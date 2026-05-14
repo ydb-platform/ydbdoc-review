@@ -7,13 +7,13 @@ set -eu
 REPO="${YDBDOC_REPO_PATH:-}"
 if [ -z "${REPO}" ]; then
   REPO="${GITHUB_WORKSPACE:-}"
-elif [ ! -d "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "${GITHUB_WORKSPACE}/.git" ]; then
+elif [ ! -e "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -e "${GITHUB_WORKSPACE}/.git" ]; then
   REPO="${GITHUB_WORKSPACE}"
 fi
 export YDBDOC_REPO_PATH="${REPO}"
 
-# Repo is bind-mounted from the runner; file UID != container user → Git "dubious ownership" (2.35+).
-if [ -n "${YDBDOC_REPO_PATH}" ] && [ -d "${YDBDOC_REPO_PATH}/.git" ]; then
+# Bind-mounted repo: runner UID != container user → "dubious ownership". .git may be a *file* (gitdir), not dir.
+if [ -n "${YDBDOC_REPO_PATH}" ] && [ -e "${YDBDOC_REPO_PATH}/.git" ]; then
   git config --global --add safe.directory "${YDBDOC_REPO_PATH}"
 fi
 
@@ -28,7 +28,7 @@ set -- python -m ydbdoc_review run \
   --merge-base-with "${MB}" \
   ${OPTS}
 
-if [ -n "${YDBDOC_REPO_PATH}" ] && [ -d "${YDBDOC_REPO_PATH}/.git" ]; then
+if [ -n "${YDBDOC_REPO_PATH}" ] && [ -e "${YDBDOC_REPO_PATH}/.git" ]; then
   set -- "$@" --repo-path "${YDBDOC_REPO_PATH}"
 fi
 
