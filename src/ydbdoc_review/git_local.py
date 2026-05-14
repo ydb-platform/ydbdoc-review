@@ -57,7 +57,12 @@ def read_text(repo: str, rel_path: str) -> str | None:
 def write_text(repo: str, rel_path: str, content: str) -> None:
     path = Path(repo) / rel_path.replace("/", os.sep)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="\n")
+    # POSIX text files end with newline; LLM output often omits it → git shows the last
+    # line as changed though visible text is identical ("\\ No newline at end of file").
+    text = content.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
+    if text:
+        text += "\n"
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def git_commit_all(repo: str, message: str, author_name: str, author_email: str) -> bool:
