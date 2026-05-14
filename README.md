@@ -19,7 +19,7 @@
 Рекомендуемый путь к проекту: `~/ydbdoc-review` (или любой другой).
 
 ```bash
-cd /Users/iuriisintiaev/ydbdoc-review   # подставьте свой путь
+cd ~/ydbdoc-review   # подставьте свой путь
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
