@@ -59,7 +59,7 @@ python -m ydbdoc_review list-models
 
 Переменные из `.env` подхватываются автоматически (`python-dotenv`).
 
-Вызовы идут в **OpenAI-совместимый** endpoint Foundation Models (`client.responses` и URI вида `gpt://<folder>/<model>`). Переменные **`ANTHROPIC_BASE_URL`** / **`ANTHROPIC_AUTH_TOKEN`** (шлюз Eliza и т.п.) этим кодом **не** используются. **`YC_INDEXER_API_KEY`** к обзору доков не относится.
+Вызовы идут в **OpenAI-совместимый** endpoint Foundation Models (`client.responses` и URI вида `gpt://<folder>/<model>`). 
 
 `export PATH=…` и **`NODE_EXTRA_CA_CERTS`** задавайте в shell-профиле (в `.env` для Python они не нужны; для HTTPS из Python при корпоративном CA обычно используют `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE`, если потребуется).
 
