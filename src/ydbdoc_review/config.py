@@ -193,8 +193,7 @@ class Settings:
         else:
             review_enabled = file_review
         gh = os.environ.get("GITHUB_TOKEN", "").strip()
-        # Workflow may set GITHUB_PUSH_TOKEN to ${{ secrets.X }}; if the secret is
-        # missing, GitHub passes empty string — fall back to GITHUB_TOKEN.
+        # CI often maps a repo secret (e.g. YDBDOC_PUSH_PAT) into GITHUB_PUSH_TOKEN; empty → GITHUB_TOKEN.
         gh_push_raw = os.environ.get("GITHUB_PUSH_TOKEN")
         if gh_push_raw is None:
             gh_push = gh
