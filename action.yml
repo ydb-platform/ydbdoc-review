@@ -1,0 +1,27 @@
+# https://docs.github.com/en/actions/sharing-automations/creating-actions/metadata-syntax-for-github-actions
+name: "ydbdoc-review"
+description: "Check RU/EN YDB documentation parity and optionally generate translations (Yandex AI Studio)."
+branding:
+  icon: "book-open"
+  color: "blue"
+
+inputs:
+  repo:
+    description: "Repository where the pull request is opened (owner/name)."
+    required: true
+  pr:
+    description: "Pull request number."
+    required: true
+  merge_base_with:
+    description: "Second ref for git merge-base when using a local checkout (e.g. origin/main)."
+    default: "origin/main"
+  dry_run:
+    description: 'If "true", pass --dry-run (no writes, no commit, no push, no PR comment).'
+    default: "false"
+  no_commit:
+    description: 'If "true", pass --no-commit (write files, no git commit/push, no PR comment).'
+    default: "false"
+
+runs:
+  using: "docker"
+  image: "Dockerfile"

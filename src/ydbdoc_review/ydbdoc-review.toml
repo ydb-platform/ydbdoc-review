@@ -1,0 +1,11 @@
+# Bundled defaults (override: ydbdoc-review.toml в cwd / YDBDOC_CONFIG).
+# Slugs без префикса gpt:// — см. Model gallery и python -m ydbdoc_review list-models.
+# Перевод RU→EN: YandexGPT Pro 5.1 (yandexgpt-5.1); проверка пар — более дешёвая yandexgpt/latest.
+
+[models]
+check = "yandexgpt/latest"
+translate = "yandexgpt-5.1"
+
+# Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.
+[feature]
+review_enabled = true

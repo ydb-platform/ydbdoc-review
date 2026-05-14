@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+from openai import OpenAI
+
+from ydbdoc_review.config import Settings
+
+
+def _model_uri(settings: Settings, model: str) -> str:
+    m = model.strip()
+    if m.startswith("gpt://"):
+        return m
+    return f"gpt://{settings.yandex_folder}/{m}"
+
+
+def _read_prompt(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _strip_code_fence(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```"):
+        lines = t.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        t = "\n".join(lines).strip()
+    return t
+
+
+def parse_json_object(text: str) -> dict:
+    t = _strip_code_fence(text)
+    try:
+        return json.loads(t)
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", t)
+        if not m:
+            raise
+        return json.loads(m.group(0))
+
+
+def _format_response_api_error(err: Any) -> str:
+    code = getattr(err, "code", None)
+    msg = getattr(err, "message", None)
+    parts = [p for p in (code, msg) if p]
+    return " — ".join(str(p) for p in parts) if parts else repr(err)
+
+
+def _text_from_response_output_dump(resp: Any) -> str:
+    """Collect assistant text when provider uses non-standard content block types."""
+    dump_fn = getattr(resp, "model_dump", None)
+    if not callable(dump_fn):
+        return ""
+    try:
+        d: dict[str, Any] = dump_fn(mode="python")
+    except Exception:
+        return ""
+    texts: list[str] = []
+    for item in d.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for block in item.get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            t = block.get("text")
+            if isinstance(t, str) and t.strip():
+                texts.append(t)
+    return "".join(texts)
+
+
+def _responses_error_message(resp: Any) -> str | None:
+    err = getattr(resp, "error", None)
+    if err is None:
+        return None
+    return _format_response_api_error(err)
+
+
+def _extract_responses_text(resp: Any) -> str:
+    """Return assistant text only; do not raise on FM `error` field (try chat fallback)."""
+    primary = getattr(resp, "output_text", None)
+    if isinstance(primary, str) and primary.strip():
+        return primary
+    loose = _text_from_response_output_dump(resp)
+    if loose.strip():
+        return loose
+    return ""
+
+
+def _call_fm_chat_completions(
+    client: OpenAI,
+    *,
+    model_uri: str,
+    instructions: str,
+    user_input: str,
+    max_output_tokens: int,
+) -> str:
+    # Yandex FM examples use max_tokens; some gateways reject max_completion_tokens.
+    comp = client.chat.completions.create(
+        model=model_uri,
+        temperature=0.2,
+        max_tokens=max_output_tokens,
+        messages=[
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_input},
+        ],
+    )
+    choice = comp.choices[0]
+    msg = choice.message
+    content = msg.content
+    if isinstance(content, str) and content.strip():
+        return content
+    raise RuntimeError(
+        "Chat completions returned no text in choices[0].message.content "
+        f"(finish_reason={getattr(choice, 'finish_reason', None)!r})."
+    )
+
+
+def call_yandex_responses(
+    settings: Settings,
+    model: str,
+    instructions: str,
+    user_input: str,
+    max_output_tokens: int,
+) -> str:
+    settings.validate_yandex()
+    # Folder is already in `gpt://<folder>/<model>`; `OpenAI-Project` duplicates it
+    # and some Yandex FM deployments return "Failed to get model" when both are set.
+    client = OpenAI(
+        api_key=settings.yandex_api_key,
+        base_url=settings.yandex_base_url,
+    )
+    model_uri = _model_uri(settings, model)
+    responses_err: str | None = None
+    skip_resp = os.environ.get("YDBDOC_FM_SKIP_RESPONSES_API", "").strip() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if not skip_resp:
+        resp = client.responses.create(
+            model=model_uri,
+            temperature=0.2,
+            instructions=instructions,
+            input=user_input,
+            max_output_tokens=max_output_tokens,
+        )
+        responses_err = _responses_error_message(resp)
+        out = _extract_responses_text(resp)
+        if out.strip():
+            return out
+    else:
+        resp = None  # type: ignore[assignment]
+
+    # Chat completions is the path most Yandex OpenAI examples use; also covers
+    # empty output_text and responses body errors (e.g. model not on Responses route).
+    try:
+        out = _call_fm_chat_completions(
+            client,
+            model_uri=model_uri,
+            instructions=instructions,
+            user_input=user_input,
+            max_output_tokens=max_output_tokens,
+        )
+    except Exception as chat_exc:
+        status = getattr(resp, "status", None) if resp is not None else None
+        inc = getattr(resp, "incomplete_details", None) if resp is not None else None
+        snippet = ""
+        if resp is not None:
+            dump_fn = getattr(resp, "model_dump_json", None)
+            if callable(dump_fn):
+                try:
+                    snippet = f"\nresponses.create body (truncated): {dump_fn()[:4000]}"
+                except Exception:
+                    pass
+        parts = [f"chat.completions failed: {chat_exc!s}"]
+        if responses_err:
+            parts.insert(0, f"responses API: {responses_err}")
+        raise RuntimeError(
+            "Foundation Models call failed.\n"
+            + "\n".join(parts)
+            + f"\n(status={status!r}, incomplete_details={inc!r}).{snippet}"
+        ) from chat_exc
+    if out.strip():
+        return out
+
+    status = getattr(resp, "status", None) if resp is not None else None
+    inc = getattr(resp, "incomplete_details", None) if resp is not None else None
+    snippet = ""
+    if resp is not None:
+        dump_fn = getattr(resp, "model_dump_json", None)
+        if callable(dump_fn):
+            try:
+                raw_json = dump_fn()[:4000]
+                snippet = f"\nresponses.create body (truncated): {raw_json}"
+            except Exception:
+                pass
+    parts: list[str] = []
+    if responses_err:
+        parts.append(f"responses API: {responses_err}")
+    parts.append("chat.completions returned empty assistant content.")
+    raise RuntimeError(
+        "\n".join(parts)
+        + f"\n(status={status!r}, incomplete_details={inc!r}).{snippet}"
+    )
+
+
+def load_analyze_instructions(settings: Settings) -> str:
+    p = Path(settings.prompts_dir) / "01_analyze_translation_pairs.txt"
+    return _read_prompt(p)
+
+
+def load_translate_instructions(settings: Settings) -> str:
+    p = Path(settings.prompts_dir) / "02_translate_article.txt"
+    return _read_prompt(p)
+
+
+def translate_markdown(
+    settings: Settings,
+    *,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    source_text: str,
+    max_output_tokens: int = 32000,
+) -> str:
+    instructions = load_translate_instructions(settings)
+    user_input = (
+        f"Source language: {source_lang}\n"
+        f"Target language: {target_lang}\n"
+        f"Source file path: {source_path}\n\n"
+        f"--- SOURCE BEGIN ---\n{source_text}\n--- SOURCE END ---\n\n"
+        "Output only the translated markdown."
+    )
+    return call_yandex_responses(
+        settings,
+        settings.model_translate,
+        instructions=instructions.strip(),
+        user_input=user_input,
+        max_output_tokens=max_output_tokens,
+    ).strip()

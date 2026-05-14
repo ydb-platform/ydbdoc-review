@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ydbdoc-review"
+version = "0.1.0"
+description = "YDB documentation RU/EN parity checks and optional AI translation via Yandex AI Studio"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.59.0",
+  "httpx>=0.27.0",
+  "click>=8.1.0",
+  "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+ydbdoc-review = "ydbdoc_review.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ydbdoc_review = ["ydbdoc-review.toml"]
