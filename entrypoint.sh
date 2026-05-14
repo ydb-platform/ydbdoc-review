@@ -1,7 +1,16 @@
 #!/bin/sh
 set -eu
 
-export YDBDOC_REPO_PATH="${YDBDOC_REPO_PATH:-${GITHUB_WORKSPACE:-}}"
+# In Docker Actions the repo is mounted at GITHUB_WORKSPACE (e.g. /github/workspace).
+# Workflows often set YDBDOC_REPO_PATH=${{ github.workspace }}, which is a *runner* path
+# (/home/runner/...) and does not exist inside the container — then merge-base fails.
+REPO="${YDBDOC_REPO_PATH:-}"
+if [ -z "${REPO}" ]; then
+  REPO="${GITHUB_WORKSPACE:-}"
+elif [ ! -d "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "${GITHUB_WORKSPACE}/.git" ]; then
+  REPO="${GITHUB_WORKSPACE}"
+fi
+export YDBDOC_REPO_PATH="${REPO}"
 
 MB="${INPUT_MERGE_BASE_WITH:-origin/main}"
 OPTS=""

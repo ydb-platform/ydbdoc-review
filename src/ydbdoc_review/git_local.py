@@ -9,10 +9,14 @@ from urllib.parse import urlparse
 def _git(cwd: str, *args: str) -> str:
     p = subprocess.run(
         ["git", "-C", cwd, *args],
-        check=True,
         capture_output=True,
         text=True,
     )
+    if p.returncode != 0:
+        err = (p.stderr or "").strip() or (p.stdout or "").strip() or "(no output)"
+        raise RuntimeError(
+            f"git -C {cwd} {' '.join(args)} failed (exit {p.returncode}): {err}"
+        ) from None
     return p.stdout.strip()
 
 
