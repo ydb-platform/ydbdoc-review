@@ -1,0 +1,15 @@
+You update the Russian YDB documentation so it reflects **only** what changed in English between the merge base and the PR branch.
+
+You receive, in order:
+1) REFERENCE_RU — the full current Russian article. Treat it as the source of truth for wording, formatting, and all markdown link targets (text in parentheses after ]( must stay identical unless the English change clearly requires a different path).
+2) EN_DIFF — a unified `git diff` of the English file (merge-base..HEAD). Only content introduced or modified there should drive edits in Russian.
+3) EN_FULL — the full current English file for local context only.
+
+Output rules (strict):
+- Output **one** complete Russian markdown document — the full file body, nothing before or after it.
+- Any paragraph, line, heading, list item, table cell, or code fence that does **not** need to change to reflect EN_DIFF must be copied **verbatim** from REFERENCE_RU (same characters: spaces, blank lines between blocks, punctuation, link syntax).
+- Do **not** add a `./` prefix to relative markdown links unless REFERENCE_RU already has it there for that same link.
+- Do **not** reflow paragraphs, do **not** add or remove blank lines except where you insert new translated lines that correspond to `+` lines in EN_DIFF.
+- Do **not** “improve” unrelated Russian sentences; leave them exactly as in REFERENCE_RU.
+
+Output only the markdown. No commentary.

@@ -19,7 +19,9 @@ from ydbdoc_review.llm import (
     call_yandex_responses,
     load_analyze_instructions,
     parse_json_object,
+    translate_en_update_from_ru_diff,
     translate_markdown,
+    translate_ru_update_from_en_diff,
 )
 from ydbdoc_review.paths import DocPair, pairs_from_changed_files, truncate
 
@@ -270,13 +272,44 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to EN: missing Russian source `{ru_p}`")
                 continue
             click.echo(f"Translating RU→EN `{ru_p}` → `{en_p}` with `{settings.model_translate}` …")
-            out_md = translate_markdown(
-                settings,
-                source_lang="Russian",
-                target_lang="English",
-                source_path=ru_p,
-                source_text=ru_full,
-            )
+            out_md: str
+            if effective_repo_path and en_full is not None:
+                try:
+                    ru_diff = git_local.file_diff_range(
+                        effective_repo_path, merge_base_with, ru_p
+                    )
+                except RuntimeError as exc:
+                    click.echo(
+                        f"Note: diff-based translate unavailable ({exc}); "
+                        "using full-file translate.",
+                        err=True,
+                    )
+                    ru_diff = ""
+                if ru_diff.strip():
+                    click.echo("  (mode: merge-base..HEAD Russian diff + English reference)")
+                    out_md = translate_en_update_from_ru_diff(
+                        settings,
+                        en_reference=en_full,
+                        ru_diff=ru_diff,
+                        ru_path=ru_p,
+                        ru_full=ru_full,
+                    )
+                else:
+                    out_md = translate_markdown(
+                        settings,
+                        source_lang="Russian",
+                        target_lang="English",
+                        source_path=ru_p,
+                        source_text=ru_full,
+                    )
+            else:
+                out_md = translate_markdown(
+                    settings,
+                    source_lang="Russian",
+                    target_lang="English",
+                    source_path=ru_p,
+                    source_text=ru_full,
+                )
             git_local.write_text(workdir, en_p, out_md)
             generated.append(en_p)
         else:
@@ -284,13 +317,44 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to RU: missing English source `{en_p}`")
                 continue
             click.echo(f"Translating EN→RU `{en_p}` → `{ru_p}` with `{settings.model_translate}` …")
-            out_md = translate_markdown(
-                settings,
-                source_lang="English",
-                target_lang="Russian",
-                source_path=en_p,
-                source_text=en_full,
-            )
+            out_md2: str
+            if effective_repo_path and ru_full is not None:
+                try:
+                    en_diff = git_local.file_diff_range(
+                        effective_repo_path, merge_base_with, en_p
+                    )
+                except RuntimeError as exc:
+                    click.echo(
+                        f"Note: diff-based translate unavailable ({exc}); "
+                        "using full-file translate.",
+                        err=True,
+                    )
+                    en_diff = ""
+                if en_diff.strip():
+                    click.echo("  (mode: merge-base..HEAD English diff + Russian reference)")
+                    out_md = translate_ru_update_from_en_diff(
+                        settings,
+                        ru_reference=ru_full,
+                        en_diff=en_diff,
+                        en_path=en_p,
+                        en_full=en_full,
+                    )
+                else:
+                    out_md = translate_markdown(
+                        settings,
+                        source_lang="English",
+                        target_lang="Russian",
+                        source_path=en_p,
+                        source_text=en_full,
+                    )
+            else:
+                out_md = translate_markdown(
+                    settings,
+                    source_lang="English",
+                    target_lang="Russian",
+                    source_path=en_p,
+                    source_text=en_full,
+                )
             git_local.write_text(workdir, ru_p, out_md)
             generated.append(ru_p)
 

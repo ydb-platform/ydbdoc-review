@@ -237,10 +237,95 @@ def translate_markdown(
         f"--- SOURCE BEGIN ---\n{source_text}\n--- SOURCE END ---\n\n"
         "Output only the translated markdown."
     )
-    return call_yandex_responses(
-        settings,
-        settings.model_translate,
-        instructions=instructions.strip(),
-        user_input=user_input,
-        max_output_tokens=max_output_tokens,
-    ).strip()
+    return _strip_code_fence(
+        call_yandex_responses(
+            settings,
+            settings.model_translate,
+            instructions=instructions.strip(),
+            user_input=user_input,
+            max_output_tokens=max_output_tokens,
+        ).strip()
+    )
+
+
+def _max_diff_chars() -> int:
+    raw = os.environ.get("YDBDOC_MAX_DIFF_CHARS", "").strip()
+    if raw.isdigit():
+        return max(4096, int(raw))
+    return 120_000
+
+
+def _cap_block(text: str, limit: int, label: str) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n\n[{label} truncated to {limit} chars]\n"
+
+
+def load_translate_ru_diff_to_en_instructions(settings: Settings) -> str:
+    return _read_prompt(Path(settings.prompts_dir) / "03_translate_ru_diff_to_en.txt")
+
+
+def load_translate_en_diff_to_ru_instructions(settings: Settings) -> str:
+    return _read_prompt(Path(settings.prompts_dir) / "04_translate_en_diff_to_ru.txt")
+
+
+def translate_en_update_from_ru_diff(
+    settings: Settings,
+    *,
+    en_reference: str,
+    ru_diff: str,
+    ru_path: str,
+    ru_full: str,
+    max_output_tokens: int = 32000,
+) -> str:
+    """Apply Russian file delta (merge-base..HEAD) onto English with minimal drift."""
+    instructions = load_translate_ru_diff_to_en_instructions(settings)
+    lim = _max_diff_chars()
+    ru_diff_c = _cap_block(ru_diff, lim, "RU_DIFF")
+    user_input = (
+        f"Russian file path: {ru_path}\n\n"
+        f"--- REFERENCE_EN BEGIN ---\n{en_reference}\n--- REFERENCE_EN END ---\n\n"
+        f"--- RU_DIFF BEGIN ---\n{ru_diff_c}\n--- RU_DIFF END ---\n\n"
+        f"--- RU_FULL BEGIN ---\n{ru_full}\n--- RU_FULL END ---\n\n"
+        "Output only the updated English markdown file."
+    )
+    return _strip_code_fence(
+        call_yandex_responses(
+            settings,
+            settings.model_translate,
+            instructions=instructions.strip(),
+            user_input=user_input,
+            max_output_tokens=max_output_tokens,
+        ).strip()
+    )
+
+
+def translate_ru_update_from_en_diff(
+    settings: Settings,
+    *,
+    ru_reference: str,
+    en_diff: str,
+    en_path: str,
+    en_full: str,
+    max_output_tokens: int = 32000,
+) -> str:
+    """Apply English file delta (merge-base..HEAD) onto Russian with minimal drift."""
+    instructions = load_translate_en_diff_to_ru_instructions(settings)
+    lim = _max_diff_chars()
+    en_diff_c = _cap_block(en_diff, lim, "EN_DIFF")
+    user_input = (
+        f"English file path: {en_path}\n\n"
+        f"--- REFERENCE_RU BEGIN ---\n{ru_reference}\n--- REFERENCE_RU END ---\n\n"
+        f"--- EN_DIFF BEGIN ---\n{en_diff_c}\n--- EN_DIFF END ---\n\n"
+        f"--- EN_FULL BEGIN ---\n{en_full}\n--- EN_FULL END ---\n\n"
+        "Output only the updated Russian markdown file."
+    )
+    return _strip_code_fence(
+        call_yandex_responses(
+            settings,
+            settings.model_translate,
+            instructions=instructions.strip(),
+            user_input=user_input,
+            max_output_tokens=max_output_tokens,
+        ).strip()
+    )

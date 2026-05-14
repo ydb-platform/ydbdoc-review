@@ -20,6 +20,25 @@ def _git(cwd: str, *args: str) -> str:
     return p.stdout.strip()
 
 
+def file_diff_range(repo: str, merge_base_with: str, rel_path: str) -> str:
+    """
+    Unified diff for rel_path between merge-base(merge_base_with, HEAD) and HEAD.
+    Same range semantics as local_changed_paths (all PR commits vs base).
+    """
+    mb = _git(repo, "merge-base", merge_base_with, "HEAD")
+    p = subprocess.run(
+        ["git", "-C", repo, "diff", mb, "HEAD", "--", rel_path],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        err = (p.stderr or "").strip() or (p.stdout or "").strip() or "(no output)"
+        raise RuntimeError(
+            f"git -C {repo} diff {mb} HEAD -- {rel_path} failed (exit {p.returncode}): {err}"
+        )
+    return p.stdout
+
+
 def local_changed_paths(repo: str, merge_base_with: str) -> list[str]:
     mb = _git(repo, "merge-base", merge_base_with, "HEAD")
     out = _git(repo, "diff", "--name-only", mb, "HEAD")
