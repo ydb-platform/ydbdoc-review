@@ -12,6 +12,11 @@ elif [ ! -d "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "${GITHUB
 fi
 export YDBDOC_REPO_PATH="${REPO}"
 
+# Repo is bind-mounted from the runner; file UID != container user → Git "dubious ownership" (2.35+).
+if [ -n "${YDBDOC_REPO_PATH}" ] && [ -d "${YDBDOC_REPO_PATH}/.git" ]; then
+  git config --global --add safe.directory "${YDBDOC_REPO_PATH}"
+fi
+
 MB="${INPUT_MERGE_BASE_WITH:-origin/main}"
 OPTS=""
 case "${INPUT_DRY_RUN:-false}" in true|True|TRUE) OPTS="${OPTS} --dry-run" ;; esac
