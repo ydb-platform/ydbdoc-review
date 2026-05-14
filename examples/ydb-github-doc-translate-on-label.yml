@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   ydbdoc-review:
+    # Для PR из форка: заведите секрет GITHUB_PUSH_TOKEN (PAT) и уберите проверку fork ниже.
     if: |
       github.event.label.name == 'doc_translate' &&
       github.event.pull_request.head.repo.fork == false
@@ -49,8 +50,9 @@ jobs:
           YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
           YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
-          # Встроенный токен job; для push в ветку форка позже замените на PAT в GITHUB_PUSH_TOKEN.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_PUSH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Репозиторий ydb → Settings → Secrets → Actions: GITHUB_PUSH_TOKEN = PAT (временно ваш, потом бота).
+          # Если секрета нет, приложение использует GITHUB_TOKEN (достаточно для ветки в том же репо).
+          GITHUB_PUSH_TOKEN: ${{ secrets.GITHUB_PUSH_TOKEN }}
           # Быстрый выключатель без смены workflow:
           # YDBDOC_REVIEW_ENABLED: ${{ vars.YDBDOC_REVIEW_ENABLED }}

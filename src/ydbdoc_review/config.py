@@ -193,7 +193,13 @@ class Settings:
         else:
             review_enabled = file_review
         gh = os.environ.get("GITHUB_TOKEN", "").strip()
-        gh_push = os.environ.get("GITHUB_PUSH_TOKEN", gh).strip()
+        # Workflow may set GITHUB_PUSH_TOKEN to ${{ secrets.X }}; if the secret is
+        # missing, GitHub passes empty string — fall back to GITHUB_TOKEN.
+        gh_push_raw = os.environ.get("GITHUB_PUSH_TOKEN")
+        if gh_push_raw is None:
+            gh_push = gh
+        else:
+            gh_push = gh_push_raw.strip() or gh
         docs_prefix = os.environ.get("DOCS_SRC_ROOT", "ydb/docs").strip().strip("/")
         max_chars = int(os.environ.get("YDBDOC_MAX_ANALYZE_CHARS", "16000"))
         here = os.path.dirname(os.path.abspath(__file__))
