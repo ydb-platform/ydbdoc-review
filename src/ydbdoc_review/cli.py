@@ -65,18 +65,50 @@ def _assess_translation_files(
 
 
 def _blocked_needs_other_pr(
+    blocked_raw: list[tuple[str, str]],
     blocked_prereq: list[tuple[str, str, github_api.PathPrerequisiteInfo | None]],
+    *,
+    owner: str,
+    repo: str,
     pr_number: int,
+    token: str,
 ) -> bool:
-    """False when this PR is already the right target for doc_translate on all blocked files."""
-    if not blocked_prereq:
+    """
+    False when we can run doc_translate on the current PR for every blocked RU file.
+
+    If this PR's changed-files list includes the RU path, we translate here (even when a
+    later merged PR also touched the same path, e.g. #38242 after #38357).
+    """
+    if not blocked_raw:
         return False
-    for _en_p, _ru_p, prereq in blocked_prereq:
+    by_ru = {ru: prereq for _en, ru, prereq in blocked_prereq}
+    for _en_p, ru_p in blocked_raw:
+        if github_api.pr_touches_path(owner, repo, pr_number, ru_p, token):
+            continue
+        prereq = by_ru.get(ru_p)
         if prereq is None or not prereq.recommended:
             return True
         if prereq.recommended.number != pr_number:
             return True
     return False
+
+
+def _prefer_current_pr_in_prereq(
+    prereq: github_api.PathPrerequisiteInfo,
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    ru_path: str,
+    token: str,
+) -> github_api.PathPrerequisiteInfo:
+    """If this PR changed `ru_path`, recommend it over a later unrelated merge in the chain."""
+    if not github_api.pr_touches_path(owner, repo, pr_number, ru_path, token):
+        return prereq
+    for ref in prereq.chain:
+        if ref.number == pr_number:
+            return github_api.PathPrerequisiteInfo(chain=prereq.chain, recommended=ref)
+    return prereq
 
 
 def _build_prerequisites_comment(
@@ -147,7 +179,7 @@ def _build_prerequisites_comment(
             ]
         )
 
-    if blocked_prereq:
+    if blocked_prereq and blocked_only:
         lines.extend(
             [
                 "",
@@ -186,11 +218,16 @@ def _build_prerequisites_comment(
                 lines.append("_Не удалось выбрать PR для `doc_translate`._")
                 continue
             if rec.number == pr_number:
+                later = [r for r in prereq.chain if r.merged_at > rec.merged_at]
                 lines.append(
-                    f"**Вы уже на нужном PR (#{pr_number}).** "
-                    "После обновления action повторите `doc_translate` здесь — "
-                    "должен создаться отдельный PR с **полным** EN-переводом."
+                    f"**`doc_translate` на этом PR (#{pr_number})** — _{rec.title}_"
                 )
+                if later:
+                    nums = ", ".join(f"#{r.number}" for r in later)
+                    lines.append(
+                        f"_Позже файл также меняли PR {nums}; для полного EN достаточно "
+                        f"перевода с #{pr_number}, отдельно на них вешать лейбл не нужно._"
+                    )
                 continue
             if len(prereq.chain) == 1:
                 lines.append(
@@ -719,6 +756,14 @@ def run_cmd(
                 base_branch=base_ref,
                 exclude_pr=None,
             )
+            prereq = _prefer_current_pr_in_prereq(
+                prereq,
+                owner=base_owner,
+                repo=base_repo,
+                pr_number=pr_number,
+                ru_path=ru_p,
+                token=settings.github_token,
+            )
             blocked_prereq.append((en_p, ru_p, prereq))
             if prereq.recommended:
                 rec = prereq.recommended
@@ -732,7 +777,14 @@ def run_cmd(
                     f"Could not resolve prerequisite PR chain for `{ru_p}`.",
                     err=True,
                 )
-        if blocked_prereq and _blocked_needs_other_pr(blocked_prereq, pr_number):
+        if blocked_prereq and _blocked_needs_other_pr(
+            blocked_raw,
+            blocked_prereq,
+            owner=base_owner,
+            repo=base_repo,
+            pr_number=pr_number,
+            token=settings.github_token,
+        ):
             blocked_only = True
             click.echo(
                 "Blocking translation PR: EN prerequisite is missing on base branch. "
