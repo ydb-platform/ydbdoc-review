@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -179,18 +180,38 @@ def resolve_commit(repo: str, ref: str) -> str:
 
 
 def checkout_branch_at_ref(repo: str, branch: str, start_ref: str) -> None:
+    """Create/reset ``branch`` at ``start_ref``. ``-f`` drops local edits (caller restores via snapshot)."""
     start_sha = resolve_commit(repo, start_ref)
-    subprocess.run(["git", "-C", repo, "checkout", "-B", branch, start_sha], check=True)
+    subprocess.run(
+        ["git", "-C", repo, "checkout", "-f", "-B", branch, start_sha],
+        check=True,
+    )
 
 
-def snapshot_paths(repo: str, paths: list[str]) -> dict[str, str]:
-    """Read file contents before checkout (avoids stash merge conflicts on re-run)."""
-    out: dict[str, str] = {}
+def _snapshot_paths_to_dir(repo: str, paths: list[str], staging_dir: str) -> list[str]:
+    """Copy paths to a temp dir (text + binary) before branch checkout."""
+    saved: list[str] = []
+    root = Path(staging_dir)
     for rel in paths:
-        text = read_text(repo, rel)
-        if text is not None:
-            out[rel] = text
-    return out
+        src = Path(repo) / rel.replace("/", os.sep)
+        if not src.is_file():
+            continue
+        dest = root / rel.replace("/", os.sep)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        saved.append(rel)
+    return saved
+
+
+def _restore_paths_from_dir(repo: str, staging_dir: str, paths: list[str]) -> None:
+    root = Path(staging_dir)
+    for rel in paths:
+        src = root / rel.replace("/", os.sep)
+        if not src.is_file():
+            continue
+        dest = Path(repo) / rel.replace("/", os.sep)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
 
 
 def prepare_translation_branch_on_base(
@@ -212,18 +233,18 @@ def prepare_translation_branch_on_base(
     (use for ``ydbdoc-review/pr-N``; must not be pre-fetched before ``ensure_remote``).
     When both are set, ``continue_from_branch`` wins unless fetch fails (then ``start_ref``).
     """
-    saved = snapshot_paths(repo, paths)
-    ensure_remote(repo, base_remote_name, base_remote_url)
-    tip_ref: str | None = None
-    if continue_from_branch:
-        tip_ref = try_fetch_remote_branch(repo, base_remote_name, continue_from_branch)
-    if tip_ref is None and start_ref is not None:
-        tip_ref = start_ref
-    if tip_ref is None:
-        tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
-    checkout_branch_at_ref(repo, translation_branch, tip_ref)
-    for rel, content in saved.items():
-        write_text(repo, rel, content)
+    with tempfile.TemporaryDirectory(prefix="ydbdoc-review-staging-") as staging:
+        saved = _snapshot_paths_to_dir(repo, paths, staging)
+        ensure_remote(repo, base_remote_name, base_remote_url)
+        tip_ref: str | None = None
+        if continue_from_branch:
+            tip_ref = try_fetch_remote_branch(repo, base_remote_name, continue_from_branch)
+        if tip_ref is None and start_ref is not None:
+            tip_ref = start_ref
+        if tip_ref is None:
+            tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
+        checkout_branch_at_ref(repo, translation_branch, tip_ref)
+        _restore_paths_from_dir(repo, staging, saved)
 
 
 def local_changed_paths(repo: str, merge_base_with: str) -> list[str]:
