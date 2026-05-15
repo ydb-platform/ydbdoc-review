@@ -37,7 +37,7 @@ jobs:
 
       - name: Documentation translation review
         # Репозиторий с action.yml в корне; v0.1.0 — git-тег релиза (см. README «Публикация»).
-        uses: ydb-platform/ydbdoc-review@v0.1.0
+        uses: ydb-platform/ydbdoc-review@main
         with:
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}

@@ -957,28 +957,20 @@ def run_cmd(
             "true",
             "yes",
         )
-        trans_start_ref: str | None = None
-        if base_ref_local:
-            if reset_branch:
-                trans_start_ref = base_ref_local
-                click.echo(
-                    f"YDBDOC_TRANSLATION_RESET_BRANCH: rebuild `{translation_branch}` "
-                    f"from `{base_ref}` (replaces branch tip on push)."
-                )
-            else:
-                trans_start_ref = git_local.try_fetch_remote_branch(
-                    workdir, "ydbdoc-base", translation_branch
-                )
-                if trans_start_ref:
-                    click.echo(
-                        f"Translation branch `{translation_branch}` exists on remote; "
-                        "new commit will be appended on top."
-                    )
-                else:
-                    trans_start_ref = base_ref_local
-                    click.echo(
-                        f"No remote `{translation_branch}` yet; branching from `{base_ref}`."
-                    )
+        continue_branch: str | None = None
+        branch_start_ref: str | None = base_ref_local
+        if reset_branch:
+            click.echo(
+                f"YDBDOC_TRANSLATION_RESET_BRANCH: rebuild `{translation_branch}` "
+                f"from `{base_ref}` (replaces branch tip on push)."
+            )
+        elif base_ref_local:
+            continue_branch = translation_branch
+            click.echo(
+                f"Will fetch `{translation_branch}` from upstream after remote setup "
+                "(append commit if branch exists, else start from "
+                f"`{base_ref}`)."
+            )
         git_local.prepare_translation_branch_on_base(
             workdir,
             translation_branch=translation_branch,
@@ -986,7 +978,8 @@ def run_cmd(
             base_remote_name="ydbdoc-base",
             base_branch=base_ref,
             paths=publish_paths,
-            start_ref=trans_start_ref,
+            start_ref=branch_start_ref,
+            continue_from_branch=continue_branch,
         )
         msg = (
             f"docs: add AI translations ({len(generated)} md, {len(mirrored_en)} companion)\n\n"

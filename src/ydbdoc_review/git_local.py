@@ -170,8 +170,17 @@ def fetch_remote_branch(repo: str, remote: str, branch: str) -> str:
     return local_ref
 
 
+def resolve_commit(repo: str, ref: str) -> str:
+    """Return full commit SHA for ``ref`` (branch, remote-tracking ref, etc.)."""
+    sha = _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    if not sha:
+        raise RuntimeError(f"Not a commit: {ref}")
+    return sha
+
+
 def checkout_branch_at_ref(repo: str, branch: str, start_ref: str) -> None:
-    subprocess.run(["git", "-C", repo, "checkout", "-B", branch, start_ref], check=True)
+    start_sha = resolve_commit(repo, start_ref)
+    subprocess.run(["git", "-C", repo, "checkout", "-B", branch, start_sha], check=True)
 
 
 def stash_paths(repo: str, paths: list[str], message: str = "ydbdoc-review") -> bool:
@@ -203,18 +212,26 @@ def prepare_translation_branch_on_base(
     base_branch: str,
     paths: list[str],
     start_ref: str | None = None,
+    continue_from_branch: str | None = None,
 ) -> None:
     """
     Move uncommitted translation files onto a branch for publishing into upstream.
 
-    ``start_ref`` — git ref to branch from (e.g. existing remote translation branch).
-    When omitted, uses the fetched ``base_branch`` (typically ``main``).
+    ``start_ref`` — local ref already in the repo (e.g. ``refs/remotes/.../main``).
+    ``continue_from_branch`` — remote branch name to fetch **after** ``ensure_remote``
+    (use for ``ydbdoc-review/pr-N``; must not be pre-fetched before ``ensure_remote``).
+  When both are set, ``continue_from_branch`` wins unless fetch fails (then ``start_ref``).
     """
     stashed = stash_paths(repo, paths)
     ensure_remote(repo, base_remote_name, base_remote_url)
-    if start_ref is None:
-        start_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
-    checkout_branch_at_ref(repo, translation_branch, start_ref)
+    tip_ref: str | None = None
+    if continue_from_branch:
+        tip_ref = try_fetch_remote_branch(repo, base_remote_name, continue_from_branch)
+    if tip_ref is None and start_ref is not None:
+        tip_ref = start_ref
+    if tip_ref is None:
+        tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
+    checkout_branch_at_ref(repo, translation_branch, tip_ref)
     if stashed:
         stash_pop(repo)
 
