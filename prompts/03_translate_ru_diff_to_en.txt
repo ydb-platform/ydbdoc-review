@@ -12,5 +12,7 @@ Output rules (strict):
 - Do **not** reflow paragraphs, do **not** add or remove blank lines except where you insert new translated lines that correspond to `+` lines in RU_DIFF.
 - Do **not** “improve” or harmonize unrelated English sentences; leave them exactly as in REFERENCE_EN.
 - Translate only what is necessary so the English side documents the same facts as Russian after the diff.
+- When you add or change translated lines, preserve all markdown links from REFERENCE_EN on unchanged lines; on new lines mirror Russian link targets and translate link text only when needed.
+- For GUI/integration sections you introduce or change: Title Case in headings; natural English articles; "pastes" / "constructs" as in the full-file EN style guide.
 
 Output only the markdown. No commentary.

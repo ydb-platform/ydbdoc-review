@@ -49,18 +49,21 @@ def ru_to_en_path(path: str, docs_prefix: str) -> str | None:
     return counterpart(path, docs_prefix)
 
 
-def ru_companion_files_to_mirror(changed: list[str], docs_prefix: str) -> list[tuple[str, str]]:
-    """
-    Non-markdown files under docs/ru/ from the PR that should be copied to docs/en/.
-    (images, toc yaml, etc.)
-    """
+_ASSET_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico")
+
+
+def ru_asset_files_to_mirror(changed: list[str], docs_prefix: str) -> list[tuple[str, str]]:
+    """Binary assets under docs/ru/ → same path under docs/en/ (identical files)."""
     out: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
+    prefix = f"{docs_prefix.strip('/')}/ru/"
     for raw in changed:
         p = _norm(raw)
-        if not p.startswith(f"{docs_prefix.strip('/')}/ru/"):
+        if not p.startswith(prefix):
             continue
-        if p.endswith(".md"):
+        if p.endswith(".md") or p.endswith((".yaml", ".yml")):
+            continue
+        if not ("/_assets/" in p or p.lower().endswith(_ASSET_SUFFIXES)):
             continue
         en = ru_to_en_path(p, docs_prefix)
         if not en:
@@ -70,6 +73,29 @@ def ru_companion_files_to_mirror(changed: list[str], docs_prefix: str) -> list[t
             seen.add(key)
             out.append(key)
     return out
+
+
+def ru_toc_yaml_paths(changed: list[str], docs_prefix: str) -> list[tuple[str, str]]:
+    """toc*.yaml / *.yml navigation files — merged, not copied from RU."""
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    prefix = f"{docs_prefix.strip('/')}/ru/"
+    for raw in changed:
+        p = _norm(raw)
+        if not p.startswith(prefix):
+            continue
+        if not (p.endswith((".yaml", ".yml")) and "toc" in p.lower()):
+            continue
+        en = ru_to_en_path(p, docs_prefix)
+        if not en:
+            continue
+        key = (p, en)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
 
 
 def pairs_from_changed_files(changed: list[str], docs_prefix: str) -> list[DocPair]:

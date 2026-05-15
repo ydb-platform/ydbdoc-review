@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Any
 
 import click
@@ -26,9 +27,11 @@ from ydbdoc_review.llm import (
 from ydbdoc_review.paths import (
     DocPair,
     pairs_from_changed_files,
-    ru_companion_files_to_mirror,
+    ru_asset_files_to_mirror,
+    ru_toc_yaml_paths,
     truncate,
 )
+from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 
 
 _OK_STATUSES = frozenset({"added", "modified", "changed", "renamed"})
@@ -166,7 +169,7 @@ def _build_prerequisites_comment(
                     "### Скопировано в `en/` (картинки и прочее, без перевода)",
                     *[f"- `{p}`" for p in mirrored_en],
                     "",
-                    "_Оглавления (`toc*.yaml`) при необходимости поправьте вручную в EN._",
+                    "_Оглавления (`toc*.yaml`): подписи из EN `main`, добавлены только пункты для новых статей этого PR._",
                 ]
             )
 
@@ -768,10 +771,32 @@ def run_cmd(
             generated.append(ru_p)
 
     if workdir and not dry_run:
-        for ru_asset, en_asset in ru_companion_files_to_mirror(changed, settings.docs_prefix):
+        for ru_asset, en_asset in ru_asset_files_to_mirror(changed, settings.docs_prefix):
             if git_local.copy_file_in_repo(workdir, ru_asset, en_asset):
                 mirrored_en.append(en_asset)
-                click.echo(f"Copied RU→EN companion `{ru_asset}` → `{en_asset}`")
+                click.echo(f"Copied RU→EN asset `{ru_asset}` → `{en_asset}`")
+
+        new_toc_hrefs = {Path(p).name for p in generated if p.endswith(".md")}
+        for ru_toc, en_toc in ru_toc_yaml_paths(changed, settings.docs_prefix):
+            ru_pr_yaml = git_local.read_text(workdir, ru_toc)
+            if not ru_pr_yaml:
+                continue
+            en_main_yaml = (
+                git_local.read_text_at_ref(workdir, base_ref_local, en_toc)
+                if base_ref_local
+                else None
+            )
+            if not en_main_yaml:
+                en_main_yaml = git_local.read_text(workdir, en_toc) or "items:\n"
+            merged = merge_en_toc_yaml(
+                en_main_yaml,
+                ru_pr_yaml,
+                new_hrefs=new_toc_hrefs,
+                translate_name=lambda title: translate_toc_title(settings, title),
+            )
+            git_local.write_text(workdir, en_toc, merged)
+            mirrored_en.append(en_toc)
+            click.echo(f"Merged EN toc `{en_toc}` (kept labels from `{base_ref}`, new entries only)")
 
     translation_branch = _translation_branch_name(pr_number)
     translation_pr_url: str | None = None
