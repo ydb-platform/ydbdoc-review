@@ -184,6 +184,84 @@ def _merge_analyze_batch_results(
     return merged
 
 
+def _slim_analyze_batch_for_retry(
+    batch: list[dict[str, Any]],
+    *,
+    text_limit: int = 4000,
+) -> list[dict[str, Any]]:
+    """Smaller JSON for a second check-model attempt (drops diffs, caps bodies)."""
+    slim: list[dict[str, Any]] = []
+    for e in batch:
+        ne = dict(e)
+        for k in ("ru_diff_vs_base", "en_diff_vs_base"):
+            ne.pop(k, None)
+        rt = ne.get("ru_text")
+        if isinstance(rt, str) and len(rt) > text_limit:
+            ne["ru_text"] = rt[:text_limit] + "\n…(slim retry: truncated)\n"
+        et = ne.get("en_text")
+        if isinstance(et, str) and len(et) > text_limit:
+            ne["en_text"] = et[:text_limit] + "\n…(slim retry: truncated)\n"
+        slim.append(ne)
+    return slim
+
+
+def _fallback_check_batch_results(
+    batch: list[dict[str, Any]],
+    *,
+    pr_changed: set[str],
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
+) -> list[dict[str, Any]]:
+    """
+    When the check model returns prose (refusal) or invalid JSON, infer ``results``.
+
+    Uses the same RU-diff override inputs as the normal path (``pair_diffs`` + ``pr_changed``).
+    """
+    out: list[dict[str, Any]] = []
+    for entry in batch:
+        ru_p = str(entry["ru_path"])
+        en_p = str(entry["en_path"])
+        ru_t = (entry.get("ru_text") or "").strip()
+        en_t = (entry.get("en_text") or "").strip()
+        ru_present = len(ru_t) > 30
+        en_present = len(en_t) > 30
+        rd, ed = pair_diffs.get((ru_p, en_p), (None, None))
+        gen: str | None = None
+        if ru_present and not en_present:
+            gen = "en"
+        elif en_present and not ru_present:
+            gen = "ru"
+        elif ru_present and en_present:
+            if pair_needs_en_from_ru_only_diff(
+                ru_path=ru_p,
+                ru_diff=rd,
+                en_diff=ed,
+                pr_changed_paths=pr_changed,
+            ):
+                gen = "en"
+            elif ru_p in pr_changed and en_p not in pr_changed:
+                gen = "en"
+            elif en_p in pr_changed and ru_p not in pr_changed:
+                gen = "ru"
+            elif ru_p in pr_changed:
+                gen = "en"
+        aligned = bool(ru_present and en_present and gen is None)
+        out.append(
+            {
+                "ru_path": ru_p,
+                "en_path": en_p,
+                "ru_present": ru_present,
+                "en_present": en_present,
+                "semantically_aligned": aligned,
+                "needs_generation_for": gen,
+                "summary": (
+                    "Heuristic fallback: check model refused or returned non-JSON "
+                    "(safety filter, outage, or non-JSON prose)."
+                ),
+            }
+        )
+    return out
+
+
 def _assess_translation_files(
     *,
     repo_path: str,
@@ -651,31 +729,59 @@ def run_cmd(
     instructions = load_analyze_instructions(settings).strip()
     per_batch_results: list[list[dict[str, Any]]] = []
     for bi, batch in enumerate(analyze_batches):
-        analyze_input = json.dumps({"pairs": batch}, ensure_ascii=False)
-        click.echo(
-            f"Calling check model `{settings.model_check}` "
-            f"(batch {bi + 1}/{len(analyze_batches)}, {len(batch)} pair(s); "
-            f"translate `{settings.model_translate}` only when needed) …"
-        )
-        raw = call_yandex_responses(
-            settings,
-            settings.model_check,
-            instructions=instructions,
-            user_input=analyze_input,
-            max_output_tokens=8000,
-        )
-        try:
-            data = parse_json_object(raw)
-        except (json.JSONDecodeError, ValueError) as e:
-            raise SystemExit(
-                f"Check model returned non-JSON output (batch {bi + 1}):\n{raw[:2000]}\nError: {e}"
-            ) from e
-        batch_results = data.get("results")
-        if not isinstance(batch_results, list):
-            raise SystemExit(f"Check model JSON has no 'results' list (batch {bi + 1}).")
-        if len(batch_results) != len(batch):
-            raise SystemExit(
-                f"Check model batch {bi + 1}: expected {len(batch)} results, got {len(batch_results)}."
+        payloads: list[tuple[str, list[dict[str, Any]]]] = [
+            ("full", batch),
+            ("slim", _slim_analyze_batch_for_retry(batch)),
+        ]
+        batch_results: list[dict[str, Any]] | None = None
+        last_parse_err: str | None = None
+        last_raw_head: str | None = None
+        for label, pl in payloads:
+            if label == "slim":
+                click.echo(
+                    f"Retrying check model batch {bi + 1}/{len(analyze_batches)} "
+                    "with reduced JSON (no diffs, shorter bodies) …",
+                    err=True,
+                )
+            analyze_input = json.dumps({"pairs": pl}, ensure_ascii=False)
+            if label == "full":
+                click.echo(
+                    f"Calling check model `{settings.model_check}` "
+                    f"(batch {bi + 1}/{len(analyze_batches)}, {len(batch)} pair(s); "
+                    f"translate `{settings.model_translate}` only when needed) …"
+                )
+            raw = call_yandex_responses(
+                settings,
+                settings.model_check,
+                instructions=instructions,
+                user_input=analyze_input,
+                max_output_tokens=8000,
+            )
+            last_raw_head = (raw or "")[:500]
+            try:
+                data = parse_json_object(raw)
+            except (json.JSONDecodeError, ValueError) as e:
+                last_parse_err = str(e)
+                continue
+            br = data.get("results")
+            if not isinstance(br, list):
+                last_parse_err = "results is not a list"
+                continue
+            if len(br) != len(batch):
+                last_parse_err = f"expected {len(batch)} results, got {len(br)}"
+                continue
+            batch_results = br
+            break
+        if batch_results is None:
+            click.echo(
+                f"Warning: check model batch {bi + 1}/{len(analyze_batches)} did not return valid JSON "
+                f"after full+slim attempts ({last_parse_err}). "
+                f"First 500 chars of last response: {last_raw_head!r}. "
+                "Using heuristic fallback for this batch (often a provider safety refusal).",
+                err=True,
+            )
+            batch_results = _fallback_check_batch_results(
+                batch, pr_changed=pr_changed, pair_diffs=pair_diffs
             )
         per_batch_results.append(batch_results)
 
