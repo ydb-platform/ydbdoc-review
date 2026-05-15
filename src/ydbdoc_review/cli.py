@@ -89,6 +89,101 @@ def _apply_ru_diff_generation_overrides(
     return n
 
 
+def _analyze_batch_json_size(batch: list[dict[str, Any]]) -> int:
+    return len(json.dumps({"pairs": batch}, ensure_ascii=False))
+
+
+def _shrink_one_entry_to_max_json(entry: dict[str, Any], max_chars: int) -> None:
+    """Last resort when a single pair still exceeds ``max_chars`` (FM input limit)."""
+    keys = ("ru_text", "en_text", "ru_diff_vs_base", "en_diff_vs_base")
+    guard = 0
+    while _analyze_batch_json_size([entry]) > max_chars and guard < 10_000:
+        guard += 1
+        best: tuple[int, str] | None = None
+        for k in keys:
+            v = entry.get(k)
+            if not isinstance(v, str) or len(v) <= 256:
+                continue
+            if best is None or len(v) > best[0]:
+                best = (len(v), k)
+        if best is None:
+            break
+        k = best[1]
+        v = entry[k]
+        new_len = max(256, len(v) * 2 // 3)
+        entry[k] = (
+            v[:new_len]
+            + "\n\n…(truncated: pair alone exceeds YDBDOC_ANALYZE_MAX_JSON_CHARS)\n"
+        )
+
+
+def _batch_analyze_payload_pairs(
+    payload_pairs: list[dict[str, Any]],
+    max_batch_chars: int,
+) -> list[list[dict[str, Any]]]:
+    """
+    Split ``payload_pairs`` into several API-sized batches (multiple check-model calls).
+
+    Full ``ru_text`` / ``en_text`` / diffs are kept per pair; only batch boundaries split pairs.
+    """
+    batches: list[list[dict[str, Any]]] = []
+    cur: list[dict[str, Any]] = []
+    for entry in payload_pairs:
+        if not cur:
+            lone = [entry]
+            if _analyze_batch_json_size(lone) > max_batch_chars:
+                click.echo(
+                    f"Warning: one pair exceeds analyze batch size ({max_batch_chars} chars); "
+                    "truncating that pair only so the check model can run.",
+                    err=True,
+                )
+                _shrink_one_entry_to_max_json(entry, max_batch_chars)
+            cur = [entry]
+            continue
+        trial = cur + [entry]
+        if _analyze_batch_json_size(trial) <= max_batch_chars:
+            cur = trial
+            continue
+        batches.append(cur)
+        lone = [entry]
+        if _analyze_batch_json_size(lone) > max_batch_chars:
+            click.echo(
+                f"Warning: one pair exceeds analyze batch size ({max_batch_chars} chars); "
+                "truncating that pair only.",
+                err=True,
+            )
+            _shrink_one_entry_to_max_json(entry, max_batch_chars)
+        cur = [entry]
+    if cur:
+        batches.append(cur)
+    return batches
+
+
+def _merge_analyze_batch_results(
+    payload_pairs: list[dict[str, Any]],
+    per_batch: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for batch in per_batch:
+        for item in batch:
+            ru = item.get("ru_path")
+            en = item.get("en_path")
+            if isinstance(ru, str) and isinstance(en, str):
+                by_key[(ru, en)] = item
+    merged: list[dict[str, Any]] = []
+    for entry in payload_pairs:
+        ru = entry["ru_path"]
+        en = entry["en_path"]
+        got = by_key.get((ru, en))
+        if got is None:
+            raise SystemExit(
+                f"Check model returned no result for pair `{ru}` / `{en}` "
+                f"(expected {len(payload_pairs)} pair(s) total)."
+            )
+        merged.append(got)
+    return merged
+
+
 def _assess_translation_files(
     *,
     repo_path: str,
@@ -470,8 +565,18 @@ def run_cmd(
     settings.validate_yandex()
 
     trunc_raw = os.environ.get("YDBDOC_ANALYZE_TRUNCATE_CHARS", "").strip()
-    analyze_trunc: int | None = (
-        int(trunc_raw) if trunc_raw.isdigit() and int(trunc_raw) > 0 else None
+    if trunc_raw == "0" or not trunc_raw:
+        analyze_trunc: int | None = None
+    elif trunc_raw.isdigit() and int(trunc_raw) > 0:
+        analyze_trunc = int(trunc_raw)
+    else:
+        analyze_trunc = None
+
+    max_batch_raw = os.environ.get("YDBDOC_ANALYZE_MAX_JSON_CHARS", "").strip()
+    max_analyze_batch_json = (
+        int(max_batch_raw)
+        if max_batch_raw.isdigit() and int(max_batch_raw) > 0
+        else 24_000
     )
 
     payload_pairs: list[dict[str, Any]] = []
@@ -480,11 +585,10 @@ def run_cmd(
     pr_changed = _pr_changed_path_set(changed)
 
     diff_preview_raw = os.environ.get("YDBDOC_ANALYZE_DIFF_MAX", "").strip()
-    diff_preview_cap = (
-        int(diff_preview_raw)
-        if diff_preview_raw.isdigit() and int(diff_preview_raw) > 0
-        else 500_000
-    )
+    if diff_preview_raw.isdigit() and int(diff_preview_raw) > 0:
+        diff_preview_cap = int(diff_preview_raw)
+    else:
+        diff_preview_cap = 500_000
     for pair in pairs:
         ru_t, en_t = _read_pair_texts(
             head_owner=head_owner,
@@ -537,26 +641,45 @@ def run_cmd(
         pair_diffs[(pair.ru_path, pair.en_path)] = (dru_full, den_full)
         payload_pairs.append(entry)
 
-    analyze_input = json.dumps({"pairs": payload_pairs}, ensure_ascii=False)
+    analyze_batches = _batch_analyze_payload_pairs(payload_pairs, max_analyze_batch_json)
     click.echo(
-        f"Calling check model `{settings.model_check}` "
-        f"(translate model `{settings.model_translate}` — only if generation is needed) …"
+        f"Check model: {len(analyze_batches)} batch(es), "
+        f"up to {max_analyze_batch_json} chars of `{{\"pairs\":...}}` per batch "
+        "(YDBDOC_ANALYZE_MAX_JSON_CHARS)."
     )
-    raw = call_yandex_responses(
-        settings,
-        settings.model_check,
-        instructions=load_analyze_instructions(settings).strip(),
-        user_input=analyze_input,
-        max_output_tokens=8000,
-    )
-    try:
-        data = parse_json_object(raw)
-    except (json.JSONDecodeError, ValueError) as e:
-        raise SystemExit(f"Check model returned non-JSON output:\n{raw[:2000]}\nError: {e}") from e
 
-    results = data.get("results")
-    if not isinstance(results, list):
-        raise SystemExit("Check model JSON has no 'results' list.")
+    instructions = load_analyze_instructions(settings).strip()
+    per_batch_results: list[list[dict[str, Any]]] = []
+    for bi, batch in enumerate(analyze_batches):
+        analyze_input = json.dumps({"pairs": batch}, ensure_ascii=False)
+        click.echo(
+            f"Calling check model `{settings.model_check}` "
+            f"(batch {bi + 1}/{len(analyze_batches)}, {len(batch)} pair(s); "
+            f"translate `{settings.model_translate}` only when needed) …"
+        )
+        raw = call_yandex_responses(
+            settings,
+            settings.model_check,
+            instructions=instructions,
+            user_input=analyze_input,
+            max_output_tokens=8000,
+        )
+        try:
+            data = parse_json_object(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise SystemExit(
+                f"Check model returned non-JSON output (batch {bi + 1}):\n{raw[:2000]}\nError: {e}"
+            ) from e
+        batch_results = data.get("results")
+        if not isinstance(batch_results, list):
+            raise SystemExit(f"Check model JSON has no 'results' list (batch {bi + 1}).")
+        if len(batch_results) != len(batch):
+            raise SystemExit(
+                f"Check model batch {bi + 1}: expected {len(batch)} results, got {len(batch_results)}."
+            )
+        per_batch_results.append(batch_results)
+
+    results = _merge_analyze_batch_results(payload_pairs, per_batch_results)
 
     if effective_repo_path and pr_changed:
         overridden = _apply_ru_diff_generation_overrides(
@@ -635,31 +758,45 @@ def run_cmd(
                     )
             out_md: str
             ru_diff = ""
-            if (
-                effective_repo_path
-                and en_full is not None
-                and not use_main_ru
-            ):
+            if effective_repo_path and not use_main_ru:
                 try:
                     ru_diff = git_local.file_diff_range(
                         effective_repo_path, merge_base_with, ru_p
                     )
                 except RuntimeError as exc:
                     click.echo(
-                        f"Note: diff-based translate unavailable ({exc}); "
+                        f"Note: could not compute RU diff vs `{merge_base_with}` ({exc}); "
                         "using full-file translate.",
                         err=True,
                     )
-            if ru_diff.strip() and not use_main_ru:
+            if ru_diff.strip() and not use_main_ru and en_full is not None:
                 click.echo("  (mode: merge-base..HEAD Russian diff + English reference)")
-                out_md = translate_en_update_from_ru_diff(
-                    settings,
-                    en_reference=en_full,
-                    ru_diff=ru_diff,
-                    ru_path=ru_p,
-                    ru_full=ru_source,
-                )
+                try:
+                    out_md = translate_en_update_from_ru_diff(
+                        settings,
+                        en_reference=en_full,
+                        ru_diff=ru_diff,
+                        ru_path=ru_p,
+                        ru_full=ru_source,
+                    )
+                except Exception as exc:
+                    click.echo(
+                        f"Note: diff-based EN update failed ({exc}); using full-file translate.",
+                        err=True,
+                    )
+                    out_md = translate_markdown(
+                        settings,
+                        source_lang="Russian",
+                        target_lang="English",
+                        source_path=ru_p,
+                        source_text=ru_source,
+                    )
             else:
+                if ru_diff.strip() and en_full is None and not use_main_ru:
+                    click.echo(
+                        "  (mode: full-file — no English file on branch to patch with diff)",
+                        err=True,
+                    )
                 out_md = translate_markdown(
                     settings,
                     source_lang="Russian",
@@ -676,20 +813,22 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to RU: missing English source `{en_p}`")
                 continue
             click.echo(f"Translating EN→RU `{en_p}` → `{ru_p}` with `{settings.model_translate}` …")
-            if effective_repo_path and ru_full is not None:
+            en_diff = ""
+            if effective_repo_path:
                 try:
                     en_diff = git_local.file_diff_range(
                         effective_repo_path, merge_base_with, en_p
                     )
                 except RuntimeError as exc:
                     click.echo(
-                        f"Note: diff-based translate unavailable ({exc}); "
+                        f"Note: could not compute EN diff vs `{merge_base_with}` ({exc}); "
                         "using full-file translate.",
                         err=True,
                     )
                     en_diff = ""
-                if en_diff.strip():
-                    click.echo("  (mode: merge-base..HEAD English diff + Russian reference)")
+            if en_diff.strip() and ru_full is not None:
+                click.echo("  (mode: merge-base..HEAD English diff + Russian reference)")
+                try:
                     out_md = translate_ru_update_from_en_diff(
                         settings,
                         ru_reference=ru_full,
@@ -697,7 +836,11 @@ def run_cmd(
                         en_path=en_p,
                         en_full=en_full,
                     )
-                else:
+                except Exception as exc:
+                    click.echo(
+                        f"Note: diff-based RU update failed ({exc}); using full-file translate.",
+                        err=True,
+                    )
                     out_md = translate_markdown(
                         settings,
                         source_lang="English",
@@ -706,6 +849,11 @@ def run_cmd(
                         source_text=en_full,
                     )
             else:
+                if en_diff.strip() and ru_full is None:
+                    click.echo(
+                        "  (mode: full-file — no Russian file on branch to patch with diff)",
+                        err=True,
+                    )
                 out_md = translate_markdown(
                     settings,
                     source_lang="English",
