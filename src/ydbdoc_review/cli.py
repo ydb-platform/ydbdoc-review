@@ -31,6 +31,7 @@ from ydbdoc_review.paths import (
     ru_toc_yaml_paths,
     truncate,
 )
+from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 
 
@@ -125,6 +126,7 @@ def _build_prerequisites_comment(
     overlay_ok: list[str],
     blocked_prereq: list[tuple[str, str, github_api.PathPrerequisiteInfo | None]],
     translation_pr_url: str | None,
+    translation_pr_title: str,
     translation_branch: str,
     compare_url: str | None,
     mirrored_en: list[str],
@@ -160,7 +162,14 @@ def _build_prerequisites_comment(
         if compare_url:
             lines.append(
                 f"\n**Создать PR с переводом:** {compare_url}"
-                + ("" if translation_pr_url else f"  \n(ветка `{translation_branch}` → `base` = `{base_ref}`)")
+                + (
+                    ""
+                    if translation_pr_url
+                    else (
+                        f"  \n(ветка `{translation_branch}` → `base` = `{base_ref}`; "
+                        f"заголовок: **{translation_pr_title}**)"
+                    )
+                )
             )
         if mirrored_en:
             lines.extend(
@@ -722,6 +731,7 @@ def run_cmd(
                     source_path=ru_p,
                     source_text=ru_source,
                 )
+            out_md = restore_markdown_links_from_ru(ru_source, out_md)
             git_local.write_text(workdir, en_p, out_md)
             generated.append(en_p)
             generated_en_to_ru[en_p] = ru_p
@@ -799,6 +809,7 @@ def run_cmd(
             click.echo(f"Merged EN toc `{en_toc}` (kept labels from `{base_ref}`, new entries only)")
 
     translation_branch = _translation_branch_name(pr_number)
+    translation_pr_title = f"Translation of PR {pr_number}"
     translation_pr_url: str | None = None
     compare_url: str | None = None
     new_at_base: list[str] = []
@@ -903,7 +914,11 @@ def run_cmd(
         )
         if committed:
             compare_url = github_api.compare_branch_url(
-                base_owner, base_repo, base_ref, translation_branch
+                base_owner,
+                base_repo,
+                base_ref,
+                translation_branch,
+                title=translation_pr_title,
             )
             click.echo(
                 f"Committed {len(publish_paths)} file(s) on branch `{translation_branch}` "
@@ -920,7 +935,11 @@ def run_cmd(
 
     if committed and compare_url is None:
         compare_url = github_api.compare_branch_url(
-            base_owner, base_repo, base_ref, translation_branch
+            base_owner,
+            base_repo,
+            base_ref,
+            translation_branch,
+            title=translation_pr_title,
         )
 
     if workdir and not dry_run and committed and not no_push:
@@ -936,7 +955,7 @@ def run_cmd(
             base_https_url=base_clone_url,
         )
         click.echo("Push completed.")
-        pr_title = f"Translation of PR {pr_number}"
+        pr_title = translation_pr_title
         pr_body = _build_translation_pr_body(
             pr_number=pr_number,
             base_owner=base_owner,
@@ -966,11 +985,17 @@ def run_cmd(
         else:
             if compare_url is None:
                 compare_url = github_api.compare_branch_url(
-                    base_owner, base_repo, base_ref, translation_branch
+                    base_owner,
+                    base_repo,
+                    base_ref,
+                    translation_branch,
+                    title=translation_pr_title,
+                    body=pr_body,
                 )
             click.echo(
-                f"Could not open translation PR via API (branch may already exist). "
-                f"Open manually: {compare_url}",
+                "Could not open translation PR via API "
+                "(check YDBDOC_PUSH_PAT: repo scope, pull_requests write). "
+                f"Open manually (title prefilled): {compare_url}",
                 err=True,
             )
 
@@ -1040,6 +1065,7 @@ def run_cmd(
             overlay_ok=overlay_ok,
             blocked_prereq=blocked_prereq,
             translation_pr_url=translation_pr_url,
+            translation_pr_title=translation_pr_title,
             translation_branch=translation_branch,
             compare_url=compare_url,
             mirrored_en=mirrored_en,

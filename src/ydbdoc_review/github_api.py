@@ -62,8 +62,50 @@ def iter_pr_files(owner: str, repo: str, pr: int, token: str) -> Iterator[dict[s
         page += 1
 
 
-def compare_branch_url(owner: str, repo: str, base: str, head_branch: str) -> str:
-    return f"https://github.com/{owner}/{repo}/compare/{base}...{head_branch}?expand=1"
+def compare_branch_url(
+    owner: str,
+    repo: str,
+    base: str,
+    head_branch: str,
+    *,
+    title: str | None = None,
+    body: str | None = None,
+) -> str:
+    from urllib.parse import quote
+
+    url = f"https://github.com/{owner}/{repo}/compare/{base}...{head_branch}?expand=1"
+    if title:
+        url += f"&title={quote(title)}"
+    if body:
+        url += f"&body={quote(body)}"
+    return url
+
+
+def find_open_pull_by_head(
+    owner: str,
+    repo: str,
+    *,
+    head_branch: str,
+    base: str,
+    token: str,
+) -> tuple[str, int] | None:
+    """Return (html_url, number) for an open PR with the given head branch in owner/repo."""
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+    r = httpx.get(
+        url,
+        headers=_headers(token),
+        params={"state": "open", "head": f"{owner}:{head_branch}", "base": base},
+        timeout=60.0,
+    )
+    if r.status_code != 200:
+        return None
+    pulls = r.json()
+    if not isinstance(pulls, list) or not pulls:
+        return None
+    data = pulls[0]
+    html = str(data.get("html_url", ""))
+    num = int(data.get("number", 0))
+    return (html, num) if html and num else None
 
 
 def create_pull(
@@ -81,6 +123,12 @@ def create_pull(
     head / base are branch names in that same repository.
     Returns (html_url, number) or None if GitHub rejected the request.
     """
+    existing = find_open_pull_by_head(
+        owner, repo, head_branch=head, base=base, token=token
+    )
+    if existing:
+        return existing
+
     url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
     r = httpx.post(
         url,
@@ -93,6 +141,10 @@ def create_pull(
         html = str(data.get("html_url", ""))
         num = int(data.get("number", 0))
         return (html, num) if html and num else None
+    if r.status_code == 422:
+        return find_open_pull_by_head(
+            owner, repo, head_branch=head, base=base, token=token
+        )
     return None
 
 
