@@ -936,7 +936,7 @@ def run_cmd(
             base_https_url=base_clone_url,
         )
         click.echo("Push completed.")
-        pr_title = f"docs(i18n): translate PR #{pr_number} ({len(generated)} file(s))"
+        pr_title = f"Translation of PR {pr_number}"
         pr_body = _build_translation_pr_body(
             pr_number=pr_number,
             base_owner=base_owner,
