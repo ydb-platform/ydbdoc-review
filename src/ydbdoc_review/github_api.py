@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from dataclasses import dataclass
 from typing import Any, Iterator
 from urllib.parse import quote
@@ -142,10 +143,44 @@ def create_pull(
         num = int(data.get("number", 0))
         return (html, num) if html and num else None
     if r.status_code == 422:
-        return find_open_pull_by_head(
+        existing = find_open_pull_by_head(
             owner, repo, head_branch=head, base=base, token=token
         )
+        if existing:
+            return existing
     return None
+
+
+def pull_create_error(
+    owner: str,
+    repo: str,
+    *,
+    title: str,
+    head: str,
+    base: str,
+    body: str,
+    token: str,
+) -> str:
+    """Return GitHub API error text from a pull create attempt (for logs)."""
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+    r = httpx.post(
+        url,
+        headers=_headers(token),
+        json={"title": title, "head": head, "base": base, "body": body},
+        timeout=120.0,
+    )
+    if r.status_code == 201:
+        return ""
+    try:
+        data = r.json()
+        msg = str(data.get("message", ""))
+        errs = data.get("errors")
+        if isinstance(errs, list) and errs:
+            parts = [str(e.get("message", e)) for e in errs[:3]]
+            return f"{msg}: {'; '.join(parts)}" if msg else "; ".join(parts)
+        return msg or r.text[:500]
+    except (json.JSONDecodeError, ValueError, AttributeError):
+        return r.text[:500] if r.text else f"HTTP {r.status_code}"
 
 
 def post_issue_comment(owner: str, repo: str, pr: int, body: str, token: str) -> str:

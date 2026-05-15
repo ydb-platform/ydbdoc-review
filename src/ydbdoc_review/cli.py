@@ -166,6 +166,25 @@ def _prefer_current_pr_in_prereq(
     return prereq
 
 
+def _build_source_pr_comment(
+    *,
+    translation_pr_url: str | None,
+    generated: list[str],
+) -> list[str]:
+    """Short comment on the source doc PR after a successful translation run."""
+    lines = ["## ydbdoc-review", ""]
+    if translation_pr_url:
+        lines.append(f"**PR с переводом:** {translation_pr_url}")
+    else:
+        lines.append(
+            "_PR с переводом не создан автоматически — см. лог workflow "
+            "(права `YDBDOC_PUSH_PAT`, создание pull request)._"
+        )
+    if generated:
+        lines.extend(["", "Переведённые файлы:", *[f"- `{p}`" for p in generated]])
+    return lines
+
+
 def _build_prerequisites_comment(
     *,
     new_at_base: list[str],
@@ -196,65 +215,9 @@ def _build_prerequisites_comment(
             "полный английский перевод по актуальному RU на базовой ветке.",
         ]
     else:
-        lines = [
-            "## ydbdoc-review — перевод вынесен в отдельный PR в upstream",
-            "",
-            "Перевод **не** коммитится в ветку исходного PR.",
-            f"PR с переводом открывается в **`{publish_owner}/{publish_repo}`** "
-            f"(`base` = `{base_ref}`), его можно смержить **после** вашего PR с документацией.",
-        ]
-        if translation_pr_url:
-            lines.append(f"\n**PR с переводом:** {translation_pr_url}")
-        if compare_url:
-            lines.append(
-                f"\n**Создать PR с переводом:** {compare_url}"
-                + (
-                    ""
-                    if translation_pr_url
-                    else (
-                        f"  \n(ветка `{translation_branch}` → `base` = `{base_ref}`; "
-                        f"заголовок: **{translation_pr_title}**)"
-                    )
-                )
-            )
-        if mirrored_en:
-            lines.extend(
-                [
-                    "",
-                    "### Скопировано в `en/` (картинки и прочее, без перевода)",
-                    *[f"- `{p}`" for p in mirrored_en],
-                    "",
-                    "_Оглавления (`toc*.yaml`): подписи из EN `main`, добавлены только пункты для новых статей этого PR._",
-                ]
-            )
+        raise AssertionError("_build_prerequisites_comment requires blocked_only=True")
 
-    if is_fork and not blocked_only:
-        lines.extend(
-            [
-                "",
-                "### Порядок (PR из форка → `main`)",
-                "",
-                "1. **Смержите** этот PR с документацией в `main` (как обычно).",
-                "2. **Смержите** PR с переводом в `main` чуть позже (отдельный PR в upstream).",
-                "3. Если нужно донести EN **по diff** после появления файла в `main` — "
-                "снова повесьте `doc_translate` на **этот** PR (или на обновлённую ветку).",
-                "",
-                f"_Исходный PR: #{pr_number}, форк `{head_owner}/{head_repo}` → `{head_ref}`._",
-            ]
-        )
-    elif not blocked_only:
-        lines.extend(
-            [
-                "",
-                "### Порядок действий",
-                "",
-                f"1. Смержите PR с переводом в `{base_ref}`.",
-                "2. Обновите ветку документации при необходимости.",
-                "3. Повторите `doc_translate` для точечного обновения по diff.",
-            ]
-        )
-
-    if blocked_prereq and blocked_only:
+    if blocked_prereq:
         lines.extend(
             [
                 "",
@@ -321,112 +284,24 @@ def _build_prerequisites_comment(
                     f"**`doc_translate` (последний в цепочке):** "
                     f"[#{rec.number}]({rec.url}) — _{rec.title}_"
                 )
-    if new_at_base and not blocked_only:
-        lines.extend(
-            [
-                "",
-                "### Новые EN-файлы (на `"
-                + base_ref
-                + "` их ещё не было)",
-                "",
-                "Переведён **весь** файл. Проверьте ссылки на другие `.md` в `en/` — "
-                "при отсутствии целей билд может падать; недостающие страницы переводите "
-                "через `doc_translate` на **других** (уже смерженных) PR с появлением RU.",
-                "",
-                *[f"- `{p}`" for p in new_at_base],
-            ]
-        )
-    if overlay_ok and not blocked_only:
-        lines.extend(
-            [
-                "",
-                "### EN уже был на `"
-                + base_ref
-                + "`",
-                "",
-                "После мержа PR перевода повторный `doc_translate` на исходном PR "
-                "сможет обновить EN **по diff**.",
-                "",
-                *[f"- `{p}`" for p in overlay_ok],
-            ]
-        )
     return lines
 
 
-def _build_translation_pr_body(
-    *,
-    pr_number: int,
-    base_owner: str,
-    base_repo: str,
-    base_ref: str,
-    head_owner: str,
-    head_repo: str,
-    head_ref: str,
-    is_fork: bool,
-    generated: list[str],
-    new_at_base: list[str],
-    overlay_ok: list[str],
-    results: list[dict[str, Any]],
-) -> str:
+def _build_translation_pr_body(*, pr_number: int, base_owner: str, base_repo: str) -> str:
     source = f"https://github.com/{base_owner}/{base_repo}/pull/{pr_number}"
-    lines = [
-        "## ydbdoc-review (автоматический перевод)",
-        "",
-        f"Перевод для PR {source}.",
-    ]
-    if is_fork:
-        lines.append(
-            f"Исходная ветка: форк `{head_owner}/{head_repo}` (`{head_ref}`). "
-            f"Этот PR в **upstream** (`base` = `{base_ref}`) — смержите **после** "
-            "исходного PR с документацией, если он ещё открыт."
-        )
-    else:
-        lines.append(
-            f"Исходная ветка: `{head_ref}`. Отдельный PR в `{base_ref}` — "
-            "не смешивайте с исходным PR документации."
-        )
-    lines.extend(
+    return "\n".join(
         [
+            "### Changelog entry",
             "",
-            "### Сгенерированные файлы",
-            *[f"- `{p}`" for p in generated],
+            f"DOCS: English translation for documentation PR #{pr_number} ({source}).",
+            "",
+            "### Changelog category",
+            "",
+            "* Documentation",
+            "",
+            "* Not for changelog (please remove the unused bullet(s) below)",
         ]
     )
-    if new_at_base:
-        lines.extend(
-            [
-                "",
-                "### Внимание: новые EN-файлы (не было на merge-base)",
-                "",
-                *[f"- `{p}`" for p in new_at_base],
-                "",
-                "Переведён весь файл. Проверьте ссылки на другие страницы в `en/` — "
-                "при отсутствии целевых файлов билд документации может сломаться. "
-                "При необходимости откройте `doc_translate` на **других** PR, "
-                "где появились соответствующие RU-файлы, и смержите те переводы **раньше**.",
-            ]
-        )
-    if overlay_ok:
-        lines.extend(
-            [
-                "",
-                "### EN уже существовал на merge-base",
-                "",
-                *[f"- `{p}`" for p in overlay_ok],
-                "",
-                "После мержа этого PR в базу повторите `doc_translate` на исходном PR "
-                "для точечного обновления по diff, если нужно.",
-            ]
-        )
-    lines.extend(["", "### Результаты проверочной модели"])
-    for item in results:
-        lines.append(
-            f"- `{item.get('ru_path')}` ↔ `{item.get('en_path')}`: "
-            f"aligned={item.get('semantically_aligned')} "
-            f"generate_for={item.get('needs_generation_for')} — _{item.get('summary')}_"
-        )
-    lines.append("\n_Generated by ydbdoc-review._")
-    return "\n".join(lines)
 
 
 def _split_repo(repo: str) -> tuple[str, str]:
@@ -1048,15 +923,6 @@ def run_cmd(
             pr_number=pr_number,
             base_owner=base_owner,
             base_repo=base_repo,
-            base_ref=base_ref,
-            head_owner=head_owner,
-            head_repo=head_repo_name,
-            head_ref=head_ref,
-            is_fork=is_fork,
-            generated=generated,
-            new_at_base=new_at_base,
-            overlay_ok=overlay_ok,
-            results=results,
         )
         opened = github_api.create_pull(
             base_owner,
@@ -1067,10 +933,29 @@ def run_cmd(
             body=pr_body,
             token=settings.github_push_token,
         )
+        if not opened and settings.github_token != settings.github_push_token:
+            opened = github_api.create_pull(
+                base_owner,
+                base_repo,
+                title=pr_title,
+                head=translation_branch,
+                base=base_ref,
+                body=pr_body,
+                token=settings.github_token,
+            )
         if opened:
             translation_pr_url, trans_num = opened
             click.echo(f"Opened translation PR #{trans_num}: {translation_pr_url}")
         else:
+            err = github_api.pull_create_error(
+                base_owner,
+                base_repo,
+                title=pr_title,
+                head=translation_branch,
+                base=base_ref,
+                body=pr_body,
+                token=settings.github_push_token,
+            )
             if compare_url is None:
                 compare_url = github_api.compare_branch_url(
                     base_owner,
@@ -1082,7 +967,11 @@ def run_cmd(
                 )
             click.echo(
                 "Could not open translation PR via API "
-                "(check YDBDOC_PUSH_PAT: repo scope, pull_requests write). "
+                "(check YDBDOC_PUSH_PAT: repo scope, pull_requests write)."
+                + (f" GitHub: {err}" if err else ""),
+                err=True,
+            )
+            click.echo(
                 f"Open manually (title prefilled): {compare_url}",
                 err=True,
             )
@@ -1147,7 +1036,7 @@ def run_cmd(
             comment_lines.extend(
                 ["", "_`--no-commit`: no PR comment posted (local-only mode)._"]
             )
-    elif (committed and generated) or blocked_only:
+    elif blocked_only:
         comment_lines = _build_prerequisites_comment(
             new_at_base=new_at_base,
             overlay_ok=overlay_ok,
@@ -1165,15 +1054,15 @@ def run_cmd(
             head_repo=head_repo_name,
             head_ref=head_ref,
             pr_number=pr_number,
-            blocked_only=blocked_only,
+            blocked_only=True,
         )
-        comment_lines.extend(["", "### Check model results"])
-        for item in results:
-            comment_lines.append(
-                f"- `{item.get('ru_path')}` ↔ `{item.get('en_path')}`: "
-                f"aligned={item.get('semantically_aligned')} "
-                f"generate_for={item.get('needs_generation_for')} — _{item.get('summary')}_"
-            )
+        if warnings:
+            comment_lines.extend(["", "### Прочее", *warnings])
+    elif committed and generated:
+        comment_lines = _build_source_pr_comment(
+            translation_pr_url=translation_pr_url,
+            generated=generated,
+        )
         if warnings:
             comment_lines.extend(["", "### Прочее", *warnings])
     else:

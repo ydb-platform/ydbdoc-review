@@ -1,4 +1,4 @@
-"""Restore markdown links in EN text using the Russian source (bullet-aligned)."""
+"""Restore markdown links in EN text using the Russian source."""
 
 from __future__ import annotations
 
@@ -7,33 +7,44 @@ import re
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
-def _bullet_line_indices(lines: list[str]) -> list[int]:
-    return [i for i, line in enumerate(lines) if line.lstrip().startswith("- ")]
-
-
 def restore_markdown_links_from_ru(ru: str, en: str) -> str:
     """
-    When RU list items contain ``[text](href)`` but the matching EN bullet lost the link,
-    re-insert links for recognizable patterns (e.g. ``(ACL)`` → linked ACL phrase).
+    Re-insert ``[text](href)`` from RU when diff-based EN translation dropped them.
+
+    Diff mode keeps unchanged EN lines verbatim; new RU sentences with links often
+    become plain text in EN (e.g. cross-links to ``create-resource-pool.md#run-access``).
     """
     ru_lines = ru.replace("\r\n", "\n").split("\n")
     en_lines = en.replace("\r\n", "\n").split("\n")
-    ru_idx = _bullet_line_indices(ru_lines)
-    en_idx = _bullet_line_indices(en_lines)
-    if not ru_idx or not en_idx:
-        return en
-
-    for pos in range(min(len(ru_idx), len(en_idx))):
-        ri, ei = ru_idx[pos], en_idx[pos]
-        ru_line = ru_lines[ri]
-        en_line = en_lines[ei]
-        for _ru_text, href in _LINK_RE.findall(ru_line):
-            if f"]({href})" in en_line or f"]({href}#" in en_line:
+    for i in range(min(len(ru_lines), len(en_lines))):
+        for _ru_text, href in _LINK_RE.findall(ru_lines[i]):
+            if f"]({href})" in en_lines[i]:
                 continue
-            en_line = _inject_link_for_href(ru_line, en_line, href)
-        en_lines[ei] = en_line
+            en_lines[i] = _inject_link_for_href(ru_lines[i], en_lines[i], href)
 
-    return "\n".join(en_lines) + ("\n" if en.endswith("\n") else "")
+    en_text = "\n".join(en_lines)
+    if en.endswith("\n") and not en_text.endswith("\n"):
+        en_text += "\n"
+
+    for ru_text, href in _LINK_RE.findall(ru):
+        if f"]({href})" in en_text:
+            continue
+        en_text = _inject_link_global(en_text, ru_text, href)
+
+    if en.endswith("\n") and not en_text.endswith("\n"):
+        en_text += "\n"
+    return en_text
+
+
+def _inject_link_global(en: str, ru_text: str, href: str) -> str:
+    if "#run-access" in href:
+        for phrase in (
+            "access to the resource pool",
+            "Access to the resource pool",
+        ):
+            if phrase in en and f"[{phrase}]" not in en:
+                return en.replace(phrase, f"[{phrase}]({href})", 1)
+    return _inject_link_for_href(ru_text, en, href)
 
 
 def _inject_link_for_href(ru_line: str, en_line: str, href: str) -> str:
@@ -43,7 +54,7 @@ def _inject_link_for_href(ru_line: str, en_line: str, href: str) -> str:
     ru_links = _LINK_RE.findall(ru_line)
     ru_texts = [t for t, h in ru_links if h == href]
     if not ru_texts:
-        return en_line
+        return _inject_link_global(en_line, "", href)
 
     ru_text = ru_texts[0]
     if "(ACL)" in ru_text and "(ACL)" in en_line and f"]({href})" not in en_line:
@@ -54,10 +65,9 @@ def _inject_link_for_href(ru_line: str, en_line: str, href: str) -> str:
             if phrase in en_line and f"[{phrase}]" not in en_line:
                 return en_line.replace(phrase, f"[{phrase}]({href})", 1)
 
-    if href in en_line:
+    if href in en_line and f"]({href})" not in en_line:
         return en_line
 
-    # Generic: wrap first parenthesized segment shared with RU link text.
     paren_in_ru = re.search(r"\(([^)]+)\)", ru_text)
     if paren_in_ru:
         token = paren_in_ru.group(1)
