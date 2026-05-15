@@ -4,6 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 def _load_dotenv() -> None:
@@ -20,6 +21,12 @@ def _first_nonempty_env(*names: str, default: str = "") -> str:
         if v:
             return v
     return default
+
+
+def fm_base_url_requires_yandex_folder(base_url: str) -> bool:
+    """True for Yandex Cloud FM host — needs catalog id and gpt:// URIs for models."""
+    host = (urlparse(base_url.strip()).hostname or "").lower()
+    return host.endswith("yandex.net")
 
 
 _DEFAULT_MODEL_CHECK = "yandexgpt/latest"
@@ -159,7 +166,6 @@ class Settings:
     github_token: str
     github_push_token: str
     docs_prefix: str
-    max_chars_per_side_analyze: int
     prompts_dir: str
 
     @staticmethod
@@ -174,9 +180,13 @@ class Settings:
             "YANDEX_CLOUD_API_KEY_DOC_REVIEW",
             "YANDEX_CLOUD_API_KEY",
             "YC_API_KEY",
+            "OPENAI_API_KEY",
+            "YDBDOC_LLM_API_KEY",
         )
         base_url = _first_nonempty_env(
             "YANDEX_CLOUD_BASE_URL",
+            "OPENAI_BASE_URL",
+            "YDBDOC_LLM_BASE_URL",
             default="https://ai.api.cloud.yandex.net/v1",
         ).rstrip("/")
         file_check, file_translate, file_review = load_config_layer()
@@ -200,7 +210,6 @@ class Settings:
         else:
             gh_push = gh_push_raw.strip() or gh
         docs_prefix = os.environ.get("DOCS_SRC_ROOT", "ydb/docs").strip().strip("/")
-        max_chars = int(os.environ.get("YDBDOC_MAX_ANALYZE_CHARS", "16000"))
         here = os.path.dirname(os.path.abspath(__file__))
         default_prompts = os.path.normpath(os.path.join(here, "..", "..", "prompts"))
         prompts_dir = os.environ.get("YDBDOC_PROMPTS_DIR", default_prompts)
@@ -214,16 +223,20 @@ class Settings:
             github_token=gh,
             github_push_token=gh_push,
             docs_prefix=docs_prefix,
-            max_chars_per_side_analyze=max_chars,
             prompts_dir=prompts_dir,
         )
 
     def validate_yandex(self) -> None:
-        if not self.yandex_folder or not self.yandex_api_key:
+        if not self.yandex_api_key:
             raise SystemExit(
-                "Set folder (YANDEX_CLOUD_FOLDER_DOC_REVIEW or YANDEX_CLOUD_FOLDER or YC_FOLDER_ID) "
-                "and API key (YANDEX_CLOUD_API_KEY_DOC_REVIEW or YANDEX_CLOUD_API_KEY or YC_API_KEY); "
+                "Set an API key: YANDEX_CLOUD_API_KEY_DOC_REVIEW / YANDEX_CLOUD_API_KEY / "
+                "YC_API_KEY, or OPENAI_API_KEY / YDBDOC_LLM_API_KEY for other OpenAI-compatible hosts; "
                 "see .env.example."
+            )
+        if fm_base_url_requires_yandex_folder(self.yandex_base_url) and not self.yandex_folder:
+            raise SystemExit(
+                "Yandex Foundation Models require a cloud folder id: "
+                "YANDEX_CLOUD_FOLDER_DOC_REVIEW or YANDEX_CLOUD_FOLDER or YC_FOLDER_ID."
             )
 
     def validate_github(self) -> None:

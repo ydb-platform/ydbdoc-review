@@ -8,14 +8,18 @@ from typing import Any
 
 from openai import OpenAI
 
-from ydbdoc_review.config import Settings
+from ydbdoc_review.config import Settings, fm_base_url_requires_yandex_folder
 
 
 def _model_uri(settings: Settings, model: str) -> str:
     m = model.strip()
     if m.startswith("gpt://"):
         return m
-    return f"gpt://{settings.yandex_folder}/{m}"
+    if fm_base_url_requires_yandex_folder(settings.yandex_base_url):
+        if not settings.yandex_folder:
+            raise ValueError("Yandex FM requires a folder id when the model id is not gpt://…")
+        return f"gpt://{settings.yandex_folder}/{m}"
+    return m
 
 
 def _read_prompt(path: Path) -> str:

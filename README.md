@@ -8,7 +8,7 @@
 
 - Python **3.11+** (или только Docker для GitHub Action).
 - **Токен GitHub** с правами на чтение PR и (при необходимости) **push** в репозиторий, откуда открыт PR (**head**).
-- Каталог в **Yandex Cloud** и **API-ключ** для OpenAI-совместимого endpoint Foundation Models ([документация](https://yandex.cloud/ru/docs/foundation-models/)).
+- **OpenAI-совместимый LLM**: по умолчанию [Yandex Foundation Models](https://yandex.cloud/ru/docs/foundation-models/) (каталог + ключ); можно подставить **другой** хост (`OPENAI_BASE_URL` / `OPENAI_API_KEY` и т.д., см. ниже).
 
 ---
 
@@ -38,13 +38,15 @@ cp .env.example .env
 
 | Переменная | Назначение |
 |------------|------------|
-| `YANDEX_CLOUD_FOLDER_DOC_REVIEW` или `YANDEX_CLOUD_FOLDER` или `YC_FOLDER_ID` | ID каталога (`b1…`). Для CI в `ydb` удобнее имена с суффиксом `_DOC_REVIEW`. |
-| `YANDEX_CLOUD_API_KEY_DOC_REVIEW` или `YANDEX_CLOUD_API_KEY` или `YC_API_KEY` | Ключ API Foundation Models. |
-| `YANDEX_CLOUD_BASE_URL` | Обычно `https://ai.api.cloud.yandex.net/v1` (если не задано — используется это значение по умолчанию). |
+| `YANDEX_CLOUD_FOLDER_DOC_REVIEW` или `YANDEX_CLOUD_FOLDER` или `YC_FOLDER_ID` | ID каталога Yandex Cloud (`b1…`). **Нужен только** если `YANDEX_CLOUD_BASE_URL` (или дефолт) указывает на **Yandex** (`*.yandex.net`). Для OpenAI / vLLM / другого хоста можно не задавать. |
+| `YANDEX_CLOUD_API_KEY_DOC_REVIEW` или `YANDEX_CLOUD_API_KEY` или `YC_API_KEY` или **`OPENAI_API_KEY`** или **`YDBDOC_LLM_API_KEY`** | Ключ к выбранному API. |
+| `YANDEX_CLOUD_BASE_URL` или **`OPENAI_BASE_URL`** или **`YDBDOC_LLM_BASE_URL`** | База OpenAI-совместимого API, обычно с суффиксом `/v1`. По умолчанию — Yandex FM `https://ai.api.cloud.yandex.net/v1`. Пример OpenAI: `https://api.openai.com/v1`. |
 | `GITHUB_TOKEN` | PAT или вывод `gh auth token` после `gh auth login`. |
 | `GITHUB_PUSH_TOKEN` | Только **локально** в `.env`: необязательный второй PAT для `git push` в ветку форка; по умолчанию = `GITHUB_TOKEN`. В **GitHub Actions** такой PAT не называют секретом `GITHUB_*` (запрещено платформой): заводите **`YDBDOC_PUSH_PAT`** и в workflow передаёте `GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}` (см. «Push в форк»). |
 
 Имена **моделей** (проверка / перевод) задаются в **`ydbdoc-review.toml`**: секция `[models]`, ключи `check` и `translate`. По умолчанию используется файл из пакета (`src/ydbdoc_review/ydbdoc-review.toml`); переопределение — свой `ydbdoc-review.toml` в каталоге запуска или **`YDBDOC_CONFIG`**. Значения из TOML можно сменить переменными **`YDBDOC_MODEL_CHECK`** и **`YDBDOC_MODEL_TRANSLATE`** (удобно в CI).
+
+**Другой провайдер (не Yandex):** задайте **`OPENAI_BASE_URL`** (или `YDBDOC_LLM_BASE_URL`) на корень совместимого API и **`OPENAI_API_KEY`** (или `YDBDOC_LLM_API_KEY`). Каталог Yandex не нужен. В `ydbdoc-review.toml` или в env укажите **ид модели в формате этого провайдера** (например `gpt-4o-mini`, `gpt-4o`). Для Yandex FM по-прежнему можно задать полный URI в `gpt://…` в TOML — тогда префикс каталога не добавляется автоматически.
 
 Список id моделей в вашем каталоге (если шлюз отдаёт `GET /v1/models`):
 
@@ -120,7 +122,7 @@ python -m ydbdoc_review run \
 
 - Тексты промптов лежат в каталоге [`prompts/`](prompts/) — их можно править без изменения кода.
 - Каталог с промптами можно переопределить: **`YDBDOC_PROMPTS_DIR`**.
-- Длинные статьи для **проверочной** модели укорачиваются; бюджет задаётся **`YDBDOC_MAX_ANALYZE_CHARS`** (по умолчанию см. `src/ydbdoc_review/config.py`).
+- Длинные статьи в **шаге анализа** по умолчанию в модель уходят **целиком** (без усечения). Если нужно снова ограничить размер, задайте **`YDBDOC_ANALYZE_TRUNCATE_CHARS`** (максимум символов на сторону `ru_text` / `en_text` в JSON). Фрагменты **`ru_diff_vs_base` / `en_diff_vs_base`** по умолчанию до **500000** символов каждый; лимит: **`YDBDOC_ANALYZE_DIFF_MAX`**.
 
 ### 7. Запуск без локального клона `ydb`
 
@@ -282,7 +284,8 @@ Action собирается из **Dockerfile**: внутри контейнер
 | `YDBDOC_REVIEW_ENABLED` | `true` / `false` — глобально включить или выключить шаг (пустое = как в `ydbdoc-review.toml`). |
 | `YDBDOC_MODEL_CHECK` | Необязательно, если заданы модели в `ydbdoc-review.toml` в образе/репо или устраивают встроенные значения. |
 | `YDBDOC_MODEL_TRANSLATE` | То же; иначе переопределение slug для перевода. |
-| `YDBDOC_MAX_DIFF_CHARS` | Необязательно: лимит символов unified diff, уходящего в модель при diff-переводе (по умолчанию `120000`). |
+| `YDBDOC_ANALYZE_TRUNCATE_CHARS` | Необязательно: если задано положительное число — усечь `ru_text`/`en_text` в шаге анализа до стольки символов на сторону. **По умолчанию не задано — полные файлы.** |
+| `YDBDOC_ANALYZE_DIFF_MAX` | Необязательно: макс. длина `ru_diff_vs_base` / `en_diff_vs_base` в JSON анализа (по умолчанию `500000`). |
 
 Встроить job можно рядом с существующим `build-docs` в `.github/workflows/docs_build.yaml`, указав `uses:` на ваш тег релиза этого action или на vendored-путь (`./tools/ydbdoc-review`).
 
@@ -292,13 +295,13 @@ Action собирается из **Dockerfile**: внутри контейнер
 
 1. **Список изменённых файлов:** GitHub API «files changed» в PR **или** локально `git merge-base` + `git diff --name-only`.
 2. **Пары:** пути `ydb/docs/ru/…` ↔ `ydb/docs/en/…` с тем же хвостом (корень задаётся **`DOCS_SRC_ROOT`**, по умолчанию `ydb/docs`).
-3. **Проверка:** один запрос к «дешёвой» модели с усечёнными текстами и ответом в JSON.
+3. **Проверка:** один запрос к «дешёвой» модели: в JSON для каждой пары передаются **полные** `ru_text` и `en_text` (если не задан **`YDBDOC_ANALYZE_TRUNCATE_CHARS`**). При локальном git добавляются **`ru_diff_vs_base`** и **`en_diff_vs_base`** — это текст unified diff того же файла между merge-base и `HEAD` (что именно поменялось в PR по сравнению с базой). Ими модель пользуется, чтобы не пропустить новые блоки в конце длинной статьи. Длину diff в JSON ограничивает **`YDBDOC_ANALYZE_DIFF_MAX`** (по умолчанию 500000 символов на поле).
 4. **Перевод:** «дорогая» модель вызывается только если для пары указано `needs_generation_for`: `en` или `ru`. При **локальном** checkout (`--repo-path` / `YDBDOC_REPO_PATH`) и успешном `git merge-base` перевод идёт в **безопасном режиме**: в модель передаётся **unified diff** исходного языка между merge-base и `HEAD` (все коммиты PR в этой ветке, не «только последний») и **полный файл целевого языка как эталон** — промпты [`03_translate_ru_diff_to_en.txt`](prompts/03_translate_ru_diff_to_en.txt) / [`04_translate_en_diff_to_ru.txt`](prompts/04_translate_en_diff_to_ru.txt). Если diff получить нельзя (нет локального git или ошибка), используется прежний режим **полного** перевода исходного файла. Без локального репозитория (только API списка файлов + клон head) diff недоступен — снова полный файл.
 5. **Git:** коммит в дереве checkout; **push** в ветку **`head.ref`** удалённого **head** репозитория PR.
 
 ## Ограничения
 
-- Для проверки длинные страницы **усечены** (`YDBDOC_MAX_ANALYZE_CHARS`).
+- Для проверки тексты по умолчанию **не** укорачиваются; при необходимости — **`YDBDOC_ANALYZE_TRUNCATE_CHARS`**. Очень большие запросы к FM могут упираться в лимиты шлюза — тогда задайте усечение или разбейте PR.
 - Дифф для перевода усечён по умолчанию **`YDBDOC_MAX_DIFF_CHARS`** (120000 символов); при очень больших правках RU/EN режим diff может быть неполным.
 - Даже в diff-режиме модель **не гарантирует** побайтовое совпадение неизменных фрагментов с эталоном; промпт снижает риск (лишние `./`, пустые строки, «улучшение» ссылок). Критичные PR проверяйте диффом вручную.
 - Если оба языка есть, но расходятся по смыслу, инструмент **не перезаписывает** файлы автоматически — в комментарии будет блок про ручной разбор.

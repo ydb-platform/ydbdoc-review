@@ -190,11 +190,20 @@ def run_cmd(
 
     settings.validate_yandex()
 
-    per_side = max(4000, settings.max_chars_per_side_analyze // max(1, len(pairs)))
+    trunc_raw = os.environ.get("YDBDOC_ANALYZE_TRUNCATE_CHARS", "").strip()
+    analyze_trunc: int | None = (
+        int(trunc_raw) if trunc_raw.isdigit() and int(trunc_raw) > 0 else None
+    )
 
     payload_pairs: list[dict[str, Any]] = []
     full_texts: dict[tuple[str, str], tuple[str | None, str | None]] = {}
 
+    diff_preview_raw = os.environ.get("YDBDOC_ANALYZE_DIFF_MAX", "").strip()
+    diff_preview_cap = (
+        int(diff_preview_raw)
+        if diff_preview_raw.isdigit() and int(diff_preview_raw) > 0
+        else 500_000
+    )
     for pair in pairs:
         ru_t, en_t = _read_pair_texts(
             head_owner=head_owner,
@@ -205,16 +214,44 @@ def run_cmd(
             repo_path=effective_repo_path,
         )
         full_texts[(pair.ru_path, pair.en_path)] = (ru_t, en_t)
-        ru_s, _ = truncate(ru_t, per_side)
-        en_s, _ = truncate(en_t, per_side)
-        payload_pairs.append(
-            {
-                "ru_path": pair.ru_path,
-                "en_path": pair.en_path,
-                "ru_text": ru_s,
-                "en_text": en_s,
-            }
-        )
+        if analyze_trunc is not None:
+            ru_s, _ = truncate(ru_t, analyze_trunc)
+            en_s, _ = truncate(en_t, analyze_trunc)
+        else:
+            ru_s = ru_t if ru_t is not None else ""
+            en_s = en_t if en_t is not None else ""
+        entry: dict[str, Any] = {
+            "ru_path": pair.ru_path,
+            "en_path": pair.en_path,
+            "ru_text": ru_s,
+            "en_text": en_s,
+        }
+        if effective_repo_path:
+            try:
+                dru = git_local.file_diff_range(
+                    effective_repo_path, merge_base_with, pair.ru_path
+                )
+                if dru.strip():
+                    entry["ru_diff_vs_base"] = (
+                        dru
+                        if len(dru) <= diff_preview_cap
+                        else dru[:diff_preview_cap] + "\n…(diff truncated)\n"
+                    )
+            except RuntimeError:
+                pass
+            try:
+                den = git_local.file_diff_range(
+                    effective_repo_path, merge_base_with, pair.en_path
+                )
+                if den.strip():
+                    entry["en_diff_vs_base"] = (
+                        den
+                        if len(den) <= diff_preview_cap
+                        else den[:diff_preview_cap] + "\n…(diff truncated)\n"
+                    )
+            except RuntimeError:
+                pass
+        payload_pairs.append(entry)
 
     analyze_input = json.dumps({"pairs": payload_pairs}, ensure_ascii=False)
     click.echo(
@@ -317,7 +354,6 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to RU: missing English source `{en_p}`")
                 continue
             click.echo(f"Translating EN→RU `{en_p}` → `{ru_p}` with `{settings.model_translate}` …")
-            out_md2: str
             if effective_repo_path and ru_full is not None:
                 try:
                     en_diff = git_local.file_diff_range(

@@ -1,6 +1,6 @@
 # Bundled defaults (override: ydbdoc-review.toml в cwd / YDBDOC_CONFIG).
-# Slugs без префикса gpt:// — см. Model gallery и python -m ydbdoc_review list-models.
-# Перевод RU→EN: YandexGPT Pro 5.1 (yandexgpt-5.1); проверка пар — более дешёвая yandexgpt/latest.
+# Slugs: для Yandex FM без префикса gpt:// — см. list-models; для OpenAI — например gpt-4o-mini.
+# Полный URI gpt://… в TOML задаётся как есть (каталог в URI не добавляется повторно).
 
 [models]
 check = "yandexgpt/latest"
