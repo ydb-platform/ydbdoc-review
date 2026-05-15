@@ -852,7 +852,6 @@ def run_cmd(
             base_remote_name="ydbdoc-base",
             base_branch=base_ref,
             paths=publish_paths,
-            start_ref=base_ref_local,
         )
         msg = (
             f"docs: add AI translations ({len(generated)} md, {len(mirrored_en)} companion)\n\n"

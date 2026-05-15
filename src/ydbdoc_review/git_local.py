@@ -222,20 +222,17 @@ def prepare_translation_branch_on_base(
     base_remote_name: str,
     base_branch: str,
     paths: list[str],
-    start_ref: str | None = None,
 ) -> None:
     """
     Move uncommitted translation files onto a fresh branch tip for publishing.
 
-    The caller should delete the remote translation branch first; this always bases
-    the local branch on ``start_ref`` or ``base_branch`` from ``base_remote_name``.
+    Always resets the translation branch to ``base_branch`` from ``base_remote_name``
+    (re-fetch after ``ensure_remote`` so an earlier remote-tracking ref is not stale).
     """
     with tempfile.TemporaryDirectory(prefix="ydbdoc-review-staging-") as staging:
         saved = _snapshot_paths_to_dir(repo, paths, staging)
         ensure_remote(repo, base_remote_name, base_remote_url)
-        tip_ref = start_ref if start_ref is not None else fetch_remote_branch(
-            repo, base_remote_name, base_branch
-        )
+        tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
         checkout_branch_at_ref(repo, translation_branch, tip_ref)
         _restore_paths_from_dir(repo, staging, saved)
 
