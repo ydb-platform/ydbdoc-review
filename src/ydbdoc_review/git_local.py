@@ -183,24 +183,14 @@ def checkout_branch_at_ref(repo: str, branch: str, start_ref: str) -> None:
     subprocess.run(["git", "-C", repo, "checkout", "-B", branch, start_sha], check=True)
 
 
-def stash_paths(repo: str, paths: list[str], message: str = "ydbdoc-review") -> bool:
-    if not paths:
-        return False
-    p = subprocess.run(
-        ["git", "-C", repo, "stash", "push", "-m", message, "--"] + paths,
-        capture_output=True,
-        text=True,
-    )
-    if p.returncode != 0:
-        return False
-    out = (p.stdout or "").strip().lower()
-    err = (p.stderr or "").strip().lower()
-    text = f"{out}\n{err}"
-    return "no local changes to save" not in text
-
-
-def stash_pop(repo: str) -> None:
-    subprocess.run(["git", "-C", repo, "stash", "pop"], check=True)
+def snapshot_paths(repo: str, paths: list[str]) -> dict[str, str]:
+    """Read file contents before checkout (avoids stash merge conflicts on re-run)."""
+    out: dict[str, str] = {}
+    for rel in paths:
+        text = read_text(repo, rel)
+        if text is not None:
+            out[rel] = text
+    return out
 
 
 def prepare_translation_branch_on_base(
@@ -220,9 +210,9 @@ def prepare_translation_branch_on_base(
     ``start_ref`` — local ref already in the repo (e.g. ``refs/remotes/.../main``).
     ``continue_from_branch`` — remote branch name to fetch **after** ``ensure_remote``
     (use for ``ydbdoc-review/pr-N``; must not be pre-fetched before ``ensure_remote``).
-  When both are set, ``continue_from_branch`` wins unless fetch fails (then ``start_ref``).
+    When both are set, ``continue_from_branch`` wins unless fetch fails (then ``start_ref``).
     """
-    stashed = stash_paths(repo, paths)
+    saved = snapshot_paths(repo, paths)
     ensure_remote(repo, base_remote_name, base_remote_url)
     tip_ref: str | None = None
     if continue_from_branch:
@@ -232,8 +222,8 @@ def prepare_translation_branch_on_base(
     if tip_ref is None:
         tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
     checkout_branch_at_ref(repo, translation_branch, tip_ref)
-    if stashed:
-        stash_pop(repo)
+    for rel, content in saved.items():
+        write_text(repo, rel, content)
 
 
 def local_changed_paths(repo: str, merge_base_with: str) -> list[str]:
