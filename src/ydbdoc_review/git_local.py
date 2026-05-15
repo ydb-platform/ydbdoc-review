@@ -44,6 +44,86 @@ def merge_base(repo: str, ref1: str, ref2: str) -> str:
     return _git(repo, "merge-base", ref1, ref2)
 
 
+def commits_touching_path(
+    repo: str,
+    ref: str,
+    rel_path: str,
+    *,
+    max_count: int = 50,
+) -> list[str]:
+    """SHAs of commits on `ref` that touched `rel_path`, newest first."""
+    path = rel_path.replace(os.sep, "/")
+    limit = str(max(1, max_count))
+    p = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo,
+            "log",
+            ref,
+            f"-{limit}",
+            "--format=%H",
+            "--",
+            path,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        return []
+    return [line.strip() for line in (p.stdout or "").splitlines() if line.strip()]
+
+
+def first_commit_for_path(repo: str, ref: str, rel_path: str) -> str | None:
+    """
+    SHA of the earliest commit on `ref` that introduced or touched `rel_path`.
+    Prefer --diff-filter=A (file add); fall back to oldest commit in history.
+    """
+    path = rel_path.replace(os.sep, "/")
+    for extra in (["--diff-filter=A"], []):
+        p = subprocess.run(
+            [
+                "git",
+                "-C",
+                repo,
+                "log",
+                ref,
+                "-1",
+                "--format=%H",
+                *extra,
+                "--",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if p.returncode == 0:
+            sha = (p.stdout or "").strip()
+            if sha:
+                return sha
+    p = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo,
+            "log",
+            ref,
+            "--reverse",
+            "-1",
+            "--format=%H",
+            "--",
+            path,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode == 0:
+        sha = (p.stdout or "").strip()
+        if sha:
+            return sha
+    return None
+
+
 def path_exists_at_tree(repo: str, rev: str, rel_path: str) -> bool:
     """True if `rev` has a blob at `rel_path` (git object path uses `/`)."""
     path = rel_path.replace(os.sep, "/")

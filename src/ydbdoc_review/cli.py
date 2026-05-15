@@ -68,7 +68,7 @@ def _build_prerequisites_comment(
     *,
     new_at_base: list[str],
     overlay_ok: list[str],
-    blocked_prereq: list[tuple[str, str]],
+    blocked_prereq: list[tuple[str, str, github_api.PathPrerequisiteInfo | None]],
     translation_pr_url: str | None,
     translation_branch: str,
     publish_owner: str,
@@ -88,7 +88,7 @@ def _build_prerequisites_comment(
             "Перевод для **этого** PR сейчас **не** создан: на целевой ветке (`"
             f"{base_ref}`) уже есть русский файл, но **нет** английского. "
             "Точечно наложить изменения этого PR на EN нельзя, пока не появится "
-            "полный английский перевод из PR, который **ввёл** страницу.",
+                "полный английский перевод по актуальному RU на базовой ветке.",
         ]
     else:
         lines = [
@@ -140,15 +140,55 @@ def _build_prerequisites_comment(
                 "",
                 "На `"
                 + base_ref
-                + "` уже есть RU, но нет EN. Найдите **смерженный** PR, в котором "
-                "впервые появился русский файл, откройте его на GitHub и повесьте лейбл "
-                "**`doc_translate`** — откроется отдельный PR с **полным** переводом в "
+                + "` уже есть RU, но нет EN. Сначала все перечисленные ниже "
+                "смерженные PR с правками RU должны быть в базе (обычно уже так). "
+                "Затем повесьте **`doc_translate`** на **последний** PR в цепочке — "
+                "откроется отдельный PR с **полным** переводом в "
                 f"`{publish_owner}/{publish_repo}` → `{base_ref}`. "
                 "Смержите **его**, затем снова запустите перевод **здесь**.",
-                "",
-                *[f"- RU `{ru}` → EN `{en}`" for en, ru in blocked_prereq],
             ]
         )
+        for en_p, ru_p, prereq in blocked_prereq:
+            lines.append("")
+            lines.append(f"#### `{ru_p}` → `{en_p}`")
+            if prereq is None or not prereq.chain:
+                lines.append(
+                    "_Не удалось найти смерженные PR по истории файла на `"
+                    + base_ref
+                    + "`._"
+                )
+                continue
+            if len(prereq.chain) > 1:
+                lines.append("")
+                lines.append("Смерженные PR, менявшие этот RU (по порядку):")
+                for ref in prereq.chain:
+                    lines.append(
+                        f"- [#{ref.number}]({ref.url}) — _{ref.title}_ "
+                        f"_(merged {ref.merged_at[:10]})_"
+                    )
+            rec = prereq.recommended
+            if rec is None:
+                lines.append(
+                    "_Не удалось выбрать PR для `doc_translate` (исключён текущий PR)._"
+                )
+                continue
+            if len(prereq.chain) == 1:
+                lines.append(
+                    f"**`doc_translate`:** [#{rec.number}]({rec.url}) — _{rec.title}_"
+                )
+            else:
+                others = [r for r in prereq.chain if r.number != rec.number]
+                if others:
+                    nums = ", ".join(f"#{r.number}" for r in others)
+                    lines.append(
+                        f"_PR {nums} уже должны быть в `{base_ref}`; "
+                        "отдельный перевод по ним не нужен._"
+                    )
+                lines.append("")
+                lines.append(
+                    f"**`doc_translate` (последний в цепочке):** "
+                    f"[#{rec.number}]({rec.url}) — _{rec.title}_"
+                )
     if new_at_base and not blocked_only:
         lines.extend(
             [
@@ -631,28 +671,53 @@ def run_cmd(
     translation_pr_url: str | None = None
     new_at_base: list[str] = []
     overlay_ok: list[str] = []
-    blocked_prereq: list[tuple[str, str]] = []
+    blocked_prereq: list[tuple[str, str, github_api.PathPrerequisiteInfo | None]] = []
     blocked_only = False
+    base_ref_local: str | None = None
 
     if workdir and generated_en_to_ru:
         base_remote_name = "ydbdoc-base"
-        base_ref_local = f"refs/remotes/{base_remote_name}/{base_ref}"
         git_local.ensure_remote(
             workdir,
             base_remote_name,
             git_local.remote_push_url(base_clone_url, settings.github_push_token),
         )
         base_ref_local = git_local.fetch_remote_branch(workdir, base_remote_name, base_ref)
-        new_at_base, overlay_ok, blocked_prereq = _assess_translation_files(
+        new_at_base, overlay_ok, blocked_raw = _assess_translation_files(
             repo_path=workdir,
             base_ref=base_ref_local,
             generated_en_to_ru=generated_en_to_ru,
         )
+        exclude_intro_pr = None if github_api.pr_is_merged(pr) else pr_number
+        for en_p, ru_p in blocked_raw:
+            prereq = github_api.find_prerequisite_chain_for_path(
+                base_owner,
+                base_repo,
+                ru_p,
+                token=settings.github_token,
+                repo_path=workdir,
+                base_git_ref=base_ref_local,
+                base_branch=base_ref,
+                exclude_pr=exclude_intro_pr,
+            )
+            blocked_prereq.append((en_p, ru_p, prereq))
+            if prereq.recommended:
+                rec = prereq.recommended
+                chain_nums = ", ".join(f"#{r.number}" for r in prereq.chain) or "—"
+                click.echo(
+                    f"Prerequisite chain for `{ru_p}`: [{chain_nums}] → "
+                    f"doc_translate on #{rec.number} {rec.url}"
+                )
+            else:
+                click.echo(
+                    f"Could not resolve prerequisite PR chain for `{ru_p}`.",
+                    err=True,
+                )
         if blocked_prereq:
             blocked_only = True
             click.echo(
                 "Blocking translation PR: EN prerequisite is missing on base branch. "
-                "Ask user to translate merged prerequisite PR(s) first.",
+                "Label doc_translate on the merged PR(s) listed in the comment.",
                 err=True,
             )
 

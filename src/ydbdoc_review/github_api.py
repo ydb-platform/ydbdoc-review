@@ -1,10 +1,29 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 from typing import Any, Iterator
 from urllib.parse import quote
 
 import httpx
+
+from ydbdoc_review import git_local
+
+
+@dataclass(frozen=True)
+class MergedPrRef:
+    number: int
+    url: str
+    title: str
+    merged_at: str
+
+
+@dataclass(frozen=True)
+class PathPrerequisiteInfo:
+    """Merged PRs that brought RU changes to the base branch, oldest → newest."""
+
+    chain: tuple[MergedPrRef, ...]
+    recommended: MergedPrRef | None
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -155,3 +174,181 @@ def is_fork_pr(pr: dict[str, Any]) -> bool:
 
 def pr_is_merged(pr: dict[str, Any]) -> bool:
     return bool(pr.get("merged_at"))
+
+
+def list_pulls_for_commit(
+    owner: str, repo: str, commit_sha: str, token: str
+) -> list[dict[str, Any]]:
+    """Pull requests associated with a commit (may be empty without merge commit link)."""
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}/pulls"
+    r = httpx.get(url, headers=_headers(token), timeout=60.0)
+    if r.status_code in (404, 409):
+        return []
+    r.raise_for_status()
+    data = r.json()
+    return data if isinstance(data, list) else []
+
+
+def oldest_commit_for_path(
+    owner: str,
+    repo: str,
+    path: str,
+    ref: str,
+    token: str,
+    *,
+    max_pages: int = 20,
+) -> str | None:
+    """Walk commit history for `path` at `ref`; return SHA of the oldest commit."""
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits"
+    page = 1
+    oldest: str | None = None
+    while page <= max_pages:
+        r = httpx.get(
+            url,
+            headers=_headers(token),
+            params={"path": path, "sha": ref, "per_page": 100, "page": page},
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        oldest = str(batch[-1].get("sha", "")) or oldest
+        if len(batch) < 100:
+            break
+        page += 1
+    return oldest if oldest else None
+
+
+def _merged_pr_ref_from_pull(pull: dict[str, Any]) -> MergedPrRef | None:
+    if not pull.get("merged_at"):
+        return None
+    num = pull.get("number")
+    url = pull.get("html_url")
+    if not isinstance(num, int) or not url:
+        return None
+    return MergedPrRef(
+        number=num,
+        url=str(url),
+        title=str(pull.get("title", "")),
+        merged_at=str(pull["merged_at"]),
+    )
+
+
+def list_commit_shas_for_path(
+    owner: str,
+    repo: str,
+    path: str,
+    ref: str,
+    token: str,
+    *,
+    max_pages: int = 20,
+    max_commits: int = 50,
+) -> list[str]:
+    """Commit SHAs touching `path` at `ref`, newest first (capped)."""
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits"
+    page = 1
+    shas: list[str] = []
+    while page <= max_pages and len(shas) < max_commits:
+        r = httpx.get(
+            url,
+            headers=_headers(token),
+            params={"path": path, "sha": ref, "per_page": 100, "page": page},
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        for item in batch:
+            sha = item.get("sha")
+            if isinstance(sha, str) and sha:
+                shas.append(sha)
+                if len(shas) >= max_commits:
+                    break
+        if len(batch) < 100:
+            break
+        page += 1
+    return shas
+
+
+def find_prerequisite_chain_for_path(
+    owner: str,
+    repo: str,
+    ru_path: str,
+    *,
+    token: str,
+    repo_path: str | None,
+    base_git_ref: str | None,
+    base_branch: str,
+    exclude_pr: int | None = None,
+    max_commits: int = 50,
+) -> PathPrerequisiteInfo:
+    """
+  Find merged PRs that changed `ru_path` on the base branch (oldest → newest).
+
+  `recommended` is the latest merged PR in the chain (for `doc_translate`), excluding
+  `exclude_pr` when set (typically the open PR being labeled).
+    """
+    shas: list[str] = []
+    if repo_path and base_git_ref:
+        shas = git_local.commits_touching_path(
+            repo_path, base_git_ref, ru_path, max_count=max_commits
+        )
+    if not shas:
+        shas = list_commit_shas_for_path(
+            owner,
+            repo,
+            ru_path,
+            base_branch,
+            token,
+            max_commits=max_commits,
+        )
+
+    by_number: dict[int, MergedPrRef] = {}
+    for sha in shas:
+        for pull in list_pulls_for_commit(owner, repo, sha, token):
+            ref = _merged_pr_ref_from_pull(pull)
+            if ref is None:
+                continue
+            prev = by_number.get(ref.number)
+            if prev is None or ref.merged_at >= prev.merged_at:
+                by_number[ref.number] = ref
+
+    chain = tuple(sorted(by_number.values(), key=lambda r: (r.merged_at, r.number)))
+    recommended: MergedPrRef | None = None
+    for ref in reversed(chain):
+        if exclude_pr is None or ref.number != exclude_pr:
+            recommended = ref
+            break
+    if recommended is None and chain:
+        recommended = chain[-1]
+    return PathPrerequisiteInfo(chain=chain, recommended=recommended)
+
+
+def find_introducing_pull_for_path(
+    owner: str,
+    repo: str,
+    ru_path: str,
+    *,
+    token: str,
+    repo_path: str | None,
+    base_git_ref: str | None,
+    base_branch: str,
+    exclude_pr: int | None = None,
+) -> tuple[int, str, str] | None:
+    """Backward-compatible: latest merged PR in the prerequisite chain."""
+    info = find_prerequisite_chain_for_path(
+        owner,
+        repo,
+        ru_path,
+        token=token,
+        repo_path=repo_path,
+        base_git_ref=base_git_ref,
+        base_branch=base_branch,
+        exclude_pr=exclude_pr,
+    )
+    rec = info.recommended
+    if rec is None:
+        return None
+    return rec.number, rec.url, rec.title
