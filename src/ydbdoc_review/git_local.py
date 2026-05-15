@@ -223,26 +223,19 @@ def prepare_translation_branch_on_base(
     base_branch: str,
     paths: list[str],
     start_ref: str | None = None,
-    continue_from_branch: str | None = None,
 ) -> None:
     """
-    Move uncommitted translation files onto a branch for publishing into upstream.
+    Move uncommitted translation files onto a fresh branch tip for publishing.
 
-    ``start_ref`` — local ref already in the repo (e.g. ``refs/remotes/.../main``).
-    ``continue_from_branch`` — remote branch name to fetch **after** ``ensure_remote``
-    (use for ``ydbdoc-review/pr-N``; must not be pre-fetched before ``ensure_remote``).
-    When both are set, ``continue_from_branch`` wins unless fetch fails (then ``start_ref``).
+    The caller should delete the remote translation branch first; this always bases
+    the local branch on ``start_ref`` or ``base_branch`` from ``base_remote_name``.
     """
     with tempfile.TemporaryDirectory(prefix="ydbdoc-review-staging-") as staging:
         saved = _snapshot_paths_to_dir(repo, paths, staging)
         ensure_remote(repo, base_remote_name, base_remote_url)
-        tip_ref: str | None = None
-        if continue_from_branch:
-            tip_ref = try_fetch_remote_branch(repo, base_remote_name, continue_from_branch)
-        if tip_ref is None and start_ref is not None:
-            tip_ref = start_ref
-        if tip_ref is None:
-            tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
+        tip_ref = start_ref if start_ref is not None else fetch_remote_branch(
+            repo, base_remote_name, base_branch
+        )
         checkout_branch_at_ref(repo, translation_branch, tip_ref)
         _restore_paths_from_dir(repo, staging, saved)
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import httpx
 from openai import OpenAI
 
 from ydbdoc_review import git_local, github_api
@@ -827,24 +828,22 @@ def run_cmd(
 
     committed = False
     if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:
-        reset_branch = os.environ.get("YDBDOC_TRANSLATION_RESET_BRANCH", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        continue_branch: str | None = None
-        branch_start_ref: str | None = base_ref_local
-        if reset_branch:
+        try:
+            if github_api.delete_branch_if_exists(
+                base_owner,
+                base_repo,
+                translation_branch,
+                settings.github_push_token,
+            ):
+                click.echo(
+                    f"Deleted existing upstream branch `{translation_branch}` "
+                    f"(fresh translation from `{base_ref}`)."
+                )
+        except httpx.HTTPError as exc:
             click.echo(
-                f"YDBDOC_TRANSLATION_RESET_BRANCH: rebuild `{translation_branch}` "
-                f"from `{base_ref}` (replaces branch tip on push)."
-            )
-        elif base_ref_local:
-            continue_branch = translation_branch
-            click.echo(
-                f"Will fetch `{translation_branch}` from upstream after remote setup "
-                "(append commit if branch exists, else start from "
-                f"`{base_ref}`)."
+                f"Warning: could not delete `{translation_branch}` on upstream ({exc}); "
+                "will force-push the new translation.",
+                err=True,
             )
         git_local.prepare_translation_branch_on_base(
             workdir,
@@ -853,8 +852,7 @@ def run_cmd(
             base_remote_name="ydbdoc-base",
             base_branch=base_ref,
             paths=publish_paths,
-            start_ref=branch_start_ref,
-            continue_from_branch=continue_branch,
+            start_ref=base_ref_local,
         )
         msg = (
             f"docs: add AI translations ({len(generated)} md, {len(mirrored_en)} companion)\n\n"
@@ -909,14 +907,8 @@ def run_cmd(
             branch=translation_branch,
             token=settings.github_push_token,
             base_https_url=base_clone_url,
-            force_with_lease=reset_branch,
+            force_with_lease=True,
         )
-        if reset_branch:
-            click.echo(
-                f"Pushed with --force-with-lease (YDBDOC_TRANSLATION_RESET_BRANCH): "
-                f"branch reset to current commit from `{base_ref}` base.",
-                err=True,
-            )
         click.echo("Push completed.")
         pr_title = translation_pr_title
         pr_body = _build_translation_pr_body(
