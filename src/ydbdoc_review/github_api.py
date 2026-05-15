@@ -43,6 +43,36 @@ def iter_pr_files(owner: str, repo: str, pr: int, token: str) -> Iterator[dict[s
         page += 1
 
 
+def create_pull(
+    owner: str,
+    repo: str,
+    *,
+    title: str,
+    head: str,
+    base: str,
+    body: str,
+    token: str,
+) -> tuple[str, int] | None:
+    """
+    Open a pull request in owner/repo (usually the PR head fork).
+    head / base are branch names in that same repository.
+    Returns (html_url, number) or None if GitHub rejected the request.
+    """
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+    r = httpx.post(
+        url,
+        headers=_headers(token),
+        json={"title": title, "head": head, "base": base, "body": body},
+        timeout=120.0,
+    )
+    if r.status_code == 201:
+        data = r.json()
+        html = str(data.get("html_url", ""))
+        num = int(data.get("number", 0))
+        return (html, num) if html and num else None
+    return None
+
+
 def post_issue_comment(owner: str, repo: str, pr: int, body: str, token: str) -> str:
     url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr}/comments"
     r = httpx.post(
@@ -102,3 +132,26 @@ def head_repo_from_pr(pr: dict[str, Any]) -> tuple[str, str, str, str]:
 def base_repo_from_pr(pr: dict[str, Any]) -> tuple[str, str]:
     base = pr["base"]["repo"]
     return base["owner"]["login"], base["name"]
+
+
+def base_ref_from_pr(pr: dict[str, Any]) -> str:
+    return str(pr["base"]["ref"])
+
+
+def base_clone_url_from_pr(pr: dict[str, Any]) -> str:
+    return str(pr["base"]["repo"]["clone_url"])
+
+
+def is_fork_pr(pr: dict[str, Any]) -> bool:
+    head = pr["head"]["repo"]
+    base = pr["base"]["repo"]
+    if head is None or base is None:
+        return False
+    return (
+        head["owner"]["login"] != base["owner"]["login"]
+        or head["name"] != base["name"]
+    )
+
+
+def pr_is_merged(pr: dict[str, Any]) -> bool:
+    return bool(pr.get("merged_at"))
