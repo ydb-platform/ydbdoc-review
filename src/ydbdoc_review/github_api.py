@@ -176,6 +176,31 @@ def pr_is_merged(pr: dict[str, Any]) -> bool:
     return bool(pr.get("merged_at"))
 
 
+def pr_touches_path(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    ru_path: str,
+    token: str,
+    *,
+    _cache: dict[tuple[str, str, int, str], bool] | None = None,
+) -> bool:
+    """True if `ru_path` (or its rename source) appears in that PR's changed files."""
+    key = (owner, repo, pr_number, ru_path)
+    if _cache is not None and key in _cache:
+        return _cache[key]
+    found = False
+    for item in iter_pr_files(owner, repo, pr_number, token):
+        fn = item.get("filename")
+        prev = item.get("previous_filename")
+        if fn == ru_path or prev == ru_path:
+            found = True
+            break
+    if _cache is not None:
+        _cache[key] = found
+    return found
+
+
 def list_pulls_for_commit(
     owner: str, repo: str, commit_sha: str, token: str
 ) -> list[dict[str, Any]]:
@@ -306,10 +331,15 @@ def find_prerequisite_chain_for_path(
         )
 
     by_number: dict[int, MergedPrRef] = {}
+    touch_cache: dict[tuple[str, str, int, str], bool] = {}
     for sha in shas:
         for pull in list_pulls_for_commit(owner, repo, sha, token):
             ref = _merged_pr_ref_from_pull(pull)
             if ref is None:
+                continue
+            if not pr_touches_path(
+                owner, repo, ref.number, ru_path, token, _cache=touch_cache
+            ):
                 continue
             prev = by_number.get(ref.number)
             if prev is None or ref.merged_at >= prev.merged_at:
