@@ -189,15 +189,19 @@ def prepare_translation_branch_on_base(
     base_remote_name: str,
     base_branch: str,
     paths: list[str],
+    start_ref: str | None = None,
 ) -> None:
     """
-    Move uncommitted translation files onto a new branch starting at upstream base
-    (e.g. origin/main), for publishing a PR into the main repo — not the fork head.
+    Move uncommitted translation files onto a branch for publishing into upstream.
+
+    ``start_ref`` — git ref to branch from (e.g. existing remote translation branch).
+    When omitted, uses the fetched ``base_branch`` (typically ``main``).
     """
     stashed = stash_paths(repo, paths)
     ensure_remote(repo, base_remote_name, base_remote_url)
-    base_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
-    checkout_branch_at_ref(repo, translation_branch, base_ref)
+    if start_ref is None:
+        start_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
+    checkout_branch_at_ref(repo, translation_branch, start_ref)
     if stashed:
         stash_pop(repo)
 
@@ -281,7 +285,15 @@ def remote_push_url(https_clone_url: str, token: str) -> str:
     return f"https://x-access-token:{token}@{host}{path}"
 
 
-def push_branch(repo: str, remote_name: str, branch: str, token: str, base_https_url: str) -> None:
+def push_branch(
+    repo: str,
+    remote_name: str,
+    branch: str,
+    token: str,
+    base_https_url: str,
+    *,
+    force_with_lease: bool = False,
+) -> None:
     url = remote_push_url(base_https_url, token)
     subprocess.run(
         ["git", "-C", repo, "remote", "remove", remote_name],
@@ -291,7 +303,26 @@ def push_branch(repo: str, remote_name: str, branch: str, token: str, base_https
         ["git", "-C", repo, "remote", "add", remote_name, url],
         check=True,
     )
-    subprocess.run(
-        ["git", "-C", repo, "push", remote_name, f"HEAD:refs/heads/{branch}"],
-        check=True,
+    push_args = ["git", "-C", repo, "push", remote_name, f"HEAD:refs/heads/{branch}"]
+    if force_with_lease:
+        push_args.insert(4, "--force-with-lease")
+    subprocess.run(push_args, check=True)
+
+
+def try_fetch_remote_branch(repo: str, remote_name: str, branch: str) -> str | None:
+    """Fetch ``branch`` from ``remote_name``; return local ref or None if missing."""
+    p = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo,
+            "fetch",
+            remote_name,
+            f"+refs/heads/{branch}:refs/remotes/{remote_name}/{branch}",
+        ],
+        capture_output=True,
+        text=True,
     )
+    if p.returncode != 0:
+        return None
+    return f"refs/remotes/{remote_name}/{branch}"

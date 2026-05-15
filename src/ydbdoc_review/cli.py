@@ -32,6 +32,7 @@ from ydbdoc_review.paths import (
     truncate,
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+from ydbdoc_review.pair_diff import pair_needs_en_from_ru_only_diff
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 
 
@@ -40,6 +41,51 @@ _OK_STATUSES = frozenset({"added", "modified", "changed", "renamed"})
 
 def _translation_branch_name(pr_number: int) -> str:
     return f"ydbdoc-review/pr-{pr_number}"
+
+
+def _pr_changed_path_set(changed: list[str]) -> set[str]:
+    return {p.replace("\\", "/").lstrip("./") for p in changed}
+
+
+def _apply_ru_diff_generation_overrides(
+    results: list[dict[str, Any]],
+    *,
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
+    pr_changed: set[str],
+) -> int:
+    """
+    Force ``needs_generation_for=en`` when RU diff adds lines but EN diff in this PR does not.
+    Returns count of overridden pairs.
+    """
+    n = 0
+    for item in results:
+        ru_p = item.get("ru_path")
+        en_p = item.get("en_path")
+        if not isinstance(ru_p, str) or not isinstance(en_p, str):
+            continue
+        ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
+        if not pair_needs_en_from_ru_only_diff(
+            ru_path=ru_p,
+            ru_diff=ru_diff,
+            en_diff=en_diff,
+            pr_changed_paths=pr_changed,
+        ):
+            continue
+        if item.get("needs_generation_for") == "en":
+            continue
+        item["needs_generation_for"] = "en"
+        item["semantically_aligned"] = False
+        item["summary"] = (
+            "RU PR diff adds content; EN file unchanged in PR — generating EN update "
+            "(deterministic override)."
+        )
+        n += 1
+        click.echo(
+            f"Override check model: force EN generation for `{ru_p}` "
+            "(RU diff has additions, EN diff does not).",
+            err=True,
+        )
+    return n
 
 
 def _assess_translation_files(
@@ -554,6 +600,8 @@ def run_cmd(
 
     payload_pairs: list[dict[str, Any]] = []
     full_texts: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    pr_changed = _pr_changed_path_set(changed)
 
     diff_preview_raw = os.environ.get("YDBDOC_ANALYZE_DIFF_MAX", "").strip()
     diff_preview_cap = (
@@ -583,31 +631,34 @@ def run_cmd(
             "ru_text": ru_s,
             "en_text": en_s,
         }
+        dru_full: str | None = None
+        den_full: str | None = None
         if effective_repo_path:
             try:
-                dru = git_local.file_diff_range(
+                dru_full = git_local.file_diff_range(
                     effective_repo_path, merge_base_with, pair.ru_path
                 )
-                if dru.strip():
+                if dru_full.strip():
                     entry["ru_diff_vs_base"] = (
-                        dru
-                        if len(dru) <= diff_preview_cap
-                        else dru[:diff_preview_cap] + "\n…(diff truncated)\n"
+                        dru_full
+                        if len(dru_full) <= diff_preview_cap
+                        else dru_full[:diff_preview_cap] + "\n…(diff truncated)\n"
                     )
             except RuntimeError:
                 pass
             try:
-                den = git_local.file_diff_range(
+                den_full = git_local.file_diff_range(
                     effective_repo_path, merge_base_with, pair.en_path
                 )
-                if den.strip():
+                if den_full and den_full.strip():
                     entry["en_diff_vs_base"] = (
-                        den
-                        if len(den) <= diff_preview_cap
-                        else den[:diff_preview_cap] + "\n…(diff truncated)\n"
+                        den_full
+                        if len(den_full) <= diff_preview_cap
+                        else den_full[:diff_preview_cap] + "\n…(diff truncated)\n"
                     )
             except RuntimeError:
                 pass
+        pair_diffs[(pair.ru_path, pair.en_path)] = (dru_full, den_full)
         payload_pairs.append(entry)
 
     analyze_input = json.dumps({"pairs": payload_pairs}, ensure_ascii=False)
@@ -630,6 +681,15 @@ def run_cmd(
     results = data.get("results")
     if not isinstance(results, list):
         raise SystemExit("Check model JSON has no 'results' list.")
+
+    if effective_repo_path and pr_changed:
+        overridden = _apply_ru_diff_generation_overrides(
+            results,
+            pair_diffs=pair_diffs,
+            pr_changed=pr_changed,
+        )
+        if overridden:
+            click.echo(f"Applied RU-diff override to {overridden} pair(s).")
 
     workdir = effective_repo_path
     tmp: str | None = None
@@ -892,6 +952,33 @@ def run_cmd(
 
     committed = False
     if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:
+        reset_branch = os.environ.get("YDBDOC_TRANSLATION_RESET_BRANCH", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        trans_start_ref: str | None = None
+        if base_ref_local:
+            if reset_branch:
+                trans_start_ref = base_ref_local
+                click.echo(
+                    f"YDBDOC_TRANSLATION_RESET_BRANCH: rebuild `{translation_branch}` "
+                    f"from `{base_ref}` (replaces branch tip on push)."
+                )
+            else:
+                trans_start_ref = git_local.try_fetch_remote_branch(
+                    workdir, "ydbdoc-base", translation_branch
+                )
+                if trans_start_ref:
+                    click.echo(
+                        f"Translation branch `{translation_branch}` exists on remote; "
+                        "new commit will be appended on top."
+                    )
+                else:
+                    trans_start_ref = base_ref_local
+                    click.echo(
+                        f"No remote `{translation_branch}` yet; branching from `{base_ref}`."
+                    )
         git_local.prepare_translation_branch_on_base(
             workdir,
             translation_branch=translation_branch,
@@ -899,6 +986,7 @@ def run_cmd(
             base_remote_name="ydbdoc-base",
             base_branch=base_ref,
             paths=publish_paths,
+            start_ref=trans_start_ref,
         )
         msg = (
             f"docs: add AI translations ({len(generated)} md, {len(mirrored_en)} companion)\n\n"
@@ -953,7 +1041,14 @@ def run_cmd(
             branch=translation_branch,
             token=settings.github_push_token,
             base_https_url=base_clone_url,
+            force_with_lease=reset_branch,
         )
+        if reset_branch:
+            click.echo(
+                f"Pushed with --force-with-lease (YDBDOC_TRANSLATION_RESET_BRANCH): "
+                f"branch reset to current commit from `{base_ref}` base.",
+                err=True,
+            )
         click.echo("Push completed.")
         pr_title = translation_pr_title
         pr_body = _build_translation_pr_body(
