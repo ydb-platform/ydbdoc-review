@@ -148,13 +148,26 @@ def ensure_remote(repo: str, name: str, url: str) -> None:
     subprocess.run(["git", "-C", repo, "remote", "add", name, url], check=True)
 
 
+def _remote_tracking_ref(remote: str, branch: str) -> str:
+    """
+    Local ref for ``refs/heads/{branch}`` after fetch.
+
+    Branch names like ``ydbdoc-review/pr-39815`` cannot be stored as
+    ``refs/remotes/{remote}/ydbdoc-review/pr-39815`` — Git treats the middle
+    segment as a directory and checkout fails. Slashes are flattened to ``--``.
+    """
+    safe = branch.replace("/", "--")
+    return f"refs/remotes/{remote}/{safe}"
+
+
 def fetch_remote_branch(repo: str, remote: str, branch: str) -> str:
-    """Fetch one branch from remote; return local ref `refs/remotes/{remote}/{branch}`."""
+    """Fetch one branch from remote; return a local commit ref suitable for checkout."""
+    local_ref = _remote_tracking_ref(remote, branch)
     subprocess.run(
-        ["git", "-C", repo, "fetch", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"],
+        ["git", "-C", repo, "fetch", remote, f"+refs/heads/{branch}:{local_ref}"],
         check=True,
     )
-    return f"refs/remotes/{remote}/{branch}"
+    return local_ref
 
 
 def checkout_branch_at_ref(repo: str, branch: str, start_ref: str) -> None:
@@ -311,6 +324,7 @@ def push_branch(
 
 def try_fetch_remote_branch(repo: str, remote_name: str, branch: str) -> str | None:
     """Fetch ``branch`` from ``remote_name``; return local ref or None if missing."""
+    local_ref = _remote_tracking_ref(remote_name, branch)
     p = subprocess.run(
         [
             "git",
@@ -318,11 +332,17 @@ def try_fetch_remote_branch(repo: str, remote_name: str, branch: str) -> str | N
             repo,
             "fetch",
             remote_name,
-            f"+refs/heads/{branch}:refs/remotes/{remote_name}/{branch}",
+            f"+refs/heads/{branch}:{local_ref}",
         ],
         capture_output=True,
         text=True,
     )
     if p.returncode != 0:
         return None
-    return f"refs/remotes/{remote_name}/{branch}"
+    verify = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--verify", f"{local_ref}^{{commit}}"],
+        capture_output=True,
+    )
+    if verify.returncode != 0:
+        return None
+    return local_ref
