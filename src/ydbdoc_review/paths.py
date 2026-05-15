@@ -44,6 +44,34 @@ def counterpart(path: str, docs_prefix: str) -> str | None:
     return None
 
 
+def ru_to_en_path(path: str, docs_prefix: str) -> str | None:
+    """Map any `docs/ru/...` path to `docs/en/...` (md, assets, yaml, …)."""
+    return counterpart(path, docs_prefix)
+
+
+def ru_companion_files_to_mirror(changed: list[str], docs_prefix: str) -> list[tuple[str, str]]:
+    """
+    Non-markdown files under docs/ru/ from the PR that should be copied to docs/en/.
+    (images, toc yaml, etc.)
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in changed:
+        p = _norm(raw)
+        if not p.startswith(f"{docs_prefix.strip('/')}/ru/"):
+            continue
+        if p.endswith(".md"):
+            continue
+        en = ru_to_en_path(p, docs_prefix)
+        if not en:
+            continue
+        key = (p, en)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
 def pairs_from_changed_files(changed: list[str], docs_prefix: str) -> list[DocPair]:
     seen: set[tuple[str, str]] = set()
     out: list[DocPair] = []

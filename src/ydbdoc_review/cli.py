@@ -23,7 +23,12 @@ from ydbdoc_review.llm import (
     translate_markdown,
     translate_ru_update_from_en_diff,
 )
-from ydbdoc_review.paths import DocPair, pairs_from_changed_files, truncate
+from ydbdoc_review.paths import (
+    DocPair,
+    pairs_from_changed_files,
+    ru_companion_files_to_mirror,
+    truncate,
+)
 
 
 _OK_STATUSES = frozenset({"added", "modified", "changed", "renamed"})
@@ -118,6 +123,8 @@ def _build_prerequisites_comment(
     blocked_prereq: list[tuple[str, str, github_api.PathPrerequisiteInfo | None]],
     translation_pr_url: str | None,
     translation_branch: str,
+    compare_url: str | None,
+    mirrored_en: list[str],
     publish_owner: str,
     publish_repo: str,
     base_ref: str,
@@ -147,10 +154,20 @@ def _build_prerequisites_comment(
         ]
         if translation_pr_url:
             lines.append(f"\n**PR с переводом:** {translation_pr_url}")
-        else:
+        if compare_url:
             lines.append(
-                f"\nВетка: `{translation_branch}` в `{publish_owner}/{publish_repo}` "
-                f"(создайте PR вручную: `base` = `{base_ref}`)."
+                f"\n**Создать PR с переводом:** {compare_url}"
+                + ("" if translation_pr_url else f"  \n(ветка `{translation_branch}` → `base` = `{base_ref}`)")
+            )
+        if mirrored_en:
+            lines.extend(
+                [
+                    "",
+                    "### Скопировано в `en/` (картинки и прочее, без перевода)",
+                    *[f"- `{p}`" for p in mirrored_en],
+                    "",
+                    "_Оглавления (`toc*.yaml`) при необходимости поправьте вручную в EN._",
+                ]
             )
 
     if is_fork and not blocked_only:
@@ -612,7 +629,22 @@ def run_cmd(
 
     generated: list[str] = []
     generated_en_to_ru: dict[str, str] = {}
+    mirrored_en: list[str] = []
     warnings: list[str] = []
+    base_ref_local: str | None = None
+
+    if workdir:
+        try:
+            git_local.ensure_remote(
+                workdir,
+                "ydbdoc-base",
+                git_local.remote_push_url(base_clone_url, settings.github_push_token),
+            )
+            base_ref_local = git_local.fetch_remote_branch(
+                workdir, "ydbdoc-base", base_ref
+            )
+        except RuntimeError as exc:
+            click.echo(f"Warning: could not fetch `{base_ref}`: {exc}", err=True)
 
     for item in results:
         gen = item.get("needs_generation_for")
@@ -638,8 +670,28 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to EN: missing Russian source `{ru_p}`")
                 continue
             click.echo(f"Translating RU→EN `{ru_p}` → `{en_p}` with `{settings.model_translate}` …")
+            ru_source = ru_full or ""
+            use_main_ru = bool(
+                workdir
+                and base_ref_local
+                and git_local.path_exists_at_tree(workdir, base_ref_local, ru_p)
+                and not git_local.path_exists_at_tree(workdir, base_ref_local, en_p)
+            )
+            if use_main_ru:
+                ru_on_main = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
+                if ru_on_main:
+                    ru_source = ru_on_main
+                    click.echo(
+                        "  (mode: full-file translate from RU on "
+                        f"`{base_ref}` — EN missing on base)"
+                    )
             out_md: str
-            if effective_repo_path and en_full is not None:
+            ru_diff = ""
+            if (
+                effective_repo_path
+                and en_full is not None
+                and not use_main_ru
+            ):
                 try:
                     ru_diff = git_local.file_diff_range(
                         effective_repo_path, merge_base_with, ru_p
@@ -650,31 +702,22 @@ def run_cmd(
                         "using full-file translate.",
                         err=True,
                     )
-                    ru_diff = ""
-                if ru_diff.strip():
-                    click.echo("  (mode: merge-base..HEAD Russian diff + English reference)")
-                    out_md = translate_en_update_from_ru_diff(
-                        settings,
-                        en_reference=en_full,
-                        ru_diff=ru_diff,
-                        ru_path=ru_p,
-                        ru_full=ru_full,
-                    )
-                else:
-                    out_md = translate_markdown(
-                        settings,
-                        source_lang="Russian",
-                        target_lang="English",
-                        source_path=ru_p,
-                        source_text=ru_full,
-                    )
+            if ru_diff.strip() and not use_main_ru:
+                click.echo("  (mode: merge-base..HEAD Russian diff + English reference)")
+                out_md = translate_en_update_from_ru_diff(
+                    settings,
+                    en_reference=en_full,
+                    ru_diff=ru_diff,
+                    ru_path=ru_p,
+                    ru_full=ru_source,
+                )
             else:
                 out_md = translate_markdown(
                     settings,
                     source_lang="Russian",
                     target_lang="English",
                     source_path=ru_p,
-                    source_text=ru_full,
+                    source_text=ru_source,
                 )
             git_local.write_text(workdir, en_p, out_md)
             generated.append(en_p)
@@ -724,22 +767,34 @@ def run_cmd(
             git_local.write_text(workdir, ru_p, out_md)
             generated.append(ru_p)
 
+    if workdir and not dry_run:
+        for ru_asset, en_asset in ru_companion_files_to_mirror(changed, settings.docs_prefix):
+            if git_local.copy_file_in_repo(workdir, ru_asset, en_asset):
+                mirrored_en.append(en_asset)
+                click.echo(f"Copied RU→EN companion `{ru_asset}` → `{en_asset}`")
+
     translation_branch = _translation_branch_name(pr_number)
     translation_pr_url: str | None = None
+    compare_url: str | None = None
     new_at_base: list[str] = []
     overlay_ok: list[str] = []
     blocked_prereq: list[tuple[str, str, github_api.PathPrerequisiteInfo | None]] = []
     blocked_only = False
-    base_ref_local: str | None = None
+
+    if workdir and generated_en_to_ru and base_ref_local is None:
+        try:
+            git_local.ensure_remote(
+                workdir,
+                "ydbdoc-base",
+                git_local.remote_push_url(base_clone_url, settings.github_push_token),
+            )
+            base_ref_local = git_local.fetch_remote_branch(
+                workdir, "ydbdoc-base", base_ref
+            )
+        except RuntimeError:
+            pass
 
     if workdir and generated_en_to_ru:
-        base_remote_name = "ydbdoc-base"
-        git_local.ensure_remote(
-            workdir,
-            base_remote_name,
-            git_local.remote_push_url(base_clone_url, settings.github_push_token),
-        )
-        base_ref_local = git_local.fetch_remote_branch(workdir, base_remote_name, base_ref)
         new_at_base, overlay_ok, blocked_raw = _assess_translation_files(
             repo_path=workdir,
             base_ref=base_ref_local,
@@ -797,18 +852,20 @@ def run_cmd(
                 "target — proceeding with full-file translation.",
             )
 
+    publish_paths = list(dict.fromkeys(generated + mirrored_en))
+
     committed = False
-    if workdir and not dry_run and generated and not no_commit and not blocked_only:
+    if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:
         git_local.prepare_translation_branch_on_base(
             workdir,
             translation_branch=translation_branch,
             base_remote_url=git_local.remote_push_url(base_clone_url, settings.github_push_token),
             base_remote_name="ydbdoc-base",
             base_branch=base_ref,
-            paths=generated,
+            paths=publish_paths,
         )
         msg = (
-            f"docs: add AI translations ({len(generated)} file(s))\n\n"
+            f"docs: add AI translations ({len(generated)} md, {len(mirrored_en)} companion)\n\n"
             f"Translation PR for #{pr_number} — generated by ydbdoc-review.\n"
             f"Target: {base_owner}/{base_repo}:{base_ref}\n"
             f"Branch: {translation_branch}"
@@ -820,8 +877,11 @@ def run_cmd(
             author_email="ydbdoc-review@users.noreply.github.com",
         )
         if committed:
+            compare_url = github_api.compare_branch_url(
+                base_owner, base_repo, base_ref, translation_branch
+            )
             click.echo(
-                f"Committed {len(generated)} file(s) on branch `{translation_branch}` "
+                f"Committed {len(publish_paths)} file(s) on branch `{translation_branch}` "
                 f"from `{base_owner}/{base_repo}:{base_ref}`."
             )
         else:
@@ -831,6 +891,11 @@ def run_cmd(
         click.echo(
             f"Wrote {len(generated)} file(s) under `{workdir}`; "
             "`--no-commit`: review with `git diff`, then commit when ready."
+        )
+
+    if committed and compare_url is None:
+        compare_url = github_api.compare_branch_url(
+            base_owner, base_repo, base_ref, translation_branch
         )
 
     if workdir and not dry_run and committed and not no_push:
@@ -874,13 +939,13 @@ def run_cmd(
             translation_pr_url, trans_num = opened
             click.echo(f"Opened translation PR #{trans_num}: {translation_pr_url}")
         else:
-            compare = (
-                f"https://github.com/{base_owner}/{base_repo}/compare/"
-                f"{base_ref}...{translation_branch}?expand=1"
-            )
+            if compare_url is None:
+                compare_url = github_api.compare_branch_url(
+                    base_owner, base_repo, base_ref, translation_branch
+                )
             click.echo(
                 f"Could not open translation PR via API (branch may already exist). "
-                f"Open manually: {compare}",
+                f"Open manually: {compare_url}",
                 err=True,
             )
 
@@ -951,6 +1016,8 @@ def run_cmd(
             blocked_prereq=blocked_prereq,
             translation_pr_url=translation_pr_url,
             translation_branch=translation_branch,
+            compare_url=compare_url,
+            mirrored_en=mirrored_en,
             publish_owner=base_owner,
             publish_repo=base_repo,
             base_ref=base_ref,

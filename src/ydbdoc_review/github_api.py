@@ -62,6 +62,10 @@ def iter_pr_files(owner: str, repo: str, pr: int, token: str) -> Iterator[dict[s
         page += 1
 
 
+def compare_branch_url(owner: str, repo: str, base: str, head_branch: str) -> str:
+    return f"https://github.com/{owner}/{repo}/compare/{base}...{head_branch}?expand=1"
+
+
 def create_pull(
     owner: str,
     repo: str,

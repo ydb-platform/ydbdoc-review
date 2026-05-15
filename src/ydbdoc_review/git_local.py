@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
@@ -214,6 +215,30 @@ def read_text(repo: str, rel_path: str) -> str | None:
     if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
+
+
+def read_text_at_ref(repo: str, ref: str, rel_path: str) -> str | None:
+    """UTF-8 file contents at `ref:path`, or None."""
+    path = rel_path.replace(os.sep, "/")
+    p = subprocess.run(
+        ["git", "-C", repo, "show", f"{ref}:{path}"],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        return None
+    return p.stdout
+
+
+def copy_file_in_repo(repo: str, src_rel: str, dest_rel: str) -> bool:
+    """Copy a file within the repo working tree (binary-safe)."""
+    src = Path(repo) / src_rel.replace("/", os.sep)
+    dest = Path(repo) / dest_rel.replace("/", os.sep)
+    if not src.is_file():
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    return True
 
 
 def write_text(repo: str, rel_path: str, content: str) -> None:
