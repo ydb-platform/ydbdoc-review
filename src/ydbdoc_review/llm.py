@@ -13,6 +13,11 @@ from ydbdoc_review.markdown_chunk import (
     split_markdown_for_translate,
     translate_chunk_target_chars,
 )
+from ydbdoc_review.translate_postprocess import (
+    fix_yandex_cloud_links_for_en,
+    should_retry_chunk,
+    translation_quality_issues,
+)
 
 
 def _model_uri(settings: Settings, model: str) -> str:
@@ -291,6 +296,111 @@ def _chunk_translate_max_tokens(chunk_len: int) -> int:
     return min(est, _TRANSLATE_OUTPUT_HARD_CEILING)
 
 
+def _is_english_target(target_lang: str) -> bool:
+    return target_lang.strip().lower() in ("english", "en")
+
+
+def _postprocess_target_language(text: str, *, target_lang: str) -> str:
+    if _is_english_target(target_lang):
+        return fix_yandex_cloud_links_for_en(text)
+    return text
+
+
+def _translate_chunk_with_retry(
+    settings: Settings,
+    *,
+    instructions: str,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    chunk: str,
+    chunk_index: int,
+    chunk_count: int,
+    default_cap: int,
+) -> str:
+    preamble = (
+        f"This is fragment {chunk_index} of {chunk_count} of a single markdown file "
+        f"(`{source_path}`).\n"
+        "Translate only this fragment. Reply with the translated markdown for this "
+        "fragment only — no preamble, part labels, or commentary.\n"
+        "Keep Diplodoc directives unchanged: `{% list tabs %}`, `{% endlist %}`, "
+        "`{% note %}`, `{{ ydb-short-name }}`, etc.\n"
+        "If the fragment starts or ends inside a code fence, keep the same fence "
+        "markers (` ``` ` / ` ```yaml ` etc.) so the merged file has valid fences.\n"
+        "Do not invent CLI flags or rename token/output filenames; mirror the source.\n"
+        "Do not omit sections or summarize — translate every line in the fragment.\n\n"
+    )
+    user_input = _translate_markdown_user_input(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_path=source_path,
+        source_text=chunk,
+        chunk_preamble=preamble,
+    )
+    cap = min(default_cap, _chunk_translate_max_tokens(len(chunk)))
+    out = _translate_user_payload(
+        settings,
+        instructions=instructions,
+        user_input=user_input,
+        reference_for_truncation=chunk,
+        max_output_tokens=cap,
+    )
+    if should_retry_chunk(chunk, out):
+        cap2 = min(_translate_retry_max_tokens(cap), default_cap)
+        if cap2 > cap:
+            out2 = _translate_user_payload(
+                settings,
+                instructions=instructions,
+                user_input=user_input,
+                reference_for_truncation=chunk,
+                max_output_tokens=cap2,
+            )
+            if len(out2) > len(out):
+                out = out2
+    return out
+
+
+def _maybe_retry_full_document(
+    settings: Settings,
+    *,
+    instructions: str,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    source_text: str,
+    merged: str,
+    default_cap: int,
+) -> str:
+    """Re-translate the whole file once when chunked output looks incomplete."""
+    issues = translation_quality_issues(
+        source_text, merged, target_lang=target_lang
+    )
+    retry_codes = {"too_short", "missing_tabs", "unbalanced_fences", "cyrillic_leak"}
+    if not retry_codes.intersection(issues):
+        return merged
+    user_input = _translate_markdown_user_input(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_path=source_path,
+        source_text=source_text,
+    )
+    cap = default_cap
+    retry_out = _translate_user_payload(
+        settings,
+        instructions=instructions,
+        user_input=user_input,
+        reference_for_truncation=source_text,
+        max_output_tokens=cap,
+    )
+    retry_out = _postprocess_target_language(retry_out, target_lang=target_lang)
+    if len(retry_out) > int(len(merged) * 1.05):
+        return retry_out
+    if translation_quality_issues(source_text, retry_out, target_lang=target_lang):
+        if len(retry_out) >= len(merged):
+            return retry_out
+    return merged
+
+
 def translate_markdown(
     settings: Settings,
     *,
@@ -315,13 +425,14 @@ def translate_markdown(
             source_path=source_path,
             source_text=source_text,
         )
-        return _translate_user_payload(
+        out = _translate_user_payload(
             settings,
             instructions=instructions,
             user_input=user_input,
             reference_for_truncation=source_text,
             max_output_tokens=default_cap,
         )
+        return _postprocess_target_language(out, target_lang=target_lang)
 
     chunks = split_markdown_for_translate(source_text, target_chars=target)
     if len(chunks) == 1:
@@ -331,43 +442,45 @@ def translate_markdown(
             source_path=source_path,
             source_text=chunks[0],
         )
-        return _translate_user_payload(
+        out = _translate_user_payload(
             settings,
             instructions=instructions,
             user_input=user_input,
             reference_for_truncation=chunks[0],
             max_output_tokens=default_cap,
         )
+        return _postprocess_target_language(out, target_lang=target_lang)
 
     n = len(chunks)
     parts: list[str] = []
     for i, ch in enumerate(chunks, start=1):
-        preamble = (
-            f"This is fragment {i} of {n} of a single markdown file (`{source_path}`).\n"
-            "Translate only this fragment. Reply with the translated markdown for this "
-            "fragment only — no preamble, part labels, or commentary.\n"
-            "If the fragment starts or ends inside a code fence, keep the same fence "
-            "markers (` ``` ` / ` ```yaml ` etc.) so the merged file has valid fences.\n"
-            "Do not invent CLI flags or rename token/output filenames; mirror the source.\n\n"
+        parts.append(
+            _translate_chunk_with_retry(
+                settings,
+                instructions=instructions,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                source_path=source_path,
+                chunk=ch,
+                chunk_index=i,
+                chunk_count=n,
+                default_cap=default_cap,
+            )
         )
-        user_input = _translate_markdown_user_input(
+    merged = "\n".join(parts)
+    merged = _postprocess_target_language(merged, target_lang=target_lang)
+    if len(chunks) > 1:
+        merged = _maybe_retry_full_document(
+            settings,
+            instructions=instructions,
             source_lang=source_lang,
             target_lang=target_lang,
             source_path=source_path,
-            source_text=ch,
-            chunk_preamble=preamble,
+            source_text=source_text,
+            merged=merged,
+            default_cap=default_cap,
         )
-        cap = min(default_cap, _chunk_translate_max_tokens(len(ch)))
-        parts.append(
-            _translate_user_payload(
-                settings,
-                instructions=instructions,
-                user_input=user_input,
-                reference_for_truncation=ch,
-                max_output_tokens=cap,
-            )
-        )
-    return "\n".join(parts)
+    return merged
 
 
 def _translate_max_output_tokens() -> int:
@@ -490,7 +603,7 @@ def translate_en_update_from_ru_diff(
             source_text=ru_full,
             max_output_tokens=max_output_tokens,
         )
-    return out
+    return _postprocess_target_language(out, target_lang="English")
 
 
 def translate_ru_update_from_en_diff(

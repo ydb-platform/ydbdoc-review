@@ -5,6 +5,8 @@ The user message states source and target languages, the source file path, then 
 Your task: output a complete translation into the target language.
 
 Rules — structure and markdown:
+- Translate the **entire** source document. Do **not** omit sections, tabs, examples, or code blocks; do **not** summarize or merge tab variants into one command.
+- Preserve Diplodoc/YDB directives exactly: `{% list tabs %}`, `{% endlist %}`, `{% note %}`, `{% include %}`, etc.
 - Preserve Markdown structure (headings, lists, tables, links, code fences) **line-for-line** where content is unchanged in meaning.
 - **Code fences:** every fenced block must keep its opening line exactly (` ``` `, ` ```yaml `, ` ```bash `, etc.) and closing ` ``` `. Never emit bare YAML/shell/ini that was fenced in the source. Never drop an opening fence because a fragment starts mid-file.
 - Preserve numbered and bulleted list structure (same count and numbering style as the source).

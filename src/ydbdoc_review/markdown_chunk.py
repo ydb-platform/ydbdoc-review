@@ -13,6 +13,16 @@ def _h2_heading(line: str) -> bool:
     return s.startswith("##") and not s.startswith("###")
 
 
+def _tabs_block_start(line: str) -> bool:
+    s = line.strip().lower()
+    return "{% list tabs" in s or "{% list tabsgroup" in s
+
+
+def _tabs_block_end(line: str) -> bool:
+    s = line.strip().lower()
+    return "{% endlist %}" in s or "{% endtabs %}" in s
+
+
 def split_markdown_for_translate(
     text: str,
     *,
@@ -38,6 +48,7 @@ def split_markdown_for_translate(
     buf: list[str] = []
     buf_len = 0
     in_fence = False
+    in_tabs = False
 
     def emit_buf() -> None:
         nonlocal buf, buf_len
@@ -53,12 +64,18 @@ def split_markdown_for_translate(
         if in_fence and est > target_chars * 3 and buf:
             emit_buf()
 
+        if _tabs_block_start(line):
+            in_tabs = True
+        if in_tabs and _tabs_block_end(line):
+            in_tabs = False
+
         if _is_fence_toggle(line):
             in_fence = not in_fence
 
         # Prefer new chunk at H2 when we already have enough material (outside fence).
         if (
             not in_fence
+            and not in_tabs
             and buf
             and buf_len >= min_chunk_chars
             and _h2_heading(line)
@@ -68,8 +85,9 @@ def split_markdown_for_translate(
         buf.append(line)
         buf_len += len(line) + 1
 
-        # Hard flush when outside fence and over target — split at last good break in buffer.
-        if not in_fence and buf_len >= target_chars:
+        # Hard flush when outside fence/tabs and over target — split at last good break in buffer.
+        tabs_limit = target_chars * 2
+        if not in_fence and not in_tabs and buf_len >= target_chars:
             joined = "\n".join(buf)
             cut = _last_good_break(joined, min_keep=min_chunk_chars)
             if 0 < cut < len(joined):
@@ -88,6 +106,9 @@ def split_markdown_for_translate(
                     buf_len = sum(len(x) + 1 for x in buf) if buf else 0
                 else:
                     emit_buf()
+        elif in_tabs and buf_len >= tabs_limit:
+            # Rare: huge tab group — split at line (may break tabs; better than OOM).
+            emit_buf()
 
     emit_buf()
 

@@ -34,6 +34,7 @@ from ydbdoc_review.paths import (
     truncate,
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+from ydbdoc_review.translate_postprocess import translation_quality_issues
 from ydbdoc_review.pair_diff import pair_needs_en_from_ru_only_diff
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 
@@ -991,6 +992,14 @@ def run_cmd(
                     source_text=ru_source,
                 )
             out_md = restore_markdown_links_from_ru(ru_source, out_md)
+            q_issues = translation_quality_issues(
+                ru_source, out_md, target_lang="English"
+            )
+            if q_issues:
+                warnings.append(
+                    f"- `{en_p}`: эвристики после перевода: {', '.join(q_issues)} "
+                    "_(проверьте вручную или перезапустите doc_translate)_"
+                )
             git_local.write_text(workdir, en_p, out_md)
             generated.append(en_p)
             generated_en_to_ru[en_p] = ru_p
