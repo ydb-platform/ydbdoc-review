@@ -542,3 +542,74 @@ def translate_ru_update_from_en_diff(
             max_output_tokens=max_output_tokens,
         )
     return out
+
+
+def load_verify_translation_instructions(settings: Settings) -> str:
+    return _read_prompt(Path(settings.prompts_dir) / "05_verify_translation.txt")
+
+
+def _translation_self_check_input_cap() -> int:
+    raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_INPUT_CHARS", "").strip()
+    if raw.isdigit():
+        return max(4096, int(raw))
+    return 40_000
+
+
+def _translation_self_check_max_output_tokens() -> int:
+    raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_OUTPUT_TOKENS", "").strip()
+    if raw.isdigit():
+        return max(1024, min(int(raw), 65_536))
+    return 8192
+
+
+def _cap_verify_body(text: str, cap: int) -> str:
+    if len(text) <= cap:
+        return text
+    head = max(cap // 2, cap - 400)
+    return (
+        text[:head]
+        + "\n\n… _[truncated for self-check input size limit]_\n\n"
+        + text[-(cap - head) :]
+    )
+
+
+def verify_translation_pair(
+    settings: Settings,
+    *,
+    translate_model: str,
+    verify_model: str,
+    source_lang: str,
+    target_lang: str,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    translated_text: str,
+) -> str:
+    """
+    Ask a second model whether the translation matches the source (debug / QA).
+
+    Returns markdown in Russian for posting on the source PR.
+    """
+    instructions = load_verify_translation_instructions(settings)
+    cap = _translation_self_check_input_cap()
+    src_c = _cap_verify_body(source_text.strip(), cap)
+    out_c = _cap_verify_body(translated_text.strip(), cap)
+    user_input = (
+        f"Модель, которой делали перевод (для справки): {translate_model}\n"
+        f"Модель-проверяющая (вы): {verify_model}\n\n"
+        f"Пара файлов: `{ru_path}` (RU) ↔ `{en_path}` (EN)\n"
+        f"Исходный язык статьи: {source_lang}\n"
+        f"Язык перевода (целевой): {target_lang}\n\n"
+        f"--- SOURCE ({source_lang}) BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
+        f"--- TRANSLATION ({target_lang}) BEGIN ---\n{out_c}\n--- TRANSLATION END ---\n\n"
+        "Следуйте формату ответа из системных инструкций."
+    )
+    return _strip_code_fence(
+        call_yandex_responses(
+            settings,
+            verify_model,
+            instructions=instructions.strip(),
+            user_input=user_input,
+            max_output_tokens=_translation_self_check_max_output_tokens(),
+        ).strip()
+    )

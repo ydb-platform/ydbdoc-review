@@ -50,6 +50,10 @@ jobs:
           YDBDOC_REVIEW_ENABLED: ${{ vars.YDBDOC_REVIEW_ENABLED }}
           YDBDOC_MODEL_CHECK: ${{ vars.YDBDOC_MODEL_CHECK }}
           YDBDOC_MODEL_TRANSLATE: ${{ vars.YDBDOC_MODEL_TRANSLATE }}
+          # Self-check: по умолчанию из ydbdoc-review.toml в образе ([feature].translation_self_check).
+          # Раскомментируйте env, чтобы временно переопределить без пересборки образа:
+          # YDBDOC_TRANSLATION_SELF_CHECK: "true"
+          # YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Секрет не может называться GITHUB_* — PAT (ваш или бота) → env GITHUB_PUSH_TOKEN для приложения.

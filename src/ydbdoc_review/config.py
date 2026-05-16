@@ -86,8 +86,37 @@ def _feature_review_enabled(feature: dict[str, object]) -> bool:
     return True
 
 
-def load_config_layer() -> tuple[str, str, bool]:
-    """Models and review_enabled from the first TOML that defines [models] and/or [feature]."""
+def _feature_bool(feature: dict[str, object], key: str, *, default: bool) -> bool:
+    if key not in feature:
+        return default
+    v = feature[key]
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("false", "0", "no", "off", "disabled"):
+            return False
+        if s in ("true", "1", "yes", "on", "enabled"):
+            return True
+    return default
+
+
+@dataclass(frozen=True)
+class TomlConfigLayer:
+    """First-resolved ``ydbdoc-review.toml`` slice (env may still override in ``Settings.from_env``)."""
+
+    model_check: str
+    model_translate: str
+    review_enabled: bool
+    translation_self_check_enabled: bool
+    """Slug for cross-model translation QA; empty → use ``model_check`` after env merge."""
+    model_translation_verify: str
+
+
+def load_config_layer() -> TomlConfigLayer:
+    """Models and feature flags from the first TOML that defines [models] and/or [feature]."""
     for path in _candidate_config_files():
         if not path.is_file():
             continue
@@ -104,25 +133,47 @@ def load_config_layer() -> tuple[str, str, bool]:
             continue
         mc = _DEFAULT_MODEL_CHECK
         mt = _DEFAULT_MODEL_TRANSLATE
+        verify = ""
         if isinstance(models, dict):
             mc = _toml_str(models, "check") or _DEFAULT_MODEL_CHECK
             mt = _toml_str(models, "translate") or _DEFAULT_MODEL_TRANSLATE
+            verify = _toml_str(models, "translation_verify")
         review_on = True
+        self_check = False
         if isinstance(feature, dict):
             review_on = _feature_review_enabled(feature)
-        return mc, mt, review_on
-    return _DEFAULT_MODEL_CHECK, _DEFAULT_MODEL_TRANSLATE, True
+            self_check = _feature_bool(
+                feature, "translation_self_check", default=False
+            )
+        return TomlConfigLayer(
+            model_check=mc,
+            model_translate=mt,
+            review_enabled=review_on,
+            translation_self_check_enabled=self_check,
+            model_translation_verify=verify,
+        )
+    return TomlConfigLayer(
+        model_check=_DEFAULT_MODEL_CHECK,
+        model_translate=_DEFAULT_MODEL_TRANSLATE,
+        review_enabled=True,
+        translation_self_check_enabled=False,
+        model_translation_verify="",
+    )
 
 
-def _parse_env_review_enabled(raw: str) -> bool:
+def _parse_env_bool(raw: str, *, var_name: str) -> bool:
     s = raw.strip().lower()
     if s in ("1", "true", "yes", "on", "enabled"):
         return True
     if s in ("0", "false", "no", "off", "disabled"):
         return False
     raise SystemExit(
-        f"Invalid YDBDOC_REVIEW_ENABLED={raw!r}; use true/false, 1/0, yes/no, on/off."
+        f"Invalid {var_name}={raw!r}; use true/false, 1/0, yes/no, on/off."
     )
+
+
+def _parse_env_review_enabled(raw: str) -> bool:
+    return _parse_env_bool(raw, var_name="YDBDOC_REVIEW_ENABLED")
 
 
 def resolved_config_path() -> Path | None:
@@ -162,6 +213,9 @@ class Settings:
     yandex_base_url: str
     model_check: str
     model_translate: str
+    """Second model for post-translation cross-check (debug); defaults to ``model_check``."""
+    model_translation_verify: str
+    translation_self_check_enabled: bool
     review_enabled: bool
     github_token: str
     github_push_token: str
@@ -189,19 +243,30 @@ class Settings:
             "YDBDOC_LLM_BASE_URL",
             default="https://ai.api.cloud.yandex.net/v1",
         ).rstrip("/")
-        file_check, file_translate, file_review = load_config_layer()
+        toml = load_config_layer()
         # Env overrides ydbdoc-review.toml (for CI one-offs without editing the file).
-        model_check = (
-            os.environ.get("YDBDOC_MODEL_CHECK", "").strip() or file_check
-        )
+        model_check = os.environ.get("YDBDOC_MODEL_CHECK", "").strip() or toml.model_check
         model_translate = (
-            os.environ.get("YDBDOC_MODEL_TRANSLATE", "").strip() or file_translate
+            os.environ.get("YDBDOC_MODEL_TRANSLATE", "").strip() or toml.model_translate
         )
+        model_translation_verify = (
+            os.environ.get("YDBDOC_MODEL_TRANSLATION_VERIFY", "").strip()
+            or toml.model_translation_verify.strip()
+            or model_check
+        )
+        self_check_env = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK")
+        if self_check_env is not None and str(self_check_env).strip() != "":
+            translation_self_check_enabled = _parse_env_bool(
+                str(self_check_env).strip(),
+                var_name="YDBDOC_TRANSLATION_SELF_CHECK",
+            )
+        else:
+            translation_self_check_enabled = toml.translation_self_check_enabled
         review_env = os.environ.get("YDBDOC_REVIEW_ENABLED", "").strip()
         if review_env:
             review_enabled = _parse_env_review_enabled(review_env)
         else:
-            review_enabled = file_review
+            review_enabled = toml.review_enabled
         gh = os.environ.get("GITHUB_TOKEN", "").strip()
         # CI often maps a repo secret (e.g. YDBDOC_PUSH_PAT) into GITHUB_PUSH_TOKEN; empty → GITHUB_TOKEN.
         gh_push_raw = os.environ.get("GITHUB_PUSH_TOKEN")
@@ -219,6 +284,8 @@ class Settings:
             yandex_base_url=base_url,
             model_check=model_check,
             model_translate=model_translate,
+            model_translation_verify=model_translation_verify,
+            translation_self_check_enabled=translation_self_check_enabled,
             review_enabled=review_enabled,
             github_token=gh,
             github_push_token=gh_push,

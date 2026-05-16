@@ -46,6 +46,8 @@ cp .env.example .env
 
 Имена **моделей** (проверка / перевод) задаются в **`ydbdoc-review.toml`**: секция `[models]`, ключи `check` и `translate`. По умолчанию используется файл из пакета (`src/ydbdoc_review/ydbdoc-review.toml`); переопределение — свой `ydbdoc-review.toml` в каталоге запуска или **`YDBDOC_CONFIG`**. Значения из TOML можно сменить переменными **`YDBDOC_MODEL_CHECK`** и **`YDBDOC_MODEL_TRANSLATE`** (удобно в CI).
 
+**Отладочная проверка перевода второй моделью** (после генерации — отчёт в комментарий к исходному PR): в том же TOML в **`[feature]`** ключ **`translation_self_check`** (`true` / `false`), в **`[models]`** при необходимости **`translation_verify`** (slug второй модели; если не задан — используется `check`). Лимиты длины запроса к проверяющей модели по-прежнему задаются только env (`YDBDOC_TRANSLATION_SELF_CHECK_*`). Переопределить флаг или модель без пересборки образа можно env **`YDBDOC_TRANSLATION_SELF_CHECK`** и **`YDBDOC_MODEL_TRANSLATION_VERIFY`**; при конфликте **приоритет у env**, как у `YDBDOC_REVIEW_ENABLED`.
+
 **Другой провайдер (не Yandex):** задайте **`OPENAI_BASE_URL`** (или `YDBDOC_LLM_BASE_URL`) на корень совместимого API и **`OPENAI_API_KEY`** (или `YDBDOC_LLM_API_KEY`). Каталог Yandex не нужен. В `ydbdoc-review.toml` или в env укажите **ид модели в формате этого провайдера** (например `gpt-4o-mini`, `gpt-4o`). Для Yandex FM по-прежнему можно задать полный URI в `gpt://…` в TOML — тогда префикс каталога не добавляется автоматически.
 
 Список id моделей в вашем каталоге (если шлюз отдаёт `GET /v1/models`):
@@ -284,6 +286,8 @@ Action собирается из **Dockerfile**: внутри контейнер
 | `YDBDOC_REVIEW_ENABLED` | `true` / `false` — глобально включить или выключить шаг (пустое = как в `ydbdoc-review.toml`). |
 | `YDBDOC_MODEL_CHECK` | Необязательно, если заданы модели в `ydbdoc-review.toml` в образе/репо или устраивают встроенные значения. |
 | `YDBDOC_MODEL_TRANSLATE` | То же; иначе переопределение slug для перевода. |
+| `YDBDOC_TRANSLATION_SELF_CHECK` | Необязательно: `true` / `false` — переопределить **`[feature].translation_self_check`** в TOML образа (пустое = только TOML). |
+| `YDBDOC_MODEL_TRANSLATION_VERIFY` | Необязательно: переопределить **`[models].translation_verify`** в TOML. |
 | `YDBDOC_TRANSLATE_MAX_OUTPUT_TOKENS` | Потолок выходных токенов **перевода**. По умолчанию **1048576** (1M; шлюз провайдера может отрезать ниже). **`0`** — то же 1M. Задайте меньшее число, если API возвращает ошибку на слишком большой `max_tokens`. |
 | `YDBDOC_ANALYZE_TRUNCATE_CHARS` | Необязательно: положительное число — усечь `ru_text`/`en_text` в **каждом** батче анализа. Пусто или **`0`** — полные тела (батчинг по `YDBDOC_ANALYZE_MAX_JSON_CHARS`). |
 | `YDBDOC_ANALYZE_DIFF_MAX` | Необязательно: макс. длина `ru_diff_vs_base` / `en_diff_vs_base` в JSON анализа (по умолчанию **500000**). |

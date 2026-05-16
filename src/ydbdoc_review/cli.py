@@ -24,6 +24,7 @@ from ydbdoc_review.llm import (
     translate_en_update_from_ru_diff,
     translate_markdown,
     translate_ru_update_from_en_diff,
+    verify_translation_pair,
 )
 from ydbdoc_review.paths import (
     DocPair,
@@ -344,6 +345,7 @@ def _build_source_pr_comment(
     *,
     translation_pr_url: str | None,
     generated: list[str],
+    translation_self_check: str | None = None,
 ) -> list[str]:
     """Short comment on the source doc PR after a successful translation run."""
     lines = ["## ydbdoc-review", ""]
@@ -356,7 +358,83 @@ def _build_source_pr_comment(
         )
     if generated:
         lines.extend(["", "Переведённые файлы:", *[f"- `{p}`" for p in generated]])
+    if translation_self_check:
+        lines.extend(["", translation_self_check])
     return lines
+
+
+def _run_translation_self_check_section(
+    settings: Settings,
+    *,
+    workdir: str,
+    generated: list[str],
+    generated_en_to_ru: dict[str, str],
+    generated_ru_to_en: dict[str, str],
+) -> str | None:
+    """
+    Optional cross-model QA of translated markdown (debug).
+
+    Returns markdown to append to the source PR comment, or None if nothing ran.
+    """
+    md_generated = [p for p in generated if p.endswith(".md")]
+    if not md_generated:
+        return None
+    total_raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS", "").strip()
+    total_budget = int(total_raw) if total_raw.isdigit() else 18_000
+    total_budget = max(4000, min(total_budget, 62_000))
+
+    lines: list[str] = [
+        "### Проверка перевода (cross-model)",
+        "",
+        f"_Модель перевода:_ `{settings.model_translate}` · "
+        f"_модель проверки:_ `{settings.model_translation_verify}`",
+        "",
+    ]
+    for gen_p in md_generated:
+        try:
+            if gen_p in generated_en_to_ru:
+                ru_p = generated_en_to_ru[gen_p]
+                en_p = gen_p
+                source_text = git_local.read_text(workdir, ru_p) or ""
+                translated_text = git_local.read_text(workdir, en_p) or ""
+                source_lang, target_lang = "Russian", "English"
+            elif gen_p in generated_ru_to_en:
+                ru_p = gen_p
+                en_p = generated_ru_to_en[ru_p]
+                source_text = git_local.read_text(workdir, en_p) or ""
+                translated_text = git_local.read_text(workdir, ru_p) or ""
+                source_lang, target_lang = "English", "Russian"
+            else:
+                lines.append(f"#### `{gen_p}`")
+                lines.append("")
+                lines.append("_Пара RU↔EN для self-check не найдена (внутренняя ошибка)._")
+                lines.append("")
+                continue
+            chunk = verify_translation_pair(
+                settings,
+                translate_model=settings.model_translate,
+                verify_model=settings.model_translation_verify,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_p,
+                en_path=en_p,
+                source_text=source_text,
+                translated_text=translated_text,
+            )
+        except Exception as exc:
+            chunk = f"_Ошибка вызова модели проверки:_ `{exc}`"
+        lines.append(f"#### `{en_p}` ↔ `{ru_p}`")
+        lines.append("")
+        lines.append(chunk.strip())
+        lines.append("")
+
+    text = "\n".join(lines).rstrip()
+    if len(text) > total_budget:
+        text = (
+            text[: total_budget - 120].rstrip()
+            + "\n\n… _[раздел проверки обрезан по `YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS`]_"
+        )
+    return text
 
 
 def _build_prerequisites_comment(
@@ -545,7 +623,8 @@ def list_models_cmd() -> None:
             f"Error: {e}\n\n"
             "In Yandex AI Studio open «Model gallery» and copy the text-generation slug for your folder. "
             "Vendor spelling is «DeepSeek»; slugs often look like `deepseek-v3.2/latest` — always verify in UI.\n"
-            f"Current config: check={settings.model_check!r}, translate={settings.model_translate!r}"
+            f"Current config: check={settings.model_check!r}, translate={settings.model_translate!r}, "
+            f"translation_verify={settings.model_translation_verify!r}"
         ) from e
     ids = sorted({m.id for m in page.data if getattr(m, "id", None)})
     if not ids:
@@ -806,6 +885,7 @@ def run_cmd(
 
     generated: list[str] = []
     generated_en_to_ru: dict[str, str] = {}
+    generated_ru_to_en: dict[str, str] = {}
     mirrored_en: list[str] = []
     warnings: list[str] = []
     base_ref_local: str | None = None
@@ -969,6 +1049,7 @@ def run_cmd(
                 )
             git_local.write_text(workdir, ru_p, out_md)
             generated.append(ru_p)
+            generated_ru_to_en[ru_p] = en_p
 
     if workdir and not dry_run:
         for ru_asset, en_asset in ru_asset_files_to_mirror(changed, settings.docs_prefix):
@@ -1221,6 +1302,33 @@ def run_cmd(
                 err=True,
             )
 
+    translation_self_check_section: str | None = None
+    if (
+        settings.translation_self_check_enabled
+        and workdir
+        and committed
+        and generated
+        and not blocked_only
+        and not dry_run
+    ):
+        click.echo(
+            f"Running translation self-check with model `{settings.model_translation_verify}` …"
+        )
+        try:
+            translation_self_check_section = _run_translation_self_check_section(
+                settings,
+                workdir=workdir,
+                generated=generated,
+                generated_en_to_ru=generated_en_to_ru,
+                generated_ru_to_en=generated_ru_to_en,
+            )
+        except Exception as exc:
+            translation_self_check_section = (
+                "### Проверка перевода (cross-model)\n\n"
+                f"_Не удалось выполнить self-check:_ `{exc}`"
+            )
+            click.echo(f"Warning: translation self-check failed: {exc}", err=True)
+
     if dry_run:
         comment_lines = [
             "## ydbdoc-review",
@@ -1307,6 +1415,7 @@ def run_cmd(
         comment_lines = _build_source_pr_comment(
             translation_pr_url=translation_pr_url,
             generated=generated,
+            translation_self_check=translation_self_check_section,
         )
         if warnings:
             comment_lines.extend(["", "### Прочее", *warnings])
