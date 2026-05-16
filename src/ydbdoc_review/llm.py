@@ -141,6 +141,7 @@ def call_yandex_responses(
     user_input: str,
     max_output_tokens: int,
 ) -> str:
+    max_output_tokens = clamp_max_output_tokens(max_output_tokens, model)
     settings.validate_yandex()
     # Folder is already in `gpt://<folder>/<model>`; `OpenAI-Project` duplicates it
     # and some Yandex FM deployments return "Failed to get model" when both are set.
@@ -237,6 +238,28 @@ def load_translate_instructions(settings: Settings) -> str:
 # clamp lower. Set ``YDBDOC_TRANSLATE_MAX_OUTPUT_TOKENS=0`` for this ceiling.
 _TRANSLATE_OUTPUT_HARD_CEILING = 1_048_576
 
+# Yandex FM rejects higher values for some models (e.g. DeepSeek-V3.2 with reasoning).
+_KNOWN_MODEL_COMPLETION_CEILINGS: tuple[tuple[str, int], ...] = (
+    ("deepseek", 32_768),
+)
+
+
+def _model_completion_token_ceiling(model: str) -> int:
+    """Provider-specific max completion tokens (slug substring match)."""
+    raw = os.environ.get("YDBDOC_MODEL_COMPLETION_TOKEN_CEILING", "").strip()
+    if raw.isdigit():
+        return max(1024, int(raw))
+    slug = model.lower()
+    for needle, ceiling in _KNOWN_MODEL_COMPLETION_CEILINGS:
+        if needle in slug:
+            return ceiling
+    return _TRANSLATE_OUTPUT_HARD_CEILING
+
+
+def clamp_max_output_tokens(requested: int, model: str) -> int:
+    ceiling = _model_completion_token_ceiling(model)
+    return max(1024, min(requested, ceiling))
+
 
 def _translate_user_payload(
     settings: Settings,
@@ -244,26 +267,31 @@ def _translate_user_payload(
     instructions: str,
     user_input: str,
     reference_for_truncation: str,
+    model: str,
     max_output_tokens: int | None = None,
 ) -> str:
     """Single FM call + optional retry when the completion looks truncated."""
-    cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    cap = (
+        clamp_max_output_tokens(max_output_tokens, model)
+        if max_output_tokens is not None
+        else _translate_max_output_tokens(model)
+    )
     out = _strip_code_fence(
         call_yandex_responses(
             settings,
-            settings.model_translate,
+            model,
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=cap,
         ).strip()
     )
     if _full_file_translation_looks_truncated(out, reference_for_truncation):
-        cap2 = _translate_retry_max_tokens(cap)
+        cap2 = _translate_retry_max_tokens(cap, model)
         if cap2 > cap:
             out = _strip_code_fence(
                 call_yandex_responses(
                     settings,
-                    settings.model_translate,
+                    model,
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
@@ -290,10 +318,10 @@ def _translate_markdown_user_input(
     return f"{chunk_preamble}{body}" if chunk_preamble else body
 
 
-def _chunk_translate_max_tokens(chunk_len: int) -> int:
+def _chunk_translate_max_tokens(chunk_len: int, model: str) -> int:
     """Completion budget for one fragment (UTF-8 length → rough token budget)."""
     est = max(12_288, int(chunk_len * 2.3))
-    return min(est, _TRANSLATE_OUTPUT_HARD_CEILING)
+    return clamp_max_output_tokens(est, model)
 
 
 def _is_english_target(target_lang: str) -> bool:
@@ -337,22 +365,25 @@ def _translate_chunk_with_retry(
         source_text=chunk,
         chunk_preamble=preamble,
     )
-    cap = min(default_cap, _chunk_translate_max_tokens(len(chunk)))
+    model = settings.model_translate
+    cap = min(default_cap, _chunk_translate_max_tokens(len(chunk), model))
     out = _translate_user_payload(
         settings,
         instructions=instructions,
         user_input=user_input,
         reference_for_truncation=chunk,
+        model=model,
         max_output_tokens=cap,
     )
     if should_retry_chunk(chunk, out):
-        cap2 = min(_translate_retry_max_tokens(cap), default_cap)
+        cap2 = min(_translate_retry_max_tokens(cap, model), default_cap)
         if cap2 > cap:
             out2 = _translate_user_payload(
                 settings,
                 instructions=instructions,
                 user_input=user_input,
                 reference_for_truncation=chunk,
+                model=model,
                 max_output_tokens=cap2,
             )
             if len(out2) > len(out):
@@ -384,12 +415,14 @@ def _maybe_retry_full_document(
         source_path=source_path,
         source_text=source_text,
     )
+    model = settings.model_translate
     cap = default_cap
     retry_out = _translate_user_payload(
         settings,
         instructions=instructions,
         user_input=user_input,
         reference_for_truncation=source_text,
+        model=model,
         max_output_tokens=cap,
     )
     retry_out = _postprocess_target_language(retry_out, target_lang=target_lang)
@@ -416,7 +449,12 @@ def translate_markdown(
     """
     instructions = load_translate_instructions(settings)
     target = translate_chunk_target_chars()
-    default_cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    model = settings.model_translate
+    default_cap = (
+        clamp_max_output_tokens(max_output_tokens, model)
+        if max_output_tokens is not None
+        else _translate_max_output_tokens(model)
+    )
 
     if len(source_text) <= target:
         user_input = _translate_markdown_user_input(
@@ -430,6 +468,7 @@ def translate_markdown(
             instructions=instructions,
             user_input=user_input,
             reference_for_truncation=source_text,
+            model=model,
             max_output_tokens=default_cap,
         )
         return _postprocess_target_language(out, target_lang=target_lang)
@@ -447,6 +486,7 @@ def translate_markdown(
             instructions=instructions,
             user_input=user_input,
             reference_for_truncation=chunks[0],
+            model=model,
             max_output_tokens=default_cap,
         )
         return _postprocess_target_language(out, target_lang=target_lang)
@@ -483,7 +523,7 @@ def translate_markdown(
     return merged
 
 
-def _translate_max_output_tokens() -> int:
+def _translate_max_output_tokens(model: str) -> int:
     """
     Max tokens for translate model completion.
 
@@ -494,10 +534,12 @@ def _translate_max_output_tokens() -> int:
     if raw.isdigit():
         v = int(raw)
         if v == 0:
-            return _TRANSLATE_OUTPUT_HARD_CEILING
-        return max(4096, min(v, _TRANSLATE_OUTPUT_HARD_CEILING))
-    # Default: ask for the largest value we allow here; gateway may clamp lower.
-    return _TRANSLATE_OUTPUT_HARD_CEILING
+            requested = _TRANSLATE_OUTPUT_HARD_CEILING
+        else:
+            requested = max(4096, min(v, _TRANSLATE_OUTPUT_HARD_CEILING))
+    else:
+        requested = _TRANSLATE_OUTPUT_HARD_CEILING
+    return clamp_max_output_tokens(requested, model)
 
 
 def _max_diff_chars() -> int:
@@ -518,8 +560,8 @@ def _markdown_code_fences_balanced(md: str) -> bool:
     return not open_fence
 
 
-def _translate_retry_max_tokens(first: int) -> int:
-    return min(max(first * 2, first + 1), _TRANSLATE_OUTPUT_HARD_CEILING)
+def _translate_retry_max_tokens(first: int, model: str) -> int:
+    return clamp_max_output_tokens(max(first * 2, first + 1), model)
 
 
 def _full_file_translation_looks_truncated(out: str, source: str) -> bool:
@@ -572,23 +614,28 @@ def translate_en_update_from_ru_diff(
         f"--- RU_FULL BEGIN ---\n{ru_full}\n--- RU_FULL END ---\n\n"
         "Output only the updated English markdown file."
     )
-    cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    model = settings.model_translate
+    cap = (
+        clamp_max_output_tokens(max_output_tokens, model)
+        if max_output_tokens is not None
+        else _translate_max_output_tokens(model)
+    )
     out = _strip_code_fence(
         call_yandex_responses(
             settings,
-            settings.model_translate,
+            model,
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=cap,
         ).strip()
     )
     if _diff_en_update_looks_truncated(out, en_reference):
-        cap2 = _translate_retry_max_tokens(cap)
+        cap2 = _translate_retry_max_tokens(cap, model)
         if cap2 > cap:
             out = _strip_code_fence(
                 call_yandex_responses(
                     settings,
-                    settings.model_translate,
+                    model,
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
@@ -626,23 +673,28 @@ def translate_ru_update_from_en_diff(
         f"--- EN_FULL BEGIN ---\n{en_full}\n--- EN_FULL END ---\n\n"
         "Output only the updated Russian markdown file."
     )
-    cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    model = settings.model_translate
+    cap = (
+        clamp_max_output_tokens(max_output_tokens, model)
+        if max_output_tokens is not None
+        else _translate_max_output_tokens(model)
+    )
     out = _strip_code_fence(
         call_yandex_responses(
             settings,
-            settings.model_translate,
+            model,
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=cap,
         ).strip()
     )
     if _diff_en_update_looks_truncated(out, ru_reference):
-        cap2 = _translate_retry_max_tokens(cap)
+        cap2 = _translate_retry_max_tokens(cap, model)
         if cap2 > cap:
             out = _strip_code_fence(
                 call_yandex_responses(
                     settings,
-                    settings.model_translate,
+                    model,
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
