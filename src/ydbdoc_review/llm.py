@@ -345,7 +345,10 @@ def translate_markdown(
         preamble = (
             f"This is fragment {i} of {n} of a single markdown file (`{source_path}`).\n"
             "Translate only this fragment. Reply with the translated markdown for this "
-            "fragment only — no preamble, part labels, or commentary.\n\n"
+            "fragment only — no preamble, part labels, or commentary.\n"
+            "If the fragment starts or ends inside a code fence, keep the same fence "
+            "markers (` ``` ` / ` ```yaml ` etc.) so the merged file has valid fences.\n"
+            "Do not invent CLI flags or rename token/output filenames; mirror the source.\n\n"
         )
         user_input = _translate_markdown_user_input(
             source_lang=source_lang,
