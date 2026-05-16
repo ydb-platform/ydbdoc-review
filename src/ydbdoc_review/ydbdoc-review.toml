@@ -4,11 +4,10 @@
 
 [models]
 check = "yandexgpt/latest"
-# deepseek-v32: только на ветке main (лимит 32k completion); в @v0.1.0 — yandexgpt-5.1
 translate = "yandexgpt-5.1"
-# Вторая модель для отладочной проверки перевода (см. [feature].translation_self_check).
+# Вторая модель для cross-check перевода (см. [feature].translation_self_check).
 # Не задавать или пусто — используется та же, что и check.
-translation_verify = "yandexgpt-5.1"
+translation_verify = "deepseek-v32"
 
 # Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.
 [feature]
