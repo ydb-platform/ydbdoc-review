@@ -4,7 +4,8 @@
 
 [models]
 check = "yandexgpt/latest"
-translate = "deepseek-v32"
+# deepseek-v32: только на ветке main (лимит 32k completion); в @v0.1.0 — yandexgpt-5.1
+translate = "yandexgpt-5.1"
 # Вторая модель для отладочной проверки перевода (см. [feature].translation_self_check).
 # Не задавать или пусто — используется та же, что и check.
 translation_verify = "yandexgpt-5.1"
