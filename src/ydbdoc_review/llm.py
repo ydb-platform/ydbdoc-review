@@ -231,7 +231,7 @@ def translate_markdown(
     target_lang: str,
     source_path: str,
     source_text: str,
-    max_output_tokens: int = 32000,
+    max_output_tokens: int | None = None,
 ) -> str:
     instructions = load_translate_instructions(settings)
     user_input = (
@@ -241,15 +241,42 @@ def translate_markdown(
         f"--- SOURCE BEGIN ---\n{source_text}\n--- SOURCE END ---\n\n"
         "Output only the translated markdown."
     )
-    return _strip_code_fence(
+    cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    out = _strip_code_fence(
         call_yandex_responses(
             settings,
             settings.model_translate,
             instructions=instructions.strip(),
             user_input=user_input,
-            max_output_tokens=max_output_tokens,
+            max_output_tokens=cap,
         ).strip()
     )
+    if _full_file_translation_looks_truncated(out, source_text):
+        cap2 = _translate_retry_max_tokens(cap)
+        if cap2 > cap:
+            out = _strip_code_fence(
+                call_yandex_responses(
+                    settings,
+                    settings.model_translate,
+                    instructions=instructions.strip(),
+                    user_input=user_input,
+                    max_output_tokens=cap2,
+                ).strip()
+            )
+    return out
+
+
+def _translate_max_output_tokens() -> int:
+    """
+    Max tokens for translate model completion.
+
+    Long EN/RU articles with large code blocks can exceed small defaults; the provider
+    then stops mid-document (truncated markdown, unclosed fences).
+    """
+    raw = os.environ.get("YDBDOC_TRANSLATE_MAX_OUTPUT_TOKENS", "").strip()
+    if raw.isdigit():
+        return max(4096, min(int(raw), 262_144))
+    return 96_000
 
 
 def _max_diff_chars() -> int:
@@ -257,6 +284,37 @@ def _max_diff_chars() -> int:
     if raw.isdigit():
         return max(4096, int(raw))
     return 120_000
+
+
+def _markdown_code_fences_balanced(md: str) -> bool:
+    """True if ``` fence markers form closed pairs (best-effort truncation check)."""
+    lines = md.split("\n")
+    open_fence = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith("```"):
+            open_fence = not open_fence
+    return not open_fence
+
+
+def _translate_retry_max_tokens(first: int) -> int:
+    return min(max(first * 2, first + 1), 262_144)
+
+
+def _full_file_translation_looks_truncated(out: str, source: str) -> bool:
+    if len(source) < 4000:
+        return False
+    if len(out) < int(len(source) * 0.55):
+        return True
+    return not _markdown_code_fences_balanced(out)
+
+
+def _diff_en_update_looks_truncated(out: str, en_reference: str) -> bool:
+    if len(en_reference) < 8000:
+        return False
+    if len(out) < int(len(en_reference) * 0.65):
+        return True
+    return not _markdown_code_fences_balanced(out)
 
 
 def _cap_block(text: str, limit: int, label: str) -> str:
@@ -280,7 +338,7 @@ def translate_en_update_from_ru_diff(
     ru_diff: str,
     ru_path: str,
     ru_full: str,
-    max_output_tokens: int = 32000,
+    max_output_tokens: int | None = None,
 ) -> str:
     """Apply Russian file delta (merge-base..HEAD) onto English with minimal drift."""
     instructions = load_translate_ru_diff_to_en_instructions(settings)
@@ -293,15 +351,29 @@ def translate_en_update_from_ru_diff(
         f"--- RU_FULL BEGIN ---\n{ru_full}\n--- RU_FULL END ---\n\n"
         "Output only the updated English markdown file."
     )
-    return _strip_code_fence(
+    cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    out = _strip_code_fence(
         call_yandex_responses(
             settings,
             settings.model_translate,
             instructions=instructions.strip(),
             user_input=user_input,
-            max_output_tokens=max_output_tokens,
+            max_output_tokens=cap,
         ).strip()
     )
+    if _diff_en_update_looks_truncated(out, en_reference):
+        cap2 = _translate_retry_max_tokens(cap)
+        if cap2 > cap:
+            out = _strip_code_fence(
+                call_yandex_responses(
+                    settings,
+                    settings.model_translate,
+                    instructions=instructions.strip(),
+                    user_input=user_input,
+                    max_output_tokens=cap2,
+                ).strip()
+            )
+    return out
 
 
 def translate_ru_update_from_en_diff(
@@ -311,7 +383,7 @@ def translate_ru_update_from_en_diff(
     en_diff: str,
     en_path: str,
     en_full: str,
-    max_output_tokens: int = 32000,
+    max_output_tokens: int | None = None,
 ) -> str:
     """Apply English file delta (merge-base..HEAD) onto Russian with minimal drift."""
     instructions = load_translate_en_diff_to_ru_instructions(settings)
@@ -324,12 +396,26 @@ def translate_ru_update_from_en_diff(
         f"--- EN_FULL BEGIN ---\n{en_full}\n--- EN_FULL END ---\n\n"
         "Output only the updated Russian markdown file."
     )
-    return _strip_code_fence(
+    cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+    out = _strip_code_fence(
         call_yandex_responses(
             settings,
             settings.model_translate,
             instructions=instructions.strip(),
             user_input=user_input,
-            max_output_tokens=max_output_tokens,
+            max_output_tokens=cap,
         ).strip()
     )
+    if _diff_en_update_looks_truncated(out, ru_reference):
+        cap2 = _translate_retry_max_tokens(cap)
+        if cap2 > cap:
+            out = _strip_code_fence(
+                call_yandex_responses(
+                    settings,
+                    settings.model_translate,
+                    instructions=instructions.strip(),
+                    user_input=user_input,
+                    max_output_tokens=cap2,
+                ).strip()
+            )
+    return out
