@@ -224,6 +224,11 @@ def load_translate_instructions(settings: Settings) -> str:
     return _read_prompt(p)
 
 
+# Upper bound for max_output_tokens we pass to the API (typo guard). Provider may
+# clamp lower. Set ``YDBDOC_TRANSLATE_MAX_OUTPUT_TOKENS=0`` for this ceiling.
+_TRANSLATE_OUTPUT_HARD_CEILING = 1_048_576
+
+
 def translate_markdown(
     settings: Settings,
     *,
@@ -270,13 +275,17 @@ def _translate_max_output_tokens() -> int:
     """
     Max tokens for translate model completion.
 
-    Long EN/RU articles with large code blocks can exceed small defaults; the provider
-    then stops mid-document (truncated markdown, unclosed fences).
+    Long articles need a large completion budget; the provider still applies its
+    own cap and may return an error if the value is unsupported.
     """
     raw = os.environ.get("YDBDOC_TRANSLATE_MAX_OUTPUT_TOKENS", "").strip()
     if raw.isdigit():
-        return max(4096, min(int(raw), 262_144))
-    return 96_000
+        v = int(raw)
+        if v == 0:
+            return _TRANSLATE_OUTPUT_HARD_CEILING
+        return max(4096, min(v, _TRANSLATE_OUTPUT_HARD_CEILING))
+    # Default: ask for the largest value we allow here; gateway may clamp lower.
+    return _TRANSLATE_OUTPUT_HARD_CEILING
 
 
 def _max_diff_chars() -> int:
@@ -298,7 +307,7 @@ def _markdown_code_fences_balanced(md: str) -> bool:
 
 
 def _translate_retry_max_tokens(first: int) -> int:
-    return min(max(first * 2, first + 1), 262_144)
+    return min(max(first * 2, first + 1), _TRANSLATE_OUTPUT_HARD_CEILING)
 
 
 def _full_file_translation_looks_truncated(out: str, source: str) -> bool:
