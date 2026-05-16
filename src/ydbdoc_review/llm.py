@@ -9,6 +9,10 @@ from typing import Any
 from openai import OpenAI
 
 from ydbdoc_review.config import Settings, fm_base_url_requires_yandex_folder
+from ydbdoc_review.markdown_chunk import (
+    split_markdown_for_translate,
+    translate_chunk_target_chars,
+)
 
 
 def _model_uri(settings: Settings, model: str) -> str:
@@ -229,23 +233,15 @@ def load_translate_instructions(settings: Settings) -> str:
 _TRANSLATE_OUTPUT_HARD_CEILING = 1_048_576
 
 
-def translate_markdown(
+def _translate_user_payload(
     settings: Settings,
     *,
-    source_lang: str,
-    target_lang: str,
-    source_path: str,
-    source_text: str,
+    instructions: str,
+    user_input: str,
+    reference_for_truncation: str,
     max_output_tokens: int | None = None,
 ) -> str:
-    instructions = load_translate_instructions(settings)
-    user_input = (
-        f"Source language: {source_lang}\n"
-        f"Target language: {target_lang}\n"
-        f"Source file path: {source_path}\n\n"
-        f"--- SOURCE BEGIN ---\n{source_text}\n--- SOURCE END ---\n\n"
-        "Output only the translated markdown."
-    )
+    """Single FM call + optional retry when the completion looks truncated."""
     cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
     out = _strip_code_fence(
         call_yandex_responses(
@@ -256,7 +252,7 @@ def translate_markdown(
             max_output_tokens=cap,
         ).strip()
     )
-    if _full_file_translation_looks_truncated(out, source_text):
+    if _full_file_translation_looks_truncated(out, reference_for_truncation):
         cap2 = _translate_retry_max_tokens(cap)
         if cap2 > cap:
             out = _strip_code_fence(
@@ -269,6 +265,106 @@ def translate_markdown(
                 ).strip()
             )
     return out
+
+
+def _translate_markdown_user_input(
+    *,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    source_text: str,
+    chunk_preamble: str = "",
+) -> str:
+    body = (
+        f"Source language: {source_lang}\n"
+        f"Target language: {target_lang}\n"
+        f"Source file path: {source_path}\n\n"
+        f"--- SOURCE BEGIN ---\n{source_text}\n--- SOURCE END ---\n\n"
+        "Output only the translated markdown."
+    )
+    return f"{chunk_preamble}{body}" if chunk_preamble else body
+
+
+def _chunk_translate_max_tokens(chunk_len: int) -> int:
+    """Completion budget for one fragment (UTF-8 length → rough token budget)."""
+    est = max(12_288, int(chunk_len * 2.3))
+    return min(est, _TRANSLATE_OUTPUT_HARD_CEILING)
+
+
+def translate_markdown(
+    settings: Settings,
+    *,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    source_text: str,
+    max_output_tokens: int | None = None,
+) -> str:
+    """
+    Translate markdown. Long sources are split into fragments, translated
+    separately, then concatenated (see ``YDBDOC_TRANSLATE_CHUNK_CHARS``).
+    """
+    instructions = load_translate_instructions(settings)
+    target = translate_chunk_target_chars()
+    default_cap = max_output_tokens if max_output_tokens is not None else _translate_max_output_tokens()
+
+    if len(source_text) <= target:
+        user_input = _translate_markdown_user_input(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_path=source_path,
+            source_text=source_text,
+        )
+        return _translate_user_payload(
+            settings,
+            instructions=instructions,
+            user_input=user_input,
+            reference_for_truncation=source_text,
+            max_output_tokens=default_cap,
+        )
+
+    chunks = split_markdown_for_translate(source_text, target_chars=target)
+    if len(chunks) == 1:
+        user_input = _translate_markdown_user_input(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_path=source_path,
+            source_text=chunks[0],
+        )
+        return _translate_user_payload(
+            settings,
+            instructions=instructions,
+            user_input=user_input,
+            reference_for_truncation=chunks[0],
+            max_output_tokens=default_cap,
+        )
+
+    n = len(chunks)
+    parts: list[str] = []
+    for i, ch in enumerate(chunks, start=1):
+        preamble = (
+            f"This is fragment {i} of {n} of a single markdown file (`{source_path}`).\n"
+            "Translate only this fragment. Reply with the translated markdown for this "
+            "fragment only — no preamble, part labels, or commentary.\n\n"
+        )
+        user_input = _translate_markdown_user_input(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_path=source_path,
+            source_text=ch,
+            chunk_preamble=preamble,
+        )
+        cap = min(default_cap, _chunk_translate_max_tokens(len(ch)))
+        parts.append(
+            _translate_user_payload(
+                settings,
+                instructions=instructions,
+                user_input=user_input,
+                reference_for_truncation=ch,
+                max_output_tokens=cap,
+            )
+        )
+    return "\n".join(parts)
 
 
 def _translate_max_output_tokens() -> int:
@@ -382,6 +478,15 @@ def translate_en_update_from_ru_diff(
                     max_output_tokens=cap2,
                 ).strip()
             )
+    if _diff_en_update_looks_truncated(out, en_reference):
+        out = translate_markdown(
+            settings,
+            source_lang="Russian",
+            target_lang="English",
+            source_path=ru_path,
+            source_text=ru_full,
+            max_output_tokens=max_output_tokens,
+        )
     return out
 
 
@@ -427,4 +532,13 @@ def translate_ru_update_from_en_diff(
                     max_output_tokens=cap2,
                 ).strip()
             )
+    if _diff_en_update_looks_truncated(out, ru_reference):
+        out = translate_markdown(
+            settings,
+            source_lang="English",
+            target_lang="Russian",
+            source_path=en_path,
+            source_text=en_full,
+            max_output_tokens=max_output_tokens,
+        )
     return out
