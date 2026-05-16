@@ -21,11 +21,9 @@ from ydbdoc_review.llm import (
     call_yandex_responses,
     load_analyze_instructions,
     parse_json_object,
-    translate_en_update_from_ru_diff,
-    translate_markdown,
-    translate_ru_update_from_en_diff,
     verify_translation_pair,
 )
+from ydbdoc_review.translate_strict import strict_translate_document
 from ydbdoc_review.paths import (
     DocPair,
     pairs_from_changed_files,
@@ -33,7 +31,6 @@ from ydbdoc_review.paths import (
     ru_toc_yaml_paths,
     truncate,
 )
-from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
 from ydbdoc_review.translate_postprocess import translation_quality_issues
 from ydbdoc_review.pair_diff import pair_needs_en_from_ru_only_diff
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
@@ -346,12 +343,15 @@ def _build_source_pr_comment(
     *,
     translation_pr_url: str | None,
     generated: list[str],
-    translation_self_check: str | None = None,
 ) -> list[str]:
     """Short comment on the source doc PR after a successful translation run."""
     lines = ["## ydbdoc-review", ""]
     if translation_pr_url:
         lines.append(f"**PR с переводом:** {translation_pr_url}")
+        lines.append(
+            "_Отчёт о качестве перевода (если включён self-check) — в первом комментарии "
+            "к PR с переводом._"
+        )
     else:
         lines.append(
             "_PR с переводом не создан автоматически — см. лог workflow "
@@ -359,9 +359,31 @@ def _build_source_pr_comment(
         )
     if generated:
         lines.extend(["", "Переведённые файлы:", *[f"- `{p}`" for p in generated]])
-    if translation_self_check:
-        lines.extend(["", translation_self_check])
     return lines
+
+
+def _build_translation_pr_self_check_body(
+    *,
+    source_pr_number: int,
+    base_owner: str,
+    base_repo: str,
+    translate_model: str,
+    verify_model: str,
+    self_check_section: str,
+) -> str:
+    source = f"https://github.com/{base_owner}/{base_repo}/pull/{source_pr_number}"
+    return "\n".join(
+        [
+            "## ydbdoc-review — проверка перевода",
+            "",
+            f"Перевод для исходного PR {source}.",
+            "",
+            f"_Модель перевода:_ `{translate_model}` · "
+            f"_модель проверки:_ `{verify_model}`",
+            "",
+            self_check_section.strip(),
+        ]
+    )
 
 
 def _run_translation_self_check_section(
@@ -384,13 +406,7 @@ def _run_translation_self_check_section(
     total_budget = int(total_raw) if total_raw.isdigit() else 18_000
     total_budget = max(4000, min(total_budget, 62_000))
 
-    lines: list[str] = [
-        "### Проверка перевода (cross-model)",
-        "",
-        f"_Модель перевода:_ `{settings.model_translate}` · "
-        f"_модель проверки:_ `{settings.model_translation_verify}`",
-        "",
-    ]
+    lines: list[str] = []
     for gen_p in md_generated:
         try:
             if gen_p in generated_en_to_ru:
@@ -939,11 +955,6 @@ def run_cmd(
                 ru_on_main = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
                 if ru_on_main:
                     ru_source = ru_on_main
-                    click.echo(
-                        "  (mode: full-file translate from RU on "
-                        f"`{base_ref}` — EN missing on base)"
-                    )
-            out_md: str
             ru_diff = ""
             if effective_repo_path and not use_main_ru:
                 try:
@@ -953,45 +964,28 @@ def run_cmd(
                 except RuntimeError as exc:
                     click.echo(
                         f"Note: could not compute RU diff vs `{merge_base_with}` ({exc}); "
-                        "using full-file translate.",
+                        "full-file path if target missing or stale.",
                         err=True,
                     )
-            if ru_diff.strip() and not use_main_ru and en_full is not None:
-                click.echo("  (mode: merge-base..HEAD Russian diff + English reference)")
-                try:
-                    out_md = translate_en_update_from_ru_diff(
-                        settings,
-                        en_reference=en_full,
-                        ru_diff=ru_diff,
-                        ru_path=ru_p,
-                        ru_full=ru_source,
-                    )
-                except Exception as exc:
-                    click.echo(
-                        f"Note: diff-based EN update failed ({exc}); using full-file translate.",
-                        err=True,
-                    )
-                    out_md = translate_markdown(
-                        settings,
-                        source_lang="Russian",
-                        target_lang="English",
-                        source_path=ru_p,
-                        source_text=ru_source,
-                    )
-            else:
-                if ru_diff.strip() and en_full is None and not use_main_ru:
-                    click.echo(
-                        "  (mode: full-file — no English file on branch to patch with diff)",
-                        err=True,
-                    )
-                out_md = translate_markdown(
+            en_at_base: str | None = None
+            if workdir and base_ref_local:
+                en_at_base = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+            try:
+                out_md, mode = strict_translate_document(
                     settings,
-                    source_lang="Russian",
-                    target_lang="English",
+                    direction="ru_to_en",
                     source_path=ru_p,
-                    source_text=ru_source,
+                    target_path=en_p,
+                    source_full=ru_source,
+                    target_reference=en_full,
+                    source_diff=ru_diff,
+                    target_at_base=en_at_base,
+                    use_full_source_from_base=use_main_ru,
                 )
-            out_md = restore_markdown_links_from_ru(ru_source, out_md)
+            except Exception as exc:
+                warnings.append(f"- `{en_p}`: перевод не выполнен: {exc}")
+                continue
+            click.echo(f"  (mode: {mode})")
             q_issues = translation_quality_issues(
                 ru_source, out_md, target_lang="English"
             )
@@ -1017,44 +1011,35 @@ def run_cmd(
                 except RuntimeError as exc:
                     click.echo(
                         f"Note: could not compute EN diff vs `{merge_base_with}` ({exc}); "
-                        "using full-file translate.",
+                        "full-file path if target missing or stale.",
                         err=True,
                     )
                     en_diff = ""
-            if en_diff.strip() and ru_full is not None:
-                click.echo("  (mode: merge-base..HEAD English diff + Russian reference)")
-                try:
-                    out_md = translate_ru_update_from_en_diff(
-                        settings,
-                        ru_reference=ru_full,
-                        en_diff=en_diff,
-                        en_path=en_p,
-                        en_full=en_full,
-                    )
-                except Exception as exc:
-                    click.echo(
-                        f"Note: diff-based RU update failed ({exc}); using full-file translate.",
-                        err=True,
-                    )
-                    out_md = translate_markdown(
-                        settings,
-                        source_lang="English",
-                        target_lang="Russian",
-                        source_path=en_p,
-                        source_text=en_full,
-                    )
-            else:
-                if en_diff.strip() and ru_full is None:
-                    click.echo(
-                        "  (mode: full-file — no Russian file on branch to patch with diff)",
-                        err=True,
-                    )
-                out_md = translate_markdown(
+            ru_at_base: str | None = None
+            if workdir and base_ref_local:
+                ru_at_base = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
+            try:
+                out_md, mode = strict_translate_document(
                     settings,
-                    source_lang="English",
-                    target_lang="Russian",
+                    direction="en_to_ru",
                     source_path=en_p,
-                    source_text=en_full,
+                    target_path=ru_p,
+                    source_full=en_full,
+                    target_reference=ru_full,
+                    source_diff=en_diff,
+                    target_at_base=ru_at_base,
+                )
+            except Exception as exc:
+                warnings.append(f"- `{ru_p}`: перевод не выполнен: {exc}")
+                continue
+            click.echo(f"  (mode: {mode})")
+            q_issues = translation_quality_issues(
+                en_full, out_md, target_lang="Russian"
+            )
+            if q_issues:
+                warnings.append(
+                    f"- `{ru_p}`: эвристики после перевода: {', '.join(q_issues)} "
+                    "_(проверьте вручную или перезапустите doc_translate)_"
                 )
             git_local.write_text(workdir, ru_p, out_md)
             generated.append(ru_p)
@@ -1091,6 +1076,7 @@ def run_cmd(
     translation_branch = _translation_branch_name(pr_number)
     translation_pr_title = f"Translation of PR {pr_number}"
     translation_pr_url: str | None = None
+    translation_pr_number: int | None = None
     compare_url: str | None = None
     new_at_base: list[str] = []
     overlay_ok: list[str] = []
@@ -1280,6 +1266,7 @@ def run_cmd(
             )
         if opened:
             translation_pr_url, trans_num = opened
+            translation_pr_number = trans_num
             click.echo(f"Opened translation PR #{trans_num}: {translation_pr_url}")
         else:
             err = github_api.pull_create_error(
@@ -1333,10 +1320,39 @@ def run_cmd(
             )
         except Exception as exc:
             translation_self_check_section = (
-                "### Проверка перевода (cross-model)\n\n"
+                "### Проверка по файлам\n\n"
                 f"_Не удалось выполнить self-check:_ `{exc}`"
             )
             click.echo(f"Warning: translation self-check failed: {exc}", err=True)
+
+    if (
+        translation_self_check_section
+        and translation_pr_number is not None
+        and not dry_run
+        and not no_comment
+    ):
+        sc_body = _build_translation_pr_self_check_body(
+            source_pr_number=pr_number,
+            base_owner=base_owner,
+            base_repo=base_repo,
+            translate_model=settings.model_translate,
+            verify_model=settings.model_translation_verify,
+            self_check_section=translation_self_check_section,
+        )
+        try:
+            sc_url = github_api.post_issue_comment(
+                base_owner,
+                base_repo,
+                translation_pr_number,
+                sc_body,
+                settings.github_token,
+            )
+            click.echo(f"Posted self-check on translation PR: {sc_url}")
+        except Exception as exc:
+            click.echo(
+                f"Warning: could not post self-check on translation PR #{translation_pr_number}: {exc}",
+                err=True,
+            )
 
     if dry_run:
         comment_lines = [
@@ -1424,7 +1440,6 @@ def run_cmd(
         comment_lines = _build_source_pr_comment(
             translation_pr_url=translation_pr_url,
             generated=generated,
-            translation_self_check=translation_self_check_section,
         )
         if warnings:
             comment_lines.extend(["", "### Прочее", *warnings])

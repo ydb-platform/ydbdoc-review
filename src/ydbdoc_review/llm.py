@@ -391,6 +391,16 @@ def _translate_chunk_with_retry(
     return out
 
 
+def _allow_full_document_retry() -> bool:
+    raw = os.environ.get("YDBDOC_TRANSLATE_ALLOW_FULL_RETRY", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _allow_diff_to_full_fallback() -> bool:
+    raw = os.environ.get("YDBDOC_TRANSLATE_ALLOW_FULL_FALLBACK", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def _maybe_retry_full_document(
     settings: Settings,
     *,
@@ -403,6 +413,8 @@ def _maybe_retry_full_document(
     default_cap: int,
 ) -> str:
     """Re-translate the whole file once when chunked output looks incomplete."""
+    if not _allow_full_document_retry():
+        return merged
     issues = translation_quality_issues(
         source_text, merged, target_lang=target_lang
     )
@@ -641,7 +653,7 @@ def translate_en_update_from_ru_diff(
                     max_output_tokens=cap2,
                 ).strip()
             )
-    if _diff_en_update_looks_truncated(out, en_reference):
+    if _diff_en_update_looks_truncated(out, en_reference) and _allow_diff_to_full_fallback():
         out = translate_markdown(
             settings,
             source_lang="Russian",
@@ -700,7 +712,7 @@ def translate_ru_update_from_en_diff(
                     max_output_tokens=cap2,
                 ).strip()
             )
-    if _diff_en_update_looks_truncated(out, ru_reference):
+    if _diff_en_update_looks_truncated(out, ru_reference) and _allow_diff_to_full_fallback():
         out = translate_markdown(
             settings,
             source_lang="English",

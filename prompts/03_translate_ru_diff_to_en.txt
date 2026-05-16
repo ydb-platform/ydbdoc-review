@@ -1,22 +1,20 @@
-You update the English YDB documentation so it reflects **only** what changed in Russian between the merge base and the PR branch.
+Вы обновляете английскую документацию YDB так, чтобы она отражала **только** изменения в русском файле между merge base и веткой PR.
 
-You receive, in order:
-1) REFERENCE_EN — the full current English article. Treat it as the source of truth for wording, formatting, and all markdown link targets (text in parentheses after ]( must stay identical unless the Russian change clearly requires a different path).
-2) RU_DIFF — a unified `git diff` of the Russian file (merge-base..HEAD). Only content introduced or modified there should drive edits in English.
-3) RU_FULL — the full current Russian file for local context only.
+На входе по порядку:
+1) REFERENCE_EN — полная текущая английская статья. Эталон формулировок и **всех** целей ссылок markdown (`](path)` без изменений, если русское изменение явно не требует другого path).
+2) RU_DIFF — unified `git diff` русского файла (merge-base..HEAD). Только он задаёт правки в английском.
+3) RU_FULL — полный русский файл для контекста.
 
-Output rules (strict):
-- Output **one** complete English markdown document — the full file body, nothing before or after it.
-- Any paragraph, line, heading, list item, table cell, or code fence that does **not** need to change to reflect RU_DIFF must be copied **verbatim** from REFERENCE_EN (same characters: spaces, blank lines between blocks, punctuation, link syntax).
-- Shell / CLI lines: copy every flag and argument **character-for-character** from REFERENCE_EN on unchanged lines (e.g. `--ca-file`, `--tls`, `--kafka-port`, paths). On **new** lines translated from RU_DIFF, mirror the Russian command exactly — same flags, filenames (`token-file`, `auth_token`), redirects (`> …`), and binary paths (`/opt/ydb/bin/ydb` vs `ydb`). Do **not** invent flags (e.g. `-f auth_token`) or rename token/output files unless RU_DIFF does.
-- **Code fences:** preserve opening/closing ` ``` ` lines from REFERENCE_EN; for new fenced blocks from RU_DIFF include the same fence language tag (`yaml`, `bash`, …) as in Russian.
-- **External links:** on unchanged lines keep REFERENCE_EN URLs. On new/changed lines, if Russian has `yandex.cloud/ru/docs/…`, use `yandex.cloud/en/docs/…` in English output.
-- Do **not** drop security-related flags unless RU_DIFF explicitly removes the corresponding Russian line.
-- Do **not** add a `./` prefix to relative markdown links unless REFERENCE_EN already has it there for that same link.
-- Do **not** reflow paragraphs, do **not** add or remove blank lines except where you insert new translated lines that correspond to `+` lines in RU_DIFF.
-- Do **not** “improve” or harmonize unrelated English sentences; leave them exactly as in REFERENCE_EN.
-- Translate only what is necessary so the English side documents the same facts as Russian after the diff.
-- When you add or change translated lines, preserve all markdown links from REFERENCE_EN on unchanged lines; on new or changed list items mirror every `[text](path)` from the matching Russian line (same `path`, English bracket text).
-- For GUI/integration sections you introduce or change: Title Case in headings; natural English articles; "pastes" / "constructs" as in the full-file EN style guide.
+Правила (строго):
+- Один полный английский markdown-документ, без текста до/после.
+- Абзацы, строки, заголовки, ячейки таблиц, fence, которые **не** следуют из RU_DIFF, копируйте **дословно** из REFERENCE_EN (пробелы, пустые строки, пунктуация, ссылки).
+- Shell/CLI: на неизменённых строках — посимвольно из REFERENCE_EN; на **новых** из RU_DIFF — зеркально русскую команду (те же флаги, `token-file`, пути, `/opt/ydb/bin/ydb` vs `ydbd`). **Не** выдумывайте флаги.
+- **Fences:** сохраняйте ` ``` ` из REFERENCE_EN; для новых блоков — тот же язык fence, что в русском (`yaml`, `bash`, …).
+- В **неизменённых** fenced-блоках конфигурации (yaml/ini/toml) **не** меняйте ключи и значения; в новых/изменённых — копируйте структуру из русского, переводите только `#` комментарии при необходимости.
+- **Ссылки:** неизменённые — как в REFERENCE_EN; новые с `yandex.cloud/ru/docs/` → `/en/docs/` в английском.
+- **Не** перетекайте абзацы, **не** добавляйте/убирайте пустые строки, кроме вставок под строки `+` в RU_DIFF.
+- **Не** «улучшайте» английский вне diff.
+- **Не** вставляйте русские слова в английский текст.
+- **Не** добавляйте пояснения, которых нет в русском diff (например «используя полученный токен», если в RU_DIFF этого нет).
 
-Output only the markdown. No commentary.
+Вывод: только markdown.

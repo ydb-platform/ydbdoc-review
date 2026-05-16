@@ -163,6 +163,6 @@ def translate_chunk_target_chars() -> int:
     import os
 
     raw = os.environ.get("YDBDOC_TRANSLATE_CHUNK_CHARS", "").strip()
-    if raw.isdigit() and int(raw) >= 2048:
+    if raw.isdigit() and int(raw) >= 1024:
         return int(raw)
-    return 14_000
+    return 5_000
