@@ -12,5 +12,7 @@ translation_verify = "deepseek-v32"
 # Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.
 [feature]
 review_enabled = true
-# Отладка: после перевода вызвать translation_verify и дописать отчёт в комментарий к исходному PR.
+# Отладка: ревью + (опционально) исправление критиком + подтверждение переводчиком → комментарий в PR перевода.
 translation_self_check = true
+# При существенных замечаниях критик переписывает перевод; переводчик проверяет исправление.
+translation_repair = true

@@ -21,7 +21,11 @@ from ydbdoc_review.llm import (
     call_yandex_responses,
     load_analyze_instructions,
     parse_json_object,
-    verify_translation_pair,
+)
+from ydbdoc_review.translation_qa import (
+    format_pair_qa_markdown,
+    qa_comment_budget,
+    run_pair_qa_repair,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
 from ydbdoc_review.paths import (
@@ -31,7 +35,10 @@ from ydbdoc_review.paths import (
     ru_toc_yaml_paths,
     truncate,
 )
-from ydbdoc_review.translate_postprocess import translation_quality_issues
+from ydbdoc_review.translate_postprocess import (
+    collect_quality_gate_failures,
+    translation_quality_issues,
+)
 from ydbdoc_review.pair_diff import pair_needs_en_from_ru_only_diff
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 
@@ -349,8 +356,8 @@ def _build_source_pr_comment(
     if translation_pr_url:
         lines.append(f"**PR с переводом:** {translation_pr_url}")
         lines.append(
-            "_Отчёт о качестве перевода (если включён self-check) — в первом комментарии "
-            "к PR с переводом._"
+            "_Отчёт QA (ревью, исправления критиком, подтверждение переводчиком) — "
+            "в первом комментарии к PR с переводом._"
         )
     else:
         lines.append(
@@ -374,84 +381,96 @@ def _build_translation_pr_self_check_body(
     source = f"https://github.com/{base_owner}/{base_repo}/pull/{source_pr_number}"
     return "\n".join(
         [
-            "## ydbdoc-review — проверка перевода",
+            "## ydbdoc-review — проверка и исправление перевода",
             "",
             f"Перевод для исходного PR {source}.",
             "",
             f"_Модель перевода:_ `{translate_model}` · "
-            f"_модель проверки:_ `{verify_model}`",
+            f"_модель-критик (ревью и исправление):_ `{verify_model}`",
             "",
             self_check_section.strip(),
         ]
     )
 
 
-def _run_translation_self_check_section(
+def _run_translation_qa_and_repair(
     settings: Settings,
     *,
     workdir: str,
     generated: list[str],
     generated_en_to_ru: dict[str, str],
     generated_ru_to_en: dict[str, str],
-) -> str | None:
+    warnings: list[str],
+) -> tuple[str | None, int]:
     """
-    Optional cross-model QA of translated markdown (debug).
+    Cross-model QA: critic review → optional repair → translator confirmation.
 
-    Returns markdown to append to the source PR comment, or None if nothing ran.
+    Writes repaired markdown to *workdir* before commit. Returns comment markdown
+    and count of files updated on disk.
     """
     md_generated = [p for p in generated if p.endswith(".md")]
     if not md_generated:
-        return None
-    total_raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS", "").strip()
-    total_budget = int(total_raw) if total_raw.isdigit() else 18_000
-    total_budget = max(4000, min(total_budget, 62_000))
-
+        return None, 0
+    repair_on = settings.translation_repair_enabled
     lines: list[str] = []
+    repaired_count = 0
     for gen_p in md_generated:
         try:
             if gen_p in generated_en_to_ru:
                 ru_p = generated_en_to_ru[gen_p]
                 en_p = gen_p
+                target_path = en_p
                 source_text = git_local.read_text(workdir, ru_p) or ""
                 translated_text = git_local.read_text(workdir, en_p) or ""
                 source_lang, target_lang = "Russian", "English"
             elif gen_p in generated_ru_to_en:
                 ru_p = gen_p
                 en_p = generated_ru_to_en[ru_p]
+                target_path = ru_p
                 source_text = git_local.read_text(workdir, en_p) or ""
                 translated_text = git_local.read_text(workdir, ru_p) or ""
                 source_lang, target_lang = "English", "Russian"
             else:
                 lines.append(f"#### `{gen_p}`")
                 lines.append("")
-                lines.append("_Пара RU↔EN для self-check не найдена (внутренняя ошибка)._")
+                lines.append("_Пара RU↔EN для QA не найдена (внутренняя ошибка)._")
                 lines.append("")
                 continue
-            chunk = verify_translation_pair(
+            new_text, outcome = run_pair_qa_repair(
                 settings,
-                translate_model=settings.model_translate,
-                verify_model=settings.model_translation_verify,
-                source_lang=source_lang,
-                target_lang=target_lang,
                 ru_path=ru_p,
                 en_path=en_p,
+                target_path=target_path,
                 source_text=source_text,
                 translated_text=translated_text,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                repair_enabled=repair_on,
             )
+            if new_text is not None and outcome.repair_applied:
+                git_local.write_text(workdir, target_path, new_text)
+                repaired_count += 1
+                click.echo(f"  QA repair applied: `{target_path}`")
+            lines.append(format_pair_qa_markdown(outcome))
         except Exception as exc:
-            chunk = f"_Ошибка вызова модели проверки:_ `{exc}`"
-        lines.append(f"#### `{en_p}` ↔ `{ru_p}`")
-        lines.append("")
-        lines.append(chunk.strip())
-        lines.append("")
+            lines.append(f"#### `{gen_p}`")
+            lines.append("")
+            lines.append(f"_Ошибка QA/repair:_ `{exc}`")
+            lines.append("")
+            warnings.append(f"- `{gen_p}`: QA/repair failed: {exc}")
 
     text = "\n".join(lines).rstrip()
-    if len(text) > total_budget:
+    budget = qa_comment_budget()
+    if len(text) > budget:
         text = (
-            text[: total_budget - 120].rstrip()
-            + "\n\n… _[раздел проверки обрезан по `YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS`]_"
+            text[: budget - 120].rstrip()
+            + "\n\n… _[отчёт обрезан по `YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS`]_"
         )
-    return text
+    if repaired_count:
+        warnings.append(
+            f"- QA: критик обновил {repaired_count} файл(ов) на диске перед коммитом."
+        )
+    return text, repaired_count
 
 
 def _build_prerequisites_comment(
@@ -1154,7 +1173,58 @@ def run_cmd(
                 "target — proceeding with full-file translation.",
             )
 
+    translation_qa_section: str | None = None
+    if (
+        settings.translation_self_check_enabled
+        and workdir
+        and generated
+        and not dry_run
+        and not blocked_only
+    ):
+        click.echo(
+            f"Running translation QA"
+            f"{' + critic repair' if settings.translation_repair_enabled else ''} "
+            f"(verify `{settings.model_translation_verify}`, "
+            f"translate `{settings.model_translate}`) …"
+        )
+        try:
+            translation_qa_section, _n_repaired = _run_translation_qa_and_repair(
+                settings,
+                workdir=workdir,
+                generated=generated,
+                generated_en_to_ru=generated_en_to_ru,
+                generated_ru_to_en=generated_ru_to_en,
+                warnings=warnings,
+            )
+        except Exception as exc:
+            translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
+            click.echo(f"Warning: translation QA failed: {exc}", err=True)
+
     publish_paths = list(dict.fromkeys(generated + mirrored_en))
+
+    if workdir and generated and not dry_run and not blocked_only:
+        gate_pairs: list[tuple[str, str, str]] = []
+        for gen_p in generated:
+            if not gen_p.endswith(".md"):
+                continue
+            if gen_p in generated_en_to_ru:
+                ru_p = generated_en_to_ru[gen_p]
+                src = git_local.read_text(workdir, ru_p) or ""
+                trans = git_local.read_text(workdir, gen_p) or ""
+                gate_pairs.append((gen_p, src, trans))
+            elif gen_p in generated_ru_to_en:
+                en_p = generated_ru_to_en[gen_p]
+                src = git_local.read_text(workdir, en_p) or ""
+                trans = git_local.read_text(workdir, gen_p) or ""
+                gate_pairs.append((gen_p, src, trans))
+        gate_failures = collect_quality_gate_failures(gate_pairs)
+        if gate_failures:
+            msg = (
+                "## ydbdoc-review — quality gate failed\n\n"
+                "Перевод не закоммичен. Исправьте или перезапустите `doc_translate`.\n\n"
+                + "\n".join(f"- {line}" for line in gate_failures)
+            )
+            raise SystemExit(msg)
 
     committed = False
     if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:
@@ -1298,35 +1368,8 @@ def run_cmd(
                 err=True,
             )
 
-    translation_self_check_section: str | None = None
     if (
-        settings.translation_self_check_enabled
-        and workdir
-        and committed
-        and generated
-        and not blocked_only
-        and not dry_run
-    ):
-        click.echo(
-            f"Running translation self-check with model `{settings.model_translation_verify}` …"
-        )
-        try:
-            translation_self_check_section = _run_translation_self_check_section(
-                settings,
-                workdir=workdir,
-                generated=generated,
-                generated_en_to_ru=generated_en_to_ru,
-                generated_ru_to_en=generated_ru_to_en,
-            )
-        except Exception as exc:
-            translation_self_check_section = (
-                "### Проверка по файлам\n\n"
-                f"_Не удалось выполнить self-check:_ `{exc}`"
-            )
-            click.echo(f"Warning: translation self-check failed: {exc}", err=True)
-
-    if (
-        translation_self_check_section
+        translation_qa_section
         and translation_pr_number is not None
         and not dry_run
         and not no_comment
@@ -1337,7 +1380,7 @@ def run_cmd(
             base_repo=base_repo,
             translate_model=settings.model_translate,
             verify_model=settings.model_translation_verify,
-            self_check_section=translation_self_check_section,
+            self_check_section=translation_qa_section,
         )
         try:
             sc_url = github_api.post_issue_comment(

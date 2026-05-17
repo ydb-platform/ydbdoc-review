@@ -111,6 +111,7 @@ class TomlConfigLayer:
     model_translate: str
     review_enabled: bool
     translation_self_check_enabled: bool
+    translation_repair_enabled: bool
     """Slug for cross-model translation QA; empty → use ``model_check`` after env merge."""
     model_translation_verify: str
 
@@ -140,16 +141,21 @@ def load_config_layer() -> TomlConfigLayer:
             verify = _toml_str(models, "translation_verify")
         review_on = True
         self_check = False
+        repair = True
         if isinstance(feature, dict):
             review_on = _feature_review_enabled(feature)
             self_check = _feature_bool(
                 feature, "translation_self_check", default=False
+            )
+            repair = _feature_bool(
+                feature, "translation_repair", default=self_check
             )
         return TomlConfigLayer(
             model_check=mc,
             model_translate=mt,
             review_enabled=review_on,
             translation_self_check_enabled=self_check,
+            translation_repair_enabled=repair,
             model_translation_verify=verify,
         )
     return TomlConfigLayer(
@@ -157,6 +163,7 @@ def load_config_layer() -> TomlConfigLayer:
         model_translate=_DEFAULT_MODEL_TRANSLATE,
         review_enabled=True,
         translation_self_check_enabled=False,
+        translation_repair_enabled=False,
         model_translation_verify="",
     )
 
@@ -216,6 +223,7 @@ class Settings:
     """Second model for post-translation cross-check (debug); defaults to ``model_check``."""
     model_translation_verify: str
     translation_self_check_enabled: bool
+    translation_repair_enabled: bool
     review_enabled: bool
     github_token: str
     github_push_token: str
@@ -262,6 +270,14 @@ class Settings:
             )
         else:
             translation_self_check_enabled = toml.translation_self_check_enabled
+        repair_env = os.environ.get("YDBDOC_TRANSLATION_REPAIR")
+        if repair_env is not None and str(repair_env).strip() != "":
+            translation_repair_enabled = _parse_env_bool(
+                str(repair_env).strip(),
+                var_name="YDBDOC_TRANSLATION_REPAIR",
+            )
+        else:
+            translation_repair_enabled = toml.translation_repair_enabled
         review_env = os.environ.get("YDBDOC_REVIEW_ENABLED", "").strip()
         if review_env:
             review_enabled = _parse_env_review_enabled(review_env)
@@ -286,6 +302,7 @@ class Settings:
             model_translate=model_translate,
             model_translation_verify=model_translation_verify,
             translation_self_check_enabled=translation_self_check_enabled,
+            translation_repair_enabled=translation_repair_enabled,
             review_enabled=review_enabled,
             github_token=gh,
             github_push_token=gh_push,

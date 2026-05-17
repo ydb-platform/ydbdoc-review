@@ -17,6 +17,12 @@ from ydbdoc_review.llm import (
     translate_ru_update_from_en_diff,
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+from ydbdoc_review.section_translate import (
+    translate_by_section_enabled,
+    translate_en_to_ru_by_sections,
+    translate_full_source_by_sections,
+    translate_ru_to_en_by_sections,
+)
 from ydbdoc_review.translate_postprocess import translation_quality_issues
 
 Direction = Literal["ru_to_en", "en_to_ru"]
@@ -110,13 +116,21 @@ def _strict_ru_to_en(
     )
 
     if use_full_ru_from_base or stale or en_reference is None:
-        mode = "full-file"
         if use_full_ru_from_base:
             mode = "full-file-from-base-ru"
         elif stale and en_reference is not None:
             mode = "full-file-stale-target"
-        elif en_reference is None:
+        else:
             mode = "full-file-no-target"
+        if translate_by_section_enabled(source_len=len(ru_source)):
+            out, mode_sec = translate_full_source_by_sections(
+                settings,
+                source_path=ru_path,
+                source_full=ru_source,
+                source_lang="Russian",
+                target_lang="English",
+            )
+            return out, f"{mode}-{mode_sec}"
         out = translate_markdown(
             settings,
             source_lang="Russian",
@@ -128,6 +142,16 @@ def _strict_ru_to_en(
 
     if not ru_diff.strip():
         return en_reference, "unchanged-no-diff"
+
+    if translate_by_section_enabled(source_len=len(ru_source)):
+        out, mode = translate_ru_to_en_by_sections(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_source,
+            en_reference=en_reference,
+            ru_diff=ru_diff,
+        )
+        return out, mode
 
     batches = batch_unified_diff(ru_diff)
     en_cur = en_reference
@@ -211,6 +235,15 @@ def _strict_en_to_ru(
 
     if stale or ru_reference is None:
         mode = "full-file-stale-target" if ru_reference else "full-file-no-target"
+        if translate_by_section_enabled(source_len=len(en_full)):
+            out, mode_sec = translate_full_source_by_sections(
+                settings,
+                source_path=en_path,
+                source_full=en_full,
+                source_lang="English",
+                target_lang="Russian",
+            )
+            return out, f"{mode}-{mode_sec}"
         out = translate_markdown(
             settings,
             source_lang="English",
@@ -222,6 +255,15 @@ def _strict_en_to_ru(
 
     if not en_diff.strip():
         return ru_reference, "unchanged-no-diff"
+
+    if translate_by_section_enabled(source_len=len(en_full)):
+        return translate_en_to_ru_by_sections(
+            settings,
+            en_path=en_path,
+            en_full=en_full,
+            ru_reference=ru_reference,
+            en_diff=en_diff,
+        )
 
     batches = batch_unified_diff(en_diff)
     ru_cur = ru_reference

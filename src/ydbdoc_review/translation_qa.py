@@ -1,0 +1,518 @@
+"""Cross-model review, section-level critic repair, and translator confirmation."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from ydbdoc_review.config import Settings
+from ydbdoc_review.llm import (
+    confirm_repair_pair,
+    fix_translation_pair,
+    verify_translation_pair,
+)
+from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+from ydbdoc_review.markdown_sections import (
+    align_sections_by_heading,
+    join_markdown_sections,
+    split_markdown_sections,
+)
+from ydbdoc_review.section_translate import full_file_repair_max_chars
+from ydbdoc_review.translate_postprocess import (
+    translation_quality_gate_codes,
+    translation_quality_issues,
+)
+
+
+@dataclass(frozen=True)
+class PairQaOutcome:
+    ru_path: str
+    en_path: str
+    target_path: str
+    review_md: str
+    repair_attempted: bool
+    repair_applied: bool
+    repair_skip_reason: str | None
+    confirmation_md: str | None
+    repair_error: str | None
+
+
+def review_needs_repair(review_md: str) -> bool:
+    """True when the critic report lists substantive issues worth auto-fixing."""
+    if not review_md.strip():
+        return False
+    tl = review_md.lower()
+    if "существенных проблем не выявлено" in tl:
+        return False
+    if "существенные расхождения" in tl:
+        return True
+    if "соответствует с оговорками" in tl:
+        return True
+    m = re.search(
+        r"###\s*найденные проблемы\s*\n([\s\S]*?)(?:\n###|\Z)",
+        review_md,
+        re.IGNORECASE,
+    )
+    if m:
+        body = m.group(1).strip().lower()
+        if "не выявлено" in body and body.count("-") < 2:
+            return False
+        if re.search(r"^[\s]*[-*•]\s+\S", m.group(1), re.MULTILINE):
+            return True
+        if re.search(r"^\d+\.\s+\S", m.group(1), re.MULTILINE):
+            return True
+    return False
+
+
+def _repair_should_apply(
+    *,
+    source_text: str,
+    before: str,
+    after: str,
+    target_lang: str,
+) -> tuple[bool, str | None]:
+    if not after.strip():
+        return False, "пустой ответ модели-исправителя"
+    if len(after) < int(len(source_text) * 0.55):
+        return False, "исправленный текст слишком короткий относительно оригинала"
+    if len(after) < int(len(before) * 0.75) and len(source_text) > 4000:
+        return False, "исправленный текст короче предыдущего перевода >25%"
+    issues = translation_quality_issues(source_text, after, target_lang=target_lang)
+    hard = translation_quality_gate_codes()
+    hit = hard.intersection(issues)
+    if hit:
+        return False, f"эвристики после исправления: {', '.join(sorted(hit))}"
+    return True, None
+
+
+def _section_qa_use(source_text: str) -> bool:
+    raw = os.environ.get("YDBDOC_TRANSLATION_QA_BY_SECTION", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    min_raw = os.environ.get("YDBDOC_TRANSLATE_BY_SECTION_MIN_CHARS", "").strip()
+    threshold = int(min_raw) if min_raw.isdigit() else 8_000
+    if len(source_text) < threshold:
+        return False
+    return len(split_markdown_sections(source_text)) > 1
+
+
+def run_pair_qa_repair(
+    settings: Settings,
+    *,
+    ru_path: str,
+    en_path: str,
+    target_path: str,
+    source_text: str,
+    translated_text: str,
+    source_lang: str,
+    target_lang: str,
+    repair_enabled: bool,
+) -> tuple[str | None, PairQaOutcome]:
+    if _section_qa_use(source_text):
+        return _run_pair_qa_repair_by_sections(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            repair_enabled=repair_enabled,
+        )
+    return _run_pair_qa_repair_whole_file(
+        settings,
+        ru_path=ru_path,
+        en_path=en_path,
+        target_path=target_path,
+        source_text=source_text,
+        translated_text=translated_text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        repair_enabled=repair_enabled,
+    )
+
+
+def _run_pair_qa_repair_by_sections(
+    settings: Settings,
+    *,
+    ru_path: str,
+    en_path: str,
+    target_path: str,
+    source_text: str,
+    translated_text: str,
+    source_lang: str,
+    target_lang: str,
+    repair_enabled: bool,
+) -> tuple[str | None, PairQaOutcome]:
+    src_secs = split_markdown_sections(source_text)
+    tgt_secs = split_markdown_sections(translated_text)
+    aligned = align_sections_by_heading(src_secs, tgt_secs)
+
+    review_parts: list[str] = []
+    to_repair: list[int] = []
+    section_reviews: dict[int, str] = {}
+
+    for src_sec in src_secs:
+        tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
+        tgt_body = tgt_sec.content if tgt_sec else ""
+        try:
+            rev = verify_translation_pair(
+                settings,
+                translate_model=settings.model_translate,
+                verify_model=settings.model_translation_verify,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=src_sec.content,
+                translated_text=tgt_body,
+            )
+        except Exception as exc:
+            rev = f"_Ошибка ревью раздела:_ `{exc}`"
+        section_reviews[src_sec.index] = rev
+        title = src_sec.heading or "(преамбула)"
+        review_parts.append(f"##### Раздел: {title}\n\n{rev.strip()}\n")
+        if review_needs_repair(rev):
+            to_repair.append(src_sec.index)
+
+    review_md = "\n".join(review_parts).strip()
+    any_needs = bool(to_repair)
+
+    if not any_needs or not repair_enabled:
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=False,
+            repair_applied=False,
+            repair_skip_reason=None,
+            confirmation_md=None,
+            repair_error=None,
+        )
+
+    out_secs: list = []
+    repaired_any = False
+    confirm_parts: list[str] = []
+    last_error: str | None = None
+
+    for src_sec in src_secs:
+        tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
+        tgt_body = tgt_sec.content if tgt_sec else ""
+        if src_sec.index not in to_repair:
+            if tgt_sec:
+                out_secs.append(tgt_sec)
+            else:
+                out_secs.append(src_sec)
+            continue
+
+        sec_review = section_reviews[src_sec.index]
+        try:
+            fixed_raw = fix_translation_pair(
+                settings,
+                verify_model=settings.model_translation_verify,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=src_sec.content,
+                translated_text=tgt_body,
+                review_report=sec_review,
+            )
+        except Exception as exc:
+            last_error = str(exc)
+            if tgt_sec:
+                out_secs.append(tgt_sec)
+            continue
+
+        fixed = fixed_raw
+        if target_lang.strip().lower() in ("english", "en"):
+            fixed = restore_markdown_links_from_ru(src_sec.content, fixed)
+
+        ok, skip = _repair_should_apply(
+            source_text=src_sec.content,
+            before=tgt_body,
+            after=fixed,
+            target_lang=target_lang,
+        )
+        if not ok:
+            if tgt_sec:
+                out_secs.append(tgt_sec)
+            confirm_parts.append(
+                f"##### {src_sec.heading or 'преамбула'}\n\n_Исправление не применено:_ {skip}\n"
+            )
+            continue
+
+        from ydbdoc_review.markdown_sections import MarkdownSection
+
+        out_secs.append(
+            MarkdownSection(
+                index=src_sec.index,
+                heading=src_sec.heading,
+                content=fixed.strip(),
+                start_line=src_sec.start_line,
+                end_line=src_sec.end_line,
+            )
+        )
+        repaired_any = True
+        try:
+            conf = confirm_repair_pair(
+                settings,
+                translate_model=settings.model_translate,
+                verify_model=settings.model_translation_verify,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=src_sec.content,
+                translation_before=tgt_body,
+                translation_after=fixed,
+                review_before=sec_review,
+            )
+            confirm_parts.append(
+                f"##### {src_sec.heading or 'преамбула'}\n\n{conf.strip()}\n"
+            )
+        except Exception as exc:
+            confirm_parts.append(
+                f"##### {src_sec.heading or 'преамбула'}\n\n_Ошибка подтверждения:_ `{exc}`\n"
+            )
+
+    merged = join_markdown_sections(out_secs)
+    if not repaired_any:
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=True,
+            repair_applied=False,
+            repair_skip_reason="ни один раздел не прошёл проверку качества",
+            confirmation_md="\n".join(confirm_parts) if confirm_parts else None,
+            repair_error=last_error,
+        )
+
+    return merged, PairQaOutcome(
+        ru_path=ru_path,
+        en_path=en_path,
+        target_path=target_path,
+        review_md=review_md,
+        repair_attempted=True,
+        repair_applied=True,
+        repair_skip_reason=None,
+        confirmation_md="\n".join(confirm_parts).strip() if confirm_parts else None,
+        repair_error=last_error,
+    )
+
+
+def _run_pair_qa_repair_whole_file(
+    settings: Settings,
+    *,
+    ru_path: str,
+    en_path: str,
+    target_path: str,
+    source_text: str,
+    translated_text: str,
+    source_lang: str,
+    target_lang: str,
+    repair_enabled: bool,
+) -> tuple[str | None, PairQaOutcome]:
+    review_md = verify_translation_pair(
+        settings,
+        translate_model=settings.model_translate,
+        verify_model=settings.model_translation_verify,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        ru_path=ru_path,
+        en_path=en_path,
+        source_text=source_text,
+        translated_text=translated_text,
+    )
+    needs = review_needs_repair(review_md)
+    if not needs or not repair_enabled:
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=False,
+            repair_applied=False,
+            repair_skip_reason=None,
+            confirmation_md=None,
+            repair_error=None,
+        )
+
+    if len(source_text) > full_file_repair_max_chars():
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=True,
+            repair_applied=False,
+            repair_skip_reason=(
+                f"файл длиннее {full_file_repair_max_chars()} символов — "
+                "целиком не исправляем (нужен section QA; включите длинный документ)"
+            ),
+            confirmation_md=None,
+            repair_error=None,
+        )
+
+    try:
+        fixed_raw = fix_translation_pair(
+            settings,
+            verify_model=settings.model_translation_verify,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            review_report=review_md,
+        )
+    except Exception as exc:
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=True,
+            repair_applied=False,
+            repair_skip_reason=None,
+            confirmation_md=None,
+            repair_error=str(exc),
+        )
+
+    fixed = fixed_raw
+    if target_lang.strip().lower() in ("english", "en"):
+        fixed = restore_markdown_links_from_ru(source_text, fixed)
+
+    ok, skip = _repair_should_apply(
+        source_text=source_text,
+        before=translated_text,
+        after=fixed,
+        target_lang=target_lang,
+    )
+    if not ok:
+        try:
+            confirmation = confirm_repair_pair(
+                settings,
+                translate_model=settings.model_translate,
+                verify_model=settings.model_translation_verify,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=source_text,
+                translation_before=translated_text,
+                translation_after=translated_text,
+                review_before=review_md,
+            )
+        except Exception as exc:
+            confirmation = f"_Ошибка подтверждения:_ `{exc}`"
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=True,
+            repair_applied=False,
+            repair_skip_reason=skip,
+            confirmation_md=confirmation,
+            repair_error=None,
+        )
+
+    try:
+        confirmation = confirm_repair_pair(
+            settings,
+            translate_model=settings.model_translate,
+            verify_model=settings.model_translation_verify,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translation_before=translated_text,
+            translation_after=fixed,
+            review_before=review_md,
+        )
+    except Exception as exc:
+        confirmation = f"_Ошибка подтверждения переводчиком:_ `{exc}`"
+
+    return fixed, PairQaOutcome(
+        ru_path=ru_path,
+        en_path=en_path,
+        target_path=target_path,
+        review_md=review_md,
+        repair_attempted=True,
+        repair_applied=True,
+        repair_skip_reason=None,
+        confirmation_md=confirmation,
+        repair_error=None,
+    )
+
+
+def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
+    lines = [
+        f"#### `{outcome.en_path}` ↔ `{outcome.ru_path}`",
+        "",
+        "##### Ревью (критик, до исправления)",
+        "",
+        outcome.review_md.strip(),
+        "",
+    ]
+    if outcome.repair_error:
+        lines.extend(
+            [
+                "##### Исправление критиком",
+                "",
+                f"_Ошибка:_ `{outcome.repair_error}`",
+                "",
+            ]
+        )
+    elif outcome.repair_attempted:
+        if outcome.repair_applied:
+            lines.extend(
+                [
+                    "##### Исправление критиком",
+                    "",
+                    "_Применено:_ файл перевода обновлён на диске и попадёт в коммит.",
+                    "",
+                ]
+            )
+        else:
+            reason = outcome.repair_skip_reason or "не прошло проверки качества"
+            lines.extend(
+                [
+                    "##### Исправление критиком",
+                    "",
+                    f"_Не применено:_ {reason}.",
+                    "",
+                ]
+            )
+    else:
+        lines.extend(
+            [
+                "##### Исправление критиком",
+                "",
+                "_Не выполнялось_ — существенных проблем в ревью нет или repair отключён.",
+                "",
+            ]
+        )
+    if outcome.confirmation_md:
+        lines.extend(
+            [
+                "##### Подтверждение (модель-переводчик)",
+                "",
+                outcome.confirmation_md.strip(),
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def qa_comment_budget() -> int:
+    raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS", "").strip()
+    if raw.isdigit():
+        return max(8000, min(int(raw), 90_000))
+    return 24_000

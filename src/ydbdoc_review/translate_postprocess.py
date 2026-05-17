@@ -71,6 +71,33 @@ def translation_quality_issues(
     return issues
 
 
+def translation_quality_gate_codes() -> frozenset[str]:
+    return frozenset({"too_short", "missing_tabs", "unbalanced_fences", "cyrillic_leak"})
+
+
+def quality_gate_enabled() -> bool:
+    raw = os.environ.get("YDBDOC_TRANSLATION_QUALITY_GATE", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def collect_quality_gate_failures(
+    pairs: list[tuple[str, str, str]],
+) -> list[str]:
+    """
+    *pairs*: ``(path, source_text, translated_text)`` — report paths failing the gate.
+    """
+    if not quality_gate_enabled():
+        return []
+    out: list[str] = []
+    for path, source, translated in pairs:
+        lang = "English" if "/en/" in path.replace("\\", "/") else "Russian"
+        issues = translation_quality_issues(source, translated, target_lang=lang)
+        hit = sorted(translation_quality_gate_codes().intersection(issues))
+        if hit:
+            out.append(f"`{path}`: {', '.join(hit)}")
+    return out
+
+
 def should_retry_chunk(source_chunk: str, translated_chunk: str) -> bool:
     if len(source_chunk) < 400:
         return False

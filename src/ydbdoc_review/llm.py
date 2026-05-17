@@ -728,6 +728,14 @@ def load_verify_translation_instructions(settings: Settings) -> str:
     return _read_prompt(Path(settings.prompts_dir) / "05_verify_translation.txt")
 
 
+def load_fix_translation_instructions(settings: Settings) -> str:
+    return _read_prompt(Path(settings.prompts_dir) / "06_fix_translation.txt")
+
+
+def load_confirm_repair_instructions(settings: Settings) -> str:
+    return _read_prompt(Path(settings.prompts_dir) / "07_confirm_repair.txt")
+
+
 def _translation_self_check_input_cap() -> int:
     raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_INPUT_CHARS", "").strip()
     if raw.isdigit():
@@ -788,6 +796,112 @@ def verify_translation_pair(
         call_yandex_responses(
             settings,
             verify_model,
+            instructions=instructions.strip(),
+            user_input=user_input,
+            max_output_tokens=_translation_self_check_max_output_tokens(),
+        ).strip()
+    )
+
+
+def _repair_max_output_tokens(model: str) -> int:
+    """Completion budget for critic full-file repair (may be long)."""
+    raw = os.environ.get("YDBDOC_TRANSLATION_REPAIR_MAX_OUTPUT_TOKENS", "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return clamp_max_output_tokens(int(raw), model)
+    return _translate_max_output_tokens(model)
+
+
+def fix_translation_pair(
+    settings: Settings,
+    *,
+    verify_model: str,
+    source_lang: str,
+    target_lang: str,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    translated_text: str,
+    review_report: str,
+) -> str:
+    """Critic model returns a full corrected translation file."""
+    instructions = load_fix_translation_instructions(settings)
+    cap = _translation_self_check_input_cap()
+    src_c = _cap_verify_body(source_text.strip(), cap)
+    tr_c = _cap_verify_body(translated_text.strip(), cap)
+    rev_c = _cap_verify_body(review_report.strip(), min(cap, 12_000))
+    user_input = (
+        f"Пара файлов: `{ru_path}` (RU) ↔ `{en_path}` (EN)\n"
+        f"Исходный язык (SOURCE): {source_lang}\n"
+        f"Язык перевода (TRANSLATION): {target_lang}\n\n"
+        f"--- SOURCE ({source_lang}) BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
+        f"--- TRANSLATION ({target_lang}) BEGIN ---\n{tr_c}\n--- TRANSLATION END ---\n\n"
+        f"--- REVIEW BEGIN ---\n{rev_c}\n--- REVIEW END ---\n\n"
+        "Выведите только исправленный полный markdown перевода."
+    )
+    out = _strip_code_fence(
+        call_yandex_responses(
+            settings,
+            verify_model,
+            instructions=instructions.strip(),
+            user_input=user_input,
+            max_output_tokens=_repair_max_output_tokens(verify_model),
+        ).strip()
+    )
+    if _full_file_translation_looks_truncated(out, source_text):
+        cap2 = clamp_max_output_tokens(
+            _repair_max_output_tokens(verify_model) * 2, verify_model
+        )
+        if cap2 > _repair_max_output_tokens(verify_model):
+            out2 = _strip_code_fence(
+                call_yandex_responses(
+                    settings,
+                    verify_model,
+                    instructions=instructions.strip(),
+                    user_input=user_input,
+                    max_output_tokens=cap2,
+                ).strip()
+            )
+            if len(out2) > len(out):
+                out = out2
+    return out
+
+
+def confirm_repair_pair(
+    settings: Settings,
+    *,
+    translate_model: str,
+    verify_model: str,
+    source_lang: str,
+    target_lang: str,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    translation_before: str,
+    translation_after: str,
+    review_before: str,
+) -> str:
+    """Translator model confirms whether critic fixes addressed the review."""
+    instructions = load_confirm_repair_instructions(settings)
+    cap = _translation_self_check_input_cap()
+    src_c = _cap_verify_body(source_text.strip(), cap)
+    before_c = _cap_verify_body(translation_before.strip(), cap)
+    after_c = _cap_verify_body(translation_after.strip(), cap)
+    rev_c = _cap_verify_body(review_before.strip(), min(cap, 12_000))
+    user_input = (
+        f"Модель перевода: {translate_model}\n"
+        f"Модель исправления (критик): {verify_model}\n\n"
+        f"Пара: `{ru_path}` ↔ `{en_path}`\n"
+        f"SOURCE ({source_lang}), целевой язык: {target_lang}\n\n"
+        f"--- SOURCE BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
+        f"--- TRANSLATION_BEFORE BEGIN ---\n{before_c}\n--- TRANSLATION_BEFORE END ---\n\n"
+        f"--- TRANSLATION_AFTER BEGIN ---\n{after_c}\n--- TRANSLATION_AFTER END ---\n\n"
+        f"--- REVIEW_BEFORE BEGIN ---\n{rev_c}\n--- REVIEW_BEFORE END ---\n\n"
+        "Следуйте формату ответа из системных инструкций."
+    )
+    return _strip_code_fence(
+        call_yandex_responses(
+            settings,
+            translate_model,
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=_translation_self_check_max_output_tokens(),
