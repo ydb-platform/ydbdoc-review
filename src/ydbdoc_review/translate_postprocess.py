@@ -49,11 +49,37 @@ def chunk_lost_yaml_fence(source_chunk: str, translated_chunk: str) -> bool:
     return "```" not in head and len(translated_chunk) > 200
 
 
+_CONFIG_DIR_NO_SPACE_RE = re.compile(r"--config-dir/[^\s]")
+
+
+def cli_critical_issues(
+    translated: str,
+    *,
+    en_main: str | None = None,
+) -> list[str]:
+    """CLI regressions that break commands (deterministic)."""
+    issues: list[str] = []
+    if _CONFIG_DIR_NO_SPACE_RE.search(translated):
+        issues.append("config_dir_missing_space")
+    if en_main and "--config-dir /" in en_main and _CONFIG_DIR_NO_SPACE_RE.search(translated):
+        if "config_dir_missing_space" not in issues:
+            issues.append("config_dir_missing_space")
+    if "token-file" in translated and re.search(
+        r"[-\s]f\s+auth_token\b|--token-file\s+auth_token\b", translated
+    ):
+        if re.search(r">\s*token-file\b", translated):
+            issues.append("token_file_inconsistent")
+    if translated.rstrip().endswith("/opt") or translated.rstrip().endswith("/opt/"):
+        issues.append("truncated_file")
+    return issues
+
+
 def translation_quality_issues(
     source: str,
     translated: str,
     *,
     target_lang: str,
+    en_main: str | None = None,
 ) -> list[str]:
     """Short issue codes; empty list means heuristics are satisfied."""
     issues: list[str] = []
@@ -69,11 +95,22 @@ def translation_quality_issues(
         issues.append("missing_tabs")
     if target_lang.strip().lower() == "english" and en_contains_cyrillic(translated):
         issues.append("cyrillic_leak")
+    issues.extend(cli_critical_issues(translated, en_main=en_main))
     return issues
 
 
 def translation_quality_gate_codes() -> frozenset[str]:
-    return frozenset({"too_short", "missing_tabs", "unbalanced_fences", "cyrillic_leak"})
+    return frozenset(
+        {
+            "too_short",
+            "missing_tabs",
+            "unbalanced_fences",
+            "cyrillic_leak",
+            "config_dir_missing_space",
+            "token_file_inconsistent",
+            "truncated_file",
+        }
+    )
 
 
 def quality_gate_enabled() -> bool:
@@ -82,17 +119,19 @@ def quality_gate_enabled() -> bool:
 
 
 def collect_quality_gate_failures(
-    pairs: list[tuple[str, str, str]],
+    pairs: list[tuple[str, str, str, str | None]],
 ) -> list[str]:
     """
-    *pairs*: ``(path, source_text, translated_text)`` — report paths failing the gate.
+    *pairs*: ``(path, source_text, translated_text, en_on_main_or_none)``.
     """
     if not quality_gate_enabled():
         return []
     out: list[str] = []
-    for path, source, translated in pairs:
+    for path, source, translated, en_main in pairs:
         lang = "English" if "/en/" in path.replace("\\", "/") else "Russian"
-        issues = translation_quality_issues(source, translated, target_lang=lang)
+        issues = translation_quality_issues(
+            source, translated, target_lang=lang, en_main=en_main
+        )
         hit = sorted(translation_quality_gate_codes().intersection(issues))
         if hit:
             out.append(f"`{path}`: {', '.join(hit)}")

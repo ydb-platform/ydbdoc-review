@@ -401,6 +401,9 @@ def _run_translation_qa_and_repair(
     generated_en_to_ru: dict[str, str],
     generated_ru_to_en: dict[str, str],
     warnings: list[str],
+    source_pr_number: int,
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
+    base_ref_local: str | None,
 ) -> tuple[str | None, int]:
     """
     Cross-model QA: critic review → optional repair → translator confirmation.
@@ -436,6 +439,10 @@ def _run_translation_qa_and_repair(
                 lines.append("_Пара RU↔EN для QA не найдена (внутренняя ошибка)._")
                 lines.append("")
                 continue
+            ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))
+            en_on_main: str | None = None
+            if base_ref_local and en_p:
+                en_on_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
             new_text, outcome = run_pair_qa_repair(
                 settings,
                 ru_path=ru_p,
@@ -446,6 +453,9 @@ def _run_translation_qa_and_repair(
                 source_lang=source_lang,
                 target_lang=target_lang,
                 repair_enabled=repair_on,
+                source_pr_number=source_pr_number,
+                ru_pr_diff=ru_diff,
+                en_on_main=en_on_main,
             )
             if new_text is not None and outcome.repair_applied:
                 git_local.write_text(workdir, target_path, new_text)
@@ -460,12 +470,6 @@ def _run_translation_qa_and_repair(
             warnings.append(f"- `{gen_p}`: QA/repair failed: {exc}")
 
     text = "\n".join(lines).rstrip()
-    budget = qa_comment_budget()
-    if len(text) > budget:
-        text = (
-            text[: budget - 120].rstrip()
-            + "\n\n… _[отчёт обрезан по `YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS`]_"
-        )
     if repaired_count:
         warnings.append(
             f"- QA: критик обновил {repaired_count} файл(ов) на диске перед коммитом."
@@ -1195,6 +1199,9 @@ def run_cmd(
                 generated_en_to_ru=generated_en_to_ru,
                 generated_ru_to_en=generated_ru_to_en,
                 warnings=warnings,
+                source_pr_number=pr_number,
+                pair_diffs=pair_diffs,
+                base_ref_local=base_ref_local,
             )
         except Exception as exc:
             translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
@@ -1211,12 +1218,17 @@ def run_cmd(
                 ru_p = generated_en_to_ru[gen_p]
                 src = git_local.read_text(workdir, ru_p) or ""
                 trans = git_local.read_text(workdir, gen_p) or ""
-                gate_pairs.append((gen_p, src, trans))
+                en_main = (
+                    git_local.read_text_at_ref(workdir, base_ref_local, gen_p)
+                    if base_ref_local
+                    else None
+                )
+                gate_pairs.append((gen_p, src, trans, en_main))
             elif gen_p in generated_ru_to_en:
                 en_p = generated_ru_to_en[gen_p]
                 src = git_local.read_text(workdir, en_p) or ""
                 trans = git_local.read_text(workdir, gen_p) or ""
-                gate_pairs.append((gen_p, src, trans))
+                gate_pairs.append((gen_p, src, trans, None))
         gate_failures = collect_quality_gate_failures(gate_pairs)
         if gate_failures:
             msg = (
@@ -1383,14 +1395,17 @@ def run_cmd(
             self_check_section=translation_qa_section,
         )
         try:
-            sc_url = github_api.post_issue_comment(
+            sc_urls = github_api.post_issue_comment_chunked(
                 base_owner,
                 base_repo,
                 translation_pr_number,
                 sc_body,
                 settings.github_token,
             )
-            click.echo(f"Posted self-check on translation PR: {sc_url}")
+            click.echo(
+                f"Posted QA report on translation PR ({len(sc_urls)} comment(s)): "
+                f"{sc_urls[0] if sc_urls else '—'}"
+            )
         except Exception as exc:
             click.echo(
                 f"Warning: could not post self-check on translation PR #{translation_pr_number}: {exc}",

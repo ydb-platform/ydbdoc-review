@@ -740,14 +740,14 @@ def _translation_self_check_input_cap() -> int:
     raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_INPUT_CHARS", "").strip()
     if raw.isdigit():
         return max(4096, int(raw))
-    return 40_000
+    return 55_000
 
 
 def _translation_self_check_max_output_tokens() -> int:
     raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_OUTPUT_TOKENS", "").strip()
     if raw.isdigit():
-        return max(1024, min(int(raw), 65_536))
-    return 8192
+        return max(2048, min(int(raw), 65_536))
+    return 16_384
 
 
 def _cap_verify_body(text: str, cap: int) -> str:
@@ -761,6 +761,33 @@ def _cap_verify_body(text: str, cap: int) -> str:
     )
 
 
+def _qa_extra_blocks(
+    *,
+    cap: int,
+    source_pr_number: int | None = None,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
+) -> str:
+    parts: list[str] = []
+    if source_pr_number is not None:
+        parts.append(f"Исходный PR документации: #{source_pr_number}")
+    if ru_pr_diff and ru_pr_diff.strip():
+        parts.append(
+            "--- RU_PR_DIFF (исходный PR) BEGIN ---\n"
+            f"{_cap_verify_body(ru_pr_diff.strip(), min(cap, 24_000))}\n"
+            "--- RU_PR_DIFF END ---"
+        )
+    if en_on_main and en_on_main.strip():
+        parts.append(
+            "--- EN_ON_MAIN (английский на базовой ветке до перевода) BEGIN ---\n"
+            f"{_cap_verify_body(en_on_main.strip(), cap)}\n"
+            "--- EN_ON_MAIN END ---"
+        )
+    if not parts:
+        return ""
+    return "\n\n".join(parts) + "\n\n"
+
+
 def verify_translation_pair(
     settings: Settings,
     *,
@@ -772,22 +799,32 @@ def verify_translation_pair(
     en_path: str,
     source_text: str,
     translated_text: str,
+    source_pr_number: int | None = None,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
 ) -> str:
     """
     Ask a second model whether the translation matches the source (debug / QA).
 
-    Returns markdown in Russian for posting on the source PR.
+    Returns markdown in Russian for posting on the translation PR.
     """
     instructions = load_verify_translation_instructions(settings)
     cap = _translation_self_check_input_cap()
     src_c = _cap_verify_body(source_text.strip(), cap)
     out_c = _cap_verify_body(translated_text.strip(), cap)
+    extra = _qa_extra_blocks(
+        cap=cap,
+        source_pr_number=source_pr_number,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
+    )
     user_input = (
-        f"Модель, которой делали перевод (для справки): {translate_model}\n"
+        f"Модель перевода: {translate_model}\n"
         f"Модель-проверяющая (вы): {verify_model}\n\n"
         f"Пара файлов: `{ru_path}` (RU) ↔ `{en_path}` (EN)\n"
-        f"Исходный язык статьи: {source_lang}\n"
-        f"Язык перевода (целевой): {target_lang}\n\n"
+        f"Исходный язык (SOURCE): {source_lang}\n"
+        f"Язык перевода (TRANSLATION): {target_lang}\n\n"
+        f"{extra}"
         f"--- SOURCE ({source_lang}) BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
         f"--- TRANSLATION ({target_lang}) BEGIN ---\n{out_c}\n--- TRANSLATION END ---\n\n"
         "Следуйте формату ответа из системных инструкций."
@@ -822,17 +859,21 @@ def fix_translation_pair(
     source_text: str,
     translated_text: str,
     review_report: str,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
 ) -> str:
     """Critic model returns a full corrected translation file."""
     instructions = load_fix_translation_instructions(settings)
     cap = _translation_self_check_input_cap()
     src_c = _cap_verify_body(source_text.strip(), cap)
     tr_c = _cap_verify_body(translated_text.strip(), cap)
-    rev_c = _cap_verify_body(review_report.strip(), min(cap, 12_000))
+    rev_c = _cap_verify_body(review_report.strip(), min(cap, 20_000))
+    extra = _qa_extra_blocks(cap=cap, ru_pr_diff=ru_pr_diff, en_on_main=en_on_main)
     user_input = (
         f"Пара файлов: `{ru_path}` (RU) ↔ `{en_path}` (EN)\n"
         f"Исходный язык (SOURCE): {source_lang}\n"
         f"Язык перевода (TRANSLATION): {target_lang}\n\n"
+        f"{extra}"
         f"--- SOURCE ({source_lang}) BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
         f"--- TRANSLATION ({target_lang}) BEGIN ---\n{tr_c}\n--- TRANSLATION END ---\n\n"
         f"--- REVIEW BEGIN ---\n{rev_c}\n--- REVIEW END ---\n\n"
@@ -879,6 +920,7 @@ def confirm_repair_pair(
     translation_before: str,
     translation_after: str,
     review_before: str,
+    en_on_main: str | None = None,
 ) -> str:
     """Translator model confirms whether critic fixes addressed the review."""
     instructions = load_confirm_repair_instructions(settings)
@@ -886,12 +928,14 @@ def confirm_repair_pair(
     src_c = _cap_verify_body(source_text.strip(), cap)
     before_c = _cap_verify_body(translation_before.strip(), cap)
     after_c = _cap_verify_body(translation_after.strip(), cap)
-    rev_c = _cap_verify_body(review_before.strip(), min(cap, 12_000))
+    rev_c = _cap_verify_body(review_before.strip(), min(cap, 20_000))
+    extra = _qa_extra_blocks(cap=cap, en_on_main=en_on_main)
     user_input = (
         f"Модель перевода: {translate_model}\n"
         f"Модель исправления (критик): {verify_model}\n\n"
         f"Пара: `{ru_path}` ↔ `{en_path}`\n"
         f"SOURCE ({source_lang}), целевой язык: {target_lang}\n\n"
+        f"{extra}"
         f"--- SOURCE BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
         f"--- TRANSLATION_BEFORE BEGIN ---\n{before_c}\n--- TRANSLATION_BEFORE END ---\n\n"
         f"--- TRANSLATION_AFTER BEGIN ---\n{after_c}\n--- TRANSLATION_AFTER END ---\n\n"

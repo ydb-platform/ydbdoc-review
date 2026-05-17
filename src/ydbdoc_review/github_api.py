@@ -214,6 +214,49 @@ def post_issue_comment(owner: str, repo: str, pr: int, body: str, token: str) ->
     return str(data.get("html_url", ""))
 
 
+def post_issue_comment_chunked(
+    owner: str,
+    repo: str,
+    pr: int,
+    body: str,
+    token: str,
+    *,
+    max_chars: int = 58_000,
+) -> list[str]:
+    """
+    Post one or more PR comments so long audit reports are not truncated.
+
+    Splits on ``#### ``` file headings when possible.
+    """
+    text = body.strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [post_issue_comment(owner, repo, pr, text, token)]
+
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for line in text.split("\n"):
+        line_len = len(line) + 1
+        if line.startswith("#### `") and cur and cur_len + line_len > max_chars:
+            chunks.append("\n".join(cur))
+            cur = [line]
+            cur_len = line_len
+        else:
+            cur.append(line)
+            cur_len += line_len
+    if cur:
+        chunks.append("\n".join(cur))
+
+    urls: list[str] = []
+    total = len(chunks)
+    for i, ch in enumerate(chunks, start=1):
+        prefix = f"_Часть {i}/{total} отчёта ydbdoc-review_\n\n" if total > 1 else ""
+        urls.append(post_issue_comment(owner, repo, pr, prefix + ch, token))
+    return urls
+
+
 def get_file_text(
     owner: str,
     repo: str,

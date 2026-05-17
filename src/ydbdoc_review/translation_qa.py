@@ -14,8 +14,10 @@ from ydbdoc_review.llm import (
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
 from ydbdoc_review.markdown_sections import (
+    MarkdownSection,
     align_sections_by_heading,
     join_markdown_sections,
+    section_indices_touched_by_diff,
     split_markdown_sections,
 )
 from ydbdoc_review.section_translate import full_file_repair_max_chars
@@ -43,21 +45,24 @@ def review_needs_repair(review_md: str) -> bool:
     if not review_md.strip():
         return False
     tl = review_md.lower()
-    if "существенных проблем не выявлено" in tl:
-        return False
+    if "критических проблем не выявлено" in tl and "блокер" not in tl:
+        if "существенные расхождения" not in tl:
+            return False
     if "существенные расхождения" in tl:
         return True
     if "соответствует с оговорками" in tl:
         return True
-    m = re.search(
-        r"###\s*найденные проблемы\s*\n([\s\S]*?)(?:\n###|\Z)",
-        review_md,
-        re.IGNORECASE,
-    )
-    if m:
+    for heading in (
+        r"###\s*критические проблемы",
+        r"###\s*найденные проблемы",
+        r"###\s*регрессии",
+    ):
+        m = re.search(heading + r"\s*\n([\s\S]*?)(?:\n###|\Z)", review_md, re.IGNORECASE)
+        if not m:
+            continue
         body = m.group(1).strip().lower()
-        if "не выявлено" in body and body.count("-") < 2:
-            return False
+        if "не выявлено" in body and not re.search(r"^\s*\d+\.", m.group(1), re.MULTILINE):
+            continue
         if re.search(r"^[\s]*[-*•]\s+\S", m.group(1), re.MULTILINE):
             return True
         if re.search(r"^\d+\.\s+\S", m.group(1), re.MULTILINE):
@@ -71,6 +76,7 @@ def _repair_should_apply(
     before: str,
     after: str,
     target_lang: str,
+    en_on_main: str | None = None,
 ) -> tuple[bool, str | None]:
     if not after.strip():
         return False, "пустой ответ модели-исправителя"
@@ -78,7 +84,9 @@ def _repair_should_apply(
         return False, "исправленный текст слишком короткий относительно оригинала"
     if len(after) < int(len(before) * 0.75) and len(source_text) > 4000:
         return False, "исправленный текст короче предыдущего перевода >25%"
-    issues = translation_quality_issues(source_text, after, target_lang=target_lang)
+    issues = translation_quality_issues(
+        source_text, after, target_lang=target_lang, en_main=en_on_main
+    )
     hard = translation_quality_gate_codes()
     hit = hard.intersection(issues)
     if hit:
@@ -108,6 +116,9 @@ def run_pair_qa_repair(
     source_lang: str,
     target_lang: str,
     repair_enabled: bool,
+    source_pr_number: int | None = None,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
 ) -> tuple[str | None, PairQaOutcome]:
     if _section_qa_use(source_text):
         return _run_pair_qa_repair_by_sections(
@@ -120,6 +131,9 @@ def run_pair_qa_repair(
             source_lang=source_lang,
             target_lang=target_lang,
             repair_enabled=repair_enabled,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
         )
     return _run_pair_qa_repair_whole_file(
         settings,
@@ -131,6 +145,9 @@ def run_pair_qa_repair(
         source_lang=source_lang,
         target_lang=target_lang,
         repair_enabled=repair_enabled,
+        source_pr_number=source_pr_number,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
     )
 
 
@@ -145,40 +162,26 @@ def _run_pair_qa_repair_by_sections(
     source_lang: str,
     target_lang: str,
     repair_enabled: bool,
+    source_pr_number: int | None = None,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
 ) -> tuple[str | None, PairQaOutcome]:
-    src_secs = split_markdown_sections(source_text)
-    tgt_secs = split_markdown_sections(translated_text)
-    aligned = align_sections_by_heading(src_secs, tgt_secs)
-
-    review_parts: list[str] = []
-    to_repair: list[int] = []
-    section_reviews: dict[int, str] = {}
-
-    for src_sec in src_secs:
-        tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
-        tgt_body = tgt_sec.content if tgt_sec else ""
-        try:
-            rev = verify_translation_pair(
-                settings,
-                translate_model=settings.model_translate,
-                verify_model=settings.model_translation_verify,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                ru_path=ru_path,
-                en_path=en_path,
-                source_text=src_sec.content,
-                translated_text=tgt_body,
-            )
-        except Exception as exc:
-            rev = f"_Ошибка ревью раздела:_ `{exc}`"
-        section_reviews[src_sec.index] = rev
-        title = src_sec.heading or "(преамбула)"
-        review_parts.append(f"##### Раздел: {title}\n\n{rev.strip()}\n")
-        if review_needs_repair(rev):
-            to_repair.append(src_sec.index)
-
-    review_md = "\n".join(review_parts).strip()
-    any_needs = bool(to_repair)
+    """One file-level audit report; repairs applied per ``##`` section."""
+    review_md = verify_translation_pair(
+        settings,
+        translate_model=settings.model_translate,
+        verify_model=settings.model_translation_verify,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        ru_path=ru_path,
+        en_path=en_path,
+        source_text=source_text,
+        translated_text=translated_text,
+        source_pr_number=source_pr_number,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
+    )
+    any_needs = review_needs_repair(review_md)
 
     if not any_needs or not repair_enabled:
         return None, PairQaOutcome(
@@ -193,7 +196,14 @@ def _run_pair_qa_repair_by_sections(
             repair_error=None,
         )
 
-    out_secs: list = []
+    src_secs = split_markdown_sections(source_text)
+    tgt_secs = split_markdown_sections(translated_text)
+    aligned = align_sections_by_heading(src_secs, tgt_secs)
+    to_repair = section_indices_touched_by_diff(ru_pr_diff or "", src_secs)
+    if not to_repair:
+        to_repair = {s.index for s in src_secs}
+
+    out_secs: list[MarkdownSection] = []
     repaired_any = False
     confirm_parts: list[str] = []
     last_error: str | None = None
@@ -202,13 +212,9 @@ def _run_pair_qa_repair_by_sections(
         tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
         tgt_body = tgt_sec.content if tgt_sec else ""
         if src_sec.index not in to_repair:
-            if tgt_sec:
-                out_secs.append(tgt_sec)
-            else:
-                out_secs.append(src_sec)
+            out_secs.append(tgt_sec if tgt_sec else src_sec)
             continue
 
-        sec_review = section_reviews[src_sec.index]
         try:
             fixed_raw = fix_translation_pair(
                 settings,
@@ -219,12 +225,13 @@ def _run_pair_qa_repair_by_sections(
                 en_path=en_path,
                 source_text=src_sec.content,
                 translated_text=tgt_body,
-                review_report=sec_review,
+                review_report=review_md,
+                ru_pr_diff=ru_pr_diff,
+                en_on_main=en_on_main,
             )
         except Exception as exc:
             last_error = str(exc)
-            if tgt_sec:
-                out_secs.append(tgt_sec)
+            out_secs.append(tgt_sec if tgt_sec else src_sec)
             continue
 
         fixed = fixed_raw
@@ -236,16 +243,14 @@ def _run_pair_qa_repair_by_sections(
             before=tgt_body,
             after=fixed,
             target_lang=target_lang,
+            en_on_main=en_on_main,
         )
         if not ok:
-            if tgt_sec:
-                out_secs.append(tgt_sec)
+            out_secs.append(tgt_sec if tgt_sec else src_sec)
             confirm_parts.append(
                 f"##### {src_sec.heading or 'преамбула'}\n\n_Исправление не применено:_ {skip}\n"
             )
             continue
-
-        from ydbdoc_review.markdown_sections import MarkdownSection
 
         out_secs.append(
             MarkdownSection(
@@ -269,7 +274,8 @@ def _run_pair_qa_repair_by_sections(
                 source_text=src_sec.content,
                 translation_before=tgt_body,
                 translation_after=fixed,
-                review_before=sec_review,
+                review_before=review_md,
+                en_on_main=en_on_main,
             )
             confirm_parts.append(
                 f"##### {src_sec.heading or 'преамбула'}\n\n{conf.strip()}\n"
@@ -317,6 +323,9 @@ def _run_pair_qa_repair_whole_file(
     source_lang: str,
     target_lang: str,
     repair_enabled: bool,
+    source_pr_number: int | None = None,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
 ) -> tuple[str | None, PairQaOutcome]:
     review_md = verify_translation_pair(
         settings,
@@ -328,6 +337,9 @@ def _run_pair_qa_repair_whole_file(
         en_path=en_path,
         source_text=source_text,
         translated_text=translated_text,
+        source_pr_number=source_pr_number,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
     )
     needs = review_needs_repair(review_md)
     if not needs or not repair_enabled:
@@ -370,6 +382,8 @@ def _run_pair_qa_repair_whole_file(
             source_text=source_text,
             translated_text=translated_text,
             review_report=review_md,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
         )
     except Exception as exc:
         return None, PairQaOutcome(
@@ -393,6 +407,7 @@ def _run_pair_qa_repair_whole_file(
         before=translated_text,
         after=fixed,
         target_lang=target_lang,
+        en_on_main=en_on_main,
     )
     if not ok:
         try:
@@ -408,6 +423,7 @@ def _run_pair_qa_repair_whole_file(
                 translation_before=translated_text,
                 translation_after=translated_text,
                 review_before=review_md,
+                en_on_main=en_on_main,
             )
         except Exception as exc:
             confirmation = f"_Ошибка подтверждения:_ `{exc}`"
@@ -436,6 +452,7 @@ def _run_pair_qa_repair_whole_file(
             translation_before=translated_text,
             translation_after=fixed,
             review_before=review_md,
+            en_on_main=en_on_main,
         )
     except Exception as exc:
         confirmation = f"_Ошибка подтверждения переводчиком:_ `{exc}`"
@@ -455,9 +472,9 @@ def _run_pair_qa_repair_whole_file(
 
 def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
     lines = [
-        f"#### `{outcome.en_path}` ↔ `{outcome.ru_path}`",
+        f"## `{outcome.en_path}`",
         "",
-        "##### Ревью (критик, до исправления)",
+        f"_RU:_ `{outcome.ru_path}`",
         "",
         outcome.review_md.strip(),
         "",
@@ -512,8 +529,3 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
     return "\n".join(lines)
 
 
-def qa_comment_budget() -> int:
-    raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_TOTAL_CHARS", "").strip()
-    if raw.isdigit():
-        return max(8000, min(int(raw), 90_000))
-    return 24_000
