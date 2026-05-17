@@ -24,7 +24,6 @@ from ydbdoc_review.llm import (
 )
 from ydbdoc_review.translation_qa import (
     format_pair_qa_markdown,
-    qa_comment_budget,
     run_pair_qa_repair,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
