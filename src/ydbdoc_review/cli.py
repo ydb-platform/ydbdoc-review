@@ -1034,7 +1034,10 @@ def run_cmd(
                 continue
             click.echo(f"  (mode: {mode})")
             q_issues = translation_quality_issues(
-                ru_source, out_md, target_lang="English"
+                ru_source,
+                out_md,
+                target_lang="English",
+                source_diff=ru_diff,
             )
             if q_issues:
                 warnings.append(
@@ -1246,25 +1249,29 @@ def run_cmd(
     publish_paths = list(dict.fromkeys(generated + mirrored_en))
 
     if workdir and generated and not dry_run and not blocked_only:
-        gate_pairs: list[tuple[str, str, str, str | None]] = []
+        gate_pairs: list[tuple[str, str, str, str | None, str | None]] = []
         for gen_p in generated:
             if not gen_p.endswith(".md"):
                 continue
             if gen_p in generated_en_to_ru:
                 ru_p = generated_en_to_ru[gen_p]
+                en_p = gen_p
                 src = git_local.read_text(workdir, ru_p) or ""
-                trans = git_local.read_text(workdir, gen_p) or ""
+                trans = git_local.read_text(workdir, en_p) or ""
                 en_main = (
-                    git_local.read_text_at_ref(workdir, base_ref_local, gen_p)
+                    git_local.read_text_at_ref(workdir, base_ref_local, en_p)
                     if base_ref_local
                     else None
                 )
-                gate_pairs.append((gen_p, src, trans, en_main))
+                ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))
+                gate_pairs.append((gen_p, src, trans, en_main, ru_diff))
             elif gen_p in generated_ru_to_en:
+                ru_p = gen_p
                 en_p = generated_ru_to_en[gen_p]
                 src = git_local.read_text(workdir, en_p) or ""
                 trans = git_local.read_text(workdir, gen_p) or ""
-                gate_pairs.append((gen_p, src, trans, None))
+                _ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
+                gate_pairs.append((gen_p, src, trans, None, en_diff))
         gate_failures = collect_quality_gate_failures(gate_pairs)
         if gate_failures:
             msg = (

@@ -78,6 +78,7 @@ def _repair_should_apply(
     after: str,
     target_lang: str,
     en_on_main: str | None = None,
+    source_diff: str | None = None,
 ) -> tuple[bool, str | None]:
     if not after.strip():
         return False, "пустой ответ модели-исправителя"
@@ -86,7 +87,11 @@ def _repair_should_apply(
     if len(after) < int(len(before) * 0.75) and len(source_text) > 4000:
         return False, "исправленный текст короче предыдущего перевода >25%"
     issues = translation_quality_issues(
-        source_text, after, target_lang=target_lang, en_main=en_on_main
+        source_text,
+        after,
+        target_lang=target_lang,
+        en_main=en_on_main,
+        source_diff=source_diff,
     )
     hard = translation_quality_gate_codes()
     hit = hard.intersection(issues)
@@ -405,12 +410,16 @@ def _run_pair_qa_repair_whole_file(
         fixed = restore_markdown_links_from_ru(source_text, fixed)
         fixed = apply_deterministic_cli_fixes(fixed, en_main=en_on_main)
 
+    diff_for_gate = (
+        ru_pr_diff if target_lang.strip().lower() in ("english", "en") else None
+    )
     ok, skip = _repair_should_apply(
         source_text=source_text,
         before=translated_text,
         after=fixed,
         target_lang=target_lang,
         en_on_main=en_on_main,
+        source_diff=diff_for_gate,
     )
     if not ok:
         try:

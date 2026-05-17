@@ -23,6 +23,52 @@ _LIST_TABS_RE = re.compile(r"\{%\s*list\s+tabs", re.IGNORECASE)
 _FENCE_OPEN_RE = re.compile(r"^```(\w*)", re.MULTILINE)
 
 
+def _count_list_tabs(text: str) -> int:
+    return len(_LIST_TABS_RE.findall(text))
+
+
+def tabs_missing_vs_source(
+    source: str,
+    translated: str,
+    *,
+    source_diff: str | None = None,
+) -> bool:
+    """
+    True when translated text is missing ``{% list tabs %}`` blocks vs *source*.
+
+    With *source_diff*, only sections touched by the PR diff are checked. Untouched
+    sections may keep EN from main even when RU gained tabs elsewhere (minimal PR scope).
+    """
+    if _count_list_tabs(source) == 0:
+        return False
+    if _count_list_tabs(translated) >= _count_list_tabs(source):
+        return False
+    if not source_diff or not source_diff.strip():
+        return True
+    from ydbdoc_review.markdown_sections import (
+        align_sections_by_heading,
+        section_indices_touched_by_diff,
+        split_markdown_sections,
+    )
+
+    ru_sections = split_markdown_sections(source)
+    en_sections = split_markdown_sections(translated)
+    touched = section_indices_touched_by_diff(source_diff, ru_sections)
+    if not touched or len(touched) >= len(ru_sections):
+        return True
+    aligned = align_sections_by_heading(ru_sections, en_sections)
+    required = 0
+    actual = 0
+    for ru_sec in ru_sections:
+        if ru_sec.index not in touched:
+            continue
+        required += _count_list_tabs(ru_sec.content)
+        en_sec = aligned[ru_sec.index] if ru_sec.index < len(aligned) else None
+        if en_sec is not None:
+            actual += _count_list_tabs(en_sec.content)
+    return required > 0 and actual < required
+
+
 def en_contains_cyrillic(text: str) -> bool:
     return bool(_CYRILLIC_RE.search(text))
 
@@ -142,6 +188,7 @@ def translation_quality_issues(
     *,
     target_lang: str,
     en_main: str | None = None,
+    source_diff: str | None = None,
 ) -> list[str]:
     """Short issue codes; empty list means heuristics are satisfied."""
     issues: list[str] = []
@@ -151,9 +198,7 @@ def translation_quality_issues(
         issues.append("unbalanced_fences")
     if len(translated) < int(len(source) * 0.62):
         issues.append("too_short")
-    src_tabs = len(_LIST_TABS_RE.findall(source))
-    out_tabs = len(_LIST_TABS_RE.findall(translated))
-    if src_tabs > 0 and out_tabs < src_tabs:
+    if tabs_missing_vs_source(source, translated, source_diff=source_diff):
         issues.append("missing_tabs")
     if target_lang.strip().lower() == "english" and en_contains_cyrillic(translated):
         issues.append("cyrillic_leak")
@@ -181,18 +226,22 @@ def quality_gate_enabled() -> bool:
 
 
 def collect_quality_gate_failures(
-    pairs: list[tuple[str, str, str, str | None]],
+    pairs: list[tuple[str, str, str, str | None, str | None]],
 ) -> list[str]:
     """
-    *pairs*: ``(path, source_text, translated_text, en_on_main_or_none)``.
+    *pairs*: ``(path, source_text, translated_text, en_on_main_or_none, source_diff_or_none)``.
     """
     if not quality_gate_enabled():
         return []
     out: list[str] = []
-    for path, source, translated, en_main in pairs:
+    for path, source, translated, en_main, source_diff in pairs:
         lang = "English" if "/en/" in path.replace("\\", "/") else "Russian"
         issues = translation_quality_issues(
-            source, translated, target_lang=lang, en_main=en_main
+            source,
+            translated,
+            target_lang=lang,
+            en_main=en_main,
+            source_diff=source_diff,
         )
         hit = sorted(translation_quality_gate_codes().intersection(issues))
         if hit:
