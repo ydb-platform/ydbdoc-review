@@ -921,18 +921,19 @@ def confirm_repair_pair(
     translation_after: str,
     review_before: str,
     en_on_main: str | None = None,
+    ru_pr_diff: str | None = None,
 ) -> str:
-    """Translator model confirms whether critic fixes addressed the review."""
+    """Translator model: final check and merge verdict (ПРИНЯТЬ / ОТКЛОНИТЬ)."""
     instructions = load_confirm_repair_instructions(settings)
     cap = _translation_self_check_input_cap()
     src_c = _cap_verify_body(source_text.strip(), cap)
     before_c = _cap_verify_body(translation_before.strip(), cap)
     after_c = _cap_verify_body(translation_after.strip(), cap)
     rev_c = _cap_verify_body(review_before.strip(), min(cap, 20_000))
-    extra = _qa_extra_blocks(cap=cap, en_on_main=en_on_main)
+    extra = _qa_extra_blocks(cap=cap, ru_pr_diff=ru_pr_diff, en_on_main=en_on_main)
     user_input = (
         f"Модель перевода: {translate_model}\n"
-        f"Модель исправления (критик): {verify_model}\n\n"
+        f"Модель-критик: {verify_model}\n\n"
         f"Пара: `{ru_path}` ↔ `{en_path}`\n"
         f"SOURCE ({source_lang}), целевой язык: {target_lang}\n\n"
         f"{extra}"

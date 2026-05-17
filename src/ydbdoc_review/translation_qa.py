@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ydbdoc_review.config import Settings
 from ydbdoc_review.llm import (
@@ -41,38 +41,43 @@ class PairQaOutcome:
     repair_error: str | None
 
 
-def file_merge_verdict(review_md: str, confirmation_md: str | None = None) -> str:
-    """
-    Per-file verdict for the translation PR: ``merge``, ``warn``, or ``reject``.
-
-    The translation PR is all-or-nothing: one ``reject`` blocks the whole PR commit.
-    """
-    conf = (confirmation_md or "").lower()
-    if "не готово" in conf or "остались блокеры" in conf:
-        return "reject"
-    rev = review_md.lower()
+def _parse_translator_merge_line(text: str) -> str | None:
+    """Extract merge/reject/warn from translator «Вердикт для мержа» section."""
     verdict_m = re.search(
         r"###\s*вердикт[^\n]*\n([^\n#]+)",
-        review_md,
+        text,
         re.IGNORECASE,
     )
-    if verdict_m and "отклонить" in verdict_m.group(1).lower():
+    if not verdict_m:
+        return None
+    line = verdict_m.group(1).lower()
+    if "отклонить" in line:
         return "reject"
-    crit_m = re.search(
-        r"###\s*(?:критические проблемы|блокеры)[^\n]*\n([\s\S]*?)(?:\n###|\Z)",
-        review_md,
-        re.IGNORECASE,
-    )
-    if crit_m:
-        body = crit_m.group(1).strip().lower()
-        if "блокеров нет" not in body and "не выявлено" not in body:
-            if re.search(r"^\s*[-*•\d]", crit_m.group(1), re.MULTILINE):
-                return "reject"
-    if "есть существенные расхождения" in rev:
-        return "reject"
-    if "оговорк" in rev and "принять" in rev:
+    if "оговорк" in line:
         return "warn"
-    if "принять" in rev and "отклонить" not in rev:
+    if "принять" in line:
+        return "merge"
+    return None
+
+
+def file_merge_verdict(review_md: str, confirmation_md: str | None = None) -> str:
+    """
+    Per-file verdict from **translator** confirmation only.
+
+    Critic *review_md* is not used for merge/reject — only for ``<details>`` in comments.
+    """
+    _ = review_md
+    if not confirmation_md or not confirmation_md.strip():
+        return "warn"
+    parsed = _parse_translator_merge_line(confirmation_md)
+    if parsed:
+        return parsed
+    conf = confirmation_md.lower()
+    if "не готово" in conf or "остались блокеры" in conf:
+        return "reject"
+    if "готово к мержу" in conf or "можно мержить" in conf:
+        return "merge"
+    if "блокеров нет" in conf:
         return "merge"
     return "warn"
 
@@ -92,11 +97,15 @@ def format_translation_pr_summary(
         v = file_merge_verdict(o.review_md, o.confirmation_md)
         by_verdict[v].append(o.en_path)
     if by_verdict["reject"]:
-        lines.append("**ОТКЛОНИТЬ** — есть блокеры. Translation PR **нельзя мержить** целиком.")
+        lines.append(
+            "**ОТКЛОНИТЬ** (вердикт модели-переводчика) — translation PR **нельзя мержить**."
+        )
     elif by_verdict["warn"]:
-        lines.append("**ПРИНЯТЬ С ОГОВОРКАМИ** — критических блокеров нет, есть замечания.")
+        lines.append(
+            "**ПРИНЯТЬ С ОГОВОРКАМИ** (переводчик) — можно мержить, есть замечания."
+        )
     else:
-        lines.append("**ПРИНЯТЬ** — можно мержить translation PR.")
+        lines.append("**ПРИНЯТЬ** (переводчик) — можно мержить translation PR.")
     lines.append("")
     for label, key in (("Принять", "merge"), ("Оговорки", "warn"), ("Отклонить", "reject")):
         if by_verdict[key]:
@@ -106,10 +115,21 @@ def format_translation_pr_summary(
         v = file_merge_verdict(o.review_md, o.confirmation_md)
         tag = {"merge": "OK", "warn": "⚠", "reject": "✗"}[v]
         lines.append(f"- {tag} `{o.en_path}`")
-        summary = _one_line_summary(o.review_md)
+        summary = _translator_one_line(o.confirmation_md)
         if summary:
             lines.append(f"  {summary}")
     return "\n".join(lines).strip()
+
+
+def _translator_one_line(confirmation_md: str | None) -> str:
+    if not confirmation_md:
+        return "Вердикт переводчика не получен."
+    parsed = _parse_translator_merge_line(confirmation_md)
+    if parsed:
+        labels = {"merge": "ПРИНЯТЬ", "warn": "ПРИНЯТЬ С ОГОВОРКАМИ", "reject": "ОТКЛОНИТЬ"}
+        return f"Переводчик: **{labels[parsed]}**."
+    body = " ".join(confirmation_md.split())
+    return body[:220] + ("…" if len(body) > 220 else "")
 
 
 def _one_line_summary(review_md: str) -> str:
@@ -131,6 +151,40 @@ def _one_line_summary(review_md: str) -> str:
 
 def pr_merge_blocked(outcomes: list[PairQaOutcome]) -> bool:
     return any(file_merge_verdict(o.review_md, o.confirmation_md) == "reject" for o in outcomes)
+
+
+def _translator_final_verdict(
+    settings: Settings,
+    *,
+    ru_path: str,
+    en_path: str,
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    translation_before: str,
+    translation_after: str,
+    review_md: str,
+    en_on_main: str | None,
+    ru_pr_diff: str | None,
+) -> str:
+    try:
+        return confirm_repair_pair(
+            settings,
+            translate_model=settings.model_translate,
+            verify_model=settings.model_translation_verify,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translation_before=translation_before,
+            translation_after=translation_after,
+            review_before=review_md,
+            en_on_main=en_on_main,
+            ru_pr_diff=ru_pr_diff,
+        ).strip()
+    except Exception as exc:
+        return f"_Ошибка вердикта переводчика:_ `{exc}`"
 
 
 def review_needs_repair(review_md: str) -> bool:
@@ -219,7 +273,7 @@ def run_pair_qa_repair(
     en_on_main: str | None = None,
 ) -> tuple[str | None, PairQaOutcome]:
     if _section_qa_use(source_text):
-        return _run_pair_qa_repair_by_sections(
+        new_text, outcome = _run_pair_qa_repair_by_sections(
             settings,
             ru_path=ru_path,
             en_path=en_path,
@@ -233,20 +287,36 @@ def run_pair_qa_repair(
             ru_pr_diff=ru_pr_diff,
             en_on_main=en_on_main,
         )
-    return _run_pair_qa_repair_whole_file(
+    else:
+        new_text, outcome = _run_pair_qa_repair_whole_file(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            repair_enabled=repair_enabled,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+        )
+    after = new_text if new_text is not None else translated_text
+    conf = _translator_final_verdict(
         settings,
         ru_path=ru_path,
         en_path=en_path,
-        target_path=target_path,
-        source_text=source_text,
-        translated_text=translated_text,
         source_lang=source_lang,
         target_lang=target_lang,
-        repair_enabled=repair_enabled,
-        source_pr_number=source_pr_number,
-        ru_pr_diff=ru_pr_diff,
+        source_text=source_text,
+        translation_before=translated_text,
+        translation_after=after,
+        review_md=outcome.review_md,
         en_on_main=en_on_main,
+        ru_pr_diff=ru_pr_diff,
     )
+    return new_text, replace(outcome, confirmation_md=conf)
 
 
 def _run_pair_qa_repair_by_sections(
@@ -304,7 +374,6 @@ def _run_pair_qa_repair_by_sections(
     out_secs: list[MarkdownSection] = []
     repaired_any = False
     last_error: str | None = None
-    merged_before = translated_text
 
     for src_sec in src_secs:
         tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
@@ -360,25 +429,6 @@ def _run_pair_qa_repair_by_sections(
         repaired_any = True
 
     merged = join_markdown_sections(out_secs)
-    confirmation_md: str | None = None
-    if repaired_any:
-        try:
-            confirmation_md = confirm_repair_pair(
-                settings,
-                translate_model=settings.model_translate,
-                verify_model=settings.model_translation_verify,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                ru_path=ru_path,
-                en_path=en_path,
-                source_text=source_text,
-                translation_before=merged_before,
-                translation_after=merged,
-                review_before=review_md,
-                en_on_main=en_on_main,
-            ).strip()
-        except Exception as exc:
-            confirmation_md = f"_Ошибка подтверждения:_ `{exc}`"
 
     if not repaired_any:
         return None, PairQaOutcome(
@@ -389,7 +439,7 @@ def _run_pair_qa_repair_by_sections(
             repair_attempted=True,
             repair_applied=False,
             repair_skip_reason="ни один раздел не прошёл проверку качества",
-            confirmation_md=confirmation_md,
+            confirmation_md=None,
             repair_error=last_error,
         )
 
@@ -401,7 +451,7 @@ def _run_pair_qa_repair_by_sections(
         repair_attempted=True,
         repair_applied=True,
         repair_skip_reason=None,
-        confirmation_md=confirmation_md,
+        confirmation_md=None,
         repair_error=last_error,
     )
 
@@ -509,23 +559,6 @@ def _run_pair_qa_repair_whole_file(
         source_diff=diff_for_gate,
     )
     if not ok:
-        try:
-            confirmation = confirm_repair_pair(
-                settings,
-                translate_model=settings.model_translate,
-                verify_model=settings.model_translation_verify,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                ru_path=ru_path,
-                en_path=en_path,
-                source_text=source_text,
-                translation_before=translated_text,
-                translation_after=translated_text,
-                review_before=review_md,
-                en_on_main=en_on_main,
-            )
-        except Exception as exc:
-            confirmation = f"_Ошибка подтверждения:_ `{exc}`"
         return None, PairQaOutcome(
             ru_path=ru_path,
             en_path=en_path,
@@ -534,27 +567,9 @@ def _run_pair_qa_repair_whole_file(
             repair_attempted=True,
             repair_applied=False,
             repair_skip_reason=skip,
-            confirmation_md=confirmation,
+            confirmation_md=None,
             repair_error=None,
         )
-
-    try:
-        confirmation = confirm_repair_pair(
-            settings,
-            translate_model=settings.model_translate,
-            verify_model=settings.model_translation_verify,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            ru_path=ru_path,
-            en_path=en_path,
-            source_text=source_text,
-            translation_before=translated_text,
-            translation_after=fixed,
-            review_before=review_md,
-            en_on_main=en_on_main,
-        )
-    except Exception as exc:
-        confirmation = f"_Ошибка подтверждения переводчиком:_ `{exc}`"
 
     return fixed, PairQaOutcome(
         ru_path=ru_path,
@@ -564,19 +579,19 @@ def _run_pair_qa_repair_whole_file(
         repair_attempted=True,
         repair_applied=True,
         repair_skip_reason=None,
-        confirmation_md=confirmation,
+        confirmation_md=None,
         repair_error=None,
     )
 
 
 def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
-    """Compact per-file block; full critic text under ``<details>``."""
+    """Compact per-file block; critic report under ``<details>``."""
     verdict = file_merge_verdict(outcome.review_md, outcome.confirmation_md)
     tag = {"merge": "ПРИНЯТЬ", "warn": "ОГОВОРКИ", "reject": "ОТКЛОНИТЬ"}[verdict]
     lines = [
-        f"### `{outcome.en_path}` — **{tag}**",
+        f"### `{outcome.en_path}` — **{tag}** _(переводчик)_",
         "",
-        _one_line_summary(outcome.review_md) or "_См. детали ниже._",
+        _translator_one_line(outcome.confirmation_md),
         "",
     ]
     if outcome.repair_error:
@@ -587,21 +602,26 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
         lines.append(
             f"_Repair не применён:_ {outcome.repair_skip_reason or 'quality check'}."
         )
-    if outcome.confirmation_md:
-        conf_one = " ".join(outcome.confirmation_md.split())
-        if len(conf_one) > 200:
-            conf_one = conf_one[:197] + "…"
-        lines.append(f"_Подтверждение:_ {conf_one}")
     lines.extend(
         [
             "",
-            "<details><summary>Полный отчёт критика</summary>",
+            "<details><summary>Замечания критика</summary>",
             "",
             outcome.review_md.strip(),
             "",
             "</details>",
         ]
     )
+    if outcome.confirmation_md:
+        lines.extend(
+            [
+                "<details><summary>Полный ответ переводчика</summary>",
+                "",
+                outcome.confirmation_md.strip(),
+                "",
+                "</details>",
+            ]
+        )
     return "\n".join(lines)
 
 

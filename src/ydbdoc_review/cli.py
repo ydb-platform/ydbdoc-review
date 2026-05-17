@@ -1242,7 +1242,7 @@ def run_cmd(
             )
             if qa_outcomes and pr_merge_blocked(qa_outcomes):
                 click.echo(
-                    "Translation QA: ОТКЛОНИТЬ — есть блокеры; коммит не будет создан.",
+                    "Translation QA: переводчик — ОТКЛОНИТЬ; коммит не будет создан.",
                     err=True,
                 )
         except Exception as exc:
@@ -1259,7 +1259,7 @@ def run_cmd(
     ):
         raise SystemExit(
             "## ydbdoc-review — translation PR отклонён\n\n"
-            "В отчёте QA есть **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
+            "Модель-переводчик вынесла **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
             "Translation PR нельзя мержить частично — исправьте и перезапустите "
             "`doc_translate`, либо отклоните весь translation PR.\n\n"
             + (translation_qa_section or "")
