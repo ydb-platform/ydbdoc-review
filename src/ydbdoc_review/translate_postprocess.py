@@ -50,6 +50,71 @@ def chunk_lost_yaml_fence(source_chunk: str, translated_chunk: str) -> bool:
 
 
 _CONFIG_DIR_NO_SPACE_RE = re.compile(r"--config-dir/[^\s]")
+_TOKEN_FILENAME_RE = r"(?:token-file|auth_token)"
+_REDIRECT_TOKEN_RE = re.compile(rf">\s*({_TOKEN_FILENAME_RE})\b")
+_READ_TOKEN_RE = re.compile(rf"(?<=[-\s])f\s+({_TOKEN_FILENAME_RE})\b")
+_TOKEN_FILE_ARG_RE = re.compile(rf"--token-file\s+({_TOKEN_FILENAME_RE})\b")
+
+
+def _token_filenames_used(text: str) -> set[str]:
+    names: set[str] = set()
+    for pat in (_REDIRECT_TOKEN_RE, _READ_TOKEN_RE, _TOKEN_FILE_ARG_RE):
+        names.update(pat.findall(text))
+    return names
+
+
+def _pick_canonical_token_filename(
+    translated: str,
+    *,
+    en_main: str | None = None,
+) -> str:
+    main_names = _token_filenames_used(en_main) if en_main else set()
+    if len(main_names) == 1:
+        return next(iter(main_names))
+    cur = _token_filenames_used(translated)
+    if "auth_token" in cur:
+        return "auth_token"
+    if "token-file" in cur:
+        return "token-file"
+    return "auth_token"
+
+
+def fix_config_dir_spacing(text: str) -> str:
+    """``--config-dir/path`` → ``--config-dir /path``."""
+    return re.sub(r"--config-dir/(\S+)", r"--config-dir /\1", text)
+
+
+def fix_token_file_inconsistency(
+    text: str,
+    *,
+    en_main: str | None = None,
+    canonical: str | None = None,
+) -> str:
+    """Unify redirect / ``-f`` / ``--token-file`` operand to one basename."""
+    names = _token_filenames_used(text)
+    if len(names) <= 1:
+        return text
+    pick = canonical or _pick_canonical_token_filename(text, en_main=en_main)
+    other = "auth_token" if pick == "token-file" else "token-file"
+    out = re.sub(rf">\s*{re.escape(other)}\b", f"> {pick}", text)
+    out = re.sub(rf"(?<=[-\s])f\s+{re.escape(other)}\b", f"f {pick}", out)
+    out = re.sub(
+        rf"--token-file\s+{re.escape(other)}\b",
+        f"--token-file {pick}",
+        out,
+    )
+    return out
+
+
+def apply_deterministic_cli_fixes(
+    text: str,
+    *,
+    en_main: str | None = None,
+) -> str:
+    """Fix known CLI copy-paste regressions without calling an LLM."""
+    out = fix_config_dir_spacing(text)
+    out = fix_token_file_inconsistency(out, en_main=en_main)
+    return out
 
 
 def cli_critical_issues(
@@ -64,11 +129,8 @@ def cli_critical_issues(
     if en_main and "--config-dir /" in en_main and _CONFIG_DIR_NO_SPACE_RE.search(translated):
         if "config_dir_missing_space" not in issues:
             issues.append("config_dir_missing_space")
-    if "token-file" in translated and re.search(
-        r"[-\s]f\s+auth_token\b|--token-file\s+auth_token\b", translated
-    ):
-        if re.search(r">\s*token-file\b", translated):
-            issues.append("token_file_inconsistent")
+    if len(_token_filenames_used(translated)) > 1:
+        issues.append("token_file_inconsistent")
     if translated.rstrip().endswith("/opt") or translated.rstrip().endswith("/opt/"):
         issues.append("truncated_file")
     return issues

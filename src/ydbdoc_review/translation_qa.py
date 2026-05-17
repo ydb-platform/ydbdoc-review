@@ -22,6 +22,7 @@ from ydbdoc_review.markdown_sections import (
 )
 from ydbdoc_review.section_translate import full_file_repair_max_chars
 from ydbdoc_review.translate_postprocess import (
+    apply_deterministic_cli_fixes,
     translation_quality_gate_codes,
     translation_quality_issues,
 )
@@ -237,6 +238,7 @@ def _run_pair_qa_repair_by_sections(
         fixed = fixed_raw
         if target_lang.strip().lower() in ("english", "en"):
             fixed = restore_markdown_links_from_ru(src_sec.content, fixed)
+            fixed = apply_deterministic_cli_fixes(fixed, en_main=en_on_main)
 
         ok, skip = _repair_should_apply(
             source_text=src_sec.content,
@@ -401,6 +403,7 @@ def _run_pair_qa_repair_whole_file(
     fixed = fixed_raw
     if target_lang.strip().lower() in ("english", "en"):
         fixed = restore_markdown_links_from_ru(source_text, fixed)
+        fixed = apply_deterministic_cli_fixes(fixed, en_main=en_on_main)
 
     ok, skip = _repair_should_apply(
         source_text=source_text,

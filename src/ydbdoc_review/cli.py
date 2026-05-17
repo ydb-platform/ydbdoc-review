@@ -35,6 +35,7 @@ from ydbdoc_review.paths import (
     truncate,
 )
 from ydbdoc_review.translate_postprocess import (
+    apply_deterministic_cli_fixes,
     collect_quality_gate_failures,
     translation_quality_issues,
 )
@@ -474,6 +475,30 @@ def _run_translation_qa_and_repair(
             f"- QA: критик обновил {repaired_count} файл(ов) на диске перед коммитом."
         )
     return text, repaired_count
+
+
+def _apply_deterministic_cli_fixes_to_generated(
+    workdir: str,
+    *,
+    generated: list[str],
+    generated_en_to_ru: dict[str, str],
+    base_ref_local: str | None,
+) -> int:
+    """Normalize ``--config-dir`` spacing and token filenames on EN outputs."""
+    fixed = 0
+    for en_p in generated:
+        if not en_p.endswith(".md") or en_p not in generated_en_to_ru:
+            continue
+        en_main: str | None = None
+        if base_ref_local:
+            en_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+        before = git_local.read_text(workdir, en_p) or ""
+        after = apply_deterministic_cli_fixes(before, en_main=en_main)
+        if after != before:
+            git_local.write_text(workdir, en_p, after)
+            fixed += 1
+            click.echo(f"  CLI auto-fix: `{en_p}`")
+    return fixed
 
 
 def _build_prerequisites_comment(
@@ -1206,10 +1231,22 @@ def run_cmd(
             translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
             click.echo(f"Warning: translation QA failed: {exc}", err=True)
 
+    if workdir and generated and not dry_run and not blocked_only:
+        n_cli = _apply_deterministic_cli_fixes_to_generated(
+            workdir,
+            generated=generated,
+            generated_en_to_ru=generated_en_to_ru,
+            base_ref_local=base_ref_local,
+        )
+        if n_cli:
+            warnings.append(
+                f"- CLI: детерминированные правки в {n_cli} EN-файл(ах) перед quality gate."
+            )
+
     publish_paths = list(dict.fromkeys(generated + mirrored_en))
 
     if workdir and generated and not dry_run and not blocked_only:
-        gate_pairs: list[tuple[str, str, str]] = []
+        gate_pairs: list[tuple[str, str, str, str | None]] = []
         for gen_p in generated:
             if not gen_p.endswith(".md"):
                 continue
