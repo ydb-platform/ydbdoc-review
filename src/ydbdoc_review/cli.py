@@ -23,7 +23,10 @@ from ydbdoc_review.llm import (
     parse_json_object,
 )
 from ydbdoc_review.translation_qa import (
+    PairQaOutcome,
     format_pair_qa_markdown,
+    format_translation_pr_summary,
+    pr_merge_blocked,
     run_pair_qa_repair,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
@@ -404,18 +407,19 @@ def _run_translation_qa_and_repair(
     source_pr_number: int,
     pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
     base_ref_local: str | None,
-) -> tuple[str | None, int]:
+) -> tuple[str | None, int, list[PairQaOutcome]]:
     """
     Cross-model QA: critic review → optional repair → translator confirmation.
 
-    Writes repaired markdown to *workdir* before commit. Returns comment markdown
-    and count of files updated on disk.
+    Writes repaired markdown to *workdir* before commit. Returns comment markdown,
+    count of files updated on disk, and per-file QA outcomes.
     """
     md_generated = [p for p in generated if p.endswith(".md")]
     if not md_generated:
-        return None, 0
+        return None, 0, []
     repair_on = settings.translation_repair_enabled
     lines: list[str] = []
+    outcomes: list[PairQaOutcome] = []
     repaired_count = 0
     for gen_p in md_generated:
         try:
@@ -461,20 +465,25 @@ def _run_translation_qa_and_repair(
                 git_local.write_text(workdir, target_path, new_text)
                 repaired_count += 1
                 click.echo(f"  QA repair applied: `{target_path}`")
+            outcomes.append(outcome)
             lines.append(format_pair_qa_markdown(outcome))
         except Exception as exc:
-            lines.append(f"#### `{gen_p}`")
+            lines.append(f"### `{gen_p}` — **ОШИБКА QA**")
             lines.append("")
-            lines.append(f"_Ошибка QA/repair:_ `{exc}`")
+            lines.append(f"`{exc}`")
             lines.append("")
             warnings.append(f"- `{gen_p}`: QA/repair failed: {exc}")
 
-    text = "\n".join(lines).rstrip()
+    summary = format_translation_pr_summary(
+        source_pr_number=source_pr_number,
+        outcomes=outcomes,
+    )
+    text = summary + "\n\n---\n\n" + "\n\n".join(lines) if lines else summary
     if repaired_count:
         warnings.append(
             f"- QA: критик обновил {repaired_count} файл(ов) на диске перед коммитом."
         )
-    return text, repaired_count
+    return text, repaired_count, outcomes
 
 
 def _apply_deterministic_cli_fixes_to_generated(
@@ -1205,6 +1214,7 @@ def run_cmd(
             )
 
     translation_qa_section: str | None = None
+    qa_outcomes: list[PairQaOutcome] = []
     if (
         settings.translation_self_check_enabled
         and workdir
@@ -1219,7 +1229,7 @@ def run_cmd(
             f"translate `{settings.model_translate}`) …"
         )
         try:
-            translation_qa_section, _n_repaired = _run_translation_qa_and_repair(
+            translation_qa_section, _n_repaired, qa_outcomes = _run_translation_qa_and_repair(
                 settings,
                 workdir=workdir,
                 generated=generated,
@@ -1230,9 +1240,30 @@ def run_cmd(
                 pair_diffs=pair_diffs,
                 base_ref_local=base_ref_local,
             )
+            if qa_outcomes and pr_merge_blocked(qa_outcomes):
+                click.echo(
+                    "Translation QA: ОТКЛОНИТЬ — есть блокеры; коммит не будет создан.",
+                    err=True,
+                )
         except Exception as exc:
             translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
             click.echo(f"Warning: translation QA failed: {exc}", err=True)
+
+    if (
+        workdir
+        and generated
+        and not dry_run
+        and not blocked_only
+        and qa_outcomes
+        and pr_merge_blocked(qa_outcomes)
+    ):
+        raise SystemExit(
+            "## ydbdoc-review — translation PR отклонён\n\n"
+            "В отчёте QA есть **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
+            "Translation PR нельзя мержить частично — исправьте и перезапустите "
+            "`doc_translate`, либо отклоните весь translation PR.\n\n"
+            + (translation_qa_section or "")
+        )
 
     if workdir and generated and not dry_run and not blocked_only:
         n_cli = _apply_deterministic_cli_fixes_to_generated(

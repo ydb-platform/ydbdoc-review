@@ -33,6 +33,70 @@ def _allow_full_file_fallback() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def prefer_diff_only_translation(source_diff: str, source_full: str) -> bool:
+    """
+    Small PR diff on a long file → patch EN via RU_DIFF only (no section copy from main).
+
+    Avoids mixing stale EN chunks with a few translated lines (the #40070 failure mode).
+    """
+    raw = os.environ.get("YDBDOC_TRANSLATE_DIFF_FIRST", "1").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    diff = source_diff.strip()
+    if not diff or len(source_full) < 1000:
+        return False
+    max_chars = 6000
+    max_raw = os.environ.get("YDBDOC_TRANSLATE_DIFF_FIRST_MAX_CHARS", "").strip()
+    if max_raw.isdigit():
+        max_chars = max(500, int(max_raw))
+    if len(diff) > max_chars:
+        return False
+    max_ratio = 0.12
+    ratio_raw = os.environ.get("YDBDOC_TRANSLATE_DIFF_FIRST_MAX_RATIO", "").strip()
+    if ratio_raw:
+        try:
+            max_ratio = float(ratio_raw)
+        except ValueError:
+            pass
+    return len(diff) < int(len(source_full) * max_ratio)
+
+
+def _translate_ru_to_en_via_diff(
+    settings: Settings,
+    *,
+    ru_path: str,
+    ru_full: str,
+    en_reference: str,
+    ru_diff: str,
+) -> tuple[str, str]:
+    """Apply RU unified diff to EN reference in one or more batches."""
+    batches = batch_unified_diff(ru_diff)
+    en_cur = en_reference
+    for i, batch in enumerate(batches, start=1):
+        try:
+            en_cur = translate_en_update_from_ru_diff(
+                settings,
+                en_reference=en_cur,
+                ru_diff=batch,
+                ru_path=ru_path,
+                ru_full=ru_full,
+            )
+        except Exception:
+            if not _allow_full_file_fallback():
+                raise
+            out = translate_markdown(
+                settings,
+                source_lang="Russian",
+                target_lang="English",
+                source_path=ru_path,
+                source_text=ru_full,
+            )
+            return restore_markdown_links_from_ru(ru_full, out), "full-file-after-diff-error"
+    mode = "diff" if len(batches) == 1 else f"diff-incremental-{len(batches)}-batches"
+    out = restore_markdown_links_from_ru(ru_full, en_cur)
+    return out, mode
+
+
 def target_file_too_stale(
     *,
     target_reference: str | None,
@@ -143,6 +207,16 @@ def _strict_ru_to_en(
     if not ru_diff.strip():
         return en_reference, "unchanged-no-diff"
 
+    if prefer_diff_only_translation(ru_diff, ru_source):
+        out, mode = _translate_ru_to_en_via_diff(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_source,
+            en_reference=en_reference,
+            ru_diff=ru_diff,
+        )
+        return out, f"diff-first-{mode}"
+
     if translate_by_section_enabled(source_len=len(ru_source)):
         out, mode = translate_ru_to_en_by_sections(
             settings,
@@ -153,57 +227,16 @@ def _strict_ru_to_en(
         )
         return out, mode
 
-    batches = batch_unified_diff(ru_diff)
-    en_cur = en_reference
-    if len(batches) == 1:
-        try:
-            en_cur = translate_en_update_from_ru_diff(
-                settings,
-                en_reference=en_reference,
-                ru_diff=batches[0],
-                ru_path=ru_path,
-                ru_full=ru_source,
-            )
-        except Exception:
-            if not _allow_full_file_fallback():
-                raise
-            out = translate_markdown(
-                settings,
-                source_lang="Russian",
-                target_lang="English",
-                source_path=ru_path,
-                source_text=ru_source,
-            )
-            return restore_markdown_links_from_ru(ru_source, out), "full-file-after-diff-error"
-        mode = "diff-incremental" if len(batches) > 1 else "diff"
-    else:
-        for i, batch in enumerate(batches, start=1):
-            try:
-                en_cur = translate_en_update_from_ru_diff(
-                    settings,
-                    en_reference=en_cur,
-                    ru_diff=batch,
-                    ru_path=ru_path,
-                    ru_full=ru_source,
-                )
-            except Exception:
-                if not _allow_full_file_fallback():
-                    raise
-                out = translate_markdown(
-                    settings,
-                    source_lang="Russian",
-                    target_lang="English",
-                    source_path=ru_path,
-                    source_text=ru_source,
-                )
-                return (
-                    restore_markdown_links_from_ru(ru_source, out),
-                    f"full-file-after-diff-batch-{i}-error",
-                )
-        mode = f"diff-incremental-{len(batches)}-batches"
-
-    out = restore_markdown_links_from_ru(ru_source, en_cur)
-    issues = translation_quality_issues(ru_source, out, target_lang="English")
+    out, mode = _translate_ru_to_en_via_diff(
+        settings,
+        ru_path=ru_path,
+        ru_full=ru_source,
+        en_reference=en_reference,
+        ru_diff=ru_diff,
+    )
+    issues = translation_quality_issues(
+        ru_source, out, target_lang="English", source_diff=ru_diff
+    )
     if issues and _allow_full_file_fallback():
         out2 = translate_markdown(
             settings,
@@ -213,7 +246,9 @@ def _strict_ru_to_en(
             source_text=ru_source,
         )
         out2 = restore_markdown_links_from_ru(ru_source, out2)
-        if not translation_quality_issues(ru_source, out2, target_lang="English"):
+        if not translation_quality_issues(
+            ru_source, out2, target_lang="English", source_diff=ru_diff
+        ):
             return out2, f"{mode}-heuristic-fallback-full"
     return out, mode
 
