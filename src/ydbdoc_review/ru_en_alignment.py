@@ -22,6 +22,13 @@ _SSD_GROUP_RE = re.compile(r"ssd:(\d+)")
 _H3_HEADING_RE = re.compile(r"^###\s+\S", re.MULTILINE)
 
 
+def ru_authority_text(ru_pr: str, ru_at_base: str | None) -> str:
+    """Prefer longer RU from merge base when the PR branch RU is not ahead yet."""
+    if ru_at_base and len(ru_at_base.strip()) > len(ru_pr.strip()):
+        return ru_at_base
+    return ru_pr
+
+
 def en_coverage_behind_ru(ru_full: str, en_text: str) -> bool:
     """
     True when EN is missing structural blocks present in RU (not just shorter prose).
@@ -49,6 +56,7 @@ def critical_ru_en_mismatches(
     en_text: str,
     *,
     en_reference: str | None = None,
+    ru_authority: str | None = None,
 ) -> list[str]:
     """
     Semantic mismatches that require full re-translation from RU (not grammar-only).
@@ -58,12 +66,13 @@ def critical_ru_en_mismatches(
     issues: list[str] = []
     if len(ru_full) < 500:
         return issues
+    ru_ref = ru_authority_text(ru_full, ru_authority)
     ref = en_reference or en_text
     if ref and _diff_en_update_looks_truncated(en_text, ref):
         issues.append("truncated")
-    if len(ru_full) > 8000 and len(en_text) < int(len(ru_full) * 0.72):
+    if len(ru_ref) > 8000 and len(en_text) < int(len(ru_ref) * 0.72):
         issues.append("too_short_vs_ru")
-    if en_coverage_behind_ru(ru_full, en_text):
+    if en_coverage_behind_ru(ru_ref, en_text):
         issues.append("en_behind_ru")
 
     ru_has_cfg = bool(_CONFIG_DIR_RE.search(ru_full))

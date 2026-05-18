@@ -1029,8 +1029,10 @@ def run_cmd(
                         err=True,
                     )
             en_at_base: str | None = None
+            ru_at_base: str | None = None
             if workdir and base_ref_local:
                 en_at_base = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+                ru_at_base = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
             try:
                 out_md, mode = strict_translate_document(
                     settings,
@@ -1041,6 +1043,7 @@ def run_cmd(
                     target_reference=en_full,
                     source_diff=ru_diff,
                     target_at_base=en_at_base,
+                    source_at_base=ru_at_base,
                     use_full_source_from_base=use_main_ru,
                 )
             except Exception as exc:
@@ -1295,7 +1298,7 @@ def run_cmd(
     publish_paths = list(dict.fromkeys(generated + mirrored_en))
 
     if workdir and generated and not dry_run and not blocked_only:
-        gate_pairs: list[tuple[str, str, str, str | None, str | None]] = []
+        gate_pairs: list[tuple[str, str, str, str | None, str | None, str | None]] = []
         for gen_p in generated:
             if not gen_p.endswith(".md"):
                 continue
@@ -1309,15 +1312,20 @@ def run_cmd(
                     if base_ref_local
                     else None
                 )
+                ru_main = (
+                    git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
+                    if base_ref_local
+                    else None
+                )
                 ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-                gate_pairs.append((gen_p, src, trans, en_main, ru_diff))
+                gate_pairs.append((gen_p, src, trans, en_main, ru_diff, ru_main))
             elif gen_p in generated_ru_to_en:
                 ru_p = gen_p
                 en_p = generated_ru_to_en[gen_p]
                 src = git_local.read_text(workdir, en_p) or ""
                 trans = git_local.read_text(workdir, gen_p) or ""
                 _ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-                gate_pairs.append((gen_p, src, trans, None, en_diff))
+                gate_pairs.append((gen_p, src, trans, None, en_diff, None))
         gate_failures = collect_quality_gate_failures(gate_pairs)
         if gate_failures:
             msg = (

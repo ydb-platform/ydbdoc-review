@@ -28,6 +28,7 @@ from ydbdoc_review.ru_en_alignment import (
     critical_ru_en_mismatches,
     en_coverage_behind_ru,
     ru_authority_resync_enabled,
+    ru_authority_text,
 )
 from ydbdoc_review.translate_postprocess import (
     apply_post_translation_fixes,
@@ -144,13 +145,19 @@ def _apply_ru_authority_if_needed(
     en_reference: str | None,
     out: str,
     mode: str,
+    ru_at_base: str | None = None,
 ) -> tuple[str, str]:
     if not ru_authority_resync_enabled() or not en_reference:
         return out, mode
-    reasons = critical_ru_en_mismatches(ru_full, out, en_reference=en_reference)
+    reasons = critical_ru_en_mismatches(
+        ru_full, out, en_reference=en_reference, ru_authority=ru_at_base
+    )
     if not reasons:
         return out, mode
-    resynced, resync_mode = _full_resync_from_ru(settings, ru_path=ru_path, ru_full=ru_full)
+    ru_resync = ru_authority_text(ru_full, ru_at_base)
+    resynced, resync_mode = _full_resync_from_ru(
+        settings, ru_path=ru_path, ru_full=ru_resync
+    )
     tag = ",".join(reasons[:4])
     return resynced, f"ru-authority-{resync_mode}-after-{mode}-{tag}"
 
@@ -161,13 +168,21 @@ def target_file_too_stale(
     target_at_base: str | None,
     source_diff: str,
     source_full: str | None = None,
+    source_at_base: str | None = None,
 ) -> bool:
     """True when incremental merge into *target_reference* is unreliable."""
     if not target_reference or not target_reference.strip():
         return True
     if len(target_reference.strip()) < 80:
         return True
-    if source_full and en_coverage_behind_ru(source_full, target_reference):
+    ru_auth = (
+        ru_authority_text(source_full, source_at_base)
+        if source_full
+        else (source_at_base or "")
+    )
+    if ru_auth and target_reference and en_coverage_behind_ru(ru_auth, target_reference):
+        return True
+    if ru_auth and target_at_base and en_coverage_behind_ru(ru_auth, target_at_base):
         return True
     if not source_diff.strip():
         return False
@@ -196,6 +211,7 @@ def strict_translate_document(
     target_reference: str | None,
     source_diff: str,
     target_at_base: str | None = None,
+    source_at_base: str | None = None,
     use_full_source_from_base: bool = False,
 ) -> tuple[str, str]:
     """
@@ -211,6 +227,7 @@ def strict_translate_document(
             en_reference=target_reference,
             ru_diff=source_diff,
             en_at_base=target_at_base,
+            ru_at_base=source_at_base,
             use_full_ru_from_base=use_full_source_from_base,
         )
     return _strict_en_to_ru(
@@ -231,14 +248,17 @@ def _strict_ru_to_en(
     en_reference: str | None,
     ru_diff: str,
     en_at_base: str | None,
+    ru_at_base: str | None = None,
     use_full_ru_from_base: bool,
 ) -> tuple[str, str]:
     ru_source = ru_full
+    ru_work = ru_authority_text(ru_full, ru_at_base)
     stale = target_file_too_stale(
         target_reference=en_reference,
         target_at_base=en_at_base,
         source_diff=ru_diff,
         source_full=ru_source,
+        source_at_base=ru_at_base,
     )
 
     if use_full_ru_from_base or stale or en_reference is None:
@@ -248,15 +268,15 @@ def _strict_ru_to_en(
             mode = "full-file-stale-target"
         else:
             mode = "full-file-no-target"
-        if translate_by_section_enabled(source_len=len(ru_source)):
+        if translate_by_section_enabled(source_len=len(ru_work)):
             out, mode_sec = translate_full_source_by_sections(
                 settings,
                 source_path=ru_path,
-                source_full=ru_source,
+                source_full=ru_work,
                 source_lang="Russian",
                 target_lang="English",
             )
-            out = restore_markdown_links_from_ru(ru_source, out)
+            out = restore_markdown_links_from_ru(ru_work, out)
             return _apply_ru_authority_if_needed(
                 settings,
                 ru_path=ru_path,
@@ -264,21 +284,23 @@ def _strict_ru_to_en(
                 en_reference=en_reference,
                 out=out,
                 mode=f"{mode}-{mode_sec}",
+                ru_at_base=ru_at_base,
             )
         out = translate_markdown(
             settings,
             source_lang="Russian",
             target_lang="English",
             source_path=ru_path,
-            source_text=ru_source,
+            source_text=ru_work,
         )
         return _apply_ru_authority_if_needed(
             settings,
             ru_path=ru_path,
             ru_full=ru_source,
             en_reference=en_reference,
-            out=restore_markdown_links_from_ru(ru_source, out),
+            out=restore_markdown_links_from_ru(ru_work, out),
             mode=mode,
+            ru_at_base=ru_at_base,
         )
 
     if not ru_diff.strip():
@@ -299,6 +321,7 @@ def _strict_ru_to_en(
             en_reference=en_reference,
             out=out,
             mode=f"diff-first-{mode}",
+            ru_at_base=ru_at_base,
         )
 
     if translate_by_section_enabled(source_len=len(ru_source)):
@@ -316,6 +339,7 @@ def _strict_ru_to_en(
             en_reference=en_reference,
             out=out,
             mode=mode,
+            ru_at_base=ru_at_base,
         )
 
     out, mode = _translate_ru_to_en_via_diff(
@@ -332,6 +356,7 @@ def _strict_ru_to_en(
         en_reference=en_reference,
         out=out,
         mode=mode,
+        ru_at_base=ru_at_base,
     )
 
 

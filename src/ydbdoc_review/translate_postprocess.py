@@ -249,28 +249,6 @@ def cli_critical_issues(
     return issues
 
 
-def _en_target_too_short(
-    ru_source: str,
-    en_translated: str,
-    *,
-    en_main: str | None,
-) -> bool:
-    """
-    RU→EN length check. English is usually ~45–55% of Russian by character count;
-    comparing EN to full RU at 0.62 causes false ``too_short`` on valid translations.
-    """
-    if en_main and en_main.strip():
-        base = en_main
-        if len(en_translated) < int(len(base) * 0.55):
-            return True
-        if len(ru_source) > int(len(base) * 1.2):
-            floor = max(int(len(base) * 1.02), int(len(ru_source) * 0.40))
-            if len(en_translated) < floor:
-                return True
-        return False
-    return len(en_translated) < int(len(ru_source) * 0.38)
-
-
 def translation_quality_issues(
     source: str,
     translated: str,
@@ -278,6 +256,7 @@ def translation_quality_issues(
     target_lang: str,
     en_main: str | None = None,
     source_diff: str | None = None,
+    ru_authority: str | None = None,
 ) -> list[str]:
     """Short issue codes; empty list means heuristics are satisfied."""
     issues: list[str] = []
@@ -287,7 +266,14 @@ def translation_quality_issues(
         issues.append("unbalanced_fences")
     lang = target_lang.strip().lower()
     if lang in ("english", "en"):
-        if _en_target_too_short(source, translated, en_main=en_main):
+        from ydbdoc_review.ru_en_alignment import en_coverage_behind_ru, ru_authority_text
+
+        ru_ref = ru_authority_text(source, ru_authority)
+        if en_coverage_behind_ru(ru_ref, translated):
+            issues.append("en_behind_ru")
+        elif en_main and len(translated) < int(len(en_main) * 0.55):
+            issues.append("too_short")
+        elif not en_main and len(translated) < int(len(ru_ref) * 0.38):
             issues.append("too_short")
     elif len(translated) < int(len(source) * 0.62):
         issues.append("too_short")
@@ -305,7 +291,10 @@ def translation_quality_issues(
         )
 
         for code in critical_ru_en_mismatches(
-            source, translated, en_reference=en_main or translated
+            source,
+            translated,
+            en_reference=en_main or translated,
+            ru_authority=ru_authority,
         ):
             if code in mismatch_gate_codes():
                 issues.append(code)
@@ -338,15 +327,15 @@ def quality_gate_enabled() -> bool:
 
 
 def collect_quality_gate_failures(
-    pairs: list[tuple[str, str, str, str | None, str | None]],
+    pairs: list[tuple[str, str, str, str | None, str | None, str | None]],
 ) -> list[str]:
     """
-    *pairs*: ``(path, source_text, translated_text, en_on_main_or_none, source_diff_or_none)``.
+    *pairs*: ``(path, ru_text, en_text, en_on_main, ru_diff, ru_on_main)``.
     """
     if not quality_gate_enabled():
         return []
     out: list[str] = []
-    for path, source, translated, en_main, source_diff in pairs:
+    for path, source, translated, en_main, source_diff, ru_authority in pairs:
         lang = "English" if "/en/" in path.replace("\\", "/") else "Russian"
         issues = translation_quality_issues(
             source,
@@ -354,6 +343,7 @@ def collect_quality_gate_failures(
             target_lang=lang,
             en_main=en_main,
             source_diff=source_diff,
+            ru_authority=ru_authority,
         )
         hit = sorted(translation_quality_gate_codes().intersection(issues))
         if hit:
