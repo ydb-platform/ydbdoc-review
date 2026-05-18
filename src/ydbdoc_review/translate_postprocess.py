@@ -249,6 +249,26 @@ def cli_critical_issues(
     return issues
 
 
+def _en_target_too_short(
+    ru_source: str,
+    en_translated: str,
+    *,
+    en_main: str | None,
+) -> bool:
+    """
+    RU→EN length check. English is usually ~45–55% of Russian by character count;
+    comparing EN to full RU at 0.62 causes false ``too_short`` on valid translations.
+    """
+    if en_main and en_main.strip():
+        base = en_main
+        if len(en_translated) < int(len(base) * 0.55):
+            return True
+        if len(ru_source) > int(len(base) * 1.2) and len(en_translated) < int(len(base) * 1.05):
+            return True
+        return False
+    return len(en_translated) < int(len(ru_source) * 0.38)
+
+
 def translation_quality_issues(
     source: str,
     translated: str,
@@ -263,17 +283,17 @@ def translation_quality_issues(
         return issues
     if not _markdown_code_fences_balanced(translated):
         issues.append("unbalanced_fences")
-    if len(translated) < int(len(source) * 0.62):
+    lang = target_lang.strip().lower()
+    if lang in ("english", "en"):
+        if _en_target_too_short(source, translated, en_main=en_main):
+            issues.append("too_short")
+    elif len(translated) < int(len(source) * 0.62):
         issues.append("too_short")
     if tabs_missing_vs_source(source, translated, source_diff=source_diff):
         issues.append("missing_tabs")
     if target_lang.strip().lower() == "english" and en_contains_cyrillic(translated):
         issues.append("cyrillic_leak")
-    if (
-        en_main
-        and len(en_main) > 8000
-        and len(translated) < int(len(en_main) * 0.72)
-    ):
+    if en_main and len(en_main) >= 400 and len(translated) < int(len(en_main) * 0.72):
         issues.append("truncated_file")
     issues.extend(cli_critical_issues(translated, en_main=en_main))
     if target_lang.strip().lower() == "english":
