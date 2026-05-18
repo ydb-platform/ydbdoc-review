@@ -27,6 +27,7 @@ from ydbdoc_review.translation_qa import (
     format_pair_qa_markdown,
     format_translation_pr_summary,
     pr_merge_blocked,
+    pr_merge_verdict_unavailable,
     run_pair_qa_repair,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
@@ -1240,7 +1241,13 @@ def run_cmd(
                 pair_diffs=pair_diffs,
                 base_ref_local=base_ref_local,
             )
-            if qa_outcomes and pr_merge_blocked(qa_outcomes):
+            if qa_outcomes and pr_merge_verdict_unavailable(qa_outcomes):
+                click.echo(
+                    "Translation QA: вердикт переводчика не получен (лимит токенов/API); "
+                    "коммит не будет создан.",
+                    err=True,
+                )
+            elif qa_outcomes and pr_merge_blocked(qa_outcomes):
                 click.echo(
                     "Translation QA: переводчик — ОТКЛОНИТЬ; коммит не будет создан.",
                     err=True,
@@ -1249,21 +1256,25 @@ def run_cmd(
             translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
             click.echo(f"Warning: translation QA failed: {exc}", err=True)
 
-    if (
-        workdir
-        and generated
-        and not dry_run
-        and not blocked_only
-        and qa_outcomes
-        and pr_merge_blocked(qa_outcomes)
-    ):
-        raise SystemExit(
-            "## ydbdoc-review — translation PR отклонён\n\n"
-            "Модель-переводчик вынесла **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
-            "Translation PR нельзя мержить частично — исправьте и перезапустите "
-            "`doc_translate`, либо отклоните весь translation PR.\n\n"
-            + (translation_qa_section or "")
-        )
+    if workdir and generated and not dry_run and not blocked_only and qa_outcomes:
+        unavailable = pr_merge_verdict_unavailable(qa_outcomes)
+        if unavailable:
+            raise SystemExit(
+                "## ydbdoc-review — вердикт переводчика не получен\n\n"
+                "Вызов YandexGPT для финальной проверки **не влез в лимит 32k токенов** "
+                "(или другая ошибка API). Это **не** содержательное «ОТКЛОНИТЬ» перевода — "
+                "вердикт просто не сформирован. Перезапустите `doc_translate` "
+                f"(файлы: {', '.join(f'`{p}`' for p in unavailable)}).\n\n"
+                + (translation_qa_section or "")
+            )
+        if pr_merge_blocked(qa_outcomes):
+            raise SystemExit(
+                "## ydbdoc-review — translation PR отклонён\n\n"
+                "Модель-переводчик вынесла **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
+                "Translation PR нельзя мержить частично — исправьте и перезапустите "
+                "`doc_translate`, либо отклоните весь translation PR.\n\n"
+                + (translation_qa_section or "")
+            )
 
     if workdir and generated and not dry_run and not blocked_only:
         n_cli = _apply_deterministic_cli_fixes_to_generated(

@@ -60,15 +60,28 @@ def _parse_translator_merge_line(text: str) -> str | None:
     return None
 
 
+def _is_translator_api_error(confirmation_md: str | None) -> bool:
+    if not confirmation_md or not confirmation_md.strip():
+        return False
+    low = confirmation_md.strip().lower()
+    return (
+        low.startswith("_ошибка вердикта переводчика")
+        or "foundation models call failed" in low
+        or "number of input tokens must be no more than" in low
+    )
+
+
 def file_merge_verdict(review_md: str, confirmation_md: str | None = None) -> str:
     """
     Per-file verdict from **translator** confirmation only.
 
-    Critic *review_md* is not used for merge/reject — only for ``<details>`` in comments.
+    Returns ``merge`` | ``warn`` | ``reject`` | ``error`` (API/limits, not a content reject).
     """
     _ = review_md
     if not confirmation_md or not confirmation_md.strip():
         return "warn"
+    if _is_translator_api_error(confirmation_md):
+        return "error"
     parsed = _parse_translator_merge_line(confirmation_md)
     if parsed:
         return parsed
@@ -92,28 +105,45 @@ def format_translation_pr_summary(
         f"## Вердикт для translation PR (исходный #{source_pr_number})",
         "",
     ]
-    by_verdict: dict[str, list[str]] = {"merge": [], "warn": [], "reject": []}
+    by_verdict: dict[str, list[str]] = {
+        "merge": [],
+        "warn": [],
+        "reject": [],
+        "error": [],
+    }
     for o in outcomes:
         v = file_merge_verdict(o.review_md, o.confirmation_md)
-        by_verdict[v].append(o.en_path)
+        by_verdict.setdefault(v, []).append(o.en_path)
+    if by_verdict["error"]:
+        lines.append(
+            "**Вердикт переводчика не получен** (лимит API/токенов) для: "
+            + ", ".join(f"`{p}`" for p in by_verdict["error"])
+            + ". Перезапустите `doc_translate` или уменьшите размер входа."
+        )
+        lines.append("")
     if by_verdict["reject"]:
         lines.append(
             "**ОТКЛОНИТЬ** (вердикт модели-переводчика) — translation PR **нельзя мержить**."
         )
-    elif by_verdict["warn"]:
+    elif by_verdict["warn"] and not by_verdict["error"]:
         lines.append(
             "**ПРИНЯТЬ С ОГОВОРКАМИ** (переводчик) — можно мержить, есть замечания."
         )
     else:
         lines.append("**ПРИНЯТЬ** (переводчик) — можно мержить translation PR.")
     lines.append("")
-    for label, key in (("Принять", "merge"), ("Оговорки", "warn"), ("Отклонить", "reject")):
-        if by_verdict[key]:
+    for label, key in (
+        ("Принять", "merge"),
+        ("Оговорки", "warn"),
+        ("Отклонить", "reject"),
+        ("Нет вердикта (API)", "error"),
+    ):
+        if by_verdict.get(key):
             lines.append(f"**{label}:** " + ", ".join(f"`{p}`" for p in by_verdict[key]))
     lines.append("")
     for o in outcomes:
         v = file_merge_verdict(o.review_md, o.confirmation_md)
-        tag = {"merge": "OK", "warn": "⚠", "reject": "✗"}[v]
+        tag = {"merge": "OK", "warn": "⚠", "reject": "✗", "error": "API"}[v]
         lines.append(f"- {tag} `{o.en_path}`")
         summary = _translator_one_line(o.confirmation_md)
         if summary:
@@ -124,6 +154,8 @@ def format_translation_pr_summary(
 def _translator_one_line(confirmation_md: str | None) -> str:
     if not confirmation_md:
         return "Вердикт переводчика не получен."
+    if _is_translator_api_error(confirmation_md):
+        return "Переводчик: **вердикт не получен** (ошибка API, см. details)."
     parsed = _parse_translator_merge_line(confirmation_md)
     if parsed:
         labels = {"merge": "ПРИНЯТЬ", "warn": "ПРИНЯТЬ С ОГОВОРКАМИ", "reject": "ОТКЛОНИТЬ"}
@@ -151,6 +183,15 @@ def _one_line_summary(review_md: str) -> str:
 
 def pr_merge_blocked(outcomes: list[PairQaOutcome]) -> bool:
     return any(file_merge_verdict(o.review_md, o.confirmation_md) == "reject" for o in outcomes)
+
+
+def pr_merge_verdict_unavailable(outcomes: list[PairQaOutcome]) -> list[str]:
+    """EN paths where translator verdict API failed (token limit, etc.)."""
+    return [
+        o.en_path
+        for o in outcomes
+        if file_merge_verdict(o.review_md, o.confirmation_md) == "error"
+    ]
 
 
 def _translator_final_verdict(
@@ -587,7 +628,12 @@ def _run_pair_qa_repair_whole_file(
 def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
     """Compact per-file block; critic report under ``<details>``."""
     verdict = file_merge_verdict(outcome.review_md, outcome.confirmation_md)
-    tag = {"merge": "ПРИНЯТЬ", "warn": "ОГОВОРКИ", "reject": "ОТКЛОНИТЬ"}[verdict]
+    tag = {
+        "merge": "ПРИНЯТЬ",
+        "warn": "ОГОВОРКИ",
+        "reject": "ОТКЛОНИТЬ",
+        "error": "API",
+    }[verdict]
     lines = [
         f"### `{outcome.en_path}` — **{tag}** _(переводчик)_",
         "",

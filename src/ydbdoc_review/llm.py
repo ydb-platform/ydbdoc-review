@@ -743,6 +743,14 @@ def _translation_self_check_input_cap() -> int:
     return 55_000
 
 
+def _translator_confirm_total_input_cap() -> int:
+    """Total chars for confirm call (yandexgpt-5.1 input limit ~32k tokens)."""
+    raw = os.environ.get("YDBDOC_TRANSLATOR_CONFIRM_MAX_INPUT_CHARS", "").strip()
+    if raw.isdigit():
+        return max(8000, int(raw))
+    return 22_000
+
+
 def _translation_self_check_max_output_tokens() -> int:
     raw = os.environ.get("YDBDOC_TRANSLATION_SELF_CHECK_MAX_OUTPUT_TOKENS", "").strip()
     if raw.isdigit():
@@ -925,12 +933,18 @@ def confirm_repair_pair(
 ) -> str:
     """Translator model: final check and merge verdict (ПРИНЯТЬ / ОТКЛОНИТЬ)."""
     instructions = load_confirm_repair_instructions(settings)
-    cap = _translation_self_check_input_cap()
-    src_c = _cap_verify_body(source_text.strip(), cap)
-    before_c = _cap_verify_body(translation_before.strip(), cap)
-    after_c = _cap_verify_body(translation_after.strip(), cap)
-    rev_c = _cap_verify_body(review_before.strip(), min(cap, 20_000))
-    extra = _qa_extra_blocks(cap=cap, ru_pr_diff=ru_pr_diff, en_on_main=en_on_main)
+    total = _translator_confirm_total_input_cap()
+    # Share budget: diff + critic review + EN after (primary); smaller RU/before samples.
+    per = max(2500, total // 6)
+    src_c = _cap_verify_body(source_text.strip(), per)
+    before_c = _cap_verify_body(translation_before.strip(), per)
+    after_c = _cap_verify_body(translation_after.strip(), per * 2)
+    rev_c = _cap_verify_body(review_before.strip(), per * 2)
+    extra = _qa_extra_blocks(
+        cap=per * 2,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=None,
+    )
     user_input = (
         f"Модель перевода: {translate_model}\n"
         f"Модель-критик: {verify_model}\n\n"

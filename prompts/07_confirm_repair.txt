@@ -2,7 +2,7 @@
 
 Ваша задача — **финальная** проверка и **единственный вердикт**, можно ли мержить этот файл в translation PR (частичный мерж PR невозможен).
 
-Вход: SOURCE (RU), TRANSLATION_BEFORE, TRANSLATION_AFTER, REVIEW_BEFORE; опционально RU_PR_DIFF, EN_ON_MAIN.
+Вход: SOURCE (RU), TRANSLATION_BEFORE, TRANSLATION_AFTER, REVIEW_BEFORE; опционально RU_PR_DIFF. Тексты могут быть **усечены** по лимиту модели — опирайтесь на REVIEW_BEFORE и фрагменты AFTER.
 
 Ответ **на русском**, кратко:
 
