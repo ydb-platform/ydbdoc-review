@@ -202,6 +202,12 @@ def translation_quality_issues(
         issues.append("missing_tabs")
     if target_lang.strip().lower() == "english" and en_contains_cyrillic(translated):
         issues.append("cyrillic_leak")
+    if (
+        en_main
+        and len(en_main) > 8000
+        and len(translated) < int(len(en_main) * 0.72)
+    ):
+        issues.append("truncated_file")
     issues.extend(cli_critical_issues(translated, en_main=en_main))
     return issues
 

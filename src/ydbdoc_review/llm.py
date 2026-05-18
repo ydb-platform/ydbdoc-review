@@ -623,7 +623,7 @@ def translate_en_update_from_ru_diff(
         f"Russian file path: {ru_path}\n\n"
         f"--- REFERENCE_EN BEGIN ---\n{en_reference}\n--- REFERENCE_EN END ---\n\n"
         f"--- RU_DIFF BEGIN ---\n{ru_diff_c}\n--- RU_DIFF END ---\n\n"
-        f"--- RU_FULL BEGIN ---\n{ru_full}\n--- RU_FULL END ---\n\n"
+        f"--- RU_FULL BEGIN ---\n{_cap_block(ru_full, lim, 'RU_FULL')}\n--- RU_FULL END ---\n\n"
         "Output only the updated English markdown file."
     )
     model = settings.model_translate

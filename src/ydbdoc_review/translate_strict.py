@@ -12,6 +12,7 @@ from typing import Literal
 from ydbdoc_review.config import Settings
 from ydbdoc_review.diff_hunks import batch_unified_diff
 from ydbdoc_review.llm import (
+    _diff_en_update_looks_truncated,
     translate_en_update_from_ru_diff,
     translate_markdown,
     translate_ru_update_from_en_diff,
@@ -94,6 +95,27 @@ def _translate_ru_to_en_via_diff(
             return restore_markdown_links_from_ru(ru_full, out), "full-file-after-diff-error"
     mode = "diff" if len(batches) == 1 else f"diff-incremental-{len(batches)}-batches"
     out = restore_markdown_links_from_ru(ru_full, en_cur)
+    if _diff_en_update_looks_truncated(out, en_reference):
+        out_sec, mode_sec = translate_ru_to_en_by_sections(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_full,
+            en_reference=en_reference,
+            ru_diff=ru_diff,
+        )
+        if not _diff_en_update_looks_truncated(out_sec, en_reference):
+            return out_sec, f"{mode}-recovered-{mode_sec}"
+        if _allow_full_file_fallback():
+            full = translate_markdown(
+                settings,
+                source_lang="Russian",
+                target_lang="English",
+                source_path=ru_path,
+                source_text=ru_full,
+            )
+            full = restore_markdown_links_from_ru(ru_full, full)
+            if not _diff_en_update_looks_truncated(full, en_reference):
+                return full, f"{mode}-recovered-full-file"
     return out, mode
 
 
