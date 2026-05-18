@@ -199,6 +199,12 @@ def translate_full_source_by_sections(
             )
         )
     merged = join_markdown_sections(out)
+    if target_lang.strip().lower() in ("english", "en") and source_lang.lower().startswith(
+        "rus"
+    ):
+        from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
+
+        merged = apply_post_translation_fixes(merged, ru_source=source_full)
     issues = translation_quality_issues(source_full, merged, target_lang=target_lang)
     suffix = f"-issues-{','.join(issues)}" if issues else ""
     return merged, f"sections-full-{len(sections)}{suffix}"

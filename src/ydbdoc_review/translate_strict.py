@@ -25,7 +25,10 @@ from ydbdoc_review.section_translate import (
     translate_ru_to_en_by_sections,
 )
 from ydbdoc_review.ru_en_alignment import critical_ru_en_mismatches, ru_authority_resync_enabled
-from ydbdoc_review.translate_postprocess import translation_quality_issues
+from ydbdoc_review.translate_postprocess import (
+    apply_post_translation_fixes,
+    translation_quality_issues,
+)
 
 Direction = Literal["ru_to_en", "en_to_ru"]
 
@@ -114,7 +117,9 @@ def _full_resync_from_ru(
             source_lang="Russian",
             target_lang="English",
         )
-        return restore_markdown_links_from_ru(ru_full, out), sec_mode
+        out = restore_markdown_links_from_ru(ru_full, out)
+        out = apply_post_translation_fixes(out, ru_source=ru_full)
+        return out, sec_mode
     out = translate_markdown(
         settings,
         source_lang="Russian",
@@ -122,7 +127,9 @@ def _full_resync_from_ru(
         source_path=ru_path,
         source_text=ru_full,
     )
-    return restore_markdown_links_from_ru(ru_full, out), "full-file"
+    out = restore_markdown_links_from_ru(ru_full, out)
+    out = apply_post_translation_fixes(out, ru_source=ru_full)
+    return out, "full-file"
 
 
 def _apply_ru_authority_if_needed(

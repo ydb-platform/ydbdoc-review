@@ -502,8 +502,12 @@ def _apply_deterministic_cli_fixes_to_generated(
         en_main: str | None = None
         if base_ref_local:
             en_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+        ru_p = generated_en_to_ru[en_p]
+        ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        after = apply_deterministic_cli_fixes(before, en_main=en_main)
+        from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
+
+        after = apply_post_translation_fixes(before, en_main=en_main, ru_source=ru_full)
         if after != before:
             git_local.write_text(workdir, en_p, after)
             fixed += 1

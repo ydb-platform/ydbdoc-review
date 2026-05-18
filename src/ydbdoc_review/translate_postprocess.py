@@ -113,7 +113,14 @@ def _pick_canonical_token_filename(
     translated: str,
     *,
     en_main: str | None = None,
+    ru_source: str | None = None,
 ) -> str:
+    if ru_source:
+        from ydbdoc_review.ru_en_alignment import canonical_token_filename_from_ru
+
+        ru_canon = canonical_token_filename_from_ru(ru_source)
+        if ru_canon:
+            return ru_canon
     main_names = _token_filenames_used(en_main) if en_main else set()
     if len(main_names) == 1:
         return next(iter(main_names))
@@ -134,13 +141,16 @@ def fix_token_file_inconsistency(
     text: str,
     *,
     en_main: str | None = None,
+    ru_source: str | None = None,
     canonical: str | None = None,
 ) -> str:
     """Unify redirect / ``-f`` / ``--token-file`` operand to one basename."""
+    pick = canonical or _pick_canonical_token_filename(
+        text, en_main=en_main, ru_source=ru_source
+    )
     names = _token_filenames_used(text)
-    if len(names) <= 1:
+    if names == {pick}:
         return text
-    pick = canonical or _pick_canonical_token_filename(text, en_main=en_main)
     other = "auth_token" if pick == "token-file" else "token-file"
     out = re.sub(rf">\s*{re.escape(other)}\b", f"> {pick}", text)
     out = re.sub(rf"(?<=[-\s])f\s+{re.escape(other)}\b", f"f {pick}", out)
@@ -152,15 +162,72 @@ def fix_token_file_inconsistency(
     return out
 
 
+def _close_trailing_fence_block(text: str) -> str:
+    if _markdown_code_fences_balanced(text):
+        return text
+    open_fence = False
+    for line in text.split("\n"):
+        if line.strip().startswith("```"):
+            open_fence = not open_fence
+    if open_fence:
+        return text.rstrip() + "\n```\n"
+    return text
+
+
+def fix_unbalanced_fences(text: str, *, reference: str | None = None) -> str:
+    """Close dangling ``` per section (and whole file) after section-wise translation."""
+    if _markdown_code_fences_balanced(text):
+        return text
+    if reference and reference.strip():
+        from ydbdoc_review.markdown_sections import (
+            MarkdownSection,
+            align_sections_by_heading,
+            join_markdown_sections,
+            split_markdown_sections,
+        )
+
+        ru_sections = split_markdown_sections(reference)
+        en_sections = split_markdown_sections(text)
+        aligned = align_sections_by_heading(ru_sections, en_sections)
+        fixed: list[MarkdownSection] = []
+        for en_sec in en_sections:
+            content = en_sec.content
+            if not _markdown_code_fences_balanced(content):
+                content = _close_trailing_fence_block(content)
+            fixed.append(
+                MarkdownSection(
+                    index=en_sec.index,
+                    heading=en_sec.heading,
+                    content=content,
+                    start_line=en_sec.start_line,
+                    end_line=en_sec.end_line,
+                )
+            )
+        text = join_markdown_sections(fixed)
+    return _close_trailing_fence_block(text)
+
+
 def apply_deterministic_cli_fixes(
     text: str,
     *,
     en_main: str | None = None,
+    ru_source: str | None = None,
 ) -> str:
     """Fix known CLI copy-paste regressions without calling an LLM."""
     out = fix_config_dir_spacing(text)
-    out = fix_token_file_inconsistency(out, en_main=en_main)
+    out = fix_token_file_inconsistency(out, en_main=en_main, ru_source=ru_source)
     return out
+
+
+def apply_post_translation_fixes(
+    text: str,
+    *,
+    en_main: str | None = None,
+    ru_source: str | None = None,
+) -> str:
+    """Deterministic CLI + fence repairs before quality gate."""
+    out = apply_deterministic_cli_fixes(text, en_main=en_main, ru_source=ru_source)
+    return fix_unbalanced_fences(out, reference=ru_source)
 
 
 def cli_critical_issues(

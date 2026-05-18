@@ -66,14 +66,31 @@ def critical_ru_en_mismatches(
     if ru_ssd and en_ssd and ru_ssd != en_ssd:
         issues.append("ssd_group_count")
 
-    ru_tokens = _cli_token_filenames(ru_full)
+    canon = canonical_token_filename_from_ru(ru_full)
     en_tokens = _cli_token_filenames(en_text)
-    if ru_tokens and en_tokens and ru_tokens != en_tokens:
-        issues.append("token_file_name")
-    if len(ru_tokens) == 1 and len(en_tokens) > 1:
-        issues.append("token_file_name")
+    if canon:
+        if en_tokens and en_tokens != {canon}:
+            issues.append("token_file_name")
+    else:
+        ru_tokens = _cli_token_filenames(ru_full)
+        if ru_tokens and en_tokens and ru_tokens != en_tokens:
+            issues.append("token_file_name")
+        if len(ru_tokens) == 1 and len(en_tokens) > 1:
+            issues.append("token_file_name")
 
     return issues
+
+
+def canonical_token_filename_from_ru(ru_full: str) -> str | None:
+    """Single basename EN should use when RU mentions token-file or auth_token."""
+    names = _cli_token_filenames(ru_full)
+    if not names:
+        return None
+    if len(names) == 1:
+        return next(iter(names))
+    if "auth_token" in names:
+        return "auth_token"
+    return "token-file"
 
 
 def _cli_token_filenames(text: str) -> set[str]:
