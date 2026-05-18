@@ -47,6 +47,7 @@ from ydbdoc_review.translate_postprocess import (
 from ydbdoc_review.pair_diff import diff_has_added_lines, pair_needs_en_from_ru_only_diff
 from ydbdoc_review.ru_en_alignment import en_coverage_behind_ru, ru_authority_text
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
+from ydbdoc_review.verify_pr import run_verify_pr
 
 
 _OK_STATUSES = frozenset({"added", "modified", "changed", "renamed"})
@@ -934,6 +935,53 @@ def list_models_cmd() -> None:
     cfg = resolved_models_config_path()
     if cfg is not None:
         click.echo(f"\n(config file with [models]: {cfg})")
+
+
+@main.command("verify")
+@click.option("--repo", required=True, help="Repository (owner/name).")
+@click.option("--pr", "pr_number", type=int, required=True, help="Translation PR number.")
+@click.option(
+    "--repo-path",
+    type=click.Path(exists=True, file_okay=False, path_type=str),
+    default=None,
+    help="Local checkout of the PR head branch.",
+)
+@click.option(
+    "--merge-base-with",
+    default="origin/main",
+    show_default=True,
+    help="Base ref for PR diff and RU authority (e.g. origin/main).",
+)
+@click.option(
+    "--source-pr",
+    "source_pr_number",
+    type=int,
+    default=None,
+    help="Source doc PR number (default: parse from translation PR title/body).",
+)
+@click.option("--no-comment", is_flag=True, help="Do not post a GitHub comment.")
+def verify_cmd(
+    repo: str,
+    pr_number: int,
+    repo_path: str | None,
+    merge_base_with: str,
+    source_pr_number: int | None,
+    no_comment: bool,
+) -> None:
+    """Verify EN files in a translation PR against RU on the merge base (doc_verify)."""
+    settings = Settings.from_env()
+    if not settings.review_enabled:
+        click.echo("ydbdoc-review: skipped (review disabled).")
+        return
+    run_verify_pr(
+        settings,
+        repo=repo,
+        pr_number=pr_number,
+        repo_path=repo_path,
+        merge_base_with=merge_base_with,
+        source_pr_number=source_pr_number,
+        no_comment=no_comment,
+    )
 
 
 @main.command("run")

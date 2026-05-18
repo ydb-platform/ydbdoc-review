@@ -21,6 +21,9 @@ inputs:
   no_commit:
     description: 'If "true", pass --no-commit (write files, no git commit/push, no PR comment).'
     default: "false"
+  mode:
+    description: '"run" — doc_translate (check + optional translation). "verify" — doc_verify (QA only).'
+    default: "run"
 
 runs:
   using: "docker"

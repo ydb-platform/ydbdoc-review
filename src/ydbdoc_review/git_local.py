@@ -22,6 +22,22 @@ def _git(cwd: str, *args: str) -> str:
     return p.stdout.strip()
 
 
+def file_diff_between_refs(repo: str, ref_a: str, ref_b: str, rel_path: str) -> str:
+    """Unified diff for *rel_path* between two commits/refs (``git diff ref_a ref_b -- path``)."""
+    p = subprocess.run(
+        ["git", "-C", repo, "diff", ref_a, ref_b, "--", rel_path],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        err = (p.stderr or "").strip() or (p.stdout or "").strip() or "(no output)"
+        raise RuntimeError(
+            f"git -C {repo} diff {ref_a} {ref_b} -- {rel_path} failed "
+            f"(exit {p.returncode}): {err}"
+        )
+    return p.stdout
+
+
 def file_diff_range(repo: str, merge_base_with: str, rel_path: str) -> str:
     """
     Unified diff for rel_path between merge-base(merge_base_with, HEAD) and HEAD.
