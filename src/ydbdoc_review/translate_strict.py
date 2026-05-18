@@ -24,6 +24,7 @@ from ydbdoc_review.section_translate import (
     translate_full_source_by_sections,
     translate_ru_to_en_by_sections,
 )
+from ydbdoc_review.ru_en_alignment import critical_ru_en_mismatches, ru_authority_resync_enabled
 from ydbdoc_review.translate_postprocess import translation_quality_issues
 
 Direction = Literal["ru_to_en", "en_to_ru"]
@@ -95,28 +96,52 @@ def _translate_ru_to_en_via_diff(
             return restore_markdown_links_from_ru(ru_full, out), "full-file-after-diff-error"
     mode = "diff" if len(batches) == 1 else f"diff-incremental-{len(batches)}-batches"
     out = restore_markdown_links_from_ru(ru_full, en_cur)
-    if _diff_en_update_looks_truncated(out, en_reference):
-        out_sec, mode_sec = translate_ru_to_en_by_sections(
-            settings,
-            ru_path=ru_path,
-            ru_full=ru_full,
-            en_reference=en_reference,
-            ru_diff=ru_diff,
-        )
-        if not _diff_en_update_looks_truncated(out_sec, en_reference):
-            return out_sec, f"{mode}-recovered-{mode_sec}"
-        if _allow_full_file_fallback():
-            full = translate_markdown(
-                settings,
-                source_lang="Russian",
-                target_lang="English",
-                source_path=ru_path,
-                source_text=ru_full,
-            )
-            full = restore_markdown_links_from_ru(ru_full, full)
-            if not _diff_en_update_looks_truncated(full, en_reference):
-                return full, f"{mode}-recovered-full-file"
     return out, mode
+
+
+def _full_resync_from_ru(
+    settings: Settings,
+    *,
+    ru_path: str,
+    ru_full: str,
+) -> tuple[str, str]:
+    """Replace EN with full translation from RU (source PR is authority)."""
+    if translate_by_section_enabled(source_len=len(ru_full)):
+        out, sec_mode = translate_full_source_by_sections(
+            settings,
+            source_path=ru_path,
+            source_full=ru_full,
+            source_lang="Russian",
+            target_lang="English",
+        )
+        return restore_markdown_links_from_ru(ru_full, out), sec_mode
+    out = translate_markdown(
+        settings,
+        source_lang="Russian",
+        target_lang="English",
+        source_path=ru_path,
+        source_text=ru_full,
+    )
+    return restore_markdown_links_from_ru(ru_full, out), "full-file"
+
+
+def _apply_ru_authority_if_needed(
+    settings: Settings,
+    *,
+    ru_path: str,
+    ru_full: str,
+    en_reference: str | None,
+    out: str,
+    mode: str,
+) -> tuple[str, str]:
+    if not ru_authority_resync_enabled() or not en_reference:
+        return out, mode
+    reasons = critical_ru_en_mismatches(ru_full, out, en_reference=en_reference)
+    if not reasons:
+        return out, mode
+    resynced, resync_mode = _full_resync_from_ru(settings, ru_path=ru_path, ru_full=ru_full)
+    tag = ",".join(reasons[:4])
+    return resynced, f"ru-authority-{resync_mode}-after-{mode}-{tag}"
 
 
 def target_file_too_stale(
@@ -216,7 +241,15 @@ def _strict_ru_to_en(
                 source_lang="Russian",
                 target_lang="English",
             )
-            return out, f"{mode}-{mode_sec}"
+            out = restore_markdown_links_from_ru(ru_source, out)
+            return _apply_ru_authority_if_needed(
+                settings,
+                ru_path=ru_path,
+                ru_full=ru_source,
+                en_reference=en_reference,
+                out=out,
+                mode=f"{mode}-{mode_sec}",
+            )
         out = translate_markdown(
             settings,
             source_lang="Russian",
@@ -224,7 +257,14 @@ def _strict_ru_to_en(
             source_path=ru_path,
             source_text=ru_source,
         )
-        return restore_markdown_links_from_ru(ru_source, out), mode
+        return _apply_ru_authority_if_needed(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_source,
+            en_reference=en_reference,
+            out=restore_markdown_links_from_ru(ru_source, out),
+            mode=mode,
+        )
 
     if not ru_diff.strip():
         return en_reference, "unchanged-no-diff"
@@ -237,7 +277,14 @@ def _strict_ru_to_en(
             en_reference=en_reference,
             ru_diff=ru_diff,
         )
-        return out, f"diff-first-{mode}"
+        return _apply_ru_authority_if_needed(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_source,
+            en_reference=en_reference,
+            out=out,
+            mode=f"diff-first-{mode}",
+        )
 
     if translate_by_section_enabled(source_len=len(ru_source)):
         out, mode = translate_ru_to_en_by_sections(
@@ -247,7 +294,14 @@ def _strict_ru_to_en(
             en_reference=en_reference,
             ru_diff=ru_diff,
         )
-        return out, mode
+        return _apply_ru_authority_if_needed(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_source,
+            en_reference=en_reference,
+            out=out,
+            mode=mode,
+        )
 
     out, mode = _translate_ru_to_en_via_diff(
         settings,
@@ -256,23 +310,14 @@ def _strict_ru_to_en(
         en_reference=en_reference,
         ru_diff=ru_diff,
     )
-    issues = translation_quality_issues(
-        ru_source, out, target_lang="English", source_diff=ru_diff
+    return _apply_ru_authority_if_needed(
+        settings,
+        ru_path=ru_path,
+        ru_full=ru_source,
+        en_reference=en_reference,
+        out=out,
+        mode=mode,
     )
-    if issues and _allow_full_file_fallback():
-        out2 = translate_markdown(
-            settings,
-            source_lang="Russian",
-            target_lang="English",
-            source_path=ru_path,
-            source_text=ru_source,
-        )
-        out2 = restore_markdown_links_from_ru(ru_source, out2)
-        if not translation_quality_issues(
-            ru_source, out2, target_lang="English", source_diff=ru_diff
-        ):
-            return out2, f"{mode}-heuristic-fallback-full"
-    return out, mode
 
 
 def _strict_en_to_ru(

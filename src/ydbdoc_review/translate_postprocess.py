@@ -209,6 +209,17 @@ def translation_quality_issues(
     ):
         issues.append("truncated_file")
     issues.extend(cli_critical_issues(translated, en_main=en_main))
+    if target_lang.strip().lower() == "english":
+        from ydbdoc_review.ru_en_alignment import (
+            critical_ru_en_mismatches,
+            mismatch_gate_codes,
+        )
+
+        for code in critical_ru_en_mismatches(
+            source, translated, en_reference=en_main or translated
+        ):
+            if code in mismatch_gate_codes():
+                issues.append(code)
     return issues
 
 
@@ -222,6 +233,11 @@ def translation_quality_gate_codes() -> frozenset[str]:
             "config_dir_missing_space",
             "token_file_inconsistent",
             "truncated_file",
+            "config_dir_vs_yaml_config",
+            "kafka_port_flags",
+            "missing_kafka_prereq_ports",
+            "ssd_group_count",
+            "token_file_name",
         }
     )
 

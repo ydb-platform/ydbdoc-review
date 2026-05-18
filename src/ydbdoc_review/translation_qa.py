@@ -21,6 +21,7 @@ from ydbdoc_review.markdown_sections import (
     split_markdown_sections,
 )
 from ydbdoc_review.section_translate import full_file_repair_max_chars
+from ydbdoc_review.ru_en_alignment import critical_ru_en_mismatches
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     translation_quality_gate_codes,
@@ -71,6 +72,43 @@ def _is_translator_api_error(confirmation_md: str | None) -> bool:
     )
 
 
+def _is_content_refusal(confirmation_md: str | None) -> bool:
+    if not confirmation_md:
+        return False
+    low = confirmation_md.lower()
+    return (
+        "не могу обсуждать" in low
+        or "давайте поговорим" in low
+        or "can't discuss" in low
+    )
+
+
+def _fallback_translator_verdict(
+    *,
+    review_md: str,
+    ru_full: str,
+    en_after: str,
+) -> str:
+    """When Yandex refuses confirm call, derive verdict from critic + heuristics."""
+    if critical_ru_en_mismatches(ru_full, en_after):
+        return (
+            "### Вердикт для мержа\n**ОТКЛОНИТЬ**\n\n"
+            "### Блокеры\n"
+            "_Модель-переводчик отказала; эвристика: расхождение EN с RU (команды/флаги)._"
+        )
+    if review_needs_repair(review_md):
+        return (
+            "### Вердикт для мержа\n**ОТКЛОНИТЬ**\n\n"
+            "### Блокеры\n"
+            "_Модель-переводчик отказала; в отчёте критика остаются проблемы._"
+        )
+    return (
+        "### Вердикт для мержа\n**ПРИНЯТЬ С ОГОВОРКАМИ**\n\n"
+        "### Блокеры\n_Блокеров нет._\n\n"
+        "_Модель-переводчик отказала; критик без блокеров, эвристика RU↔EN ок._"
+    )
+
+
 def file_merge_verdict(review_md: str, confirmation_md: str | None = None) -> str:
     """
     Per-file verdict from **translator** confirmation only.
@@ -82,6 +120,8 @@ def file_merge_verdict(review_md: str, confirmation_md: str | None = None) -> st
         return "warn"
     if _is_translator_api_error(confirmation_md):
         return "error"
+    if _is_content_refusal(confirmation_md):
+        return "warn"
     parsed = _parse_translator_merge_line(confirmation_md)
     if parsed:
         return parsed
@@ -209,7 +249,7 @@ def _translator_final_verdict(
     ru_pr_diff: str | None,
 ) -> str:
     try:
-        return confirm_repair_pair(
+        conf = confirm_repair_pair(
             settings,
             translate_model=settings.model_translate,
             verify_model=settings.model_translation_verify,
@@ -224,6 +264,13 @@ def _translator_final_verdict(
             en_on_main=en_on_main,
             ru_pr_diff=ru_pr_diff,
         ).strip()
+        if _is_content_refusal(conf):
+            return _fallback_translator_verdict(
+                review_md=review_md,
+                ru_full=source_text,
+                en_after=translation_after,
+            )
+        return conf
     except Exception as exc:
         return f"_Ошибка вердикта переводчика:_ `{exc}`"
 
