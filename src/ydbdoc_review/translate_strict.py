@@ -24,7 +24,11 @@ from ydbdoc_review.section_translate import (
     translate_full_source_by_sections,
     translate_ru_to_en_by_sections,
 )
-from ydbdoc_review.ru_en_alignment import critical_ru_en_mismatches, ru_authority_resync_enabled
+from ydbdoc_review.ru_en_alignment import (
+    critical_ru_en_mismatches,
+    en_coverage_behind_ru,
+    ru_authority_resync_enabled,
+)
 from ydbdoc_review.translate_postprocess import (
     apply_post_translation_fixes,
     translation_quality_issues,
@@ -156,11 +160,14 @@ def target_file_too_stale(
     target_reference: str | None,
     target_at_base: str | None,
     source_diff: str,
+    source_full: str | None = None,
 ) -> bool:
     """True when incremental merge into *target_reference* is unreliable."""
     if not target_reference or not target_reference.strip():
         return True
     if len(target_reference.strip()) < 80:
+        return True
+    if source_full and en_coverage_behind_ru(source_full, target_reference):
         return True
     if not source_diff.strip():
         return False
@@ -231,6 +238,7 @@ def _strict_ru_to_en(
         target_reference=en_reference,
         target_at_base=en_at_base,
         source_diff=ru_diff,
+        source_full=ru_source,
     )
 
     if use_full_ru_from_base or stale or en_reference is None:

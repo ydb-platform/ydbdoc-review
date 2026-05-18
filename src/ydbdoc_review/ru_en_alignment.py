@@ -19,6 +19,24 @@ _CONFIG_DIR_RE = re.compile(r"--config-dir\s+/\S")
 _YAML_CONFIG_RE = re.compile(r"--yaml-config\s+/\S")
 _KAFKA_PORT_FLAG_RE = re.compile(r"--kafka-port\s+\d+")
 _SSD_GROUP_RE = re.compile(r"ssd:(\d+)")
+_H3_HEADING_RE = re.compile(r"^###\s+\S", re.MULTILINE)
+
+
+def en_coverage_behind_ru(ru_full: str, en_text: str) -> bool:
+    """
+    True when EN is missing structural blocks present in RU (not just shorter prose).
+
+    Typical on ``main``: RU article was extended but EN was never fully synced.
+  """
+    if len(ru_full) < 600:
+        return False
+    ru_h3 = len(_H3_HEADING_RE.findall(ru_full))
+    en_h3 = len(_H3_HEADING_RE.findall(en_text))
+    if ru_h3 >= 4 and en_h3 < ru_h3:
+        return True
+    if len(ru_full) >= 1200 and len(en_text) < int(len(ru_full) * 0.58):
+        return True
+    return False
 
 
 def ru_authority_resync_enabled() -> bool:
@@ -45,6 +63,8 @@ def critical_ru_en_mismatches(
         issues.append("truncated")
     if len(ru_full) > 8000 and len(en_text) < int(len(ru_full) * 0.72):
         issues.append("too_short_vs_ru")
+    if en_coverage_behind_ru(ru_full, en_text):
+        issues.append("en_behind_ru")
 
     ru_has_cfg = bool(_CONFIG_DIR_RE.search(ru_full))
     en_has_cfg = bool(_CONFIG_DIR_RE.search(en_text))
@@ -112,5 +132,6 @@ def mismatch_gate_codes() -> frozenset[str]:
             "missing_kafka_prereq_ports",
             "ssd_group_count",
             "token_file_name",
+            "en_behind_ru",
         }
     )

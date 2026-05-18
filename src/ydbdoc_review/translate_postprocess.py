@@ -263,8 +263,10 @@ def _en_target_too_short(
         base = en_main
         if len(en_translated) < int(len(base) * 0.55):
             return True
-        if len(ru_source) > int(len(base) * 1.2) and len(en_translated) < int(len(base) * 1.05):
-            return True
+        if len(ru_source) > int(len(base) * 1.2):
+            floor = max(int(len(base) * 1.02), int(len(ru_source) * 0.40))
+            if len(en_translated) < floor:
+                return True
         return False
     return len(en_translated) < int(len(ru_source) * 0.38)
 
@@ -325,6 +327,7 @@ def translation_quality_gate_codes() -> frozenset[str]:
             "missing_kafka_prereq_ports",
             "ssd_group_count",
             "token_file_name",
+            "en_behind_ru",
         }
     )
 
