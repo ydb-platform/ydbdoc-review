@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -43,7 +44,8 @@ from ydbdoc_review.translate_postprocess import (
     collect_quality_gate_failures,
     translation_quality_issues,
 )
-from ydbdoc_review.pair_diff import pair_needs_en_from_ru_only_diff
+from ydbdoc_review.pair_diff import diff_has_added_lines, pair_needs_en_from_ru_only_diff
+from ydbdoc_review.ru_en_alignment import en_coverage_behind_ru, ru_authority_text
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 
 
@@ -350,10 +352,204 @@ def _prefer_current_pr_in_prereq(
     return prereq
 
 
+def _h3_heading_count(text: str) -> int:
+    return len(re.findall(r"^###\s+\S", text, re.MULTILINE))
+
+
+def _texts_at_base_for_pairs(
+    workdir: str,
+    base_ref_local: str,
+    analyze_results: list[dict[str, Any]],
+) -> dict[str, tuple[str | None, str | None]]:
+    """``ru_path`` → (ru_on_main, en_on_main)."""
+    out: dict[str, tuple[str | None, str | None]] = {}
+    for item in analyze_results:
+        ru_p = item.get("ru_path")
+        en_p = item.get("en_path")
+        if not isinstance(ru_p, str) or not isinstance(en_p, str):
+            continue
+        if ru_p in out:
+            continue
+        out[ru_p] = (
+            git_local.read_text_at_ref(workdir, base_ref_local, ru_p),
+            git_local.read_text_at_ref(workdir, base_ref_local, en_p),
+        )
+    return out
+
+
+def _supplementary_pair_notes(
+    *,
+    ru_path: str,
+    en_path: str,
+    ru_text: str | None,
+    en_text: str | None,
+    ru_at_base: str | None,
+    en_at_base: str | None,
+    ru_diff: str | None,
+    en_diff: str | None,
+    pr_changed: set[str],
+) -> list[str]:
+    """Deterministic cross-check for a pair skipped by translation generation."""
+    notes: list[str] = []
+    ru_pr = (ru_text or "").strip()
+    en_pr = (en_text or "").strip()
+    ru_ref = ru_authority_text(ru_pr, ru_at_base) if ru_at_base else ru_pr
+
+    if not ru_pr or not en_pr:
+        notes.append("⚠️ на ветке PR нет полного RU или EN — проверьте вручную.")
+        return notes
+
+    if en_coverage_behind_ru(ru_ref, en_pr):
+        notes.append(
+            f"⚠️ EN короче эталонного RU: ~{len(en_pr)} симв. vs ~{len(ru_ref)}; "
+            f"заголовков `###`: {_h3_heading_count(en_pr)} vs {_h3_heading_count(ru_ref)}."
+        )
+    else:
+        notes.append("✅ EN не отстаёт от RU по длине и структуре `###` (эвристика).")
+
+    ru_only = pair_needs_en_from_ru_only_diff(
+        ru_path=ru_path,
+        ru_diff=ru_diff,
+        en_diff=en_diff,
+        pr_changed_paths=pr_changed,
+    )
+    if ru_only:
+        notes.append("⚠️ в diff PR новые строки только в RU — обычно нужен EN.")
+    elif ru_path in pr_changed and en_path in pr_changed:
+        ru_add = diff_has_added_lines(ru_diff)
+        en_add = diff_has_added_lines(en_diff)
+        if ru_add and en_add:
+            notes.append("✅ RU и EN менялись в этом PR (есть добавления в обоих diff).")
+        elif ru_add or en_add:
+            notes.append("✅ RU и EN в списке изменённых файлов PR.")
+        else:
+            notes.append("✅ оба файла в PR (без добавленных строк в diff — правки/удаления).")
+    elif ru_path in pr_changed:
+        notes.append("ℹ️ в PR менялся только RU.")
+    elif en_path in pr_changed:
+        notes.append("ℹ️ в PR менялся только EN.")
+
+    if en_at_base and en_pr and len(en_pr) < int(len(en_at_base) * 0.9):
+        notes.append(
+            f"ℹ️ EN на PR короче EN на main (~{len(en_pr)} vs ~{len(en_at_base)} симв.)."
+        )
+    return notes
+
+
+def _build_pair_scope_report(
+    *,
+    analyze_results: list[dict[str, Any]],
+    generated_en_paths: set[str],
+    generated_ru_paths: set[str],
+    full_texts: dict[tuple[str, str], tuple[str | None, str | None]],
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
+    pr_changed: set[str],
+    texts_at_base: dict[str, tuple[str | None, str | None]] | None = None,
+) -> list[str]:
+    """
+  Markdown lines: translated list + skipped pairs with check-model summary and heuristics.
+    """
+    lines: list[str] = []
+    if generated_en_paths:
+        lines.extend(
+            [
+                "### Переведённые файлы",
+                "",
+                "В translation PR попали только эти пути (модель или override запросили генерацию EN/RU):",
+                "",
+                *[f"- `{p}`" for p in sorted(generated_en_paths | generated_ru_paths)],
+                "",
+            ]
+        )
+
+    skipped: list[dict[str, Any]] = []
+    review: list[dict[str, Any]] = []
+    for item in analyze_results:
+        ru_p = item.get("ru_path")
+        en_p = item.get("en_path")
+        if not isinstance(ru_p, str) or not isinstance(en_p, str):
+            continue
+        gen = item.get("needs_generation_for")
+        aligned = bool(item.get("semantically_aligned"))
+        if gen in ("en", "ru"):
+            if gen == "en" and en_p in generated_en_paths:
+                continue
+            if gen == "ru" and ru_p in generated_ru_paths:
+                continue
+        if gen in ("en", "ru"):
+            continue
+        if aligned:
+            skipped.append(item)
+        else:
+            review.append(item)
+
+    if skipped:
+        lines.extend(
+            [
+                "### Пропущено — дополнительная проверка",
+                "",
+                "Пары из этого PR, для которых **отдельный translation PR не создавал** "
+                "(модель проверки: `semantically_aligned`, генерация не нужна). "
+                "Ниже — её вывод и **детерминированная** сверка RU↔EN.",
+                "",
+            ]
+        )
+        for item in skipped:
+            ru_p = str(item["ru_path"])
+            en_p = str(item["en_path"])
+            ru_t, en_t = full_texts.get((ru_p, en_p), (None, None))
+            ru_base, en_base = (None, None)
+            if texts_at_base:
+                ru_base, en_base = texts_at_base.get(ru_p, (None, None))
+            rd, ed = pair_diffs.get((ru_p, en_p), (None, None))
+            lines.append(f"#### `{ru_p}` ↔ `{en_p}`")
+            lines.append("")
+            lines.append(f"_Модель проверки:_ {item.get('summary', '—')}")
+            lines.append("")
+            for note in _supplementary_pair_notes(
+                ru_path=ru_p,
+                en_path=en_p,
+                ru_text=ru_t,
+                en_text=en_t,
+                ru_at_base=ru_base,
+                en_at_base=en_base,
+                ru_diff=rd,
+                en_diff=ed,
+                pr_changed=pr_changed,
+            ):
+                lines.append(f"- {note}")
+            lines.append("")
+
+    if review:
+        lines.extend(
+            [
+                "### Требует ручной проверки",
+                "",
+                "Модель **не** считает пару выровненной и **не** выбрала сторону для автоперевода:",
+                "",
+            ]
+        )
+        for item in review:
+            ru_p = item.get("ru_path")
+            en_p = item.get("en_path")
+            lines.append(
+                f"- `{ru_p}` ↔ `{en_p}`: _{item.get('summary', '—')}_"
+            )
+        lines.append("")
+
+    return lines
+
+
 def _build_source_pr_comment(
     *,
     translation_pr_url: str | None,
     generated: list[str],
+    analyze_results: list[dict[str, Any]] | None = None,
+    generated_en_to_ru: dict[str, str] | None = None,
+    full_texts: dict[tuple[str, str], tuple[str | None, str | None]] | None = None,
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]] | None = None,
+    pr_changed: set[str] | None = None,
+    texts_at_base: dict[str, tuple[str | None, str | None]] | None = None,
 ) -> list[str]:
     """Short comment on the source doc PR after a successful translation run."""
     lines = ["## ydbdoc-review", ""]
@@ -368,7 +564,31 @@ def _build_source_pr_comment(
             "_PR с переводом не создан автоматически — см. лог workflow "
             "(права `YDBDOC_PUSH_PAT`, создание pull request)._"
         )
-    if generated:
+    if (
+        analyze_results
+        and full_texts is not None
+        and pair_diffs is not None
+        and pr_changed is not None
+    ):
+        gen_en = {
+            p
+            for p in (generated or [])
+            if p.endswith(".md") and generated_en_to_ru and p in generated_en_to_ru
+        }
+        scope_lines = _build_pair_scope_report(
+            analyze_results=analyze_results,
+            generated_en_paths=gen_en,
+            generated_ru_paths={
+                p for p in (generated or []) if p.endswith(".md") and p not in gen_en
+            },
+            full_texts=full_texts,
+            pair_diffs=pair_diffs,
+            pr_changed=pr_changed,
+            texts_at_base=texts_at_base,
+        )
+        if scope_lines:
+            lines.extend(["", *scope_lines])
+    elif generated:
         lines.extend(["", "Переведённые файлы:", *[f"- `{p}`" for p in generated]])
     return lines
 
@@ -1591,10 +1811,21 @@ def run_cmd(
         )
         if warnings:
             comment_lines.extend(["", "### Прочее", *warnings])
-    elif committed and generated:
+    elif committed:
+        texts_at_base = (
+            _texts_at_base_for_pairs(workdir, base_ref_local, results)
+            if workdir and base_ref_local
+            else None
+        )
         comment_lines = _build_source_pr_comment(
             translation_pr_url=translation_pr_url,
             generated=generated,
+            analyze_results=results,
+            generated_en_to_ru=generated_en_to_ru,
+            full_texts=full_texts,
+            pair_diffs=pair_diffs,
+            pr_changed=pr_changed,
+            texts_at_base=texts_at_base,
         )
         if warnings:
             comment_lines.extend(["", "### Прочее", *warnings])
