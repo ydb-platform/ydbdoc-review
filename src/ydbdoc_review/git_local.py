@@ -304,6 +304,18 @@ def write_text(repo: str, rel_path: str, content: str) -> None:
 
 
 def git_commit_all(repo: str, message: str, author_name: str, author_email: str) -> bool:
+    return git_commit_paths(repo, [], message, author_name, author_email, all_paths=True)
+
+
+def git_commit_paths(
+    repo: str,
+    paths: list[str],
+    message: str,
+    author_name: str,
+    author_email: str,
+    *,
+    all_paths: bool = False,
+) -> bool:
     subprocess.run(
         ["git", "-C", repo, "config", "user.name", author_name],
         check=True,
@@ -312,7 +324,11 @@ def git_commit_all(repo: str, message: str, author_name: str, author_email: str)
         ["git", "-C", repo, "config", "user.email", author_email],
         check=True,
     )
-    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    if all_paths:
+        subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    else:
+        for rel in paths:
+            subprocess.run(["git", "-C", repo, "add", "--", rel], check=True)
     st = subprocess.run(["git", "-C", repo, "status", "--porcelain"], capture_output=True, text=True)
     if not st.stdout.strip():
         return False

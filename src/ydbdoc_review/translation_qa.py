@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass, replace
 
+from ydbdoc_review import git_local
 from ydbdoc_review.config import Settings
 from ydbdoc_review.llm import (
     confirm_repair_pair,
@@ -716,5 +717,68 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def run_pairs_qa_and_repair(
+    settings: Settings,
+    *,
+    workdir: str,
+    pairs: list[tuple[str, str]],
+    pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
+    source_pr_number: int,
+    base_ref_local: str | None,
+    repair_enabled: bool | None = None,
+) -> tuple[str | None, list[str], list[PairQaOutcome]]:
+    """
+    Same pipeline as after ``doc_translate``: critic → repair → translator.
+
+    *pairs*: ``(ru_path, en_path)``; SOURCE/TRANSLATION read from *workdir* (PR branch).
+    Returns ``(comment_markdown, repaired_en_paths, outcomes)``.
+    """
+    if not pairs:
+        return None, [], []
+    repair_on = (
+        settings.translation_repair_enabled
+        if repair_enabled is None
+        else repair_enabled
+    )
+    lines: list[str] = []
+    outcomes: list[PairQaOutcome] = []
+    repaired_paths: list[str] = []
+
+    for ru_p, en_p in pairs:
+        source_text = git_local.read_text(workdir, ru_p) or ""
+        translated_text = git_local.read_text(workdir, en_p) or ""
+        ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))
+        en_on_main: str | None = None
+        if base_ref_local:
+            en_on_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+
+        new_text, outcome = run_pair_qa_repair(
+            settings,
+            ru_path=ru_p,
+            en_path=en_p,
+            target_path=en_p,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_lang="Russian",
+            target_lang="English",
+            repair_enabled=repair_on,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_diff,
+            en_on_main=en_on_main,
+        )
+        if new_text is not None and outcome.repair_applied:
+            git_local.write_text(workdir, en_p, new_text)
+            repaired_paths.append(en_p)
+        outcomes.append(outcome)
+        lines.append(format_pair_qa_markdown(outcome))
+
+    summary = format_translation_pr_summary(
+        source_pr_number=source_pr_number,
+        outcomes=outcomes,
+    )
+    body = summary + "\n\n---\n\n" + "\n\n".join(lines) if lines else summary
+    return body, repaired_paths, outcomes
 
 

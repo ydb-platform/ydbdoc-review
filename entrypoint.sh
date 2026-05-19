@@ -28,7 +28,8 @@ case "${MODE}" in
     set -- python -m ydbdoc_review verify \
       --repo "${INPUT_REPO}" \
       --pr "${INPUT_PR}" \
-      --merge-base-with "${MB}"
+      --merge-base-with "${MB}" \
+      ${OPTS}
     ;;
   *)
     set -- python -m ydbdoc_review run \

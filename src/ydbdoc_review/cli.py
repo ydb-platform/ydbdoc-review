@@ -29,7 +29,7 @@ from ydbdoc_review.translation_qa import (
     format_translation_pr_summary,
     pr_merge_blocked,
     pr_merge_verdict_unavailable,
-    run_pair_qa_repair,
+    run_pairs_qa_and_repair,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
 from ydbdoc_review.paths import (
@@ -639,73 +639,30 @@ def _run_translation_qa_and_repair(
     md_generated = [p for p in generated if p.endswith(".md")]
     if not md_generated:
         return None, 0, []
-    repair_on = settings.translation_repair_enabled
-    lines: list[str] = []
-    outcomes: list[PairQaOutcome] = []
-    repaired_count = 0
+    pairs: list[tuple[str, str]] = []
     for gen_p in md_generated:
-        try:
-            if gen_p in generated_en_to_ru:
-                ru_p = generated_en_to_ru[gen_p]
-                en_p = gen_p
-                target_path = en_p
-                source_text = git_local.read_text(workdir, ru_p) or ""
-                translated_text = git_local.read_text(workdir, en_p) or ""
-                source_lang, target_lang = "Russian", "English"
-            elif gen_p in generated_ru_to_en:
-                ru_p = gen_p
-                en_p = generated_ru_to_en[ru_p]
-                target_path = ru_p
-                source_text = git_local.read_text(workdir, en_p) or ""
-                translated_text = git_local.read_text(workdir, ru_p) or ""
-                source_lang, target_lang = "English", "Russian"
-            else:
-                lines.append(f"#### `{gen_p}`")
-                lines.append("")
-                lines.append("_Пара RU↔EN для QA не найдена (внутренняя ошибка)._")
-                lines.append("")
-                continue
-            ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-            en_on_main: str | None = None
-            if base_ref_local and en_p:
-                en_on_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
-            new_text, outcome = run_pair_qa_repair(
-                settings,
-                ru_path=ru_p,
-                en_path=en_p,
-                target_path=target_path,
-                source_text=source_text,
-                translated_text=translated_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                repair_enabled=repair_on,
-                source_pr_number=source_pr_number,
-                ru_pr_diff=ru_diff,
-                en_on_main=en_on_main,
-            )
-            if new_text is not None and outcome.repair_applied:
-                git_local.write_text(workdir, target_path, new_text)
-                repaired_count += 1
-                click.echo(f"  QA repair applied: `{target_path}`")
-            outcomes.append(outcome)
-            lines.append(format_pair_qa_markdown(outcome))
-        except Exception as exc:
-            lines.append(f"### `{gen_p}` — **ОШИБКА QA**")
-            lines.append("")
-            lines.append(f"`{exc}`")
-            lines.append("")
-            warnings.append(f"- `{gen_p}`: QA/repair failed: {exc}")
-
-    summary = format_translation_pr_summary(
-        source_pr_number=source_pr_number,
-        outcomes=outcomes,
-    )
-    text = summary + "\n\n---\n\n" + "\n\n".join(lines) if lines else summary
-    if repaired_count:
-        warnings.append(
-            f"- QA: критик обновил {repaired_count} файл(ов) на диске перед коммитом."
+        if gen_p in generated_en_to_ru:
+            pairs.append((generated_en_to_ru[gen_p], gen_p))
+        elif gen_p in generated_ru_to_en:
+            pairs.append((gen_p, generated_ru_to_en[gen_p]))
+    try:
+        text, repaired_paths, outcomes = run_pairs_qa_and_repair(
+            settings,
+            workdir=workdir,
+            pairs=pairs,
+            pair_diffs=pair_diffs,
+            source_pr_number=source_pr_number,
+            base_ref_local=base_ref_local,
         )
-    return text, repaired_count, outcomes
+    except Exception as exc:
+        return f"_QA/repair pipeline failed:_ `{exc}`", 0, []
+    for p in repaired_paths:
+        click.echo(f"  QA repair applied: `{p}`")
+    if repaired_paths:
+        warnings.append(
+            f"- QA: критик обновил {len(repaired_paths)} файл(ов) на диске перед коммитом."
+        )
+    return text, len(repaired_paths), outcomes
 
 
 def _apply_deterministic_cli_fixes_to_generated(
@@ -960,6 +917,16 @@ def list_models_cmd() -> None:
     help="Source doc PR number (default: parse from translation PR title/body).",
 )
 @click.option("--no-comment", is_flag=True, help="Do not post a GitHub comment.")
+@click.option(
+    "--no-commit",
+    is_flag=True,
+    help="Apply repairs on disk only; do not commit to the PR branch.",
+)
+@click.option(
+    "--no-push",
+    is_flag=True,
+    help="Commit locally but do not push (implies repairs are committed unless --no-commit).",
+)
 def verify_cmd(
     repo: str,
     pr_number: int,
@@ -967,8 +934,10 @@ def verify_cmd(
     merge_base_with: str,
     source_pr_number: int | None,
     no_comment: bool,
+    no_commit: bool,
+    no_push: bool,
 ) -> None:
-    """Verify EN files in a translation PR against RU on the merge base (doc_verify)."""
+    """doc_verify: critic + repair + translator on PR branch RU↔EN (like doc_translate)."""
     settings = Settings.from_env()
     if not settings.review_enabled:
         click.echo("ydbdoc-review: skipped (review disabled).")
@@ -981,6 +950,8 @@ def verify_cmd(
         merge_base_with=merge_base_with,
         source_pr_number=source_pr_number,
         no_comment=no_comment,
+        no_commit=no_commit,
+        no_push=no_push,
     )
 
 

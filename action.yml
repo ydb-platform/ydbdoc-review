@@ -19,10 +19,10 @@ inputs:
     description: 'If "true", pass --dry-run (no writes, no commit, no push, no PR comment).'
     default: "false"
   no_commit:
-    description: 'If "true", pass --no-commit (write files, no git commit/push, no PR comment).'
+    description: 'If "true", pass --no-commit (run: no translation commit; verify: no repair commit/push).'
     default: "false"
   mode:
-    description: '"run" — doc_translate (check + optional translation). "verify" — doc_verify (QA only).'
+    description: '"run" — doc_translate. "verify" — doc_verify (critic + repair + translator on PR branch).'
     default: "run"
 
 runs:

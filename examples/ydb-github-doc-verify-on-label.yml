@@ -1,5 +1,5 @@
-# Проверка translation PR: лейбл doc_verify на PR с переводом (ветка ydbdoc-review/pr-*).
-# EN на ветке PR сверяется с RU на main; критик + переводчик, без нового перевода.
+# Проверка PR с переводом (или bilingual): лейбл doc_verify.
+# RU и EN берутся с ветки PR; цикл как после doc_translate: критик → repair → переводчик.
 
 name: ydbdoc-review (doc_verify label)
 
@@ -10,7 +10,7 @@ on:
       - "ydb/docs/**"
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
@@ -31,13 +31,14 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
-      - name: Verify translation PR
+      - name: Verify translation on PR branch
         uses: ydb-platform/ydbdoc-review@main
         with:
           mode: verify
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}
           merge_base_with: origin/${{ github.event.pull_request.base.ref }}
+          # no_commit: "true"  # только отчёт в комментарии, без commit/push правок
         env:
           YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
           YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
@@ -45,3 +46,4 @@ jobs:
           YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}

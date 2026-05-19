@@ -1,4 +1,4 @@
-"""Verify translation PR: EN on PR branch vs RU on merge base (main)."""
+"""doc_verify: QA on a PR as if ydbdoc-review had produced the translation."""
 
 from __future__ import annotations
 
@@ -10,23 +10,20 @@ import click
 
 from ydbdoc_review import git_local, github_api
 from ydbdoc_review.config import Settings
-from ydbdoc_review.paths import pairs_from_changed_files
+from ydbdoc_review.paths import DocPair, pairs_from_changed_files
 from ydbdoc_review.translation_qa import (
-    PairQaOutcome,
-    format_pair_qa_markdown,
-    format_translation_pr_summary,
     pr_merge_blocked,
     pr_merge_verdict_unavailable,
-    run_pair_qa_repair,
+    run_pairs_qa_and_repair,
 )
 from ydbdoc_review.translate_postprocess import (
+    apply_post_translation_fixes,
     collect_quality_gate_failures,
-    translation_quality_issues,
 )
 
 
 def parse_source_pr_number(*texts: str | None) -> int | None:
-    """Extract doc PR number from translation PR title/body."""
+    """Extract linked doc PR number from translation PR title/body."""
     patterns = (
         r"Translation of PR\s+#?(\d+)",
         r"Translation PR for\s+#?(\d+)",
@@ -43,55 +40,85 @@ def parse_source_pr_number(*texts: str | None) -> int | None:
     return None
 
 
-def _source_pr_ru_diff(
+def _pair_diffs_for_pr(
     workdir: str,
-    base_ref: str,
-    ru_path: str,
+    merge_base_with: str,
+    pairs: list[DocPair],
+) -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    out: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for pair in pairs:
+        ru_d: str | None = None
+        en_d: str | None = None
+        try:
+            ru_d = git_local.file_diff_range(workdir, merge_base_with, pair.ru_path)
+        except RuntimeError:
+            pass
+        try:
+            en_d = git_local.file_diff_range(workdir, merge_base_with, pair.en_path)
+        except RuntimeError:
+            pass
+        out[(pair.ru_path, pair.en_path)] = (ru_d, en_d)
+    return out
+
+
+def _pairs_to_verify(
+    pairs: list[DocPair],
     *,
-    source_pr: dict[str, Any] | None,
-) -> str | None:
-    """RU file diff introduced by the source documentation PR (if merged)."""
-    if not source_pr or not workdir:
-        return None
-    merge_sha = source_pr.get("merge_commit_sha")
-    if not isinstance(merge_sha, str) or not merge_sha.strip():
-        return None
-    try:
-        return git_local.file_diff_between_refs(
-            workdir, base_ref, merge_sha, ru_path
-        )
-    except RuntimeError:
-        return None
+    workdir: str,
+    pr_changed: set[str],
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Pairs with RU+EN on the PR branch; at least one side in this PR's diff."""
+    ok: list[tuple[str, str]] = []
+    skipped: list[str] = []
+    for pair in pairs:
+        if pair.ru_path not in pr_changed and pair.en_path not in pr_changed:
+            continue
+        ru_text = git_local.read_text(workdir, pair.ru_path) or ""
+        en_text = git_local.read_text(workdir, pair.en_path) or ""
+        if len(ru_text.strip()) < 30:
+            skipped.append(f"{pair.ru_path} (нет RU на ветке PR)")
+            continue
+        if len(en_text.strip()) < 30:
+            skipped.append(f"{pair.en_path} (нет EN на ветке PR)")
+            continue
+        ok.append((pair.ru_path, pair.en_path))
+    return ok, skipped
 
 
 def _build_verify_comment(
     *,
     pr_number: int,
-    base_ref: str,
-    source_pr_number: int | None,
-    outcomes: list[PairQaOutcome],
+    linked_source_pr: int | None,
+    qa_body: str | None,
     gate_failures: list[str],
     skipped: list[str],
+    repaired_paths: list[str],
 ) -> str:
     lines = [
         "## ydbdoc-review — doc_verify",
         "",
-        f"Self-check translation PR **#{pr_number}**: EN на ветке PR vs RU на **`{base_ref}`**.",
+        f"Проверка PR **#{pr_number}**: EN на ветке PR vs **RU на той же ветке** "
+        "(тот же цикл, что после `doc_translate`: критик → repair → переводчик).",
     ]
-    if source_pr_number is not None:
-        lines.append(f"_Исходный doc PR: #{source_pr_number}._")
+    if linked_source_pr is not None and linked_source_pr != pr_number:
+        lines.append(f"_Связанный doc PR (из заголовка): #{linked_source_pr}._")
     lines.append("")
+
+    if repaired_paths:
+        lines.extend(
+            [
+                "### Исправления критика",
+                "",
+                "Закоммичены правки в EN (если не отключён `--no-commit`):",
+                "",
+                *[f"- `{p}`" for p in repaired_paths],
+                "",
+            ]
+        )
 
     if skipped:
         lines.extend(
-            [
-                "### Пропущено",
-                "",
-                "Нет EN-файла в diff этого PR (проверка только затронутых EN):",
-                "",
-                *[f"- `{p}`" for p in skipped],
-                "",
-            ]
+            ["### Пропущено", "", *[f"- {s}" for s in skipped], ""]
         )
 
     if gate_failures:
@@ -104,22 +131,12 @@ def _build_verify_comment(
             ]
         )
 
-    if outcomes:
-        summary = format_translation_pr_summary(
-            source_pr_number=source_pr_number or pr_number,
-            outcomes=outcomes,
-        )
-        if summary.startswith("## Вердикт для translation PR"):
-            summary = "## Вердикт doc_verify" + summary[len("## Вердикт для translation PR") :]
-        lines.append(summary)
-        lines.append("---")
-        lines.append("")
-        for o in outcomes:
-            lines.append(format_pair_qa_markdown(o))
-            lines.append("")
-
-    if not outcomes and not gate_failures:
-        lines.append("_Нет пар RU↔EN для проверки в diff PR._")
+    if qa_body:
+        if qa_body.startswith("## Вердикт для translation PR"):
+            qa_body = "## Вердикт doc_verify" + qa_body[len("## Вердикт для translation PR") :]
+        lines.append(qa_body)
+    elif not gate_failures:
+        lines.append("_Нет пар для QA в diff этого PR._")
 
     return "\n".join(lines).strip()
 
@@ -133,36 +150,29 @@ def run_verify_pr(
     merge_base_with: str,
     source_pr_number: int | None,
     no_comment: bool,
+    no_commit: bool,
+    no_push: bool,
 ) -> None:
-    """Run critic + translator verify on all EN files changed in the PR."""
+    """Verify doc pairs on the PR branch (critic + repair + translator, like doc_translate)."""
     settings.validate_github()
     settings.validate_yandex()
 
     if not settings.translation_self_check_enabled:
-        click.echo(
-            "Warning: translation_self_check disabled in config; "
-            "doc_verify still runs QA if models are configured.",
-            err=True,
+        raise SystemExit(
+            "doc_verify requires translation self-check "
+            "(YDBDOC_TRANSLATION_SELF_CHECK / translation_self_check in config)."
         )
 
     owner, repo_name = repo.split("/", 1)
     pr = github_api.get_pull(owner, repo_name, pr_number, settings.github_token)
+    head_owner, head_repo_name, _head_sha, head_ref = github_api.head_repo_from_pr(pr)
+    head_clone_url = str(pr["head"]["repo"]["clone_url"])
     title = str(pr.get("title") or "")
     body = str(pr.get("body") or "")
 
-    resolved_source = source_pr_number or parse_source_pr_number(title, body)
-    source_pr: dict[str, Any] | None = None
-    if resolved_source is not None:
-        try:
-            source_pr = github_api.get_pull(
-                owner, repo_name, resolved_source, settings.github_token
-            )
-            click.echo(f"Linked source documentation PR #{resolved_source}.")
-        except Exception as exc:
-            click.echo(
-                f"Warning: could not load source PR #{resolved_source}: {exc}",
-                err=True,
-            )
+    linked_source = source_pr_number or parse_source_pr_number(title, body)
+    if linked_source is not None and linked_source != pr_number:
+        click.echo(f"Linked doc PR #{linked_source} (metadata only).")
 
     workdir = repo_path or os.environ.get("YDBDOC_REPO_PATH", "").strip() or None
     if not workdir:
@@ -175,18 +185,22 @@ def run_verify_pr(
 
     changed = git_local.local_changed_paths(workdir, merge_base_with)
     pr_changed = {p.replace("\\", "/").lstrip("./") for p in changed}
-    pairs = pairs_from_changed_files(changed, settings.docs_prefix)
-    if not pairs:
+    all_pairs = pairs_from_changed_files(changed, settings.docs_prefix)
+    verify_pairs, skipped = _pairs_to_verify(
+        all_pairs, workdir=workdir, pr_changed=pr_changed
+    )
+
+    if not verify_pairs:
         msg = (
             "## ydbdoc-review — doc_verify\n\n"
-            "_В diff PR нет пар markdown RU↔EN под "
-            f"`{settings.docs_prefix}/`._"
+            "_В diff PR нет проверяемых пар RU↔EN (нужны оба файла на ветке PR "
+            "и хотя бы один путь в diff)._"
         )
+        if skipped:
+            msg += "\n\n" + "\n".join(f"- {s}" for s in skipped)
         if not no_comment:
-            github_api.post_issue_comment(
-                owner, repo_name, pr_number, msg, settings.github_token
-            )
-        click.echo("No doc pairs in PR diff.")
+            github_api.post_issue_comment(owner, repo_name, pr_number, msg, settings.github_token)
+        click.echo("No pairs to verify.")
         return
 
     base_ref_local: str | None = None
@@ -202,106 +216,103 @@ def run_verify_pr(
     except RuntimeError as exc:
         click.echo(f"Warning: could not fetch `{base_ref}`: {exc}", err=True)
 
-    outcomes: list[PairQaOutcome] = []
-    gate_pairs: list[tuple[str, str, str, str | None, str | None, str | None]] = []
-    skipped: list[str] = []
+    pair_diffs = _pair_diffs_for_pr(workdir, merge_base_with, [
+        DocPair(ru_path=r, en_path=e) for r, e in verify_pairs
+    ])
 
     click.echo(
-        f"doc_verify: {len(pairs)} pair(s), RU authority=`{base_ref_local or base_ref}`, "
-        f"critic `{settings.model_translation_verify}` …"
+        f"doc_verify: {len(verify_pairs)} pair(s) on PR branch, "
+        f"critic `{settings.model_translation_verify}`, "
+        f"repair={'on' if settings.translation_repair_enabled else 'off'} …"
     )
 
-    for pair in pairs:
-        if pair.en_path not in pr_changed:
-            skipped.append(pair.ru_path)
-            continue
+    qa_body, repaired_paths, outcomes = run_pairs_qa_and_repair(
+        settings,
+        workdir=workdir,
+        pairs=verify_pairs,
+        pair_diffs=pair_diffs,
+        source_pr_number=pr_number,
+        base_ref_local=base_ref_local,
+    )
 
-        if not base_ref_local:
-            click.echo(
-                f"  Skip `{pair.en_path}`: could not load RU from `{base_ref}`.",
-                err=True,
-            )
-            skipped.append(pair.en_path)
-            continue
-
-        ru_main = git_local.read_text_at_ref(workdir, base_ref_local, pair.ru_path)
-        en_pr = git_local.read_text(workdir, pair.en_path) or ""
-        en_main = git_local.read_text_at_ref(workdir, base_ref_local, pair.en_path)
-
-        if not ru_main or len(ru_main.strip()) < 30:
-            click.echo(f"  Skip `{pair.en_path}`: no RU on base.", err=True)
-            skipped.append(pair.en_path)
-            continue
-        if not en_pr.strip():
-            click.echo(f"  Skip `{pair.en_path}`: empty EN on PR.", err=True)
-            skipped.append(pair.en_path)
-            continue
-
-        ru_pr_diff = _source_pr_ru_diff(
-            workdir,
-            base_ref_local or merge_base_with,
-            pair.ru_path,
-            source_pr=source_pr,
+    for en_p in {p for _r, p in verify_pairs}:
+        ru_p = next(r for r, e in verify_pairs if e == en_p)
+        ru_full = git_local.read_text(workdir, ru_p) or ""
+        before = git_local.read_text(workdir, en_p) or ""
+        en_main = (
+            git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+            if base_ref_local
+            else None
         )
-        en_pr_diff: str | None = None
-        try:
-            en_pr_diff = git_local.file_diff_range(
-                workdir, merge_base_with, pair.en_path
-            )
-        except RuntimeError:
-            pass
-
-        click.echo(f"  QA `{pair.ru_path}` ↔ `{pair.en_path}` …")
-        _new_text, outcome = run_pair_qa_repair(
-            settings,
-            ru_path=pair.ru_path,
-            en_path=pair.en_path,
-            target_path=pair.en_path,
-            source_text=ru_main,
-            translated_text=en_pr,
-            source_lang="Russian",
-            target_lang="English",
-            repair_enabled=False,
-            source_pr_number=resolved_source,
-            ru_pr_diff=ru_pr_diff,
-            en_on_main=en_main,
+        after = apply_post_translation_fixes(
+            before, en_main=en_main, ru_source=ru_full
         )
-        outcomes.append(outcome)
+        if after != before:
+            git_local.write_text(workdir, en_p, after)
+            if en_p not in repaired_paths:
+                repaired_paths.append(en_p)
 
-        q_issues = translation_quality_issues(
-            ru_main,
-            en_pr,
-            target_lang="English",
-            en_main=en_main,
-            source_diff=en_pr_diff,
-            ru_authority=ru_main,
+    gate_pairs: list[tuple[str, str, str, str | None, str | None, str | None]] = []
+    for ru_p, en_p in verify_pairs:
+        ru_text = git_local.read_text(workdir, ru_p) or ""
+        en_text = git_local.read_text(workdir, en_p) or ""
+        en_main = (
+            git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+            if base_ref_local
+            else None
         )
-        if q_issues:
-            click.echo(
-                f"    heuristics: {', '.join(q_issues)}",
-                err=True,
-            )
-
-        gate_pairs.append((pair.en_path, ru_main, en_pr, en_main, en_pr_diff, ru_main))
+        ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
+        gate_pairs.append((en_p, ru_text, en_text, en_main, en_diff, ru_text))
 
     gate_failures = collect_quality_gate_failures(gate_pairs)
+
+    if gate_failures:
+        click.echo("Quality gate failed:", err=True)
+        for line in gate_failures:
+            click.echo(f"  {line}", err=True)
+
+    blocked = bool(gate_failures) or (outcomes and pr_merge_blocked(outcomes))
+    unavailable = outcomes and pr_merge_verdict_unavailable(outcomes)
+
+    committed = False
+    paths_to_publish = list(dict.fromkeys(repaired_paths))
+    if paths_to_publish and not no_commit and not blocked and not unavailable:
+        msg = (
+            f"docs: doc_verify critic repairs (PR #{pr_number})\n\n"
+            "Applied by ydbdoc-review doc_verify (same QA/repair as doc_translate)."
+        )
+        committed = git_local.git_commit_paths(
+            workdir,
+            paths_to_publish,
+            msg,
+            author_name="ydbdoc-review",
+            author_email="ydbdoc-review@users.noreply.github.com",
+        )
+        if committed:
+            click.echo(f"Committed {len(paths_to_publish)} repaired file(s).")
+
+    if committed and not no_push:
+        git_local.push_branch(
+            workdir,
+            remote_name="ydbdoc-push",
+            branch=head_ref,
+            token=settings.github_push_token,
+            base_https_url=head_clone_url,
+        )
+        click.echo(f"Pushed to `{head_owner}/{head_repo_name}:{head_ref}`.")
+
     comment = _build_verify_comment(
         pr_number=pr_number,
-        base_ref=base_ref,
-        source_pr_number=resolved_source,
-        outcomes=outcomes,
+        linked_source_pr=linked_source,
+        qa_body=qa_body,
         gate_failures=gate_failures,
         skipped=skipped,
+        repaired_paths=paths_to_publish if committed else repaired_paths,
     )
 
     click.echo("\n--- doc_verify report ---\n")
     click.echo(comment)
     click.echo("\n--- end ---\n")
-
-    blocked = bool(gate_failures) or (
-        outcomes and pr_merge_blocked(outcomes)
-    )
-    unavailable = outcomes and pr_merge_verdict_unavailable(outcomes)
 
     if not no_comment:
         github_api.post_issue_comment_chunked(
@@ -311,8 +322,7 @@ def run_verify_pr(
 
     if unavailable:
         raise SystemExit(
-            "## ydbdoc-review — doc_verify: вердикт не получен\n\n"
-            + comment
+            "## ydbdoc-review — doc_verify: вердикт не получен\n\n" + comment
         )
     if blocked:
         raise SystemExit(
