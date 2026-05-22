@@ -7,9 +7,9 @@ check = "yandexgpt/latest"
 translate = "yandexgpt-5.1"
 # Вторая модель для cross-check перевода (см. [feature].translation_self_check).
 # Не задавать или пусто — используется та же, что и check.
-# Critic for translation QA. Prefer DeepSeek V4 Flash when provisioned in your folder;
-# otherwise ydbdoc-review falls back to yandexgpt (see YDBDOC_MODEL_VERIFY_FALLBACKS).
-translation_verify = "deepseek-v4-flash"
+# Critic for translation QA (doc_translate / doc_verify). Default: YandexGPT in FM.
+# Override: YDBDOC_MODEL_TRANSLATION_VERIFY or vars (e.g. deepseek-v4-flash when enabled in folder).
+translation_verify = "yandexgpt/latest"
 
 # Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.
 [feature]

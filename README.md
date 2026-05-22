@@ -61,7 +61,7 @@ export PYTHONPATH="$(pwd)/src"
 python -m ydbdoc_review list-models
 ```
 
-Официальный перечень в интерфейсе: [Yandex AI Studio — Model gallery](https://aistudio.yandex.ru/model-gallery). Для cross-check по умолчанию задан **`deepseek-v4-flash`**; если в каталоге FM модель ещё не подключена (`Failed to get model`), action автоматически пробует **`YDBDOC_MODEL_VERIFY_FALLBACKS`** (по умолчанию `yandexgpt/latest`, `yandexgpt-5.1`). Сверяйте slug с `list-models` или консолью.
+Официальный перечень в интерфейсе: [Yandex AI Studio — Model gallery](https://aistudio.yandex.ru/model-gallery). Для cross-check (критик) по умолчанию в TOML образа: **`yandexgpt/latest`** (`[models].translation_verify`). Переопределение: **`YDBDOC_MODEL_TRANSLATION_VERIFY`** или `vars` в workflow `ydb` (например `deepseek-v4-flash`, когда модель подключена в каталоге). При `Failed to get model` пробуются **`YDBDOC_MODEL_VERIFY_FALLBACKS`** (`yandexgpt-5.1`, …).
 
 **Выключатель всего `run`** (удобно в CI репозитория-документации, аналогично флагам Diplodoc): переменная **`YDBDOC_REVIEW_ENABLED`** (`false` / `0` / `off` — команда сразу завершается успешно, без GitHub и без FM). Либо в `ydbdoc-review.toml` секция **`[feature]`** и ключ **`review_enabled = false`**. Если заданы и env, и TOML, **приоритет у env**.
 
