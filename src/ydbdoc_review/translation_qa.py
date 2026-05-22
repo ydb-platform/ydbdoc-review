@@ -23,7 +23,12 @@ from ydbdoc_review.markdown_sections import (
 )
 from ydbdoc_review.section_translate import full_file_repair_max_chars
 from ydbdoc_review.ru_en_alignment import critical_ru_en_mismatches
-from ydbdoc_review.ru_en_sync import section_missing_h3, section_too_short
+from ydbdoc_review.ru_en_sync import (
+    deterministic_prepare_en,
+    document_structure_broken,
+    section_missing_h3,
+    section_too_short,
+)
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     translation_quality_gate_codes,
@@ -375,6 +380,42 @@ def _translator_final_verdict(
         return f"_Ошибка вердикта переводчика:_ `{exc}`"
 
 
+def critic_needs_structure_rebuild(review_md: str) -> bool:
+    """True when the critic report calls for full-file / structural resync."""
+    if not review_md.strip():
+        return False
+    tl = review_md.lower()
+    markers = (
+        "полный resync",
+        "полная пересинхронизация",
+        "пересинхронизац",
+        "структур",
+        "дублир",
+        "отсутствует",
+        "отсутствуют",
+        "нарушен",
+        "ydbdoc_block",
+        "⟦",
+        "весь файл",
+        "весь раздел",
+        "неверное расположение",
+        "неправильн",
+        "порядок раздел",
+    )
+    if not any(m in tl for m in markers):
+        return False
+    for heading in (
+        r"###\s*блокеры",
+        r"###\s*найдено\s+критиком",
+        r"###\s*scope",
+        r"###\s*оставшиеся\s+проблемы",
+    ):
+        m = re.search(heading + r"\s*\n([\s\S]*?)(?:\n###|\Z)", review_md, re.IGNORECASE)
+        if m and any(x in m.group(1).lower() for x in markers):
+            return True
+    return any(m in tl for m in ("полный resync", "структур", "дублир", "ydbdoc_block", "⟦"))
+
+
 def review_needs_repair(review_md: str) -> bool:
     """True when the critic report lists substantive issues worth auto-fixing."""
     if not review_md.strip():
@@ -448,6 +489,72 @@ def _section_qa_use(source_text: str) -> bool:
     return len(split_markdown_sections(source_text)) > 1
 
 
+def _is_en_target(target_lang: str) -> bool:
+    return target_lang.strip().lower() in ("english", "en")
+
+
+def _run_llm_repair(
+    settings: Settings,
+    *,
+    ru_path: str,
+    en_path: str,
+    target_path: str,
+    source_text: str,
+    translated_text: str,
+    review_md: str,
+    source_lang: str,
+    target_lang: str,
+    repair_enabled: bool,
+    source_pr_number: int | None,
+    ru_pr_diff: str | None,
+    en_on_main: str | None,
+) -> tuple[str | None, PairQaOutcome]:
+    """LLM fixer for prose/semantics only (not whole-file structure)."""
+    if not review_needs_repair(review_md) or not repair_enabled:
+        return None, PairQaOutcome(
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            review_md=review_md,
+            repair_attempted=False,
+            repair_applied=False,
+            repair_skip_reason=None,
+            confirmation_md=None,
+            repair_error=None,
+        )
+    if _section_qa_use(source_text):
+        return _run_pair_qa_repair_by_sections(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            target_path=target_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            repair_enabled=True,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+            review_md=review_md,
+        )
+    return _run_pair_qa_repair_whole_file(
+        settings,
+        ru_path=ru_path,
+        en_path=en_path,
+        target_path=target_path,
+        source_text=source_text,
+        translated_text=translated_text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        repair_enabled=True,
+        source_pr_number=source_pr_number,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
+        review_md=review_md,
+    )
+
+
 def run_pair_qa_repair(
     settings: Settings,
     *,
@@ -462,38 +569,88 @@ def run_pair_qa_repair(
     source_pr_number: int | None = None,
     ru_pr_diff: str | None = None,
     en_on_main: str | None = None,
-) -> tuple[str | None, PairQaOutcome]:
-    if _section_qa_use(source_text):
-        new_text, outcome = _run_pair_qa_repair_by_sections(
+) -> tuple[str, PairQaOutcome]:
+    """
+    Critic → deterministic prepare → structural rebuild → optional LLM repair
+    → deterministic prepare → translator verdict.
+    """
+    translation_before = translated_text
+    current = translated_text
+    repair_applied = False
+    repair_attempted = False
+    repair_skip_reason: str | None = None
+    repair_error: str | None = None
+
+    if _is_en_target(target_lang):
+        current = deterministic_prepare_en(
+            settings,
+            ru_path=ru_path,
+            ru_full=source_text,
+            en_text=current,
+        )
+
+    review_md = verify_translation_pair(
+        settings,
+        translate_model=settings.model_translate,
+        verify_model=settings.model_translation_verify,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        ru_path=ru_path,
+        en_path=en_path,
+        source_text=source_text,
+        translated_text=current,
+        source_pr_number=source_pr_number,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
+    )
+
+    structural = _is_en_target(target_lang) and (
+        critic_needs_structure_rebuild(review_md)
+        or document_structure_broken(source_text, current)
+    )
+
+    if structural and repair_enabled:
+        repair_attempted = True
+        current = deterministic_prepare_en(
+            settings,
+            ru_path=ru_path,
+            ru_full=source_text,
+            en_text=current,
+            force_structure_rebuild=True,
+        )
+        repair_applied = True
+        repair_skip_reason = "структурный rebuild по RU (детерминированно)"
+    elif review_needs_repair(review_md) and repair_enabled:
+        llm_text, llm_outcome = _run_llm_repair(
             settings,
             ru_path=ru_path,
             en_path=en_path,
             target_path=target_path,
             source_text=source_text,
-            translated_text=translated_text,
+            translated_text=current,
+            review_md=review_md,
             source_lang=source_lang,
             target_lang=target_lang,
-            repair_enabled=repair_enabled,
+            repair_enabled=True,
             source_pr_number=source_pr_number,
             ru_pr_diff=ru_pr_diff,
             en_on_main=en_on_main,
         )
-    else:
-        new_text, outcome = _run_pair_qa_repair_whole_file(
+        repair_attempted = llm_outcome.repair_attempted
+        repair_applied = llm_outcome.repair_applied
+        repair_skip_reason = llm_outcome.repair_skip_reason
+        repair_error = llm_outcome.repair_error
+        if llm_text is not None:
+            current = llm_text
+
+    if _is_en_target(target_lang):
+        current = deterministic_prepare_en(
             settings,
             ru_path=ru_path,
-            en_path=en_path,
-            target_path=target_path,
-            source_text=source_text,
-            translated_text=translated_text,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            repair_enabled=repair_enabled,
-            source_pr_number=source_pr_number,
-            ru_pr_diff=ru_pr_diff,
-            en_on_main=en_on_main,
+            ru_full=source_text,
+            en_text=current,
         )
-    after = new_text if new_text is not None else translated_text
+
     conf = _translator_final_verdict(
         settings,
         ru_path=ru_path,
@@ -501,13 +658,25 @@ def run_pair_qa_repair(
         source_lang=source_lang,
         target_lang=target_lang,
         source_text=source_text,
-        translation_before=translated_text,
-        translation_after=after,
-        review_md=outcome.review_md,
+        translation_before=translation_before,
+        translation_after=current,
+        review_md=review_md,
         en_on_main=en_on_main,
         ru_pr_diff=ru_pr_diff,
     )
-    return new_text, replace(outcome, confirmation_md=conf)
+
+    outcome = PairQaOutcome(
+        ru_path=ru_path,
+        en_path=en_path,
+        target_path=target_path,
+        review_md=review_md,
+        repair_attempted=repair_attempted,
+        repair_applied=repair_applied,
+        repair_skip_reason=repair_skip_reason,
+        confirmation_md=conf,
+        repair_error=repair_error,
+    )
+    return current, outcome
 
 
 def _run_pair_qa_repair_by_sections(
@@ -524,35 +693,23 @@ def _run_pair_qa_repair_by_sections(
     source_pr_number: int | None = None,
     ru_pr_diff: str | None = None,
     en_on_main: str | None = None,
+    review_md: str | None = None,
 ) -> tuple[str | None, PairQaOutcome]:
-    """One file-level audit report; repairs applied per ``##`` section."""
-    review_md = verify_translation_pair(
-        settings,
-        translate_model=settings.model_translate,
-        verify_model=settings.model_translation_verify,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        ru_path=ru_path,
-        en_path=en_path,
-        source_text=source_text,
-        translated_text=translated_text,
-        source_pr_number=source_pr_number,
-        ru_pr_diff=ru_pr_diff,
-        en_on_main=en_on_main,
-    )
-    any_needs = review_needs_repair(review_md)
-
-    if not any_needs or not repair_enabled:
-        return None, PairQaOutcome(
+    """Repairs applied per ``##`` section (LLM fixer; critic report already computed)."""
+    if review_md is None:
+        review_md = verify_translation_pair(
+            settings,
+            translate_model=settings.model_translate,
+            verify_model=settings.model_translation_verify,
+            source_lang=source_lang,
+            target_lang=target_lang,
             ru_path=ru_path,
             en_path=en_path,
-            target_path=target_path,
-            review_md=review_md,
-            repair_attempted=False,
-            repair_applied=False,
-            repair_skip_reason=None,
-            confirmation_md=None,
-            repair_error=None,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
         )
 
     src_secs = split_markdown_sections(source_text)
@@ -628,23 +785,6 @@ def _run_pair_qa_repair_by_sections(
 
     merged = join_markdown_sections(out_secs)
 
-    if target_lang.strip().lower() in ("english", "en") and repaired_any:
-        from ydbdoc_review.ru_en_sync import (
-            structure_sync_needed,
-            sync_document_structure_from_ru,
-        )
-
-        if structure_sync_needed(source_text, merged):
-            from ydbdoc_review.ru_en_sync import rebuild_en_document_from_ru
-
-            merged = rebuild_en_document_from_ru(
-                settings,
-                ru_path=ru_path,
-                ru_full=source_text,
-                en_text=merged,
-            )
-            merged = apply_deterministic_cli_fixes(merged, en_main=en_on_main)
-
     if not repaired_any:
         return None, PairQaOutcome(
             ru_path=ru_path,
@@ -685,33 +825,22 @@ def _run_pair_qa_repair_whole_file(
     source_pr_number: int | None = None,
     ru_pr_diff: str | None = None,
     en_on_main: str | None = None,
+    review_md: str | None = None,
 ) -> tuple[str | None, PairQaOutcome]:
-    review_md = verify_translation_pair(
-        settings,
-        translate_model=settings.model_translate,
-        verify_model=settings.model_translation_verify,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        ru_path=ru_path,
-        en_path=en_path,
-        source_text=source_text,
-        translated_text=translated_text,
-        source_pr_number=source_pr_number,
-        ru_pr_diff=ru_pr_diff,
-        en_on_main=en_on_main,
-    )
-    needs = review_needs_repair(review_md)
-    if not needs or not repair_enabled:
-        return None, PairQaOutcome(
+    if review_md is None:
+        review_md = verify_translation_pair(
+            settings,
+            translate_model=settings.model_translate,
+            verify_model=settings.model_translation_verify,
+            source_lang=source_lang,
+            target_lang=target_lang,
             ru_path=ru_path,
             en_path=en_path,
-            target_path=target_path,
-            review_md=review_md,
-            repair_attempted=False,
-            repair_applied=False,
-            repair_skip_reason=None,
-            confirmation_md=None,
-            repair_error=None,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
         )
 
     if len(source_text) > full_file_repair_max_chars():
@@ -928,7 +1057,8 @@ def run_pairs_qa_and_repair(
         if base_ref_local:
             en_on_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
 
-        new_text, outcome = run_pair_qa_repair(
+        initial_en = translated_text
+        final_en, outcome = run_pair_qa_repair(
             settings,
             ru_path=ru_p,
             en_path=en_p,
@@ -942,8 +1072,8 @@ def run_pairs_qa_and_repair(
             ru_pr_diff=ru_diff,
             en_on_main=en_on_main,
         )
-        if new_text is not None and outcome.repair_applied:
-            git_local.write_text(workdir, en_p, new_text)
+        if final_en != initial_en:
+            git_local.write_text(workdir, en_p, final_en)
             repaired_paths.append(en_p)
         outcomes.append(outcome)
         lines.append(format_pair_qa_markdown(outcome))

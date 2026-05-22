@@ -238,6 +238,7 @@ def finalize_en_from_ru(
     ru_path: str,
     ru_full: str,
     en_text: str,
+    force_structure_rebuild: bool = False,
 ) -> str:
     from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
 
@@ -245,7 +246,9 @@ def finalize_en_from_ru(
     out = apply_post_translation_fixes(
         en_text, ru_source=ru_full, en_path=en_path
     )
-    if structure_sync_enabled() and structure_sync_needed(ru_full, out):
+    if structure_sync_enabled() and (
+        force_structure_rebuild or structure_sync_needed(ru_full, out)
+    ):
         out = rebuild_en_document_from_ru(
             settings,
             ru_path=ru_path,
@@ -256,3 +259,21 @@ def finalize_en_from_ru(
             out, ru_source=ru_full, en_path=en_path
         )
     return out
+
+
+def deterministic_prepare_en(
+    settings: Settings,
+    *,
+    ru_path: str,
+    ru_full: str,
+    en_text: str,
+    force_structure_rebuild: bool = False,
+) -> str:
+    """Artifacts, CLI semantics, and optional RU-order rebuild (no critic LLM)."""
+    return finalize_en_from_ru(
+        settings,
+        ru_path=ru_path,
+        ru_full=ru_full,
+        en_text=en_text,
+        force_structure_rebuild=force_structure_rebuild,
+    )

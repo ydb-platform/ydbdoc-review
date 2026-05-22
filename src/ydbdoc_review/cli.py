@@ -665,6 +665,33 @@ def _run_translation_qa_and_repair(
     return text, len(repaired_paths), outcomes
 
 
+def _prepare_generated_en_before_qa(
+    workdir: str,
+    *,
+    settings: Settings,
+    generated_en_to_ru: dict[str, str],
+) -> int:
+    """Deterministic EN prepare (artifacts, structure, CLI) before critic QA."""
+    from ydbdoc_review.ru_en_sync import deterministic_prepare_en
+
+    fixed = 0
+    for en_p, ru_p in generated_en_to_ru.items():
+        if not en_p.endswith(".md"):
+            continue
+        ru_full = git_local.read_text(workdir, ru_p) or ""
+        before = git_local.read_text(workdir, en_p) or ""
+        after = deterministic_prepare_en(
+            settings,
+            ru_path=ru_p,
+            ru_full=ru_full,
+            en_text=before,
+        )
+        if after != before:
+            git_local.write_text(workdir, en_p, after)
+            fixed += 1
+    return fixed
+
+
 def _apply_deterministic_cli_fixes_to_generated(
     workdir: str,
     *,
@@ -673,35 +700,26 @@ def _apply_deterministic_cli_fixes_to_generated(
     generated_en_to_ru: dict[str, str],
     base_ref_local: str | None,
 ) -> int:
-    """Post-translation repairs on EN outputs before quality gate."""
+    """Final idempotent EN pass before quality gate (after QA pipeline)."""
+    from ydbdoc_review.translate_postprocess import (
+        en_contains_cyrillic_prose,
+        repair_en_cyrillic_from_ru,
+    )
+    from ydbdoc_review.ru_en_sync import deterministic_prepare_en
+
     fixed = 0
     for en_p in generated:
         if not en_p.endswith(".md") or en_p not in generated_en_to_ru:
             continue
-        en_main: str | None = None
-        if base_ref_local:
-            en_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
         ru_p = generated_en_to_ru[en_p]
         ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        from ydbdoc_review.translate_postprocess import (
-            apply_post_translation_fixes,
-            en_contains_cyrillic_prose,
-            repair_en_cyrillic_from_ru,
-        )
-
-        from ydbdoc_review.ru_en_sync import finalize_en_from_ru
-
-        after = finalize_en_from_ru(
+        after = deterministic_prepare_en(
             settings,
             ru_path=ru_p,
             ru_full=ru_full,
             en_text=before,
         )
-        if en_main:
-            after = apply_post_translation_fixes(
-                after, en_main=en_main, ru_source=ru_full, en_path=en_p
-            )
         cy = False
         if en_contains_cyrillic_prose(after):
             after, cy = repair_en_cyrillic_from_ru(
@@ -712,17 +730,15 @@ def _apply_deterministic_cli_fixes_to_generated(
             )
             if cy:
                 click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
-            after = apply_post_translation_fixes(
-                after, en_main=en_main, ru_source=ru_full, en_path=en_p
+            after = deterministic_prepare_en(
+                settings,
+                ru_path=ru_p,
+                ru_full=ru_full,
+                en_text=after,
             )
-            if en_contains_cyrillic_prose(after):
-                click.echo(
-                    f"  Warning: Cyrillic still present in prose after repair: `{en_p}`"
-                )
         if after != before or cy:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
-            click.echo(f"  Post-translation fix: `{en_p}`")
     return fixed
 
 
@@ -1492,6 +1508,15 @@ def run_cmd(
                 f"EN missing on {base_ref}; this PR #{pr_number} is the translation "
                 "target — proceeding with full-file translation.",
             )
+
+    if workdir and generated_en_to_ru and not dry_run and not blocked_only:
+        n_pre = _prepare_generated_en_before_qa(
+            workdir,
+            settings=settings,
+            generated_en_to_ru=generated_en_to_ru,
+        )
+        if n_pre:
+            click.echo(f"  Pre-QA deterministic prepare: {n_pre} EN file(s)")
 
     translation_qa_section: str | None = None
     qa_outcomes: list[PairQaOutcome] = []
