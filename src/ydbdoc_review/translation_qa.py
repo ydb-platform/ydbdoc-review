@@ -664,12 +664,35 @@ def run_pair_qa_repair(
             current = llm_text
 
     if _is_en_target(target_lang):
+        from ydbdoc_review.translate_postprocess import (
+            cyrillic_repair_enabled,
+            en_contains_cyrillic,
+            repair_en_cyrillic_from_ru,
+        )
+
         current = deterministic_prepare_en(
             settings,
             ru_path=ru_path,
             ru_full=source_text,
             en_text=current,
         )
+        if cyrillic_repair_enabled() and en_contains_cyrillic(current):
+            repair_attempted = True
+            current, cy_changed = repair_en_cyrillic_from_ru(
+                settings,
+                ru_path=ru_path,
+                ru_full=source_text,
+                en_text=current,
+            )
+            if cy_changed:
+                repair_applied = True
+                repair_skip_reason = "устранение кириллицы перед вердиктом переводчика"
+            current = deterministic_prepare_en(
+                settings,
+                ru_path=ru_path,
+                ru_full=source_text,
+                en_text=current,
+            )
 
     conf = _translator_final_verdict(
         settings,

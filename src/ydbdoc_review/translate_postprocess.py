@@ -169,7 +169,7 @@ def repair_en_cyrillic_from_ru(
         for i, ru_sec in enumerate(ru_sections):
             en_sec = en_sections[i] if i < len(en_sections) else None
             body = en_sec.content if en_sec is not None else ""
-            if en_sec is None or en_contains_cyrillic_prose(body):
+            if en_sec is None or en_contains_cyrillic(body):
                 text = _translate_ru_section_strict_en(
                     settings,
                     ru_path=ru_path,
@@ -399,6 +399,19 @@ def fix_grant_classifier_use_from_ru(ru_source: str, en_text: str) -> str:
     )
 
 
+_COMMON_RU_PROSE_LEAKS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bфактически\b", re.IGNORECASE), "effectively"),
+)
+
+
+def fix_common_ru_prose_leaks(en_text: str) -> str:
+    """Deterministic replacements for frequent RU words left in EN prose."""
+    out = en_text
+    for pat, repl in _COMMON_RU_PROSE_LEAKS:
+        out = pat.sub(repl, out)
+    return out
+
+
 def apply_semantic_fixes_from_ru(ru_source: str, en_text: str) -> str:
     """Copy command/ACL semantics from RU without an LLM call."""
     out = fix_cli_explain_commands(en_text)
@@ -425,6 +438,8 @@ def apply_deterministic_cli_fixes(
 def apply_post_translation_fixes(
     text: str,
     *,
+    settings: object | None = None,
+    ru_path: str = "",
     en_main: str | None = None,
     ru_source: str | None = None,
     en_path: str = "",
@@ -435,6 +450,7 @@ def apply_post_translation_fixes(
         from ydbdoc_review.markdown_blocks import repair_block_translation_artifacts
 
         out = repair_block_translation_artifacts(ru_source, out)
+    out = fix_common_ru_prose_leaks(out)
     out = apply_deterministic_cli_fixes(out, en_main=en_main, ru_source=ru_source)
     if ru_source:
         from ydbdoc_review.ru_en_structure import apply_structure_sync_from_ru
@@ -443,7 +459,64 @@ def apply_post_translation_fixes(
         from ydbdoc_review.markdown_blocks import repair_block_translation_artifacts
 
         out = repair_block_translation_artifacts(ru_source, out)
+        if settings is not None and ru_path:
+            out = apply_fence_comments_from_ru(
+                settings,
+                ru_path=ru_path,
+                ru_source=ru_source,
+                en_text=out,
+                only_if_cyrillic=True,
+            )
     return fix_unbalanced_fences(out, reference=ru_source)
+
+
+def apply_fence_comments_from_ru(
+    settings: object,
+    *,
+    ru_path: str,
+    ru_source: str,
+    en_text: str,
+    only_if_cyrillic: bool = True,
+) -> str:
+    """Translate ``` comment lines from paired RU fences; code/identifiers unchanged."""
+    from ydbdoc_review.fence_comments import translate_fence_comments
+    from ydbdoc_review.llm import translate_comment_line_ru_to_en
+    from ydbdoc_review.markdown_blocks import (
+        MarkdownBlock,
+        join_markdown_blocks,
+        split_markdown_blocks,
+    )
+
+    ru_fences = [b.text for b in split_markdown_blocks(ru_source) if b.kind == "fence"]
+    fi = 0
+
+    def translate_comment(text: str) -> str:
+        return translate_comment_line_ru_to_en(
+            settings, ru_path=ru_path, comment=text
+        )
+
+    out_blocks: list[MarkdownBlock] = []
+    for block in split_markdown_blocks(en_text):
+        if block.kind != "fence":
+            out_blocks.append(block)
+            continue
+        if only_if_cyrillic and not en_contains_cyrillic(block.text):
+            out_blocks.append(block)
+            fi += 1
+            continue
+        ru_fence = ru_fences[fi] if fi < len(ru_fences) else block.text
+        fi += 1
+        out_blocks.append(
+            MarkdownBlock(
+                "fence",
+                translate_fence_comments(
+                    ru_fence,
+                    translate_comment,
+                    only_if_cyrillic=False,
+                ),
+            )
+        )
+    return join_markdown_blocks(out_blocks)
 
 
 def cli_critical_issues(

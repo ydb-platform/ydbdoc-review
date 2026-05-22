@@ -511,7 +511,48 @@ def _translate_preserving_blocks(
             )
         return _postprocess_target_language("\n".join(parts), target_lang=target_lang)
 
-    return translate_preserving_blocks(source_text, translate_prose)
+    def translate_comment(comment: str) -> str:
+        if not (
+            source_lang.lower().startswith("rus")
+            and target_lang.strip().lower() in ("english", "en")
+        ):
+            return comment
+        return translate_comment_line_ru_to_en(
+            settings, ru_path=source_path, comment=comment
+        )
+
+    return translate_preserving_blocks(
+        source_text, translate_prose, translate_comment
+    )
+
+
+def translate_comment_line_ru_to_en(
+    settings: Settings,
+    *,
+    ru_path: str,
+    comment: str,
+) -> str:
+    """Translate one ``--`` or ``#`` comment line inside a code fence."""
+    text = comment.strip()
+    if not text:
+        return comment
+    instructions = load_translate_instructions(settings)
+    user_input = (
+        f"File: `{ru_path}`\n"
+        "Translate this **single comment line** from Russian to English.\n"
+        "Output only the translated comment text (no markdown fence, no quotes).\n"
+        "Keep technical identifiers (table/column names) unchanged.\n\n"
+        f"{text}"
+    )
+    out = _translate_user_payload(
+        settings,
+        instructions=instructions,
+        user_input=user_input,
+        reference_for_truncation=text,
+        model=settings.model_translate,
+        max_output_tokens=min(512, _translate_max_output_tokens(settings.model_translate)),
+    )
+    return _postprocess_target_language(out, target_lang="English").strip()
 
 
 def translate_ru_block_to_en(

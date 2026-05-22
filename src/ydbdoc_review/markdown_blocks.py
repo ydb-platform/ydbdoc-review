@@ -180,33 +180,31 @@ def repair_cyrillic_in_fences_from_ru(
     ru_full: str,
     en_text: str,
 ) -> str:
-    """Re-translate fenced blocks that still contain Cyrillic (e.g. SQL ``--`` comments)."""
+    """Translate comment lines in EN fences from paired RU fences (code unchanged)."""
     if not _CYRILLIC_RE.search(en_text):
         return en_text
-    from ydbdoc_review.llm import translate_ru_block_to_en
+    from ydbdoc_review.fence_comments import translate_fence_comments
+    from ydbdoc_review.llm import translate_comment_line_ru_to_en
+
+    def translate_comment(text: str) -> str:
+        return translate_comment_line_ru_to_en(
+            settings, ru_path=ru_path, comment=text
+        )
 
     ru_fences = _fence_blocks(ru_full)
     fi = 0
     out_blocks: list[MarkdownBlock] = []
     for block in split_markdown_blocks(en_text):
-        if block.kind != "fence" or not _CYRILLIC_RE.search(block.text):
+        if block.kind != "fence":
             out_blocks.append(block)
             continue
-        ru_block = ru_fences[fi].text if fi < len(ru_fences) else block.text
+        ru_fence = ru_fences[fi].text if fi < len(ru_fences) else block.text
         fi += 1
-        if _CYRILLIC_RE.search(ru_block):
-            out_blocks.append(
-                MarkdownBlock(
-                    "fence",
-                    translate_ru_block_to_en(
-                        settings,
-                        ru_path=ru_path,
-                        ru_block=ru_block,
-                    ).strip(),
-                )
-            )
-        else:
+        if not _CYRILLIC_RE.search(block.text):
             out_blocks.append(block)
+            continue
+        rebuilt = translate_fence_comments(ru_fence, translate_comment)
+        out_blocks.append(MarkdownBlock("fence", rebuilt))
     return join_markdown_blocks(out_blocks)
 
 
@@ -221,15 +219,31 @@ def repair_block_translation_artifacts(ru_source: str, en_text: str) -> str:
 def translate_preserving_blocks(
     source_text: str,
     translate_prose: Callable[[str], str],
+    translate_comment: Callable[[str], str] | None = None,
 ) -> str:
-    """Translate only ``prose`` blocks; copy fence/Liquid blocks from source unchanged."""
+    """
+    Translate ``prose`` via *translate_prose*; inside ``` fences translate **comments only**
+    (code and identifiers stay as in the source); copy Liquid blocks verbatim.
+    """
+    from ydbdoc_review.fence_comments import translate_fence_comments
+
+    if translate_comment is None:
+        translate_comment = lambda text: text
+
     blocks = split_markdown_blocks(source_text)
     out: list[MarkdownBlock] = []
     for block in blocks:
-        if block.kind != "prose" or not block.text.strip():
+        if block.kind == "prose" and block.text.strip():
+            out.append(MarkdownBlock("prose", translate_prose(block.text).strip()))
+        elif block.kind == "fence":
+            out.append(
+                MarkdownBlock(
+                    "fence",
+                    translate_fence_comments(block.text, translate_comment),
+                )
+            )
+        else:
             out.append(block)
-            continue
-        out.append(MarkdownBlock("prose", translate_prose(block.text).strip()))
     return join_markdown_blocks(out)
 
 

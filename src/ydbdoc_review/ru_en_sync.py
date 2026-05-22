@@ -14,6 +14,12 @@ from ydbdoc_review.markdown_sections import (
 )
 
 
+def _section_has_cyrillic_leak(section_text: str) -> bool:
+    from ydbdoc_review.translate_postprocess import en_contains_cyrillic
+
+    return en_contains_cyrillic(section_text)
+
+
 def _norm_heading(title: str) -> str:
     t = title.strip().lower()
     if t.startswith("##"):
@@ -189,8 +195,10 @@ def rebuild_en_document_from_ru(
         if en_sec is None:
             body = translate_block(ru_sec.content)
             heading = ru_sec.heading
-        elif section_missing_h3(ru_sec.content, en_sec.content) or section_too_short(
-            ru_sec.content, en_sec.content
+        elif (
+            section_missing_h3(ru_sec.content, en_sec.content)
+            or section_too_short(ru_sec.content, en_sec.content)
+            or _section_has_cyrillic_leak(en_sec.content)
         ):
             body = merge_section_h3_from_ru(
                 ru_sec.content, en_sec.content, translate_block
@@ -244,7 +252,11 @@ def finalize_en_from_ru(
 
     en_path = en_path_from_ru(ru_path)
     out = apply_post_translation_fixes(
-        en_text, ru_source=ru_full, en_path=en_path
+        en_text,
+        settings=settings,
+        ru_path=ru_path,
+        ru_source=ru_full,
+        en_path=en_path,
     )
     if structure_sync_enabled() and (
         force_structure_rebuild or structure_sync_needed(ru_full, out)
@@ -256,7 +268,11 @@ def finalize_en_from_ru(
             en_text=out,
         )
         out = apply_post_translation_fixes(
-            out, ru_source=ru_full, en_path=en_path
+            out,
+            settings=settings,
+            ru_path=ru_path,
+            ru_source=ru_full,
+            en_path=en_path,
         )
     return out
 
@@ -290,6 +306,20 @@ def deterministic_prepare_en(
             ru_full=ru_full,
             en_text=out,
         )
+        from ydbdoc_review.markdown_blocks import repair_cyrillic_in_fences_from_ru
+        from ydbdoc_review.translate_postprocess import fix_common_ru_prose_leaks
+
+        out = repair_cyrillic_in_fences_from_ru(
+            settings, ru_path=ru_path, ru_full=ru_full, en_text=out
+        )
+        out = fix_common_ru_prose_leaks(out)
+        if en_contains_cyrillic(out):
+            out, _ = repair_en_cyrillic_from_ru(
+                settings,
+                ru_path=ru_path,
+                ru_full=ru_full,
+                en_text=out,
+            )
         out = finalize_en_from_ru(
             settings,
             ru_path=ru_path,
