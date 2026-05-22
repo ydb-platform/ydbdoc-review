@@ -606,7 +606,7 @@ def _build_translation_pr_self_check_body(
     source = f"https://github.com/{base_owner}/{base_repo}/pull/{source_pr_number}"
     return "\n".join(
         [
-            "## ydbdoc-review — проверка и исправление перевода",
+            "## ydbdoc-review — отчёт по переводу",
             "",
             f"Перевод для исходного PR {source}.",
             "",
