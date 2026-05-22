@@ -132,8 +132,10 @@ def _build_verify_comment(
         )
 
     if qa_body:
-        if qa_body.startswith("## Вердикт для translation PR"):
-            qa_body = "## Вердикт doc_verify" + qa_body[len("## Вердикт для translation PR") :]
+        for prefix in ("## Отчёт по переводу", "## Вердикт для translation PR"):
+            if qa_body.startswith(prefix):
+                qa_body = "## Вердикт doc_verify" + qa_body[len(prefix) :]
+                break
         lines.append(qa_body)
     elif not gate_failures:
         lines.append("_Нет пар для QA в diff этого PR._")

@@ -43,8 +43,44 @@ class PairQaOutcome:
     repair_error: str | None
 
 
+def _section_body(text: str, heading_pattern: str) -> str | None:
+    m = re.search(
+        heading_pattern + r"\s*\n([\s\S]*?)(?:\n###|\Z)",
+        text,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
+def _parse_translator_file_accept(text: str) -> bool | None:
+    """True = ПРИНИМАТЬ, False = НЕ ПРИНИМАТЬ, None = not parsed."""
+    body = _section_body(text, r"###\s*вердикт\s+файла")
+    if not body:
+        body = _section_body(text, r"###\s*вердикт\s+для\s+мержа")
+    if not body:
+        return None
+    low = body.lower()
+    if "не принимать" in low or "отклонить" in low:
+        return False
+    if "принимать" in low or re.search(r"\bпринять\b", low):
+        return True
+    if "оговорк" in low:
+        return True
+    return None
+
+
 def _parse_translator_merge_line(text: str) -> str | None:
-    """Extract merge/reject/warn from translator «Вердикт для мержа» section."""
+    """Map translator report to merge / warn / reject / None."""
+    accept = _parse_translator_file_accept(text)
+    if accept is False:
+        return "reject"
+    if accept is True:
+        remaining = _parse_translator_remaining_problems(text)
+        if remaining and remaining.lower() not in ("_нет._", "нет.", "нет"):
+            return "warn"
+        return "merge"
     verdict_m = re.search(
         r"###\s*вердикт[^\n]*\n([^\n#]+)",
         text,
@@ -53,13 +89,61 @@ def _parse_translator_merge_line(text: str) -> str | None:
     if not verdict_m:
         return None
     line = verdict_m.group(1).lower()
-    if "отклонить" in line:
+    if "отклонить" in line or "не принимать" in line:
         return "reject"
     if "оговорк" in line:
         return "warn"
-    if "принять" in line:
+    if "принять" in line or "принимать" in line:
         return "merge"
     return None
+
+
+def _parse_translator_remaining_problems(text: str) -> str | None:
+    body = _section_body(text, r"###\s*оставшиеся\s+проблемы")
+    if not body:
+        body = _section_body(text, r"###\s*блокеры")
+    return body
+
+
+def _parse_translator_pipeline(text: str) -> dict[str, str]:
+    body = _section_body(text, r"###\s*ход\s+проверки")
+    if not body:
+        return {}
+    out: dict[str, str] = {}
+    for key, pat in (
+        ("critic", r"\*\*критик:\*\*\s*(.+)"),
+        ("fixer", r"\*\*исправитель:\*\*\s*(.+)"),
+        ("translator", r"\*\*переводчик:\*\*\s*(.+)"),
+    ):
+        m = re.search(pat, body, re.IGNORECASE | re.DOTALL)
+        if m:
+            out[key] = " ".join(m.group(1).split())
+    return out
+
+
+def _critic_findings_summary(review_md: str) -> str:
+    for pat in (
+        r"###\s*найдено\s+критиком",
+        r"###\s*критические\s+проблемы",
+        r"###\s*найденные\s+проблемы",
+    ):
+        body = _section_body(review_md, pat)
+        if body:
+            one = " ".join(body.split())
+            return one[:400] + ("…" if len(one) > 400 else "")
+    return _one_line_summary(review_md) or "—"
+
+
+def _fixer_status_line(outcome: PairQaOutcome) -> str:
+    if outcome.repair_error:
+        return f"ошибка: {outcome.repair_error}"
+    if outcome.repair_applied:
+        return "правки применены на диске"
+    if outcome.repair_attempted:
+        return f"правки не применены: {outcome.repair_skip_reason or 'quality check'}"
+    if review_needs_repair(outcome.review_md):
+        return "repair не запускался (отключён или не требовался по политике)"
+    return "критик существенных проблем не зафиксировал — правки не требовались"
 
 
 def _is_translator_api_error(confirmation_md: str | None) -> bool:
@@ -93,20 +177,31 @@ def _fallback_translator_verdict(
     """When Yandex refuses confirm call, derive verdict from critic + heuristics."""
     if critical_ru_en_mismatches(ru_full, en_after):
         return (
-            "### Вердикт для мержа\n**ОТКЛОНИТЬ**\n\n"
-            "### Блокеры\n"
-            "_Модель-переводчик отказала; эвристика: расхождение EN с RU (команды/флаги)._"
+            "### Вердикт файла\n**НЕ ПРИНИМАТЬ**\n\n"
+            "### Оставшиеся проблемы\n"
+            "1. Эвристика: расхождение EN с RU (команды, флаги, числа, структура).\n\n"
+            "### Ход проверки\n"
+            "- **Критик:** _модель-переводчик недоступна; использован fallback._\n"
+            "- **Исправитель:** —\n"
+            "- **Переводчик:** **НЕ ПРИНИМАТЬ** по эвристике RU↔EN.\n"
         )
     if review_needs_repair(review_md):
         return (
-            "### Вердикт для мержа\n**ОТКЛОНИТЬ**\n\n"
-            "### Блокеры\n"
-            "_Модель-переводчик отказала; в отчёте критика остаются проблемы._"
+            "### Вердикт файла\n**НЕ ПРИНИМАТЬ**\n\n"
+            "### Оставшиеся проблемы\n"
+            "1. В отчёте критика остаются существенные замечания после repair.\n\n"
+            "### Ход проверки\n"
+            "- **Критик:** см. REVIEW_BEFORE.\n"
+            "- **Исправитель:** _модель-переводчик недоступна._\n"
+            "- **Переводчик:** **НЕ ПРИНИМАТЬ** (fallback).\n"
         )
     return (
-        "### Вердикт для мержа\n**ПРИНЯТЬ С ОГОВОРКАМИ**\n\n"
-        "### Блокеры\n_Блокеров нет._\n\n"
-        "_Модель-переводчик отказала; критик без блокеров, эвристика RU↔EN ок._"
+        "### Вердикт файла\n**ПРИНИМАТЬ**\n\n"
+        "### Оставшиеся проблемы\n_Нет._\n\n"
+        "### Ход проверки\n"
+        "- **Критик:** существенных замечаний нет.\n"
+        "- **Исправитель:** —\n"
+        "- **Переводчик:** **ПРИНИМАТЬ** (fallback, API недоступен).\n"
     )
 
 
@@ -141,9 +236,9 @@ def format_translation_pr_summary(
     source_pr_number: int,
     outcomes: list[PairQaOutcome],
 ) -> str:
-    """Short merge/reject summary for the whole translation PR (not a wall of text)."""
+    """PR-level summary: можно ли мержить translation PR."""
     lines = [
-        f"## Вердикт для translation PR (исходный #{source_pr_number})",
+        f"## Отчёт по переводу (исходный PR #{source_pr_number})",
         "",
     ]
     by_verdict: dict[str, list[str]] = {
@@ -157,38 +252,36 @@ def format_translation_pr_summary(
         by_verdict.setdefault(v, []).append(o.en_path)
     if by_verdict["error"]:
         lines.append(
-            "**Вердикт переводчика не получен** (лимит API/токенов) для: "
+            "**Итог по translation PR:** вердикт переводчика **не получен** (API/лимит) для "
             + ", ".join(f"`{p}`" for p in by_verdict["error"])
-            + ". Перезапустите `doc_translate` или уменьшите размер входа."
+            + ". Перезапустите `doc_translate`."
         )
-        lines.append("")
-    if by_verdict["reject"]:
+    elif by_verdict["reject"]:
         lines.append(
-            "**ОТКЛОНИТЬ** (вердикт модели-переводчика) — translation PR **нельзя мержить**."
+            "**Итог по translation PR:** **нельзя мержить** — есть файлы с вердиктом «не принимать»."
         )
-    elif by_verdict["warn"] and not by_verdict["error"]:
+    elif by_verdict["warn"]:
         lines.append(
-            "**ПРИНЯТЬ С ОГОВОРКАМИ** (переводчик) — можно мержить, есть замечания."
+            "**Итог по translation PR:** **можно мержить** — все файлы принимаются; у части есть оговорки."
         )
     else:
-        lines.append("**ПРИНЯТЬ** (переводчик) — можно мержить translation PR.")
+        lines.append(
+            "**Итог по translation PR:** **можно мержить** — все файлы принимаются."
+        )
     lines.append("")
-    for label, key in (
-        ("Принять", "merge"),
-        ("Оговорки", "warn"),
-        ("Отклонить", "reject"),
-        ("Нет вердикта (API)", "error"),
-    ):
-        if by_verdict.get(key):
-            lines.append(f"**{label}:** " + ", ".join(f"`{p}`" for p in by_verdict[key]))
-    lines.append("")
-    for o in outcomes:
-        v = file_merge_verdict(o.review_md, o.confirmation_md)
-        tag = {"merge": "OK", "warn": "⚠", "reject": "✗", "error": "API"}[v]
-        lines.append(f"- {tag} `{o.en_path}`")
-        summary = _translator_one_line(o.confirmation_md)
-        if summary:
-            lines.append(f"  {summary}")
+    if by_verdict["merge"]:
+        lines.append(
+            "**Принимать:** " + ", ".join(f"`{p}`" for p in by_verdict["merge"])
+        )
+    not_accept = by_verdict["reject"] + by_verdict["error"]
+    if not_accept:
+        lines.append(
+            "**Не принимать:** " + ", ".join(f"`{p}`" for p in not_accept)
+        )
+    if by_verdict["warn"]:
+        lines.append(
+            "**Принимать с оговорками:** " + ", ".join(f"`{p}`" for p in by_verdict["warn"])
+        )
     return "\n".join(lines).strip()
 
 
@@ -196,13 +289,18 @@ def _translator_one_line(confirmation_md: str | None) -> str:
     if not confirmation_md:
         return "Вердикт переводчика не получен."
     if _is_translator_api_error(confirmation_md):
-        return "Переводчик: **вердикт не получен** (ошибка API, см. details)."
+        return "Переводчик: **вердикт не получен** (ошибка API)."
+    accept = _parse_translator_file_accept(confirmation_md)
+    if accept is True:
+        return "**Принимать файл:** да"
+    if accept is False:
+        return "**Принимать файл:** нет"
     parsed = _parse_translator_merge_line(confirmation_md)
-    if parsed:
-        labels = {"merge": "ПРИНЯТЬ", "warn": "ПРИНЯТЬ С ОГОВОРКАМИ", "reject": "ОТКЛОНИТЬ"}
-        return f"Переводчик: **{labels[parsed]}**."
-    body = " ".join(confirmation_md.split())
-    return body[:220] + ("…" if len(body) > 220 else "")
+    if parsed == "merge":
+        return "**Принимать файл:** да"
+    if parsed == "reject":
+        return "**Принимать файл:** нет"
+    return "**Принимать файл:** да (с оговорками)"
 
 
 def _one_line_summary(review_md: str) -> str:
@@ -288,7 +386,10 @@ def review_needs_repair(review_md: str) -> bool:
         return True
     if "соответствует с оговорками" in tl:
         return True
+    if "существенных проблем не выявлено" in tl:
+        return False
     for heading in (
+        r"###\s*найдено\s+критиком",
         r"###\s*критические проблемы",
         r"###\s*найденные проблемы",
         r"###\s*регрессии",
@@ -674,39 +775,87 @@ def _run_pair_qa_repair_whole_file(
 
 
 def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
-    """Compact per-file block; critic report under ``<details>``."""
+    """Per-file report: accept yes/no, remaining issues, critic→fixer→translator chain."""
     verdict = file_merge_verdict(outcome.review_md, outcome.confirmation_md)
-    tag = {
-        "merge": "ПРИНЯТЬ",
-        "warn": "ОГОВОРКИ",
-        "reject": "ОТКЛОНИТЬ",
-        "error": "API",
-    }[verdict]
+    accept_yes = verdict in ("merge", "warn")
+    if verdict == "error":
+        accept_label = "вердикт не получен (API)"
+    elif accept_yes:
+        accept_label = "да"
+    else:
+        accept_label = "нет"
+
     lines = [
-        f"### `{outcome.en_path}` — **{tag}** _(переводчик)_",
+        f"### `{outcome.en_path}`",
         "",
-        _translator_one_line(outcome.confirmation_md),
+        f"**Принимать файл:** {accept_label}",
         "",
     ]
-    if outcome.repair_error:
-        lines.append(f"_Ошибка repair:_ `{outcome.repair_error}`")
-    elif outcome.repair_applied:
-        lines.append("_Критик обновил файл на диске._")
-    elif outcome.repair_attempted:
+
+    remaining = (
+        _parse_translator_remaining_problems(outcome.confirmation_md or "")
+        if outcome.confirmation_md
+        else None
+    )
+    if accept_yes and verdict != "error":
+        lines.append("**Оставшиеся проблемы:** _Нет._")
+    elif remaining and remaining.lower().strip().strip("_").rstrip(".") not in (
+        "нет",
+        "нет.",
+    ):
+        lines.append("**Оставшиеся проблемы:**")
+        lines.append("")
+        lines.append(remaining)
+    elif verdict == "reject":
+        lines.append("**Оставшиеся проблемы:**")
+        lines.append("")
+        lines.append(_critic_findings_summary(outcome.review_md) or "_См. ход проверки._")
+    elif verdict == "error":
         lines.append(
-            f"_Repair не применён:_ {outcome.repair_skip_reason or 'quality check'}."
+            "**Оставшиеся проблемы:** _Не оценено — ошибка API переводчика._"
         )
+    else:
+        lines.append("**Оставшиеся проблемы:** _Нет._")
+
+    lines.append("")
+    lines.append("**Ход проверки:**")
+    lines.append("")
+
+    pipeline = (
+        _parse_translator_pipeline(outcome.confirmation_md or "")
+        if outcome.confirmation_md
+        else {}
+    )
+    lines.append(
+        "- **Критик:** "
+        + (
+            pipeline.get("critic")
+            or _critic_findings_summary(outcome.review_md)
+        )
+    )
+    lines.append(
+        "- **Исправитель:** "
+        + (pipeline.get("fixer") or _fixer_status_line(outcome))
+    )
+    lines.append(
+        "- **Переводчик:** "
+        + (
+            pipeline.get("translator")
+            or _translator_one_line(outcome.confirmation_md)
+        )
+    )
+
     lines.extend(
         [
             "",
-            "<details><summary>Замечания критика</summary>",
+            "<details><summary>Полный отчёт критика</summary>",
             "",
             outcome.review_md.strip(),
             "",
             "</details>",
         ]
     )
-    if outcome.confirmation_md:
+    if outcome.confirmation_md and not _is_translator_api_error(outcome.confirmation_md):
         lines.extend(
             [
                 "<details><summary>Полный ответ переводчика</summary>",
