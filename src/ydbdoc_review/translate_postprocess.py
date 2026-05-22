@@ -77,6 +77,72 @@ def en_contains_cyrillic(text: str) -> bool:
     return bool(_CYRILLIC_RE.search(text))
 
 
+def cyrillic_repair_enabled() -> bool:
+    raw = os.environ.get("YDBDOC_REPAIR_CYRILLIC", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def repair_en_cyrillic_from_ru(
+    settings: object,
+    *,
+    ru_path: str,
+    ru_full: str,
+    en_text: str,
+) -> tuple[str, bool]:
+    """
+    Re-translate ``##`` sections that still contain Cyrillic in EN (common on long docs).
+
+    Returns ``(markdown, changed)``.
+    """
+    if not cyrillic_repair_enabled() or not en_contains_cyrillic(en_text):
+        return en_text, False
+
+    from ydbdoc_review.llm import translate_markdown
+    from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+    from ydbdoc_review.markdown_sections import (
+        MarkdownSection,
+        align_sections_by_heading,
+        join_markdown_sections,
+        split_markdown_sections,
+    )
+
+    ru_sections = split_markdown_sections(ru_full)
+    en_sections = split_markdown_sections(en_text)
+    aligned = align_sections_by_heading(ru_sections, en_sections)
+    out: list[MarkdownSection] = []
+    changed = False
+
+    for ru_sec in ru_sections:
+        en_sec = aligned[ru_sec.index] if ru_sec.index < len(aligned) else None
+        body = en_sec.content if en_sec is not None else ""
+        if en_sec is None or en_contains_cyrillic(body):
+            text = translate_markdown(
+                settings,
+                source_lang="Russian",
+                target_lang="English",
+                source_path=ru_path,
+                source_text=ru_sec.content,
+            )
+            text = restore_markdown_links_from_ru(ru_sec.content, text)
+            text = apply_deterministic_cli_fixes(text, ru_source=ru_full)
+            changed = True
+        else:
+            text = body
+        out.append(
+            MarkdownSection(
+                index=ru_sec.index,
+                heading=ru_sec.heading,
+                content=text.strip(),
+                start_line=ru_sec.start_line,
+                end_line=ru_sec.end_line,
+            )
+        )
+
+    merged = join_markdown_sections(out)
+    merged = fix_unbalanced_fences(merged, reference=ru_full)
+    return merged, changed
+
+
 def fix_yandex_cloud_links_for_en(text: str) -> str:
     """Use English Yandex Cloud doc URLs in EN articles."""
     return _YANDEX_RU_DOCS_RE.sub(r"\1/en/docs/", text)

@@ -668,11 +668,12 @@ def _run_translation_qa_and_repair(
 def _apply_deterministic_cli_fixes_to_generated(
     workdir: str,
     *,
+    settings: Settings,
     generated: list[str],
     generated_en_to_ru: dict[str, str],
     base_ref_local: str | None,
 ) -> int:
-    """Normalize ``--config-dir`` spacing and token filenames on EN outputs."""
+    """Post-translation repairs on EN outputs before quality gate."""
     fixed = 0
     for en_p in generated:
         if not en_p.endswith(".md") or en_p not in generated_en_to_ru:
@@ -683,15 +684,31 @@ def _apply_deterministic_cli_fixes_to_generated(
         ru_p = generated_en_to_ru[en_p]
         ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
+        from ydbdoc_review.translate_postprocess import (
+            apply_post_translation_fixes,
+            en_contains_cyrillic,
+            repair_en_cyrillic_from_ru,
+        )
 
         after = apply_post_translation_fixes(
             before, en_main=en_main, ru_source=ru_full, en_path=en_p
         )
+        if en_contains_cyrillic(after):
+            after, cy = repair_en_cyrillic_from_ru(
+                settings,
+                ru_path=ru_p,
+                ru_full=ru_full,
+                en_text=after,
+            )
+            if cy:
+                click.echo(f"  Cyrillic repair: re-translated sections in `{en_p}`")
+                after = apply_post_translation_fixes(
+                    after, en_main=en_main, ru_source=ru_full, en_path=en_p
+                )
         if after != before:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
-            click.echo(f"  CLI auto-fix: `{en_p}`")
+            click.echo(f"  Post-translation fix: `{en_p}`")
     return fixed
 
 
@@ -1527,13 +1544,14 @@ def run_cmd(
     if workdir and generated and not dry_run and not blocked_only:
         n_cli = _apply_deterministic_cli_fixes_to_generated(
             workdir,
+            settings=settings,
             generated=generated,
             generated_en_to_ru=generated_en_to_ru,
             base_ref_local=base_ref_local,
         )
         if n_cli:
             warnings.append(
-                f"- CLI: детерминированные правки в {n_cli} EN-файл(ах) перед quality gate."
+                f"- Post-translation: правки в {n_cli} EN-файл(ах) перед quality gate."
             )
 
     publish_paths = list(dict.fromkeys(generated + mirrored_en))
