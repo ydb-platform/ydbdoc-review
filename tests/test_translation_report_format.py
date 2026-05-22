@@ -14,8 +14,14 @@ CONFIRM_REJECT = """\
 **НЕ ПРИНИМАТЬ**
 
 ### Оставшиеся проблемы
-1. Нет вкладок C++ и Rust в EN.
-2. Порядок ссылок в оглавлении неверен.
+
+Документ: `ydb/docs/en/core/recipes/ydb-sdk/debug-jaeger.md`
+Раздел: Вкладки SDK (якорь: `весь файл`)
+Проблема: Отсутствует — вкладки C++ и Rust
+
+Документ: `ydb/docs/en/core/recipes/ydb-sdk/debug.md`
+Раздел: Содержание (якорь: `#toc`)
+Проблема: Искажён смысл — порядок ссылок Jaeger/OpenTelemetry
 
 ### Ход проверки
 - **Критик:** отсутствуют вкладки SDK.
@@ -89,4 +95,5 @@ def test_format_pr_summary():
     s = format_translation_pr_summary(source_pr_number=39667, outcomes=outcomes)
     assert "нельзя мержить" in s
     assert "**Не принимать:**" in s
-    assert _parse_translator_remaining_problems(CONFIRM_REJECT).startswith("1.")
+    remaining = _parse_translator_remaining_problems(CONFIRM_REJECT) or ""
+    assert "Документ:" in remaining and "C++" in remaining
