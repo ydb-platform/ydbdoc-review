@@ -5,6 +5,7 @@ from ydbdoc_review.markdown_blocks import (
     unmask_translated_prose,
 )
 from ydbdoc_review.translate_postprocess import (
+    fix_cli_explain_commands,
     fix_cli_explain_from_ru,
     fix_grant_classifier_use_from_ru,
 )
@@ -41,6 +42,11 @@ def test_fix_explain_from_ru():
     ru = "Эквивалент: `ydb sql --explain`"
     en = "Use `ydb table query explain`"
     assert "ydb sql --explain" in fix_cli_explain_from_ru(ru, en)
+
+
+def test_fix_explain_commands_always():
+    en = "`ydb table query explain --ast`"
+    assert "ydb sql --explain-ast" in fix_cli_explain_commands(en)
 
 
 def test_fix_grant_use_classifier():

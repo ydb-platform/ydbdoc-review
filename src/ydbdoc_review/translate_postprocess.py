@@ -355,10 +355,19 @@ _EXPLAIN_EN_WRONG = (
 )
 
 
-def fix_cli_explain_from_ru(ru_source: str, en_text: str) -> str:
-    if "ydb sql --explain" not in ru_source:
-        return en_text
+def fix_cli_explain_commands(en_text: str) -> str:
+    """Known stale EN CLI doc strings (interactive mode / special commands)."""
     out = en_text
+    for wrong, right in _EXPLAIN_EN_WRONG:
+        out = out.replace(wrong, right)
+        out = out.replace(f"`{wrong}`", f"`{right}`")
+    return out
+
+
+def fix_cli_explain_from_ru(ru_source: str, en_text: str) -> str:
+    out = fix_cli_explain_commands(en_text)
+    if "ydb sql --explain" not in ru_source and "ydb sql --explain-ast" not in ru_source:
+        return out
     for wrong, right in _EXPLAIN_EN_WRONG:
         out = out.replace(wrong, right)
     return out
@@ -379,7 +388,8 @@ def fix_grant_classifier_use_from_ru(ru_source: str, en_text: str) -> str:
 
 def apply_semantic_fixes_from_ru(ru_source: str, en_text: str) -> str:
     """Copy command/ACL semantics from RU without an LLM call."""
-    out = fix_cli_explain_from_ru(ru_source, en_text)
+    out = fix_cli_explain_commands(en_text)
+    out = fix_cli_explain_from_ru(ru_source, out)
     out = fix_grant_classifier_use_from_ru(ru_source, out)
     return out
 
@@ -393,6 +403,7 @@ def apply_deterministic_cli_fixes(
     """Fix known CLI copy-paste regressions without calling an LLM."""
     out = fix_config_dir_spacing(text)
     out = fix_token_file_inconsistency(out, en_main=en_main, ru_source=ru_source)
+    out = fix_cli_explain_commands(out)
     if ru_source:
         out = apply_semantic_fixes_from_ru(ru_source, out)
     return out

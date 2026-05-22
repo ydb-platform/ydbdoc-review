@@ -159,6 +159,33 @@ def _full_resync_from_ru(
     ), "full-file"
 
 
+def _complete_ru_to_en(
+    settings: Settings,
+    *,
+    ru_path: str,
+    ru_full: str,
+    en_reference: str | None,
+    out: str,
+    mode: str,
+    ru_at_base: str | None = None,
+) -> tuple[str, str]:
+    """Post-process EN (structure + CLI fixes) then optional full RU authority resync."""
+    from ydbdoc_review.ru_en_sync import finalize_en_from_ru
+
+    out = finalize_en_from_ru(
+        settings, ru_path=ru_path, ru_full=ru_full, en_text=out
+    )
+    return _apply_ru_authority_if_needed(
+        settings,
+        ru_path=ru_path,
+        ru_full=ru_full,
+        en_reference=en_reference,
+        out=out,
+        mode=mode,
+        ru_at_base=ru_at_base,
+    )
+
+
 def _apply_ru_authority_if_needed(
     settings: Settings,
     *,
@@ -302,15 +329,7 @@ def _strict_ru_to_en(
                 target_lang="English",
             )
             out = restore_markdown_links_from_ru(ru_work, out)
-            from ydbdoc_review.ru_en_sync import finalize_en_from_ru
-
-            out = finalize_en_from_ru(
-                settings,
-                ru_path=ru_path,
-                ru_full=ru_work,
-                en_text=out,
-            )
-            return _apply_ru_authority_if_needed(
+            return _complete_ru_to_en(
                 settings,
                 ru_path=ru_path,
                 ru_full=ru_source,
@@ -327,12 +346,7 @@ def _strict_ru_to_en(
             source_text=ru_work,
         )
         out = restore_markdown_links_from_ru(ru_work, out)
-        from ydbdoc_review.ru_en_sync import finalize_en_from_ru
-
-        out = finalize_en_from_ru(
-            settings, ru_path=ru_path, ru_full=ru_work, en_text=out
-        )
-        return _apply_ru_authority_if_needed(
+        return _complete_ru_to_en(
             settings,
             ru_path=ru_path,
             ru_full=ru_source,
@@ -353,7 +367,7 @@ def _strict_ru_to_en(
             en_reference=en_reference,
             ru_diff=ru_diff,
         )
-        return _apply_ru_authority_if_needed(
+        return _complete_ru_to_en(
             settings,
             ru_path=ru_path,
             ru_full=ru_source,
@@ -371,7 +385,7 @@ def _strict_ru_to_en(
             en_reference=en_reference,
             ru_diff=ru_diff,
         )
-        return _apply_ru_authority_if_needed(
+        return _complete_ru_to_en(
             settings,
             ru_path=ru_path,
             ru_full=ru_source,
@@ -388,7 +402,7 @@ def _strict_ru_to_en(
         en_reference=en_reference,
         ru_diff=ru_diff,
     )
-    return _apply_ru_authority_if_needed(
+    return _complete_ru_to_en(
         settings,
         ru_path=ru_path,
         ru_full=ru_source,

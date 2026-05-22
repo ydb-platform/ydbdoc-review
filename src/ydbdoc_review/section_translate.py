@@ -221,14 +221,7 @@ def translate_full_source_by_sections(
     ):
         from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
 
-        from ydbdoc_review.ru_en_sync import finalize_en_from_ru
-
-        merged = finalize_en_from_ru(
-            settings,
-            ru_path=source_path,
-            ru_full=source_full,
-            en_text=merged,
-        )
+        merged = apply_post_translation_fixes(merged, ru_source=source_full)
     issues = translation_quality_issues(source_full, merged, target_lang=target_lang)
     suffix = f"-issues-{','.join(issues)}" if issues else ""
     return merged, f"sections-full-{len(sections)}{suffix}"

@@ -635,7 +635,9 @@ def _run_pair_qa_repair_by_sections(
         )
 
         if structure_sync_needed(source_text, merged):
-            merged = sync_document_structure_from_ru(
+            from ydbdoc_review.ru_en_sync import rebuild_en_document_from_ru
+
+            merged = rebuild_en_document_from_ru(
                 settings,
                 ru_path=ru_path,
                 ru_full=source_text,
