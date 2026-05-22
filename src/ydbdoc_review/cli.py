@@ -698,9 +698,8 @@ def _prepare_generated_en_before_qa(
     settings: Settings,
     generated_en_to_ru: dict[str, str],
 ) -> int:
-    """Light EN prepare before critic QA (pipeline v2: CLI fixes only)."""
-    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-    from ydbdoc_review.translate_postprocess import apply_deterministic_cli_fixes
+    """Deterministic EN prepare (artifacts, structure, CLI) before critic QA."""
+    from ydbdoc_review.ru_en_sync import deterministic_prepare_en
 
     fixed = 0
     for en_p, ru_p in generated_en_to_ru.items():
@@ -708,17 +707,12 @@ def _prepare_generated_en_before_qa(
             continue
         ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        if pipeline_v2_enabled():
-            after = apply_deterministic_cli_fixes(before, ru_source=ru_full)
-        else:
-            from ydbdoc_review.ru_en_sync import deterministic_prepare_en
-
-            after = deterministic_prepare_en(
-                settings,
-                ru_path=ru_p,
-                ru_full=ru_full,
-                en_text=before,
-            )
+        after = deterministic_prepare_en(
+            settings,
+            ru_path=ru_p,
+            ru_full=ru_full,
+            en_text=before,
+        )
         if after != before:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
@@ -733,13 +727,12 @@ def _apply_deterministic_cli_fixes_to_generated(
     generated_en_to_ru: dict[str, str],
     base_ref_local: str | None,
 ) -> int:
-    """Final idempotent EN pass before commit (after QA pipeline)."""
-    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
+    """Final idempotent EN pass before quality gate (after QA pipeline)."""
     from ydbdoc_review.translate_postprocess import (
-        apply_deterministic_cli_fixes,
         en_contains_cyrillic_prose,
         repair_en_cyrillic_from_ru,
     )
+    from ydbdoc_review.ru_en_sync import deterministic_prepare_en
 
     fixed = 0
     for en_p in generated:
@@ -748,34 +741,28 @@ def _apply_deterministic_cli_fixes_to_generated(
         ru_p = generated_en_to_ru[en_p]
         ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        if pipeline_v2_enabled():
-            after = apply_deterministic_cli_fixes(before, ru_source=ru_full)
-            cy = False
-        else:
-            from ydbdoc_review.ru_en_sync import deterministic_prepare_en
-
+        after = deterministic_prepare_en(
+            settings,
+            ru_path=ru_p,
+            ru_full=ru_full,
+            en_text=before,
+        )
+        cy = False
+        if en_contains_cyrillic_prose(after):
+            after, cy = repair_en_cyrillic_from_ru(
+                settings,
+                ru_path=ru_p,
+                ru_full=ru_full,
+                en_text=after,
+            )
+            if cy:
+                click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
             after = deterministic_prepare_en(
                 settings,
                 ru_path=ru_p,
                 ru_full=ru_full,
-                en_text=before,
+                en_text=after,
             )
-            cy = False
-            if en_contains_cyrillic_prose(after):
-                after, cy = repair_en_cyrillic_from_ru(
-                    settings,
-                    ru_path=ru_p,
-                    ru_full=ru_full,
-                    en_text=after,
-                )
-                if cy:
-                    click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
-                after = deterministic_prepare_en(
-                    settings,
-                    ru_path=ru_p,
-                    ru_full=ru_full,
-                    en_text=after,
-                )
         if after != before or cy:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
@@ -1242,8 +1229,6 @@ def run_cmd(
                 instructions=instructions,
                 user_input=analyze_input,
                 max_output_tokens=8000,
-                operation="analyze_check",
-                detail=f"batch {bi + 1}/{len(analyze_batches)} {label}",
             )
             last_raw_head = (raw or "")[:500]
             try:
@@ -1559,14 +1544,7 @@ def run_cmd(
             generated_en_to_ru=generated_en_to_ru,
         )
         if n_pre:
-            from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-
-            label = (
-                "Pre-QA CLI fixes"
-                if pipeline_v2_enabled()
-                else "Pre-QA deterministic prepare"
-            )
-            click.echo(f"  {label}: {n_pre} EN file(s)")
+            click.echo(f"  Pre-QA deterministic prepare: {n_pre} EN file(s)")
 
     translation_qa_section: str | None = None
     qa_outcomes: list[PairQaOutcome] = []
@@ -1632,16 +1610,10 @@ def run_cmd(
                 base_ref_local=base_ref_local,
             )
             if n_post_qa:
-                from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-
-                label = (
-                    "Post-QA CLI fixes"
-                    if pipeline_v2_enabled()
-                    else "Post-QA deterministic prepare"
-                )
-                click.echo(f"  {label}: {n_post_qa} EN file(s)")
+                click.echo(f"  Post-QA deterministic prepare: {n_post_qa} EN file(s)")
                 warnings.append(
-                    f"- Post-QA: правки в {n_post_qa} EN-файл(ах) перед коммитом."
+                    f"- Post-QA: детерминированные правки в {n_post_qa} EN-файл(ах) "
+                    "перед коммитом."
                 )
         if doc_translate_should_fail_ci(
             qa_outcomes, qa_section=translation_qa_section
@@ -1655,11 +1627,16 @@ def run_cmd(
                     f"(файлы: {', '.join(f'`{p}`' for p in unavailable)}).\n\n"
                     + (translation_qa_section or "")
                 )
+            from ydbdoc_review.translation_qa import qa_repair_max_rounds
+
+            rounds = qa_repair_max_rounds()
             raise SystemExit(
-                "## ydbdoc-review — translation PR отклонён\n\n"
-                "Модель-переводчик вынесла **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
-                "Включён strict merge (`YDBDOC_TRANSLATION_STRICT_MERGE=1`). "
-                "Исправьте и перезапустите `doc_translate`, либо отклоните translation PR.\n\n"
+                "## ydbdoc-review — translation PR не создан\n\n"
+                "После перевода и цикла критик → исправитель → переводчик остаются "
+                "блокеры (**НЕ ПРИНИМАТЬ**). Коммит в translation PR **не создан** — "
+                "править EN вручную не требуется.\n\n"
+                f"Перезапустите `doc_translate` (доп. раунды repair: `{rounds}`). "
+                "Soft merge (коммит при отклонении): `YDBDOC_TRANSLATION_STRICT_MERGE=0`.\n\n"
                 + (translation_qa_section or "")
             )
         if qa_critic_unavailable_all(qa_outcomes):
@@ -1722,7 +1699,6 @@ def run_cmd(
             raise SystemExit(msg)
 
     committed = False
-    translation_branch_delete_failed = False
     if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:
         try:
             if github_api.delete_branch_if_exists(
@@ -1736,19 +1712,11 @@ def run_cmd(
                     f"(fresh translation from `{base_ref}`)."
                 )
         except httpx.HTTPError as exc:
-            translation_branch_delete_failed = True
             click.echo(
                 f"Warning: could not delete `{translation_branch}` on upstream ({exc}); "
                 "will force-push the new translation.",
                 err=True,
             )
-            if settings.github_push_token == settings.github_token:
-                click.echo(
-                    "Hint: branch delete/push may need "
-                    "`GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}` "
-                    "(contents write on the repo).",
-                    err=True,
-                )
         git_local.prepare_translation_branch_on_base(
             workdir,
             translation_branch=translation_branch,
@@ -1804,38 +1772,14 @@ def run_cmd(
             f"Pushing to upstream {base_owner}/{base_repo} branch `{translation_branch}` "
             f"(base `{base_ref}`) …"
         )
-        if translation_branch_delete_failed:
-            git_local.push_branch(
-                workdir,
-                remote_name="ydbdoc-push",
-                branch=translation_branch,
-                token=settings.github_push_token,
-                base_https_url=base_clone_url,
-                force=True,
-            )
-        else:
-            lease_err = git_local.try_push_branch(
-                workdir,
-                remote_name="ydbdoc-push",
-                branch=translation_branch,
-                token=settings.github_push_token,
-                base_https_url=base_clone_url,
-                force_with_lease=True,
-            )
-            if lease_err:
-                click.echo(
-                    f"Warning: force-with-lease push failed ({lease_err}); "
-                    "retrying with --force.",
-                    err=True,
-                )
-                git_local.push_branch(
-                    workdir,
-                    remote_name="ydbdoc-push",
-                    branch=translation_branch,
-                    token=settings.github_push_token,
-                    base_https_url=base_clone_url,
-                    force=True,
-                )
+        git_local.push_branch(
+            workdir,
+            remote_name="ydbdoc-push",
+            branch=translation_branch,
+            token=settings.github_push_token,
+            base_https_url=base_clone_url,
+            force_with_lease=True,
+        )
         click.echo("Push completed.")
         pr_title = translation_pr_title
         pr_body = _build_translation_pr_body(

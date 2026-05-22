@@ -93,7 +93,7 @@ def test_format_pr_summary():
         ),
     ]
     s = format_translation_pr_summary(source_pr_number=39667, outcomes=outcomes)
-    assert "можно мержить с ручной доработкой" in s
+    assert "нельзя мержить" in s
     assert "**Не принимать:**" in s
     remaining = _parse_translator_remaining_problems(CONFIRM_REJECT) or ""
     assert "Документ:" in remaining and "C++" in remaining

@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass, replace
 
 from ydbdoc_review import git_local
-from ydbdoc_review.fm_progress import fm_log
 from ydbdoc_review.config import Settings
 from ydbdoc_review.llm import (
     confirm_repair_pair,
@@ -279,7 +278,7 @@ def format_translation_pr_summary(
             lines.append(
                 "**Итог по translation PR:** **можно мержить с ручной доработкой** — "
                 "job создаст коммит; ниже файлы с замечаниями переводчика "
-                "(включите `YDBDOC_TRANSLATION_STRICT_MERGE=1`, чтобы снова блокировать CI)."
+                "(soft merge: `YDBDOC_TRANSLATION_STRICT_MERGE=0`)."
             )
     elif by_verdict["warn"]:
         lines.append(
@@ -342,9 +341,39 @@ def _one_line_summary(review_md: str) -> str:
 
 
 def translation_strict_merge_enabled() -> bool:
-    """When false (default), translator «ОТКЛОНИТЬ» is reported but does not fail the job."""
-    raw = os.environ.get("YDBDOC_TRANSLATION_STRICT_MERGE", "0").strip().lower()
-    return raw in ("1", "true", "yes", "on", "enabled")
+    """When true (default), translator «НЕ ПРИНИМАТЬ» blocks commit and fails CI."""
+    raw = os.environ.get("YDBDOC_TRANSLATION_STRICT_MERGE", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def qa_repair_max_rounds() -> int:
+    """Extra whole-file repair rounds after translator «НЕ ПРИНИМАТЬ» (v2 QA loop)."""
+    import os
+
+    raw = os.environ.get("YDBDOC_QA_REPAIR_MAX_ROUNDS", "2").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 2
+    return max(0, min(n, 5))
+
+
+def repair_report_for_fixer(
+    critic_review: str,
+    *,
+    translator_confirmation: str | None = None,
+) -> str:
+    """REVIEW text for fixer: critic report plus translator «оставшиеся проблемы»."""
+    parts = [critic_review.strip()]
+    remaining = _parse_translator_remaining_problems(translator_confirmation or "")
+    if remaining:
+        low = remaining.lower().strip().strip("_").rstrip(".")
+        if low not in ("нет", "_нет"):
+            parts.append(
+                "### Блокеры (вердикт переводчика — осталось исправить)\n\n"
+                + remaining.strip()
+            )
+    return "\n\n---\n\n".join(parts)
 
 
 def critic_api_failed_outcome(outcome: PairQaOutcome) -> bool:
@@ -686,24 +715,9 @@ def run_pair_qa_repair(
     en_on_main: str | None = None,
 ) -> tuple[str, PairQaOutcome]:
     """
-    QA: pipeline v2 (two files → critic → whole-file repair → translator) by default.
-    Set ``YDBDOC_PIPELINE=legacy`` for the old multi-pass repair loop.
+    Critic → deterministic prepare → structural rebuild → optional LLM repair
+    → deterministic prepare → translator verdict.
     """
-    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled, run_pair_qa_v2
-
-    if pipeline_v2_enabled():
-        return run_pair_qa_v2(
-            settings,
-            ru_path=ru_path,
-            en_path=en_path,
-            source_text=source_text,
-            translated_text=translated_text,
-            source_pr_number=source_pr_number,
-            ru_pr_diff=ru_pr_diff,
-            en_on_main=en_on_main,
-            repair_enabled=repair_enabled,
-        )
-
     translation_before = translated_text
     current = translated_text
     repair_applied = False
@@ -719,7 +733,6 @@ def run_pair_qa_repair(
             en_text=current,
         )
 
-    fm_log(f"QA critic start | {ru_path}")
     review_md = verify_translation_pair(
         settings,
         translate_model=settings.model_translate,
@@ -734,7 +747,6 @@ def run_pair_qa_repair(
         ru_pr_diff=ru_pr_diff,
         en_on_main=en_on_main,
     )
-    fm_log(f"QA critic done | {ru_path} | repair_needed={review_needs_repair(review_md)}")
 
     structural = _is_en_target(target_lang) and (
         critic_needs_structure_rebuild(review_md)
@@ -753,7 +765,6 @@ def run_pair_qa_repair(
         repair_applied = True
         repair_skip_reason = "структурный rebuild по RU (детерминированно)"
     elif review_needs_repair(review_md) and repair_enabled:
-        fm_log(f"QA repair start | {ru_path} | by_section={_section_qa_use(source_text)}")
         llm_text, llm_outcome = _run_llm_repair(
             settings,
             ru_path=ru_path,
@@ -775,10 +786,6 @@ def run_pair_qa_repair(
         repair_error = llm_outcome.repair_error
         if llm_text is not None:
             current = llm_text
-        fm_log(
-            f"QA repair done | {ru_path} | applied={llm_outcome.repair_applied} "
-            f"skip={llm_outcome.repair_skip_reason or '-'}"
-        )
 
     if _is_en_target(target_lang):
         from ydbdoc_review.translate_postprocess import (
@@ -811,7 +818,6 @@ def run_pair_qa_repair(
                 en_text=current,
             )
 
-    fm_log(f"QA translator verdict start | {ru_path}")
     conf = _translator_final_verdict(
         settings,
         ru_path=ru_path,
@@ -825,7 +831,6 @@ def run_pair_qa_repair(
         en_on_main=en_on_main,
         ru_pr_diff=ru_pr_diff,
     )
-    fm_log(f"QA translator verdict done | {ru_path}")
 
     outcome = PairQaOutcome(
         ru_path=ru_path,
@@ -891,8 +896,6 @@ def _run_pair_qa_repair_by_sections(
     out_secs: list[MarkdownSection] = []
     repaired_any = False
     last_error: str | None = None
-    repair_total = len(to_repair)
-    repair_n = 0
 
     for src_sec in src_secs:
         tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
@@ -901,11 +904,6 @@ def _run_pair_qa_repair_by_sections(
             out_secs.append(tgt_sec if tgt_sec else src_sec)
             continue
 
-        repair_n += 1
-        heading = (src_sec.heading or "").strip() or f"section#{src_sec.index}"
-        fm_log(
-            f"QA repair section {repair_n}/{repair_total} | {ru_path} | {heading}"
-        )
         try:
             fixed_raw = fix_translation_pair(
                 settings,
@@ -1217,10 +1215,8 @@ def run_pairs_qa_and_repair(
     lines: list[str] = []
     outcomes: list[PairQaOutcome] = []
     repaired_paths: list[str] = []
-    pair_total = len(pairs)
 
-    for pair_i, (ru_p, en_p) in enumerate(pairs, start=1):
-        fm_log(f"QA pair {pair_i}/{pair_total} | {ru_p}")
+    for ru_p, en_p in pairs:
         source_text = git_local.read_text(workdir, ru_p) or ""
         translated_text = git_local.read_text(workdir, en_p) or ""
         ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))

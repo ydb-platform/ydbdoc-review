@@ -19,10 +19,13 @@ After QA, pipeline v2 runs the same **CLI-only** pass (not legacy `deterministic
 ## QA
 
 1. **Critic** — full RU file + full EN file (`05_verify_translation.txt`).
-2. **Repair** — at most **one** whole-file fix (`06_fix_translation.txt`) if the critic listed blockers.
-3. **Translator** — checklist: each critic item fixed? (`07_confirm_repair.txt`).
+2. **Repair** — whole-file fix (`06_fix_translation.txt`) when the critic listed blockers.
+3. **Translator** — checklist (`07_confirm_repair.txt`).
+4. If **НЕ ПРИНИМАТЬ** — repeat repair (using critic + «оставшиеся проблемы») → translator, up to `YDBDOC_QA_REPAIR_MAX_ROUNDS` (default **2**).
 
-No per-section repair loop, no repeated full-file retranslate in `deterministic_prepare`.
+Default **`YDBDOC_TRANSLATION_STRICT_MERGE=1`**: остаётся «НЕ ПРИНИМАТЬ» → CI red, **коммит не создаётся** (без ручной правки EN).
+
+No per-section repair loop, no `deterministic_prepare` storm after QA.
 
 ## Ops
 

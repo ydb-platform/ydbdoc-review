@@ -22,7 +22,13 @@ from ydbdoc_review.llm import (
     verify_translation_pair,
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
-from ydbdoc_review.translation_qa import PairQaOutcome, review_needs_repair
+from ydbdoc_review.translation_qa import (
+    PairQaOutcome,
+    file_merge_verdict,
+    qa_repair_max_rounds,
+    repair_report_for_fixer,
+    review_needs_repair,
+)
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     fix_yandex_cloud_links_for_en,
@@ -242,6 +248,41 @@ def translate_ru_document_v2(
     return merged, f"pipeline-v2-{len(units)}-units"
 
 
+def _apply_whole_file_repair(
+    settings: Settings,
+    *,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    current: str,
+    review_report: str,
+    ru_pr_diff: str | None,
+    en_on_main: str | None,
+) -> tuple[str, bool, str | None, str | None]:
+    """Returns (en_text, applied, skip_reason, error)."""
+    try:
+        fixed = fix_translation_pair(
+            settings,
+            verify_model=settings.model_translation_verify,
+            source_lang="Russian",
+            target_lang="English",
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translated_text=current,
+            review_report=review_report,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+        )
+        fixed = restore_markdown_links_from_ru(source_text, fixed)
+        fixed = apply_deterministic_cli_fixes(fixed, ru_source=source_text)
+        if fixed.strip() and fixed.strip() != current.strip():
+            return fixed, True, None, None
+        return current, False, "repair не изменил файл", None
+    except Exception as exc:
+        return current, False, "api_error", str(exc)
+
+
 def run_pair_qa_v2(
     settings: Settings,
     *,
@@ -255,7 +296,8 @@ def run_pair_qa_v2(
     repair_enabled: bool = True,
 ) -> tuple[str, PairQaOutcome]:
     """
-    Critic compares two full files → optional single whole-file repair → translator verdict.
+    Critic → repair → translator; on «НЕ ПРИНИМАТЬ» repeat repair+translator up to
+    ``YDBDOC_QA_REPAIR_MAX_ROUNDS`` (default 2 extra rounds).
     """
     translation_before = translated_text
     current = translated_text
@@ -280,51 +322,72 @@ def run_pair_qa_v2(
     repair_attempted = False
     repair_skip_reason: str | None = None
     repair_error: str | None = None
+    confirmation_md: str | None = None
+    extra_after_reject = 0
+    max_extra = qa_repair_max_rounds() if repair_enabled else 0
 
     if repair_enabled and review_needs_repair(review_md):
         repair_attempted = True
-        fm_log(f"pipeline-v2 QA repair (whole file) | {ru_path}")
-        try:
-            fixed = fix_translation_pair(
-                settings,
-                verify_model=settings.model_translation_verify,
-                source_lang="Russian",
-                target_lang="English",
-                ru_path=ru_path,
-                en_path=en_path,
-                source_text=source_text,
-                translated_text=current,
-                review_report=review_md,
-                ru_pr_diff=ru_pr_diff,
-                en_on_main=en_on_main,
-            )
-            fixed = restore_markdown_links_from_ru(source_text, fixed)
-            fixed = apply_deterministic_cli_fixes(fixed, ru_source=source_text)
-            if fixed.strip() and fixed.strip() != current.strip():
-                current = fixed
-                repair_applied = True
-            else:
-                repair_skip_reason = "repair не изменил файл"
-        except Exception as exc:
-            repair_error = str(exc)
-            repair_skip_reason = "api_error"
+        fm_log(f"pipeline-v2 QA repair (critic) | {ru_path}")
+        current, applied, skip, err = _apply_whole_file_repair(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            current=current,
+            review_report=review_md,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+        )
+        repair_applied = repair_applied or applied
+        repair_skip_reason = skip or repair_skip_reason
+        repair_error = err or repair_error
 
-    fm_log(f"pipeline-v2 QA translator verdict | {ru_path}")
-    confirmation_md = confirm_repair_pair(
-        settings,
-        translate_model=settings.model_translate,
-        verify_model=settings.model_translation_verify,
-        source_lang="Russian",
-        target_lang="English",
-        ru_path=ru_path,
-        en_path=en_path,
-        source_text=source_text,
-        translation_before=translation_before,
-        translation_after=current,
-        review_before=review_md,
-        en_on_main=en_on_main,
-        ru_pr_diff=ru_pr_diff,
-    )
+    while True:
+        fm_log(f"pipeline-v2 QA translator verdict | {ru_path}")
+        confirmation_md = confirm_repair_pair(
+            settings,
+            translate_model=settings.model_translate,
+            verify_model=settings.model_translation_verify,
+            source_lang="Russian",
+            target_lang="English",
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translation_before=translation_before,
+            translation_after=current,
+            review_before=review_md,
+            en_on_main=en_on_main,
+            ru_pr_diff=ru_pr_diff,
+        )
+        verdict = file_merge_verdict(review_md, confirmation_md)
+        if verdict != "reject" or extra_after_reject >= max_extra:
+            break
+        extra_after_reject += 1
+        repair_attempted = True
+        report = repair_report_for_fixer(
+            review_md, translator_confirmation=confirmation_md
+        )
+        fm_log(
+            f"pipeline-v2 QA repair after reject "
+            f"{extra_after_reject}/{max_extra} | {ru_path}"
+        )
+        current, applied, skip, err = _apply_whole_file_repair(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            current=current,
+            review_report=report,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+        )
+        repair_applied = repair_applied or applied
+        if skip:
+            repair_skip_reason = skip
+        if err:
+            repair_error = err
+            break
 
     outcome = PairQaOutcome(
         ru_path=ru_path,
