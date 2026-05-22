@@ -1557,7 +1557,14 @@ def run_cmd(
             generated_en_to_ru=generated_en_to_ru,
         )
         if n_pre:
-            click.echo(f"  Pre-QA deterministic prepare: {n_pre} EN file(s)")
+            from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
+
+            label = (
+                "Pre-QA CLI fixes"
+                if pipeline_v2_enabled()
+                else "Pre-QA deterministic prepare"
+            )
+            click.echo(f"  {label}: {n_pre} EN file(s)")
 
     translation_qa_section: str | None = None
     qa_outcomes: list[PairQaOutcome] = []
@@ -1623,10 +1630,16 @@ def run_cmd(
                 base_ref_local=base_ref_local,
             )
             if n_post_qa:
-                click.echo(f"  Post-QA deterministic prepare: {n_post_qa} EN file(s)")
+                from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
+
+                label = (
+                    "Post-QA CLI fixes"
+                    if pipeline_v2_enabled()
+                    else "Post-QA deterministic prepare"
+                )
+                click.echo(f"  {label}: {n_post_qa} EN file(s)")
                 warnings.append(
-                    f"- Post-QA: детерминированные правки в {n_post_qa} EN-файл(ах) "
-                    "перед коммитом."
+                    f"- Post-QA: правки в {n_post_qa} EN-файл(ах) перед коммитом."
                 )
         if doc_translate_should_fail_ci(
             qa_outcomes, qa_section=translation_qa_section
@@ -1656,19 +1669,6 @@ def run_cmd(
             click.echo(
                 "Translation QA: критик недоступен — job завершится успешно, "
                 "translation PR будет создан/обновлён.",
-            )
-
-    if workdir and generated and not dry_run and not blocked_only:
-        n_cli = _apply_deterministic_cli_fixes_to_generated(
-            workdir,
-            settings=settings,
-            generated=generated,
-            generated_en_to_ru=generated_en_to_ru,
-            base_ref_local=base_ref_local,
-        )
-        if n_cli:
-            warnings.append(
-                f"- Post-translation: правки в {n_cli} EN-файл(ах) перед quality gate."
             )
 
     publish_paths = list(dict.fromkeys(generated + mirrored_en))

@@ -347,10 +347,10 @@ def translation_strict_merge_enabled() -> bool:
 
 
 def qa_repair_max_rounds() -> int:
-    """Extra whole-file repair rounds after translator «НЕ ПРИНИМАТЬ» (v2 QA loop)."""
+    """Extra whole-file repair rounds after translator «НЕ ПРИНИМАТЬ» (v2 only; default 0)."""
     import os
 
-    raw = os.environ.get("YDBDOC_QA_REPAIR_MAX_ROUNDS", "2").strip()
+    raw = os.environ.get("YDBDOC_QA_REPAIR_MAX_ROUNDS", "0").strip()
     try:
         n = int(raw)
     except ValueError:
@@ -715,9 +715,24 @@ def run_pair_qa_repair(
     en_on_main: str | None = None,
 ) -> tuple[str, PairQaOutcome]:
     """
-    Critic → deterministic prepare → structural rebuild → optional LLM repair
-    → deterministic prepare → translator verdict.
+    Pipeline v2: one critic call (two full files) → optional one repair → one translator.
+    Legacy: section rebuilds, deterministic_prepare, cyrillic loops.
     """
+    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled, run_pair_qa_v2
+
+    if pipeline_v2_enabled():
+        return run_pair_qa_v2(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+            repair_enabled=repair_enabled,
+        )
+
     translation_before = translated_text
     current = translated_text
     repair_applied = False

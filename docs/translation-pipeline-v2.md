@@ -16,16 +16,19 @@ Default since `YDBDOC_PIPELINE=v2` (set `legacy` to restore the old loop).
 
 After QA, pipeline v2 runs the same **CLI-only** pass (not legacy `deterministic_prepare_en`).
 
-## QA
+## QA (per file, pipeline v2 only)
 
-1. **Critic** — full RU file + full EN file (`05_verify_translation.txt`).
-2. **Repair** — whole-file fix (`06_fix_translation.txt`) when the critic listed blockers.
-3. **Translator** — checklist (`07_confirm_repair.txt`).
-4. If **НЕ ПРИНИМАТЬ** — repeat repair (using critic + «оставшиеся проблемы») → translator, up to `YDBDOC_QA_REPAIR_MAX_ROUNDS` (default **2**).
+| Step | FM calls | What |
+|------|----------|------|
+| Critic | **1** | Whole RU + whole EN in one request (`05_verify_translation.txt`) |
+| Repair | **0–1** | Whole-file fix only if critic listed blockers (`06_fix_translation.txt`) |
+| Translator | **1** | Verdict ПРИНЯТЬ / НЕ ПРИНИМАТЬ (`07_confirm_repair.txt`) |
 
-Default **`YDBDOC_TRANSLATION_STRICT_MERGE=1`**: остаётся «НЕ ПРИНИМАТЬ» → CI red, **коммит не создаётся** (без ручной правки EN).
+**No** `deterministic_prepare_en`, **no** cyrillic-repair loops, **no** per-section QA in v2.
 
-No per-section repair loop, no `deterministic_prepare` storm after QA.
+Optional: `YDBDOC_QA_REPAIR_MAX_ROUNDS` (default **0**) — extra repair→translator after НЕ ПРИНИМАТЬ.
+
+Default **`YDBDOC_TRANSLATION_STRICT_MERGE=1`**: НЕ ПРИНИМАТЬ → CI red, коммит не создаётся.
 
 ## Ops
 

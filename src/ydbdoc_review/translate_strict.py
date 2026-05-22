@@ -171,16 +171,9 @@ def _complete_ru_to_en(
 ) -> tuple[str, str]:
     """Post-process EN (structure + CLI fixes) then optional full RU authority resync."""
     from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-    from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
 
     if pipeline_v2_enabled():
-        out = apply_post_translation_fixes(
-            out,
-            settings=settings,
-            ru_path=ru_path,
-            ru_source=ru_full,
-            en_path=ru_path.replace("/docs/ru/", "/docs/en/", 1),
-        )
+        # Segment translate already applied CLI fixes; no FM post-pass (fence/structure).
         return out, mode
 
     from ydbdoc_review.ru_en_sync import finalize_en_from_ru

@@ -9,7 +9,6 @@ from typing import Any
 from openai import OpenAI
 
 from ydbdoc_review.config import Settings, fm_base_url_requires_yandex_folder
-from ydbdoc_review.fm_progress import fm_call_span, fm_http_timeout_sec
 from ydbdoc_review.markdown_blocks import (
     prose_mask_enabled,
     translate_preserving_blocks,
@@ -178,29 +177,21 @@ def call_yandex_responses(
     max_output_tokens: int,
     *,
     model_fallbacks: tuple[str, ...] | None = None,
-    operation: str = "fm",
-    detail: str = "",
 ) -> str:
     chain = _expand_model_candidates(model, model_fallbacks)
     last_err: RuntimeError | None = None
     for i, cand in enumerate(chain):
-        op = operation if i == 0 else f"{operation}:fallback"
         try:
-            with fm_call_span(operation=op, model=cand, detail=detail):
-                return _call_yandex_responses_impl(
-                    settings,
-                    cand,
-                    instructions=instructions,
-                    user_input=user_input,
-                    max_output_tokens=max_output_tokens,
-                )
+            return _call_yandex_responses_impl(
+                settings,
+                cand,
+                instructions=instructions,
+                user_input=user_input,
+                max_output_tokens=max_output_tokens,
+            )
         except RuntimeError as exc:
             last_err = exc
             if _fm_model_not_found(exc) and i + 1 < len(chain):
-                fm_log_msg = f"model {cand!r} unavailable, trying fallback"
-                from ydbdoc_review.fm_progress import fm_log
-
-                fm_log(fm_log_msg)
                 continue
             raise
     if last_err is not None:
@@ -222,7 +213,6 @@ def _call_yandex_responses_impl(
     client = OpenAI(
         api_key=settings.yandex_api_key,
         base_url=settings.yandex_base_url,
-        timeout=fm_http_timeout_sec(),
     )
     model_uri = _model_uri(settings, model)
     responses_err: str | None = None
@@ -345,8 +335,6 @@ def _translate_user_payload(
     reference_for_truncation: str,
     model: str,
     max_output_tokens: int | None = None,
-    operation: str = "translate",
-    detail: str = "",
 ) -> str:
     """Single FM call + optional retry when the completion looks truncated."""
     cap = (
@@ -361,8 +349,6 @@ def _translate_user_payload(
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=cap,
-            operation=operation,
-            detail=detail,
         ).strip()
     )
     if _full_file_translation_looks_truncated(out, reference_for_truncation):
@@ -375,8 +361,6 @@ def _translate_user_payload(
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
-                    operation=f"{operation}:retry_truncated",
-                    detail=detail,
                 ).strip()
             )
     return out
@@ -427,7 +411,6 @@ def _translate_chunk_with_retry(
     chunk_index: int,
     chunk_count: int,
     default_cap: int,
-    operation: str = "translate:chunk",
 ) -> str:
     preamble = (
         f"This is fragment {chunk_index} of {chunk_count} of a single markdown file "
@@ -457,8 +440,6 @@ def _translate_chunk_with_retry(
         reference_for_truncation=chunk,
         model=model,
         max_output_tokens=cap,
-        operation=operation,
-        detail=source_path,
     )
     if should_retry_chunk(chunk, out):
         cap2 = min(_translate_retry_max_tokens(cap, model), default_cap)
@@ -470,8 +451,6 @@ def _translate_chunk_with_retry(
                 reference_for_truncation=chunk,
                 model=model,
                 max_output_tokens=cap2,
-                operation=f"{operation}:retry",
-                detail=source_path,
             )
             if len(out2) > len(out):
                 out = out2
@@ -590,7 +569,6 @@ def _translate_preserving_blocks(
                     chunk_index=i,
                     chunk_count=len(chunks),
                     default_cap=default_cap,
-                    operation=f"translate:prose-chunk-{i}/{len(chunks)}",
                 )
             )
         return _postprocess_target_language("\n".join(parts), target_lang=target_lang)
@@ -635,8 +613,6 @@ def translate_comment_line_ru_to_en(
         reference_for_truncation=text,
         model=settings.model_translate,
         max_output_tokens=min(512, _translate_max_output_tokens(settings.model_translate)),
-        operation="translate:comment",
-        detail=ru_path,
     )
     translated = _postprocess_target_language(out, target_lang="English").strip()
     if re.search(r"please provide the text", translated, re.IGNORECASE):

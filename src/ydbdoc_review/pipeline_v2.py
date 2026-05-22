@@ -296,13 +296,13 @@ def run_pair_qa_v2(
     repair_enabled: bool = True,
 ) -> tuple[str, PairQaOutcome]:
     """
-    Critic → repair → translator; on «НЕ ПРИНИМАТЬ» repeat repair+translator up to
-    ``YDBDOC_QA_REPAIR_MAX_ROUNDS`` (default 2 extra rounds).
+    Exactly up to 3 FM calls per file: critic (RU+EN whole files), optional repair,
+    translator verdict. No section loops, no deterministic_prepare, no cyrillic repair.
     """
     translation_before = translated_text
     current = translated_text
 
-    fm_log(f"pipeline-v2 QA critic | {ru_path}")
+    fm_log(f"pipeline-v2 QA critic (2 full files, 1 request) | {ru_path}")
     review_md = verify_translation_pair(
         settings,
         translate_model=settings.model_translate,
@@ -322,13 +322,10 @@ def run_pair_qa_v2(
     repair_attempted = False
     repair_skip_reason: str | None = None
     repair_error: str | None = None
-    confirmation_md: str | None = None
-    extra_after_reject = 0
-    max_extra = qa_repair_max_rounds() if repair_enabled else 0
 
     if repair_enabled and review_needs_repair(review_md):
         repair_attempted = True
-        fm_log(f"pipeline-v2 QA repair (critic) | {ru_path}")
+        fm_log(f"pipeline-v2 QA repair (1 whole file, 1 request) | {ru_path}")
         current, applied, skip, err = _apply_whole_file_repair(
             settings,
             ru_path=ru_path,
@@ -339,12 +336,15 @@ def run_pair_qa_v2(
             ru_pr_diff=ru_pr_diff,
             en_on_main=en_on_main,
         )
-        repair_applied = repair_applied or applied
-        repair_skip_reason = skip or repair_skip_reason
-        repair_error = err or repair_error
+        repair_applied = applied
+        repair_skip_reason = skip
+        repair_error = err
 
+    extra_after_reject = 0
+    max_extra = qa_repair_max_rounds() if repair_enabled else 0
+    confirmation_md: str | None = None
     while True:
-        fm_log(f"pipeline-v2 QA translator verdict | {ru_path}")
+        fm_log(f"pipeline-v2 QA translator (1 request) | {ru_path}")
         confirmation_md = confirm_repair_pair(
             settings,
             translate_model=settings.model_translate,

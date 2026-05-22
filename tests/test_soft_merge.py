@@ -74,4 +74,4 @@ def test_repair_report_includes_translator_remaining():
 
 def test_qa_repair_max_rounds_default(monkeypatch):
     monkeypatch.delenv("YDBDOC_QA_REPAIR_MAX_ROUNDS", raising=False)
-    assert qa_repair_max_rounds() == 2
+    assert qa_repair_max_rounds() == 0
