@@ -9,6 +9,7 @@ from typing import Callable, Literal
 BlockKind = Literal["prose", "fence", "liquid"]
 
 _BLOCK_PH_RE = re.compile(r"⟦YDBDOC_BLOCK_\d+[^⟧\n]*⟧?", re.IGNORECASE)
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,47 @@ def realign_en_prose_with_ru_blocks(ru_source: str, en_text: str) -> str:
         else:
             out.append(rb)
     return join_markdown_blocks(out)
+
+
+def _fence_blocks(text: str) -> list[MarkdownBlock]:
+    return [b for b in split_markdown_blocks(text) if b.kind == "fence"]
+
+
+def repair_cyrillic_in_fences_from_ru(
+    settings: object,
+    *,
+    ru_path: str,
+    ru_full: str,
+    en_text: str,
+) -> str:
+    """Re-translate fenced blocks that still contain Cyrillic (e.g. SQL ``--`` comments)."""
+    if not _CYRILLIC_RE.search(en_text):
+        return en_text
+    from ydbdoc_review.llm import translate_ru_block_to_en
+
+    ru_fences = _fence_blocks(ru_full)
+    fi = 0
+    out_blocks: list[MarkdownBlock] = []
+    for block in split_markdown_blocks(en_text):
+        if block.kind != "fence" or not _CYRILLIC_RE.search(block.text):
+            out_blocks.append(block)
+            continue
+        ru_block = ru_fences[fi].text if fi < len(ru_fences) else block.text
+        fi += 1
+        if _CYRILLIC_RE.search(ru_block):
+            out_blocks.append(
+                MarkdownBlock(
+                    "fence",
+                    translate_ru_block_to_en(
+                        settings,
+                        ru_path=ru_path,
+                        ru_block=ru_block,
+                    ).strip(),
+                )
+            )
+        else:
+            out_blocks.append(block)
+    return join_markdown_blocks(out_blocks)
 
 
 def repair_block_translation_artifacts(ru_source: str, en_text: str) -> str:

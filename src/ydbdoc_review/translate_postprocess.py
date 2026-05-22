@@ -143,7 +143,7 @@ def repair_en_cyrillic_from_ru(
 
     Returns ``(markdown, changed)``.
     """
-    if not cyrillic_repair_enabled() or not en_contains_cyrillic_prose(en_text):
+    if not cyrillic_repair_enabled() or not en_contains_cyrillic(en_text):
         return en_text, False
 
     from ydbdoc_review.llm import translate_markdown
@@ -211,6 +211,19 @@ def repair_en_cyrillic_from_ru(
             if full.strip() != merged.strip():
                 merged = full
                 changed = True
+
+    if en_contains_cyrillic(merged):
+        from ydbdoc_review.markdown_blocks import repair_cyrillic_in_fences_from_ru
+
+        fixed = repair_cyrillic_in_fences_from_ru(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_full,
+            en_text=merged,
+        )
+        if fixed != merged:
+            merged = fixed
+            changed = True
 
     return merged, changed
 

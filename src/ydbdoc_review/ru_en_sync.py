@@ -269,11 +269,32 @@ def deterministic_prepare_en(
     en_text: str,
     force_structure_rebuild: bool = False,
 ) -> str:
-    """Artifacts, CLI semantics, and optional RU-order rebuild (no critic LLM)."""
-    return finalize_en_from_ru(
+    """Artifacts, CLI semantics, optional RU-order rebuild, cyrillic cleanup."""
+    from ydbdoc_review.translate_postprocess import (
+        cyrillic_repair_enabled,
+        en_contains_cyrillic,
+        repair_en_cyrillic_from_ru,
+    )
+
+    out = finalize_en_from_ru(
         settings,
         ru_path=ru_path,
         ru_full=ru_full,
         en_text=en_text,
         force_structure_rebuild=force_structure_rebuild,
     )
+    if cyrillic_repair_enabled() and en_contains_cyrillic(out):
+        out, _ = repair_en_cyrillic_from_ru(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_full,
+            en_text=out,
+        )
+        out = finalize_en_from_ru(
+            settings,
+            ru_path=ru_path,
+            ru_full=ru_full,
+            en_text=out,
+            force_structure_rebuild=False,
+        )
+    return out

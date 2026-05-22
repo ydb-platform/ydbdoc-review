@@ -380,15 +380,46 @@ def _translator_final_verdict(
         return f"_Ошибка вердикта переводчика:_ `{exc}`"
 
 
+def _critic_sections_text(review_md: str) -> str:
+    parts: list[str] = []
+    for heading in (
+        r"###\s*найдено\s+критиком",
+        r"###\s*блокеры",
+        r"###\s*scope",
+    ):
+        m = re.search(heading + r"\s*\n([\s\S]*?)(?:\n###|\Z)", review_md, re.IGNORECASE)
+        if m:
+            parts.append(m.group(1))
+    return "\n".join(parts).lower()
+
+
 def critic_needs_structure_rebuild(review_md: str) -> bool:
-    """True when the critic report calls for full-file / structural resync."""
+    """True when the critic report calls for layout resync (not cyrillic-only cleanup)."""
     if not review_md.strip():
         return False
+    body = _critic_sections_text(review_md)
     tl = review_md.lower()
+    cyrillic_only = (
+        "кириллиц" in body
+        or "фактически" in body
+        or ("русск" in body and "коммент" in body)
+    ) and not any(
+        x in body
+        for x in (
+            "структур",
+            "дублир",
+            "ydbdoc_block",
+            "⟦",
+            "отсутствует",
+            "отсутствуют",
+            "перемест",
+            "нарушен",
+            "порядок раздел",
+        )
+    )
+    if cyrillic_only:
+        return False
     markers = (
-        "полный resync",
-        "полная пересинхронизация",
-        "пересинхронизац",
         "структур",
         "дублир",
         "отсутствует",
@@ -396,24 +427,13 @@ def critic_needs_structure_rebuild(review_md: str) -> bool:
         "нарушен",
         "ydbdoc_block",
         "⟦",
-        "весь файл",
-        "весь раздел",
         "неверное расположение",
         "неправильн",
         "порядок раздел",
     )
-    if not any(m in tl for m in markers):
-        return False
-    for heading in (
-        r"###\s*блокеры",
-        r"###\s*найдено\s+критиком",
-        r"###\s*scope",
-        r"###\s*оставшиеся\s+проблемы",
-    ):
-        m = re.search(heading + r"\s*\n([\s\S]*?)(?:\n###|\Z)", review_md, re.IGNORECASE)
-        if m and any(x in m.group(1).lower() for x in markers):
-            return True
-    return any(m in tl for m in ("полный resync", "структур", "дублир", "ydbdoc_block", "⟦"))
+    if any(m in body for m in markers):
+        return True
+    return any(m in tl for m in ("дублир", "ydbdoc_block", "⟦")) and "структур" in tl
 
 
 def review_needs_repair(review_md: str) -> bool:
