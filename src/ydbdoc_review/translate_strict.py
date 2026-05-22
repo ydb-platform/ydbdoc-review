@@ -130,11 +130,6 @@ def _full_resync_from_ru(
     ru_full: str,
 ) -> tuple[str, str]:
     """Replace EN with full translation from RU (source PR is authority)."""
-    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled, translate_ru_document_v2
-
-    if pipeline_v2_enabled():
-        return translate_ru_document_v2(settings, ru_path=ru_path, ru_full=ru_full)
-
     if translate_by_section_enabled(source_len=len(ru_full)):
         out, sec_mode = translate_full_source_by_sections(
             settings,
@@ -176,9 +171,16 @@ def _complete_ru_to_en(
 ) -> tuple[str, str]:
     """Post-process EN (structure + CLI fixes) then optional full RU authority resync."""
     from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
+    from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
 
     if pipeline_v2_enabled():
-        out = apply_post_translation_fixes(out, ru_source=ru_full)
+        out = apply_post_translation_fixes(
+            out,
+            settings=settings,
+            ru_path=ru_path,
+            ru_source=ru_full,
+            en_path=ru_path.replace("/docs/ru/", "/docs/en/", 1),
+        )
         return out, mode
 
     from ydbdoc_review.ru_en_sync import finalize_en_from_ru
@@ -328,21 +330,6 @@ def _strict_ru_to_en(
             mode = "full-file-stale-target"
         else:
             mode = "full-file-no-target"
-        from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled, translate_ru_document_v2
-
-        if pipeline_v2_enabled():
-            out, mode_sec = translate_ru_document_v2(
-                settings, ru_path=ru_path, ru_full=ru_work
-            )
-            return _complete_ru_to_en(
-                settings,
-                ru_path=ru_path,
-                ru_full=ru_source,
-                en_reference=en_reference,
-                out=out,
-                mode=f"{mode}-{mode_sec}",
-                ru_at_base=ru_at_base,
-            )
         behind = en_reference is not None and en_coverage_behind_ru(
             ru_work, en_reference
         )

@@ -28,5 +28,11 @@ echo ok
     assert en_contains_cyrillic(md)
 
 
-def test_cyrillic_repair_enabled_default():
+def test_cyrillic_repair_enabled_legacy_default(monkeypatch):
+    monkeypatch.setenv("YDBDOC_PIPELINE", "legacy")
     assert cyrillic_repair_enabled()
+
+
+def test_cyrillic_repair_disabled_under_pipeline_v2(monkeypatch):
+    monkeypatch.delenv("YDBDOC_PIPELINE", raising=False)
+    assert not cyrillic_repair_enabled()

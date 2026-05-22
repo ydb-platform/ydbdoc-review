@@ -698,8 +698,9 @@ def _prepare_generated_en_before_qa(
     settings: Settings,
     generated_en_to_ru: dict[str, str],
 ) -> int:
-    """Deterministic EN prepare (artifacts, structure, CLI) before critic QA."""
-    from ydbdoc_review.ru_en_sync import deterministic_prepare_en
+    """Light EN prepare before critic QA (pipeline v2: CLI fixes only)."""
+    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
+    from ydbdoc_review.translate_postprocess import apply_deterministic_cli_fixes
 
     fixed = 0
     for en_p, ru_p in generated_en_to_ru.items():
@@ -707,12 +708,17 @@ def _prepare_generated_en_before_qa(
             continue
         ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        after = deterministic_prepare_en(
-            settings,
-            ru_path=ru_p,
-            ru_full=ru_full,
-            en_text=before,
-        )
+        if pipeline_v2_enabled():
+            after = apply_deterministic_cli_fixes(before, ru_source=ru_full)
+        else:
+            from ydbdoc_review.ru_en_sync import deterministic_prepare_en
+
+            after = deterministic_prepare_en(
+                settings,
+                ru_path=ru_p,
+                ru_full=ru_full,
+                en_text=before,
+            )
         if after != before:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
@@ -727,12 +733,13 @@ def _apply_deterministic_cli_fixes_to_generated(
     generated_en_to_ru: dict[str, str],
     base_ref_local: str | None,
 ) -> int:
-    """Final idempotent EN pass before quality gate (after QA pipeline)."""
+    """Final idempotent EN pass before commit (after QA pipeline)."""
+    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
     from ydbdoc_review.translate_postprocess import (
+        apply_deterministic_cli_fixes,
         en_contains_cyrillic_prose,
         repair_en_cyrillic_from_ru,
     )
-    from ydbdoc_review.ru_en_sync import deterministic_prepare_en
 
     fixed = 0
     for en_p in generated:
@@ -741,28 +748,34 @@ def _apply_deterministic_cli_fixes_to_generated(
         ru_p = generated_en_to_ru[en_p]
         ru_full = git_local.read_text(workdir, ru_p) or ""
         before = git_local.read_text(workdir, en_p) or ""
-        after = deterministic_prepare_en(
-            settings,
-            ru_path=ru_p,
-            ru_full=ru_full,
-            en_text=before,
-        )
-        cy = False
-        if en_contains_cyrillic_prose(after):
-            after, cy = repair_en_cyrillic_from_ru(
-                settings,
-                ru_path=ru_p,
-                ru_full=ru_full,
-                en_text=after,
-            )
-            if cy:
-                click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
+        if pipeline_v2_enabled():
+            after = apply_deterministic_cli_fixes(before, ru_source=ru_full)
+            cy = False
+        else:
+            from ydbdoc_review.ru_en_sync import deterministic_prepare_en
+
             after = deterministic_prepare_en(
                 settings,
                 ru_path=ru_p,
                 ru_full=ru_full,
-                en_text=after,
+                en_text=before,
             )
+            cy = False
+            if en_contains_cyrillic_prose(after):
+                after, cy = repair_en_cyrillic_from_ru(
+                    settings,
+                    ru_path=ru_p,
+                    ru_full=ru_full,
+                    en_text=after,
+                )
+                if cy:
+                    click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
+                after = deterministic_prepare_en(
+                    settings,
+                    ru_path=ru_p,
+                    ru_full=ru_full,
+                    en_text=after,
+                )
         if after != before or cy:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
