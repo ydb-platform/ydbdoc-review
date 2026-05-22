@@ -256,7 +256,13 @@ def format_translation_pr_summary(
     for o in outcomes:
         v = file_merge_verdict(o.review_md, o.confirmation_md)
         by_verdict.setdefault(v, []).append(o.en_path)
-    if by_verdict["error"]:
+    if qa_critic_unavailable_all(outcomes):
+        lines.append(
+            "**Итог по translation PR:** **можно мержить** — критик не отработал "
+            "(ошибка API модели). Translation PR и коммит созданы; проверьте EN вручную "
+            "или перезапустите `doc_translate` после исправления модели-критика."
+        )
+    elif by_verdict["error"]:
         lines.append(
             "**Итог по translation PR:** вердикт переводчика **не получен** (API/лимит) для "
             + ", ".join(f"`{p}`" for p in by_verdict["error"])
@@ -340,7 +346,61 @@ def translation_strict_merge_enabled() -> bool:
     return raw in ("1", "true", "yes", "on", "enabled")
 
 
+def critic_api_failed_outcome(outcome: PairQaOutcome) -> bool:
+    """Critic step failed (model slug, FM outage) — not a translator «ОТКЛОНИТЬ»."""
+    review = outcome.review_md or ""
+    if "Ошибка вызова модели-критика" in review:
+        return True
+    if "Ошибка QA pipeline" in review:
+        return True
+    return outcome.repair_skip_reason == "api_error" and not (
+        outcome.confirmation_md or ""
+    ).strip()
+
+
+def qa_critic_unavailable_all(outcomes: list[PairQaOutcome]) -> bool:
+    return bool(outcomes) and all(critic_api_failed_outcome(o) for o in outcomes)
+
+
+def qa_pipeline_failed_in_section(section: str | None) -> bool:
+    if not section:
+        return False
+    low = section.lower()
+    return "qa/repair pipeline failed" in low or "pipeline failed" in low
+
+
+def synthetic_qa_outcomes_for_api_failure(
+    pairs: list[tuple[str, str]],
+    error: str,
+) -> list[PairQaOutcome]:
+    err = error.strip()
+    if len(err) > 1200:
+        err = err[:1200] + "…"
+    review = (
+        f"### Ошибка вызова модели-критика\n\n"
+        f"`{err}`\n\n"
+        "Критик не отработал — это **не** вердикт «ОТКЛОНИТЬ» по качеству перевода. "
+        "Проверьте `YDBDOC_MODEL_TRANSLATION_VERIFY` и `list-models` для каталога FM."
+    )
+    return [
+        PairQaOutcome(
+            ru_path=ru_p,
+            en_path=en_p,
+            target_path=en_p,
+            review_md=review,
+            repair_attempted=False,
+            repair_applied=False,
+            repair_skip_reason="api_error",
+            confirmation_md=None,
+            repair_error=err,
+        )
+        for ru_p, en_p in pairs
+    ]
+
+
 def pr_merge_blocked(outcomes: list[PairQaOutcome]) -> bool:
+    if qa_critic_unavailable_all(outcomes):
+        return False
     if not translation_strict_merge_enabled():
         return False
     return any(
@@ -349,12 +409,28 @@ def pr_merge_blocked(outcomes: list[PairQaOutcome]) -> bool:
 
 
 def pr_merge_verdict_unavailable(outcomes: list[PairQaOutcome]) -> list[str]:
-    """EN paths where translator verdict API failed (token limit, etc.)."""
+    """EN paths where translator verdict API failed after a successful critic review."""
+    if qa_critic_unavailable_all(outcomes):
+        return []
     return [
         o.en_path
         for o in outcomes
         if file_merge_verdict(o.review_md, o.confirmation_md) == "error"
+        and not critic_api_failed_outcome(o)
     ]
+
+
+def doc_translate_should_fail_ci(
+    outcomes: list[PairQaOutcome],
+    *,
+    qa_section: str | None = None,
+) -> bool:
+    """True only when CI should exit 1 after translation commit (translator/content gate)."""
+    if not outcomes and qa_pipeline_failed_in_section(qa_section):
+        return False
+    if qa_critic_unavailable_all(outcomes):
+        return False
+    return bool(pr_merge_verdict_unavailable(outcomes)) or pr_merge_blocked(outcomes)
 
 
 def _translator_final_verdict(

@@ -25,12 +25,16 @@ from ydbdoc_review.llm import (
 )
 from ydbdoc_review.translation_qa import (
     PairQaOutcome,
+    doc_translate_should_fail_ci,
     file_merge_verdict,
     format_pair_qa_markdown,
     format_translation_pr_summary,
     pr_merge_blocked,
     pr_merge_verdict_unavailable,
+    qa_critic_unavailable_all,
+    qa_pipeline_failed_in_section,
     run_pairs_qa_and_repair,
+    synthetic_qa_outcomes_for_api_failure,
     translation_strict_merge_enabled,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
@@ -657,7 +661,28 @@ def _run_translation_qa_and_repair(
             base_ref_local=base_ref_local,
         )
     except Exception as exc:
-        return f"_QA/repair pipeline failed:_ `{exc}`", 0, []
+        err = str(exc).strip()
+        synthetic = synthetic_qa_outcomes_for_api_failure(pairs, err)
+        summary = format_translation_pr_summary(
+            source_pr_number=source_pr_number,
+            outcomes=synthetic,
+        )
+        per_file = "\n\n---\n\n".join(
+            format_pair_qa_markdown(o) for o in synthetic
+        )
+        section = (
+            f"_QA/repair pipeline failed (критик не отработал):_ `{err}`\n\n"
+            f"{summary}\n\n---\n\n{per_file}"
+        )
+        click.echo(
+            "Translation QA: критик недоступен (API); job не будет остановлен — "
+            "см. отчёт в translation PR.",
+            err=True,
+        )
+        warnings.append(
+            "- QA: модель-критик недоступна; коммит translation PR будет создан без вердикта."
+        )
+        return section, 0, synthetic
     for p in repaired_paths:
         click.echo(f"  QA repair applied: `{p}`")
     if repaired_paths:
@@ -1572,37 +1597,47 @@ def run_cmd(
             translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
             click.echo(f"Warning: translation QA failed: {exc}", err=True)
 
-    if workdir and generated and not dry_run and not blocked_only and qa_outcomes:
-        unavailable = pr_merge_verdict_unavailable(qa_outcomes)
-        if unavailable:
-            raise SystemExit(
-                "## ydbdoc-review — вердикт переводчика не получен\n\n"
-                "Вызов YandexGPT для финальной проверки **не влез в лимит 32k токенов** "
-                "(или другая ошибка API). Это **не** содержательное «ОТКЛОНИТЬ» перевода — "
-                "вердикт просто не сформирован. Перезапустите `doc_translate` "
-                f"(файлы: {', '.join(f'`{p}`' for p in unavailable)}).\n\n"
-                + (translation_qa_section or "")
+    if workdir and generated and not dry_run and not blocked_only:
+        if (
+            settings.translation_self_check_enabled
+            and (qa_outcomes or qa_pipeline_failed_in_section(translation_qa_section))
+        ):
+            n_post_qa = _apply_deterministic_cli_fixes_to_generated(
+                workdir,
+                settings=settings,
+                generated=generated,
+                generated_en_to_ru=generated_en_to_ru,
+                base_ref_local=base_ref_local,
             )
-        n_post_qa = _apply_deterministic_cli_fixes_to_generated(
-            workdir,
-            settings=settings,
-            generated=generated,
-            generated_en_to_ru=generated_en_to_ru,
-            base_ref_local=base_ref_local,
-        )
-        if n_post_qa:
-            click.echo(f"  Post-QA deterministic prepare: {n_post_qa} EN file(s)")
-            warnings.append(
-                f"- Post-QA: детерминированные правки в {n_post_qa} EN-файл(ах) "
-                "перед коммитом."
-            )
-        if pr_merge_blocked(qa_outcomes):
+            if n_post_qa:
+                click.echo(f"  Post-QA deterministic prepare: {n_post_qa} EN file(s)")
+                warnings.append(
+                    f"- Post-QA: детерминированные правки в {n_post_qa} EN-файл(ах) "
+                    "перед коммитом."
+                )
+        if doc_translate_should_fail_ci(
+            qa_outcomes, qa_section=translation_qa_section
+        ):
+            unavailable = pr_merge_verdict_unavailable(qa_outcomes)
+            if unavailable:
+                raise SystemExit(
+                    "## ydbdoc-review — вердикт переводчика не получен\n\n"
+                    "Вызов модели для финальной проверки **не удался** (лимит токенов/API). "
+                    "Критик при этом отработал. Перезапустите `doc_translate` "
+                    f"(файлы: {', '.join(f'`{p}`' for p in unavailable)}).\n\n"
+                    + (translation_qa_section or "")
+                )
             raise SystemExit(
                 "## ydbdoc-review — translation PR отклонён\n\n"
                 "Модель-переводчик вынесла **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
                 "Включён strict merge (`YDBDOC_TRANSLATION_STRICT_MERGE=1`). "
                 "Исправьте и перезапустите `doc_translate`, либо отклоните translation PR.\n\n"
                 + (translation_qa_section or "")
+            )
+        if qa_critic_unavailable_all(qa_outcomes):
+            click.echo(
+                "Translation QA: критик недоступен — job завершится успешно, "
+                "translation PR будет создан/обновлён.",
             )
 
     if workdir and generated and not dry_run and not blocked_only:
