@@ -686,9 +686,24 @@ def run_pair_qa_repair(
     en_on_main: str | None = None,
 ) -> tuple[str, PairQaOutcome]:
     """
-    Critic → deterministic prepare → structural rebuild → optional LLM repair
-    → deterministic prepare → translator verdict.
+    QA: pipeline v2 (two files → critic → whole-file repair → translator) by default.
+    Set ``YDBDOC_PIPELINE=legacy`` for the old multi-pass repair loop.
     """
+    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled, run_pair_qa_v2
+
+    if pipeline_v2_enabled():
+        return run_pair_qa_v2(
+            settings,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+            repair_enabled=repair_enabled,
+        )
+
     translation_before = translated_text
     current = translated_text
     repair_applied = False
