@@ -9,6 +9,7 @@ from typing import Any
 from openai import OpenAI
 
 from ydbdoc_review.config import Settings, fm_base_url_requires_yandex_folder
+from ydbdoc_review.fm_progress import fm_call_span, fm_http_timeout_sec
 from ydbdoc_review.markdown_blocks import (
     prose_mask_enabled,
     translate_preserving_blocks,
@@ -177,21 +178,29 @@ def call_yandex_responses(
     max_output_tokens: int,
     *,
     model_fallbacks: tuple[str, ...] | None = None,
+    operation: str = "fm",
+    detail: str = "",
 ) -> str:
     chain = _expand_model_candidates(model, model_fallbacks)
     last_err: RuntimeError | None = None
     for i, cand in enumerate(chain):
+        op = operation if i == 0 else f"{operation}:fallback"
         try:
-            return _call_yandex_responses_impl(
-                settings,
-                cand,
-                instructions=instructions,
-                user_input=user_input,
-                max_output_tokens=max_output_tokens,
-            )
+            with fm_call_span(operation=op, model=cand, detail=detail):
+                return _call_yandex_responses_impl(
+                    settings,
+                    cand,
+                    instructions=instructions,
+                    user_input=user_input,
+                    max_output_tokens=max_output_tokens,
+                )
         except RuntimeError as exc:
             last_err = exc
             if _fm_model_not_found(exc) and i + 1 < len(chain):
+                fm_log_msg = f"model {cand!r} unavailable, trying fallback"
+                from ydbdoc_review.fm_progress import fm_log
+
+                fm_log(fm_log_msg)
                 continue
             raise
     if last_err is not None:
@@ -213,6 +222,7 @@ def _call_yandex_responses_impl(
     client = OpenAI(
         api_key=settings.yandex_api_key,
         base_url=settings.yandex_base_url,
+        timeout=fm_http_timeout_sec(),
     )
     model_uri = _model_uri(settings, model)
     responses_err: str | None = None
@@ -349,6 +359,7 @@ def _translate_user_payload(
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=cap,
+            operation="translate",
         ).strip()
     )
     if _full_file_translation_looks_truncated(out, reference_for_truncation):
@@ -361,6 +372,7 @@ def _translate_user_payload(
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
+                    operation="translate:retry_truncated",
                 ).strip()
             )
     return out
@@ -1081,6 +1093,8 @@ def verify_translation_pair(
             user_input=user_input,
             max_output_tokens=_translation_self_check_max_output_tokens(),
             model_fallbacks=translation_verify_model_fallbacks(),
+            operation="critic",
+            detail=ru_path,
         ).strip()
     )
 
@@ -1133,6 +1147,8 @@ def fix_translation_pair(
             user_input=user_input,
             max_output_tokens=_repair_max_output_tokens(verify_model),
             model_fallbacks=fb,
+            operation="repair",
+            detail=ru_path,
         ).strip()
     )
     if _full_file_translation_looks_truncated(out, source_text):
@@ -1148,6 +1164,8 @@ def fix_translation_pair(
                     user_input=user_input,
                     max_output_tokens=cap2,
                     model_fallbacks=fb,
+                    operation="repair:retry_truncated",
+                    detail=ru_path,
                 ).strip()
             )
             if len(out2) > len(out):
@@ -1204,5 +1222,7 @@ def confirm_repair_pair(
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=_translation_self_check_max_output_tokens(),
+            operation="translator_confirm",
+            detail=ru_path,
         ).strip()
     )

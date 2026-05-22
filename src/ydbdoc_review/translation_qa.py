@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, replace
 
 from ydbdoc_review import git_local
+from ydbdoc_review.fm_progress import fm_log
 from ydbdoc_review.config import Settings
 from ydbdoc_review.llm import (
     confirm_repair_pair,
@@ -703,6 +704,7 @@ def run_pair_qa_repair(
             en_text=current,
         )
 
+    fm_log(f"QA critic start | {ru_path}")
     review_md = verify_translation_pair(
         settings,
         translate_model=settings.model_translate,
@@ -717,6 +719,7 @@ def run_pair_qa_repair(
         ru_pr_diff=ru_pr_diff,
         en_on_main=en_on_main,
     )
+    fm_log(f"QA critic done | {ru_path} | repair_needed={review_needs_repair(review_md)}")
 
     structural = _is_en_target(target_lang) and (
         critic_needs_structure_rebuild(review_md)
@@ -735,6 +738,7 @@ def run_pair_qa_repair(
         repair_applied = True
         repair_skip_reason = "структурный rebuild по RU (детерминированно)"
     elif review_needs_repair(review_md) and repair_enabled:
+        fm_log(f"QA repair start | {ru_path} | by_section={_section_qa_use(source_text)}")
         llm_text, llm_outcome = _run_llm_repair(
             settings,
             ru_path=ru_path,
@@ -756,6 +760,10 @@ def run_pair_qa_repair(
         repair_error = llm_outcome.repair_error
         if llm_text is not None:
             current = llm_text
+        fm_log(
+            f"QA repair done | {ru_path} | applied={llm_outcome.repair_applied} "
+            f"skip={llm_outcome.repair_skip_reason or '-'}"
+        )
 
     if _is_en_target(target_lang):
         from ydbdoc_review.translate_postprocess import (
@@ -788,6 +796,7 @@ def run_pair_qa_repair(
                 en_text=current,
             )
 
+    fm_log(f"QA translator verdict start | {ru_path}")
     conf = _translator_final_verdict(
         settings,
         ru_path=ru_path,
@@ -801,6 +810,7 @@ def run_pair_qa_repair(
         en_on_main=en_on_main,
         ru_pr_diff=ru_pr_diff,
     )
+    fm_log(f"QA translator verdict done | {ru_path}")
 
     outcome = PairQaOutcome(
         ru_path=ru_path,
@@ -866,6 +876,8 @@ def _run_pair_qa_repair_by_sections(
     out_secs: list[MarkdownSection] = []
     repaired_any = False
     last_error: str | None = None
+    repair_total = len(to_repair)
+    repair_n = 0
 
     for src_sec in src_secs:
         tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
@@ -874,6 +886,11 @@ def _run_pair_qa_repair_by_sections(
             out_secs.append(tgt_sec if tgt_sec else src_sec)
             continue
 
+        repair_n += 1
+        heading = (src_sec.heading or "").strip() or f"section#{src_sec.index}"
+        fm_log(
+            f"QA repair section {repair_n}/{repair_total} | {ru_path} | {heading}"
+        )
         try:
             fixed_raw = fix_translation_pair(
                 settings,
@@ -1185,8 +1202,10 @@ def run_pairs_qa_and_repair(
     lines: list[str] = []
     outcomes: list[PairQaOutcome] = []
     repaired_paths: list[str] = []
+    pair_total = len(pairs)
 
-    for ru_p, en_p in pairs:
+    for pair_i, (ru_p, en_p) in enumerate(pairs, start=1):
+        fm_log(f"QA pair {pair_i}/{pair_total} | {ru_p}")
         source_text = git_local.read_text(workdir, ru_p) or ""
         translated_text = git_local.read_text(workdir, en_p) or ""
         ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))

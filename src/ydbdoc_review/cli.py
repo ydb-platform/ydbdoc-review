@@ -1229,6 +1229,8 @@ def run_cmd(
                 instructions=instructions,
                 user_input=analyze_input,
                 max_output_tokens=8000,
+                operation="analyze_check",
+                detail=f"batch {bi + 1}/{len(analyze_batches)} {label}",
             )
             last_raw_head = (raw or "")[:500]
             try:
