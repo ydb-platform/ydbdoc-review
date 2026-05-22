@@ -927,7 +927,8 @@ def list_models_cmd() -> None:
             "Could not list models via the OpenAI SDK (this gateway may not expose GET /v1/models).\n"
             f"Error: {e}\n\n"
             "In Yandex AI Studio open «Model gallery» and copy the text-generation slug for your folder. "
-            "Vendor spelling is «DeepSeek»; slugs often look like `deepseek-v3.2/latest` — always verify in UI.\n"
+            "Vendor spelling is «DeepSeek»; slug example: `deepseek-v4-flash` "
+            "(URI `gpt://<folder>/deepseek-v4-flash`) — always verify in UI.\n"
             f"Current config: check={settings.model_check!r}, translate={settings.model_translate!r}, "
             f"translation_verify={settings.model_translation_verify!r}"
         ) from e

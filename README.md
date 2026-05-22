@@ -61,7 +61,7 @@ export PYTHONPATH="$(pwd)/src"
 python -m ydbdoc_review list-models
 ```
 
-Официальный перечень в интерфейсе: [Yandex AI Studio — Model gallery](https://aistudio.yandex.ru/model-gallery). Название вендора: **DeepSeek**; строка для API может выглядеть как `deepseek-v3.2/latest` — всё равно сверяйте с тем, что показано у вас в консоли.
+Официальный перечень в интерфейсе: [Yandex AI Studio — Model gallery](https://aistudio.yandex.ru/model-gallery). Название вендора: **DeepSeek**; для cross-check перевода по умолчанию используется **`deepseek-v4-flash`** (URI `gpt://<идентификатор_каталога>/deepseek-v4-flash`; модель V3.2 снята с поддержки с 28.05.2026). Сверяйте slug с консолью.
 
 **Выключатель всего `run`** (удобно в CI репозитория-документации, аналогично флагам Diplodoc): переменная **`YDBDOC_REVIEW_ENABLED`** (`false` / `0` / `off` — команда сразу завершается успешно, без GitHub и без FM). Либо в `ydbdoc-review.toml` секция **`[feature]`** и ключ **`review_enabled = false`**. Если заданы и env, и TOML, **приоритет у env**.
 

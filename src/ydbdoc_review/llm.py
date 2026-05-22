@@ -242,7 +242,7 @@ def load_translate_instructions(settings: Settings) -> str:
 # clamp lower. Set ``YDBDOC_TRANSLATE_MAX_OUTPUT_TOKENS=0`` for this ceiling.
 _TRANSLATE_OUTPUT_HARD_CEILING = 1_048_576
 
-# Yandex FM rejects higher values for some models (e.g. DeepSeek-V3.2 with reasoning).
+# Yandex FM rejects higher values for some models (e.g. DeepSeek with reasoning).
 _KNOWN_MODEL_COMPLETION_CEILINGS: tuple[tuple[str, int], ...] = (
     ("deepseek", 32_768),
 )
