@@ -7,9 +7,9 @@ check = "yandexgpt/latest"
 translate = "yandexgpt-5.1"
 # Вторая модель для cross-check перевода (см. [feature].translation_self_check).
 # Не задавать или пусто — используется та же, что и check.
-# Critic for translation QA (doc_translate / doc_verify). Default: YandexGPT in FM.
-# Override: YDBDOC_MODEL_TRANSLATION_VERIFY or vars (e.g. deepseek-v4-flash when enabled in folder).
-translation_verify = "yandexgpt/latest"
+# Critic for translation QA (doc_translate / doc_verify). Qwen3.6 in FM (256k context).
+# Override: YDBDOC_MODEL_TRANSLATION_VERIFY or vars in workflow.
+translation_verify = "qwen3.6-35b-a3b"
 
 # Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.
 [feature]

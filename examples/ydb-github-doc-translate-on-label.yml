@@ -53,7 +53,7 @@ jobs:
           # Self-check: по умолчанию из ydbdoc-review.toml в образе ([feature].translation_self_check).
           # Раскомментируйте env, чтобы временно переопределить без пересборки образа:
           # YDBDOC_TRANSLATION_SELF_CHECK: "true"
-          # Optional critic override (default in image TOML: yandexgpt/latest):
+          # Optional critic override (default in image TOML: qwen3.6-35b-a3b):
           # YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

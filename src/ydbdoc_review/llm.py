@@ -157,6 +157,10 @@ def _expand_model_candidates(
         for alt in ("deepseek-v4-flash/latest", "deepseek-v32"):
             if alt not in chain:
                 chain.append(alt)
+    if primary.startswith("qwen3.6"):
+        for alt in ("qwen3.6-35b-a3b", "qwen3-235b-a22b-fp8"):
+            if alt not in chain:
+                chain.append(alt)
     return chain
 
 
@@ -302,6 +306,7 @@ _TRANSLATE_OUTPUT_HARD_CEILING = 1_048_576
 # Yandex FM rejects higher values for some models (e.g. DeepSeek with reasoning).
 _KNOWN_MODEL_COMPLETION_CEILINGS: tuple[tuple[str, int], ...] = (
     ("deepseek", 32_768),
+    ("qwen", 32_768),
 )
 
 
