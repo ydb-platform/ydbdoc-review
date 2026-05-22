@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 
 BlockKind = Literal["prose", "fence", "liquid"]
+
+_BLOCK_PH_RE = re.compile(r"⟦YDBDOC_BLOCK_\d+[^⟧\n]*⟧?", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -92,14 +94,105 @@ def join_markdown_blocks(blocks: list[MarkdownBlock]) -> str:
     return "\n".join(b.text for b in blocks)
 
 
-_PLACEHOLDER = "⟦YDBDOC_BLOCK_{i}⟧"
+def prose_mask_enabled() -> bool:
+    import os
+
+    raw = os.environ.get("YDBDOC_TRANSLATE_PRESERVE_FENCES", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
+def has_translation_artifacts(text: str) -> bool:
+    if _BLOCK_PH_RE.search(text) or "YDBDOC_BLOCK" in text:
+        return True
+    if "\ufffd" in text:
+        return True
+    lines = text.splitlines()
+    h1 = [ln.strip() for ln in lines if ln.startswith("# ") and not ln.startswith("## ")]
+    return len(h1) >= 2 and h1[0] == h1[1]
+
+
+def strip_block_placeholder_lines(text: str) -> str:
+    out: list[str] = []
+    for line in text.splitlines():
+        if "YDBDOC_BLOCK" in line or _BLOCK_PH_RE.search(line):
+            continue
+        out.append(line.replace("\ufffd", ""))
+    return "\n".join(out)
+
+
+def dedupe_duplicate_h1_block(text: str) -> str:
+    """Remove a duplicated title/intro block left by a failed placeholder unmask."""
+    lines = text.splitlines()
+    h1_idxs = [i for i, ln in enumerate(lines) if ln.startswith("# ") and not ln.startswith("## ")]
+    if len(h1_idxs) < 2:
+        return strip_block_placeholder_lines(text)
+    title = lines[h1_idxs[0]].strip()
+    if lines[h1_idxs[1]].strip() != title:
+        return strip_block_placeholder_lines(text)
+    end = h1_idxs[1]
+    for j in range(h1_idxs[1], len(lines)):
+        if "YDBDOC_BLOCK" in lines[j] or _BLOCK_PH_RE.search(lines[j] or ""):
+            end = j + 1
+            break
+        if j > h1_idxs[1] + 2 and lines[j].startswith("## "):
+            end = j
+            break
+    merged = lines[: h1_idxs[1]] + lines[end:]
+    return strip_block_placeholder_lines("\n".join(merged))
+
+
+def realign_en_prose_with_ru_blocks(ru_source: str, en_text: str) -> str:
+    """
+    Reassemble EN using RU fence/Liquid blocks verbatim and EN prose in order.
+
+    Fixes leaked placeholders and mis-spliced chunks without calling an LLM.
+    """
+    ru_blocks = split_markdown_blocks(ru_source)
+    en_blocks = split_markdown_blocks(en_text)
+    en_prose = [
+        strip_block_placeholder_lines(b.text)
+        for b in en_blocks
+        if b.kind == "prose" and strip_block_placeholder_lines(b.text).strip()
+    ]
+    out: list[MarkdownBlock] = []
+    pi = 0
+    for rb in ru_blocks:
+        if rb.kind != "prose":
+            out.append(rb)
+            continue
+        if pi < len(en_prose):
+            out.append(MarkdownBlock("prose", en_prose[pi]))
+            pi += 1
+        else:
+            out.append(rb)
+    return join_markdown_blocks(out)
+
+
+def repair_block_translation_artifacts(ru_source: str, en_text: str) -> str:
+    if not has_translation_artifacts(en_text):
+        return en_text
+    out = dedupe_duplicate_h1_block(en_text)
+    out = realign_en_prose_with_ru_blocks(ru_source, out)
+    return dedupe_duplicate_h1_block(out)
+
+
+def translate_preserving_blocks(
+    source_text: str,
+    translate_prose: Callable[[str], str],
+) -> str:
+    """Translate only ``prose`` blocks; copy fence/Liquid blocks from source unchanged."""
+    blocks = split_markdown_blocks(source_text)
+    out: list[MarkdownBlock] = []
+    for block in blocks:
+        if block.kind != "prose" or not block.text.strip():
+            out.append(block)
+            continue
+        out.append(MarkdownBlock("prose", translate_prose(block.text).strip()))
+    return join_markdown_blocks(out)
+
+
+# Legacy helpers (tests / backwards compatibility)
 def mask_non_prose_for_translate(text: str) -> tuple[str, list[MarkdownBlock]]:
-    """
-    Replace fence/liquid blocks with placeholders so the model sees structure
-    but must not alter fenced content.
-    """
     blocks = split_markdown_blocks(text)
     masked_parts: list[str] = []
     preserved: list[MarkdownBlock] = []
@@ -108,7 +201,7 @@ def mask_non_prose_for_translate(text: str) -> tuple[str, list[MarkdownBlock]]:
         if b.kind == "prose":
             masked_parts.append(b.text)
         else:
-            ph = _PLACEHOLDER.format(i=idx)
+            ph = f"⟦YDBDOC_BLOCK_{idx}⟧"
             preserved.append(b)
             masked_parts.append(ph)
             idx += 1
@@ -116,18 +209,9 @@ def mask_non_prose_for_translate(text: str) -> tuple[str, list[MarkdownBlock]]:
 
 
 def unmask_translated_prose(translated: str, preserved: list[MarkdownBlock]) -> str:
-    """Restore fence/liquid blocks after translating masked prose."""
     out = translated
     for i, b in enumerate(preserved):
-        ph = _PLACEHOLDER.format(i=i)
-        if ph not in out:
-            continue
-        out = out.replace(ph, b.text, 1)
+        ph = f"⟦YDBDOC_BLOCK_{i}⟧"
+        if ph in out:
+            out = out.replace(ph, b.text, 1)
     return out
-
-
-def prose_mask_enabled() -> bool:
-    import os
-
-    raw = os.environ.get("YDBDOC_TRANSLATE_PRESERVE_FENCES", "1").strip().lower()
-    return raw not in ("0", "false", "no", "off")

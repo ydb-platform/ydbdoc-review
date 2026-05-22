@@ -417,11 +417,19 @@ def apply_post_translation_fixes(
     en_path: str = "",
 ) -> str:
     """Deterministic CLI + structural + fence repairs before quality gate."""
-    out = apply_deterministic_cli_fixes(text, en_main=en_main, ru_source=ru_source)
+    out = text
+    if ru_source:
+        from ydbdoc_review.markdown_blocks import repair_block_translation_artifacts
+
+        out = repair_block_translation_artifacts(ru_source, out)
+    out = apply_deterministic_cli_fixes(out, en_main=en_main, ru_source=ru_source)
     if ru_source:
         from ydbdoc_review.ru_en_structure import apply_structure_sync_from_ru
 
         out = apply_structure_sync_from_ru(ru_source, out, en_path=en_path)
+        from ydbdoc_review.markdown_blocks import repair_block_translation_artifacts
+
+        out = repair_block_translation_artifacts(ru_source, out)
     return fix_unbalanced_fences(out, reference=ru_source)
 
 

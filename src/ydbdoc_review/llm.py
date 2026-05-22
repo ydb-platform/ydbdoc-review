@@ -10,9 +10,8 @@ from openai import OpenAI
 
 from ydbdoc_review.config import Settings, fm_base_url_requires_yandex_folder
 from ydbdoc_review.markdown_blocks import (
-    mask_non_prose_for_translate,
     prose_mask_enabled,
-    unmask_translated_prose,
+    translate_preserving_blocks,
 )
 from ydbdoc_review.markdown_chunk import (
     split_markdown_for_translate,
@@ -464,7 +463,7 @@ def _ru_to_en_preserve_blocks(source_lang: str, target_lang: str) -> bool:
     )
 
 
-def _translate_masked_prose(
+def _translate_preserving_blocks(
     settings: Settings,
     *,
     instructions: str,
@@ -475,29 +474,44 @@ def _translate_masked_prose(
     model: str,
     default_cap: int,
 ) -> str:
-    masked, preserved = mask_non_prose_for_translate(source_text)
-    user_input = _translate_markdown_user_input(
-        source_lang=source_lang,
-        target_lang=target_lang,
-        source_path=source_path,
-        source_text=masked,
-    )
-    if preserved:
-        user_input += (
-            "\n\n---\n"
-            "Lines like `⟦YDBDOC_BLOCK_N⟧` are opaque placeholders for code or "
-            "templates — copy them unchanged into the translation.\n"
-        )
-    out = _translate_user_payload(
-        settings,
-        instructions=instructions,
-        user_input=user_input,
-        reference_for_truncation=source_text,
-        model=model,
-        max_output_tokens=default_cap,
-    )
-    out = _postprocess_target_language(out, target_lang=target_lang)
-    return unmask_translated_prose(out, preserved)
+    """Translate prose segments only; fences and Liquid tags stay verbatim."""
+
+    def translate_prose(prose: str) -> str:
+        if len(prose) <= translate_chunk_target_chars():
+            user_input = _translate_markdown_user_input(
+                source_lang=source_lang,
+                target_lang=target_lang,
+                source_path=source_path,
+                source_text=prose,
+            )
+            out = _translate_user_payload(
+                settings,
+                instructions=instructions,
+                user_input=user_input,
+                reference_for_truncation=prose,
+                model=model,
+                max_output_tokens=default_cap,
+            )
+            return _postprocess_target_language(out, target_lang=target_lang)
+        chunks = split_markdown_for_translate(prose, target_chars=translate_chunk_target_chars())
+        parts: list[str] = []
+        for i, ch in enumerate(chunks, start=1):
+            parts.append(
+                _translate_chunk_with_retry(
+                    settings,
+                    instructions=instructions,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    source_path=source_path,
+                    chunk=ch,
+                    chunk_index=i,
+                    chunk_count=len(chunks),
+                    default_cap=default_cap,
+                )
+            )
+        return _postprocess_target_language("\n".join(parts), target_lang=target_lang)
+
+    return translate_preserving_blocks(source_text, translate_prose)
 
 
 def translate_ru_block_to_en(
@@ -550,7 +564,7 @@ def translate_markdown(
 
     if len(source_text) <= target:
         if preserve:
-            return _translate_masked_prose(
+            return _translate_preserving_blocks(
                 settings,
                 instructions=instructions,
                 source_lang=source_lang,
@@ -579,7 +593,7 @@ def translate_markdown(
     chunks = split_markdown_for_translate(source_text, target_chars=target)
     if len(chunks) == 1:
         if preserve:
-            return _translate_masked_prose(
+            return _translate_preserving_blocks(
                 settings,
                 instructions=instructions,
                 source_lang=source_lang,
@@ -610,7 +624,7 @@ def translate_markdown(
     for i, ch in enumerate(chunks, start=1):
         if preserve:
             parts.append(
-                _translate_masked_prose(
+                _translate_preserving_blocks(
                     settings,
                     instructions=instructions,
                     source_lang=source_lang,
