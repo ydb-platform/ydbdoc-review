@@ -25,11 +25,13 @@ from ydbdoc_review.llm import (
 )
 from ydbdoc_review.translation_qa import (
     PairQaOutcome,
+    file_merge_verdict,
     format_pair_qa_markdown,
     format_translation_pr_summary,
     pr_merge_blocked,
     pr_merge_verdict_unavailable,
     run_pairs_qa_and_repair,
+    translation_strict_merge_enabled,
 )
 from ydbdoc_review.translate_strict import strict_translate_document
 from ydbdoc_review.paths import (
@@ -1552,11 +1554,20 @@ def run_cmd(
                     "коммит не будет создан.",
                     err=True,
                 )
-            elif qa_outcomes and pr_merge_blocked(qa_outcomes):
-                click.echo(
-                    "Translation QA: переводчик — ОТКЛОНИТЬ; коммит не будет создан.",
-                    err=True,
-                )
+            elif qa_outcomes and any(
+                file_merge_verdict(o.review_md, o.confirmation_md) == "reject"
+                for o in qa_outcomes
+            ):
+                if translation_strict_merge_enabled():
+                    click.echo(
+                        "Translation QA: переводчик — ОТКЛОНИТЬ; коммит не будет создан.",
+                        err=True,
+                    )
+                else:
+                    click.echo(
+                        "Translation QA: переводчик — ОТКЛОНИТЬ по части файлов; "
+                        "коммит будет создан (soft merge), замечания — в отчёте.",
+                    )
         except Exception as exc:
             translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
             click.echo(f"Warning: translation QA failed: {exc}", err=True)
@@ -1572,12 +1583,25 @@ def run_cmd(
                 f"(файлы: {', '.join(f'`{p}`' for p in unavailable)}).\n\n"
                 + (translation_qa_section or "")
             )
+        n_post_qa = _apply_deterministic_cli_fixes_to_generated(
+            workdir,
+            settings=settings,
+            generated=generated,
+            generated_en_to_ru=generated_en_to_ru,
+            base_ref_local=base_ref_local,
+        )
+        if n_post_qa:
+            click.echo(f"  Post-QA deterministic prepare: {n_post_qa} EN file(s)")
+            warnings.append(
+                f"- Post-QA: детерминированные правки в {n_post_qa} EN-файл(ах) "
+                "перед коммитом."
+            )
         if pr_merge_blocked(qa_outcomes):
             raise SystemExit(
                 "## ydbdoc-review — translation PR отклонён\n\n"
                 "Модель-переводчик вынесла **ОТКЛОНИТЬ** (блокеры в командах или diff PR). "
-                "Translation PR нельзя мержить частично — исправьте и перезапустите "
-                "`doc_translate`, либо отклоните весь translation PR.\n\n"
+                "Включён strict merge (`YDBDOC_TRANSLATION_STRICT_MERGE=1`). "
+                "Исправьте и перезапустите `doc_translate`, либо отклоните translation PR.\n\n"
                 + (translation_qa_section or "")
             )
 

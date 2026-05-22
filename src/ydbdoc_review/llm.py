@@ -552,7 +552,10 @@ def translate_comment_line_ru_to_en(
         model=settings.model_translate,
         max_output_tokens=min(512, _translate_max_output_tokens(settings.model_translate)),
     )
-    return _postprocess_target_language(out, target_lang="English").strip()
+    translated = _postprocess_target_language(out, target_lang="English").strip()
+    if re.search(r"please provide the text", translated, re.IGNORECASE):
+        return comment.strip()
+    return translated
 
 
 def translate_ru_block_to_en(

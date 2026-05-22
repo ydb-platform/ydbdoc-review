@@ -263,9 +263,17 @@ def format_translation_pr_summary(
             + ". Перезапустите `doc_translate`."
         )
     elif by_verdict["reject"]:
-        lines.append(
-            "**Итог по translation PR:** **нельзя мержить** — есть файлы с вердиктом «не принимать»."
-        )
+        if translation_strict_merge_enabled():
+            lines.append(
+                "**Итог по translation PR:** **нельзя мержить** — есть файлы "
+                "с вердиктом «не принимать»."
+            )
+        else:
+            lines.append(
+                "**Итог по translation PR:** **можно мержить с ручной доработкой** — "
+                "job создаст коммит; ниже файлы с замечаниями переводчика "
+                "(включите `YDBDOC_TRANSLATION_STRICT_MERGE=1`, чтобы снова блокировать CI)."
+            )
     elif by_verdict["warn"]:
         lines.append(
             "**Итог по translation PR:** **можно мержить** — все файлы принимаются; у части есть оговорки."
@@ -326,8 +334,18 @@ def _one_line_summary(review_md: str) -> str:
     return ""
 
 
+def translation_strict_merge_enabled() -> bool:
+    """When false (default), translator «ОТКЛОНИТЬ» is reported but does not fail the job."""
+    raw = os.environ.get("YDBDOC_TRANSLATION_STRICT_MERGE", "0").strip().lower()
+    return raw in ("1", "true", "yes", "on", "enabled")
+
+
 def pr_merge_blocked(outcomes: list[PairQaOutcome]) -> bool:
-    return any(file_merge_verdict(o.review_md, o.confirmation_md) == "reject" for o in outcomes)
+    if not translation_strict_merge_enabled():
+        return False
+    return any(
+        file_merge_verdict(o.review_md, o.confirmation_md) == "reject" for o in outcomes
+    )
 
 
 def pr_merge_verdict_unavailable(outcomes: list[PairQaOutcome]) -> list[str]:
