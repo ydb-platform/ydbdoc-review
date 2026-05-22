@@ -8,6 +8,8 @@ from typing import Any
 
 import click
 
+from ydbdoc_review.translation_qa import doc_translate_should_fail_ci
+
 from ydbdoc_review import git_local, github_api
 from ydbdoc_review.config import Settings
 from ydbdoc_review.paths import DocPair, pairs_from_changed_files
@@ -93,6 +95,8 @@ def _build_verify_comment(
     gate_failures: list[str],
     skipped: list[str],
     repaired_paths: list[str],
+    push_failed: str | None = None,
+    pushed: bool = False,
 ) -> str:
     lines = [
         "## ydbdoc-review — doc_verify",
@@ -115,6 +119,23 @@ def _build_verify_comment(
                 "",
             ]
         )
+        if pushed:
+            lines.append("_Правки запушены в ветку PR._\n")
+        elif push_failed:
+            lines.extend(
+                [
+                    "**Push не выполнен** (job завершился без падения):",
+                    "",
+                    f"```\n{push_failed}\n```",
+                    "",
+                    "Добавьте в репозиторий секрет **`YDBDOC_PUSH_PAT`** (PAT с `contents: write` "
+                    "на `ydb-platform/ydb`) и в workflow:",
+                    "`GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}`.",
+                    "Без PAT используется `GITHUB_TOKEN`, которому GitHub часто **запрещает** "
+                    "пушить в ветки, созданные `github-actions[bot]`.",
+                    "",
+                ]
+            )
 
     if skipped:
         lines.extend(
@@ -227,6 +248,12 @@ def run_verify_pr(
         f"critic `{settings.model_translation_verify}`, "
         f"repair={'on' if settings.translation_repair_enabled else 'off'} …"
     )
+    if settings.github_push_token == settings.github_token:
+        click.echo(
+            "Note: GITHUB_PUSH_TOKEN not set — push uses GITHUB_TOKEN. "
+            "If push returns 403, configure secret YDBDOC_PUSH_PAT.",
+            err=True,
+        )
 
     qa_body, repaired_paths, outcomes = run_pairs_qa_and_repair(
         settings,
@@ -273,10 +300,12 @@ def run_verify_pr(
         for line in gate_failures:
             click.echo(f"  {line}", err=True)
 
-    blocked = bool(gate_failures) or (outcomes and pr_merge_blocked(outcomes))
+    blocked = bool(gate_failures) or doc_translate_should_fail_ci(outcomes)
     unavailable = outcomes and pr_merge_verdict_unavailable(outcomes)
 
     committed = False
+    pushed = False
+    push_failed: str | None = None
     paths_to_publish = list(dict.fromkeys(repaired_paths))
     if paths_to_publish and not no_commit and not blocked and not unavailable:
         msg = (
@@ -294,14 +323,22 @@ def run_verify_pr(
             click.echo(f"Committed {len(paths_to_publish)} repaired file(s).")
 
     if committed and not no_push:
-        git_local.push_branch(
+        push_failed = git_local.try_push_branch(
             workdir,
             remote_name="ydbdoc-push",
             branch=head_ref,
             token=settings.github_push_token,
             base_https_url=head_clone_url,
         )
-        click.echo(f"Pushed to `{head_owner}/{head_repo_name}:{head_ref}`.")
+        if push_failed:
+            click.echo(
+                f"Warning: could not push to `{head_owner}/{head_repo_name}:{head_ref}`: "
+                f"{push_failed}",
+                err=True,
+            )
+        else:
+            pushed = True
+            click.echo(f"Pushed to `{head_owner}/{head_repo_name}:{head_ref}`.")
 
     comment = _build_verify_comment(
         pr_number=pr_number,
@@ -310,6 +347,8 @@ def run_verify_pr(
         gate_failures=gate_failures,
         skipped=skipped,
         repaired_paths=paths_to_publish if committed else repaired_paths,
+        push_failed=push_failed,
+        pushed=pushed,
     )
 
     click.echo("\n--- doc_verify report ---\n")

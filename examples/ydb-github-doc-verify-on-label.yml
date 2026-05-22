@@ -46,4 +46,5 @@ jobs:
           YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Обязательно для push правок doc_verify в ветку translation PR (иначе 403 у github-actions[bot]).
           GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}

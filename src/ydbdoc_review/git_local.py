@@ -372,6 +372,34 @@ def push_branch(
     subprocess.run(push_args, check=True)
 
 
+def try_push_branch(
+    repo: str,
+    remote_name: str,
+    branch: str,
+    token: str,
+    base_https_url: str,
+    *,
+    force_with_lease: bool = False,
+) -> str | None:
+    """Push ``HEAD`` to ``branch``; return ``None`` on success or a short error message."""
+    try:
+        push_branch(
+            repo,
+            remote_name,
+            branch,
+            token,
+            base_https_url,
+            force_with_lease=force_with_lease,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or b"").decode(errors="replace").strip()
+        msg = f"exit {exc.returncode}"
+        if detail:
+            msg = f"{msg}: {detail.splitlines()[-1] if detail else detail}"
+        return msg
+    return None
+
+
 def try_fetch_remote_branch(repo: str, remote_name: str, branch: str) -> str | None:
     """Fetch ``branch`` from ``remote_name``; return local ref or None if missing."""
     local_ref = _remote_tracking_ref(remote_name, branch)
