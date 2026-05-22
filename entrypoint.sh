@@ -12,6 +12,11 @@ elif [ ! -e "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -e "${GITHUB
 fi
 export YDBDOC_REPO_PATH="${REPO}"
 
+# Workflow may pass PAT only as YDBDOC_PUSH_PAT (secret name); app reads GITHUB_PUSH_TOKEN.
+if [ -n "${YDBDOC_PUSH_PAT:-}" ] && [ -z "${GITHUB_PUSH_TOKEN:-}" ]; then
+  export GITHUB_PUSH_TOKEN="${YDBDOC_PUSH_PAT}"
+fi
+
 # Bind-mounted repo: runner UID != container user → "dubious ownership". .git may be a *file* (gitdir), not dir.
 if [ -n "${YDBDOC_REPO_PATH}" ] && [ -e "${YDBDOC_REPO_PATH}/.git" ]; then
   git config --global --add safe.directory "${YDBDOC_REPO_PATH}"

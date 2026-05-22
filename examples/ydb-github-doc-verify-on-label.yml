@@ -9,6 +9,7 @@ on:
     paths:
       - "ydb/docs/**"
 
+# contents: write нужен для commit/push repair; read-only даёт 403 даже с PAT, если PAT не передан в env.
 permissions:
   contents: write
   pull-requests: write
@@ -46,5 +47,7 @@ jobs:
           YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Обязательно для push правок doc_verify в ветку translation PR (иначе 403 у github-actions[bot]).
+          # Обязательно: без этого в контейнер попадает только GITHUB_TOKEN → 403 на push.
           GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
+          # Допустимо вместо строки выше (код читает оба имени):
+          # YDBDOC_PUSH_PAT: ${{ secrets.YDBDOC_PUSH_PAT }}

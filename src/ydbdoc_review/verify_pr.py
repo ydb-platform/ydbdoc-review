@@ -250,9 +250,15 @@ def run_verify_pr(
     )
     if settings.github_push_token == settings.github_token:
         click.echo(
-            "Note: GITHUB_PUSH_TOKEN not set — push uses GITHUB_TOKEN. "
-            "If push returns 403, configure secret YDBDOC_PUSH_PAT.",
+            "Note: neither GITHUB_PUSH_TOKEN nor YDBDOC_PUSH_PAT env — push uses GITHUB_TOKEN. "
+            "In ydb/.github/workflows/ydbdoc-verify.yml add e.g. "
+            "GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }} (see ydbdoc-review examples).",
             err=True,
+        )
+    else:
+        click.echo(
+            "Git push will use a dedicated PAT (GITHUB_PUSH_TOKEN / YDBDOC_PUSH_PAT), "
+            "not the workflow GITHUB_TOKEN."
         )
 
     qa_body, repaired_paths, outcomes = run_pairs_qa_and_repair(

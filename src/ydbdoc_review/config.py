@@ -284,12 +284,12 @@ class Settings:
         else:
             review_enabled = toml.review_enabled
         gh = os.environ.get("GITHUB_TOKEN", "").strip()
-        # CI often maps a repo secret (e.g. YDBDOC_PUSH_PAT) into GITHUB_PUSH_TOKEN; empty → GITHUB_TOKEN.
-        gh_push_raw = os.environ.get("GITHUB_PUSH_TOKEN")
-        if gh_push_raw is None:
-            gh_push = gh
-        else:
-            gh_push = gh_push_raw.strip() or gh
+        # PAT for git push: GITHUB_PUSH_TOKEN (workflow env) or YDBDOC_PUSH_PAT (secret name as env).
+        gh_push = (
+            os.environ.get("GITHUB_PUSH_TOKEN", "").strip()
+            or os.environ.get("YDBDOC_PUSH_PAT", "").strip()
+            or gh
+        )
         docs_prefix = os.environ.get("DOCS_SRC_ROOT", "ydb/docs").strip().strip("/")
         here = os.path.dirname(os.path.abspath(__file__))
         default_prompts = os.path.normpath(os.path.join(here, "..", "..", "prompts"))
