@@ -193,18 +193,19 @@ def translate_full_source_by_sections(
             text = restore_markdown_links_from_ru(sec.content, text)
             from ydbdoc_review.translate_postprocess import (
                 cyrillic_repair_enabled,
-                en_contains_cyrillic,
+                en_contains_cyrillic_prose,
             )
 
-            if cyrillic_repair_enabled() and en_contains_cyrillic(text):
-                text = translate_markdown(
-                    settings,
-                    source_lang=source_lang,
-                    target_lang="English",
-                    source_path=source_path,
-                    source_text=sec.content,
+            if cyrillic_repair_enabled() and en_contains_cyrillic_prose(text):
+                from ydbdoc_review.translate_postprocess import (
+                    _translate_ru_section_strict_en,
                 )
-                text = restore_markdown_links_from_ru(sec.content, text)
+
+                text = _translate_ru_section_strict_en(
+                    settings,
+                    ru_path=source_path,
+                    ru_section=sec.content,
+                )
         out.append(
             MarkdownSection(
                 index=sec.index,

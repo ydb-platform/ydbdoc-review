@@ -73,13 +73,62 @@ def tabs_missing_vs_source(
     return required > 0 and actual < required
 
 
+def _iter_lines_outside_fences(text: str):
+    in_fence = False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            yield line
+
+
 def en_contains_cyrillic(text: str) -> bool:
     return bool(_CYRILLIC_RE.search(text))
+
+
+def en_contains_cyrillic_prose(text: str) -> bool:
+    """Cyrillic outside fenced code blocks (quality-gate signal)."""
+    return any(_CYRILLIC_RE.search(line) for line in _iter_lines_outside_fences(text))
 
 
 def cyrillic_repair_enabled() -> bool:
     raw = os.environ.get("YDBDOC_REPAIR_CYRILLIC", "1").strip().lower()
     return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def cyrillic_repair_max_passes() -> int:
+    raw = os.environ.get("YDBDOC_CYRILLIC_REPAIR_MAX_PASSES", "").strip()
+    if raw.isdigit():
+        return max(1, min(5, int(raw)))
+    return 3
+
+
+_NO_CYRILLIC_SUFFIX = (
+    "\n\n---\n"
+    "MANDATORY for this translation: output **English only**. "
+    "Do not leave any Cyrillic letters (А–Я, а–я, Ё, ё) in headings, "
+    "tables, lists, or prose. Translate `#` comments inside code fences to English.\n"
+)
+
+
+def _translate_ru_section_strict_en(
+    settings: object,
+    *,
+    ru_path: str,
+    ru_section: str,
+) -> str:
+    from ydbdoc_review.llm import translate_markdown
+    from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+
+    text = translate_markdown(
+        settings,
+        source_lang="Russian",
+        target_lang="English",
+        source_path=ru_path,
+        source_text=ru_section + _NO_CYRILLIC_SUFFIX,
+    )
+    return restore_markdown_links_from_ru(ru_section, text)
 
 
 def repair_en_cyrillic_from_ru(
@@ -90,56 +139,79 @@ def repair_en_cyrillic_from_ru(
     en_text: str,
 ) -> tuple[str, bool]:
     """
-    Re-translate ``##`` sections that still contain Cyrillic in EN (common on long docs).
+    Remove Cyrillic from EN: re-translate affected ``##`` sections, then whole file.
 
     Returns ``(markdown, changed)``.
     """
-    if not cyrillic_repair_enabled() or not en_contains_cyrillic(en_text):
+    if not cyrillic_repair_enabled() or not en_contains_cyrillic_prose(en_text):
         return en_text, False
 
     from ydbdoc_review.llm import translate_markdown
     from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
     from ydbdoc_review.markdown_sections import (
         MarkdownSection,
-        align_sections_by_heading,
         join_markdown_sections,
         split_markdown_sections,
     )
 
-    ru_sections = split_markdown_sections(ru_full)
-    en_sections = split_markdown_sections(en_text)
-    aligned = align_sections_by_heading(ru_sections, en_sections)
-    out: list[MarkdownSection] = []
+    merged = en_text
     changed = False
 
-    for ru_sec in ru_sections:
-        en_sec = aligned[ru_sec.index] if ru_sec.index < len(aligned) else None
-        body = en_sec.content if en_sec is not None else ""
-        if en_sec is None or en_contains_cyrillic(body):
-            text = translate_markdown(
+    for _ in range(cyrillic_repair_max_passes()):
+        if not en_contains_cyrillic_prose(merged):
+            break
+
+        ru_sections = split_markdown_sections(ru_full)
+        en_sections = split_markdown_sections(merged)
+        out: list[MarkdownSection] = []
+        section_pass_changed = False
+
+        for i, ru_sec in enumerate(ru_sections):
+            en_sec = en_sections[i] if i < len(en_sections) else None
+            body = en_sec.content if en_sec is not None else ""
+            if en_sec is None or en_contains_cyrillic_prose(body):
+                text = _translate_ru_section_strict_en(
+                    settings,
+                    ru_path=ru_path,
+                    ru_section=ru_sec.content,
+                )
+                text = apply_deterministic_cli_fixes(text, ru_source=ru_full)
+                section_pass_changed = True
+            else:
+                text = body
+            out.append(
+                MarkdownSection(
+                    index=ru_sec.index,
+                    heading=ru_sec.heading,
+                    content=text.strip(),
+                    start_line=ru_sec.start_line,
+                    end_line=ru_sec.end_line,
+                )
+            )
+
+        if section_pass_changed:
+            merged = join_markdown_sections(out)
+            merged = fix_unbalanced_fences(merged, reference=ru_full)
+            changed = True
+
+        if en_contains_cyrillic_prose(merged):
+            full = translate_markdown(
                 settings,
                 source_lang="Russian",
                 target_lang="English",
                 source_path=ru_path,
-                source_text=ru_sec.content,
+                source_text=ru_full + _NO_CYRILLIC_SUFFIX,
             )
-            text = restore_markdown_links_from_ru(ru_sec.content, text)
-            text = apply_deterministic_cli_fixes(text, ru_source=ru_full)
-            changed = True
-        else:
-            text = body
-        out.append(
-            MarkdownSection(
-                index=ru_sec.index,
-                heading=ru_sec.heading,
-                content=text.strip(),
-                start_line=ru_sec.start_line,
-                end_line=ru_sec.end_line,
-            )
-        )
+            full = restore_markdown_links_from_ru(ru_full, full)
+            full = apply_deterministic_cli_fixes(full, ru_source=ru_full)
+            from ydbdoc_review.ru_en_structure import apply_structure_sync_from_ru
 
-    merged = join_markdown_sections(out)
-    merged = fix_unbalanced_fences(merged, reference=ru_full)
+            full = apply_structure_sync_from_ru(ru_full, full, en_path=ru_path)
+            full = fix_unbalanced_fences(full, reference=ru_full)
+            if full.strip() != merged.strip():
+                merged = full
+                changed = True
+
     return merged, changed
 
 
@@ -368,7 +440,9 @@ def translation_quality_issues(
         ):
             if "missing_tabs" not in issues:
                 issues.append("missing_tab_items")
-    if target_lang.strip().lower() == "english" and en_contains_cyrillic(translated):
+    if target_lang.strip().lower() == "english" and en_contains_cyrillic_prose(
+        translated
+    ):
         issues.append("cyrillic_leak")
     if en_main and len(en_main) >= 400 and len(translated) < int(len(en_main) * 0.72):
         issues.append("truncated_file")

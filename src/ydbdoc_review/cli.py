@@ -686,14 +686,15 @@ def _apply_deterministic_cli_fixes_to_generated(
         before = git_local.read_text(workdir, en_p) or ""
         from ydbdoc_review.translate_postprocess import (
             apply_post_translation_fixes,
-            en_contains_cyrillic,
+            en_contains_cyrillic_prose,
             repair_en_cyrillic_from_ru,
         )
 
         after = apply_post_translation_fixes(
             before, en_main=en_main, ru_source=ru_full, en_path=en_p
         )
-        if en_contains_cyrillic(after):
+        cy = False
+        if en_contains_cyrillic_prose(after):
             after, cy = repair_en_cyrillic_from_ru(
                 settings,
                 ru_path=ru_p,
@@ -701,11 +702,15 @@ def _apply_deterministic_cli_fixes_to_generated(
                 en_text=after,
             )
             if cy:
-                click.echo(f"  Cyrillic repair: re-translated sections in `{en_p}`")
-                after = apply_post_translation_fixes(
-                    after, en_main=en_main, ru_source=ru_full, en_path=en_p
+                click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
+            after = apply_post_translation_fixes(
+                after, en_main=en_main, ru_source=ru_full, en_path=en_p
+            )
+            if en_contains_cyrillic_prose(after):
+                click.echo(
+                    f"  Warning: Cyrillic still present in prose after repair: `{en_p}`"
                 )
-        if after != before:
+        if after != before or cy:
             git_local.write_text(workdir, en_p, after)
             fixed += 1
             click.echo(f"  Post-translation fix: `{en_p}`")
