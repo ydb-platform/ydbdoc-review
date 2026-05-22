@@ -43,7 +43,12 @@ def _allow_full_file_fallback() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
-def prefer_diff_only_translation(source_diff: str, source_full: str) -> bool:
+def prefer_diff_only_translation(
+    source_diff: str,
+    source_full: str,
+    *,
+    en_reference: str | None = None,
+) -> bool:
     """
     Small PR diff on a long file → patch EN via RU_DIFF only (no section copy from main).
 
@@ -60,6 +65,17 @@ def prefer_diff_only_translation(source_diff: str, source_full: str) -> bool:
     if max_raw.isdigit():
         max_chars = max(500, int(max_raw))
     if len(diff) > max_chars:
+        return False
+    from ydbdoc_review.ru_en_structure import (
+        index_bullets_behind_ru,
+        list_tab_item_labels,
+    )
+
+    if list_tab_item_labels(source_full) and len(
+        list_tab_item_labels(source_full)
+    ) > len(list_tab_item_labels(en_reference or "")):
+        return False
+    if index_bullets_behind_ru(source_full, en_reference or ""):
         return False
     max_ratio = 0.12
     ratio_raw = os.environ.get("YDBDOC_TRANSLATE_DIFF_FIRST_MAX_RATIO", "").strip()
@@ -306,7 +322,7 @@ def _strict_ru_to_en(
     if not ru_diff.strip():
         return en_reference, "unchanged-no-diff"
 
-    if prefer_diff_only_translation(ru_diff, ru_source):
+    if prefer_diff_only_translation(ru_diff, ru_source, en_reference=en_reference):
         out, mode = _translate_ru_to_en_via_diff(
             settings,
             ru_path=ru_path,

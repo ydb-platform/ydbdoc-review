@@ -685,7 +685,9 @@ def _apply_deterministic_cli_fixes_to_generated(
         before = git_local.read_text(workdir, en_p) or ""
         from ydbdoc_review.translate_postprocess import apply_post_translation_fixes
 
-        after = apply_post_translation_fixes(before, en_main=en_main, ru_source=ru_full)
+        after = apply_post_translation_fixes(
+            before, en_main=en_main, ru_source=ru_full, en_path=en_p
+        )
         if after != before:
             git_local.write_text(workdir, en_p, after)
             fixed += 1

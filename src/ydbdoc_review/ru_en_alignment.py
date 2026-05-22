@@ -75,6 +75,16 @@ def critical_ru_en_mismatches(
     if en_coverage_behind_ru(ru_ref, en_text):
         issues.append("en_behind_ru")
 
+    from ydbdoc_review.ru_en_structure import (
+        index_bullets_behind_ru,
+        tab_items_missing_vs_source,
+    )
+
+    if tab_items_missing_vs_source(ru_ref, en_text):
+        issues.append("missing_tab_items")
+    if index_bullets_behind_ru(ru_ref, en_text):
+        issues.append("index_bullets_behind")
+
     ru_has_cfg = bool(_CONFIG_DIR_RE.search(ru_full))
     en_has_cfg = bool(_CONFIG_DIR_RE.search(en_text))
     en_has_yaml = bool(_YAML_CONFIG_RE.search(en_text))
@@ -142,5 +152,7 @@ def mismatch_gate_codes() -> frozenset[str]:
             "ssd_group_count",
             "token_file_name",
             "en_behind_ru",
+            "missing_tab_items",
+            "index_bullets_behind",
         }
     )

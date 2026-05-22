@@ -34,11 +34,15 @@ def tabs_missing_vs_source(
     source_diff: str | None = None,
 ) -> bool:
     """
-    True when translated text is missing ``{% list tabs %}`` blocks vs *source*.
+    True when translated text is missing ``{% list tabs %}`` blocks or tab items vs *source*.
 
     With *source_diff*, only sections touched by the PR diff are checked. Untouched
     sections may keep EN from main even when RU gained tabs elsewhere (minimal PR scope).
     """
+    from ydbdoc_review.ru_en_structure import tab_items_missing_vs_source
+
+    if tab_items_missing_vs_source(source, translated, source_diff=source_diff):
+        return True
     if _count_list_tabs(source) == 0:
         return False
     if _count_list_tabs(translated) >= _count_list_tabs(source):
@@ -224,9 +228,14 @@ def apply_post_translation_fixes(
     *,
     en_main: str | None = None,
     ru_source: str | None = None,
+    en_path: str = "",
 ) -> str:
-    """Deterministic CLI + fence repairs before quality gate."""
+    """Deterministic CLI + structural + fence repairs before quality gate."""
     out = apply_deterministic_cli_fixes(text, en_main=en_main, ru_source=ru_source)
+    if ru_source:
+        from ydbdoc_review.ru_en_structure import apply_structure_sync_from_ru
+
+        out = apply_structure_sync_from_ru(ru_source, out, en_path=en_path)
     return fix_unbalanced_fences(out, reference=ru_source)
 
 
@@ -279,6 +288,20 @@ def translation_quality_issues(
         issues.append("too_short")
     if tabs_missing_vs_source(source, translated, source_diff=source_diff):
         issues.append("missing_tabs")
+    if lang in ("english", "en"):
+        from ydbdoc_review.ru_en_structure import (
+            index_bullets_behind_ru,
+            tab_items_missing_vs_source,
+        )
+
+        ru_ref = ru_authority_text(source, ru_authority)
+        if index_bullets_behind_ru(ru_ref, translated):
+            issues.append("index_bullets_behind")
+        if tab_items_missing_vs_source(
+            ru_ref, translated, source_diff=source_diff
+        ):
+            if "missing_tabs" not in issues:
+                issues.append("missing_tab_items")
     if target_lang.strip().lower() == "english" and en_contains_cyrillic(translated):
         issues.append("cyrillic_leak")
     if en_main and len(en_main) >= 400 and len(translated) < int(len(en_main) * 0.72):
@@ -317,6 +340,8 @@ def translation_quality_gate_codes() -> frozenset[str]:
             "ssd_group_count",
             "token_file_name",
             "en_behind_ru",
+            "index_bullets_behind",
+            "missing_tab_items",
         }
     )
 
