@@ -349,6 +349,41 @@ def fix_unbalanced_fences(text: str, *, reference: str | None = None) -> str:
     return _close_trailing_fence_block(text)
 
 
+_EXPLAIN_EN_WRONG = (
+    ("ydb table query explain --ast", "ydb sql --explain-ast"),
+    ("ydb table query explain", "ydb sql --explain"),
+)
+
+
+def fix_cli_explain_from_ru(ru_source: str, en_text: str) -> str:
+    if "ydb sql --explain" not in ru_source:
+        return en_text
+    out = en_text
+    for wrong, right in _EXPLAIN_EN_WRONG:
+        out = out.replace(wrong, right)
+    return out
+
+
+def fix_grant_classifier_use_from_ru(ru_source: str, en_text: str) -> str:
+    if not re.search(r"GRANT\s+USE\b", ru_source, re.IGNORECASE):
+        return en_text
+    if "classifier" not in ru_source.lower():
+        return en_text
+    return re.sub(
+        r"(GRANT\s+)ALL(\s+ON\s+`[^`]*classifier[^`]*`)",
+        r"\1USE\2",
+        en_text,
+        flags=re.IGNORECASE,
+    )
+
+
+def apply_semantic_fixes_from_ru(ru_source: str, en_text: str) -> str:
+    """Copy command/ACL semantics from RU without an LLM call."""
+    out = fix_cli_explain_from_ru(ru_source, en_text)
+    out = fix_grant_classifier_use_from_ru(ru_source, out)
+    return out
+
+
 def apply_deterministic_cli_fixes(
     text: str,
     *,
@@ -358,6 +393,8 @@ def apply_deterministic_cli_fixes(
     """Fix known CLI copy-paste regressions without calling an LLM."""
     out = fix_config_dir_spacing(text)
     out = fix_token_file_inconsistency(out, en_main=en_main, ru_source=ru_source)
+    if ru_source:
+        out = apply_semantic_fixes_from_ru(ru_source, out)
     return out
 
 

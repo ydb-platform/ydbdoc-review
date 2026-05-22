@@ -139,8 +139,11 @@ def _full_resync_from_ru(
             target_lang="English",
         )
         out = restore_markdown_links_from_ru(ru_full, out)
-        out = apply_post_translation_fixes(out, ru_source=ru_full)
-        return out, sec_mode
+        from ydbdoc_review.ru_en_sync import finalize_en_from_ru
+
+        return finalize_en_from_ru(
+            settings, ru_path=ru_path, ru_full=ru_full, en_text=out
+        ), sec_mode
     out = translate_markdown(
         settings,
         source_lang="Russian",
@@ -149,8 +152,11 @@ def _full_resync_from_ru(
         source_text=ru_full,
     )
     out = restore_markdown_links_from_ru(ru_full, out)
-    out = apply_post_translation_fixes(out, ru_source=ru_full)
-    return out, "full-file"
+    from ydbdoc_review.ru_en_sync import finalize_en_from_ru
+
+    return finalize_en_from_ru(
+        settings, ru_path=ru_path, ru_full=ru_full, en_text=out
+    ), "full-file"
 
 
 def _apply_ru_authority_if_needed(
@@ -284,7 +290,10 @@ def _strict_ru_to_en(
             mode = "full-file-stale-target"
         else:
             mode = "full-file-no-target"
-        if translate_by_section_enabled(source_len=len(ru_work)):
+        behind = en_reference is not None and en_coverage_behind_ru(
+            ru_work, en_reference
+        )
+        if translate_by_section_enabled(source_len=len(ru_work)) and not behind:
             out, mode_sec = translate_full_source_by_sections(
                 settings,
                 source_path=ru_path,
@@ -293,6 +302,14 @@ def _strict_ru_to_en(
                 target_lang="English",
             )
             out = restore_markdown_links_from_ru(ru_work, out)
+            from ydbdoc_review.ru_en_sync import finalize_en_from_ru
+
+            out = finalize_en_from_ru(
+                settings,
+                ru_path=ru_path,
+                ru_full=ru_work,
+                en_text=out,
+            )
             return _apply_ru_authority_if_needed(
                 settings,
                 ru_path=ru_path,
@@ -309,12 +326,18 @@ def _strict_ru_to_en(
             source_path=ru_path,
             source_text=ru_work,
         )
+        out = restore_markdown_links_from_ru(ru_work, out)
+        from ydbdoc_review.ru_en_sync import finalize_en_from_ru
+
+        out = finalize_en_from_ru(
+            settings, ru_path=ru_path, ru_full=ru_work, en_text=out
+        )
         return _apply_ru_authority_if_needed(
             settings,
             ru_path=ru_path,
             ru_full=ru_source,
             en_reference=en_reference,
-            out=restore_markdown_links_from_ru(ru_work, out),
+            out=out,
             mode=mode,
             ru_at_base=ru_at_base,
         )

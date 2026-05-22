@@ -690,9 +690,18 @@ def _apply_deterministic_cli_fixes_to_generated(
             repair_en_cyrillic_from_ru,
         )
 
-        after = apply_post_translation_fixes(
-            before, en_main=en_main, ru_source=ru_full, en_path=en_p
+        from ydbdoc_review.ru_en_sync import finalize_en_from_ru
+
+        after = finalize_en_from_ru(
+            settings,
+            ru_path=ru_p,
+            ru_full=ru_full,
+            en_text=before,
         )
+        if en_main:
+            after = apply_post_translation_fixes(
+                after, en_main=en_main, ru_source=ru_full, en_path=en_p
+            )
         cy = False
         if en_contains_cyrillic_prose(after):
             after, cy = repair_en_cyrillic_from_ru(

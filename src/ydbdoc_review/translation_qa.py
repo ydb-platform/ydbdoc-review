@@ -23,6 +23,7 @@ from ydbdoc_review.markdown_sections import (
 )
 from ydbdoc_review.section_translate import full_file_repair_max_chars
 from ydbdoc_review.ru_en_alignment import critical_ru_en_mismatches
+from ydbdoc_review.ru_en_sync import section_missing_h3, section_too_short
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     translation_quality_gate_codes,
@@ -560,6 +561,13 @@ def _run_pair_qa_repair_by_sections(
     to_repair = section_indices_touched_by_diff(ru_pr_diff or "", src_secs)
     if not to_repair:
         to_repair = {s.index for s in src_secs}
+    for src_sec in src_secs:
+        tgt_sec = aligned[src_sec.index] if src_sec.index < len(aligned) else None
+        tgt_body = tgt_sec.content if tgt_sec else ""
+        if section_missing_h3(src_sec.content, tgt_body) or section_too_short(
+            src_sec.content, tgt_body
+        ):
+            to_repair.add(src_sec.index)
 
     out_secs: list[MarkdownSection] = []
     repaired_any = False
@@ -619,6 +627,21 @@ def _run_pair_qa_repair_by_sections(
         repaired_any = True
 
     merged = join_markdown_sections(out_secs)
+
+    if target_lang.strip().lower() in ("english", "en") and repaired_any:
+        from ydbdoc_review.ru_en_sync import (
+            structure_sync_needed,
+            sync_document_structure_from_ru,
+        )
+
+        if structure_sync_needed(source_text, merged):
+            merged = sync_document_structure_from_ru(
+                settings,
+                ru_path=ru_path,
+                ru_full=source_text,
+                en_text=merged,
+            )
+            merged = apply_deterministic_cli_fixes(merged, en_main=en_on_main)
 
     if not repaired_any:
         return None, PairQaOutcome(

@@ -9,6 +9,11 @@ from typing import Any
 from openai import OpenAI
 
 from ydbdoc_review.config import Settings, fm_base_url_requires_yandex_folder
+from ydbdoc_review.markdown_blocks import (
+    mask_non_prose_for_translate,
+    prose_mask_enabled,
+    unmask_translated_prose,
+)
 from ydbdoc_review.markdown_chunk import (
     split_markdown_for_translate,
     translate_chunk_target_chars,
@@ -418,7 +423,13 @@ def _maybe_retry_full_document(
     issues = translation_quality_issues(
         source_text, merged, target_lang=target_lang
     )
-    retry_codes = {"too_short", "missing_tabs", "unbalanced_fences", "cyrillic_leak"}
+    retry_codes = {
+        "too_short",
+        "missing_tabs",
+        "unbalanced_fences",
+        "cyrillic_leak",
+        "en_behind_ru",
+    }
     if not retry_codes.intersection(issues):
         return merged
     user_input = _translate_markdown_user_input(
@@ -446,6 +457,70 @@ def _maybe_retry_full_document(
     return merged
 
 
+def _ru_to_en_preserve_blocks(source_lang: str, target_lang: str) -> bool:
+    return source_lang.lower().startswith("rus") and target_lang.strip().lower() in (
+        "english",
+        "en",
+    )
+
+
+def _translate_masked_prose(
+    settings: Settings,
+    *,
+    instructions: str,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    source_text: str,
+    model: str,
+    default_cap: int,
+) -> str:
+    masked, preserved = mask_non_prose_for_translate(source_text)
+    user_input = _translate_markdown_user_input(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_path=source_path,
+        source_text=masked,
+    )
+    if preserved:
+        user_input += (
+            "\n\n---\n"
+            "Lines like `⟦YDBDOC_BLOCK_N⟧` are opaque placeholders for code or "
+            "templates — copy them unchanged into the translation.\n"
+        )
+    out = _translate_user_payload(
+        settings,
+        instructions=instructions,
+        user_input=user_input,
+        reference_for_truncation=source_text,
+        model=model,
+        max_output_tokens=default_cap,
+    )
+    out = _postprocess_target_language(out, target_lang=target_lang)
+    return unmask_translated_prose(out, preserved)
+
+
+def translate_ru_block_to_en(
+    settings: Settings,
+    *,
+    ru_path: str,
+    ru_block: str,
+) -> str:
+    """Translate a RU fragment to EN, preserving fenced code and Liquid blocks."""
+    from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+    from ydbdoc_review.translate_postprocess import apply_deterministic_cli_fixes
+
+    out = translate_markdown(
+        settings,
+        source_lang="Russian",
+        target_lang="English",
+        source_path=ru_path,
+        source_text=ru_block,
+    )
+    out = restore_markdown_links_from_ru(ru_block, out)
+    return apply_deterministic_cli_fixes(out, ru_source=ru_block)
+
+
 def translate_markdown(
     settings: Settings,
     *,
@@ -458,9 +533,14 @@ def translate_markdown(
     """
     Translate markdown. Long sources are split into fragments, translated
     separately, then concatenated (see ``YDBDOC_TRANSLATE_CHUNK_CHARS``).
+
+    RU→EN uses block masking so ``` fences and ``{% %}`` blocks stay verbatim.
     """
     instructions = load_translate_instructions(settings)
     target = translate_chunk_target_chars()
+    preserve = prose_mask_enabled() and _ru_to_en_preserve_blocks(
+        source_lang, target_lang
+    )
     model = settings.model_translate
     default_cap = (
         clamp_max_output_tokens(max_output_tokens, model)
@@ -469,6 +549,17 @@ def translate_markdown(
     )
 
     if len(source_text) <= target:
+        if preserve:
+            return _translate_masked_prose(
+                settings,
+                instructions=instructions,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                source_path=source_path,
+                source_text=source_text,
+                model=model,
+                default_cap=default_cap,
+            )
         user_input = _translate_markdown_user_input(
             source_lang=source_lang,
             target_lang=target_lang,
@@ -487,6 +578,17 @@ def translate_markdown(
 
     chunks = split_markdown_for_translate(source_text, target_chars=target)
     if len(chunks) == 1:
+        if preserve:
+            return _translate_masked_prose(
+                settings,
+                instructions=instructions,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                source_path=source_path,
+                source_text=chunks[0],
+                model=model,
+                default_cap=default_cap,
+            )
         user_input = _translate_markdown_user_input(
             source_lang=source_lang,
             target_lang=target_lang,
@@ -506,19 +608,33 @@ def translate_markdown(
     n = len(chunks)
     parts: list[str] = []
     for i, ch in enumerate(chunks, start=1):
-        parts.append(
-            _translate_chunk_with_retry(
-                settings,
-                instructions=instructions,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                source_path=source_path,
-                chunk=ch,
-                chunk_index=i,
-                chunk_count=n,
-                default_cap=default_cap,
+        if preserve:
+            parts.append(
+                _translate_masked_prose(
+                    settings,
+                    instructions=instructions,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    source_path=source_path,
+                    source_text=ch,
+                    model=model,
+                    default_cap=default_cap,
+                )
             )
-        )
+        else:
+            parts.append(
+                _translate_chunk_with_retry(
+                    settings,
+                    instructions=instructions,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    source_path=source_path,
+                    chunk=ch,
+                    chunk_index=i,
+                    chunk_count=n,
+                    default_cap=default_cap,
+                )
+            )
     merged = "\n".join(parts)
     merged = _postprocess_target_language(merged, target_lang=target_lang)
     if len(chunks) > 1:
