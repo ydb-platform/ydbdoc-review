@@ -154,13 +154,20 @@ def repair_en_cyrillic_from_ru(
         split_markdown_sections,
     )
 
+    from ydbdoc_review.fm_progress import fm_log
+
     merged = en_text
     changed = False
+    max_passes = cyrillic_repair_max_passes()
 
-    for _ in range(cyrillic_repair_max_passes()):
+    for pass_i in range(1, max_passes + 1):
         if not en_contains_cyrillic_prose(merged):
             break
 
+        fm_log(
+            f"cyrillic repair pass {pass_i}/{max_passes} | {ru_path} "
+            f"(prose-only section retranslate)"
+        )
         ru_sections = split_markdown_sections(ru_full)
         en_sections = split_markdown_sections(merged)
         out: list[MarkdownSection] = []
@@ -169,7 +176,8 @@ def repair_en_cyrillic_from_ru(
         for i, ru_sec in enumerate(ru_sections):
             en_sec = en_sections[i] if i < len(en_sections) else None
             body = en_sec.content if en_sec is not None else ""
-            if en_sec is None or en_contains_cyrillic(body):
+            needs_section = en_sec is None or en_contains_cyrillic_prose(body)
+            if needs_section:
                 text = _translate_ru_section_strict_en(
                     settings,
                     ru_path=ru_path,
@@ -193,8 +201,14 @@ def repair_en_cyrillic_from_ru(
             merged = join_markdown_sections(out)
             merged = fix_unbalanced_fences(merged, reference=ru_full)
             changed = True
+        elif not en_contains_cyrillic_prose(merged):
+            break
+        else:
+            # Cyrillic only in fences — avoid full-file retranslate loops.
+            break
 
         if en_contains_cyrillic_prose(merged):
+            fm_log(f"cyrillic repair full-file fallback | {ru_path}")
             full = translate_markdown(
                 settings,
                 source_lang="Russian",
@@ -211,6 +225,8 @@ def repair_en_cyrillic_from_ru(
             if full.strip() != merged.strip():
                 merged = full
                 changed = True
+            elif not en_contains_cyrillic_prose(merged):
+                break
 
     if en_contains_cyrillic(merged):
         from ydbdoc_review.markdown_blocks import repair_cyrillic_in_fences_from_ru

@@ -289,6 +289,7 @@ def deterministic_prepare_en(
     from ydbdoc_review.translate_postprocess import (
         cyrillic_repair_enabled,
         en_contains_cyrillic,
+        en_contains_cyrillic_prose,
         repair_en_cyrillic_from_ru,
     )
 
@@ -300,12 +301,6 @@ def deterministic_prepare_en(
         force_structure_rebuild=force_structure_rebuild,
     )
     if cyrillic_repair_enabled() and en_contains_cyrillic(out):
-        out, _ = repair_en_cyrillic_from_ru(
-            settings,
-            ru_path=ru_path,
-            ru_full=ru_full,
-            en_text=out,
-        )
         from ydbdoc_review.markdown_blocks import repair_cyrillic_in_fences_from_ru
         from ydbdoc_review.translate_postprocess import fix_common_ru_prose_leaks
 
@@ -313,13 +308,18 @@ def deterministic_prepare_en(
             settings, ru_path=ru_path, ru_full=ru_full, en_text=out
         )
         out = fix_common_ru_prose_leaks(out)
-        if en_contains_cyrillic(out):
+        if en_contains_cyrillic_prose(out):
             out, _ = repair_en_cyrillic_from_ru(
                 settings,
                 ru_path=ru_path,
                 ru_full=ru_full,
                 en_text=out,
             )
+        elif en_contains_cyrillic(out):
+            out = repair_cyrillic_in_fences_from_ru(
+                settings, ru_path=ru_path, ru_full=ru_full, en_text=out
+            )
+            out = fix_common_ru_prose_leaks(out)
         out = finalize_en_from_ru(
             settings,
             ru_path=ru_path,

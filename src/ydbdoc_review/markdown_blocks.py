@@ -239,7 +239,11 @@ def translate_preserving_blocks(
             out.append(
                 MarkdownBlock(
                     "fence",
-                    translate_fence_comments(block.text, translate_comment),
+                    translate_fence_comments(
+                        block.text,
+                        translate_comment,
+                        only_if_cyrillic=True,
+                    ),
                 )
             )
         else:

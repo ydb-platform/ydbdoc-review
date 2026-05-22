@@ -345,6 +345,8 @@ def _translate_user_payload(
     reference_for_truncation: str,
     model: str,
     max_output_tokens: int | None = None,
+    operation: str = "translate",
+    detail: str = "",
 ) -> str:
     """Single FM call + optional retry when the completion looks truncated."""
     cap = (
@@ -359,7 +361,8 @@ def _translate_user_payload(
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=cap,
-            operation="translate",
+            operation=operation,
+            detail=detail,
         ).strip()
     )
     if _full_file_translation_looks_truncated(out, reference_for_truncation):
@@ -372,7 +375,8 @@ def _translate_user_payload(
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
-                    operation="translate:retry_truncated",
+                    operation=f"{operation}:retry_truncated",
+                    detail=detail,
                 ).strip()
             )
     return out
@@ -423,6 +427,7 @@ def _translate_chunk_with_retry(
     chunk_index: int,
     chunk_count: int,
     default_cap: int,
+    operation: str = "translate:chunk",
 ) -> str:
     preamble = (
         f"This is fragment {chunk_index} of {chunk_count} of a single markdown file "
@@ -452,6 +457,8 @@ def _translate_chunk_with_retry(
         reference_for_truncation=chunk,
         model=model,
         max_output_tokens=cap,
+        operation=operation,
+        detail=source_path,
     )
     if should_retry_chunk(chunk, out):
         cap2 = min(_translate_retry_max_tokens(cap, model), default_cap)
@@ -463,6 +470,8 @@ def _translate_chunk_with_retry(
                 reference_for_truncation=chunk,
                 model=model,
                 max_output_tokens=cap2,
+                operation=f"{operation}:retry",
+                detail=source_path,
             )
             if len(out2) > len(out):
                 out = out2
@@ -581,6 +590,7 @@ def _translate_preserving_blocks(
                     chunk_index=i,
                     chunk_count=len(chunks),
                     default_cap=default_cap,
+                    operation=f"translate:prose-chunk-{i}/{len(chunks)}",
                 )
             )
         return _postprocess_target_language("\n".join(parts), target_lang=target_lang)
@@ -625,6 +635,8 @@ def translate_comment_line_ru_to_en(
         reference_for_truncation=text,
         model=settings.model_translate,
         max_output_tokens=min(512, _translate_max_output_tokens(settings.model_translate)),
+        operation="translate:comment",
+        detail=ru_path,
     )
     translated = _postprocess_target_language(out, target_lang="English").strip()
     if re.search(r"please provide the text", translated, re.IGNORECASE):
