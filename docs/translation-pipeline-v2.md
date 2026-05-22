@@ -14,6 +14,8 @@ Default since `YDBDOC_PIPELINE=v2` (set `legacy` to restore the old loop).
 
 3. Light post-process: link restore + deterministic CLI fixes (no cyrillic repair storm).
 
+After QA, pipeline v2 runs the same **CLI-only** pass (not legacy `deterministic_prepare_en`).
+
 ## QA
 
 1. **Critic** — full RU file + full EN file (`05_verify_translation.txt`).

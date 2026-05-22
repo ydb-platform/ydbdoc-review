@@ -356,6 +356,7 @@ def push_branch(
     base_https_url: str,
     *,
     force_with_lease: bool = False,
+    force: bool = False,
 ) -> None:
     url = remote_push_url(base_https_url, token)
     subprocess.run(
@@ -367,7 +368,9 @@ def push_branch(
         check=True,
     )
     push_args = ["git", "-C", repo, "push", remote_name, f"HEAD:refs/heads/{branch}"]
-    if force_with_lease:
+    if force:
+        push_args.insert(4, "--force")
+    elif force_with_lease:
         push_args.insert(4, "--force-with-lease")
     subprocess.run(push_args, check=True)
 
@@ -380,6 +383,7 @@ def try_push_branch(
     base_https_url: str,
     *,
     force_with_lease: bool = False,
+    force: bool = False,
 ) -> str | None:
     """Push ``HEAD`` to ``branch``; return ``None`` on success or a short error message."""
     try:
@@ -390,6 +394,7 @@ def try_push_branch(
             token,
             base_https_url,
             force_with_lease=force_with_lease,
+            force=force,
         )
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or b"").decode(errors="replace").strip()
