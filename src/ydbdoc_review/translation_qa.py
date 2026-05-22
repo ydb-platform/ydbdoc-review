@@ -1119,20 +1119,43 @@ def run_pairs_qa_and_repair(
             en_on_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
 
         initial_en = translated_text
-        final_en, outcome = run_pair_qa_repair(
-            settings,
-            ru_path=ru_p,
-            en_path=en_p,
-            target_path=en_p,
-            source_text=source_text,
-            translated_text=translated_text,
-            source_lang="Russian",
-            target_lang="English",
-            repair_enabled=repair_on,
-            source_pr_number=source_pr_number,
-            ru_pr_diff=ru_diff,
-            en_on_main=en_on_main,
-        )
+        try:
+            final_en, outcome = run_pair_qa_repair(
+                settings,
+                ru_path=ru_p,
+                en_path=en_p,
+                target_path=en_p,
+                source_text=source_text,
+                translated_text=translated_text,
+                source_lang="Russian",
+                target_lang="English",
+                repair_enabled=repair_on,
+                source_pr_number=source_pr_number,
+                ru_pr_diff=ru_diff,
+                en_on_main=en_on_main,
+            )
+        except Exception as exc:
+            err = str(exc).strip()
+            if len(err) > 1200:
+                err = err[:1200] + "…"
+            final_en = translated_text
+            outcome = PairQaOutcome(
+                ru_path=ru_p,
+                en_path=en_p,
+                target_path=en_p,
+                review_md=(
+                    f"### Ошибка вызова модели-критика\n\n"
+                    f"`{err}`\n\n"
+                    "Проверьте slug в `YDBDOC_MODEL_TRANSLATION_VERIFY` "
+                    "(например `yandexgpt/latest`) и `python -m ydbdoc_review list-models` "
+                    "для каталога FM."
+                ),
+                repair_attempted=False,
+                repair_applied=False,
+                repair_skip_reason="api_error",
+                confirmation_md=None,
+                repair_error=err,
+            )
         if final_en != initial_en:
             git_local.write_text(workdir, en_p, final_en)
             repaired_paths.append(en_p)

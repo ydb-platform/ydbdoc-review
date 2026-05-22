@@ -7,7 +7,8 @@ check = "yandexgpt/latest"
 translate = "yandexgpt-5.1"
 # Вторая модель для cross-check перевода (см. [feature].translation_self_check).
 # Не задавать или пусто — используется та же, что и check.
-# DeepSeek V3.2 deprecated 2026-05-28; use V4 Flash (gpt://<folder>/deepseek-v4-flash).
+# Critic for translation QA. Prefer DeepSeek V4 Flash when provisioned in your folder;
+# otherwise ydbdoc-review falls back to yandexgpt (see YDBDOC_MODEL_VERIFY_FALLBACKS).
 translation_verify = "deepseek-v4-flash"
 
 # Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.

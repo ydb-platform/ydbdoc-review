@@ -138,7 +138,64 @@ def _call_fm_chat_completions(
     )
 
 
+def translation_verify_model_fallbacks() -> tuple[str, ...]:
+    """Used when the configured critic slug is not provisioned in the FM folder."""
+    raw = os.environ.get(
+        "YDBDOC_MODEL_VERIFY_FALLBACKS", "yandexgpt/latest,yandexgpt-5.1"
+    )
+    return tuple(x.strip() for x in raw.split(",") if x.strip())
+
+
+def _expand_model_candidates(
+    primary: str, fallbacks: tuple[str, ...] | None
+) -> list[str]:
+    chain: list[str] = []
+    for m in (primary, *(fallbacks or ())):
+        if m and m not in chain:
+            chain.append(m)
+    if primary == "deepseek-v4-flash":
+        for alt in ("deepseek-v4-flash/latest", "deepseek-v32"):
+            if alt not in chain:
+                chain.append(alt)
+    return chain
+
+
+def _fm_model_not_found(exc: BaseException) -> bool:
+    low = str(exc).lower()
+    return "failed to get model" in low or "model_call_error" in low
+
+
 def call_yandex_responses(
+    settings: Settings,
+    model: str,
+    instructions: str,
+    user_input: str,
+    max_output_tokens: int,
+    *,
+    model_fallbacks: tuple[str, ...] | None = None,
+) -> str:
+    chain = _expand_model_candidates(model, model_fallbacks)
+    last_err: RuntimeError | None = None
+    for i, cand in enumerate(chain):
+        try:
+            return _call_yandex_responses_impl(
+                settings,
+                cand,
+                instructions=instructions,
+                user_input=user_input,
+                max_output_tokens=max_output_tokens,
+            )
+        except RuntimeError as exc:
+            last_err = exc
+            if _fm_model_not_found(exc) and i + 1 < len(chain):
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("No model candidates for Foundation Models call")
+
+
+def _call_yandex_responses_impl(
     settings: Settings,
     model: str,
     instructions: str,
@@ -1018,6 +1075,7 @@ def verify_translation_pair(
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=_translation_self_check_max_output_tokens(),
+            model_fallbacks=translation_verify_model_fallbacks(),
         ).strip()
     )
 
@@ -1061,6 +1119,7 @@ def fix_translation_pair(
         f"--- REVIEW BEGIN ---\n{rev_c}\n--- REVIEW END ---\n\n"
         "Выведите только исправленный полный markdown перевода."
     )
+    fb = translation_verify_model_fallbacks()
     out = _strip_code_fence(
         call_yandex_responses(
             settings,
@@ -1068,6 +1127,7 @@ def fix_translation_pair(
             instructions=instructions.strip(),
             user_input=user_input,
             max_output_tokens=_repair_max_output_tokens(verify_model),
+            model_fallbacks=fb,
         ).strip()
     )
     if _full_file_translation_looks_truncated(out, source_text):
@@ -1082,6 +1142,7 @@ def fix_translation_pair(
                     instructions=instructions.strip(),
                     user_input=user_input,
                     max_output_tokens=cap2,
+                    model_fallbacks=fb,
                 ).strip()
             )
             if len(out2) > len(out):
