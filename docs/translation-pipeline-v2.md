@@ -1,36 +1,46 @@
-# Translation pipeline v2
+# Translation pipeline
 
-Default since `YDBDOC_PIPELINE=v2` (set `legacy` to restore the old loop).
+Единственный путь для `doc_translate` и `doc_verify`. Никаких legacy-веток.
 
-## Translate
+## doc_translate
 
-1. Parse RU markdown into ordered **units** (`document_segments.py`):
-   - `prose` — text and headings (`#`, `###`, paragraphs)
-   - `table` — markdown tables (split out of prose)
-   - `fence` — ` ``` … ``` ` (code copied; RU comments translated in **one batch** per fence)
-   - `diplodoc` — `{% note %}…{% endnote %}`, `{% cut %}…{% endcut %}`
+1. **Analyze** — модель из `[models].check` решает, какие пары `RU↔EN` нужно переводить.
+2. **Translate** — для каждого нужного файла:
+   - `parse_document_units` разбивает SOURCE на ordered units: `prose`, `table`, `fence`, `diplodoc` (`{% note %}` / `{% cut %}`); новый `prose` начинается на каждом `###`.
+   - Каждый unit переводится одним FM-запросом по промпту `prompts/08_translate_segment.txt`.
+   - Сборка → `apply_deterministic_cli_fixes` (idempotent, без LLM).
+3. **QA** — см. ниже.
+4. **Commit + push + comment** — всегда, независимо от вердикта.
 
-2. **One FM call per unit** (`pipeline_v2.translate_unit`), then `assemble_document_units`.
+## doc_verify
 
-3. Light post-process: link restore + deterministic CLI fixes (no cyrillic repair storm).
+То же самое, но без шага 2 — RU и EN читаются с ветки PR.
 
-After QA, pipeline v2 runs the same **CLI-only** pass (not legacy `deterministic_prepare_en`).
+## QA (одинаково для обоих режимов)
 
-## QA (per file, pipeline v2 only)
+| Шаг | FM-вызовов | Промпт | Что |
+|-----|------------|--------|-----|
+| Compare | 1 | `05_verify_translation.txt` | Критик возвращает вердикт `ПРИНИМАТЬ` / `ПРИНИМАТЬ С ОГОВОРКАМИ` / `НЕ ПРИНИМАТЬ` |
+| Fix-diff | 0–1 | `06_fix_translation.txt` | Только при `НЕ ПРИНИМАТЬ`. Критик возвращает JSON `{"fixes": [{find, replace, reason}]}`; применяется CLI-ом через точный `str.replace` |
+| Re-validate | 0–1 | `07_confirm_repair.txt` | Только если fix-diff применился. Переводчик проверяет результат тем же шаблоном вердикта, что и критик |
+| Heuristics | 0–1 LLM + детерминированные | `09_quality_heuristics.md` | Запускаются всегда на финальном EN; детерминированные правила в Python, остальные — один LLM-вызов |
 
-| Step | FM calls | What |
-|------|----------|------|
-| Critic | **1** | Whole RU + whole EN in one request (`05_verify_translation.txt`) |
-| Repair | **0–1** | Whole-file fix only if critic listed blockers (`06_fix_translation.txt`) |
-| Translator | **1** | Verdict ПРИНЯТЬ / НЕ ПРИНИМАТЬ (`07_confirm_repair.txt`) |
+## Модели
 
-**No** `deterministic_prepare_en`, **no** cyrillic-repair loops, **no** per-section QA in v2.
+- **Translator** (`[models].translate`): `yandexgpt-5.1`.
+- **Critic** (`[models].translation_verify`): `qwen3.6-35b-a3b`.
+- **Critic fallbacks** (`YDBDOC_MODEL_VERIFY_FALLBACKS`): `qwen3-235b-a22b/latest, deepseek-v3.2/latest`. Не Yandex — критик не должен быть из той же семьи, что и переводчик.
 
-Optional: `YDBDOC_QA_REPAIR_MAX_ROUNDS` (default **0**) — extra repair→translator after НЕ ПРИНИМАТЬ.
+## Гарантии
 
-Default **`YDBDOC_TRANSLATION_STRICT_MERGE=1`**: НЕ ПРИНИМАТЬ → CI red, коммит не создаётся.
+- **Никаких циклов**. Максимум 3 «тяжёлых» QA-запроса на файл (compare + fix + re-validate).
+- **CI всегда зелёный**, кроме инфраструктурных ошибок (FM API лёг полностью на все фолбэки, нет прав на push, баг в коде).
+- **Коммит создаётся всегда**: пользователь видит итоговый EN в translation PR + отчёт с вердиктом, блокерами, оговорками и эвристиками. Решение о мерже — за пользователем.
 
-## Ops
+## Where to tweak behaviour
 
-- Logs: `[ydbdoc-fm] pipeline-v2 unit 3/42 | prose | …`
-- `YDBDOC_PIPELINE=legacy` — old behaviour
+- Шкала серьёзности и формат отчёта критика — `prompts/05_verify_translation.txt`.
+- Контракт исправителя и список запрещённых правок — `prompts/06_fix_translation.txt`.
+- Шаблон повторной проверки — `prompts/07_confirm_repair.txt`.
+- Правила перевода фрагментов — `prompts/08_translate_segment.txt`.
+- Эвристические проверки качества — `prompts/09_quality_heuristics.md`. Добавьте новый ```yaml блок — он подхватится автоматически. Детерминированная реализация необязательна; без неё проверка делегируется LLM.

@@ -1,20 +1,19 @@
 # Bundled defaults (override: ydbdoc-review.toml в cwd / YDBDOC_CONFIG).
 # Slugs: для Yandex FM без префикса gpt:// — см. list-models; для OpenAI — например gpt-4o-mini.
-# Полный URI gpt://… в TOML задаётся как есть (каталог в URI не добавляется повторно).
 
 [models]
+# Дешёвая модель для analyze-фазы (alignment check), а также для translate-фолбэков.
 check = "yandexgpt/latest"
+# Переводчик: на нём идёт segment-translate и финальная re-validate после fix-diff.
 translate = "yandexgpt-5.1"
-# Вторая модель для cross-check перевода (см. [feature].translation_self_check).
-# Не задавать или пусто — используется та же, что и check.
-# Critic for translation QA (doc_translate / doc_verify). Qwen3.6 in FM (256k context).
-# Override: YDBDOC_MODEL_TRANSLATION_VERIFY or vars in workflow.
+# Критик: сравнивает RU↔EN и (при «НЕ ПРИНИМАТЬ») возвращает fix-diff. ОБЯЗАТЕЛЬНО другая
+# семья моделей, не та же что translate — иначе критик/исправитель не отловят свои ошибки.
+# Фолбэки: см. YDBDOC_MODEL_VERIFY_FALLBACKS (по умолчанию тоже non-Yandex).
 translation_verify = "qwen3.6-35b-a3b"
 
-# Быстрый выключатель в CI: надёжнее дублировать env YDBDOC_REVIEW_ENABLED=false в workflow.
 [feature]
 review_enabled = true
-# Отладка: ревью + (опционально) исправление критиком + подтверждение переводчиком → комментарий в PR перевода.
+# critic compare + heuristics; результат — комментарий в translation PR. Коммит всегда.
 translation_self_check = true
-# При существенных замечаниях критик переписывает перевод; переводчик проверяет исправление.
+# При «НЕ ПРИНИМАТЬ» — fix-diff от критика + re-validate переводчиком.
 translation_repair = true

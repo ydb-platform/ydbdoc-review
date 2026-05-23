@@ -1,37 +1,31 @@
-from ydbdoc_review.translation_qa import (
-    critic_needs_structure_rebuild,
-    review_needs_repair,
+"""Verdict parsing — three-state shape."""
+
+from ydbdoc_review.pipeline_v2 import (
+    VERDICT_ACCEPT,
+    VERDICT_ACCEPT_WITH_NOTES,
+    VERDICT_REJECT,
+    parse_verdict,
 )
 
 
-def test_critic_needs_structure_rebuild_from_scope():
-    md = "### Scope\n\n**Полный resync с RU** — структура нарушена.\n"
-    assert critic_needs_structure_rebuild(md)
+def test_parse_verdict_accept_only():
+    md = "### Вердикт\n**ПРИНИМАТЬ**\n\n### Блокеры\n_Нет._\n"
+    assert parse_verdict(md) == VERDICT_ACCEPT
 
 
-def test_critic_needs_structure_rebuild_from_blockers():
+def test_parse_verdict_accept_with_notes_only():
+    md = "### Вердикт\n**ПРИНИМАТЬ С ОГОВОРКАМИ**\n\n### Блокеры\n_Нет._\n"
+    assert parse_verdict(md) == VERDICT_ACCEPT_WITH_NOTES
+
+
+def test_parse_verdict_reject_only():
+    md = "### Вердикт\n**НЕ ПРИНИМАТЬ**\n\n### Блокеры\nblah\n"
+    assert parse_verdict(md) == VERDICT_REJECT
+
+
+def test_parse_verdict_does_not_confuse_reject_with_accept():
     md = (
-        "### Блокеры (для исправителя)\n"
-        "1. Удалить дублированный блок в начале документа.\n"
-        "### Scope\n"
-        "Исправить структуру файла.\n"
+        "### Вердикт\n**НЕ ПРИНИМАТЬ**\n\n"
+        "### Блокеры\nESt принимать что-то странное.\n"
     )
-    assert critic_needs_structure_rebuild(md)
-
-
-def test_review_needs_repair_without_structure():
-    md = "### Найдено критиком\n\n- Опечатка в слове query.\n"
-    assert review_needs_repair(md)
-    assert not critic_needs_structure_rebuild(md)
-
-
-def test_cyrillic_scope_does_not_force_structure_rebuild():
-    md = (
-        "### Найдено критиком\n"
-        "Проблема: кириллица в SQL-комментариях.\n"
-        "### Блокеры\n"
-        "1. Перевести комментарии.\n"
-        "### Scope\n"
-        "**Полный resync с RU** — устранить кириллицу.\n"
-    )
-    assert not critic_needs_structure_rebuild(md)
+    assert parse_verdict(md) == VERDICT_REJECT

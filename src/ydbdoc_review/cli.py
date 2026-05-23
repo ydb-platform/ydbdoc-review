@@ -23,21 +23,14 @@ from ydbdoc_review.llm import (
     load_analyze_instructions,
     parse_json_object,
 )
-from ydbdoc_review.translation_qa import (
+from ydbdoc_review.pipeline_v2 import (
     PairQaOutcome,
-    doc_translate_should_fail_ci,
-    file_merge_verdict,
+    final_verdict,
     format_pair_qa_markdown,
     format_translation_pr_summary,
-    pr_merge_blocked,
-    pr_merge_verdict_unavailable,
-    qa_critic_unavailable_all,
-    qa_pipeline_failed_in_section,
-    run_pairs_qa_and_repair,
-    synthetic_qa_outcomes_for_api_failure,
-    translation_strict_merge_enabled,
+    translate_document,
 )
-from ydbdoc_review.translate_strict import strict_translate_document
+from ydbdoc_review.translation_qa import run_pairs_qa_and_repair
 from ydbdoc_review.paths import (
     DocPair,
     pairs_from_changed_files,
@@ -45,13 +38,7 @@ from ydbdoc_review.paths import (
     ru_toc_yaml_paths,
     truncate,
 )
-from ydbdoc_review.translate_postprocess import (
-    apply_deterministic_cli_fixes,
-    collect_quality_gate_failures,
-    translation_quality_issues,
-)
 from ydbdoc_review.pair_diff import diff_has_added_lines, pair_needs_en_from_ru_only_diff
-from ydbdoc_review.ru_en_alignment import en_coverage_behind_ru, ru_authority_text
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 from ydbdoc_review.verify_pr import run_verify_pr
 
@@ -400,19 +387,19 @@ def _supplementary_pair_notes(
     notes: list[str] = []
     ru_pr = (ru_text or "").strip()
     en_pr = (en_text or "").strip()
-    ru_ref = ru_authority_text(ru_pr, ru_at_base) if ru_at_base else ru_pr
+    ru_ref = (ru_at_base or "").strip() or ru_pr
 
     if not ru_pr or not en_pr:
         notes.append("⚠️ на ветке PR нет полного RU или EN — проверьте вручную.")
         return notes
 
-    if en_coverage_behind_ru(ru_ref, en_pr):
+    if len(en_pr) < int(len(ru_ref) * 0.75):
         notes.append(
-            f"⚠️ EN короче эталонного RU: ~{len(en_pr)} симв. vs ~{len(ru_ref)}; "
+            f"⚠️ EN заметно короче RU: ~{len(en_pr)} симв. vs ~{len(ru_ref)}; "
             f"заголовков `###`: {_h3_heading_count(en_pr)} vs {_h3_heading_count(ru_ref)}."
         )
     else:
-        notes.append("✅ EN не отстаёт от RU по длине и структуре `###` (эвристика).")
+        notes.append("✅ EN сопоставим с RU по длине (эвристика).")
 
     ru_only = pair_needs_en_from_ru_only_diff(
         ru_path=ru_path,
@@ -636,11 +623,11 @@ def _run_translation_qa_and_repair(
     pair_diffs: dict[tuple[str, str], tuple[str | None, str | None]],
     base_ref_local: str | None,
 ) -> tuple[str | None, int, list[PairQaOutcome]]:
-    """
-    Cross-model QA: critic review → optional repair → translator confirmation.
+    """QA: critic compare → fix-diff (optional) → re-validate (optional) → heuristics.
 
     Writes repaired markdown to *workdir* before commit. Returns comment markdown,
-    count of files updated on disk, and per-file QA outcomes.
+    count of files updated on disk, and per-file outcomes. Never raises on critic
+    failure — the failure becomes part of the report.
     """
     md_generated = [p for p in generated if p.endswith(".md")]
     if not md_generated:
@@ -651,135 +638,21 @@ def _run_translation_qa_and_repair(
             pairs.append((generated_en_to_ru[gen_p], gen_p))
         elif gen_p in generated_ru_to_en:
             pairs.append((gen_p, generated_ru_to_en[gen_p]))
-    try:
-        text, repaired_paths, outcomes = run_pairs_qa_and_repair(
-            settings,
-            workdir=workdir,
-            pairs=pairs,
-            pair_diffs=pair_diffs,
-            source_pr_number=source_pr_number,
-            base_ref_local=base_ref_local,
-        )
-    except Exception as exc:
-        err = str(exc).strip()
-        synthetic = synthetic_qa_outcomes_for_api_failure(pairs, err)
-        summary = format_translation_pr_summary(
-            source_pr_number=source_pr_number,
-            outcomes=synthetic,
-        )
-        per_file = "\n\n---\n\n".join(
-            format_pair_qa_markdown(o) for o in synthetic
-        )
-        section = (
-            f"_QA/repair pipeline failed (критик не отработал):_ `{err}`\n\n"
-            f"{summary}\n\n---\n\n{per_file}"
-        )
-        click.echo(
-            "Translation QA: критик недоступен (API); job не будет остановлен — "
-            "см. отчёт в translation PR.",
-            err=True,
-        )
-        warnings.append(
-            "- QA: модель-критик недоступна; коммит translation PR будет создан без вердикта."
-        )
-        return section, 0, synthetic
+    text, repaired_paths, outcomes = run_pairs_qa_and_repair(
+        settings,
+        workdir=workdir,
+        pairs=pairs,
+        pair_diffs=pair_diffs,
+        source_pr_number=source_pr_number,
+        base_ref_local=base_ref_local,
+    )
     for p in repaired_paths:
-        click.echo(f"  QA repair applied: `{p}`")
+        click.echo(f"  QA fix applied: `{p}`")
     if repaired_paths:
         warnings.append(
             f"- QA: критик обновил {len(repaired_paths)} файл(ов) на диске перед коммитом."
         )
     return text, len(repaired_paths), outcomes
-
-
-def _prepare_generated_en_before_qa(
-    workdir: str,
-    *,
-    settings: Settings,
-    generated_en_to_ru: dict[str, str],
-) -> int:
-    """Light EN prepare before critic QA (pipeline v2: CLI fixes only)."""
-    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-    from ydbdoc_review.translate_postprocess import apply_deterministic_cli_fixes
-
-    fixed = 0
-    for en_p, ru_p in generated_en_to_ru.items():
-        if not en_p.endswith(".md"):
-            continue
-        ru_full = git_local.read_text(workdir, ru_p) or ""
-        before = git_local.read_text(workdir, en_p) or ""
-        if pipeline_v2_enabled():
-            after = apply_deterministic_cli_fixes(before, ru_source=ru_full)
-        else:
-            from ydbdoc_review.ru_en_sync import deterministic_prepare_en
-
-            after = deterministic_prepare_en(
-                settings,
-                ru_path=ru_p,
-                ru_full=ru_full,
-                en_text=before,
-            )
-        if after != before:
-            git_local.write_text(workdir, en_p, after)
-            fixed += 1
-    return fixed
-
-
-def _apply_deterministic_cli_fixes_to_generated(
-    workdir: str,
-    *,
-    settings: Settings,
-    generated: list[str],
-    generated_en_to_ru: dict[str, str],
-    base_ref_local: str | None,
-) -> int:
-    """Final idempotent EN pass before commit (after QA pipeline)."""
-    from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-    from ydbdoc_review.translate_postprocess import (
-        apply_deterministic_cli_fixes,
-        en_contains_cyrillic_prose,
-        repair_en_cyrillic_from_ru,
-    )
-
-    fixed = 0
-    for en_p in generated:
-        if not en_p.endswith(".md") or en_p not in generated_en_to_ru:
-            continue
-        ru_p = generated_en_to_ru[en_p]
-        ru_full = git_local.read_text(workdir, ru_p) or ""
-        before = git_local.read_text(workdir, en_p) or ""
-        if pipeline_v2_enabled():
-            after = apply_deterministic_cli_fixes(before, ru_source=ru_full)
-            cy = False
-        else:
-            from ydbdoc_review.ru_en_sync import deterministic_prepare_en
-
-            after = deterministic_prepare_en(
-                settings,
-                ru_path=ru_p,
-                ru_full=ru_full,
-                en_text=before,
-            )
-            cy = False
-            if en_contains_cyrillic_prose(after):
-                after, cy = repair_en_cyrillic_from_ru(
-                    settings,
-                    ru_path=ru_p,
-                    ru_full=ru_full,
-                    en_text=after,
-                )
-                if cy:
-                    click.echo(f"  Cyrillic repair: re-translated `{en_p}`")
-                after = deterministic_prepare_en(
-                    settings,
-                    ru_path=ru_p,
-                    ru_full=ru_full,
-                    en_text=after,
-                )
-        if after != before or cy:
-            git_local.write_text(workdir, en_p, after)
-            fixed += 1
-    return fixed
 
 
 def _build_prerequisites_comment(
@@ -1345,51 +1218,18 @@ def run_cmd(
                 ru_on_main = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
                 if ru_on_main:
                     ru_source = ru_on_main
-            ru_diff = ""
-            if effective_repo_path and not use_main_ru:
-                try:
-                    ru_diff = git_local.file_diff_range(
-                        effective_repo_path, merge_base_with, ru_p
-                    )
-                except RuntimeError as exc:
-                    click.echo(
-                        f"Note: could not compute RU diff vs `{merge_base_with}` ({exc}); "
-                        "full-file path if target missing or stale.",
-                        err=True,
-                    )
-            en_at_base: str | None = None
-            ru_at_base: str | None = None
-            if workdir and base_ref_local:
-                en_at_base = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
-                ru_at_base = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
             try:
-                out_md, mode = strict_translate_document(
+                out_md, mode = translate_document(
                     settings,
-                    direction="ru_to_en",
                     source_path=ru_p,
-                    target_path=en_p,
                     source_full=ru_source,
-                    target_reference=en_full,
-                    source_diff=ru_diff,
-                    target_at_base=en_at_base,
-                    source_at_base=ru_at_base,
-                    use_full_source_from_base=use_main_ru,
+                    source_lang="Russian",
+                    target_lang="English",
                 )
             except Exception as exc:
                 warnings.append(f"- `{en_p}`: перевод не выполнен: {exc}")
                 continue
             click.echo(f"  (mode: {mode})")
-            q_issues = translation_quality_issues(
-                ru_source,
-                out_md,
-                target_lang="English",
-                source_diff=ru_diff,
-            )
-            if q_issues:
-                warnings.append(
-                    f"- `{en_p}`: эвристики после перевода: {', '.join(q_issues)} "
-                    "_(проверьте вручную или перезапустите doc_translate)_"
-                )
             git_local.write_text(workdir, en_p, out_md)
             generated.append(en_p)
             generated_en_to_ru[en_p] = ru_p
@@ -1398,45 +1238,18 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to RU: missing English source `{en_p}`")
                 continue
             click.echo(f"Translating EN→RU `{en_p}` → `{ru_p}` with `{settings.model_translate}` …")
-            en_diff = ""
-            if effective_repo_path:
-                try:
-                    en_diff = git_local.file_diff_range(
-                        effective_repo_path, merge_base_with, en_p
-                    )
-                except RuntimeError as exc:
-                    click.echo(
-                        f"Note: could not compute EN diff vs `{merge_base_with}` ({exc}); "
-                        "full-file path if target missing or stale.",
-                        err=True,
-                    )
-                    en_diff = ""
-            ru_at_base: str | None = None
-            if workdir and base_ref_local:
-                ru_at_base = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
             try:
-                out_md, mode = strict_translate_document(
+                out_md, mode = translate_document(
                     settings,
-                    direction="en_to_ru",
                     source_path=en_p,
-                    target_path=ru_p,
                     source_full=en_full,
-                    target_reference=ru_full,
-                    source_diff=en_diff,
-                    target_at_base=ru_at_base,
+                    source_lang="English",
+                    target_lang="Russian",
                 )
             except Exception as exc:
                 warnings.append(f"- `{ru_p}`: перевод не выполнен: {exc}")
                 continue
             click.echo(f"  (mode: {mode})")
-            q_issues = translation_quality_issues(
-                en_full, out_md, target_lang="Russian"
-            )
-            if q_issues:
-                warnings.append(
-                    f"- `{ru_p}`: эвристики после перевода: {', '.join(q_issues)} "
-                    "_(проверьте вручную или перезапустите doc_translate)_"
-                )
             git_local.write_text(workdir, ru_p, out_md)
             generated.append(ru_p)
             generated_ru_to_en[ru_p] = en_p
@@ -1550,22 +1363,6 @@ def run_cmd(
                 "target — proceeding with full-file translation.",
             )
 
-    if workdir and generated_en_to_ru and not dry_run and not blocked_only:
-        n_pre = _prepare_generated_en_before_qa(
-            workdir,
-            settings=settings,
-            generated_en_to_ru=generated_en_to_ru,
-        )
-        if n_pre:
-            from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-
-            label = (
-                "Pre-QA CLI fixes"
-                if pipeline_v2_enabled()
-                else "Pre-QA deterministic prepare"
-            )
-            click.echo(f"  {label}: {n_pre} EN file(s)")
-
     translation_qa_section: str | None = None
     qa_outcomes: list[PairQaOutcome] = []
     if (
@@ -1576,140 +1373,23 @@ def run_cmd(
         and not blocked_only
     ):
         click.echo(
-            f"Running translation QA"
-            f"{' + critic repair' if settings.translation_repair_enabled else ''} "
-            f"(verify `{settings.model_translation_verify}`, "
+            f"Running translation QA "
+            f"(critic `{settings.model_translation_verify}`, "
             f"translate `{settings.model_translate}`) …"
         )
-        try:
-            translation_qa_section, _n_repaired, qa_outcomes = _run_translation_qa_and_repair(
-                settings,
-                workdir=workdir,
-                generated=generated,
-                generated_en_to_ru=generated_en_to_ru,
-                generated_ru_to_en=generated_ru_to_en,
-                warnings=warnings,
-                source_pr_number=pr_number,
-                pair_diffs=pair_diffs,
-                base_ref_local=base_ref_local,
-            )
-            if qa_outcomes and pr_merge_verdict_unavailable(qa_outcomes):
-                click.echo(
-                    "Translation QA: вердикт переводчика не получен (лимит токенов/API); "
-                    "коммит не будет создан.",
-                    err=True,
-                )
-            elif qa_outcomes and any(
-                file_merge_verdict(o.review_md, o.confirmation_md) == "reject"
-                for o in qa_outcomes
-            ):
-                if translation_strict_merge_enabled():
-                    click.echo(
-                        "Translation QA: переводчик — ОТКЛОНИТЬ; коммит не будет создан.",
-                        err=True,
-                    )
-                else:
-                    click.echo(
-                        "Translation QA: переводчик — ОТКЛОНИТЬ по части файлов; "
-                        "коммит будет создан (soft merge), замечания — в отчёте.",
-                    )
-        except Exception as exc:
-            translation_qa_section = f"_QA/repair pipeline failed:_ `{exc}`"
-            click.echo(f"Warning: translation QA failed: {exc}", err=True)
-
-    if workdir and generated and not dry_run and not blocked_only:
-        if (
-            settings.translation_self_check_enabled
-            and (qa_outcomes or qa_pipeline_failed_in_section(translation_qa_section))
-        ):
-            n_post_qa = _apply_deterministic_cli_fixes_to_generated(
-                workdir,
-                settings=settings,
-                generated=generated,
-                generated_en_to_ru=generated_en_to_ru,
-                base_ref_local=base_ref_local,
-            )
-            if n_post_qa:
-                from ydbdoc_review.pipeline_v2 import pipeline_v2_enabled
-
-                label = (
-                    "Post-QA CLI fixes"
-                    if pipeline_v2_enabled()
-                    else "Post-QA deterministic prepare"
-                )
-                click.echo(f"  {label}: {n_post_qa} EN file(s)")
-                warnings.append(
-                    f"- Post-QA: правки в {n_post_qa} EN-файл(ах) перед коммитом."
-                )
-        if doc_translate_should_fail_ci(
-            qa_outcomes, qa_section=translation_qa_section
-        ):
-            unavailable = pr_merge_verdict_unavailable(qa_outcomes)
-            if unavailable:
-                raise SystemExit(
-                    "## ydbdoc-review — вердикт переводчика не получен\n\n"
-                    "Вызов модели для финальной проверки **не удался** (лимит токенов/API). "
-                    "Критик при этом отработал. Перезапустите `doc_translate` "
-                    f"(файлы: {', '.join(f'`{p}`' for p in unavailable)}).\n\n"
-                    + (translation_qa_section or "")
-                )
-            from ydbdoc_review.translation_qa import qa_repair_max_rounds
-
-            rounds = qa_repair_max_rounds()
-            raise SystemExit(
-                "## ydbdoc-review — translation PR не создан\n\n"
-                "После перевода и цикла критик → исправитель → переводчик остаются "
-                "блокеры (**НЕ ПРИНИМАТЬ**). Коммит в translation PR **не создан** — "
-                "править EN вручную не требуется.\n\n"
-                f"Перезапустите `doc_translate` (доп. раунды repair: `{rounds}`). "
-                "Soft merge (коммит при отклонении): `YDBDOC_TRANSLATION_STRICT_MERGE=0`.\n\n"
-                + (translation_qa_section or "")
-            )
-        if qa_critic_unavailable_all(qa_outcomes):
-            click.echo(
-                "Translation QA: критик недоступен — job завершится успешно, "
-                "translation PR будет создан/обновлён.",
-            )
+        translation_qa_section, _n_repaired, qa_outcomes = _run_translation_qa_and_repair(
+            settings,
+            workdir=workdir,
+            generated=generated,
+            generated_en_to_ru=generated_en_to_ru,
+            generated_ru_to_en=generated_ru_to_en,
+            warnings=warnings,
+            source_pr_number=pr_number,
+            pair_diffs=pair_diffs,
+            base_ref_local=base_ref_local,
+        )
 
     publish_paths = list(dict.fromkeys(generated + mirrored_en))
-
-    if workdir and generated and not dry_run and not blocked_only:
-        gate_pairs: list[tuple[str, str, str, str | None, str | None, str | None]] = []
-        for gen_p in generated:
-            if not gen_p.endswith(".md"):
-                continue
-            if gen_p in generated_en_to_ru:
-                ru_p = generated_en_to_ru[gen_p]
-                en_p = gen_p
-                src = git_local.read_text(workdir, ru_p) or ""
-                trans = git_local.read_text(workdir, en_p) or ""
-                en_main = (
-                    git_local.read_text_at_ref(workdir, base_ref_local, en_p)
-                    if base_ref_local
-                    else None
-                )
-                ru_main = (
-                    git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
-                    if base_ref_local
-                    else None
-                )
-                ru_diff, _en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-                gate_pairs.append((gen_p, src, trans, en_main, ru_diff, ru_main))
-            elif gen_p in generated_ru_to_en:
-                ru_p = gen_p
-                en_p = generated_ru_to_en[gen_p]
-                src = git_local.read_text(workdir, en_p) or ""
-                trans = git_local.read_text(workdir, gen_p) or ""
-                _ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-                gate_pairs.append((gen_p, src, trans, None, en_diff, None))
-        gate_failures = collect_quality_gate_failures(gate_pairs)
-        if gate_failures:
-            msg = (
-                "## ydbdoc-review — quality gate failed\n\n"
-                "Перевод не закоммичен. Исправьте или перезапустите `doc_translate`.\n\n"
-                + "\n".join(f"- {line}" for line in gate_failures)
-            )
-            raise SystemExit(msg)
 
     committed = False
     if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:

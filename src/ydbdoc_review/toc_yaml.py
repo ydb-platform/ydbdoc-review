@@ -99,14 +99,22 @@ def merge_en_toc_yaml(
 
 
 def translate_toc_title(settings: "Settings", ru_title: str) -> str:
-    from ydbdoc_review.llm import translate_markdown
+    from ydbdoc_review.llm import call_yandex_responses
 
-    raw = translate_markdown(
+    text = ru_title.strip()
+    if not text:
+        return ru_title
+    raw = call_yandex_responses(
         settings,
-        source_lang="Russian",
-        target_lang="English",
-        source_path="toc-entry",
-        source_text=ru_title,
+        settings.model_translate,
+        instructions=(
+            "Translate one short Russian title to English. "
+            "Output only the translated title — no quotes, no commentary, no markdown."
+        ),
+        user_input=text,
+        max_output_tokens=256,
+        operation="translate:toc-title",
+        detail=text[:60],
     )
     line = raw.strip().splitlines()[0] if raw.strip() else ru_title
     return line.strip().strip('"').strip("'")

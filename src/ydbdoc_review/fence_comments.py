@@ -82,29 +82,3 @@ def translate_fence_comments(
     return "\n".join(out)
 
 
-def apply_fence_comments_in_markdown(
-    markdown: str,
-    translate_comment: Callable[[str], str],
-    *,
-    only_if_cyrillic: bool = False,
-) -> str:
-    """Run :func:`translate_fence_comments` on every ``` block in *markdown*."""
-    from ydbdoc_review.markdown_blocks import (
-        MarkdownBlock,
-        join_markdown_blocks,
-        split_markdown_blocks,
-    )
-
-    blocks = split_markdown_blocks(markdown)
-    out: list[MarkdownBlock] = []
-    for block in blocks:
-        if block.kind == "fence":
-            text = translate_fence_comments(
-                block.text,
-                translate_comment,
-                only_if_cyrillic=only_if_cyrillic,
-            )
-            out.append(MarkdownBlock("fence", text))
-        else:
-            out.append(block)
-    return join_markdown_blocks(out)

@@ -5,13 +5,15 @@ from ydbdoc_review.llm import (
 )
 
 
-def test_expand_deepseek_candidates():
+def test_expand_chains_primary_then_fallbacks_dedup():
     chain = _expand_model_candidates(
-        "deepseek-v4-flash", ("yandexgpt/latest",)
+        "qwen3.6-35b-a3b",
+        ("deepseek-v3.2/latest", "qwen3.6-35b-a3b"),
     )
-    assert chain[0] == "deepseek-v4-flash"
-    assert "yandexgpt/latest" in chain
-    assert "deepseek-v4-flash/latest" in chain
+    assert chain[0] == "qwen3.6-35b-a3b"
+    assert "deepseek-v3.2/latest" in chain
+    # primary must not appear twice even if listed in fallbacks
+    assert chain.count("qwen3.6-35b-a3b") == 1
 
 
 def test_fm_model_not_found_detection():
@@ -20,5 +22,11 @@ def test_fm_model_not_found_detection():
     )
 
 
-def test_verify_fallbacks_default():
-    assert "yandexgpt/latest" in translation_verify_model_fallbacks()
+def test_verify_fallbacks_default_is_non_yandex(monkeypatch):
+    monkeypatch.delenv("YDBDOC_MODEL_VERIFY_FALLBACKS", raising=False)
+    fb = translation_verify_model_fallbacks()
+    assert fb, "default fallbacks must not be empty"
+    for slug in fb:
+        assert "yandex" not in slug.lower(), (
+            f"critic fallback {slug!r} must not share family with translate model"
+        )

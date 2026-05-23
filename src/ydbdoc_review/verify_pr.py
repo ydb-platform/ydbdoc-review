@@ -1,27 +1,21 @@
-"""doc_verify: QA on a PR as if ydbdoc-review had produced the translation."""
+"""doc_verify: run QA on a PR as if ydbdoc-review had produced the translation.
+
+Same pipeline as ``doc_translate`` (compare → fix-diff → re-validate → heuristics);
+the only difference is that there is no translate phase — RU and EN are read
+verbatim from the PR head branch.
+"""
 
 from __future__ import annotations
 
 import os
 import re
-from typing import Any
 
 import click
-
-from ydbdoc_review.translation_qa import doc_translate_should_fail_ci
 
 from ydbdoc_review import git_local, github_api
 from ydbdoc_review.config import Settings
 from ydbdoc_review.paths import DocPair, pairs_from_changed_files
-from ydbdoc_review.translation_qa import (
-    pr_merge_blocked,
-    pr_merge_verdict_unavailable,
-    run_pairs_qa_and_repair,
-)
-from ydbdoc_review.translate_postprocess import (
-    apply_post_translation_fixes,
-    collect_quality_gate_failures,
-)
+from ydbdoc_review.translation_qa import run_pairs_qa_and_repair
 
 
 def parse_source_pr_number(*texts: str | None) -> int | None:
@@ -92,7 +86,6 @@ def _build_verify_comment(
     pr_number: int,
     linked_source_pr: int | None,
     qa_body: str | None,
-    gate_failures: list[str],
     skipped: list[str],
     repaired_paths: list[str],
     push_failed: str | None = None,
@@ -101,8 +94,8 @@ def _build_verify_comment(
     lines = [
         "## ydbdoc-review — doc_verify",
         "",
-        f"Проверка PR **#{pr_number}**: EN на ветке PR vs **RU на той же ветке** "
-        "(тот же цикл, что после `doc_translate`: критик → repair → переводчик).",
+        f"Проверка PR **#{pr_number}**: тот же QA, что после `doc_translate` "
+        "(критик → fix-diff → переводчик → эвристики). Решение о мерже — за вами.",
     ]
     if linked_source_pr is not None and linked_source_pr != pr_number:
         lines.append(f"_Связанный doc PR (из заголовка): #{linked_source_pr}._")
@@ -113,7 +106,7 @@ def _build_verify_comment(
             [
                 "### Исправления критика",
                 "",
-                "Закоммичены правки в EN (если не отключён `--no-commit`):",
+                "Применены fix-diff правки в EN:",
                 "",
                 *[f"- `{p}`" for p in repaired_paths],
                 "",
@@ -128,11 +121,8 @@ def _build_verify_comment(
                     "",
                     f"```\n{push_failed}\n```",
                     "",
-                    "Добавьте в репозиторий секрет **`YDBDOC_PUSH_PAT`** (PAT с `contents: write` "
-                    "на `ydb-platform/ydb`) и в workflow:",
-                    "`GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}`.",
-                    "Без PAT используется `GITHUB_TOKEN`, которому GitHub часто **запрещает** "
-                    "пушить в ветки, созданные `github-actions[bot]`.",
+                    "Проверьте `YDBDOC_PUSH_PAT` (PAT с `contents: write`) "
+                    "и `GITHUB_PUSH_TOKEN` в workflow.",
                     "",
                 ]
             )
@@ -142,23 +132,13 @@ def _build_verify_comment(
             ["### Пропущено", "", *[f"- {s}" for s in skipped], ""]
         )
 
-    if gate_failures:
-        lines.extend(
-            [
-                "### Quality gate (детерминированно)",
-                "",
-                *[f"- {line}" for line in gate_failures],
-                "",
-            ]
-        )
-
     if qa_body:
         for prefix in ("## Отчёт по переводу", "## Вердикт для translation PR"):
             if qa_body.startswith(prefix):
-                qa_body = "## Вердикт doc_verify" + qa_body[len(prefix) :]
+                qa_body = "## Отчёт doc_verify" + qa_body[len(prefix) :]
                 break
         lines.append(qa_body)
-    elif not gate_failures:
+    else:
         lines.append("_Нет пар для QA в diff этого PR._")
 
     return "\n".join(lines).strip()
@@ -176,7 +156,7 @@ def run_verify_pr(
     no_commit: bool,
     no_push: bool,
 ) -> None:
-    """Verify doc pairs on the PR branch (critic + repair + translator, like doc_translate)."""
+    """Run QA on the PR branch. Same pipeline as ``doc_translate``."""
     settings.validate_github()
     settings.validate_yandex()
 
@@ -252,16 +232,15 @@ def run_verify_pr(
         click.echo(
             "Note: neither GITHUB_PUSH_TOKEN nor YDBDOC_PUSH_PAT env — push uses GITHUB_TOKEN. "
             "In ydb/.github/workflows/ydbdoc-verify.yml add e.g. "
-            "GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }} (see ydbdoc-review examples).",
+            "GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}.",
             err=True,
         )
     else:
         click.echo(
-            "Git push will use a dedicated PAT (GITHUB_PUSH_TOKEN / YDBDOC_PUSH_PAT), "
-            "not the workflow GITHUB_TOKEN."
+            "Git push will use a dedicated PAT (GITHUB_PUSH_TOKEN / YDBDOC_PUSH_PAT)."
         )
 
-    qa_body, repaired_paths, outcomes = run_pairs_qa_and_repair(
+    qa_body, repaired_paths, _outcomes = run_pairs_qa_and_repair(
         settings,
         workdir=workdir,
         pairs=verify_pairs,
@@ -270,53 +249,14 @@ def run_verify_pr(
         base_ref_local=base_ref_local,
     )
 
-    for en_p in {p for _r, p in verify_pairs}:
-        ru_p = next(r for r, e in verify_pairs if e == en_p)
-        ru_full = git_local.read_text(workdir, ru_p) or ""
-        before = git_local.read_text(workdir, en_p) or ""
-        en_main = (
-            git_local.read_text_at_ref(workdir, base_ref_local, en_p)
-            if base_ref_local
-            else None
-        )
-        after = apply_post_translation_fixes(
-            before, en_main=en_main, ru_source=ru_full
-        )
-        if after != before:
-            git_local.write_text(workdir, en_p, after)
-            if en_p not in repaired_paths:
-                repaired_paths.append(en_p)
-
-    gate_pairs: list[tuple[str, str, str, str | None, str | None, str | None]] = []
-    for ru_p, en_p in verify_pairs:
-        ru_text = git_local.read_text(workdir, ru_p) or ""
-        en_text = git_local.read_text(workdir, en_p) or ""
-        en_main = (
-            git_local.read_text_at_ref(workdir, base_ref_local, en_p)
-            if base_ref_local
-            else None
-        )
-        ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-        gate_pairs.append((en_p, ru_text, en_text, en_main, en_diff, ru_text))
-
-    gate_failures = collect_quality_gate_failures(gate_pairs)
-
-    if gate_failures:
-        click.echo("Quality gate failed:", err=True)
-        for line in gate_failures:
-            click.echo(f"  {line}", err=True)
-
-    blocked = bool(gate_failures) or doc_translate_should_fail_ci(outcomes)
-    unavailable = outcomes and pr_merge_verdict_unavailable(outcomes)
-
     committed = False
     pushed = False
     push_failed: str | None = None
     paths_to_publish = list(dict.fromkeys(repaired_paths))
-    if paths_to_publish and not no_commit and not blocked and not unavailable:
+    if paths_to_publish and not no_commit:
         msg = (
-            f"docs: doc_verify critic repairs (PR #{pr_number})\n\n"
-            "Applied by ydbdoc-review doc_verify (same QA/repair as doc_translate)."
+            f"docs: doc_verify critic fixes (PR #{pr_number})\n\n"
+            "Applied by ydbdoc-review doc_verify (same QA as doc_translate)."
         )
         committed = git_local.git_commit_paths(
             workdir,
@@ -350,7 +290,6 @@ def run_verify_pr(
         pr_number=pr_number,
         linked_source_pr=linked_source,
         qa_body=qa_body,
-        gate_failures=gate_failures,
         skipped=skipped,
         repaired_paths=paths_to_publish if committed else repaired_paths,
         push_failed=push_failed,
@@ -366,12 +305,3 @@ def run_verify_pr(
             owner, repo_name, pr_number, comment, settings.github_token
         )
         click.echo("Posted doc_verify comment on PR.")
-
-    if unavailable:
-        raise SystemExit(
-            "## ydbdoc-review — doc_verify: вердикт не получен\n\n" + comment
-        )
-    if blocked:
-        raise SystemExit(
-            "## ydbdoc-review — doc_verify: не готово к мержу\n\n" + comment
-        )
