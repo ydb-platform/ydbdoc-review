@@ -482,6 +482,7 @@ def revalidate_translation_pair(
     source_text: str,
     translated_text: str,
     review_before: str,
+    fix_skipped_notes: list[str] | None = None,
     ru_pr_diff: str | None = None,
     en_on_main: str | None = None,
 ) -> str:
@@ -492,9 +493,17 @@ def revalidate_translation_pair(
     tr_c = _cap_body(translated_text.strip(), cap)
     rev_c = _cap_body(review_before.strip(), min(cap, 20_000))
     extra = _qa_extra_blocks(cap=cap, ru_pr_diff=ru_pr_diff, en_on_main=en_on_main)
+    skipped_block = ""
+    if fix_skipped_notes:
+        skipped_block = (
+            "\n--- FIX_SKIPPED BEGIN ---\n"
+            + "\n".join(f"- {n}" for n in fix_skipped_notes)
+            + "\n--- FIX_SKIPPED END ---\n\n"
+        )
     user_input = (
         f"Files: `{ru_path}` (SOURCE, {source_lang}) ↔ `{en_path}` (TRANSLATION, {target_lang})\n\n"
         f"{extra}"
+        f"{skipped_block}"
         f"--- SOURCE BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
         f"--- TRANSLATION BEGIN ---\n{tr_c}\n--- TRANSLATION END ---\n\n"
         f"--- REVIEW_BEFORE BEGIN ---\n{rev_c}\n--- REVIEW_BEFORE END ---\n"

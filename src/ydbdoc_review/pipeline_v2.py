@@ -36,6 +36,7 @@ from ydbdoc_review.llm import (
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
+    apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
 )
 
@@ -221,8 +222,11 @@ def translate_document(
         )
     merged = assemble_document_units(translated)
     if source_lang.lower().startswith("rus"):
-        merged = restore_markdown_links_from_ru(source_full, merged)
-        merged = apply_deterministic_cli_fixes(merged, ru_source=source_full)
+        if target_lang.strip().lower() in ("english", "en"):
+            merged = apply_en_postprocess_from_ru(source_full, merged)
+        else:
+            merged = restore_markdown_links_from_ru(source_full, merged)
+            merged = apply_deterministic_cli_fixes(merged, ru_source=source_full)
     return merged, f"segment-{len(units)}-units"
 
 
@@ -302,6 +306,55 @@ def apply_fix_diff(text: str, fixes: list[dict]) -> FixApplyResult:
         out = out.replace(find, replace, 1)
         applied += 1
     return FixApplyResult(applied=applied, skipped=skipped, new_text=out)
+
+
+def _apply_en_qa_postprocess(
+    text: str,
+    *,
+    source_text: str,
+    source_lang: str,
+    target_lang: str,
+) -> str:
+    if (
+        source_lang.strip().lower().startswith("rus")
+        and target_lang.strip().lower() in ("english", "en")
+    ):
+        return apply_en_postprocess_from_ru(source_text, text)
+    if target_lang.strip().lower() in ("english", "en"):
+        return fix_yandex_cloud_links_for_en(text)
+    return text
+
+
+def _retry_fix_diff(
+    settings: Settings,
+    *,
+    source_lang: str,
+    target_lang: str,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    translated_text: str,
+    review_report: str,
+    skipped_notes: list[str],
+    ru_pr_diff: str | None,
+    en_on_main: str | None,
+) -> dict:
+    """Second fix-diff attempt when the first pass had skipped replacements."""
+    extra = "\n\n--- FIX_SKIPPED (не применились) ---\n" + "\n".join(
+        f"- {n}" for n in skipped_notes
+    )
+    return fix_translation_pair(
+        settings,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        ru_path=ru_path,
+        en_path=en_path,
+        source_text=source_text,
+        translated_text=translated_text,
+        review_report=review_report + extra,
+        ru_pr_diff=ru_pr_diff,
+        en_on_main=en_on_main,
+    )
 
 
 @dataclass(frozen=True)
@@ -418,8 +471,12 @@ def run_pair_qa(
             fix_skipped_notes = result.skipped
             if result.applied > 0:
                 current = result.new_text
-                if target_lang.strip().lower() in ("english", "en"):
-                    current = fix_yandex_cloud_links_for_en(current)
+                current = _apply_en_qa_postprocess(
+                    current,
+                    source_text=source_text,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                )
                 repair_applied = True
                 repair_skip_reason = None
             else:
@@ -427,6 +484,36 @@ def run_pair_qa(
                     "ни одна замена не применилась "
                     "(см. пропущенные fixes в отчёте)"
                 )
+
+            if fix_skipped_notes and repair_applied:
+                fm_log(f"QA fix-diff retry | {ru_path}")
+                try:
+                    retry_payload = _retry_fix_diff(
+                        settings,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        ru_path=ru_path,
+                        en_path=en_path,
+                        source_text=source_text,
+                        translated_text=current,
+                        review_report=review_md,
+                        skipped_notes=fix_skipped_notes,
+                        ru_pr_diff=ru_pr_diff,
+                        en_on_main=en_on_main,
+                    )
+                    retry_fixes = retry_payload.get("fixes", [])
+                    if retry_fixes:
+                        retry_result = apply_fix_diff(current, retry_fixes)
+                        fix_skipped_notes = retry_result.skipped
+                        if retry_result.applied > 0:
+                            current = _apply_en_qa_postprocess(
+                                retry_result.new_text,
+                                source_text=source_text,
+                                source_lang=source_lang,
+                                target_lang=target_lang,
+                            )
+                except Exception as exc:
+                    repair_error = repair_error or str(exc)
         else:
             repair_skip_reason = repair_skip_reason or "модель не вернула fixes"
 
@@ -442,6 +529,7 @@ def run_pair_qa(
                     source_text=source_text,
                     translated_text=current,
                     review_before=review_md,
+                    fix_skipped_notes=fix_skipped_notes,
                     ru_pr_diff=ru_pr_diff,
                     en_on_main=en_on_main,
                 )
@@ -507,8 +595,22 @@ def final_verdict(outcome: PairQaOutcome) -> str:
     if outcome.confirmation_md and outcome.confirmation_md.strip():
         v = parse_verdict(outcome.confirmation_md)
         if v != VERDICT_ERROR:
-            return v
-    return parse_verdict(outcome.review_md)
+            verdict = v
+        else:
+            verdict = parse_verdict(outcome.review_md)
+    else:
+        verdict = parse_verdict(outcome.review_md)
+
+    initial = parse_verdict(outcome.review_md)
+    if (
+        outcome.fix_skipped_notes
+        and initial == VERDICT_REJECT
+        and verdict == VERDICT_ACCEPT
+    ):
+        verdict = VERDICT_ACCEPT_WITH_NOTES
+    if has_critical(outcome.findings) and verdict == VERDICT_ACCEPT:
+        verdict = VERDICT_ACCEPT_WITH_NOTES
+    return verdict
 
 
 # ---------------------------------------------------------------------------

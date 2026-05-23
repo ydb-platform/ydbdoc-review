@@ -3,12 +3,16 @@
 from types import SimpleNamespace
 
 from ydbdoc_review.heuristics import (
+    _check_broken_markdown_link,
     _check_cyrillic_in_en,
     _check_fence_unbalanced,
     _check_file_length_mismatch,
+    _check_heading_anchor_mismatch,
     _check_heading_count_mismatch,
     _check_liquid_tags_balance,
     _check_list_tabs_mismatch,
+    _check_table_checkmark_drift,
+    _check_wikipedia_ru_in_en,
     load_rules,
     render_findings_markdown,
     run_heuristics,
@@ -29,6 +33,8 @@ def test_load_rules_reads_prompt_09():
     assert "cyrillic_in_en" in names
     assert "file_length_mismatch" in names
     assert "section_untranslated" in names
+    assert "wikipedia_ru_in_en" in names
+    assert "broken_markdown_link" in names
 
 
 def test_cyrillic_in_en_flags_russian_letter():
@@ -102,3 +108,33 @@ def test_run_heuristics_skips_llm_when_no_unknown_rules(monkeypatch):
 
 def test_render_findings_markdown_empty():
     assert render_findings_markdown([]) == "_Без замечаний._"
+
+
+def test_wikipedia_ru_in_en_critical():
+    f = _check_wikipedia_ru_in_en(
+        source="x",
+        translation="[Snappy](https://ru.wikipedia.org/wiki/Snappy_(библиотека))",
+    )
+    assert f is not None and f.severity == "critical"
+
+
+def test_broken_markdown_link_bare_url():
+    f = _check_broken_markdown_link(
+        source="x",
+        translation="see (https://example.com) for details",
+    )
+    assert f is not None and f.rule == "broken_markdown_link"
+
+
+def test_heading_anchor_mismatch():
+    ru = "### Формат a {#a}\n### Формат b {#b}\n"
+    en = "### Format a {#a}\n### Format b {#wrong}\n"
+    f = _check_heading_anchor_mismatch(source=ru, translation=en)
+    assert f is not None and "b→wrong" in f.detail
+
+
+def test_table_checkmark_drift():
+    ru = "|`DyNumber`| | | |✓| |\n"
+    en = "|`DyNumber`| | |✓| | |\n"
+    f = _check_table_checkmark_drift(source=ru, translation=en)
+    assert f is not None and "DyNumber" in f.detail

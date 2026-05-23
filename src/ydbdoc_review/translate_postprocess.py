@@ -122,6 +122,59 @@ def apply_semantic_fixes_from_ru(ru_source: str, en_text: str) -> str:
     return out
 
 
+_WIKI_RU_HOST_RE = re.compile(r"https?://ru\.wikipedia\.org/wiki/", re.IGNORECASE)
+_WIKI_SLUG_MAP = {
+    "Snappy_(библиотека)": "Snappy_(library)",
+    "библиотека": "library",
+}
+
+_HEADING_LINE_RE = re.compile(r"^(#{1,3}\s+.+?)(\s*\{#([^}]+)\})?\s*$")
+
+
+def fix_wikipedia_links_for_en(text: str) -> str:
+    """Use English Wikipedia URLs and slugs in EN articles."""
+    out = _WIKI_RU_HOST_RE.sub("https://en.wikipedia.org/wiki/", text)
+    for ru_slug, en_slug in _WIKI_SLUG_MAP.items():
+        out = out.replace(ru_slug, en_slug)
+    return out
+
+
+def fix_heading_anchors_from_ru(ru_source: str, en_text: str) -> str:
+    """Copy ``{#anchor}`` ids from RU headings onto EN headings (same order)."""
+    ru_heads = _heading_anchor_lines(ru_source)
+    en_heads = _heading_anchor_lines(en_text)
+    if not ru_heads or len(ru_heads) != len(en_heads):
+        return en_text
+    en_lines = en_text.splitlines()
+    for (_, _, ru_anchor), (line_idx, en_prefix, en_anchor) in zip(
+        ru_heads, en_heads, strict=True
+    ):
+        if ru_anchor and ru_anchor != en_anchor:
+            en_lines[line_idx] = f"{en_prefix} {{#{ru_anchor}}}"
+    return "\n".join(en_lines)
+
+
+def _heading_anchor_lines(text: str) -> list[tuple[int, str, str | None]]:
+    result: list[tuple[int, str, str | None]] = []
+    for i, line in enumerate(text.splitlines()):
+        m = _HEADING_LINE_RE.match(line)
+        if m:
+            result.append((i, m.group(1), m.group(3)))
+    return result
+
+
+def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
+    """Deterministic EN cleanup after segment merge (no LLM)."""
+    from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+
+    out = restore_markdown_links_from_ru(ru_source, en_text)
+    out = apply_deterministic_cli_fixes(out, ru_source=ru_source)
+    out = fix_yandex_cloud_links_for_en(out)
+    out = fix_wikipedia_links_for_en(out)
+    out = fix_heading_anchors_from_ru(ru_source, out)
+    return out
+
+
 def apply_deterministic_cli_fixes(
     text: str,
     *,

@@ -101,3 +101,49 @@ description: |
 report_message: |
   Не сбалансированы Diplodoc-теги: {detail}.
 ```
+
+```yaml
+name: wikipedia_ru_in_en
+severity: critical
+applies_to: ru_to_en
+description: |
+  В EN-переводе не должно быть ссылок на ru.wikipedia.org и кириллицы в slug
+  Wikipedia-URL (например, Snappy_(библиотека)). Допустим только en.wikipedia.org
+  с латинским slug.
+report_message: |
+  В EN остались русскоязычные Wikipedia-ссылки: {detail}.
+```
+
+```yaml
+name: broken_markdown_link
+severity: critical
+applies_to: ru_to_en
+description: |
+  В EN не должно быть сломанных markdown-ссылок: голый URL в скобках `(https://...)`
+  вместо `[текст](url)`, пустой `[#anchor]()`, `[text]()` без href.
+report_message: |
+  Сломанные markdown-ссылки в EN: {detail}.
+```
+
+```yaml
+name: heading_anchor_mismatch
+severity: critical
+applies_to: any
+description: |
+  Якоря `{#...}` у заголовков `##`/`###` в TRANSLATION должны совпадать с SOURCE
+  по порядку (тот же id на той же позиции среди заголовков с якорями).
+report_message: |
+  Несовпадение якорей заголовков: {detail}.
+```
+
+```yaml
+name: table_checkmark_drift
+severity: critical
+applies_to: any
+description: |
+  В таблицах с галочками `✓` (типы данных, алгоритмы сжатия) позиции галочек
+  в каждой строке должны совпадать с SOURCE. Имена типов и ✓ не сдвигаются
+  между столбцами при переводе.
+report_message: |
+  Галочки в таблице сдвинуты относительно SOURCE: {detail}.
+```

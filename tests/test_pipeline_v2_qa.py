@@ -190,3 +190,19 @@ def test_run_pair_qa_critic_error_does_not_raise(monkeypatch):
     assert out == "# EN\n"
     assert "FM down" in (outcome.repair_error or "")
     assert outcome.repair_skip_reason == "api_error"
+
+
+def test_final_verdict_caps_accept_when_fixes_skipped():
+    outcome = PairQaOutcome(
+        ru_path="ru.md",
+        en_path="en.md",
+        target_path="en.md",
+        review_md=REVIEW_REJECT,
+        repair_attempted=True,
+        repair_applied=True,
+        repair_skip_reason=None,
+        confirmation_md="### Вердикт\n**ПРИНИМАТЬ**\n\n### Блокеры\n_Нет._\n",
+        repair_error=None,
+        fix_skipped_notes=["`find` не найден в EN"],
+    )
+    assert final_verdict(outcome) == VERDICT_ACCEPT_WITH_NOTES

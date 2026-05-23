@@ -269,6 +269,132 @@ def _check_liquid_tags_balance(
     )
 
 
+_WIKI_RU_RE = re.compile(r"ru\.wikipedia\.org", re.IGNORECASE)
+_CYRILLIC_IN_URL_RE = re.compile(
+    r"https?://[^\s\)]*[Ѐ-ӿѐ-џ][^\s\)]*", re.IGNORECASE
+)
+_BROKEN_MD_LINK_RE = re.compile(
+    r"\[[^\]]*\]\(\)|(?<!\])\((https?://[^)]+)\)"
+)
+_HEADING_ANCHOR_LINE_RE = re.compile(r"^(#{1,3}\s+.+?)(\s*\{#([^}]+)\})?\s*$")
+_TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
+_CHECKMARK = "✓"
+
+
+def _heading_anchors(text: str) -> list[str]:
+    anchors: list[str] = []
+    for line in text.splitlines():
+        m = _HEADING_ANCHOR_LINE_RE.match(line)
+        if m and m.group(3):
+            anchors.append(m.group(3))
+    return anchors
+
+
+def _table_checkmark_rows(text: str) -> dict[str, list[bool]]:
+    rows: dict[str, list[bool]] = {}
+    for line in text.splitlines():
+        if _CHECKMARK not in line or not _TABLE_ROW_RE.match(line):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        key = re.sub(r"[`\s]", "", cells[0])[:40]
+        if not key:
+            continue
+        rows[key] = [_CHECKMARK in c for c in cells[1:]]
+    return rows
+
+
+def _check_wikipedia_ru_in_en(*, source: str, translation: str, **_: Any) -> Finding | None:
+    _ = source
+    hits: list[str] = []
+    for m in _WIKI_RU_RE.finditer(translation):
+        start = max(0, m.start() - 20)
+        end = min(len(translation), m.end() + 40)
+        hits.append(translation[start:end].replace("\n", " "))
+    for m in _CYRILLIC_IN_URL_RE.finditer(translation):
+        hits.append(m.group(0))
+    if not hits:
+        return None
+    sample = "; ".join(dict.fromkeys(hits[:3]))
+    return Finding(
+        rule="wikipedia_ru_in_en",
+        severity="critical",
+        location="ссылки",
+        detail=sample,
+    )
+
+
+def _check_broken_markdown_link(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    _ = source
+    problems: list[str] = []
+    for m in _BROKEN_MD_LINK_RE.finditer(translation):
+        snippet = m.group(0).replace("\n", " ")
+        if snippet not in problems:
+            problems.append(snippet)
+        if len(problems) >= 3:
+            break
+    if not problems:
+        return None
+    return Finding(
+        rule="broken_markdown_link",
+        severity="critical",
+        location="markdown-ссылки",
+        detail="; ".join(problems),
+    )
+
+
+def _check_heading_anchor_mismatch(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    src = _heading_anchors(source)
+    trn = _heading_anchors(translation)
+    if not src or src == trn:
+        return None
+    if len(src) != len(trn):
+        return Finding(
+            rule="heading_anchor_mismatch",
+            severity="critical",
+            location="заголовки",
+            detail=f"число якорей SOURCE={len(src)}, TRANSLATION={len(trn)}",
+        )
+    pairs = [
+        f"{a}→{b}" for a, b in zip(src, trn, strict=True) if a != b
+    ]
+    if not pairs:
+        return None
+    return Finding(
+        rule="heading_anchor_mismatch",
+        severity="critical",
+        location="заголовки",
+        detail=", ".join(pairs[:5]),
+    )
+
+
+def _check_table_checkmark_drift(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    src_rows = _table_checkmark_rows(source)
+    trn_rows = _table_checkmark_rows(translation)
+    drift: list[str] = []
+    for key, src_marks in src_rows.items():
+        trn_marks = trn_rows.get(key)
+        if trn_marks is None:
+            continue
+        if src_marks != trn_marks:
+            drift.append(key)
+    if not drift:
+        return None
+    return Finding(
+        rule="table_checkmark_drift",
+        severity="critical",
+        location="таблицы",
+        detail=", ".join(drift[:5]),
+    )
+
+
 _DETERMINISTIC: dict[str, Callable[..., Finding | None]] = {
     "cyrillic_in_en": _check_cyrillic_in_en,
     "file_length_mismatch": _check_file_length_mismatch,
@@ -276,6 +402,10 @@ _DETERMINISTIC: dict[str, Callable[..., Finding | None]] = {
     "fence_unbalanced": _check_fence_unbalanced,
     "list_tabs_mismatch": _check_list_tabs_mismatch,
     "liquid_tags_balance": _check_liquid_tags_balance,
+    "wikipedia_ru_in_en": _check_wikipedia_ru_in_en,
+    "broken_markdown_link": _check_broken_markdown_link,
+    "heading_anchor_mismatch": _check_heading_anchor_mismatch,
+    "table_checkmark_drift": _check_table_checkmark_drift,
 }
 
 
