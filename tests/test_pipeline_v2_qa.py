@@ -8,8 +8,10 @@ from ydbdoc_review.pipeline_v2 import (
     VERDICT_ACCEPT,
     VERDICT_ACCEPT_WITH_NOTES,
     VERDICT_REJECT,
+    _apply_translated_fence_comments,
     apply_fix_diff,
     final_verdict,
+    format_pair_qa_markdown,
     parse_verdict,
     run_pair_qa,
 )
@@ -206,3 +208,55 @@ def test_final_verdict_caps_accept_when_fixes_skipped():
         fix_skipped_notes=["`find` не найден в EN"],
     )
     assert final_verdict(outcome) == VERDICT_ACCEPT_WITH_NOTES
+
+
+def test_apply_translated_fence_comments_preserves_inline_code():
+    fence = (
+        '```yql\n'
+        'SELECT\n'
+        '  Decimal("1.23", 5, 2), -- до 5 десятичных знаков\n'
+        '```'
+    )
+    out = _apply_translated_fence_comments(
+        fence,
+        [{"line": 2, "marker": "--", "text": "up to 5 decimal places"}],
+    )
+    assert 'Decimal("1.23", 5, 2), -- up to 5 decimal places' in out
+    assert out.count("Decimal") == 1
+
+
+def test_format_pair_qa_hides_skipped_fixes_after_clean_revalidate():
+    outcome = PairQaOutcome(
+        ru_path="ru.md",
+        en_path="en.md",
+        target_path="en.md",
+        review_md=REVIEW_REJECT,
+        repair_attempted=True,
+        repair_applied=True,
+        repair_skip_reason=None,
+        confirmation_md="### Вердикт\n**ПРИНИМАТЬ**\n\n### Блокеры\n_Нет._\n",
+        repair_error=None,
+        fix_skipped_notes=["`find` не найден в EN: «foo»"],
+        findings=[],
+    )
+    md = format_pair_qa_markdown(outcome)
+    assert "Пропущенные fixes" not in md
+    assert "(есть пропущенные)" not in md
+
+
+def test_format_pair_qa_shows_skipped_fixes_when_revalidate_not_accept():
+    outcome = PairQaOutcome(
+        ru_path="ru.md",
+        en_path="en.md",
+        target_path="en.md",
+        review_md=REVIEW_REJECT,
+        repair_attempted=True,
+        repair_applied=True,
+        repair_skip_reason=None,
+        confirmation_md="### Вердикт\n**НЕ ПРИНИМАТЬ**\n\n### Блокеры\nx\n",
+        repair_error=None,
+        fix_skipped_notes=["`find` не найден в EN: «foo»"],
+        findings=[],
+    )
+    md = format_pair_qa_markdown(outcome)
+    assert "Пропущенные fixes" in md

@@ -135,6 +135,37 @@ def _fence_comment_rows(fence_text: str, *, source_lang: str) -> list[tuple[int,
     return rows
 
 
+def _apply_translated_fence_comments(
+    fence_text: str, translated: list[dict]
+) -> str:
+    """Merge translated comment bodies back into a fenced block."""
+    from ydbdoc_review.fence_comments import (
+        comment_body_on_line,
+        inline_sql_comment_tail,
+    )
+
+    lines = fence_text.split("\n")
+    for item in translated:
+        i = int(item.get("line", -1))
+        if not (0 <= i < len(lines)):
+            continue
+        marker = str(item.get("marker", "#"))
+        text = str(item.get("text", "")).strip()
+        line = lines[i]
+        full = comment_body_on_line(line)
+        if full is not None and full[0] == marker:
+            indent = line[: len(line) - len(line.lstrip())]
+            lines[i] = f"{indent}{marker} {text}".rstrip()
+            continue
+        inline = inline_sql_comment_tail(line)
+        if inline is not None:
+            prefix, _ = inline
+            lines[i] = f"{prefix}-- {text}".rstrip()
+            continue
+        lines[i] = f"{marker} {text}".rstrip()
+    return "\n".join(lines)
+
+
 def translate_unit(
     settings: Settings,
     unit: DocumentUnit,
@@ -175,13 +206,8 @@ def translate_unit(
         except json.JSONDecodeError:
             fm_log(f"fence-comments parse failed, keeping verbatim | {unit.label}")
             return unit
-        lines = unit.text.split("\n")
-        for item in translated:
-            i = int(item.get("line", -1))
-            if 0 <= i < len(lines):
-                marker = item.get("marker", "#")
-                lines[i] = f"{marker} {item['text']}".rstrip()
-        return DocumentUnit(unit.kind, "\n".join(lines), unit.label)
+        body = _apply_translated_fence_comments(unit.text, translated)
+        return DocumentUnit(unit.kind, body, unit.label)
 
     body = _call_translate_segment(
         settings,
@@ -626,6 +652,17 @@ _VERDICT_LABEL_RU = {
 }
 
 
+def _should_show_skipped_fixes(outcome: PairQaOutcome) -> bool:
+    """Hide stale skipped-fix noise when re-validate accepted and heuristics are clean."""
+    if not outcome.fix_skipped_notes:
+        return False
+    if outcome.confirmation_md and outcome.confirmation_md.strip():
+        if parse_verdict(outcome.confirmation_md) == VERDICT_ACCEPT:
+            if not has_critical(outcome.findings):
+                return False
+    return True
+
+
 def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
     """Per-file report block. Identical shape for doc_translate and doc_verify."""
     verdict = final_verdict(outcome)
@@ -638,11 +675,13 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
         "",
     ]
 
+    show_skipped = _should_show_skipped_fixes(outcome)
+
     if outcome.repair_attempted:
         if outcome.repair_applied:
             lines.append(
                 f"**Исправления:** применено fix-diff правок"
-                + (" (есть пропущенные)" if outcome.fix_skipped_notes else "")
+                + (" (есть пропущенные)" if show_skipped else "")
                 + "."
             )
         elif outcome.repair_error:
@@ -651,7 +690,7 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
             lines.append(
                 f"**Исправления:** не применены — {outcome.repair_skip_reason or '—'}."
             )
-        if outcome.fix_skipped_notes:
+        if show_skipped:
             lines.append("")
             lines.append("Пропущенные fixes:")
             for note in outcome.fix_skipped_notes:
