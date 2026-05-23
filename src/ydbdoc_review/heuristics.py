@@ -278,7 +278,17 @@ _BROKEN_MD_LINK_RE = re.compile(
 )
 _HEADING_ANCHOR_LINE_RE = re.compile(r"^(#{1,3}\s+.+?)(\s*\{#([^}]+)\})?\s*$")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
+_TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
 _CHECKMARK = "✓"
+
+
+@dataclass(frozen=True)
+class _CheckmarkTableRow:
+    table_index: int
+    table_caption: str
+    row_label: str
+    columns: tuple[str, ...]
+    marks: tuple[bool, ...]
 
 
 def _heading_anchors(text: str) -> list[str]:
@@ -290,19 +300,127 @@ def _heading_anchors(text: str) -> list[str]:
     return anchors
 
 
-def _table_checkmark_rows(text: str) -> dict[str, list[bool]]:
-    rows: dict[str, list[bool]] = {}
-    for line in text.splitlines():
-        if _CHECKMARK not in line or not _TABLE_ROW_RE.match(line):
+def _row_label_from_cell(cell0: str) -> str:
+    m = re.search(r"`([^`]+)`", cell0)
+    if m:
+        return m.group(1)
+    cleaned = re.sub(r"\s+", " ", cell0.replace("<br/>", " ")).strip()
+    return cleaned[:40] or "—"
+
+
+def _is_checkmark_header_row(cells: list[str]) -> bool:
+    if len(cells) < 3:
+        return False
+    first = re.sub(r"[`\s]", "", cells[0]).lower()
+    if first in ("type", "тип", "algorithm", "алгоритм"):
+        return True
+    joined = "|".join(c.lower() for c in cells)
+    return "csv" in joined or "json_each_row" in joined
+
+
+def _guess_table_caption(columns: list[str], table_index: int) -> str:
+    cols = {c.lower() for c in columns}
+    if "json_as_string" in cols and "raw" in cols:
+        return "чтение из S3"
+    if "json_as_string" not in cols and "raw" in cols and "parquet" in cols:
+        return "запись в S3"
+    if "write" in cols or "запись" in cols:
+        return "алгоритмы сжатия (запись)"
+    if "read" in cols or "чтение" in cols:
+        return "алгоритмы сжатия (чтение)"
+    return f"таблица {table_index}"
+
+
+def _parse_checkmark_tables(text: str) -> dict[str, _CheckmarkTableRow]:
+    rows: dict[str, _CheckmarkTableRow] = {}
+    table_index = 0
+    columns: list[str] = []
+    caption = "таблица"
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not _TABLE_ROW_RE.match(line):
+            i += 1
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 2:
+        if i + 1 < len(lines) and _TABLE_SEP_RE.match(lines[i + 1]):
+            if _is_checkmark_header_row(cells):
+                table_index += 1
+                columns = cells[1:]
+                caption = _guess_table_caption(cells, table_index)
+            i += 2
             continue
-        key = re.sub(r"[`\s]", "", cells[0])[:40]
-        if not key:
+        if _CHECKMARK not in line or not columns:
+            i += 1
             continue
-        rows[key] = [_CHECKMARK in c for c in cells[1:]]
+        row_label = _row_label_from_cell(cells[0])
+        raw_marks = [_CHECKMARK in c for c in cells[1:]]
+        col_count = len(columns)
+        if len(raw_marks) < col_count:
+            raw_marks.extend([False] * (col_count - len(raw_marks)))
+        else:
+            raw_marks = raw_marks[:col_count]
+        marks = tuple(raw_marks)
+        key = f"{table_index}:{row_label}"
+        rows[key] = _CheckmarkTableRow(
+            table_index=table_index,
+            table_caption=caption,
+            row_label=row_label,
+            columns=tuple(columns),
+            marks=marks,
+        )
+        i += 1
     return rows
+
+
+def _format_checkmark_drift(
+    src: _CheckmarkTableRow, trn: _CheckmarkTableRow
+) -> str:
+    parts: list[str] = []
+    col_count = max(len(src.columns), len(trn.columns), len(src.marks), len(trn.marks))
+    for idx in range(col_count):
+        col = (
+            src.columns[idx]
+            if idx < len(src.columns)
+            else (trn.columns[idx] if idx < len(trn.columns) else f"col{idx + 1}")
+        )
+        s = src.marks[idx] if idx < len(src.marks) else False
+        t = trn.marks[idx] if idx < len(trn.marks) else False
+        if s != t:
+            parts.append(
+                f"колонка «{col}»: SOURCE={'✓' if s else '—'}, EN={'✓' if t else '—'}"
+            )
+    if len(src.marks) != len(trn.marks) and not parts:
+        parts.append(
+            f"число столбцов с данными SOURCE={len(src.marks)}, EN={len(trn.marks)}"
+        )
+    joined = "; ".join(parts[:8])
+    return (
+        f"Таблица «{src.table_caption}», строка `{src.row_label}`: {joined}"
+    )
+
+
+def _check_table_checkmark_drift(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    src_rows = _parse_checkmark_tables(source)
+    trn_rows = _parse_checkmark_tables(translation)
+    drift_lines: list[str] = []
+    for key, src in src_rows.items():
+        trn = trn_rows.get(key)
+        if trn is None:
+            continue
+        if src.marks != trn.marks:
+            drift_lines.append(_format_checkmark_drift(src, trn))
+    if not drift_lines:
+        return None
+    return Finding(
+        rule="table_checkmark_drift",
+        severity="critical",
+        location="таблицы с ✓",
+        detail=" | ".join(drift_lines[:3]),
+    )
 
 
 def _check_wikipedia_ru_in_en(*, source: str, translation: str, **_: Any) -> Finding | None:
@@ -370,28 +488,6 @@ def _check_heading_anchor_mismatch(
         severity="critical",
         location="заголовки",
         detail=", ".join(pairs[:5]),
-    )
-
-
-def _check_table_checkmark_drift(
-    *, source: str, translation: str, **_: Any
-) -> Finding | None:
-    src_rows = _table_checkmark_rows(source)
-    trn_rows = _table_checkmark_rows(translation)
-    drift: list[str] = []
-    for key, src_marks in src_rows.items():
-        trn_marks = trn_rows.get(key)
-        if trn_marks is None:
-            continue
-        if src_marks != trn_marks:
-            drift.append(key)
-    if not drift:
-        return None
-    return Finding(
-        rule="table_checkmark_drift",
-        severity="critical",
-        location="таблицы",
-        detail=", ".join(drift[:5]),
     )
 
 
@@ -565,15 +661,23 @@ def run_heuristics(
     return findings
 
 
-def render_findings_markdown(findings: list[Finding]) -> str:
+def render_findings_markdown(
+    findings: list[Finding], *, prompts_dir: str = "prompts"
+) -> str:
     """Build the «Эвристики» block for the QA report."""
     if not findings:
         return "_Без замечаний._"
     icon = {"critical": "🔴", "warning": "🟡"}
+    rule_msgs = {r.name: r.report_message for r in load_rules(prompts_dir)}
     lines: list[str] = []
     for f in findings:
         ic = icon.get(f.severity, "🟡")
-        lines.append(f"- {ic} **{f.rule}** — {f.detail} _({f.location})_")
+        tmpl = rule_msgs.get(f.rule, "{detail} _({location})_")
+        try:
+            msg = tmpl.format(location=f.location, detail=f.detail).strip()
+        except KeyError:
+            msg = f"{f.detail} _({f.location})_"
+        lines.append(f"- {ic} **{f.rule}** — {msg}")
     return "\n".join(lines)
 
 

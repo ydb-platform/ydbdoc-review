@@ -137,4 +137,45 @@ def test_table_checkmark_drift():
     ru = "|`DyNumber`| | | |✓| |\n"
     en = "|`DyNumber`| | |✓| | |\n"
     f = _check_table_checkmark_drift(source=ru, translation=en)
-    assert f is not None and "DyNumber" in f.detail
+    assert f is None  # no header row → skip
+
+
+def test_table_checkmark_drift_with_headers():
+    from ydbdoc_review.heuristics import _parse_checkmark_tables
+
+    ru = (
+        "|Type|csv|json_list|\n"
+        "|---|---|\n"
+        "|`Uuid`|✓| |\n"
+        "|Type|csv|json_list|\n"
+        "|---|---|\n"
+        "|`Uuid`|✓|✓|\n"
+    )
+    en = (
+        "|Type|csv|json_list|\n"
+        "|---|---|\n"
+        "|`Uuid`|✓| |\n"
+        "|Type|csv|json_list|\n"
+        "|---|---|\n"
+        "|`Uuid`|✓|✓|\n"
+    )
+    assert len(_parse_checkmark_tables(ru)) == 2
+    assert _check_table_checkmark_drift(source=ru, translation=en) is None
+
+
+def test_table_checkmark_drift_detail_message():
+    ru = (
+        "|Type|csv|parquet|\n"
+        "|---|---|\n"
+        "|`DyNumber`| |✓|\n"
+    )
+    en = (
+        "|Type|csv|parquet|\n"
+        "|---|---|\n"
+        "|`DyNumber`|✓|✓|\n"
+    )
+    f = _check_table_checkmark_drift(source=ru, translation=en)
+    assert f is not None
+    assert "DyNumber" in f.detail
+    assert "csv" in f.detail
+    assert "SOURCE=" in f.detail
