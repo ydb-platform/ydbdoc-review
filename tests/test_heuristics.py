@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from ydbdoc_review.heuristics import (
     _check_broken_markdown_link,
     _check_cyrillic_in_en,
+    _check_fence_code_line_parity,
     _check_fence_unbalanced,
     _check_file_length_mismatch,
     _check_heading_anchor_mismatch,
@@ -35,6 +36,7 @@ def test_load_rules_reads_prompt_09():
     assert "section_untranslated" in names
     assert "wikipedia_ru_in_en" in names
     assert "broken_markdown_link" in names
+    assert "fence_code_line_parity" in names
 
 
 def test_cyrillic_in_en_flags_russian_letter():
@@ -138,6 +140,45 @@ def test_table_checkmark_drift():
     en = "|`DyNumber`| | |✓| | |\n"
     f = _check_table_checkmark_drift(source=ru, translation=en)
     assert f is None  # no header row → skip
+
+
+def test_fence_code_line_parity_detects_missing_type_literals():
+    ru = (
+        "### Примеры\n\n"
+        "```yql\n"
+        "SELECT\n"
+        '  Bool("true"),\n'
+        '  Uint8("0"),\n'
+        '  Int32("-1"),\n'
+        '  Uint64("4"),\n'
+        "```\n"
+    )
+    en = (
+        "### Examples\n\n"
+        "```yql\n"
+        "SELECT\n"
+        '  Bool("true"),\n'
+        '  Uint64("4"),\n'
+        "```\n"
+    )
+    f = _check_fence_code_line_parity(source=ru, translation=en)
+    assert f is not None
+    assert f.rule == "fence_code_line_parity"
+    assert "Uint8" in f.detail or "строк кода" in f.detail
+
+
+def test_fence_code_line_parity_ignores_comment_only_diff():
+    ru = (
+        "```yql\n"
+        '  Decimal("1.23", 5, 2), -- до 5 знаков\n'
+        "```\n"
+    )
+    en = (
+        "```yql\n"
+        '  Decimal("1.23", 5, 2), -- up to 5 digits\n'
+        "```\n"
+    )
+    assert _check_fence_code_line_parity(source=ru, translation=en) is None
 
 
 def test_table_checkmark_drift_with_headers():

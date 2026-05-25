@@ -188,7 +188,8 @@ def translate_unit(
         instructions = (
             f"Translate each JSON object's `text` from {source_lang} to {target_lang}. "
             "Return JSON array with same `line` and `marker`; only `text` changes. "
-            "Code syntax unchanged."
+            "Do not add or remove array entries. Do not omit any code lines in the fence — "
+            "you are only translating comment bodies, not rewriting the block."
         )
         out = _strip_code_fence(
             call_yandex_responses(

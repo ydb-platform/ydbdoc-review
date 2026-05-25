@@ -223,6 +223,104 @@ def _check_fence_unbalanced(
     )
 
 
+_SKIP_FENCE_CODE_LINE = re.compile(r"^SELECT\s*$", re.IGNORECASE)
+
+
+def _extract_fence_blocks(text: str) -> list[list[str]]:
+    blocks: list[list[str]] = []
+    in_fence = False
+    current: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            if in_fence:
+                blocks.append(current)
+                current = []
+                in_fence = False
+            else:
+                in_fence = True
+            continue
+        if in_fence:
+            current.append(line)
+    return blocks
+
+
+def _normalize_fence_code_line(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("--") and "(" not in stripped.split("--", 1)[0]:
+        return None
+    code = re.split(r"\s--\s", line, maxsplit=1)[0].strip().rstrip(",").rstrip(";").strip()
+    if not code or _SKIP_FENCE_CODE_LINE.match(code):
+        return None
+    return re.sub(r"\s+", " ", code)
+
+
+def _block_code_line_keys(lines: list[str]) -> list[str]:
+    keys: list[str] = []
+    for line in lines:
+        key = _normalize_fence_code_line(line)
+        if key is not None:
+            keys.append(key)
+    return keys
+
+
+def _fence_code_line_keys(text: str) -> list[list[str]]:
+    return [_block_code_line_keys(block) for block in _extract_fence_blocks(text)]
+
+
+def _check_fence_code_line_parity(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    src_blocks = _fence_code_line_keys(source)
+    trn_blocks = _fence_code_line_keys(translation)
+    if not src_blocks:
+        return None
+    if len(src_blocks) != len(trn_blocks):
+        return Finding(
+            rule="fence_code_line_parity",
+            severity="critical",
+            location="fenced-блоки",
+            detail=(
+                f"число fenced-блоков SOURCE={len(src_blocks)}, "
+                f"EN={len(trn_blocks)}"
+            ),
+        )
+    problems: list[str] = []
+    for i, (src_keys, trn_keys) in enumerate(
+        zip(src_blocks, trn_blocks, strict=True), start=1
+    ):
+        if src_keys == trn_keys:
+            continue
+        if len(src_keys) != len(trn_keys):
+            missing = [k for k in src_keys if k not in trn_keys][:3]
+            extra = [k for k in trn_keys if k not in src_keys][:3]
+            msg = f"блок {i}: строк кода SOURCE={len(src_keys)}, EN={len(trn_keys)}"
+            if missing:
+                msg += "; нет в EN: " + "; ".join(missing)
+            if extra:
+                msg += "; лишние в EN: " + "; ".join(extra)
+            problems.append(msg)
+            continue
+        for j, (src_line, trn_line) in enumerate(
+            zip(src_keys, trn_keys, strict=True), start=1
+        ):
+            if src_line != trn_line:
+                problems.append(
+                    f"блок {i}, строка {j}: SOURCE={src_line[:60]!r}, "
+                    f"EN={trn_line[:60]!r}"
+                )
+                break
+    if not problems:
+        return None
+    return Finding(
+        rule="fence_code_line_parity",
+        severity="critical",
+        location="fenced-блоки с кодом",
+        detail=" | ".join(problems[:3]),
+    )
+
+
 _LIST_TABS_OPEN_RE = re.compile(r"\{%\s*list\s+tabs", re.IGNORECASE)
 _LIST_TABS_CLOSE_RE = re.compile(r"\{%\s*endlist\s*%\}", re.IGNORECASE)
 _NOTE_OPEN_RE = re.compile(r"\{%\s*note\b", re.IGNORECASE)
@@ -496,6 +594,7 @@ _DETERMINISTIC: dict[str, Callable[..., Finding | None]] = {
     "file_length_mismatch": _check_file_length_mismatch,
     "heading_count_mismatch": _check_heading_count_mismatch,
     "fence_unbalanced": _check_fence_unbalanced,
+    "fence_code_line_parity": _check_fence_code_line_parity,
     "list_tabs_mismatch": _check_list_tabs_mismatch,
     "liquid_tags_balance": _check_liquid_tags_balance,
     "wikipedia_ru_in_en": _check_wikipedia_ru_in_en,

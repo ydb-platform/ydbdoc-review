@@ -137,6 +137,19 @@ report_message: |
 ```
 
 ```yaml
+name: fence_code_line_parity
+severity: critical
+applies_to: any
+description: |
+  В каждом fenced-блоке с кодом (`` ```yql ``, `` ```bash ``, …) число и порядок
+  строк с кодом (вызовы TypeName("..."), команды CLI, не комментарии) в TRANSLATION
+  должны совпадать с SOURCE. Литералы и имена типов не меняются; переводится только
+  текст после ``--`` / ``#``.
+report_message: |
+  В fenced-блоке пропущены или изменены строки кода относительно SOURCE. {detail}
+```
+
+```yaml
 name: table_checkmark_drift
 severity: critical
 applies_to: any
