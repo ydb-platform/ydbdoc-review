@@ -6,14 +6,16 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-UnitKind = Literal["prose", "table", "fence", "diplodoc"]
+UnitKind = Literal["prose", "table", "fence", "diplodoc", "tabs"]
 
 _TABLE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
 _DIPLODOC_END = {
     "note": re.compile(r"^\s*\{%\s*endnote\s*%\}\s*$", re.IGNORECASE),
     "cut": re.compile(r"^\s*\{%\s*endcut\s*%\}\s*$", re.IGNORECASE),
+    "tabs": re.compile(r"^\s*\{%\s*endlist\s*%\}\s*$", re.IGNORECASE),
 }
+_LIST_TABS_START_RE = re.compile(r"^\s*\{%\s*list\s+tabs", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,8 @@ def _is_fence_toggle(line: str) -> bool:
 
 def _diplodoc_start(line: str) -> str | None:
     s = line.strip().lower()
+    if _LIST_TABS_START_RE.match(line.strip()):
+        return "tabs"
     if s.startswith("{% note"):
         return "note"
     if s.startswith("{% cut"):
@@ -126,7 +130,7 @@ def _read_diplodoc(lines: list[str], start: int, kind: str) -> tuple[str, int]:
 def parse_document_units(text: str, *, doc_label: str = "doc") -> list[DocumentUnit]:
     """
     Split *text* into ordered units: prose (incl. ``#``/``###`` headings), tables,
-    ``` fences, and ``{% note %}`` / ``{% cut %}`` blocks.
+    ``` fences, ``{% list tabs %}`` blocks, and ``{% note %}`` / ``{% cut %}`` blocks.
     """
     if not text:
         return []
@@ -187,9 +191,10 @@ def parse_document_units(text: str, *, doc_label: str = "doc") -> list[DocumentU
         if dkind:
             flush_prose()
             block, i = _read_diplodoc(lines, i, dkind)
+            kind: UnitKind = "tabs" if dkind == "tabs" else "diplodoc"
             units.append(
                 DocumentUnit(
-                    kind="diplodoc",
+                    kind=kind,
                     text=block,
                     label=f"{label_prefix()}/{dkind}",
                 )

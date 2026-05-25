@@ -1207,6 +1207,8 @@ def run_cmd(
                 warnings.append(f"- Cannot translate to EN: missing Russian source `{ru_p}`")
                 continue
             click.echo(f"Translating RU→EN `{ru_p}` → `{en_p}` with `{settings.model_translate}` …")
+            from ydbdoc_review.ru_source_bugs import fix_ru_source_bugs_in_text
+
             ru_source = ru_full or ""
             use_main_ru = bool(
                 workdir
@@ -1218,6 +1220,21 @@ def run_cmd(
                 ru_on_main = git_local.read_text_at_ref(workdir, base_ref_local, ru_p)
                 if ru_on_main:
                     ru_source = ru_on_main
+            ru_source, ru_fixed_bugs = fix_ru_source_bugs_in_text(
+                ru_source, file_path=ru_p
+            )
+            if ru_fixed_bugs and workdir:
+                git_local.write_text(workdir, ru_p, ru_source)
+                warnings.append(
+                    f"- RU `{ru_p}`: исправлена опечатка `--config-dir/…` → "
+                    f"`--config-dir /…` в исходной русской доке."
+                )
+            en_on_main: str | None = None
+            if workdir and base_ref_local and git_local.path_exists_at_tree(
+                workdir, base_ref_local, en_p
+            ):
+                en_on_main = git_local.read_text_at_ref(workdir, base_ref_local, en_p)
+            ru_diff, _en_diff = pair_diffs.get(key, (None, None))
             try:
                 out_md, mode = translate_document(
                     settings,
@@ -1225,6 +1242,8 @@ def run_cmd(
                     source_full=ru_source,
                     source_lang="Russian",
                     target_lang="English",
+                    en_on_main=en_on_main,
+                    ru_pr_diff=ru_diff,
                 )
             except Exception as exc:
                 warnings.append(f"- `{en_p}`: перевод не выполнен: {exc}")

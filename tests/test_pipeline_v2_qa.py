@@ -8,6 +8,7 @@ from ydbdoc_review.pipeline_v2 import (
     VERDICT_ACCEPT,
     VERDICT_ACCEPT_WITH_NOTES,
     VERDICT_REJECT,
+    format_translation_pr_summary,
     _apply_translated_fence_comments,
     apply_fix_diff,
     final_verdict,
@@ -260,3 +261,21 @@ def test_format_pair_qa_shows_skipped_fixes_when_revalidate_not_accept():
     )
     md = format_pair_qa_markdown(outcome)
     assert "Пропущенные fixes" in md
+
+
+def test_format_translation_pr_summary_red_status_on_reject():
+    outcome = PairQaOutcome(
+        ru_path="ru/x.md",
+        en_path="en/x.md",
+        target_path="en/x.md",
+        review_md=REVIEW_REJECT,
+        repair_attempted=False,
+        repair_applied=False,
+        repair_skip_reason=None,
+        confirmation_md=None,
+        repair_error=None,
+    )
+    md = format_translation_pr_summary(source_pr_number=40070, outcomes=[outcome])
+    assert "🔴" in md
+    assert "не мержить" in md.lower()
+    assert "НЕ ПРИНИМАТЬ" in md or "Не принимать" in md

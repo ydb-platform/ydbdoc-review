@@ -52,15 +52,37 @@ report_message: |
 ```
 
 ```yaml
+name: fence_parity
+severity: critical
+applies_to: any
+description: |
+  Fenced-блоки (`` ``` ``) в TRANSLATION должны соответствовать SOURCE: то же число
+  закрытых блоков, чётное число delimiter-строк в EN, нет обрыва YAML/кода без
+  закрывающего `` ``` ``. Сравнение RU↔EN, не только «нечётное число в EN».
+report_message: |
+  Расхождение fenced-блоков RU↔EN: {detail}.
+```
+
+```yaml
 name: fence_unbalanced
 severity: critical
 applies_to: any
 description: |
-  В TRANSLATION число строк, начинающихся с тройного бэктика (открытие/закрытие
-  fence-блока кода), должно быть чётным. Нечётное число → есть незакрытый блок,
-  файл сломан.
+  Устаревший алиас ``fence_parity`` (оставлен для совместимости конфига).
 report_message: |
-  Не закрыт fence-блок: число `` ``` `` в файле нечётное ({detail}).
+  Не закрыт fence-блок: {detail}.
+```
+
+```yaml
+name: markdown_link_path_parity
+severity: critical
+applies_to: ru_to_en
+description: |
+  Для каждой относительной markdown-ссылки ``[text](path.md)`` в SOURCE: в TRANSLATION
+  тот же суффикс файла и та же глубина ``../``; исключение — ``/ru/docs/`` ↔ ``/en/docs/``
+  в URL Yandex Cloud.
+report_message: |
+  Относительные пути ссылок не совпадают с SOURCE: {detail}.
 ```
 
 ```yaml

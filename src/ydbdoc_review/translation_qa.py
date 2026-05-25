@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ydbdoc_review import git_local
 from ydbdoc_review.config import Settings
+from ydbdoc_review.ru_source_bugs import format_ru_reviewer_suggestions
 from ydbdoc_review.pipeline_v2 import (
     PairQaOutcome,
     apply_fix_diff,
@@ -123,5 +124,13 @@ def run_pairs_qa_and_repair(
         source_pr_number=source_pr_number,
         outcomes=outcomes,
     )
-    body = summary + "\n\n---\n\n" + "\n\n".join(lines) if lines else summary
+    ru_suggestions = format_ru_reviewer_suggestions(
+        [(o.ru_path, o.ru_source_bugs) for o in outcomes if o.ru_source_bugs]
+    )
+    parts = [summary]
+    if ru_suggestions:
+        parts.append(ru_suggestions)
+    if lines:
+        parts.append("\n\n".join(lines))
+    body = "\n\n---\n\n".join(parts)
     return body, repaired_paths, outcomes

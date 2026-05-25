@@ -72,9 +72,11 @@ def test_heading_count_mismatch():
 
 
 def test_fence_unbalanced_detected():
+    ru = "```text\nhello\n```\n"
     en = "```text\nhello\n"  # opening only
-    f = _check_fence_unbalanced(source="", translation=en)
+    f = _check_fence_unbalanced(source=ru, translation=en)
     assert f is not None and f.severity == "critical"
+    assert f.rule == "fence_parity"
 
 
 def test_list_tabs_mismatch():

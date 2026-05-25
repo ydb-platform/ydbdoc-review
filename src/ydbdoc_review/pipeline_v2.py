@@ -34,10 +34,21 @@ from ydbdoc_review.llm import (
     verify_translation_pair,
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+from ydbdoc_review.fence_repair import (
+    repair_fences_from_source,
+    review_mentions_fence_structure,
+)
+from ydbdoc_review.ru_source_bugs import RuSourceBug, detect_ru_source_bugs
+from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
+)
+from ydbdoc_review.translate_scope import (
+    TranslateScope,
+    compute_translate_scope,
+    h3_from_unit_label,
 )
 
 _CYRILLIC_RE = re.compile(r"[Ѐ-ӿѐ-џ]")
@@ -174,6 +185,17 @@ def translate_unit(
     source_lang: str,
     target_lang: str,
 ) -> DocumentUnit:
+    if unit.kind == "tabs":
+        body = translate_tabs_block(
+            settings,
+            unit.text,
+            source_path=source_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            label=unit.label,
+        )
+        return DocumentUnit(unit.kind, body, unit.label)
+
     if unit.kind == "fence":
         if not source_lang.lower().startswith("rus"):
             # EN→RU comment translation is rare; skip and let fence pass verbatim.
@@ -229,14 +251,43 @@ def translate_document(
     source_full: str,
     source_lang: str,
     target_lang: str,
+    en_on_main: str | None = None,
+    ru_pr_diff: str | None = None,
 ) -> tuple[str, str]:
     """Segment-based translation. Returns ``(translated_markdown, mode_label)``."""
+    scope = compute_translate_scope(
+        ru_text=source_full,
+        en_on_main=en_on_main,
+        ru_pr_diff=ru_pr_diff,
+    )
     units = parse_document_units(source_full, doc_label=source_path)
+    en_units: list[DocumentUnit] | None = None
+    if scope.mode == "sections" and en_on_main:
+        en_units = parse_document_units(en_on_main, doc_label=source_path)
+        if len(en_units) != len(units):
+            scope = TranslateScope(mode="full", changed_h3=frozenset())
+            en_units = None
+
+    mode_bits = [f"segment-{len(units)}-units"]
+    if scope.mode == "sections" and scope.changed_h3:
+        mode_bits.append(f"scoped-h3={','.join(str(x) for x in sorted(scope.changed_h3))}")
+
     fm_log(
-        f"translate {source_lang}→{target_lang} | {source_path} | {len(units)} unit(s)"
+        f"translate {source_lang}→{target_lang} | {source_path} | "
+        f"{len(units)} unit(s) | {scope.mode}"
     )
     translated: list[DocumentUnit] = []
     for i, unit in enumerate(units, start=1):
+        h3 = h3_from_unit_label(unit.label)
+        if (
+            scope.mode == "sections"
+            and en_units is not None
+            and h3 is not None
+            and h3 not in scope.changed_h3
+        ):
+            fm_log(f"unit {i}/{len(units)} | keep EN | {unit.label}")
+            translated.append(en_units[i - 1])
+            continue
         fm_log(f"unit {i}/{len(units)} | {unit.kind} | {unit.label}")
         translated.append(
             translate_unit(
@@ -254,7 +305,7 @@ def translate_document(
         else:
             merged = restore_markdown_links_from_ru(source_full, merged)
             merged = apply_deterministic_cli_fixes(merged, ru_source=source_full)
-    return merged, f"segment-{len(units)}-units"
+    return merged, "+".join(mode_bits)
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +448,8 @@ class PairQaOutcome:
     repair_error: str | None
     findings: list[Finding] = field(default_factory=list)
     fix_skipped_notes: list[str] = field(default_factory=list)
+    fence_repair_applied: bool = False
+    ru_source_bugs: list[RuSourceBug] = field(default_factory=list)
 
 
 def run_pair_qa(
@@ -424,6 +477,12 @@ def run_pair_qa(
     repair_error: str | None = None
     fix_skipped_notes: list[str] = []
     confirmation_md: str | None = None
+    ru_bugs = (
+        detect_ru_source_bugs(source_text, file_path=ru_path)
+        if source_lang.lower().startswith("rus")
+        else []
+    )
+    fence_repair_applied = False
 
     fm_log(f"QA compare | {ru_path}")
     try:
@@ -459,6 +518,7 @@ def run_pair_qa(
             repair_skip_reason="api_error",
             confirmation_md=None,
             repair_error=str(exc),
+            ru_source_bugs=ru_bugs,
             findings=_safe_heuristics(
                 settings,
                 source=source_text,
@@ -544,6 +604,20 @@ def run_pair_qa(
         else:
             repair_skip_reason = repair_skip_reason or "модель не вернула fixes"
 
+        if review_mentions_fence_structure(review_md) or fix_skipped_notes:
+            repaired, applied = repair_fences_from_source(source_text, current)
+            if applied:
+                current = _apply_en_qa_postprocess(
+                    repaired,
+                    source_text=source_text,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                )
+                fence_repair_applied = True
+                repair_applied = True
+                repair_skip_reason = None
+                fm_log(f"QA fence repair from SOURCE | {ru_path}")
+
         if repair_applied:
             fm_log(f"QA re-validate | {ru_path}")
             try:
@@ -578,6 +652,26 @@ def run_pair_qa(
         target_lang=target_lang,
         label=ru_path,
     )
+    if any(f.rule in ("fence_parity", "fence_unbalanced") for f in findings):
+        repaired, applied = repair_fences_from_source(source_text, current)
+        if applied:
+            current = _apply_en_qa_postprocess(
+                repaired,
+                source_text=source_text,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
+            fence_repair_applied = True
+            repair_applied = True
+            findings = _safe_heuristics(
+                settings,
+                source=source_text,
+                translation=current,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                label=ru_path,
+            )
+            fm_log(f"QA fence repair (heuristic) | {ru_path}")
 
     return current, PairQaOutcome(
         ru_path=ru_path,
@@ -591,6 +685,8 @@ def run_pair_qa(
         repair_error=repair_error,
         findings=findings,
         fix_skipped_notes=fix_skipped_notes,
+        fence_repair_applied=fence_repair_applied,
+        ru_source_bugs=ru_bugs,
     )
 
 
@@ -678,6 +774,16 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
 
     show_skipped = _should_show_skipped_fixes(outcome)
 
+    if outcome.fence_repair_applied:
+        lines.append("**Исправления:** восстановлены fenced-блоки из SOURCE (RU).")
+        lines.append("")
+
+    if outcome.ru_source_bugs:
+        lines.append("**Баги в RU SOURCE (исправить в русской доке):**")
+        for b in outcome.ru_source_bugs:
+            lines.append(f"- {b.detail} → `{b.suggested_fix}`")
+        lines.append("")
+
     if outcome.repair_attempted:
         if outcome.repair_applied:
             lines.append(
@@ -755,6 +861,17 @@ def format_translation_pr_summary(
         "ниже сводный вердикт критика и список найденных проблем."
     )
     lines.append("")
+
+    if by_verdict[VERDICT_REJECT]:
+        lines.append(
+            "## 🔴 **Статус: не мержить без доработки**"
+        )
+        lines.append("")
+        lines.append(
+            "Есть файлы с вердиктом **НЕ ПРИНИМАТЬ** после последнего QA "
+            "(критик или повторная проверка после fix-diff)."
+        )
+        lines.append("")
 
     if by_verdict[VERDICT_ACCEPT]:
         lines.append(

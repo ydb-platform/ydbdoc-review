@@ -21,11 +21,6 @@ def fix_yandex_cloud_links_for_en(text: str) -> str:
     return _YANDEX_RU_DOCS_RE.sub(r"\1/en/docs/", text)
 
 
-def fix_config_dir_spacing(text: str) -> str:
-    """``--config-dir/path`` → ``--config-dir /path``."""
-    return re.sub(r"--config-dir/(\S+)", r"--config-dir /\1", text)
-
-
 _EXPLAIN_EN_WRONG = (
     ("ydb table query explain --ast", "ydb sql --explain-ast"),
     ("ydb table query explain", "ydb sql --explain"),
@@ -183,8 +178,7 @@ def apply_deterministic_cli_fixes(
 ) -> str:
     """Fix known CLI copy-paste regressions without calling an LLM."""
     _ = en_main
-    out = fix_config_dir_spacing(text)
-    out = fix_cli_explain_commands(out)
+    out = fix_cli_explain_commands(text)
     if ru_source:
         out = apply_semantic_fixes_from_ru(ru_source, out)
     return out

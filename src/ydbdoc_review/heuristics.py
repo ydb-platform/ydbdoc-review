@@ -206,21 +206,59 @@ def _check_heading_count_mismatch(
     )
 
 
+def _fence_delimiter_count(text: str) -> int:
+    return sum(
+        1 for line in text.splitlines() if line.lstrip().startswith("```")
+    )
+
+
+def _check_fence_parity(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    """RU↔EN fenced-block parity: count, closers, and EN delimiter balance."""
+    from ydbdoc_review.fence_repair import extract_fence_blocks
+
+    src_blocks = extract_fence_blocks(source)
+    trn_blocks = extract_fence_blocks(translation)
+    src_ticks = _fence_delimiter_count(source)
+    trn_ticks = _fence_delimiter_count(translation)
+    problems: list[str] = []
+
+    if trn_ticks % 2 != 0:
+        problems.append(
+            f"в TRANSLATION нечётное число строк с ``` ({trn_ticks})"
+        )
+    if src_ticks % 2 != 0:
+        problems.append(
+            f"в SOURCE нечётное число строк с ``` ({src_ticks})"
+        )
+    if len(src_blocks) != len(trn_blocks):
+        problems.append(
+            f"число закрытых fenced-блоков SOURCE={len(src_blocks)}, "
+            f"TRANSLATION={len(trn_blocks)}"
+        )
+    if trn_ticks % 2 == 0 and trn_ticks > 0:
+        expected_closed = trn_ticks // 2
+        if len(trn_blocks) < expected_closed:
+            problems.append(
+                f"в TRANSLATION незакрытые блоки: ```×{trn_ticks}, "
+                f"закрытых блоков {len(trn_blocks)}"
+            )
+    if not problems:
+        return None
+    return Finding(
+        rule="fence_parity",
+        severity="critical",
+        location="fenced-блоки",
+        detail="; ".join(problems[:4]),
+    )
+
+
 def _check_fence_unbalanced(
     *, source: str, translation: str, **_: Any
 ) -> Finding | None:
-    n_open = 0
-    for line in translation.split("\n"):
-        if line.lstrip().startswith("```"):
-            n_open += 1
-    if n_open % 2 == 0:
-        return None
-    return Finding(
-        rule="fence_unbalanced",
-        severity="critical",
-        location="весь файл",
-        detail=f"найдено {n_open} строк с тройным бэктиком (нечётное число)",
-    )
+    """Backward-compatible alias: delegates to ``fence_parity``."""
+    return _check_fence_parity(source=source, translation=translation)
 
 
 _SKIP_FENCE_CODE_LINE = re.compile(r"^SELECT\s*$", re.IGNORECASE)
@@ -541,6 +579,48 @@ def _check_wikipedia_ru_in_en(*, source: str, translation: str, **_: Any) -> Fin
     )
 
 
+def _check_markdown_link_path_parity(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    from ydbdoc_review.markdown_link_paths import extract_relative_link_refs
+
+    src_refs = extract_relative_link_refs(source)
+    trn_refs = extract_relative_link_refs(translation)
+    if not src_refs:
+        return None
+    if len(src_refs) != len(trn_refs):
+        return Finding(
+            rule="markdown_link_path_parity",
+            severity="critical",
+            location="markdown-ссылки",
+            detail=(
+                f"число относительных ссылок SOURCE={len(src_refs)}, "
+                f"TRANSLATION={len(trn_refs)}"
+            ),
+        )
+    problems: list[str] = []
+    for i, (s, t) in enumerate(zip(src_refs, trn_refs, strict=True), start=1):
+        if s.depth != t.depth:
+            problems.append(
+                f"#{i}: глубина `../` SOURCE={s.depth} TRANSLATION={t.depth} "
+                f"({s.raw!r} vs {t.raw!r})"
+            )
+        elif s.suffix != t.suffix:
+            problems.append(
+                f"#{i}: путь SOURCE={s.suffix!r} TRANSLATION={t.suffix!r}"
+            )
+        if len(problems) >= 3:
+            break
+    if not problems:
+        return None
+    return Finding(
+        rule="markdown_link_path_parity",
+        severity="critical",
+        location="относительные ссылки",
+        detail="; ".join(problems),
+    )
+
+
 def _check_broken_markdown_link(
     *, source: str, translation: str, **_: Any
 ) -> Finding | None:
@@ -594,7 +674,9 @@ _DETERMINISTIC: dict[str, Callable[..., Finding | None]] = {
     "file_length_mismatch": _check_file_length_mismatch,
     "heading_count_mismatch": _check_heading_count_mismatch,
     "fence_unbalanced": _check_fence_unbalanced,
+    "fence_parity": _check_fence_parity,
     "fence_code_line_parity": _check_fence_code_line_parity,
+    "markdown_link_path_parity": _check_markdown_link_path_parity,
     "list_tabs_mismatch": _check_list_tabs_mismatch,
     "liquid_tags_balance": _check_liquid_tags_balance,
     "wikipedia_ru_in_en": _check_wikipedia_ru_in_en,
