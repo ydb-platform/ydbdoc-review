@@ -86,6 +86,18 @@ report_message: |
 ```
 
 ```yaml
+name: tab_labels_parity
+severity: critical
+applies_to: any
+description: |
+  Внутри каждого ``{% list tabs %}`` список меток вкладок (строки ``- mirror-3-dc-3nodes``,
+  ``- block-4-2``, ``- OSS``, …) в TRANSLATION должен совпадать с SOURCE по порядку и тексту.
+  Метки вкладок не переводятся.
+report_message: |
+  Метки вкладок list tabs не совпадают с SOURCE: {detail}.
+```
+
+```yaml
 name: list_tabs_mismatch
 severity: critical
 applies_to: any

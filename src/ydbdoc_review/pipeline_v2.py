@@ -39,10 +39,12 @@ from ydbdoc_review.fence_repair import (
     review_mentions_fence_structure,
 )
 from ydbdoc_review.ru_source_bugs import RuSourceBug, detect_ru_source_bugs
+from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     apply_en_postprocess_from_ru,
+    fix_dashed_cli_flags,
     fix_yandex_cloud_links_for_en,
 )
 from ydbdoc_review.translate_scope import (
@@ -471,6 +473,8 @@ def run_pair_qa(
     Returns ``(final_translation_text, outcome)``.
     """
     current = translated_text
+    current, _ = repair_tab_labels_from_source(source_text, current)
+    current = fix_dashed_cli_flags(current)
     repair_attempted = False
     repair_applied = False
     repair_skip_reason: str | None = None
@@ -618,6 +622,17 @@ def run_pair_qa(
                 repair_skip_reason = None
                 fm_log(f"QA fence repair from SOURCE | {ru_path}")
 
+        current, tab_fixed = repair_tab_labels_from_source(source_text, current)
+        if tab_fixed:
+            current = _apply_en_qa_postprocess(
+                current,
+                source_text=source_text,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
+            repair_applied = True
+            fm_log(f"QA tab-label repair from SOURCE | {ru_path}")
+
         if repair_applied:
             fm_log(f"QA re-validate | {ru_path}")
             try:
@@ -652,7 +667,10 @@ def run_pair_qa(
         target_lang=target_lang,
         label=ru_path,
     )
-    if any(f.rule in ("fence_parity", "fence_unbalanced") for f in findings):
+    if any(
+        f.rule in ("fence_parity", "fence_unbalanced", "tab_labels_parity")
+        for f in findings
+    ):
         repaired, applied = repair_fences_from_source(source_text, current)
         if applied:
             current = _apply_en_qa_postprocess(
@@ -662,6 +680,15 @@ def run_pair_qa(
                 target_lang=target_lang,
             )
             fence_repair_applied = True
+        current, tab_fixed = repair_tab_labels_from_source(source_text, current)
+        if tab_fixed or applied:
+            if tab_fixed:
+                current = _apply_en_qa_postprocess(
+                    current,
+                    source_text=source_text,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                )
             repair_applied = True
             findings = _safe_heuristics(
                 settings,
@@ -671,7 +698,7 @@ def run_pair_qa(
                 target_lang=target_lang,
                 label=ru_path,
             )
-            fm_log(f"QA fence repair (heuristic) | {ru_path}")
+            fm_log(f"QA structure repair (heuristic) | {ru_path}")
 
     return current, PairQaOutcome(
         ru_path=ru_path,
@@ -732,6 +759,19 @@ def final_verdict(outcome: PairQaOutcome) -> str:
     ):
         verdict = VERDICT_ACCEPT_WITH_NOTES
     if has_critical(outcome.findings) and verdict == VERDICT_ACCEPT:
+        verdict = VERDICT_ACCEPT_WITH_NOTES
+    if (
+        outcome.repair_applied
+        and not has_critical(outcome.findings)
+        and initial == VERDICT_REJECT
+        and verdict == VERDICT_REJECT
+        and not (
+            outcome.confirmation_md
+            and parse_verdict(outcome.confirmation_md) == VERDICT_REJECT
+        )
+    ):
+        # Fix-diff + deterministic repairs applied; heuristics clean but critic
+        # re-validate failed (API/token limits) — do not keep a hard reject.
         verdict = VERDICT_ACCEPT_WITH_NOTES
     return verdict
 

@@ -367,6 +367,37 @@ _CUT_OPEN_RE = re.compile(r"\{%\s*cut\b", re.IGNORECASE)
 _CUT_CLOSE_RE = re.compile(r"\{%\s*endcut\s*%\}", re.IGNORECASE)
 
 
+def _check_tab_labels_parity(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    from ydbdoc_review.tabs_repair import _tab_label_lines
+
+    src = _tab_label_lines(source)
+    trn = _tab_label_lines(translation)
+    if not src:
+        return None
+    if src == trn:
+        return None
+    if len(src) != len(trn):
+        missing = [x for x in src if x not in trn][:3]
+        return Finding(
+            rule="tab_labels_parity",
+            severity="critical",
+            location="{% list tabs %}",
+            detail=(
+                f"меток вкладок SOURCE={len(src)}, TRANSLATION={len(trn)}"
+                + (f"; нет в EN: {'; '.join(missing)}" if missing else "")
+            ),
+        )
+    pairs = [f"{a}!={b}" for a, b in zip(src, trn, strict=True) if a != b][:3]
+    return Finding(
+        rule="tab_labels_parity",
+        severity="critical",
+        location="{% list tabs %}",
+        detail="; ".join(pairs),
+    )
+
+
 def _check_list_tabs_mismatch(
     *, source: str, translation: str, **_: Any
 ) -> Finding | None:
@@ -678,6 +709,7 @@ _DETERMINISTIC: dict[str, Callable[..., Finding | None]] = {
     "fence_code_line_parity": _check_fence_code_line_parity,
     "markdown_link_path_parity": _check_markdown_link_path_parity,
     "list_tabs_mismatch": _check_list_tabs_mismatch,
+    "tab_labels_parity": _check_tab_labels_parity,
     "liquid_tags_balance": _check_liquid_tags_balance,
     "wikipedia_ru_in_en": _check_wikipedia_ru_in_en,
     "broken_markdown_link": _check_broken_markdown_link,

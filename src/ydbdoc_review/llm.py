@@ -365,7 +365,7 @@ def _qa_extra_blocks(
     return "\n\n".join(parts) + "\n\n"
 
 
-def verify_translation_pair(
+def _verify_translation_pair_once(
     settings: Settings,
     *,
     source_lang: str,
@@ -377,8 +377,8 @@ def verify_translation_pair(
     source_pr_number: int | None = None,
     ru_pr_diff: str | None = None,
     en_on_main: str | None = None,
+    chunk_header: str = "",
 ) -> str:
-    """Critic compare: returns markdown report with one of three verdicts."""
     instructions = load_verify_translation_instructions(settings)
     cap = _qa_input_cap()
     src_c = _cap_body(source_text.strip(), cap)
@@ -391,6 +391,7 @@ def verify_translation_pair(
     )
     user_input = (
         f"Files: `{ru_path}` (SOURCE, {source_lang}) ↔ `{en_path}` (TRANSLATION, {target_lang})\n\n"
+        f"{chunk_header}"
         f"{extra}"
         f"--- SOURCE BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
         f"--- TRANSLATION BEGIN ---\n{out_c}\n--- TRANSLATION END ---\n"
@@ -406,6 +407,69 @@ def verify_translation_pair(
         detail=ru_path,
     )
     return _strip_code_fence(raw.strip())
+
+
+def verify_translation_pair(
+    settings: Settings,
+    *,
+    source_lang: str,
+    target_lang: str,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    translated_text: str,
+    source_pr_number: int | None = None,
+    ru_pr_diff: str | None = None,
+    en_on_main: str | None = None,
+) -> str:
+    """Critic compare: returns markdown report with one of three verdicts."""
+    from ydbdoc_review.fm_progress import fm_log
+    from ydbdoc_review.qa_chunks import (
+        build_qa_chunks,
+        chunk_context_header,
+        merge_chunk_reports,
+        needs_qa_chunking,
+    )
+
+    if not needs_qa_chunking(source_text, translated_text):
+        return _verify_translation_pair_once(
+            settings,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            source_pr_number=source_pr_number,
+            ru_pr_diff=ru_pr_diff,
+            en_on_main=en_on_main,
+        )
+
+    chunks = build_qa_chunks(source_text, translated_text, doc_label=ru_path)
+    fm_log(f"QA compare chunked | {ru_path} | {len(chunks)} chunk(s)")
+    reports: list[str] = []
+    labels: list[str] = []
+    for chunk in chunks:
+        fm_log(f"QA compare chunk {chunk.index}/{chunk.total} | {chunk.label}")
+        extra_en_main = en_on_main if chunk.index == 1 else None
+        extra_diff = ru_pr_diff if chunk.index == 1 else None
+        reports.append(
+            _verify_translation_pair_once(
+                settings,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=chunk.source_text,
+                translated_text=chunk.translation_text,
+                source_pr_number=source_pr_number if chunk.index == 1 else None,
+                ru_pr_diff=extra_diff,
+                en_on_main=extra_en_main,
+                chunk_header=chunk_context_header(chunk),
+            )
+        )
+        labels.append(chunk.label)
+    return merge_chunk_reports(reports, file_label=ru_path, chunk_labels=labels)
 
 
 def fix_translation_pair(
@@ -472,6 +536,55 @@ def fix_translation_pair(
     return {"fixes": cleaned}
 
 
+def _revalidate_translation_pair_once(
+    settings: Settings,
+    *,
+    source_lang: str,
+    target_lang: str,
+    ru_path: str,
+    en_path: str,
+    source_text: str,
+    translated_text: str,
+    review_before: str,
+    fix_skipped_notes: list[str] | None = None,
+    ru_pr_diff: str | None = None,
+    chunk_header: str = "",
+) -> str:
+    instructions = load_revalidate_instructions(settings)
+    cap = _qa_input_cap()
+    src_c = _cap_body(source_text.strip(), cap)
+    tr_c = _cap_body(translated_text.strip(), cap)
+    rev_c = _cap_body(review_before.strip(), min(cap, 12_000))
+    extra = _qa_extra_blocks(cap=cap, ru_pr_diff=ru_pr_diff, en_on_main=None)
+    skipped_block = ""
+    if fix_skipped_notes:
+        skipped_block = (
+            "\n--- FIX_SKIPPED BEGIN ---\n"
+            + "\n".join(f"- {n}" for n in fix_skipped_notes)
+            + "\n--- FIX_SKIPPED END ---\n\n"
+        )
+    user_input = (
+        f"Files: `{ru_path}` (SOURCE, {source_lang}) ↔ `{en_path}` (TRANSLATION, {target_lang})\n\n"
+        f"{chunk_header}"
+        f"{extra}"
+        f"{skipped_block}"
+        f"--- SOURCE BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
+        f"--- TRANSLATION BEGIN ---\n{tr_c}\n--- TRANSLATION END ---\n\n"
+        f"--- REVIEW_BEFORE BEGIN ---\n{rev_c}\n--- REVIEW_BEFORE END ---\n"
+    )
+    raw = call_yandex_responses(
+        settings,
+        settings.model_translation_verify,
+        instructions=instructions.strip(),
+        user_input=user_input,
+        max_output_tokens=_qa_output_tokens(),
+        model_fallbacks=translation_verify_model_fallbacks(),
+        operation="revalidate",
+        detail=ru_path,
+    )
+    return _strip_code_fence(raw.strip())
+
+
 def revalidate_translation_pair(
     settings: Settings,
     *,
@@ -486,35 +599,49 @@ def revalidate_translation_pair(
     ru_pr_diff: str | None = None,
     en_on_main: str | None = None,
 ) -> str:
-    """Translator re-validates after fixer. Uses prompt 07; same template as prompt 05."""
-    instructions = load_revalidate_instructions(settings)
-    cap = _qa_input_cap()
-    src_c = _cap_body(source_text.strip(), cap)
-    tr_c = _cap_body(translated_text.strip(), cap)
-    rev_c = _cap_body(review_before.strip(), min(cap, 20_000))
-    extra = _qa_extra_blocks(cap=cap, ru_pr_diff=ru_pr_diff, en_on_main=en_on_main)
-    skipped_block = ""
-    if fix_skipped_notes:
-        skipped_block = (
-            "\n--- FIX_SKIPPED BEGIN ---\n"
-            + "\n".join(f"- {n}" for n in fix_skipped_notes)
-            + "\n--- FIX_SKIPPED END ---\n\n"
+    """Critic re-validates after fixer (chunked when inputs are large)."""
+    from ydbdoc_review.fm_progress import fm_log
+    from ydbdoc_review.qa_chunks import (
+        build_qa_chunks,
+        chunk_context_header,
+        merge_chunk_reports,
+        needs_qa_chunking,
+    )
+
+    _ = en_on_main
+    if not needs_qa_chunking(source_text, translated_text):
+        return _revalidate_translation_pair_once(
+            settings,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ru_path=ru_path,
+            en_path=en_path,
+            source_text=source_text,
+            translated_text=translated_text,
+            review_before=review_before,
+            fix_skipped_notes=fix_skipped_notes,
+            ru_pr_diff=ru_pr_diff,
         )
-    user_input = (
-        f"Files: `{ru_path}` (SOURCE, {source_lang}) ↔ `{en_path}` (TRANSLATION, {target_lang})\n\n"
-        f"{extra}"
-        f"{skipped_block}"
-        f"--- SOURCE BEGIN ---\n{src_c}\n--- SOURCE END ---\n\n"
-        f"--- TRANSLATION BEGIN ---\n{tr_c}\n--- TRANSLATION END ---\n\n"
-        f"--- REVIEW_BEFORE BEGIN ---\n{rev_c}\n--- REVIEW_BEFORE END ---\n"
-    )
-    raw = call_yandex_responses(
-        settings,
-        settings.model_translate,
-        instructions=instructions.strip(),
-        user_input=user_input,
-        max_output_tokens=_qa_output_tokens(),
-        operation="revalidate",
-        detail=ru_path,
-    )
-    return _strip_code_fence(raw.strip())
+
+    chunks = build_qa_chunks(source_text, translated_text, doc_label=ru_path)
+    fm_log(f"QA revalidate chunked | {ru_path} | {len(chunks)} chunk(s)")
+    reports: list[str] = []
+    labels: list[str] = []
+    for chunk in chunks:
+        reports.append(
+            _revalidate_translation_pair_once(
+                settings,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=chunk.source_text,
+                translated_text=chunk.translation_text,
+                review_before=review_before,
+                fix_skipped_notes=fix_skipped_notes if chunk.index == 1 else None,
+                ru_pr_diff=ru_pr_diff if chunk.index == 1 else None,
+                chunk_header=chunk_context_header(chunk),
+            )
+        )
+        labels.append(chunk.label)
+    return merge_chunk_reports(reports, file_label=ru_path, chunk_labels=labels)

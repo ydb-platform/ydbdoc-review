@@ -158,12 +158,25 @@ def _heading_anchor_lines(text: str) -> list[tuple[int, str, str | None]]:
     return result
 
 
+def fix_dashed_cli_flags(text: str) -> str:
+    """``-- uuid`` → ``--uuid`` (space wrongly inserted inside a flag name)."""
+    return re.sub(
+        r"(?<![\w-])--\s+([a-z][a-z0-9-]*)(\s+(?=<|\$|/|[A-Za-z0-9_./]))",
+        r"--\1\2",
+        text,
+    )
+
+
 def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     """Deterministic EN cleanup after segment merge (no LLM)."""
     from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
 
     out = restore_markdown_links_from_ru(ru_source, en_text)
     out = apply_deterministic_cli_fixes(out, ru_source=ru_source)
+    out = fix_dashed_cli_flags(out)
+    from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
+
+    out, _ = repair_tab_labels_from_source(ru_source, out)
     out = fix_yandex_cloud_links_for_en(out)
     out = fix_wikipedia_links_for_en(out)
     out = fix_heading_anchors_from_ru(ru_source, out)

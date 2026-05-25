@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ydbdoc_review.config import Settings
-from ydbdoc_review.document_segments import _is_fence_toggle, _read_fence
+from ydbdoc_review.tabs_repair import is_tab_label_line
 
 
 def _translate_prose_blob(
@@ -92,6 +92,11 @@ def translate_tabs_block(
             flush_prose()
             block, i = _read_fence(lines, i)
             out.append(block)
+            continue
+        if is_tab_label_line(line):
+            flush_prose()
+            out.append(line.rstrip())
+            i += 1
             continue
         prose_buf.append(line)
         i += 1

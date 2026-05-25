@@ -20,10 +20,22 @@
 
 | Шаг | FM-вызовов | Промпт | Что |
 |-----|------------|--------|-----|
-| Compare | 1 | `05_verify_translation.txt` | Критик возвращает вердикт `ПРИНИМАТЬ` / `ПРИНИМАТЬ С ОГОВОРКАМИ` / `НЕ ПРИНИМАТЬ` |
+| Compare | 1×N | `05_verify_translation.txt` | Критик сравнивает RU↔EN; при больших файлах — **N пересекающихся чанков** (см. ниже) |
 | Fix-diff | 0–1 | `06_fix_translation.txt` | Только при `НЕ ПРИНИМАТЬ`. Критик возвращает JSON `{"fixes": [{find, replace, reason}]}`; применяется CLI-ом через точный `str.replace` |
-| Re-validate | 0–1 | `07_confirm_repair.txt` | Только если fix-diff применился. Переводчик проверяет результат тем же шаблоном вердикта, что и критик |
+| Re-validate | 0–1×N | `07_confirm_repair.txt` | Только если fix-diff применился; при больших файлах — chunked, модель **критика** |
 | Heuristics | 0–1 LLM + детерминированные | `09_quality_heuristics.md` | Запускаются всегда на финальном EN; детерминированные правила в Python, остальные — один LLM-вызов |
+
+### Chunked QA (большие файлы)
+
+Если `len(RU)+len(EN) > 42 000` символов (env: `YDBDOC_QA_CHUNK_THRESHOLD_CHARS`), compare и re-validate идут **по чанкам**:
+
+1. RU и EN режутся на одни и те же **units** (`prose` / `table` / `fence` / `tabs` / `diplodoc` из `parse_document_units`).
+2. Units собираются в чанки до лимита `YDBDOC_QA_CHUNK_MAX_CHARS` (по умолчанию 18 000) на пару RU+EN.
+3. **Перекрытие:** последний unit чанка *k* повторяется первым unit чанка *k+1* (`YDBDOC_QA_CHUNK_OVERLAP_UNITS=1`), чтобы блокеры на границе секций не терялись.
+4. Если число units RU≠EN — fallback: скользящее окно по **строкам** с overlap ~12% высоты окна.
+5. Вердикт по файлу = **худший** из чанков; отчёты склеиваются в один markdown.
+
+Re-validate после fix-diff использует ту же схему и модель **критика** (`translation_verify`), без `EN_ON_MAIN` в prompt (экономия токенов).
 
 ## Модели
 
