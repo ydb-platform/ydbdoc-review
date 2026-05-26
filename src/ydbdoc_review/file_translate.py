@@ -20,13 +20,12 @@ from ydbdoc_review.llm import (
     clamp_max_output_tokens,
     load_translate_file_instructions,
 )
+from ydbdoc_review.list_tabs_blocks import split_preserving_list_tabs
+from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
 )
-from ydbdoc_review.list_tabs_blocks import split_preserving_list_tabs
-from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
-from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_scope import TranslateScope, compute_translate_scope
 
 _STRIP_REQUEST_HEADER_RE = re.compile(
@@ -164,10 +163,14 @@ def build_translate_chunks(
             )
         ]
 
+    translatable = [r for r in regions if r.kind != "tabs"]
+    if not translatable:
+        return []
+
     chunks: list[TranslateChunk] = []
     batch_regions: list[StructureRegion] = []
-    batch_start = regions[0].start_line
-    batch_end = regions[0].end_line
+    batch_start = translatable[0].start_line
+    batch_end = translatable[0].end_line
     batch_chars = 0
 
     def flush_batch() -> None:
@@ -188,7 +191,7 @@ def build_translate_chunks(
         batch_regions = []
         batch_chars = 0
 
-    for reg in regions:
+    for reg in translatable:
         reg_text = _slice_lines(text, reg.start_line, reg.end_line)
         reg_len = len(reg_text)
         if batch_regions and batch_chars + reg_len > budget:
@@ -337,8 +340,6 @@ def _translate_prose_with_plan(
             )
         )
     merged = _join_translated_chunks(parts)
-    if source_is_russian and target_lang.strip().lower() in ("english", "en"):
-        merged = apply_en_postprocess_from_ru(source_text, merged)
     return merged, len(chunks)
 
 
@@ -396,13 +397,7 @@ def translate_text_with_plan(
         )
         llm_calls += n
         parts.append(translated)
-    merged = _join_text_segments(parts)
-    if source_lang.lower().startswith("rus") and target_lang.strip().lower() in (
-        "english",
-        "en",
-    ):
-        merged, _ = repair_tab_labels_from_source(source_text, merged)
-    return merged, llm_calls
+    return _join_text_segments(parts), llm_calls
 
 
 def _merge_h3_sections(
@@ -473,8 +468,8 @@ def translate_document_file_level(
             else:
                 out_secs[idx] = en_secs.get(idx, ru_secs.get(idx, ""))
         merged = _merge_h3_sections(out_secs, max_index=max_idx)
-        merged = apply_en_postprocess_from_ru(source_full, merged)
-        merged, _ = repair_tab_labels_from_source(source_full, merged)
+        if source_is_russian and target_lang.strip().lower() in ("english", "en"):
+            merged = apply_en_postprocess_from_ru(source_full, merged)
         return (
             merged,
             f"file-plan-scoped-h3={','.join(str(x) for x in sorted(scope.changed_h3))}"
@@ -496,6 +491,8 @@ def translate_document_file_level(
         source_lang=source_lang,
         target_lang=target_lang,
     )
+    if source_is_russian and target_lang.strip().lower() in ("english", "en"):
+        merged = apply_en_postprocess_from_ru(source_full, merged)
     mode = f"file-plan-{len(regions)}-regions+llm={llm_calls}"
     if chunks and chunks[0].total > 1:
         mode += f"+requests={chunks[0].total}"
