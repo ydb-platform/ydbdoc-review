@@ -1,4 +1,4 @@
-"""Deterministic fence repair: restore ``` structure from SOURCE."""
+"""Deterministic fence repair: restore ``` structure from SOURCE (EN body preserved)."""
 
 from __future__ import annotations
 
@@ -32,11 +32,45 @@ def _fence_blocks_balanced(text: str) -> bool:
     return n % 2 == 0 and n > 0
 
 
-def repair_fences_from_source(source: str, translation: str) -> tuple[str, bool]:
-    """Replace EN fence blocks with SOURCE blocks (code verbatim, structure fixed).
+def _fence_positions(lines: list[str]) -> list[tuple[int, int]]:
+    """Half-open line ranges ``[start, end)`` for each fence region starting with ```."""
+    positions: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        if not _is_fence_toggle(lines[i]):
+            i += 1
+            continue
+        start = i
+        i += 1
+        while i < len(lines):
+            if _is_fence_toggle(lines[i]) and i > start:
+                i += 1
+                break
+            i += 1
+        positions.append((start, i))
+    return positions
 
-    Returns ``(new_translation, applied)``. Only runs when block counts match and
-    SOURCE fences are balanced.
+
+def _inner_line_count(block: str) -> int:
+    lines = block.splitlines()
+    if len(lines) < 2:
+        return 0
+    end = len(lines) - 1 if _is_fence_toggle(lines[-1]) else len(lines)
+    return max(0, end - 1)
+
+
+def _closing_fence_line(block: str) -> str:
+    lines = block.splitlines()
+    if lines and _is_fence_toggle(lines[-1]):
+        return lines[-1]
+    return "```"
+
+
+def repair_fences_from_source(source: str, translation: str) -> tuple[str, bool]:
+    """Fix EN fence delimiters using SOURCE; keep translated lines inside blocks.
+
+    Does **not** replace fenced code/config with RU verbatim. Inserts missing closing
+    ``` lines and, when needed, closes a block before prose that leaked into the region.
     """
     src_blocks = extract_fence_blocks(source)
     if not src_blocks:
@@ -44,37 +78,40 @@ def repair_fences_from_source(source: str, translation: str) -> tuple[str, bool]
     if not all(_fence_blocks_balanced(b) for b in src_blocks):
         return translation, False
 
-    trn_blocks = extract_fence_blocks(translation)
-    if len(trn_blocks) != len(src_blocks):
-        return translation, False
+    lines = translation.splitlines()
+    positions = _fence_positions(lines)
+    insertions: list[tuple[int, str]] = []
+    applied = False
 
-    out_lines = translation.splitlines()
-    trn_positions: list[tuple[int, int]] = []
-    i = 0
-    while i < len(out_lines):
-        if not _is_fence_toggle(out_lines[i]):
-            i += 1
+    for idx, (start, end) in enumerate(positions):
+        block_lines = lines[start:end]
+        if not block_lines:
             continue
-        start = i
-        i += 1
-        while i < len(out_lines):
-            if _is_fence_toggle(out_lines[i]) and i > start:
-                i += 1
-                break
-            i += 1
-        trn_positions.append((start, i))
+        has_closer = len(block_lines) >= 2 and _is_fence_toggle(block_lines[-1])
+        if has_closer:
+            continue
+        src_block = src_blocks[min(idx, len(src_blocks) - 1)]
+        closer = _closing_fence_line(src_block)
+        src_inner_n = _inner_line_count(src_block)
+        insert_at = start + 1 + src_inner_n
+        if insert_at > end:
+            insert_at = end
+        insertions.append((insert_at, closer))
+        applied = True
 
-    if len(trn_positions) != len(src_blocks):
+    trn_ticks = sum(1 for line in lines if _is_fence_toggle(line))
+    if trn_ticks % 2 == 1 and not applied:
+        closer = _closing_fence_line(src_blocks[-1])
+        insertions.append((len(lines), closer))
+        applied = True
+
+    if not insertions:
         return translation, False
 
-    new_lines = list(out_lines)
-    for (start, end), src_block in zip(
-        reversed(trn_positions), reversed(src_blocks), strict=True
-    ):
-        src_lines = src_block.splitlines()
-        new_lines[start:end] = src_lines
+    for insert_at, closer in sorted(insertions, reverse=True):
+        lines = lines[:insert_at] + [closer] + lines[insert_at:]
 
-    return "\n".join(new_lines), True
+    return "\n".join(lines), True
 
 
 _FENCE_BLOCKER_RE = re.compile(

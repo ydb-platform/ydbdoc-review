@@ -44,7 +44,6 @@ from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     apply_en_postprocess_from_ru,
-    fix_dashed_cli_flags,
     fix_yandex_cloud_links_for_en,
 )
 from ydbdoc_review.translate_scope import (
@@ -395,14 +394,19 @@ def _apply_en_qa_postprocess(
     source_lang: str,
     target_lang: str,
 ) -> str:
+    had_trailing_nl = text.endswith("\n")
     if (
         source_lang.strip().lower().startswith("rus")
         and target_lang.strip().lower() in ("english", "en")
     ):
-        return apply_en_postprocess_from_ru(source_text, text)
-    if target_lang.strip().lower() in ("english", "en"):
-        return fix_yandex_cloud_links_for_en(text)
-    return text
+        out = apply_en_postprocess_from_ru(source_text, text)
+    elif target_lang.strip().lower() in ("english", "en"):
+        out = fix_yandex_cloud_links_for_en(text)
+    else:
+        out = text
+    if had_trailing_nl and out and not out.endswith("\n"):
+        out += "\n"
+    return out
 
 
 def _retry_fix_diff(
@@ -473,8 +477,12 @@ def run_pair_qa(
     Returns ``(final_translation_text, outcome)``.
     """
     current = translated_text
-    current, _ = repair_tab_labels_from_source(source_text, current)
-    current = fix_dashed_cli_flags(current)
+    current = _apply_en_qa_postprocess(
+        current,
+        source_text=source_text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
     repair_attempted = False
     repair_applied = False
     repair_skip_reason: str | None = None
@@ -620,7 +628,7 @@ def run_pair_qa(
                 fence_repair_applied = True
                 repair_applied = True
                 repair_skip_reason = None
-                fm_log(f"QA fence repair from SOURCE | {ru_path}")
+                fm_log(f"QA fence structure repair | {ru_path}")
 
         current, tab_fixed = repair_tab_labels_from_source(source_text, current)
         if tab_fixed:
@@ -667,6 +675,7 @@ def run_pair_qa(
         target_lang=target_lang,
         label=ru_path,
     )
+    late_structure_repair = False
     if any(
         f.rule in ("fence_parity", "fence_unbalanced", "tab_labels_parity")
         for f in findings
@@ -680,6 +689,7 @@ def run_pair_qa(
                 target_lang=target_lang,
             )
             fence_repair_applied = True
+            late_structure_repair = True
         current, tab_fixed = repair_tab_labels_from_source(source_text, current)
         if tab_fixed or applied:
             if tab_fixed:
@@ -689,6 +699,7 @@ def run_pair_qa(
                     source_lang=source_lang,
                     target_lang=target_lang,
                 )
+                late_structure_repair = True
             repair_applied = True
             findings = _safe_heuristics(
                 settings,
@@ -699,6 +710,32 @@ def run_pair_qa(
                 label=ru_path,
             )
             fm_log(f"QA structure repair (heuristic) | {ru_path}")
+
+    if late_structure_repair:
+        fm_log(f"QA re-validate (after structure repair) | {ru_path}")
+        try:
+            confirmation_md = revalidate_translation_pair(
+                settings,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                ru_path=ru_path,
+                en_path=en_path,
+                source_text=source_text,
+                translated_text=current,
+                review_before=review_md,
+                fix_skipped_notes=fix_skipped_notes,
+                ru_pr_diff=ru_pr_diff,
+                en_on_main=en_on_main,
+            )
+        except Exception as exc:
+            confirmation_md = (
+                "### Вердикт\n**ПРИНИМАТЬ С ОГОВОРКАМИ**\n\n"
+                "### Блокеры\n_Нет._\n\n"
+                "### Оговорки\n"
+                f"- Ошибка повторной проверки после structure repair: `{exc}`.\n\n"
+                "### Кратко\n"
+                "Финальная проверка не отработала."
+            )
 
     return current, PairQaOutcome(
         ru_path=ru_path,
@@ -815,7 +852,9 @@ def format_pair_qa_markdown(outcome: PairQaOutcome) -> str:
     show_skipped = _should_show_skipped_fixes(outcome)
 
     if outcome.fence_repair_applied:
-        lines.append("**Исправления:** восстановлены fenced-блоки из SOURCE (RU).")
+        lines.append(
+            "**Исправления:** восстановлена структура fenced-блоков (delimiters)."
+        )
         lines.append("")
 
     if outcome.ru_source_bugs:

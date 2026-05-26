@@ -167,6 +167,20 @@ def fix_dashed_cli_flags(text: str) -> str:
     )
 
 
+_FQDN_VM_COMMENT_RE = re.compile(
+    r"(#\s*)FQDN\s+ВМ\b",
+    re.IGNORECASE,
+)
+
+
+def fix_common_ru_leaks_in_en(text: str) -> str:
+    """RU placeholders and comment fragments that must not remain in EN docs."""
+    out = text.replace("<строка>", "<string>")
+    out = out.replace("<число>", "<number>")
+    out = _FQDN_VM_COMMENT_RE.sub(r"\1VM FQDN", out)
+    return out
+
+
 def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     """Deterministic EN cleanup after segment merge (no LLM)."""
     from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
@@ -174,6 +188,7 @@ def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     out = restore_markdown_links_from_ru(ru_source, en_text)
     out = apply_deterministic_cli_fixes(out, ru_source=ru_source)
     out = fix_dashed_cli_flags(out)
+    out = fix_common_ru_leaks_in_en(out)
     from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 
     out, _ = repair_tab_labels_from_source(ru_source, out)

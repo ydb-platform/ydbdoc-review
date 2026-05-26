@@ -291,7 +291,14 @@ def _normalize_fence_code_line(line: str) -> str | None:
     code = re.split(r"\s--\s", line, maxsplit=1)[0].strip().rstrip(",").rstrip(";").strip()
     if not code or _SKIP_FENCE_CODE_LINE.match(code):
         return None
-    return re.sub(r"\s+", " ", code)
+    code = re.sub(r"\s+", " ", code)
+    code = code.replace("<строка>", "<string>").replace("<число>", "<number>")
+    code = re.sub(
+        r"(?<![\w-])--\s+([a-z][a-z0-9-]*)(\s+(?=<|\$|/|[A-Za-z0-9_./]))",
+        r"--\1\2",
+        code,
+    )
+    return code
 
 
 def _block_code_line_keys(lines: list[str]) -> list[str]:
