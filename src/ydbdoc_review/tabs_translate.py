@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ydbdoc_review.config import Settings
+from ydbdoc_review.document_segments import _is_fence_toggle, _read_fence
 from ydbdoc_review.tabs_repair import is_tab_label_line
 
 
