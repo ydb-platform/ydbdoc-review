@@ -11,6 +11,11 @@ _BARE_URL_IN_PARENS = re.compile(
 _BROKEN_ANCHOR_LINK = re.compile(r"\[#([^]]+)\]\(\)")
 
 
+def _is_relative_doc_href(href: str) -> bool:
+    h = href.strip()
+    return bool(h) and not h.startswith(("#", "http://", "https://", "mailto:"))
+
+
 def restore_markdown_links_from_ru(ru: str, en: str) -> str:
     """
     Re-insert ``[text](href)`` from RU when EN translation dropped link markup.
@@ -25,6 +30,8 @@ def restore_markdown_links_from_ru(ru: str, en: str) -> str:
         out = _restore_one_link(ru_text, out, href)
         if f"]({href})" not in out and f"({href})" in out:
             out = _wrap_bare_url_with_href(out, href)
+        if f"]({href})" not in out and _is_relative_doc_href(href):
+            out = _wrap_bare_path_in_line(out, href, ru_text)
     out = fix_bare_urls_in_prose(out)
     out = fix_broken_anchor_links(out)
     if en.endswith("\n") and not out.endswith("\n"):
@@ -111,4 +118,49 @@ def _restore_one_link(ru_text: str, en: str, href: str) -> str:
         if "requires RAG enabled" in en and "[RAG](#rag)" not in en:
             return en.replace("requires RAG enabled", "requires [RAG](#rag) enabled", 1)
 
+    if f"]({href})" not in en and not re.search(r"[а-яА-ЯёЁ]", ru_text):
+        for candidate in (ru_text.strip(), ru_text):
+            if candidate and candidate in en and f"[{candidate}]" not in en:
+                return en.replace(candidate, f"[{candidate}]({href})", 1)
+
+    return en
+
+
+def _wrap_bare_path_in_line(en: str, href: str, ru_text: str) -> str:
+    """
+    When EN contains a relative path from RU but without ``[text](path)`` markup,
+    wrap the preceding phrase on the same line.
+    """
+    path = href.split("#", 1)[0]
+    if not path or path not in en:
+        return en
+    idx = 0
+    while True:
+        pos = en.find(path, idx)
+        if pos < 0:
+            break
+        if pos > 0 and en[pos - 1] == "]":
+            idx = pos + len(path)
+            continue
+        line_start = en.rfind("\n", 0, pos) + 1
+        line_end = en.find("\n", pos)
+        if line_end < 0:
+            line_end = len(en)
+        line = en[line_start:line_end]
+        if f"]({href})" in line or f"]({path})" in line:
+            idx = pos + len(path)
+            continue
+        before_path = line[: pos - line_start].rstrip()
+        m = re.search(r"([\w\s—–\-.,()]+)$", before_path)
+        label = (m.group(1).strip() if m else "") or ru_text.strip()
+        if not label or label.startswith("http"):
+            idx = pos + len(path)
+            continue
+        label_start = line_start + before_path.rfind(label)
+        new_line = (
+            en[line_start:label_start]
+            + f"[{label}]({href})"
+            + en[pos + len(path) : line_end]
+        )
+        return en[:line_start] + new_line + en[line_end:]
     return en

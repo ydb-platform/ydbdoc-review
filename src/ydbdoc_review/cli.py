@@ -38,7 +38,11 @@ from ydbdoc_review.paths import (
     ru_toc_yaml_paths,
     truncate,
 )
-from ydbdoc_review.pair_diff import diff_has_added_lines, pair_needs_en_from_ru_only_diff
+from ydbdoc_review.pair_diff import (
+    diff_has_added_lines,
+    pair_needs_en_from_ru_only_diff,
+    pair_requires_en_translation,
+)
 from ydbdoc_review.toc_yaml import merge_en_toc_yaml, translate_toc_title
 from ydbdoc_review.verify_pr import run_verify_pr
 
@@ -61,7 +65,9 @@ def _apply_ru_diff_generation_overrides(
     pr_changed: set[str],
 ) -> int:
     """
-    Force ``needs_generation_for=en`` when RU diff adds lines but EN diff in this PR does not.
+    Force ``needs_generation_for=en`` when RU changed in the PR but EN was not updated.
+
+    Uses PR changed-file list (no git diff required) and optional merge-base diffs.
     Returns count of overridden pairs.
     """
     n = 0
@@ -71,8 +77,9 @@ def _apply_ru_diff_generation_overrides(
         if not isinstance(ru_p, str) or not isinstance(en_p, str):
             continue
         ru_diff, en_diff = pair_diffs.get((ru_p, en_p), (None, None))
-        if not pair_needs_en_from_ru_only_diff(
+        if not pair_requires_en_translation(
             ru_path=ru_p,
+            en_path=en_p,
             ru_diff=ru_diff,
             en_diff=en_diff,
             pr_changed_paths=pr_changed,
@@ -82,14 +89,17 @@ def _apply_ru_diff_generation_overrides(
             continue
         item["needs_generation_for"] = "en"
         item["semantically_aligned"] = False
+        reason = (
+            "EN path not in PR changed files"
+            if en_p not in pr_changed
+            else "RU PR diff has content changes; EN diff in PR does not"
+        )
         item["summary"] = (
-            "RU PR diff adds content; EN file unchanged in PR — generating EN update "
-            "(deterministic override)."
+            f"{reason} — generating EN update (deterministic override)."
         )
         n += 1
         click.echo(
-            f"Override check model: force EN generation for `{ru_p}` "
-            "(RU diff has additions, EN diff does not).",
+            f"Override check model: force EN generation for `{ru_p}` ({reason}).",
             err=True,
         )
     return n
@@ -237,8 +247,9 @@ def _fallback_check_batch_results(
         elif en_present and not ru_present:
             gen = "ru"
         elif ru_present and en_present:
-            if pair_needs_en_from_ru_only_diff(
+            if pair_requires_en_translation(
                 ru_path=ru_p,
+                en_path=en_p,
                 ru_diff=rd,
                 en_diff=ed,
                 pr_changed_paths=pr_changed,
@@ -1146,14 +1157,14 @@ def run_cmd(
 
     results = _merge_analyze_batch_results(payload_pairs, per_batch_results)
 
-    if effective_repo_path and pr_changed:
+    if pr_changed:
         overridden = _apply_ru_diff_generation_overrides(
             results,
             pair_diffs=pair_diffs,
             pr_changed=pr_changed,
         )
         if overridden:
-            click.echo(f"Applied RU-diff override to {overridden} pair(s).")
+            click.echo(f"Applied deterministic EN override to {overridden} pair(s).")
 
     workdir = effective_repo_path
     tmp: str | None = None

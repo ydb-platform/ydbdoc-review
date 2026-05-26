@@ -37,6 +37,13 @@ def test_fix_broken_anchor_links():
     assert fix_broken_anchor_links("[#rag]()") == "[RAG](#rag)"
 
 
+def test_restore_markdown_links_bare_relative_path():
+    ru = "See [topology](../deployment-preparation.md#topology-select)."
+    en = "See topology in ../deployment-preparation.md#topology-select."
+    out = restore_markdown_links_from_ru(ru, en)
+    assert "](../deployment-preparation.md#topology-select)" in out
+
+
 def test_restore_markdown_links_iam_lifespan():
     ru = "IAM-токен имеет ограниченный [срок жизни — не более 12 часов](https://yandex.cloud/ru/docs/iam#lifetime)."
     en = "The IAM token has a limited lifespan — no more than 12 hours (https://yandex.cloud/en/docs/iam#lifetime)."
