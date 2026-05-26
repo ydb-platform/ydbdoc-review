@@ -31,6 +31,88 @@ _STRIP_REQUEST_HEADER_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+_FENCE_OPEN_RE = re.compile(r"^\s*```")
+_TAB_LABEL_RE = re.compile(r"^(\s*-\s+)([A-Za-z0-9][A-Za-z0-9_.-]*)\s*$")
+
+
+@dataclass(frozen=True)
+class _MaskedChunk:
+    masked_text: str
+    fence_blocks: dict[str, str]
+    tab_labels: dict[str, str]
+
+
+def _mask_fences_and_tab_labels(source_text: str) -> _MaskedChunk:
+    """
+    Replace fenced blocks with placeholders to prevent the model from mutating code/config.
+    Also replace tab label lines inside `{% list tabs %}` blocks.
+    """
+    lines = source_text.splitlines()
+    out: list[str] = []
+    fence_blocks: dict[str, str] = {}
+    tab_labels: dict[str, str] = {}
+    in_tabs = False
+    i = 0
+    fence_i = 0
+    tab_i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        low = line.strip().lower()
+        if low.startswith("{% list tabs"):
+            in_tabs = True
+            out.append(line)
+            i += 1
+            continue
+        if in_tabs and low.startswith("{% endlist"):
+            in_tabs = False
+            out.append(line)
+            i += 1
+            continue
+
+        if _FENCE_OPEN_RE.match(line.strip()):
+            start = i
+            i += 1
+            while i < len(lines):
+                if _FENCE_OPEN_RE.match(lines[i].strip()):
+                    i += 1
+                    break
+                i += 1
+            block = "\n".join(lines[start:i])
+            fence_i += 1
+            key = f"<<FENCE_BLOCK_{fence_i:03d}>>"
+            fence_blocks[key] = block
+            out.append(key)
+            continue
+
+        if in_tabs:
+            m = _TAB_LABEL_RE.match(line)
+            if m:
+                tab_i += 1
+                key = f"<<TAB_LABEL_{tab_i:03d}>>"
+                tab_labels[key] = line.rstrip()
+                out.append(key)
+                i += 1
+                continue
+
+        out.append(line)
+        i += 1
+
+    return _MaskedChunk(
+        masked_text="\n".join(out),
+        fence_blocks=fence_blocks,
+        tab_labels=tab_labels,
+    )
+
+
+def _unmask_fences_and_tab_labels(text: str, masked: _MaskedChunk) -> str:
+    out = text
+    for key, val in masked.tab_labels.items():
+        out = out.replace(key, val)
+    for key, val in masked.fence_blocks.items():
+        out = out.replace(key, val)
+    return out
+
 
 @dataclass(frozen=True)
 class TranslateChunk:
@@ -176,6 +258,15 @@ def _translate_one_chunk(
     chunk: TranslateChunk,
     plan_header: str,
 ) -> str:
+    masked = _mask_fences_and_tab_labels(chunk.source_text)
+    masked_chunk = TranslateChunk(
+        index=chunk.index,
+        total=chunk.total,
+        start_line=chunk.start_line,
+        end_line=chunk.end_line,
+        source_text=masked.masked_text,
+        regions=chunk.regions,
+    )
     instructions = load_translate_file_instructions(
         settings,
         source_lang=source_lang,
@@ -185,7 +276,7 @@ def _translate_one_chunk(
         source_lang=source_lang,
         target_lang=target_lang,
         source_path=source_path,
-        chunk=chunk,
+        chunk=masked_chunk,
         plan_header=plan_header,
     )
     model = settings.model_translate
@@ -209,6 +300,7 @@ def _translate_one_chunk(
         ).strip()
     )
     out = _STRIP_REQUEST_HEADER_RE.sub("", out).strip()
+    out = _unmask_fences_and_tab_labels(out, masked)
     if target_lang.strip().lower() in ("english", "en"):
         out = fix_yandex_cloud_links_for_en(out)
     return out
