@@ -7,6 +7,7 @@ from ydbdoc_review.markdown_links import (
 )
 from ydbdoc_review.translate_postprocess import (
     fix_heading_anchors_from_ru,
+    fix_list_tabs_markdown_layout,
     fix_wikipedia_links_for_en,
 )
 
@@ -17,6 +18,13 @@ def test_fix_wikipedia_links_for_en():
     assert "en.wikipedia.org" in out
     assert "библиотека" not in out
     assert "Snappy_(library)" in out
+
+
+def test_fix_list_tabs_markdown_layout():
+    glued = "## Start static nodes {#start-storage}{% list tabs group=manual-systemd %}"
+    out = fix_list_tabs_markdown_layout(glued)
+    assert "## Start static nodes {#start-storage}\n\n{% list tabs" in out
+    assert "{#start-storage}{%" not in out
 
 
 def test_fix_heading_anchors_from_ru():

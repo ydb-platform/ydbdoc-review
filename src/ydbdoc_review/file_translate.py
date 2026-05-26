@@ -26,6 +26,7 @@ from ydbdoc_review.translate_postprocess import (
 )
 from ydbdoc_review.list_tabs_blocks import split_preserving_list_tabs
 from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
+from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_scope import TranslateScope, compute_translate_scope
 
 _STRIP_REQUEST_HEADER_RE = re.compile(
@@ -77,6 +78,34 @@ def _unmask_fences(text: str, masked: _MaskedChunk) -> str:
     for key, val in masked.fence_blocks.items():
         out = out.replace(key, val)
     return out
+
+
+def _join_text_segments(parts: list[str]) -> str:
+    """Join translated segments without gluing headings to ``{% list tabs %}``."""
+    if not parts:
+        return ""
+    merged = parts[0]
+    for part in parts[1:]:
+        if not part:
+            continue
+        if not merged:
+            merged = part
+            continue
+        if merged.endswith("\n\n") or (merged.endswith("\n") and part.startswith("\n")):
+            merged += part
+            continue
+        if merged.rstrip().endswith("}") and part.lstrip().startswith("{%"):
+            merged = merged.rstrip() + "\n\n" + part.lstrip("\n")
+        elif not merged.endswith("\n"):
+            merged += "\n\n" + part.lstrip("\n")
+        else:
+            merged += "\n" + part.lstrip("\n")
+    return merged
+
+
+def _join_translated_chunks(parts: list[str]) -> str:
+    """Join file-translate chunk outputs (same rules as segment join)."""
+    return _join_text_segments(parts)
 
 
 @dataclass(frozen=True)
@@ -307,7 +336,7 @@ def _translate_prose_with_plan(
                 plan_header=multi_note,
             )
         )
-    merged = "\n".join(parts)
+    merged = _join_translated_chunks(parts)
     if source_is_russian and target_lang.strip().lower() in ("english", "en"):
         merged = apply_en_postprocess_from_ru(source_text, merged)
     return merged, len(chunks)
@@ -324,18 +353,36 @@ def translate_text_with_plan(
     """
     Translate *source_text* using a line plan; return ``(result, num_llm_calls)``.
 
-    Entire ``{% list tabs %}…{% endlist %}`` blocks are copied verbatim from SOURCE.
+    Config-style ``{% list tabs %}`` (YAML / ASCII tab ids) are copied verbatim;
+    blocks with Russian labels or prose use :func:`translate_tabs_block`.
     """
     segments = split_preserving_list_tabs(source_text)
     parts: list[str] = []
     llm_calls = 0
     for seg in segments:
-        if seg.kind == "list_tabs":
+        if seg.kind == "list_tabs_verbatim":
             fm_log(
                 f"file-translate copy list-tabs verbatim | {source_path} | "
                 f"{len(seg.text)} chars"
             )
             parts.append(seg.text)
+            continue
+        if seg.kind == "list_tabs_translate":
+            fm_log(
+                f"file-translate translate list-tabs | {source_path} | "
+                f"{len(seg.text)} chars"
+            )
+            parts.append(
+                translate_tabs_block(
+                    settings,
+                    seg.text,
+                    source_path=source_path,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    label=f"{source_path}:list-tabs",
+                )
+            )
+            llm_calls += 1
             continue
         if not seg.text.strip():
             parts.append(seg.text)
@@ -349,7 +396,7 @@ def translate_text_with_plan(
         )
         llm_calls += n
         parts.append(translated)
-    merged = "".join(parts)
+    merged = _join_text_segments(parts)
     if source_lang.lower().startswith("rus") and target_lang.strip().lower() in (
         "english",
         "en",

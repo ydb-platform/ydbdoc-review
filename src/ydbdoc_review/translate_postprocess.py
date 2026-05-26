@@ -134,6 +134,30 @@ def fix_wikipedia_links_for_en(text: str) -> str:
     return out
 
 
+_HEADING_BEFORE_LIST_TABS_RE = re.compile(
+    r"^(?P<heading>#{1,6}\s+.+?\{#[^}]+\})\s*"
+    r"(?:\{#[^}]+\}\s*)?"
+    r"(?P<tabs>\{%\s*list\s+tabs)",
+    re.MULTILINE | re.IGNORECASE,
+)
+_ENDLIST_GLUE_RE = re.compile(
+    r"(\{%\s*endlist\s*%\})(?=[^\s\n])",
+    re.IGNORECASE,
+)
+_LIST_TABS_TRAILING_ANCHOR_RE = re.compile(
+    r"(\{%\s*list\s+tabs[^%]*%\})\s*\{#[^}]+\}\s*",
+    re.IGNORECASE,
+)
+
+
+def fix_list_tabs_markdown_layout(text: str) -> str:
+    """Blank line before ``{% list tabs %}``; newline after ``{% endlist %}``."""
+    out = _HEADING_BEFORE_LIST_TABS_RE.sub(r"\g<heading>\n\n\g<tabs>", text)
+    out = _ENDLIST_GLUE_RE.sub(r"\1\n\n", out)
+    out = _LIST_TABS_TRAILING_ANCHOR_RE.sub(r"\1\n\n", out)
+    return out
+
+
 def fix_heading_anchors_from_ru(ru_source: str, en_text: str) -> str:
     """Copy ``{#anchor}`` ids from RU headings onto EN headings (same order)."""
     ru_heads = _heading_anchor_lines(ru_source)
@@ -195,6 +219,7 @@ def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     out = fix_yandex_cloud_links_for_en(out)
     out = fix_wikipedia_links_for_en(out)
     out = fix_heading_anchors_from_ru(ru_source, out)
+    out = fix_list_tabs_markdown_layout(out)
     return out
 
 

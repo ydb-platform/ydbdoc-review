@@ -64,7 +64,7 @@ def test_file_translate_scoped_sections():
     assert call_count == 1
 
 
-def test_list_tabs_blocks_copied_without_llm():
+def test_config_list_tabs_copied_without_llm():
     ru = (
         "Вступление RU.\n\n"
         "{% list tabs %}\n\n"
@@ -114,3 +114,39 @@ def test_list_tabs_blocks_copied_without_llm():
     assert "Intro EN." in out
     assert "Outro EN." in out
     assert all("{% list tabs" not in src for src in chunk_calls)
+
+
+def test_manual_list_tabs_translated_not_copied():
+    ru = (
+        "Intro RU.\n\n"
+        "{% list tabs group=manual-systemd %}\n\n"
+        "- Вручную\n\n"
+        "Запустите сервис.\n\n"
+        "{% endlist %}\n\n"
+        "Outro RU.\n"
+    )
+    with (
+        patch(
+            "ydbdoc_review.file_translate._translate_one_chunk",
+            return_value="Intro EN.\n\n",
+        ),
+        patch(
+            "ydbdoc_review.file_translate.translate_tabs_block",
+            return_value="{% list tabs %}\n\n- Manually\n\n{% endlist %}\n\n",
+        ) as tabs_mock,
+        patch(
+            "ydbdoc_review.file_translate.apply_en_postprocess_from_ru",
+            side_effect=lambda _ru, en: en,
+        ),
+    ):
+        out, llm_calls = translate_text_with_plan(
+            MagicMock(),
+            source_path="ydb/docs/ru/core/x.md",
+            source_text=ru,
+            source_lang="Russian",
+            target_lang="English",
+        )
+    tabs_mock.assert_called_once()
+    assert "- Manually" in out
+    assert "Вручную" not in out
+    assert llm_calls >= 2
