@@ -7,6 +7,7 @@ from typing import Callable
 
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
 _INLINE_SQL_COMMENT_RE = re.compile(r"(--)([^\"']*)$")
+_INLINE_HASH_COMMENT_RE = re.compile(r"(#)([^\"'\n]*)$")
 
 
 def _is_fence_delimiter(line: str) -> bool:
@@ -36,6 +37,20 @@ def comment_body_on_line(line: str) -> tuple[str, str] | None:
 def inline_sql_comment_tail(line: str) -> tuple[str, str] | None:
     """Trailing ``-- comment`` on a code line: ``(prefix_before_dashes, comment_body)``."""
     m = _INLINE_SQL_COMMENT_RE.search(line)
+    if not m:
+        return None
+    body = m.group(2).strip()
+    if not body:
+        return None
+    return line[: m.start(1)], body
+
+
+def inline_hash_comment_tail(line: str) -> tuple[str, str] | None:
+    """Trailing ``# comment`` on a code/YAML line: ``(prefix_before_hash, comment_body)``."""
+    stripped = line.lstrip()
+    if stripped.startswith("#") and not stripped.startswith("#!"):
+        return None
+    m = _INLINE_HASH_COMMENT_RE.search(line)
     if not m:
         return None
     body = m.group(2).strip()
@@ -77,6 +92,15 @@ def translate_fence_comments(
                 continue
             translated = translate_comment(body).strip()
             out.append(f"{prefix}-- {translated}")
+            continue
+        inline_hash = inline_hash_comment_tail(line)
+        if inline_hash is not None:
+            prefix, body = inline_hash
+            if only_if_cyrillic and not _CYRILLIC_RE.search(body):
+                out.append(line)
+                continue
+            translated = translate_comment(body).strip()
+            out.append(f"{prefix}# {translated}")
             continue
         out.append(line)
     return "\n".join(out)

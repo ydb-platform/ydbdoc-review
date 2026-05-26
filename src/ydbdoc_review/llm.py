@@ -27,16 +27,37 @@ def _read_prompt(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def strip_code_fence(text: str) -> str:
+    """Remove an outer markdown code-fence wrapper from an LLM reply.
+
+    Strips only when the first and last non-empty lines are matching fence
+    markers (``` or ~~~) and the closing line is a bare marker (no info string).
+  """
+    stripped = text.strip()
+    if not stripped:
+        return text
+
+    lines = stripped.split("\n")
+    if len(lines) < 2:
+        return text
+
+    first = lines[0].lstrip()
+    last = lines[-1].lstrip()
+    open_marker: str | None = None
+    for marker in ("```", "~~~"):
+        if first.startswith(marker):
+            open_marker = marker
+            break
+    if open_marker is None:
+        return text
+    if last.strip() != open_marker:
+        return text
+    return "\n".join(lines[1:-1]).strip("\n")
+
+
 def _strip_code_fence(text: str) -> str:
-    t = text.strip()
-    if t.startswith("```"):
-        lines = t.split("\n")
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        t = "\n".join(lines).strip()
-    return t
+    """Backward-compatible alias for :func:`strip_code_fence`."""
+    return strip_code_fence(text)
 
 
 def parse_json_object(text: str) -> dict:
@@ -273,9 +294,17 @@ def load_analyze_instructions(settings: Settings) -> str:
     return _read_prompt(p)
 
 
-def load_translate_segment_instructions(settings: Settings) -> str:
-    p = Path(settings.prompts_dir) / "08_translate_segment.txt"
-    return _read_prompt(p)
+def load_translate_segment_instructions(
+    settings: Settings,
+    *,
+    source_lang: str = "Russian",
+    target_lang: str = "English",
+) -> str:
+    from ydbdoc_review.prompt_builder import PromptBuilder
+
+    return PromptBuilder.from_settings(settings).build_translate_segment_instructions(
+        source_lang, target_lang
+    )
 
 
 def load_verify_translation_instructions(settings: Settings) -> str:

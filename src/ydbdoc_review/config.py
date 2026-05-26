@@ -114,6 +114,35 @@ class TomlConfigLayer:
     translation_repair_enabled: bool
     """Slug for cross-model translation QA; empty → use ``model_check`` after env merge."""
     model_translation_verify: str
+    glossary_path: str = ""
+    project_info_path: str = ""
+    translate_system_template_path: str = ""
+    quality_hierarchy_path: str = ""
+    en_style_guide_path: str = ""
+    segment_rules_path: str = ""
+
+
+def _prompt_paths_from_toml(data: dict) -> dict[str, str]:
+    prompts = data.get("prompts")
+    if not isinstance(prompts, dict):
+        return {
+            "glossary_path": "",
+            "project_info_path": "",
+            "translate_system_template_path": "",
+            "quality_hierarchy_path": "",
+            "en_style_guide_path": "",
+            "segment_rules_path": "",
+        }
+    return {
+        "glossary_path": _toml_str(prompts, "glossary"),
+        "project_info_path": _toml_str(prompts, "project_info"),
+        "translate_system_template_path": _toml_str(
+            prompts, "translate_system_template"
+        ),
+        "quality_hierarchy_path": _toml_str(prompts, "quality_hierarchy"),
+        "en_style_guide_path": _toml_str(prompts, "en_style_guide"),
+        "segment_rules_path": _toml_str(prompts, "segment_rules"),
+    }
 
 
 def load_config_layer() -> TomlConfigLayer:
@@ -157,6 +186,7 @@ def load_config_layer() -> TomlConfigLayer:
             translation_self_check_enabled=self_check,
             translation_repair_enabled=repair,
             model_translation_verify=verify,
+            **_prompt_paths_from_toml(data),
         )
     return TomlConfigLayer(
         model_check=_DEFAULT_MODEL_CHECK,
@@ -229,6 +259,12 @@ class Settings:
     github_push_token: str
     docs_prefix: str
     prompts_dir: str
+    glossary_path: str
+    project_info_path: str
+    translate_system_template_path: str
+    quality_hierarchy_path: str
+    en_style_guide_path: str
+    segment_rules_path: str
 
     @staticmethod
     def from_env() -> "Settings":
@@ -294,6 +330,30 @@ class Settings:
         here = os.path.dirname(os.path.abspath(__file__))
         default_prompts = os.path.normpath(os.path.join(here, "..", "..", "prompts"))
         prompts_dir = os.environ.get("YDBDOC_PROMPTS_DIR", default_prompts)
+        glossary_path = (
+            os.environ.get("YDBDOC_GLOSSARY_PATH", "").strip()
+            or toml.glossary_path
+        )
+        project_info_path = (
+            os.environ.get("YDBDOC_PROJECT_INFO_PATH", "").strip()
+            or toml.project_info_path
+        )
+        translate_system_template_path = (
+            os.environ.get("YDBDOC_TRANSLATE_SYSTEM_TEMPLATE_PATH", "").strip()
+            or toml.translate_system_template_path
+        )
+        quality_hierarchy_path = (
+            os.environ.get("YDBDOC_QUALITY_HIERARCHY_PATH", "").strip()
+            or toml.quality_hierarchy_path
+        )
+        en_style_guide_path = (
+            os.environ.get("YDBDOC_EN_STYLE_GUIDE_PATH", "").strip()
+            or toml.en_style_guide_path
+        )
+        segment_rules_path = (
+            os.environ.get("YDBDOC_SEGMENT_RULES_PATH", "").strip()
+            or toml.segment_rules_path
+        )
         return Settings(
             yandex_folder=folder,
             yandex_api_key=api_key,
@@ -308,6 +368,12 @@ class Settings:
             github_push_token=gh_push,
             docs_prefix=docs_prefix,
             prompts_dir=prompts_dir,
+            glossary_path=glossary_path,
+            project_info_path=project_info_path,
+            translate_system_template_path=translate_system_template_path,
+            quality_hierarchy_path=quality_hierarchy_path,
+            en_style_guide_path=en_style_guide_path,
+            segment_rules_path=segment_rules_path,
         )
 
     def validate_yandex(self) -> None:

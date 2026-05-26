@@ -11,6 +11,12 @@ translate = "yandexgpt-5.1"
 # Фолбэки: см. YDBDOC_MODEL_VERIFY_FALLBACKS (по умолчанию тоже non-Yandex).
 translation_verify = "qwen3.6-35b-a3b"
 
+# Optional translation context (paths relative to prompts_dir or absolute).
+# Env overrides: YDBDOC_GLOSSARY_PATH, YDBDOC_PROJECT_INFO_PATH, …
+[prompts]
+# glossary = "glossary.md"
+# project_info = "project_info.md"
+
 [feature]
 review_enabled = true
 # critic compare + heuristics; результат — комментарий в translation PR. Коммит всегда.

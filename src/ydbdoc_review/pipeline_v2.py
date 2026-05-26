@@ -44,6 +44,7 @@ from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_postprocess import (
     apply_deterministic_cli_fixes,
     apply_en_postprocess_from_ru,
+    fix_dashed_cli_flags,
     fix_yandex_cloud_links_for_en,
 )
 from ydbdoc_review.translate_scope import (
@@ -55,27 +56,14 @@ from ydbdoc_review.translate_scope import (
 _CYRILLIC_RE = re.compile(r"[Ѐ-ӿѐ-џ]")
 
 
+def _postprocess_en_fragment(text: str) -> str:
+    """Per-unit EN cleanup (CLI flags, known RU leaks) before merge."""
+    return fix_dashed_cli_flags(text)
+
+
 # ---------------------------------------------------------------------------
 # Translate: segment-based, generic for RU↔EN
 # ---------------------------------------------------------------------------
-
-
-def _segment_user_input(
-    *,
-    source_lang: str,
-    target_lang: str,
-    source_path: str,
-    unit: DocumentUnit,
-    body: str,
-) -> str:
-    return (
-        f"File: `{source_path}`\n"
-        f"Fragment type: `{unit.kind}`\n"
-        f"Fragment label: `{unit.label}`\n"
-        f"SOURCE language: {source_lang}\n"
-        f"TARGET language: {target_lang}\n\n"
-        f"--- SOURCE BEGIN ---\n{body}\n--- SOURCE END ---\n"
-    )
 
 
 def _call_translate_segment(
@@ -88,12 +76,19 @@ def _call_translate_segment(
     body: str,
     operation: str,
 ) -> str:
-    instructions = load_translate_segment_instructions(settings).strip()
-    user_input = _segment_user_input(
+    from ydbdoc_review.prompt_builder import PromptBuilder
+
+    instructions = load_translate_segment_instructions(
+        settings,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    ).strip()
+    user_input = PromptBuilder.build_segment_user_input(
         source_lang=source_lang,
         target_lang=target_lang,
         source_path=source_path,
-        unit=unit,
+        fragment_type=unit.kind,
+        fragment_label=unit.label,
         body=body,
     )
     model = settings.model_translate
@@ -122,6 +117,7 @@ def _fence_comment_rows(fence_text: str, *, source_lang: str) -> list[tuple[int,
     """
     from ydbdoc_review.fence_comments import (
         comment_body_on_line,
+        inline_hash_comment_tail,
         inline_sql_comment_tail,
     )
 
@@ -144,6 +140,14 @@ def _fence_comment_rows(fence_text: str, *, source_lang: str) -> list[tuple[int,
                 _CYRILLIC_RE.search(body) if is_ru_source else re.search(r"[A-Za-z]", body)
             ):
                 rows.append((idx, "--", body))
+            continue
+        inline_hash = inline_hash_comment_tail(line)
+        if inline_hash is not None:
+            _prefix, body = inline_hash
+            if body and (
+                _CYRILLIC_RE.search(body) if is_ru_source else re.search(r"[A-Za-z]", body)
+            ):
+                rows.append((idx, "#", body))
     return rows
 
 
@@ -153,6 +157,7 @@ def _apply_translated_fence_comments(
     """Merge translated comment bodies back into a fenced block."""
     from ydbdoc_review.fence_comments import (
         comment_body_on_line,
+        inline_hash_comment_tail,
         inline_sql_comment_tail,
     )
 
@@ -173,6 +178,11 @@ def _apply_translated_fence_comments(
         if inline is not None:
             prefix, _ = inline
             lines[i] = f"{prefix}-- {text}".rstrip()
+            continue
+        inline_hash = inline_hash_comment_tail(line)
+        if inline_hash is not None and marker == "#":
+            prefix, _ = inline_hash
+            lines[i] = f"{prefix}# {text}".rstrip()
             continue
         lines[i] = f"{marker} {text}".rstrip()
     return "\n".join(lines)
@@ -195,6 +205,11 @@ def translate_unit(
             target_lang=target_lang,
             label=unit.label,
         )
+        if (
+            source_lang.lower().startswith("rus")
+            and target_lang.strip().lower() in ("english", "en")
+        ):
+            body = _postprocess_en_fragment(body)
         return DocumentUnit(unit.kind, body, unit.label)
 
     if unit.kind == "fence":
@@ -212,7 +227,9 @@ def translate_unit(
             f"Translate each JSON object's `text` from {source_lang} to {target_lang}. "
             "Return JSON array with same `line` and `marker`; only `text` changes. "
             "Do not add or remove array entries. Do not omit any code lines in the fence — "
-            "you are only translating comment bodies, not rewriting the block."
+            "you are only translating comment bodies, not rewriting the block. "
+            "For English: use Latin letters only in translated comment text — no Cyrillic, "
+            "including look-alike letters (e.g. Cyrillic «М» is not Latin «M»)."
         )
         out = _strip_code_fence(
             call_yandex_responses(
@@ -231,6 +248,8 @@ def translate_unit(
             fm_log(f"fence-comments parse failed, keeping verbatim | {unit.label}")
             return unit
         body = _apply_translated_fence_comments(unit.text, translated)
+        if target_lang.strip().lower() in ("english", "en"):
+            body = _postprocess_en_fragment(body)
         return DocumentUnit(unit.kind, body, unit.label)
 
     body = _call_translate_segment(
@@ -242,6 +261,11 @@ def translate_unit(
         body=unit.text,
         operation=f"translate:{unit.kind}",
     )
+    if (
+        source_lang.lower().startswith("rus")
+        and target_lang.strip().lower() in ("english", "en")
+    ):
+        body = _postprocess_en_fragment(body)
     return DocumentUnit(unit.kind, body, unit.label)
 
 

@@ -7,7 +7,7 @@
 1. **Analyze** — модель из `[models].check` решает, какие пары `RU↔EN` нужно переводить.
 2. **Translate** — для каждого нужного файла:
    - `parse_document_units` разбивает SOURCE на ordered units: `prose`, `table`, `fence`, `diplodoc` (`{% note %}` / `{% cut %}`); новый `prose` начинается на каждом `###`.
-   - Каждый unit переводится одним FM-запросом по промпту `prompts/08_translate_segment.txt`.
+   - Каждый unit переводится одним FM-запросом; инструкции собирает `PromptBuilder` (иерархия качества, EN style guide, глоссарий, правила из `prompts/08_translate_segment.txt`).
    - Сборка → `apply_deterministic_cli_fixes` (idempotent, без LLM).
 3. **QA** — см. ниже.
 4. **Commit + push + comment** — всегда, независимо от вердикта.

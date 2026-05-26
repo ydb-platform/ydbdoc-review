@@ -25,14 +25,20 @@ def _translate_prose_blob(
 
     if not blob.strip():
         return blob
-    instructions = load_translate_segment_instructions(settings).strip()
-    user_input = (
-        f"File: `{source_path}`\n"
-        f"Fragment type: `tabs`\n"
-        f"Fragment label: `{label}`\n"
-        f"SOURCE language: {source_lang}\n"
-        f"TARGET language: {target_lang}\n\n"
-        f"--- SOURCE BEGIN ---\n{blob}\n--- SOURCE END ---\n"
+    from ydbdoc_review.prompt_builder import PromptBuilder
+
+    instructions = load_translate_segment_instructions(
+        settings,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    ).strip()
+    user_input = PromptBuilder.build_segment_user_input(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_path=source_path,
+        fragment_type="tabs",
+        fragment_label=label,
+        body=blob,
     )
     model = settings.model_translate
     cap = clamp_max_output_tokens(max(4096, min(len(blob) * 3, 32_768)), model)

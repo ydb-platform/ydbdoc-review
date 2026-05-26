@@ -59,7 +59,7 @@ cp .env.example .env
 
 Отключить шаг fix: **`translation_repair = false`** или **`YDBDOC_TRANSLATION_REPAIR=false`** — останутся только compare и эвристики. `doc_verify` использует **тот же** код QA на ветке PR; правки критика пушатся в эту же ветку (отключить: `no_commit: "true"` / `--no-commit`).
 
-**Перевод по сегментам**: текст файла разбирается на `prose`/`table`/`fence`/`diplodoc`-блоки (новый prose-блок на каждом `###`), каждый блок переводится отдельным запросом по `prompts/08_translate_segment.txt`, потом склеивается. Никаких чанков по символам, diff-режимов и threshold-ов по длине — стратегия одна на любой размер файла.
+**Перевод по сегментам**: текст файла разбирается на `prose`/`table`/`fence`/`diplodoc`-блоки (новый prose-блок на каждом `###`); каждый unit — отдельный FM-запрос. Инструкции собирает **`PromptBuilder`**: иерархия Best/Satisfactory/Unacceptable (`prompts/translate_quality_hierarchy.md`), для EN — style guide (`prompts/en_style_guide.md`), опционально глоссарий (`YDBDOC_GLOSSARY_PATH` / `[prompts].glossary`), правила фрагмента — `prompts/08_translate_segment.txt`.
 
 **Другой провайдер (не Yandex):** задайте **`OPENAI_BASE_URL`** (или `YDBDOC_LLM_BASE_URL`) на корень совместимого API и **`OPENAI_API_KEY`** (или `YDBDOC_LLM_API_KEY`). Каталог Yandex не нужен. В `ydbdoc-review.toml` или в env укажите **ид модели в формате этого провайдера** (например `gpt-4o-mini`, `gpt-4o`). Для Yandex FM по-прежнему можно задать полный URI в `gpt://…` в TOML — тогда префикс каталога не добавляется автоматически.
 
@@ -344,6 +344,9 @@ Action собирается из **Dockerfile**: внутри контейнер
 | `YDBDOC_TRANSLATION_REPAIR` | Необязательно: `false` — выключить шаг fix-diff (останется только compare + эвристики). |
 | `YDBDOC_MODEL_TRANSLATION_VERIFY` | Необязательно: переопределить **`[models].translation_verify`** в TOML. |
 | `YDBDOC_MODEL_VERIFY_FALLBACKS` | Через запятую: какие модели пробовать, если основной критик недоступен. По умолчанию `qwen3-235b-a22b/latest, deepseek-v3.2/latest` — не семья Yandex. |
+| `YDBDOC_GLOSSARY_PATH` | Необязательно: `.md` с терминами для перевода (см. `prompts/glossary.example.md`). |
+| `YDBDOC_PROJECT_INFO_PATH` | Необязательно: краткое описание проекта/доки в system prompt. |
+| `YDBDOC_PROMPTS_DIR` | Каталог с `08_translate_segment.txt`, style guide и иерархией качества (по умолчанию `prompts/` в пакете). |
 | `YDBDOC_QA_MAX_INPUT_CHARS` | Cap входных символов для compare/fix-вызовов (по умолчанию **55000**). |
 | `YDBDOC_QA_MAX_OUTPUT_TOKENS` | Cap выходных токенов QA-вызовов (по умолчанию **16384**). |
 | `YDBDOC_HEURISTICS_MAX_INPUT_CHARS` | Cap для LLM-вызова эвристик из `prompts/09_quality_heuristics.md` (по умолчанию **40000**). |
