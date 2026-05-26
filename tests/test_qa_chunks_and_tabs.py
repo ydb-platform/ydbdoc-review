@@ -2,9 +2,39 @@
 
 from ydbdoc_review.document_segments import parse_document_units
 from ydbdoc_review.heuristics import _check_tab_labels_parity
+from ydbdoc_review.tabs_repair import config_tab_label_lines
 from ydbdoc_review.qa_chunks import build_qa_chunks, merge_chunk_reports, needs_qa_chunking
 from ydbdoc_review.tabs_repair import is_tab_label_line, repair_tab_labels_from_source
 from ydbdoc_review.translate_postprocess import fix_dashed_cli_flags
+
+
+def test_tab_labels_parity_ignores_manual_tabs_cyrillic_vs_english():
+    ru = (
+        "{% list tabs %}\n"
+        "- mirror-3-dc-3nodes\n"
+        "```yaml\n"
+        "x: 1\n"
+        "```\n"
+        "{% endlist %}\n\n"
+        "{% list tabs %}\n"
+        "- Вручную\n"
+        "Text\n"
+        "{% endlist %}\n"
+    )
+    en = (
+        "{% list tabs %}\n"
+        "- mirror-3-dc-3nodes\n"
+        "```yaml\n"
+        "x: 1\n"
+        "```\n"
+        "{% endlist %}\n\n"
+        "{% list tabs %}\n"
+        "- Manually\n"
+        "Text\n"
+        "{% endlist %}\n"
+    )
+    assert config_tab_label_lines(ru) == config_tab_label_lines(en)
+    assert _check_tab_labels_parity(source=ru, translation=en) is None
 
 
 def test_tab_label_line_detected():

@@ -1,10 +1,12 @@
 """Deterministic EN postprocess after segment translate."""
 
 from ydbdoc_review.markdown_links import (
+    fix_bare_relative_md_paths_from_ru,
     fix_bare_urls_in_prose,
     fix_broken_anchor_links,
     restore_markdown_links_from_ru,
 )
+from ydbdoc_review.markdown_link_paths import extract_relative_link_refs
 from ydbdoc_review.translate_postprocess import (
     fix_heading_anchors_from_ru,
     fix_list_tabs_markdown_layout,
@@ -43,6 +45,33 @@ def test_fix_bare_urls_in_prose():
 
 def test_fix_broken_anchor_links():
     assert fix_broken_anchor_links("[#rag]()") == "[RAG](#rag)"
+
+
+def test_fix_bare_relative_md_paths_cli_profile():
+    ru = (
+        "See [{{ ydb-short-name }} CLI documentation]"
+        "(../../../reference/ydb-cli/profile/index.md).\n"
+    )
+    en = (
+        "See {{ ydb-short-name }} CLI documentation "
+        "(../../../reference/ydb-cli/profile/index.md).\n"
+    )
+    out = fix_bare_relative_md_paths_from_ru(ru, en)
+    assert "](../../../reference/ydb-cli/profile/index.md)" in out
+
+
+def test_restore_markdown_links_cli_profile_via_full_restore():
+    ru = (
+        "See [{{ ydb-short-name }} CLI documentation]"
+        "(../../../reference/ydb-cli/profile/index.md).\n"
+    )
+    en = (
+        "See {{ ydb-short-name }} CLI documentation "
+        "(../../../reference/ydb-cli/profile/index.md).\n"
+    )
+    out = restore_markdown_links_from_ru(ru, en)
+    assert "](../../../reference/ydb-cli/profile/index.md)" in out
+    assert len(extract_relative_link_refs(ru)) == len(extract_relative_link_refs(out))
 
 
 def test_restore_markdown_links_bare_relative_path():

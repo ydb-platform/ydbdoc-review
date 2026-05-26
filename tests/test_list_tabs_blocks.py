@@ -4,6 +4,16 @@ from ydbdoc_review.list_tabs_blocks import (
 )
 
 
+def test_list_tabs_block_copy_verbatim_manual_english_not_config():
+    manual_en = (
+        "{% list tabs group=manual-systemd %}\n\n"
+        "- Manually\n\n"
+        "Run the service.\n\n"
+        "{% endlist %}\n"
+    )
+    assert not list_tabs_block_copy_verbatim(manual_en)
+
+
 def test_list_tabs_block_copy_verbatim_config_yes_manual_no():
     config = (
         "{% list tabs %}\n\n- mirror-3-dc-3nodes\n\n"
@@ -21,9 +31,9 @@ def test_list_tabs_block_copy_verbatim_config_yes_manual_no():
 def test_split_preserving_list_tabs_two_blocks():
     ru = (
         "Intro.\n\n"
-        "{% list tabs %}\n\n- tab-a\n\n  ```yaml\n  - legacy\n  ```\n\n{% endlist %}\n\n"
+        "{% list tabs %}\n\n- mirror-3-dc-3nodes\n\n  ```yaml\n  - legacy\n  ```\n\n{% endlist %}\n\n"
         "Middle.\n\n"
-        "{% list tabs %}\n\n- tab-b\n\n{% endlist %}\n\n"
+        "{% list tabs %}\n\n- Manually\n\n{% endlist %}\n\n"
         "Outro.\n"
     )
     segs = split_preserving_list_tabs(ru)
@@ -31,7 +41,7 @@ def test_split_preserving_list_tabs_two_blocks():
         "prose",
         "list_tabs_verbatim",
         "prose",
-        "list_tabs_verbatim",
+        "list_tabs_translate",
         "prose",
     ]
     assert "- legacy" in segs[1].text

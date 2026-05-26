@@ -11,6 +11,20 @@ _LIST_TABS_BLOCK_RE = re.compile(
     re.IGNORECASE,
 )
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+_TAB_LABEL_LINE_RE = re.compile(r"^-\s+([A-Za-z0-9][A-Za-z0-9_.-]*)\s*$")
+_KNOWN_SDK_TAB_NAMES = frozenset(
+    {
+        "oss",
+        "go",
+        "python",
+        "java",
+        "javascript",
+        "csharp",
+        "node",
+        "php",
+        "ruby",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -19,14 +33,30 @@ class TextSegment:
     text: str
 
 
+def _is_config_style_tab_label(line: str) -> bool:
+    """Config tab ids (``mirror-3-dc-3nodes``, ``block-4-2``, ``OSS``), not ``Manually``."""
+    m = _TAB_LABEL_LINE_RE.match(line)
+    if not m:
+        return False
+    name = m.group(1)
+    if _CYRILLIC_RE.search(name):
+        return False
+    if name.lower() in _KNOWN_SDK_TAB_NAMES:
+        return True
+    if "-" in name and re.search(r"\d", name):
+        return True
+    return False
+
+
 def list_tabs_block_copy_verbatim(block: str) -> bool:
     """
-    True for config-style tabs (ASCII labels + YAML only).
+    True for config-style tabs (ASCII ids + YAML only).
 
-    Blocks with Cyrillic outside fences (e.g. ``- Вручную`` manual/systemd tabs)
+    Blocks with Cyrillic or manual tab names (``- Вручную``, ``- Manually``)
     must be translated, not copied from RU.
     """
     in_fence = False
+    has_config_label = False
     for line in block.splitlines():
         stripped = line.lstrip()
         if stripped.startswith("```"):
@@ -34,7 +64,12 @@ def list_tabs_block_copy_verbatim(block: str) -> bool:
             continue
         if not in_fence and _CYRILLIC_RE.search(line):
             return False
-    return True
+        if not in_fence and _TAB_LABEL_LINE_RE.match(line):
+            if _is_config_style_tab_label(line):
+                has_config_label = True
+            else:
+                return False
+    return has_config_label
 
 
 def split_preserving_list_tabs(text: str) -> list[TextSegment]:

@@ -9,6 +9,9 @@ _BARE_URL_IN_PARENS = re.compile(
     r"(?<!\])\b([\w\s—–\-]+?)\s*\((https?://[^)]+)\)"
 )
 _BROKEN_ANCHOR_LINK = re.compile(r"\[#([^]]+)\]\(\)")
+_BARE_REL_MD_IN_PARENS = re.compile(
+    r"(?<!\])\((\.\./[\w./\-#{}]+(?:\.md)?(?:#[\w.\-{}]+)?)\)"
+)
 
 
 def _is_relative_doc_href(href: str) -> bool:
@@ -32,11 +35,65 @@ def restore_markdown_links_from_ru(ru: str, en: str) -> str:
             out = _wrap_bare_url_with_href(out, href)
         if f"]({href})" not in out and _is_relative_doc_href(href):
             out = _wrap_bare_path_in_line(out, href, ru_text)
+    out = fix_bare_relative_md_paths_from_ru(ru, out)
     out = fix_bare_urls_in_prose(out)
     out = fix_broken_anchor_links(out)
     if en.endswith("\n") and not out.endswith("\n"):
         out += "\n"
     return out
+
+
+def fix_bare_relative_md_paths_from_ru(ru: str, en: str) -> str:
+    """
+    Wrap ``English phrase (../../path.md)`` when RU had ``[phrase](../../path.md)``.
+
+    Handles relative doc paths in parentheses without markdown brackets.
+    """
+    out = en
+    seen_hrefs: set[str] = set()
+    for ru_text, href in _LINK_RE.findall(ru):
+        if href in seen_hrefs or not _is_relative_doc_href(href):
+            continue
+        seen_hrefs.add(href)
+        if f"]({href})" in out:
+            continue
+        path_only = href.split("#", 1)[0]
+        for bare in (f"({href})", f"({path_only})") if path_only else (f"({href})",):
+            while bare in out and f"]({href})" not in out:
+                prev = out
+                use_href = href if bare == f"({href})" else path_only
+                out = _wrap_bare_path_in_line(out, use_href, ru_text)
+                if out == prev:
+                    out = _wrap_bare_paren_path_line(out, bare, href, ru_text)
+                if out == prev:
+                    break
+    return out
+
+
+def _wrap_bare_paren_path_line(
+    en: str, bare_paren: str, href: str, ru_text: str
+) -> str:
+    """One-line wrap for ``text (../doc.md)`` including ``{{ … }}`` in the label."""
+    idx = en.find(bare_paren)
+    if idx <= 0:
+        return en
+    line_start = en.rfind("\n", 0, idx) + 1
+    line_end = en.find("\n", idx)
+    if line_end < 0:
+        line_end = len(en)
+    line = en[line_start:line_end]
+    if f"]({href})" in line or f"]({href.split('#', 1)[0]})" in line:
+        return en
+    before = line[: idx - line_start].rstrip()
+    m = re.search(r"([\w\s{{}}—–\-.'`/]+)$", before)
+    label = (m.group(1).strip() if m else "") or ru_text.strip()
+    if not label or label.startswith("http"):
+        return en
+    label_start = line_start + before.rfind(label)
+    new_line = (
+        en[line_start:label_start] + f"[{label}]({href})" + en[idx + len(bare_paren) : line_end]
+    )
+    return en[:line_start] + new_line + en[line_end:]
 
 
 def _wrap_bare_url_with_href(en: str, href: str) -> str:
@@ -122,6 +179,11 @@ def _restore_one_link(ru_text: str, en: str, href: str) -> str:
         for candidate in (ru_text.strip(), ru_text):
             if candidate and candidate in en and f"[{candidate}]" not in en:
                 return en.replace(candidate, f"[{candidate}]({href})", 1)
+
+    if _is_relative_doc_href(href) and f"]({href})" not in en:
+        bare = f"({href})"
+        if bare in en:
+            return _wrap_bare_paren_path_line(en, bare, href, ru_text)
 
     return en
 

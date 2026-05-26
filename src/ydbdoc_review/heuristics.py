@@ -380,10 +380,10 @@ _CUT_CLOSE_RE = re.compile(r"\{%\s*endcut\s*%\}", re.IGNORECASE)
 def _check_tab_labels_parity(
     *, source: str, translation: str, **_: Any
 ) -> Finding | None:
-    from ydbdoc_review.tabs_repair import _tab_label_lines
+    from ydbdoc_review.tabs_repair import config_tab_label_lines
 
-    src = _tab_label_lines(source)
-    trn = _tab_label_lines(translation)
+    src = config_tab_label_lines(source)
+    trn = config_tab_label_lines(translation)
     if not src:
         return None
     if src == trn:

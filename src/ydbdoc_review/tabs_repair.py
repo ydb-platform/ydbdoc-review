@@ -38,6 +38,36 @@ def _tab_label_lines(text: str) -> list[str]:
     return out
 
 
+def _tab_label_lines_in_block(block: str) -> list[str]:
+    out: list[str] = []
+    in_fence = False
+    for line in block.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and _TAB_LABEL_LINE_RE.match(line):
+            out.append(line.rstrip())
+    return out
+
+
+def config_tab_label_lines(text: str) -> list[str]:
+    """
+    Tab labels only in locale-neutral config ``{% list tabs %}`` blocks.
+
+    Excludes manual/systemd tabs (Cyrillic labels in RU, translated ASCII in EN).
+    """
+    labels: list[str] = []
+    parts = re.split(
+        r"(\{%\s*list\s+tabs[\s\S]*?\{%\s*endlist\s*%\})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    for part in parts:
+        if _LIST_TABS_OPEN_RE.search(part) and list_tabs_block_copy_verbatim(part):
+            labels.extend(_tab_label_lines_in_block(part))
+    return labels
+
+
 def is_tab_label_line(line: str) -> bool:
     return bool(_TAB_LABEL_LINE_RE.match(line))
 
