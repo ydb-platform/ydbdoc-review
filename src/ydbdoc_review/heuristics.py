@@ -293,6 +293,9 @@ def _normalize_fence_code_line(line: str) -> str | None:
         return None
     code = re.sub(r"\s+", " ", code)
     code = code.replace("<строка>", "<string>").replace("<число>", "<number>")
+    code = re.sub(r"#\s*FQDN\s+ВМ", "#VM_FQDN", code, flags=re.IGNORECASE)
+    code = re.sub(r"#\s*VM\s+FQDN", "#VM_FQDN", code, flags=re.IGNORECASE)
+    code = re.sub(r"#\s*FQDN\s+VM", "#VM_FQDN", code, flags=re.IGNORECASE)
     code = re.sub(
         r"(?<![\w-])--\s+([a-z][a-z0-9-]*)(\s+(?=<|\$|/|[A-Za-z0-9_./]))",
         r"--\1\2",

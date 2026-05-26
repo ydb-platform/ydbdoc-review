@@ -24,6 +24,8 @@ from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
 )
+from ydbdoc_review.list_tabs_blocks import split_preserving_list_tabs
+from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 from ydbdoc_review.translate_scope import TranslateScope, compute_translate_scope
 
 _STRIP_REQUEST_HEADER_RE = re.compile(
@@ -32,44 +34,24 @@ _STRIP_REQUEST_HEADER_RE = re.compile(
 )
 
 _FENCE_OPEN_RE = re.compile(r"^\s*```")
-_TAB_LABEL_RE = re.compile(r"^(\s*-\s+)([A-Za-z0-9][A-Za-z0-9_.-]*)\s*$")
 
 
 @dataclass(frozen=True)
 class _MaskedChunk:
     masked_text: str
     fence_blocks: dict[str, str]
-    tab_labels: dict[str, str]
 
 
-def _mask_fences_and_tab_labels(source_text: str) -> _MaskedChunk:
-    """
-    Replace fenced blocks with placeholders to prevent the model from mutating code/config.
-    Also replace tab label lines inside `{% list tabs %}` blocks.
-    """
+def _mask_fences(source_text: str) -> _MaskedChunk:
+    """Replace fenced blocks with placeholders so the model cannot mutate code."""
     lines = source_text.splitlines()
     out: list[str] = []
     fence_blocks: dict[str, str] = {}
-    tab_labels: dict[str, str] = {}
-    in_tabs = False
     i = 0
     fence_i = 0
-    tab_i = 0
 
     while i < len(lines):
         line = lines[i]
-        low = line.strip().lower()
-        if low.startswith("{% list tabs"):
-            in_tabs = True
-            out.append(line)
-            i += 1
-            continue
-        if in_tabs and low.startswith("{% endlist"):
-            in_tabs = False
-            out.append(line)
-            i += 1
-            continue
-
         if _FENCE_OPEN_RE.match(line.strip()):
             start = i
             i += 1
@@ -84,31 +66,14 @@ def _mask_fences_and_tab_labels(source_text: str) -> _MaskedChunk:
             fence_blocks[key] = block
             out.append(key)
             continue
-
-        if in_tabs:
-            m = _TAB_LABEL_RE.match(line)
-            if m:
-                tab_i += 1
-                key = f"<<TAB_LABEL_{tab_i:03d}>>"
-                tab_labels[key] = line.rstrip()
-                out.append(key)
-                i += 1
-                continue
-
         out.append(line)
         i += 1
 
-    return _MaskedChunk(
-        masked_text="\n".join(out),
-        fence_blocks=fence_blocks,
-        tab_labels=tab_labels,
-    )
+    return _MaskedChunk(masked_text="\n".join(out), fence_blocks=fence_blocks)
 
 
-def _unmask_fences_and_tab_labels(text: str, masked: _MaskedChunk) -> str:
+def _unmask_fences(text: str, masked: _MaskedChunk) -> str:
     out = text
-    for key, val in masked.tab_labels.items():
-        out = out.replace(key, val)
     for key, val in masked.fence_blocks.items():
         out = out.replace(key, val)
     return out
@@ -258,7 +223,7 @@ def _translate_one_chunk(
     chunk: TranslateChunk,
     plan_header: str,
 ) -> str:
-    masked = _mask_fences_and_tab_labels(chunk.source_text)
+    masked = _mask_fences(chunk.source_text)
     masked_chunk = TranslateChunk(
         index=chunk.index,
         total=chunk.total,
@@ -300,13 +265,13 @@ def _translate_one_chunk(
         ).strip()
     )
     out = _STRIP_REQUEST_HEADER_RE.sub("", out).strip()
-    out = _unmask_fences_and_tab_labels(out, masked)
+    out = _unmask_fences(out, masked)
     if target_lang.strip().lower() in ("english", "en"):
         out = fix_yandex_cloud_links_for_en(out)
     return out
 
 
-def translate_text_with_plan(
+def _translate_prose_with_plan(
     settings: Settings,
     *,
     source_path: str,
@@ -314,9 +279,7 @@ def translate_text_with_plan(
     source_lang: str,
     target_lang: str,
 ) -> tuple[str, int]:
-    """
-    Translate *source_text* using a line plan; return ``(result, num_llm_calls)``.
-    """
+    """Translate prose only (no ``{% list tabs %}`` blocks)."""
     source_is_russian = source_lang.lower().startswith("rus")
     regions = analyze_document_structure(
         source_text, source_is_russian=source_is_russian
@@ -348,6 +311,51 @@ def translate_text_with_plan(
     if source_is_russian and target_lang.strip().lower() in ("english", "en"):
         merged = apply_en_postprocess_from_ru(source_text, merged)
     return merged, len(chunks)
+
+
+def translate_text_with_plan(
+    settings: Settings,
+    *,
+    source_path: str,
+    source_text: str,
+    source_lang: str,
+    target_lang: str,
+) -> tuple[str, int]:
+    """
+    Translate *source_text* using a line plan; return ``(result, num_llm_calls)``.
+
+    Entire ``{% list tabs %}…{% endlist %}`` blocks are copied verbatim from SOURCE.
+    """
+    segments = split_preserving_list_tabs(source_text)
+    parts: list[str] = []
+    llm_calls = 0
+    for seg in segments:
+        if seg.kind == "list_tabs":
+            fm_log(
+                f"file-translate copy list-tabs verbatim | {source_path} | "
+                f"{len(seg.text)} chars"
+            )
+            parts.append(seg.text)
+            continue
+        if not seg.text.strip():
+            parts.append(seg.text)
+            continue
+        translated, n = _translate_prose_with_plan(
+            settings,
+            source_path=source_path,
+            source_text=seg.text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        llm_calls += n
+        parts.append(translated)
+    merged = "".join(parts)
+    if source_lang.lower().startswith("rus") and target_lang.strip().lower() in (
+        "english",
+        "en",
+    ):
+        merged, _ = repair_tab_labels_from_source(source_text, merged)
+    return merged, llm_calls
 
 
 def _merge_h3_sections(
@@ -419,6 +427,7 @@ def translate_document_file_level(
                 out_secs[idx] = en_secs.get(idx, ru_secs.get(idx, ""))
         merged = _merge_h3_sections(out_secs, max_index=max_idx)
         merged = apply_en_postprocess_from_ru(source_full, merged)
+        merged, _ = repair_tab_labels_from_source(source_full, merged)
         return (
             merged,
             f"file-plan-scoped-h3={','.join(str(x) for x in sorted(scope.changed_h3))}"

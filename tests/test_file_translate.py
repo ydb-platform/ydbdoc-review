@@ -1,6 +1,9 @@
 from unittest.mock import MagicMock, patch
 
-from ydbdoc_review.file_translate import translate_document_file_level
+from ydbdoc_review.file_translate import (
+    translate_document_file_level,
+    translate_text_with_plan,
+)
 
 
 def test_file_translate_single_request():
@@ -59,3 +62,55 @@ def test_file_translate_scoped_sections():
     assert "en-a" in out
     assert "TRANSLATED-SECTION" in out
     assert call_count == 1
+
+
+def test_list_tabs_blocks_copied_without_llm():
+    ru = (
+        "Вступление RU.\n\n"
+        "{% list tabs %}\n\n"
+        "- mirror-3-dc-3nodes\n\n"
+        "  ```yaml\n"
+        "  services_enabled:\n"
+        "  - legacy\n"
+        "  ```\n\n"
+        "- mirror-3-dc-9nodes\n\n"
+        "  ```yaml\n"
+        "  x: 1\n"
+        "  ```\n\n"
+        "{% endlist %}\n\n"
+        "Заключение RU.\n"
+    )
+    chunk_calls: list[str] = []
+
+    def fake_chunk(_settings, *, chunk, **_kwargs):
+        chunk_calls.append(chunk.source_text)
+        if "Вступление" in chunk.source_text:
+            return "Intro EN.\n\n"
+        return "Outro EN.\n"
+
+    with (
+        patch(
+            "ydbdoc_review.file_translate._translate_one_chunk",
+            side_effect=fake_chunk,
+        ),
+        patch(
+            "ydbdoc_review.file_translate.apply_en_postprocess_from_ru",
+            side_effect=lambda _ru, en: en,
+        ),
+    ):
+        out, llm_calls = translate_text_with_plan(
+            MagicMock(),
+            source_path="ydb/docs/ru/core/x.md",
+            source_text=ru,
+            source_lang="Russian",
+            target_lang="English",
+        )
+    assert llm_calls == 2
+    assert "- mirror-3-dc-3nodes" in out
+    assert "- mirror-3-dc-9nodes" in out
+    assert "services_enabled:" in out
+    assert "\n      - legacy\n" not in out
+    assert out.count("```yaml") == 2
+    assert "Intro EN." in out
+    assert "Outro EN." in out
+    assert all("{% list tabs" not in src for src in chunk_calls)

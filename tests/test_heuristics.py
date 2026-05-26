@@ -183,6 +183,12 @@ def test_fence_code_line_parity_ignores_comment_only_diff():
     assert _check_fence_code_line_parity(source=ru, translation=en) is None
 
 
+def test_fence_code_line_parity_ignores_vm_fqdn_comment_order():
+    ru = "```yaml\n    - host: static-node-1.ydb-cluster.com #FQDN ВМ\n```\n"
+    en = "```yaml\n    - host: static-node-1.ydb-cluster.com #VM FQDN\n```\n"
+    assert _check_fence_code_line_parity(source=ru, translation=en) is None
+
+
 def test_table_checkmark_drift_with_headers():
     from ydbdoc_review.heuristics import _parse_checkmark_tables
 

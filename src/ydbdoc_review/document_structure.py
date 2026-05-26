@@ -163,10 +163,10 @@ def analyze_document_structure(
         if dkind:
             flush_prose(i - 1)
             d0, d1 = _read_diplodoc_block(lines, i, dkind)
-            action = "translate_tabs" if dkind == "tabs" else "translate_diplodoc"
+            action = "copy_verbatim" if dkind == "tabs" else "translate_diplodoc"
             detail = (
-                "Translate prose inside the tabs block; copy {% list tabs %}, "
-                "tab labels (- Name), and every ``` fenced block verbatim."
+                "Copy the entire {% list tabs %}…{% endlist %} block verbatim "
+                "(tab labels, YAML fences, SDK names)."
                 if dkind == "tabs"
                 else f"Keep {{% {dkind} %}} directives; translate inner text only."
             )
