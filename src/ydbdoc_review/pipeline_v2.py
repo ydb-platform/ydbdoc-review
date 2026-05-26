@@ -7,6 +7,7 @@ Same code path for ``doc_translate`` (translate then QA) and ``doc_verify``
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -279,7 +280,46 @@ def translate_document(
     en_on_main: str | None = None,
     ru_pr_diff: str | None = None,
 ) -> tuple[str, str]:
-    """Segment-based translation. Returns ``(translated_markdown, mode_label)``."""
+    """File-level translation with line plan (1+ LLM requests per file/chunk)."""
+    from ydbdoc_review.file_translate import translate_document_file_level
+
+    if os.environ.get("YDBDOC_TRANSLATE_LEGACY_SEGMENTS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return _translate_document_segment_legacy(
+            settings,
+            source_path=source_path,
+            source_full=source_full,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            en_on_main=en_on_main,
+            ru_pr_diff=ru_pr_diff,
+        )
+
+    return translate_document_file_level(
+        settings,
+        source_path=source_path,
+        source_full=source_full,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        en_on_main=en_on_main,
+        ru_pr_diff=ru_pr_diff,
+    )
+
+
+def _translate_document_segment_legacy(
+    settings: Settings,
+    *,
+    source_path: str,
+    source_full: str,
+    source_lang: str,
+    target_lang: str,
+    en_on_main: str | None,
+    ru_pr_diff: str | None,
+) -> tuple[str, str]:
+    """Previous segment-per-unit pipeline (``YDBDOC_TRANSLATE_LEGACY_SEGMENTS``)."""
     scope = compute_translate_scope(
         ru_text=source_full,
         en_on_main=en_on_main,
