@@ -32,7 +32,7 @@ from ydbdoc_review.placeholder_translate import (
     build_placeholder_segments,
 )
 
-_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F")
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
 
 
 @dataclass(frozen=True)
