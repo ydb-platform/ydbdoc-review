@@ -366,7 +366,7 @@ def _qa_output_tokens() -> int:
     raw = os.environ.get("YDBDOC_QA_MAX_OUTPUT_TOKENS", "").strip()
     if raw.isdigit():
         return max(2048, min(int(raw), 65_536))
-    return 16_384
+    return 24_576
 
 
 def _cap_body(text: str, cap: int) -> str:

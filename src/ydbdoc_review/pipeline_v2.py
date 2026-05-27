@@ -451,6 +451,52 @@ def apply_fix_diff(text: str, fixes: list[dict]) -> FixApplyResult:
     return FixApplyResult(applied=applied, skipped=skipped, new_text=out)
 
 
+_STRUCTURE_HEURISTIC_RULES = frozenset(
+    {
+        "fence_parity",
+        "fence_unbalanced",
+        "tab_labels_parity",
+        "markdown_link_path_parity",
+    }
+)
+
+
+def _structure_finalize_for_qa(
+    source_text: str,
+    text: str,
+    *,
+    source_lang: str,
+    target_lang: str,
+) -> tuple[str, bool]:
+    """Deterministic structure sync (fences, tabs, links) before heuristics report."""
+    out = _apply_en_qa_postprocess(
+        text,
+        source_text=source_text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
+    changed = out != text
+    repaired, fence_applied = repair_fences_from_source(source_text, out)
+    if fence_applied:
+        out = _apply_en_qa_postprocess(
+            repaired,
+            source_text=source_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        changed = True
+    out, tab_applied = repair_tab_labels_from_source(source_text, out)
+    if tab_applied:
+        out = _apply_en_qa_postprocess(
+            out,
+            source_text=source_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        changed = True
+    return out, changed or fence_applied or tab_applied
+
+
 def _apply_en_qa_postprocess(
     text: str,
     *,
@@ -595,14 +641,7 @@ def run_pair_qa(
             confirmation_md=None,
             repair_error=str(exc),
             ru_source_bugs=ru_bugs,
-            findings=_safe_heuristics(
-                settings,
-                source=source_text,
-                translation=current,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                label=ru_path,
-            ),
+            findings=[],
         )
 
     verdict = parse_verdict(review_md)
@@ -731,6 +770,17 @@ def run_pair_qa(
                     "Повторная проверка не отработала после fix-diff."
                 )
 
+    current, structure_applied = _structure_finalize_for_qa(
+        source_text,
+        current,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
+    if structure_applied:
+        fence_repair_applied = True
+        repair_applied = repair_applied or structure_applied
+        fm_log(f"QA structure finalize before heuristics | {ru_path}")
+
     findings = _safe_heuristics(
         settings,
         source=source_text,
@@ -740,30 +790,16 @@ def run_pair_qa(
         label=ru_path,
     )
     late_structure_repair = False
-    if any(
-        f.rule in ("fence_parity", "fence_unbalanced", "tab_labels_parity")
-        for f in findings
-    ):
-        repaired, applied = repair_fences_from_source(source_text, current)
-        if applied:
-            current = _apply_en_qa_postprocess(
-                repaired,
-                source_text=source_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-            )
-            fence_repair_applied = True
+    if any(f.rule in _STRUCTURE_HEURISTIC_RULES for f in findings):
+        current, retry_applied = _structure_finalize_for_qa(
+            source_text,
+            current,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        if retry_applied:
             late_structure_repair = True
-        current, tab_fixed = repair_tab_labels_from_source(source_text, current)
-        if tab_fixed or applied:
-            if tab_fixed:
-                current = _apply_en_qa_postprocess(
-                    current,
-                    source_text=source_text,
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                )
-                late_structure_repair = True
+            fence_repair_applied = True
             repair_applied = True
             findings = _safe_heuristics(
                 settings,
@@ -773,7 +809,7 @@ def run_pair_qa(
                 target_lang=target_lang,
                 label=ru_path,
             )
-            fm_log(f"QA structure repair (heuristic) | {ru_path}")
+            fm_log(f"QA structure finalize retry | {ru_path}")
 
     if late_structure_repair:
         fm_log(f"QA re-validate (after structure repair) | {ru_path}")

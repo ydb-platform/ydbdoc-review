@@ -6,7 +6,10 @@ from ydbdoc_review.heuristics import (
     _check_fence_parity,
     _check_markdown_link_path_parity,
 )
-from ydbdoc_review.markdown_link_paths import extract_relative_link_refs
+from ydbdoc_review.markdown_link_paths import (
+    extract_relative_link_refs,
+    missing_relative_link_details,
+)
 from ydbdoc_review.ru_source_bugs import (
     detect_ru_source_bugs,
     fix_ru_source_bugs_in_text,
@@ -40,6 +43,33 @@ def test_fence_parity_detects_missing_closer():
     f = _check_fence_parity(source=ru, translation=en)
     assert f is not None
     assert f.rule == "fence_parity"
+    assert "незакрытый" in f.detail or "нет в EN" in f.detail
+
+
+def test_fence_parity_lists_missing_block_not_only_count():
+    ru = "```yaml\na: 1\n```\n\n```bash\necho\n```\n"
+    en = "```yaml\na: 1\n```\n"
+    f = _check_fence_parity(source=ru, translation=en)
+    assert f is not None
+    assert "нет в EN" in f.detail
+    assert "```bash" in f.detail
+
+
+def test_missing_relative_link_details():
+    ru = "[A](one.md) and [B](two.md)"
+    en = "[A](one.md)"
+    missing = missing_relative_link_details(ru, en)
+    assert len(missing) == 1
+    assert "two.md" in missing[0]
+
+
+def test_markdown_link_path_parity_lists_missing_href():
+    ru = "[A](one.md) and [B](two.md)"
+    en = "[A](one.md)"
+    f = _check_markdown_link_path_parity(source=ru, translation=en)
+    assert f is not None
+    assert "нет в EN" in f.detail
+    assert "two.md" in f.detail
 
 
 def test_fence_parity_ok_when_matched():

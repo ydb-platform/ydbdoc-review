@@ -58,7 +58,8 @@ applies_to: any
 description: |
   Fenced-блоки (`` ``` ``) в TRANSLATION должны соответствовать SOURCE: то же число
   закрытых блоков, чётное число delimiter-строк в EN, нет обрыва YAML/кода без
-  закрывающего `` ``` ``. Сравнение RU↔EN, не только «нечётное число в EN».
+  закрывающего `` ``` ``. В отчёте — какой блок отсутствует или лишний (первая
+  строка блока), а не только счётчик SOURCE/TRANSLATION.
 report_message: |
   Расхождение fenced-блоков RU↔EN: {detail}.
 ```
@@ -80,7 +81,8 @@ applies_to: ru_to_en
 description: |
   Для каждой относительной markdown-ссылки ``[text](path.md)`` в SOURCE: в TRANSLATION
   тот же суффикс файла и та же глубина ``../``; исключение — ``/ru/docs/`` ↔ ``/en/docs/``
-  в URL Yandex Cloud.
+  в URL Yandex Cloud. В отчёте перечисляются конкретные ``[text](path)`` из RU, которых
+  нет в EN (и лишние в EN), а не только число ссылок.
 report_message: |
   Относительные пути ссылок не совпадают с SOURCE: {detail}.
 ```
@@ -149,12 +151,23 @@ report_message: |
 ```
 
 ```yaml
+name: diplodoc_t_link_drift
+severity: critical
+applies_to: ru_to_en
+description: |
+  Макрос ``[{#T}](url)`` в TRANSLATION только там, где он есть в SOURCE на той же
+  строке, с тем же ``url``. Нельзя подставлять ``{#T}`` вместо обычного текста ссылки.
+report_message: |
+  Неверное использование макроса {{#T}}: {detail}.
+```
+
+```yaml
 name: broken_markdown_link
 severity: critical
 applies_to: ru_to_en
 description: |
   В EN не должно быть сломанных markdown-ссылок: голый URL в скобках `(https://...)`
-  вместо `[текст](url)`, пустой `[#anchor]()`, `[text]()` без href.
+  вместо `[текст](url)`, пустой `[#anchor]()`, `[text]()` без href, разметка ``][(``.
 report_message: |
   Сломанные markdown-ссылки в EN: {detail}.
 ```
@@ -178,7 +191,8 @@ description: |
   В каждом fenced-блоке с кодом (`` ```yql ``, `` ```bash ``, …) число и порядок
   строк с кодом (вызовы TypeName("..."), команды CLI, не комментарии) в TRANSLATION
   должны совпадать с SOURCE. Литералы и имена типов не меняются; переводится только
-  текст после ``--`` / ``#``.
+  текст после ``--`` / ``#``. Если число блоков уже не совпадает — срабатывает
+  ``fence_parity``; эта проверка не дублирует счётчик блоков.
 report_message: |
   В fenced-блоке пропущены или изменены строки кода относительно SOURCE. {detail}
 ```

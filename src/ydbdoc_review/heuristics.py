@@ -212,6 +212,14 @@ def _fence_delimiter_count(text: str) -> int:
     )
 
 
+def _fence_block_summary(block: str, *, max_len: int = 56) -> str:
+    first = block.splitlines()[0].strip() if block else "```"
+    if len(first) > max_len:
+        first = first[: max_len - 3] + "..."
+    n_lines = len(block.splitlines())
+    return f"{first} ({n_lines} строк)"
+
+
 def _check_fence_parity(
     *, source: str, translation: str, **_: Any
 ) -> Finding | None:
@@ -225,18 +233,28 @@ def _check_fence_parity(
     problems: list[str] = []
 
     if trn_ticks % 2 != 0:
-        problems.append(
-            f"в TRANSLATION нечётное число строк с ``` ({trn_ticks})"
-        )
+        if trn_blocks:
+            problems.append(
+                "незакрытый fenced-блок в EN: "
+                + _fence_block_summary(trn_blocks[-1])
+            )
+        else:
+            problems.append(
+                f"в TRANSLATION нечётное число строк с ``` ({trn_ticks})"
+            )
     if src_ticks % 2 != 0:
         problems.append(
             f"в SOURCE нечётное число строк с ``` ({src_ticks})"
         )
     if len(src_blocks) != len(trn_blocks):
-        problems.append(
-            f"число закрытых fenced-блоков SOURCE={len(src_blocks)}, "
-            f"TRANSLATION={len(trn_blocks)}"
-        )
+        for i in range(len(trn_blocks), len(src_blocks)):
+            problems.append(
+                f"нет в EN: блок {i + 1} из SOURCE — {_fence_block_summary(src_blocks[i])}"
+            )
+        for i in range(len(src_blocks), len(trn_blocks)):
+            problems.append(
+                f"лишний в EN: блок {i + 1} — {_fence_block_summary(trn_blocks[i])}"
+            )
     if trn_ticks % 2 == 0 and trn_ticks > 0:
         expected_closed = trn_ticks // 2
         if len(trn_blocks) < expected_closed:
@@ -325,15 +343,7 @@ def _check_fence_code_line_parity(
     if not src_blocks:
         return None
     if len(src_blocks) != len(trn_blocks):
-        return Finding(
-            rule="fence_code_line_parity",
-            severity="critical",
-            location="fenced-блоки",
-            detail=(
-                f"число fenced-блоков SOURCE={len(src_blocks)}, "
-                f"EN={len(trn_blocks)}"
-            ),
-        )
+        return None
     problems: list[str] = []
     for i, (src_keys, trn_keys) in enumerate(
         zip(src_blocks, trn_blocks, strict=True), start=1
@@ -389,15 +399,22 @@ def _check_tab_labels_parity(
     if src == trn:
         return None
     if len(src) != len(trn):
-        missing = [x for x in src if x not in trn][:3]
+        missing = [x for x in src if x not in trn][:5]
+        extra = [x for x in trn if x not in src][:3]
+        parts: list[str] = []
+        if missing:
+            parts.append("нет в EN: " + "; ".join(missing))
+        if extra:
+            parts.append("лишние в EN: " + "; ".join(extra))
+        if not parts:
+            parts.append(
+                f"меток config-tabs SOURCE={len(src)}, TRANSLATION={len(trn)}"
+            )
         return Finding(
             rule="tab_labels_parity",
             severity="critical",
             location="{% list tabs %}",
-            detail=(
-                f"меток вкладок SOURCE={len(src)}, TRANSLATION={len(trn)}"
-                + (f"; нет в EN: {'; '.join(missing)}" if missing else "")
-            ),
+            detail=" | ".join(parts),
         )
     pairs = [f"{a}!={b}" for a, b in zip(src, trn, strict=True) if a != b][:3]
     return Finding(
@@ -451,7 +468,10 @@ _CYRILLIC_IN_URL_RE = re.compile(
     r"https?://[^\s\)]*[Ѐ-ӿѐ-џ][^\s\)]*", re.IGNORECASE
 )
 _BROKEN_MD_LINK_RE = re.compile(
-    r"\[[^\]]*\]\(\)|(?<!\])\((https?://[^)]+)\)"
+    r"\[[^\]]*\]\(\)"
+    r"|(?<!\])\((https?://[^)]+)\)"
+    r"|\]\[\("
+    r"|\[{#T}\]\[\("
 )
 _HEADING_ANCHOR_LINE_RE = re.compile(r"^(#{1,3}\s+.+?)(\s*\{#([^}]+)\})?\s*$")
 _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
@@ -623,21 +643,34 @@ def _check_wikipedia_ru_in_en(*, source: str, translation: str, **_: Any) -> Fin
 def _check_markdown_link_path_parity(
     *, source: str, translation: str, **_: Any
 ) -> Finding | None:
-    from ydbdoc_review.markdown_link_paths import extract_relative_link_refs
+    from ydbdoc_review.markdown_link_paths import (
+        extra_relative_link_details,
+        extract_relative_link_refs,
+        missing_relative_link_details,
+    )
 
     src_refs = extract_relative_link_refs(source)
     trn_refs = extract_relative_link_refs(translation)
     if not src_refs:
         return None
     if len(src_refs) != len(trn_refs):
+        problems: list[str] = []
+        missing = missing_relative_link_details(source, translation)
+        if missing:
+            problems.append("нет в EN: " + "; ".join(missing))
+        extra = extra_relative_link_details(translation, source)
+        if extra:
+            problems.append("лишние в EN: " + "; ".join(extra))
+        if not problems:
+            problems.append(
+                f"число относительных ссылок SOURCE={len(src_refs)}, "
+                f"TRANSLATION={len(trn_refs)} (конкретные href не сопоставлены)"
+            )
         return Finding(
             rule="markdown_link_path_parity",
             severity="critical",
             location="markdown-ссылки",
-            detail=(
-                f"число относительных ссылок SOURCE={len(src_refs)}, "
-                f"TRANSLATION={len(trn_refs)}"
-            ),
+            detail=" | ".join(problems[:4]),
         )
     problems: list[str] = []
     for i, (s, t) in enumerate(zip(src_refs, trn_refs, strict=True), start=1):
@@ -659,6 +692,44 @@ def _check_markdown_link_path_parity(
         severity="critical",
         location="относительные ссылки",
         detail="; ".join(problems),
+    )
+
+
+def _check_diplodoc_t_link_drift(
+    *, source: str, translation: str, **_: Any
+) -> Finding | None:
+    """``{#T}`` only where SOURCE used it on the same line; no invented T-macros."""
+    from ydbdoc_review.markdown_links import DIPLODOC_T_MACRO, _LINK_RE
+
+    problems: list[str] = []
+    ru_lines = source.splitlines()
+    tr_lines = translation.splitlines()
+    for i in range(max(len(ru_lines), len(tr_lines))):
+        rl = ru_lines[i] if i < len(ru_lines) else ""
+        tl = tr_lines[i] if i < len(tr_lines) else ""
+        if not rl or not tl:
+            continue
+        ru_has_t = any(t == DIPLODOC_T_MACRO for t, _ in _LINK_RE.findall(rl))
+        tr_has_t = any(t == DIPLODOC_T_MACRO for t, _ in _LINK_RE.findall(tl))
+        if tr_has_t and not ru_has_t:
+            snippet = tl.strip()[:90]
+            problems.append(f"строка {i + 1}: лишний {{#T}} — {snippet}")
+        if ru_has_t and tr_has_t:
+            ru_hrefs = {h for t, h in _LINK_RE.findall(rl) if t == DIPLODOC_T_MACRO}
+            tr_hrefs = {h for t, h in _LINK_RE.findall(tl) if t == DIPLODOC_T_MACRO}
+            if ru_hrefs != tr_hrefs:
+                problems.append(
+                    f"строка {i + 1}: {{#T}} с другим href, чем в SOURCE"
+                )
+        if len(problems) >= 4:
+            break
+    if not problems:
+        return None
+    return Finding(
+        rule="diplodoc_t_link_drift",
+        severity="critical",
+        location="markdown-ссылки",
+        detail="; ".join(problems[:4]),
     )
 
 
@@ -723,6 +794,7 @@ _DETERMINISTIC: dict[str, Callable[..., Finding | None]] = {
     "liquid_tags_balance": _check_liquid_tags_balance,
     "wikipedia_ru_in_en": _check_wikipedia_ru_in_en,
     "broken_markdown_link": _check_broken_markdown_link,
+    "diplodoc_t_link_drift": _check_diplodoc_t_link_drift,
     "heading_anchor_mismatch": _check_heading_anchor_mismatch,
     "table_checkmark_drift": _check_table_checkmark_drift,
 }

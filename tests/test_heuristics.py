@@ -144,6 +144,12 @@ def test_table_checkmark_drift():
     assert f is None  # no header row → skip
 
 
+def test_fence_code_line_parity_skips_when_block_count_differs():
+    ru = "```yql\nSELECT 1\n```\n\n```yql\nSELECT 2\n```\n"
+    en = "```yql\nSELECT 1\n```\n"
+    assert _check_fence_code_line_parity(source=ru, translation=en) is None
+
+
 def test_fence_code_line_parity_detects_missing_type_literals():
     ru = (
         "### Примеры\n\n"

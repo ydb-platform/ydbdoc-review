@@ -191,9 +191,16 @@ def build_translate_chunks(
         batch_regions = []
         batch_chars = 0
 
+    def _starts_h2(line_no: int) -> bool:
+        idx = line_no - 1
+        return 0 <= idx < n and lines[idx].startswith("## ")
+
     for reg in translatable:
         reg_text = _slice_lines(text, reg.start_line, reg.end_line)
         reg_len = len(reg_text)
+        if batch_regions and _starts_h2(reg.start_line):
+            flush_batch()
+            batch_start = reg.start_line
         if batch_regions and batch_chars + reg_len > budget:
             flush_batch()
             batch_start = reg.start_line

@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+DIPLODOC_T_MACRO = "{#T}"
+_BROKEN_LINK_FRAGMENT_RE = re.compile(
+    r"\]\[\(|\]\[\[\(|\[{#T}\]\[\(|\]\(#"
+)
 _BARE_URL_IN_PARENS = re.compile(
     r"(?<!\])\b([\w\s—–\-]+?)\s*\((https?://[^)]+)\)"
 )
@@ -19,6 +23,168 @@ def _is_relative_doc_href(href: str) -> bool:
     return bool(h) and not h.startswith(("#", "http://", "https://", "mailto:"))
 
 
+def _href_key(href: str) -> tuple[str, str]:
+    base, _, frag = href.partition("#")
+    return (base.strip(), frag.strip())
+
+
+def _line_has_broken_link_markup(line: str) -> bool:
+    return bool(_BROKEN_LINK_FRAGMENT_RE.search(line))
+
+
+def _valid_en_link_label(text: str) -> bool:
+    t = text.strip()
+    if not t or t in ("(", "[", "]", "{#T}"):
+        return False
+    if len(t) < 2 and t not in ("EN", "RU"):
+        return False
+    return not _line_has_broken_link_markup(f"[{t}](x)")
+
+
+def _line_needs_link_repair(ru_line: str, en_line: str) -> bool:
+    ru_links = _LINK_RE.findall(ru_line)
+    if not ru_links:
+        return False
+    if _line_has_broken_link_markup(en_line):
+        return True
+    en_links = _LINK_RE.findall(en_line)
+    if len(en_links) != len(ru_links):
+        if not en_links and re.search(r"https?://", en_line):
+            return False
+        return True
+    for (rt, rh), (et, eh) in zip(ru_links, en_links, strict=True):
+        if rt == DIPLODOC_T_MACRO and et != DIPLODOC_T_MACRO:
+            return True
+        if rt != DIPLODOC_T_MACRO and et == DIPLODOC_T_MACRO:
+            return True
+        if _href_key(rh) != _href_key(eh):
+            return True
+    return False
+
+
+def _default_en_link_label(ru_text: str, href: str) -> str:
+    if "topology-select" in href:
+        return "topology selection"
+    if "tls-certificates" in href:
+        return "TLS certificates"
+    if "#requirements" in href or href.endswith("requirements"):
+        return "requirements"
+    if "configuration/index" in href:
+        return "configuration reference"
+    if "embedded-ui" in href:
+        return "embedded UI"
+    return ru_text
+
+
+def _label_for_ru_link(
+    ru_text: str,
+    href: str,
+    *,
+    en_line: str,
+    en_links: list[tuple[str, str]],
+    link_index: int,
+) -> str:
+    if ru_text == DIPLODOC_T_MACRO:
+        return DIPLODOC_T_MACRO
+    for et, eh in en_links:
+        if _href_key(eh) == _href_key(href) and et != DIPLODOC_T_MACRO:
+            return et
+    if link_index < len(en_links) and en_links[link_index][0] != DIPLODOC_T_MACRO:
+        return en_links[link_index][0]
+    bracket = en_line.find("[")
+    pre = en_line[:bracket] if bracket >= 0 else en_line
+    m = re.search(r"\(see\s+([^[(]+?)\s*$", pre, re.IGNORECASE)
+    if m and m.group(1).strip():
+        return m.group(1).strip().rstrip(",")
+    if re.search(r"[\u0400-\u04FF]", ru_text):
+        return _default_en_link_label(ru_text, href)
+    return ru_text
+
+
+def _en_prose_before_broken_links(en_line: str) -> str:
+    for marker in ("[{#T}]", "][(", "["):
+        idx = en_line.find(marker)
+        if idx >= 0:
+            return en_line[:idx]
+    return en_line
+
+
+def _en_prose_after_broken_links(en_line: str, *, ru_suffix: str) -> str:
+    for sep in (")).", ")).", ")."):
+        if sep in en_line:
+            tail = en_line.split(sep, 1)[1]
+            if tail and not re.search(r"[\u0400-\u04FF]", tail):
+                return tail
+    return "" if re.search(r"[\u0400-\u04FF]", ru_suffix) else ru_suffix
+
+
+def _rebuild_line_links_from_ru(ru_line: str, en_line: str) -> str:
+    """Rebuild EN line link markup from RU structure; keep EN prose between links."""
+    ru_matches = list(_LINK_RE.finditer(ru_line))
+    if not ru_matches:
+        return en_line
+
+    en_links = [
+        (t, h) for t, h in _LINK_RE.findall(en_line) if _valid_en_link_label(t)
+    ]
+
+    if _line_has_broken_link_markup(en_line) and len(ru_matches) == 1:
+        m = ru_matches[0]
+        ru_text, href = m.group(1), m.group(2)
+        label = _label_for_ru_link(
+            ru_text, href, en_line=en_line, en_links=en_links, link_index=0
+        )
+        prefix = _en_prose_before_broken_links(en_line)
+        if re.search(r"[\u0400-\u04FF]", prefix):
+            prefix = ""
+        suffix = _en_prose_after_broken_links(
+            en_line, ru_suffix=ru_line[m.end() :]
+        )
+        return f"{prefix}[{label}]({href}){suffix}"
+
+    temp = en_line
+    for m in reversed(list(_LINK_RE.finditer(en_line))):
+        temp = temp[: m.start()] + "\x00" + temp[m.end() :]
+    temp = _BROKEN_LINK_FRAGMENT_RE.sub("\x00", temp)
+    temp = re.sub(r"\[{#T}\][^\x00\n]*", "\x00", temp)
+    en_segments = temp.split("\x00")
+
+    out: list[str] = []
+    for i, m in enumerate(ru_matches):
+        if i < len(en_segments):
+            out.append(en_segments[i])
+        ru_text, href = m.group(1), m.group(2)
+        label = _label_for_ru_link(
+            ru_text, href, en_line=en_line, en_links=en_links, link_index=i
+        )
+        out.append(f"[{label}]({href})")
+    if len(en_segments) > len(ru_matches):
+        out.append(en_segments[len(ru_matches)])
+    return "".join(out)
+
+
+def repair_markdown_links_from_ru(ru: str, en: str) -> str:
+    """
+  Line-aligned link repair: fix broken ``][(`` markup and ``{#T}`` misuse vs RU.
+
+  Does not translate prose — only restores ``[label](href)`` shape from SOURCE.
+  """
+    ru_lines = ru.splitlines()
+    en_lines = en.splitlines()
+    n = max(len(ru_lines), len(en_lines))
+    out_lines: list[str] = []
+    for i in range(n):
+        rl = ru_lines[i] if i < len(ru_lines) else ""
+        el = en_lines[i] if i < len(en_lines) else ""
+        if rl and el and _line_needs_link_repair(rl, el):
+            el = _rebuild_line_links_from_ru(rl, el)
+        out_lines.append(el)
+    result = "\n".join(out_lines)
+    if en.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
 def restore_markdown_links_from_ru(ru: str, en: str) -> str:
     """
     Re-insert ``[text](href)`` from RU when EN translation dropped link markup.
@@ -26,7 +192,7 @@ def restore_markdown_links_from_ru(ru: str, en: str) -> str:
     Handles known patterns and generic ``(href)`` → ``[text](href)`` when RU
     had a proper link with the same URL.
     """
-    out = en
+    out = repair_markdown_links_from_ru(ru, en)
     for ru_text, href in _LINK_RE.findall(ru):
         if f"]({href})" in out:
             continue
