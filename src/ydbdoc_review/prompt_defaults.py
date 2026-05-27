@@ -26,6 +26,20 @@ DEFAULT_QUALITY_HIERARCHY_FILE = "translate_quality_hierarchy.md"
 DEFAULT_EN_STYLE_GUIDE_FILE = "en_style_guide.md"
 DEFAULT_SEGMENT_RULES_FILE = "08_translate_segment.txt"
 DEFAULT_FILE_RULES_FILE = "10_translate_file_with_plan.txt"
+DEFAULT_ANNOTATED_CHUNK_RULES_FILE = "11_annotated_chunk.txt"
+
+TRANSLATE_ANNOTATED_CHUNK_TEMPLATE = """\
+Вы переводите **один размеченный фрагмент** markdown-файла YDB.
+
+В user-сообщении: карта регионов по строкам и SOURCE с префиксами `L00001|`.
+Следуйте карте: COPY — дословно, TRANSLATE — на TARGET.
+
+{quality_hierarchy_section}\
+{project_info_section}\
+{glossary_section}\
+{style_guide_section}\
+{annotated_chunk_rules}\
+"""
 
 TRANSLATE_FILE_SYSTEM_TEMPLATE = """\
 Вы переводите **markdown-файл** (или его часть) технической документации YDB.

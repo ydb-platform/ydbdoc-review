@@ -7,10 +7,17 @@ import re
 from dataclasses import dataclass
 
 from ydbdoc_review.config import Settings
+from ydbdoc_review.annotated_translate import (
+    AnnotatedChunk,
+    build_annotated_chunks,
+    format_annotated_source,
+    merge_copy_regions_from_source,
+    refine_tab_regions,
+    summarize_chunk_regions,
+)
 from ydbdoc_review.document_structure import (
     StructureRegion,
     analyze_document_structure,
-    format_region_plan,
     split_by_h3_sections,
 )
 from ydbdoc_review.fm_progress import fm_log
@@ -18,10 +25,8 @@ from ydbdoc_review.llm import (
     _strip_code_fence,
     call_yandex_responses,
     clamp_max_output_tokens,
-    load_translate_file_instructions,
+    load_annotated_chunk_instructions,
 )
-from ydbdoc_review.list_tabs_blocks import split_preserving_list_tabs
-from ydbdoc_review.tabs_translate import translate_tabs_block
 from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
@@ -32,52 +37,6 @@ _STRIP_REQUEST_HEADER_RE = re.compile(
     r"^#\s*Translation request.*\n+",
     re.IGNORECASE | re.MULTILINE,
 )
-
-_FENCE_OPEN_RE = re.compile(r"^\s*```")
-
-
-@dataclass(frozen=True)
-class _MaskedChunk:
-    masked_text: str
-    fence_blocks: dict[str, str]
-
-
-def _mask_fences(source_text: str) -> _MaskedChunk:
-    """Replace fenced blocks with placeholders so the model cannot mutate code."""
-    lines = source_text.splitlines()
-    out: list[str] = []
-    fence_blocks: dict[str, str] = {}
-    i = 0
-    fence_i = 0
-
-    while i < len(lines):
-        line = lines[i]
-        if _FENCE_OPEN_RE.match(line.strip()):
-            start = i
-            i += 1
-            while i < len(lines):
-                if _FENCE_OPEN_RE.match(lines[i].strip()):
-                    i += 1
-                    break
-                i += 1
-            block = "\n".join(lines[start:i])
-            fence_i += 1
-            key = f"<<FENCE_BLOCK_{fence_i:03d}>>"
-            fence_blocks[key] = block
-            out.append(key)
-            continue
-        out.append(line)
-        i += 1
-
-    return _MaskedChunk(masked_text="\n".join(out), fence_blocks=fence_blocks)
-
-
-def _unmask_fences(text: str, masked: _MaskedChunk) -> str:
-    out = text
-    for key, val in masked.fence_blocks.items():
-        out = out.replace(key, val)
-    return out
-
 
 def _join_text_segments(parts: list[str]) -> str:
     """Join translated segments without gluing headings to ``{% list tabs %}``."""
@@ -141,116 +100,70 @@ def build_translate_chunks(
     *,
     max_chars: int | None = None,
 ) -> list[TranslateChunk]:
-    """
-    Split *text* into chunks that respect region boundaries and *max_chars*.
-
-    Never splits inside a single :class:`StructureRegion`.
-    """
-    budget = max_chars if max_chars is not None else _max_chunk_chars()
-    if not text.strip():
-        return []
-
-    lines = text.splitlines()
-    n = len(lines)
-    if not regions:
-        regions = [
-            StructureRegion(
-                1,
-                n,
-                "prose",
-                "translate",
-                "Translate entire fragment.",
-            )
-        ]
-
-    translatable = [r for r in regions if r.kind != "tabs"]
-    if not translatable:
-        return []
-
-    chunks: list[TranslateChunk] = []
-    batch_regions: list[StructureRegion] = []
-    batch_start = translatable[0].start_line
-    batch_end = translatable[0].end_line
-    batch_chars = 0
-
-    def flush_batch() -> None:
-        nonlocal batch_regions, batch_start, batch_end, batch_chars
-        if not batch_regions:
-            return
-        src = _slice_lines(text, batch_start, batch_end)
-        chunks.append(
-            TranslateChunk(
-                index=0,
-                total=0,
-                start_line=batch_start,
-                end_line=batch_end,
-                source_text=src,
-                regions=list(batch_regions),
-            )
-        )
-        batch_regions = []
-        batch_chars = 0
-
-    def _starts_h2(line_no: int) -> bool:
-        idx = line_no - 1
-        return 0 <= idx < n and lines[idx].startswith("## ")
-
-    for reg in translatable:
-        reg_text = _slice_lines(text, reg.start_line, reg.end_line)
-        reg_len = len(reg_text)
-        if batch_regions and _starts_h2(reg.start_line):
-            flush_batch()
-            batch_start = reg.start_line
-        if batch_regions and batch_chars + reg_len > budget:
-            flush_batch()
-            batch_start = reg.start_line
-        if not batch_regions:
-            batch_start = reg.start_line
-        batch_regions.append(reg)
-        batch_end = reg.end_line
-        batch_chars += reg_len + 2
-
-    flush_batch()
-
-    total = len(chunks)
+    """Region-aligned chunks (compat wrapper around :func:`build_annotated_chunks`)."""
+    annotated = build_annotated_chunks(text, regions, max_chars=max_chars)
     return [
         TranslateChunk(
-            index=i + 1,
-            total=total,
+            index=c.index,
+            total=c.total,
             start_line=c.start_line,
             end_line=c.end_line,
-            source_text=c.source_text,
+            source_text=_slice_lines(text, c.start_line, c.end_line),
             regions=c.regions,
         )
-        for i, c in enumerate(chunks)
+        for c in annotated
     ]
 
 
-def _build_chunk_user_input(
+_ANNOTATED_LINE_RE = re.compile(r"^L\d{5}\|\s?(.*)$")
+_ANNOTATED_MARKER_RE = re.compile(r"^L\d{5}\s+@(BEGIN|END)\s+")
+
+
+def _strip_annotated_line_prefixes(text: str) -> str:
+    out: list[str] = []
+    for line in text.splitlines():
+        if _ANNOTATED_MARKER_RE.match(line.strip()):
+            continue
+        m = _ANNOTATED_LINE_RE.match(line)
+        if m:
+            out.append(m.group(1))
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _build_annotated_chunk_user_input(
     *,
     source_lang: str,
     target_lang: str,
     source_path: str,
-    chunk: TranslateChunk,
-    plan_header: str,
+    chunk: AnnotatedChunk,
+    full_source: str,
+    all_regions: list[StructureRegion],
 ) -> str:
-    plan = format_region_plan(chunk.regions)
-    req = (
+    region_map = summarize_chunk_regions(full_source, chunk.regions)
+    annotated = format_annotated_source(
+        full_source,
+        all_regions,
+        start_line=chunk.start_line,
+        end_line=chunk.end_line,
+    )
+    return (
         f"## Translation request {chunk.index} of {chunk.total}\n\n"
         f"File: `{source_path}`\n"
         f"SOURCE language: {source_lang}\n"
         f"TARGET language: {target_lang}\n"
-        f"Translate **only** source lines **{chunk.start_line}–{chunk.end_line}** "
-        f"(inclusive, 1-based line numbers as in the plan).\n"
-        f"Output only the translated markdown for this line range — no commentary.\n\n"
-        f"{plan_header}\n"
-        f"### Region plan (lines {chunk.start_line}–{chunk.end_line})\n\n"
-        f"{plan}\n\n"
-        f"--- SOURCE BEGIN ---\n"
-        f"{chunk.source_text}\n"
-        f"--- SOURCE END ---\n"
+        f"Translate **only** lines **{chunk.start_line}–{chunk.end_line}** "
+        f"(inclusive, 1-based).\n\n"
+        f"### REGION MAP (this chunk)\n\n"
+        f"```\n"
+        f"{region_map}\n"
+        f"```\n\n"
+        f"### SOURCE (numbered, with @BEGIN/@END markers)\n\n"
+        f"```\n"
+        f"{annotated}\n"
+        f"```\n"
     )
-    return req
 
 
 def _translate_one_chunk(
@@ -261,35 +174,64 @@ def _translate_one_chunk(
     source_path: str,
     chunk: TranslateChunk,
     plan_header: str,
+    full_source: str = "",
+    all_regions: list[StructureRegion] | None = None,
 ) -> str:
-    masked = _mask_fences(chunk.source_text)
-    masked_chunk = TranslateChunk(
+    """Translate one region-aligned chunk (annotated SOURCE + per-chunk instructions)."""
+    _ = plan_header
+    if not full_source:
+        full_source = chunk.source_text
+    if all_regions is None:
+        all_regions = chunk.regions
+    annotated = AnnotatedChunk(
         index=chunk.index,
         total=chunk.total,
         start_line=chunk.start_line,
         end_line=chunk.end_line,
-        source_text=masked.masked_text,
         regions=chunk.regions,
     )
-    instructions = load_translate_file_instructions(
+    return _translate_annotated_chunk(
+        settings,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_path=source_path,
+        chunk=annotated,
+        full_source=full_source,
+        all_regions=all_regions,
+    )
+
+
+def _translate_annotated_chunk(
+    settings: Settings,
+    *,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    chunk: AnnotatedChunk,
+    full_source: str,
+    all_regions: list[StructureRegion],
+) -> str:
+    instructions = load_annotated_chunk_instructions(
         settings,
         source_lang=source_lang,
         target_lang=target_lang,
     ).strip()
-    user_input = _build_chunk_user_input(
+    user_input = _build_annotated_chunk_user_input(
         source_lang=source_lang,
         target_lang=target_lang,
         source_path=source_path,
-        chunk=masked_chunk,
-        plan_header=plan_header,
+        chunk=chunk,
+        full_source=full_source,
+        all_regions=all_regions,
     )
+    ru_slice = _slice_lines(full_source, chunk.start_line, chunk.end_line)
     model = settings.model_translate
     cap = clamp_max_output_tokens(
-        max(2048, min(len(chunk.source_text) * 2 + 1024, 32_768)),
+        max(2048, min(len(ru_slice) * 2 + 1024, 32_768)),
         model,
     )
     fm_log(
-        f"file-translate chunk {chunk.index}/{chunk.total} | "
+        f"annotated-translate chunk {chunk.index}/{chunk.total} | "
         f"{source_path} | lines {chunk.start_line}-{chunk.end_line}"
     )
     out = _strip_code_fence(
@@ -299,18 +241,24 @@ def _translate_one_chunk(
             instructions=instructions,
             user_input=user_input,
             max_output_tokens=cap,
-            operation="translate:file-chunk",
+            operation="translate:annotated-chunk",
             detail=f"{source_path}:{chunk.start_line}-{chunk.end_line}",
         ).strip()
     )
     out = _STRIP_REQUEST_HEADER_RE.sub("", out).strip()
-    out = _unmask_fences(out, masked)
+    out = _strip_annotated_line_prefixes(out)
+    out = merge_copy_regions_from_source(
+        ru_slice,
+        out,
+        chunk.regions,
+        chunk_start_line=chunk.start_line,
+    )
     if target_lang.strip().lower() in ("english", "en"):
         out = fix_yandex_cloud_links_for_en(out)
     return out
 
 
-def _translate_prose_with_plan(
+def _translate_annotated_file(
     settings: Settings,
     *,
     source_path: str,
@@ -318,36 +266,49 @@ def _translate_prose_with_plan(
     source_lang: str,
     target_lang: str,
 ) -> tuple[str, int]:
-    """Translate prose only (no ``{% list tabs %}`` blocks)."""
+    """Translate full file via region map, annotated chunks, deterministic COPY merge."""
     source_is_russian = source_lang.lower().startswith("rus")
-    regions = analyze_document_structure(
-        source_text, source_is_russian=source_is_russian
+    regions = refine_tab_regions(
+        source_text,
+        analyze_document_structure(source_text, source_is_russian=source_is_russian),
     )
-    chunks = build_translate_chunks(source_text, regions)
+    chunks = build_annotated_chunks(source_text, regions)
     if not chunks:
         return source_text, 0
 
-    multi_note = ""
-    if chunks[0].total > 1:
-        multi_note = (
-            f"This file is split into **{chunks[0].total}** translation requests. "
-            "You see one chunk at a time; follow the region plan for its line range only.\n\n"
-        )
-
     parts: list[str] = []
-    for chunk in chunks:
-        parts.append(
-            _translate_one_chunk(
-                settings,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                source_path=source_path,
-                chunk=chunk,
-                plan_header=multi_note,
+    llm_calls = 0
+    for ch in chunks:
+        ru_slice = _slice_lines(source_text, ch.start_line, ch.end_line)
+        if ch.copy_only():
+            fm_log(
+                f"annotated-translate copy-only chunk {ch.index}/{ch.total} | "
+                f"{source_path} | lines {ch.start_line}-{ch.end_line}"
             )
+            parts.append(ru_slice)
+            continue
+        tc = TranslateChunk(
+            index=ch.index,
+            total=ch.total,
+            start_line=ch.start_line,
+            end_line=ch.end_line,
+            source_text=ru_slice,
+            regions=ch.regions,
         )
+        en_slice = _translate_one_chunk(
+            settings,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_path=source_path,
+            chunk=tc,
+            plan_header="",
+            full_source=source_text,
+            all_regions=regions,
+        )
+        llm_calls += 1
+        parts.append(en_slice)
     merged = _join_translated_chunks(parts)
-    return merged, len(chunks)
+    return merged, llm_calls
 
 
 def translate_text_with_plan(
@@ -358,53 +319,14 @@ def translate_text_with_plan(
     source_lang: str,
     target_lang: str,
 ) -> tuple[str, int]:
-    """
-    Translate *source_text* using a line plan; return ``(result, num_llm_calls)``.
-
-    Config-style ``{% list tabs %}`` (YAML / ASCII tab ids) are copied verbatim;
-    blocks with Russian labels or prose use :func:`translate_tabs_block`.
-    """
-    segments = split_preserving_list_tabs(source_text)
-    parts: list[str] = []
-    llm_calls = 0
-    for seg in segments:
-        if seg.kind == "list_tabs_verbatim":
-            fm_log(
-                f"file-translate copy list-tabs verbatim | {source_path} | "
-                f"{len(seg.text)} chars"
-            )
-            parts.append(seg.text)
-            continue
-        if seg.kind == "list_tabs_translate":
-            fm_log(
-                f"file-translate translate list-tabs | {source_path} | "
-                f"{len(seg.text)} chars"
-            )
-            parts.append(
-                translate_tabs_block(
-                    settings,
-                    seg.text,
-                    source_path=source_path,
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    label=f"{source_path}:list-tabs",
-                )
-            )
-            llm_calls += 1
-            continue
-        if not seg.text.strip():
-            parts.append(seg.text)
-            continue
-        translated, n = _translate_prose_with_plan(
-            settings,
-            source_path=source_path,
-            source_text=seg.text,
-            source_lang=source_lang,
-            target_lang=target_lang,
-        )
-        llm_calls += n
-        parts.append(translated)
-    return _join_text_segments(parts), llm_calls
+    """Translate *source_text* with annotated region-aligned chunks."""
+    return _translate_annotated_file(
+        settings,
+        source_path=source_path,
+        source_text=source_text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
 
 
 def _merge_h3_sections(
@@ -483,13 +405,14 @@ def translate_document_file_level(
             f"+llm={llm_calls}",
         )
 
-    regions = analyze_document_structure(
-        source_full, source_is_russian=source_is_russian
+    regions = refine_tab_regions(
+        source_full,
+        analyze_document_structure(source_full, source_is_russian=source_is_russian),
     )
-    chunks = build_translate_chunks(source_full, regions)
+    chunks = build_annotated_chunks(source_full, regions)
     fm_log(
-        f"file-translate {source_lang}→{target_lang} | {source_path} | "
-        f"{len(regions)} region(s) | {len(chunks)} request(s)"
+        f"annotated-translate {source_lang}→{target_lang} | {source_path} | "
+        f"{len(regions)} region(s) | {len(chunks)} chunk(s)"
     )
     merged, llm_calls = translate_text_with_plan(
         settings,
@@ -500,7 +423,8 @@ def translate_document_file_level(
     )
     if source_is_russian and target_lang.strip().lower() in ("english", "en"):
         merged = apply_en_postprocess_from_ru(source_full, merged)
-    mode = f"file-plan-{len(regions)}-regions+llm={llm_calls}"
+    copy_chunks = sum(1 for c in chunks if c.copy_only())
+    mode = f"annotated-{len(regions)}-regions+llm={llm_calls}+copy_chunks={copy_chunks}"
     if chunks and chunks[0].total > 1:
-        mode += f"+requests={chunks[0].total}"
+        mode += f"+chunks={chunks[0].total}"
     return merged, mode

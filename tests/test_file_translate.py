@@ -22,7 +22,7 @@ def test_file_translate_single_request():
             ru_pr_diff=None,
         )
     assert mocked.call_count >= 1
-    assert "file-plan" in mode
+    assert "annotated" in mode
     assert "EN" in out or "Hello" in out
 
 
@@ -125,15 +125,33 @@ def test_manual_list_tabs_translated_not_copied():
         "{% endlist %}\n\n"
         "Outro RU.\n"
     )
+
+    def fake_chunk(_settings, *, chunk, **_kwargs):
+        if chunk.end_line > 5:
+            return (
+                "Intro EN.\n\n"
+                "{% list tabs group=manual-systemd %}\n\n"
+                "- Manually\n\n"
+                "Start the service.\n\n"
+                "{% endlist %}\n\n"
+                "Outro EN.\n"
+            )
+        if chunk.start_line <= 2:
+            return "Intro EN.\n\n"
+        if chunk.start_line == 3:
+            return (
+                "{% list tabs group=manual-systemd %}\n\n"
+                "- Manually\n\n"
+                "Start the service.\n\n"
+                "{% endlist %}\n\n"
+            )
+        return "Outro EN.\n"
+
     with (
         patch(
             "ydbdoc_review.file_translate._translate_one_chunk",
-            return_value="Intro EN.\n\n",
+            side_effect=fake_chunk,
         ),
-        patch(
-            "ydbdoc_review.file_translate.translate_tabs_block",
-            return_value="{% list tabs %}\n\n- Manually\n\n{% endlist %}\n\n",
-        ) as tabs_mock,
         patch(
             "ydbdoc_review.file_translate.apply_en_postprocess_from_ru",
             side_effect=lambda _ru, en: en,
@@ -146,7 +164,6 @@ def test_manual_list_tabs_translated_not_copied():
             source_lang="Russian",
             target_lang="English",
         )
-    tabs_mock.assert_called_once()
     assert "- Manually" in out
     assert "Вручную" not in out
-    assert llm_calls >= 2
+    assert llm_calls >= 1

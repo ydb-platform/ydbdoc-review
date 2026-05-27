@@ -320,6 +320,19 @@ def load_translate_file_instructions(
     )
 
 
+def load_annotated_chunk_instructions(
+    settings: Settings,
+    *,
+    source_lang: str = "Russian",
+    target_lang: str = "English",
+) -> str:
+    from ydbdoc_review.prompt_builder import PromptBuilder
+
+    return PromptBuilder.from_settings(settings).build_annotated_chunk_instructions(
+        source_lang, target_lang
+    )
+
+
 def load_verify_translation_instructions(settings: Settings) -> str:
     return _read_prompt(Path(settings.prompts_dir) / "05_verify_translation.txt")
 

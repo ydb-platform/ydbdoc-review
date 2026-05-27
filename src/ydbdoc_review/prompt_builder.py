@@ -10,9 +10,11 @@ from ydbdoc_review.config import Settings
 from ydbdoc_review.prompt_defaults import (
     DEFAULT_EN_STYLE_GUIDE_FILE,
     DEFAULT_QUALITY_HIERARCHY_FILE,
+    DEFAULT_ANNOTATED_CHUNK_RULES_FILE,
     DEFAULT_FILE_RULES_FILE,
     DEFAULT_SEGMENT_RULES_FILE,
     SECTION_PREAMBLES,
+    TRANSLATE_ANNOTATED_CHUNK_TEMPLATE,
     TRANSLATE_FILE_SYSTEM_TEMPLATE,
     TRANSLATE_SYSTEM_TEMPLATE,
 )
@@ -51,7 +53,11 @@ class PromptBuilder:
         self._file_rules = self._load_prompt_file(
             file_rules_path or DEFAULT_FILE_RULES_FILE
         )
+        self._annotated_chunk_rules = self._load_prompt_file(
+            DEFAULT_ANNOTATED_CHUNK_RULES_FILE
+        )
         self._file_system_template = TRANSLATE_FILE_SYSTEM_TEMPLATE
+        self._annotated_chunk_template = TRANSLATE_ANNOTATED_CHUNK_TEMPLATE
         self._context_sections: dict[str, str] = {
             "project_info_section": self._render_section(
                 "project_info", self._load_optional_file(project_info_path)
@@ -104,6 +110,23 @@ class PromptBuilder:
             **self._context_sections,
         }
         return self._file_system_template.format_map(
+            collections.defaultdict(str, variables)
+        ).strip()
+
+    def build_annotated_chunk_instructions(
+        self, source_lang: str, target_lang: str
+    ) -> str:
+        """Instructions for one annotated, region-aligned chunk."""
+        target = target_lang.strip().lower()
+        variables: dict[str, str] = {
+            "quality_hierarchy_section": self._quality_hierarchy,
+            "annotated_chunk_rules": self._annotated_chunk_rules,
+            "style_guide_section": (
+                self._en_style_guide if target in ("english", "en") else ""
+            ),
+            **self._context_sections,
+        }
+        return self._annotated_chunk_template.format_map(
             collections.defaultdict(str, variables)
         ).strip()
 
