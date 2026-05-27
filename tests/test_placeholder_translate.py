@@ -195,14 +195,11 @@ def test_assemble_preserves_indent():
     assert out == "  world"
 
 
-def test_file_translate_uses_placeholder_by_default():
+def test_file_translate_uses_masked_by_default():
     ru = "### Заголовок {#t}\n\nПривет.\n"
     with patch(
-        "ydbdoc_review.placeholder_translate.translate_line_units",
-        side_effect=lambda _s, units, **_k: {
-            u.unit_id: "Hello." if "Привет" in u.source_line else u.source_line
-            for u in units
-        },
+        "ydbdoc_review.masked_translate.translate_masked_chunk",
+        side_effect=lambda _s, masked, **_k: masked.replace("Привет", "Hello"),
     ):
         out, llm = translate_text_with_plan(
             MagicMock(),

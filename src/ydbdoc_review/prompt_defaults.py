@@ -28,6 +28,7 @@ DEFAULT_SEGMENT_RULES_FILE = "08_translate_segment.txt"
 DEFAULT_FILE_RULES_FILE = "10_translate_file_with_plan.txt"
 DEFAULT_ANNOTATED_CHUNK_RULES_FILE = "11_annotated_chunk.txt"
 DEFAULT_PLACEHOLDER_RULES_FILE = "12_translate_placeholder_json.txt"
+DEFAULT_MASKED_RULES_FILE = "13_translate_masked_document.txt"
 
 TRANSLATE_PLACEHOLDER_TEMPLATE = """\
 Вы переводите **отдельные строки** markdown-документации YDB. Ответ — только JSON.
@@ -37,6 +38,18 @@ TRANSLATE_PLACEHOLDER_TEMPLATE = """\
 {glossary_section}\
 {style_guide_section}\
 {placeholder_rules}\
+"""
+
+TRANSLATE_MASKED_TEMPLATE = """\
+Вы переводите **фрагмент markdown** с плейсхолдерами `⟦KIND:n⟧` (mask → translate → unmask).
+
+В user-сообщении — маскированный текст. Сохраняйте все `⟦…⟧` дословно; переводите только prose между ними.
+
+{quality_hierarchy_section}\
+{project_info_section}\
+{glossary_section}\
+{style_guide_section}\
+{masked_rules}\
 """
 
 TRANSLATE_ANNOTATED_CHUNK_TEMPLATE = """\

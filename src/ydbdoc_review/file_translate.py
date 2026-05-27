@@ -31,6 +31,11 @@ from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
 )
+from ydbdoc_review.masked_translate import (
+    build_masked_segments,
+    count_masked_stats,
+    translate_with_mask,
+)
 from ydbdoc_review.placeholder_translate import (
     count_placeholder_stats,
     translate_with_placeholders,
@@ -40,6 +45,14 @@ from ydbdoc_review.translate_scope import TranslateScope, compute_translate_scop
 
 def _use_legacy_annotated_translate() -> bool:
     return os.environ.get("YDBDOC_LEGACY_ANNOTATED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _use_legacy_line_placeholder() -> bool:
+    return os.environ.get("YDBDOC_LEGACY_LINE_JSON", "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -331,7 +344,7 @@ def translate_text_with_plan(
     source_lang: str,
     target_lang: str,
 ) -> tuple[str, int]:
-    """Translate *source_text* via placeholder line batches (default) or legacy annotated."""
+    """Translate *source_text* via mask→unmask (default), line-JSON, or annotated legacy."""
     if _use_legacy_annotated_translate():
         return _translate_annotated_file(
             settings,
@@ -340,7 +353,15 @@ def translate_text_with_plan(
             source_lang=source_lang,
             target_lang=target_lang,
         )
-    return translate_with_placeholders(
+    if _use_legacy_line_placeholder():
+        return translate_with_placeholders(
+            settings,
+            source_path=source_path,
+            source_text=source_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+    return translate_with_mask(
         settings,
         source_path=source_path,
         source_text=source_text,
@@ -448,7 +469,7 @@ def translate_document_file_level(
         mode = f"annotated-{len(regions)}-regions+llm={llm_calls}+copy_chunks={copy_chunks}"
         if chunks and chunks[0].total > 1:
             mode += f"+chunks={chunks[0].total}"
-    else:
+    elif _use_legacy_line_placeholder():
         from ydbdoc_review.placeholder_translate import build_placeholder_segments
 
         segments = build_placeholder_segments(
@@ -462,6 +483,23 @@ def translate_document_file_level(
         )
         mode = (
             f"placeholder-{len(regions)}-regions+units={units}"
+            f"+copy_segs={copy_segs}+llm={llm_calls}"
+        )
+    else:
+        from ydbdoc_review.document_mask import MaskRegistry
+
+        registry = MaskRegistry()
+        segments = build_masked_segments(
+            source_full, regions, registry, source_is_russian=source_is_russian
+        )
+        copy_segs, tr_segs, _ = count_masked_stats(segments)
+        fm_log(
+            f"masked-translate {source_lang}→{target_lang} | {source_path} | "
+            f"{len(regions)} region(s) | copy={copy_segs} translate={tr_segs} "
+            f"placeholders={len(registry.atoms)} llm={llm_calls}"
+        )
+        mode = (
+            f"masked-{len(regions)}-regions+ph={len(registry.atoms)}"
             f"+copy_segs={copy_segs}+llm={llm_calls}"
         )
     return merged, mode

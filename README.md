@@ -355,8 +355,10 @@ Action собирается из **Dockerfile**: внутри контейнер
 | `YDBDOC_ANALYZE_DIFF_MAX` | Необязательно: макс. длина `ru_diff_vs_base` / `en_diff_vs_base` в JSON анализа (по умолчанию **500000**). |
 | `YDBDOC_ANALYZE_MAX_JSON_CHARS` | По умолчанию **24000**: макс. размер `json.dumps({"pairs":…})` **на один** вызов check-модели; пары разбиваются на несколько запросов. Если одна пара не влезает — для неё поля укорачиваются (редкий случай). |
 | `YDBDOC_FILE_TRANSLATE_MAX_CHARS` | По умолчанию **28000**: legacy annotated — макс. размер чанка SOURCE. |
-| `YDBDOC_PLACEHOLDER_BATCH_CHARS` | По умолчанию **10000**: макс. размер JSON-batch для placeholder-перевода (строки с `id`). |
-| `YDBDOC_LEGACY_ANNOTATED` | `true` — вернуть старый annotated/file-chunk перевод вместо placeholder (по умолчанию **выкл.**). |
+| `YDBDOC_MASKED_CHUNK_CHARS` | Макс. размер одного masked-chunk для LLM (по умолчанию как `YDBDOC_FILE_TRANSLATE_MAX_CHARS`, **12000**). |
+| `YDBDOC_PLACEHOLDER_BATCH_CHARS` | Для legacy line-JSON: макс. размер JSON-batch (**10000**). |
+| `YDBDOC_LEGACY_LINE_JSON` | `true` — JSON по строкам (`12_translate_placeholder_json.txt`) вместо mask→unmask. |
+| `YDBDOC_LEGACY_ANNOTATED` | `true` — annotated/file-chunk перевод вместо mask→unmask. |
 | `YDBDOC_TRANSLATE_LEGACY_SEGMENTS` | `true` — старый пайплайн (отдельный LLM-вызов на каждый unit/tabs-blob). |
 
 Встроить job можно рядом с существующим `build-docs` в `.github/workflows/docs_build.yaml`, указав `uses:` на ваш тег релиза этого action или на vendored-путь (`./tools/ydbdoc-review`).
@@ -385,8 +387,9 @@ Action собирается из **Dockerfile**: внутри контейнер
 
 ## Ограничения
 
-- **Placeholder-перевод (по умолчанию):** fences / config `{% list tabs %}` — **COPY** из RU без LLM; кириллические строки — JSON-batch (`prompts/12_translate_placeholder_json.txt`), сборка по номерам строк. Модель **не видит** `` ``` `` и YAML.
-- **Legacy annotated:** `YDBDOC_LEGACY_ANNOTATED=true` — прежние чанки с REGION MAP.
+- **Masked-перевод (по умолчанию):** mask → translate → unmask. Fences / config tabs — **COPY**; в prose ссылки, HTML, `` `code` ``, `{{ var }}`, `{#anchor}` заменяются на `⟦KIND:n⟧`, LLM переводит только текст между плейсхолдерами (`prompts/13_translate_masked_document.txt`), Python восстанавливает атомы.
+- **Legacy line-JSON:** `YDBDOC_LEGACY_LINE_JSON=true` — JSON-batch по строкам (`12_translate_placeholder_json.txt`).
+- **Legacy annotated:** `YDBDOC_LEGACY_ANNOTATED=true` — чанки с REGION MAP.
 - Малый PR-diff — только секции `###`, затронутые diff (остальное EN с `main`).
 - **QA-критик и переводчик не должны быть из одной семьи моделей.** Дефолтные fallbacks критика — `qwen3-235b-a22b/latest`, `deepseek-v3.2/latest`. Если переопределяете `YDBDOC_MODEL_VERIFY_FALLBACKS`, не ставьте туда `yandexgpt*` — критик потеряет независимость от переводчика.
 - **Fix-diff применяется только при точном совпадении.** Если модель-критик в поле `find` ошиблась хотя бы в одном символе или вернула неуникальный фрагмент — fix пропускается, в отчёт пишется причина. Это безопасно: ничего лишнего не правится, но иногда блокер остаётся неисправленным до следующего запуска `doc_translate`.

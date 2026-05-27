@@ -11,16 +11,16 @@ from ydbdoc_review.file_translate import (
 def test_file_translate_single_request():
     ru = "### Заголовок {#t}\n\nПривет мир.\n"
 
-    def fake_units(_s, units, **_k):
-        return {
-            u.unit_id: "### Title {#t}" if u.source_line.startswith("###")
-            else "Hello world."
-            for u in units
-        }
+    def fake_masked(_s, masked, **_k):
+        return (
+            masked.replace("Заголовок", "Title")
+            .replace("Привет мир", "Hello world")
+            .replace("Привет", "Hello")
+        )
 
     with patch(
-        "ydbdoc_review.placeholder_translate.translate_line_units",
-        side_effect=fake_units,
+        "ydbdoc_review.masked_translate.translate_masked_chunk",
+        side_effect=fake_masked,
     ) as mocked:
         out, mode = translate_document_file_level(
             MagicMock(),
@@ -32,7 +32,7 @@ def test_file_translate_single_request():
             ru_pr_diff=None,
         )
     assert mocked.call_count >= 1
-    assert "placeholder" in mode
+    assert "masked" in mode
     assert "Hello" in out
     assert "Привет" not in out
 
@@ -45,17 +45,17 @@ def test_file_translate_scoped_sections():
 
     call_count = 0
 
-    def fake_units(_s, units, **_k):
+    def fake_masked(_s, masked, **_k):
         nonlocal call_count
-        if any("секция ru-b" in u.source_line for u in units):
+        if "секция ru-b" in masked:
             call_count += 1
-            return {u.unit_id: "TRANSLATED-SECTION" for u in units}
-        return {u.unit_id: u.source_line for u in units}
+            return "TRANSLATED-SECTION"
+        return masked
 
     with (
         patch(
-            "ydbdoc_review.placeholder_translate.translate_line_units",
-            side_effect=fake_units,
+            "ydbdoc_review.masked_translate.translate_masked_chunk",
+            side_effect=fake_masked,
         ),
         patch(
             "ydbdoc_review.file_translate.apply_en_postprocess_from_ru",
@@ -93,21 +93,16 @@ def test_config_list_tabs_copied_without_llm():
         "{% endlist %}\n\n"
         "Заключение RU.\n"
     )
-    def fake_units(_settings, units, **_kwargs):
-        out = {}
-        for u in units:
-            if "Вступление" in u.source_line:
-                out[u.unit_id] = "Intro EN."
-            elif "Заключение" in u.source_line:
-                out[u.unit_id] = "Outro EN."
-            else:
-                out[u.unit_id] = u.source_line
-        return out
+    def fake_masked(_settings, masked, **_kwargs):
+        return (
+            masked.replace("Вступление RU.", "Intro EN.")
+            .replace("Заключение RU.", "Outro EN.")
+        )
 
     with (
         patch(
-            "ydbdoc_review.placeholder_translate.translate_line_units",
-            side_effect=fake_units,
+            "ydbdoc_review.masked_translate.translate_masked_chunk",
+            side_effect=fake_masked,
         ),
         patch(
             "ydbdoc_review.file_translate.apply_en_postprocess_from_ru",
@@ -140,25 +135,18 @@ def test_manual_list_tabs_translated_not_copied():
         "Outro RU.\n"
     )
 
-    def fake_units(_settings, units, **_kwargs):
-        out = {}
-        for u in units:
-            if "Intro" in u.source_line:
-                out[u.unit_id] = "Intro EN."
-            elif "Outro" in u.source_line:
-                out[u.unit_id] = "Outro EN."
-            elif "Вручную" in u.source_line:
-                out[u.unit_id] = "- Manually"
-            elif "Запустите" in u.source_line:
-                out[u.unit_id] = "Start the service."
-            else:
-                out[u.unit_id] = u.source_line
-        return out
+    def fake_masked(_settings, masked, **_kwargs):
+        return (
+            masked.replace("Intro RU.", "Intro EN.")
+            .replace("Outro RU.", "Outro EN.")
+            .replace("Вручную", "Manually")
+            .replace("Запустите сервис.", "Start the service.")
+        )
 
     with (
         patch(
-            "ydbdoc_review.placeholder_translate.translate_line_units",
-            side_effect=fake_units,
+            "ydbdoc_review.masked_translate.translate_masked_chunk",
+            side_effect=fake_masked,
         ),
         patch(
             "ydbdoc_review.file_translate.apply_en_postprocess_from_ru",
@@ -222,10 +210,11 @@ def test_legacy_annotated_document_mode_label(monkeypatch: pytest.MonkeyPatch):
     assert "placeholder" not in mode
 
 
-def test_placeholder_default_without_legacy_env(monkeypatch: pytest.MonkeyPatch):
+def test_masked_default_without_legacy_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("YDBDOC_LEGACY_ANNOTATED", raising=False)
+    monkeypatch.delenv("YDBDOC_LEGACY_LINE_JSON", raising=False)
     with patch(
-        "ydbdoc_review.file_translate.translate_with_placeholders",
+        "ydbdoc_review.file_translate.translate_with_mask",
         return_value=("EN", 1),
     ) as mocked:
         _out, mode = translate_document_file_level(
@@ -238,4 +227,23 @@ def test_placeholder_default_without_legacy_env(monkeypatch: pytest.MonkeyPatch)
             ru_pr_diff=None,
         )
     mocked.assert_called_once()
-    assert "placeholder" in mode
+    assert "masked" in mode
+
+
+def test_legacy_line_json_via_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("YDBDOC_LEGACY_LINE_JSON", "true")
+    monkeypatch.delenv("YDBDOC_LEGACY_ANNOTATED", raising=False)
+    with patch(
+        "ydbdoc_review.file_translate.translate_with_placeholders",
+        return_value=("EN", 1),
+    ) as mocked:
+        out, llm = translate_text_with_plan(
+            MagicMock(),
+            source_path="x.md",
+            source_text="RU",
+            source_lang="Russian",
+            target_lang="English",
+        )
+    mocked.assert_called_once()
+    assert out == "EN"
+    assert llm == 1
