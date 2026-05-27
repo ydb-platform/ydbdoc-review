@@ -354,7 +354,9 @@ Action собирается из **Dockerfile**: внутри контейнер
 | `YDBDOC_ANALYZE_TRUNCATE_CHARS` | Необязательно: положительное число — усечь `ru_text`/`en_text` в **каждом** батче анализа. Пусто или **`0`** — полные тела (батчинг по `YDBDOC_ANALYZE_MAX_JSON_CHARS`). |
 | `YDBDOC_ANALYZE_DIFF_MAX` | Необязательно: макс. длина `ru_diff_vs_base` / `en_diff_vs_base` в JSON анализа (по умолчанию **500000**). |
 | `YDBDOC_ANALYZE_MAX_JSON_CHARS` | По умолчанию **24000**: макс. размер `json.dumps({"pairs":…})` **на один** вызов check-модели; пары разбиваются на несколько запросов. Если одна пара не влезает — для неё поля укорачиваются (редкий случай). |
-| `YDBDOC_FILE_TRANSLATE_MAX_CHARS` | По умолчанию **28000**: макс. размер фрагмента SOURCE на один запрос file-level перевода; при превышении файл режется на несколько запросов (в промпте «K из N»). |
+| `YDBDOC_FILE_TRANSLATE_MAX_CHARS` | По умолчанию **28000**: legacy annotated — макс. размер чанка SOURCE. |
+| `YDBDOC_PLACEHOLDER_BATCH_CHARS` | По умолчанию **10000**: макс. размер JSON-batch для placeholder-перевода (строки с `id`). |
+| `YDBDOC_LEGACY_ANNOTATED` | `true` — вернуть старый annotated/file-chunk перевод вместо placeholder (по умолчанию **выкл.**). |
 | `YDBDOC_TRANSLATE_LEGACY_SEGMENTS` | `true` — старый пайплайн (отдельный LLM-вызов на каждый unit/tabs-blob). |
 
 Встроить job можно рядом с существующим `build-docs` в `.github/workflows/docs_build.yaml`, указав `uses:` на ваш тег релиза этого action или на vendored-путь (`./tools/ydbdoc-review`).
@@ -383,7 +385,9 @@ Action собирается из **Dockerfile**: внутри контейнер
 
 ## Ограничения
 
-- **Перевод по плану строк, не по сотням micro-unit.** Большие файлы — несколько запросов (`YDBDOC_FILE_TRANSLATE_MAX_CHARS`). Малый PR-diff — только секции `###`, затронутые diff (остальное EN с `main`).
+- **Placeholder-перевод (по умолчанию):** fences / config `{% list tabs %}` — **COPY** из RU без LLM; кириллические строки — JSON-batch (`prompts/12_translate_placeholder_json.txt`), сборка по номерам строк. Модель **не видит** `` ``` `` и YAML.
+- **Legacy annotated:** `YDBDOC_LEGACY_ANNOTATED=true` — прежние чанки с REGION MAP.
+- Малый PR-diff — только секции `###`, затронутые diff (остальное EN с `main`).
 - **QA-критик и переводчик не должны быть из одной семьи моделей.** Дефолтные fallbacks критика — `qwen3-235b-a22b/latest`, `deepseek-v3.2/latest`. Если переопределяете `YDBDOC_MODEL_VERIFY_FALLBACKS`, не ставьте туда `yandexgpt*` — критик потеряет независимость от переводчика.
 - **Fix-diff применяется только при точном совпадении.** Если модель-критик в поле `find` ошиблась хотя бы в одном символе или вернула неуникальный фрагмент — fix пропускается, в отчёт пишется причина. Это безопасно: ничего лишнего не правится, но иногда блокер остаётся неисправленным до следующего запуска `doc_translate`.
 - **Эвристика «секция не переведена» — LLM-вызов.** Если модель для эвристик недоступна, эта проверка молча пропускается; детерминированные эвристики (длина, кириллица, fences, headings, list tabs, liquid tags) продолжают работать.

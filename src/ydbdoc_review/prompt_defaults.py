@@ -27,6 +27,17 @@ DEFAULT_EN_STYLE_GUIDE_FILE = "en_style_guide.md"
 DEFAULT_SEGMENT_RULES_FILE = "08_translate_segment.txt"
 DEFAULT_FILE_RULES_FILE = "10_translate_file_with_plan.txt"
 DEFAULT_ANNOTATED_CHUNK_RULES_FILE = "11_annotated_chunk.txt"
+DEFAULT_PLACEHOLDER_RULES_FILE = "12_translate_placeholder_json.txt"
+
+TRANSLATE_PLACEHOLDER_TEMPLATE = """\
+Вы переводите **отдельные строки** markdown-документации YDB. Ответ — только JSON.
+
+{quality_hierarchy_section}\
+{project_info_section}\
+{glossary_section}\
+{style_guide_section}\
+{placeholder_rules}\
+"""
 
 TRANSLATE_ANNOTATED_CHUNK_TEMPLATE = """\
 Вы переводите **один размеченный фрагмент** markdown-файла YDB.

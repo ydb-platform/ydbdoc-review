@@ -31,7 +31,19 @@ from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
     fix_yandex_cloud_links_for_en,
 )
+from ydbdoc_review.placeholder_translate import (
+    count_placeholder_stats,
+    translate_with_placeholders,
+)
 from ydbdoc_review.translate_scope import TranslateScope, compute_translate_scope
+
+
+def _use_legacy_annotated_translate() -> bool:
+    return os.environ.get("YDBDOC_LEGACY_ANNOTATED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 _STRIP_REQUEST_HEADER_RE = re.compile(
     r"^#\s*Translation request.*\n+",
@@ -319,8 +331,16 @@ def translate_text_with_plan(
     source_lang: str,
     target_lang: str,
 ) -> tuple[str, int]:
-    """Translate *source_text* with annotated region-aligned chunks."""
-    return _translate_annotated_file(
+    """Translate *source_text* via placeholder line batches (default) or legacy annotated."""
+    if _use_legacy_annotated_translate():
+        return _translate_annotated_file(
+            settings,
+            source_path=source_path,
+            source_text=source_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+    return translate_with_placeholders(
         settings,
         source_path=source_path,
         source_text=source_text,
@@ -409,11 +429,6 @@ def translate_document_file_level(
         source_full,
         analyze_document_structure(source_full, source_is_russian=source_is_russian),
     )
-    chunks = build_annotated_chunks(source_full, regions)
-    fm_log(
-        f"annotated-translate {source_lang}→{target_lang} | {source_path} | "
-        f"{len(regions)} region(s) | {len(chunks)} chunk(s)"
-    )
     merged, llm_calls = translate_text_with_plan(
         settings,
         source_path=source_path,
@@ -423,8 +438,30 @@ def translate_document_file_level(
     )
     if source_is_russian and target_lang.strip().lower() in ("english", "en"):
         merged = apply_en_postprocess_from_ru(source_full, merged)
-    copy_chunks = sum(1 for c in chunks if c.copy_only())
-    mode = f"annotated-{len(regions)}-regions+llm={llm_calls}+copy_chunks={copy_chunks}"
-    if chunks and chunks[0].total > 1:
-        mode += f"+chunks={chunks[0].total}"
+    if _use_legacy_annotated_translate():
+        chunks = build_annotated_chunks(source_full, regions)
+        copy_chunks = sum(1 for c in chunks if c.copy_only())
+        fm_log(
+            f"annotated-translate {source_lang}→{target_lang} | {source_path} | "
+            f"{len(regions)} region(s) | {len(chunks)} chunk(s)"
+        )
+        mode = f"annotated-{len(regions)}-regions+llm={llm_calls}+copy_chunks={copy_chunks}"
+        if chunks and chunks[0].total > 1:
+            mode += f"+chunks={chunks[0].total}"
+    else:
+        from ydbdoc_review.placeholder_translate import build_placeholder_segments
+
+        segments = build_placeholder_segments(
+            source_full, regions, source_is_russian=source_is_russian
+        )
+        copy_segs, tr_segs, units = count_placeholder_stats(segments)
+        fm_log(
+            f"placeholder-translate {source_lang}→{target_lang} | {source_path} | "
+            f"{len(regions)} region(s) | copy={copy_segs} translate={tr_segs} "
+            f"units={units} llm_batches={llm_calls}"
+        )
+        mode = (
+            f"placeholder-{len(regions)}-regions+units={units}"
+            f"+copy_segs={copy_segs}+llm={llm_calls}"
+        )
     return merged, mode
