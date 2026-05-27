@@ -46,6 +46,24 @@ def test_config_tabs_chunk_is_copy_only():
     assert tabs_chunks[0].copy_only()
 
 
+def test_manual_tabs_expanded_to_inner_fence_regions():
+    ru = (
+        "{% list tabs group=manual-systemd %}\n\n"
+        "- Вручную\n\n"
+        "  ```bash\n"
+        "  echo 1\n"
+        "  ```\n\n"
+        "{% endlist %}\n"
+    )
+    regions = refine_tab_regions(
+        ru, analyze_document_structure(ru, source_is_russian=True)
+    )
+    assert not any(r.action == "translate_tabs" for r in regions)
+    fences = [r for r in regions if r.kind == "fence"]
+    assert len(fences) == 1
+    assert fences[0].action == "copy_verbatim"
+
+
 def test_merge_copy_regions_restores_fence():
     ru = "```yaml\nkey: val\n```\n"
     en = "```yaml\nkey: CHANGED\n```\n"

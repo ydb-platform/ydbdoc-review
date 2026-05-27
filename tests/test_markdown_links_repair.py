@@ -3,8 +3,11 @@
 from ydbdoc_review.heuristics import _check_diplodoc_t_link_drift
 from ydbdoc_review.markdown_links import (
     DIPLODOC_T_MACRO,
+    fix_broken_fence_lines_from_ru,
+    fix_glued_extraneous_t_macro_from_ru,
     repair_markdown_links_from_ru,
     restore_markdown_links_from_ru,
+    strip_duplicate_cyrillic_links,
 )
 
 
@@ -56,6 +59,42 @@ def test_repair_en_line_that_lost_leading_prose():
     assert "Подготовьте" not in out
     assert "[topology selection](../deployment-preparation.md#topology-select)" in out
     assert "Examples below" in out
+
+
+def test_strip_duplicate_cyrillic_link_on_tab_line():
+    ru = (
+        "- С использованием systemd\n\n"
+        "  Образец можно [скачать из репозитория](https://example.com/svc).\n"
+    )
+    en = (
+        "- Using systemd[скачать из репозитория](https://example.com/svc)\n\n"
+        "  You can [download from the repository](https://example.com/svc).\n"
+    )
+    out = strip_duplicate_cyrillic_links(en, ru)
+    assert "скачать" not in out
+    assert "Using systemd\n" in out or "Using systemd\n\n" in out
+    assert "download from the repository" in out
+
+
+def test_fix_glued_extraneous_t_macro():
+    ru = (
+        "Сохраните файл на сервере.\n\n"
+        "Подробнее в разделе [документации](../../../reference/configuration/index.md).\n"
+    )
+    en = (
+        "Save the file on the server.[{#T}](../../../reference/configuration/index.md)\n\n"
+        "More details in [configuration reference](../../../reference/configuration/index.md).\n"
+    )
+    out = fix_glued_extraneous_t_macro_from_ru(ru, en)
+    assert "server.[{#T}]" not in out
+    assert "configuration reference" in out
+
+
+def test_fix_broken_fence_line_with_glued_link():
+    ru = "```\n\nInstead of the value"
+    en = "```[документации CLI](../../../reference/ydb-cli/profile/index.md)\n\nInstead of the value"
+    out = fix_broken_fence_lines_from_ru(ru, en)
+    assert out.splitlines()[0] == "```"
 
 
 def test_restore_calls_repair_first():

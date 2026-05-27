@@ -163,6 +163,101 @@ def _rebuild_line_links_from_ru(ru_line: str, en_line: str) -> str:
     return "".join(out)
 
 
+_CYRILLIC_IN_TEXT_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
+
+
+def _remove_link_markup(line: str, label: str, href: str) -> str:
+    needle = f"[{label}]({href})"
+    return line.replace(needle, "", 1)
+
+
+def strip_duplicate_cyrillic_links(en: str, ru: str) -> str:
+    """
+    Drop ``[кириллица](url)`` when the same *href* already has a non-Cyrillic link nearby.
+
+    Fixes tab labels like ``- Using systemd[скачать из репозитория](url)`` when a proper
+    English link to the same URL appears on the same or next lines.
+    """
+    en_lines = en.splitlines()
+    ru_lines = ru.splitlines()
+    n = max(len(en_lines), len(ru_lines))
+
+    by_href: dict[str, list[tuple[int, str]]] = {}
+    for i, line in enumerate(en_lines):
+        for label, href in _LINK_RE.findall(line):
+            by_href.setdefault(href, []).append((i, label))
+
+    to_remove: list[tuple[int, str, str]] = []
+    for href, entries in by_href.items():
+        good = [e for e in entries if not _CYRILLIC_IN_TEXT_RE.search(e[1])]
+        bad = [e for e in entries if _CYRILLIC_IN_TEXT_RE.search(e[1])]
+        if not good or not bad:
+            continue
+        for i, label in bad:
+            to_remove.append((i, label, href))
+
+    for i, label, href in sorted(to_remove, key=lambda x: -x[0]):
+        if i < len(en_lines):
+            en_lines[i] = _remove_link_markup(en_lines[i], label, href)
+
+    return "\n".join(en_lines)
+
+
+def fix_glued_extraneous_t_macro_from_ru(ru: str, en: str) -> str:
+    """
+    Remove ``[{#T}](url)`` glued without a space when RU line has no ``{#T}`` macro.
+
+    Also drops duplicate ``[{#T}]`` on a line that already has a proper link to the same href.
+    """
+    ru_lines = ru.splitlines()
+    en_lines = en.splitlines()
+    n = max(len(ru_lines), len(en_lines))
+    out: list[str] = []
+    for i in range(n):
+        rl = ru_lines[i] if i < len(ru_lines) else ""
+        el = en_lines[i] if i < len(en_lines) else ""
+        if not el:
+            out.append(el)
+            continue
+        if DIPLODOC_T_MACRO not in rl:
+            el = re.sub(
+                rf"(?<=\S)\[{re.escape(DIPLODOC_T_MACRO)}\]\([^)]+\)",
+                "",
+                el,
+            )
+        ru_hrefs = {h for t, h in _LINK_RE.findall(rl)}
+        if DIPLODOC_T_MACRO not in rl:
+            for t, h in list(_LINK_RE.findall(el)):
+                if t == DIPLODOC_T_MACRO and h in ru_hrefs:
+                    ru_labels = [rt for rt, rh in _LINK_RE.findall(rl) if rh == h]
+                    if ru_labels and ru_labels[0] != DIPLODOC_T_MACRO:
+                        el = _remove_link_markup(el, t, h)
+        out.append(el)
+    result = "\n".join(out)
+    if en.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
+def fix_broken_fence_lines_from_ru(ru: str, en: str) -> str:
+    """Restore `` ``` `` closers when EN glued a Cyrillic link into the fence delimiter."""
+    ru_lines = ru.splitlines()
+    en_lines = en.splitlines()
+    n = max(len(ru_lines), len(en_lines))
+    out: list[str] = []
+    for i in range(n):
+        rl = ru_lines[i] if i < len(ru_lines) else ""
+        el = en_lines[i] if i < len(en_lines) else ""
+        if rl.strip() == "```" and el.strip().startswith("```") and el.strip() != "```":
+            out.append(rl)
+        else:
+            out.append(el)
+    result = "\n".join(out)
+    if en.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
 def repair_markdown_links_from_ru(ru: str, en: str) -> str:
     """
   Line-aligned link repair: fix broken ``][(`` markup and ``{#T}`` misuse vs RU.
@@ -192,7 +287,10 @@ def restore_markdown_links_from_ru(ru: str, en: str) -> str:
     Handles known patterns and generic ``(href)`` → ``[text](href)`` when RU
     had a proper link with the same URL.
     """
-    out = repair_markdown_links_from_ru(ru, en)
+    out = strip_duplicate_cyrillic_links(en, ru)
+    out = fix_broken_fence_lines_from_ru(ru, out)
+    out = fix_glued_extraneous_t_macro_from_ru(ru, out)
+    out = repair_markdown_links_from_ru(ru, out)
     for ru_text, href in _LINK_RE.findall(ru):
         if f"]({href})" in out:
             continue

@@ -1,5 +1,6 @@
 from ydbdoc_review.document_structure import (
     analyze_document_structure,
+    expand_translate_tabs_regions,
     format_region_plan,
     split_by_h3_sections,
 )
@@ -39,6 +40,33 @@ def test_build_chunks_respects_region_boundaries():
     chunks = ft_chunks(text, regions, max_chars=50)
     assert len(chunks) >= 1
     assert all(c.source_text for c in chunks)
+
+
+def test_expand_translate_tabs_splits_fences():
+    text = (
+        "{% list tabs %}\n\n"
+        "- Tab\n\n"
+        "  ```bash\n"
+        "  echo hi\n"
+        "  ```\n\n"
+        "{% endlist %}\n"
+    )
+    base = analyze_document_structure(text, source_is_russian=True)
+    regions = [
+        r
+        if r.kind != "tabs"
+        else r.__class__(
+            r.start_line,
+            r.end_line,
+            r.kind,
+            "translate_tabs",
+            r.detail,
+        )
+        for r in base
+    ]
+    expanded = expand_translate_tabs_regions(text, regions)
+    assert any(r.kind == "fence" for r in expanded)
+    assert not any(r.action == "translate_tabs" for r in expanded)
 
 
 def test_split_by_h3():

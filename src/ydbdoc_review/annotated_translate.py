@@ -6,7 +6,11 @@ import os
 import re
 from dataclasses import dataclass
 
-from ydbdoc_review.document_structure import StructureRegion, regions_for_line_range
+from ydbdoc_review.document_structure import (
+    StructureRegion,
+    expand_translate_tabs_regions,
+    regions_for_line_range,
+)
 from ydbdoc_review.list_tabs_blocks import list_tabs_block_copy_verbatim
 
 _COPY_ACTIONS = frozenset({"copy_verbatim", "fence_comments"})
@@ -330,6 +334,7 @@ def tabs_region_action(text: str, region: StructureRegion) -> StructureRegion:
 
 
 def refine_tab_regions(text: str, regions: list[StructureRegion]) -> list[StructureRegion]:
-    return [
+    refined = [
         tabs_region_action(text, r) if r.kind == "tabs" else r for r in regions
     ]
+    return expand_translate_tabs_regions(text, refined)

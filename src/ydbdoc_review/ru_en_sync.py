@@ -9,7 +9,11 @@ from ydbdoc_review.list_tabs_blocks import (
     _LIST_TABS_BLOCK_RE,
     list_tabs_block_copy_verbatim,
 )
-from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
+from ydbdoc_review.markdown_links import (
+    fix_broken_fence_lines_from_ru,
+    restore_markdown_links_from_ru,
+    strip_duplicate_cyrillic_links,
+)
 from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 
 _LIST_TABS_OPEN_RE = re.compile(r"\{%\s*list\s+tabs", re.IGNORECASE)
@@ -65,6 +69,8 @@ def finalize_en_document_from_ru(ru_source: str, en_text: str) -> str:
     """
     out = en_text
     out, _ = sync_verbatim_list_tabs_from_source(ru_source, out)
+    out = strip_duplicate_cyrillic_links(out, ru_source)
+    out = fix_broken_fence_lines_from_ru(ru_source, out)
     out, _ = sync_fenced_blocks_from_source(ru_source, out)
     out = restore_markdown_links_from_ru(ru_source, out)
     out, _ = repair_tab_labels_from_source(ru_source, out)

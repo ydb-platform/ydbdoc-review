@@ -252,6 +252,89 @@ def h3_index_for_line(line_no: int, text: str) -> int:
     return cur
 
 
+def expand_translate_tabs_regions(
+    text: str, regions: list[StructureRegion]
+) -> list[StructureRegion]:
+    """
+    Split ``translate_tabs`` blocks into inner prose (translate) and fences (copy).
+
+    Config-style tabs stay a single ``copy_verbatim`` region from :func:`refine_tab_regions`.
+    """
+    if not text.strip():
+        return regions
+    lines = text.splitlines()
+    out: list[StructureRegion] = []
+    for r in regions:
+        if r.action != "translate_tabs":
+            out.append(r)
+            continue
+        out.extend(_expand_translate_tabs_region(lines, r))
+    return out
+
+
+def _expand_translate_tabs_region(
+    lines: list[str], region: StructureRegion
+) -> list[StructureRegion]:
+    """Walk inside one manual ``{% list tabs %}`` block."""
+    start_idx = region.start_line - 1
+    end_idx = region.end_line - 1
+    sub: list[StructureRegion] = []
+    prose_start: int | None = None
+    i = start_idx
+
+    def flush_prose(end_idx_inclusive: int) -> None:
+        nonlocal prose_start
+        if prose_start is None:
+            return
+        if end_idx_inclusive >= prose_start:
+            sub.append(
+                StructureRegion(
+                    start_line=prose_start + 1,
+                    end_line=end_idx_inclusive + 1,
+                    kind="prose",
+                    action="translate",
+                    detail="Translate tab labels and prose inside list tabs.",
+                )
+            )
+        prose_start = None
+
+    while i <= end_idx:
+        line = lines[i]
+        if _is_fence_toggle(line):
+            flush_prose(i - 1)
+            f0, f1 = _read_fence_block(lines, i)
+            sub.append(
+                StructureRegion(
+                    start_line=f0 + 1,
+                    end_line=f1 + 1,
+                    kind="fence",
+                    action="copy_verbatim",
+                    detail="Copy fenced block inside list tabs verbatim.",
+                )
+            )
+            i = f1 + 1
+            continue
+        if _LIST_TABS_START_RE.match(line.strip()) or _DIPLODOC_END["tabs"].match(line):
+            flush_prose(i - 1)
+            sub.append(
+                StructureRegion(
+                    start_line=i + 1,
+                    end_line=i + 1,
+                    kind="tabs",
+                    action="copy_verbatim",
+                    detail="Copy {% list tabs %} / {% endlist %} directive verbatim.",
+                )
+            )
+            i += 1
+            continue
+        if prose_start is None:
+            prose_start = i
+        i += 1
+
+    flush_prose(end_idx)
+    return sub if sub else [region]
+
+
 def regions_for_line_range(
     regions: list[StructureRegion], start_line: int, end_line: int
 ) -> list[StructureRegion]:
