@@ -99,7 +99,7 @@ def merge_en_toc_yaml(
 
 
 def translate_toc_title(settings: "Settings", ru_title: str) -> str:
-    from ydbdoc_review.llm import call_yandex_responses
+    from ydbdoc_review.llm import call_yandex_responses, translation_model_fallbacks
 
     text = ru_title.strip()
     if not text:
@@ -113,6 +113,7 @@ def translate_toc_title(settings: "Settings", ru_title: str) -> str:
         ),
         user_input=text,
         max_output_tokens=256,
+        model_fallbacks=translation_model_fallbacks(),
         operation="translate:toc-title",
         detail=text[:60],
     )

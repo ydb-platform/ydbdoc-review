@@ -32,6 +32,7 @@ from ydbdoc_review.llm import (
     fix_translation_pair,
     load_translate_segment_instructions,
     revalidate_translation_pair,
+    translation_model_fallbacks,
     verify_translation_pair,
 )
 from ydbdoc_review.markdown_links import restore_markdown_links_from_ru
@@ -101,6 +102,7 @@ def _call_translate_segment(
             instructions=instructions,
             user_input=user_input,
             max_output_tokens=cap,
+            model_fallbacks=translation_model_fallbacks(),
             operation=operation,
             detail=unit.label,
         ).strip()
@@ -239,6 +241,7 @@ def translate_unit(
                 instructions=instructions,
                 user_input=payload,
                 max_output_tokens=4096,
+                model_fallbacks=translation_model_fallbacks(),
                 operation="translate:fence-comments",
                 detail=unit.label,
             ).strip()

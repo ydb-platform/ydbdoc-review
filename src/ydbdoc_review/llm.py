@@ -155,6 +155,20 @@ def translation_verify_model_fallbacks() -> tuple[str, ...]:
     return tuple(x.strip() for x in raw.split(",") if x.strip())
 
 
+def translation_model_fallbacks() -> tuple[str, ...]:
+    """
+    Translator fallbacks when primary slug is missing in the FM folder.
+
+    Default: Yandex GPT slugs so ``doc_translate`` still completes when DeepSeek
+    is not enabled in AI Studio for the catalog.
+    """
+    raw = os.environ.get(
+        "YDBDOC_MODEL_TRANSLATE_FALLBACKS",
+        "yandexgpt-5.1,yandexgpt/latest",
+    )
+    return tuple(x.strip() for x in raw.split(",") if x.strip())
+
+
 def _expand_model_candidates(
     primary: str, fallbacks: tuple[str, ...] | None
 ) -> list[str]:
@@ -197,6 +211,12 @@ def call_yandex_responses(
         except RuntimeError as exc:
             last_err = exc
             if _fm_model_not_found(exc) and i + 1 < len(chain):
+                from ydbdoc_review.fm_progress import fm_log
+
+                nxt = chain[i + 1]
+                fm_log(
+                    f"FM model not found ({cand!r}) — retry with {nxt!r} | {operation} {detail}"
+                )
                 continue
             raise
     if last_err is not None:

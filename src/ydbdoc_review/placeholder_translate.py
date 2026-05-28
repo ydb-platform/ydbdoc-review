@@ -20,6 +20,7 @@ from ydbdoc_review.fence_comments import (
 from ydbdoc_review.llm import (
     _strip_code_fence,
     call_yandex_responses,
+    translation_model_fallbacks,
     clamp_max_output_tokens,
     load_placeholder_instructions,
     parse_json_object,
@@ -335,6 +336,7 @@ def translate_line_units(
             instructions=instructions,
             user_input=user_input,
             max_output_tokens=cap,
+            model_fallbacks=translation_model_fallbacks(),
             operation="translate:placeholder-lines",
             detail=f"{source_path}:batch-{i}-of-{total}",
         )

@@ -50,7 +50,7 @@ cp .env.example .env
 
 Имена **моделей** (проверка / перевод) задаются в **`ydbdoc-review.toml`**: секция `[models]`, ключи `check` и `translate`. По умолчанию используется файл из пакета (`src/ydbdoc_review/ydbdoc-review.toml`); переопределение — свой `ydbdoc-review.toml` в каталоге запуска или **`YDBDOC_CONFIG`**. Значения из TOML можно сменить переменными **`YDBDOC_MODEL_CHECK`** и **`YDBDOC_MODEL_TRANSLATE`** (удобно в CI).
 
-**A/B переводчика (например DeepSeek):** в репозитории `ydb` заведите Actions variable **`YDBDOC_MODEL_TRANSLATE`** = `deepseek-v3.2/latest` (точный slug — в [Model gallery](https://aistudio.yandex.ru/model-gallery) для вашего каталога). Критик (`translation_verify`, по умолчанию Qwen) **не трогайте** — он должен оставаться другой семьёй, чем переводчик. Локально один файл:
+**A/B переводчика (например DeepSeek):** в репозитории `ydb` заведите Actions variable **`YDBDOC_MODEL_TRANSLATE`** = `deepseek-v3.2/latest` (точный slug — в [Model gallery](https://aistudio.yandex.ru/model-gallery) для вашего каталога; модель должна быть **включена** для folder). Если slug недоступен (`Failed to get model`), переводчик автоматически пробует **`YDBDOC_MODEL_TRANSLATE_FALLBACKS`** (по умолчанию `yandexgpt-5.1`, `yandexgpt/latest`). Критик (`translation_verify`, по умолчанию Qwen) **не трогайте** — он должен оставаться другой семьёй, чем переводчик. Локально один файл:
 
 ```bash
 cp .env.example .env   # ключи FM
@@ -355,6 +355,7 @@ Action собирается из **Dockerfile**: внутри контейнер
 | `YDBDOC_REVIEW_ENABLED` | `true` / `false` — глобально включить или выключить шаг (пустое = как в `ydbdoc-review.toml`). |
 | `YDBDOC_MODEL_CHECK` | Необязательно, если заданы модели в `ydbdoc-review.toml` в образе/репо или устраивают встроенные значения. |
 | `YDBDOC_MODEL_TRANSLATE` | То же; иначе переопределение slug для перевода. |
+| `YDBDOC_MODEL_TRANSLATE_FALLBACKS` | Через запятую, если primary недоступен в FM (`Failed to get model`). По умолчанию `yandexgpt-5.1`, `yandexgpt/latest`. |
 | `YDBDOC_TRANSLATION_SELF_CHECK` | Необязательно: `true` / `false` — переопределить **`[feature].translation_self_check`** в TOML образа (пустое = только TOML). |
 | `YDBDOC_TRANSLATION_REPAIR` | Необязательно: `false` — выключить шаг fix-diff (останется только compare + эвристики). |
 | `YDBDOC_MODEL_TRANSLATION_VERIFY` | Необязательно: переопределить **`[models].translation_verify`** в TOML. |

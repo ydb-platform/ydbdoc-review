@@ -26,6 +26,7 @@ from ydbdoc_review.llm import (
     call_yandex_responses,
     clamp_max_output_tokens,
     load_annotated_chunk_instructions,
+    translation_model_fallbacks,
 )
 from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
@@ -266,6 +267,7 @@ def _translate_annotated_chunk(
             instructions=instructions,
             user_input=user_input,
             max_output_tokens=cap,
+            model_fallbacks=translation_model_fallbacks(),
             operation="translate:annotated-chunk",
             detail=f"{source_path}:{chunk.start_line}-{chunk.end_line}",
         ).strip()

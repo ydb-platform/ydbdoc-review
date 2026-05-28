@@ -21,6 +21,7 @@ def _translate_prose_blob(
         call_yandex_responses,
         clamp_max_output_tokens,
         load_translate_segment_instructions,
+        translation_model_fallbacks,
     )
     from ydbdoc_review.translate_postprocess import fix_yandex_cloud_links_for_en
 
@@ -50,6 +51,7 @@ def _translate_prose_blob(
             instructions=instructions,
             user_input=user_input,
             max_output_tokens=cap,
+            model_fallbacks=translation_model_fallbacks(),
             operation="translate:tabs-prose",
             detail=label,
         ).strip()

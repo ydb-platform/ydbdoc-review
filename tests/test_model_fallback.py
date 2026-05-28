@@ -1,6 +1,7 @@
 from ydbdoc_review.llm import (
     _expand_model_candidates,
     _fm_model_not_found,
+    translation_model_fallbacks,
     translation_verify_model_fallbacks,
 )
 
@@ -30,3 +31,12 @@ def test_verify_fallbacks_default_is_non_yandex(monkeypatch):
         assert "yandex" not in slug.lower(), (
             f"critic fallback {slug!r} must not share family with translate model"
         )
+
+
+def test_translate_fallbacks_default_includes_yandex(monkeypatch):
+    monkeypatch.delenv("YDBDOC_MODEL_TRANSLATE_FALLBACKS", raising=False)
+    fb = translation_model_fallbacks()
+    assert "yandexgpt-5.1" in fb
+    chain = _expand_model_candidates("deepseek-v3.2/latest", fb)
+    assert chain[0] == "deepseek-v3.2/latest"
+    assert "yandexgpt-5.1" in chain

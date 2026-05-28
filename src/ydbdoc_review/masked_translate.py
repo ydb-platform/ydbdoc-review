@@ -30,6 +30,7 @@ from ydbdoc_review.llm import (
     call_yandex_responses,
     clamp_max_output_tokens,
     load_masked_document_instructions,
+    translation_model_fallbacks,
 )
 from ydbdoc_review.masked_chunking import chunk_masked_text as _split_masked_text
 from ydbdoc_review.placeholder_translate import (
@@ -254,6 +255,7 @@ def translate_masked_chunk(
         instructions=instructions,
         user_input=user_input,
         max_output_tokens=cap,
+        model_fallbacks=translation_model_fallbacks(),
         operation="translate:masked-chunk",
         detail=f"{source_path}:{start_line}-{end_line}:{chunk_index}",
     )
