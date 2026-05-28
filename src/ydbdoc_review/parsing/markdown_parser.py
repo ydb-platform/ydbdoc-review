@@ -9,6 +9,9 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
+from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
+
+
 from ydbdoc_review.parsing.ast_types import (
     BlockNode,
     BlockQuote,
@@ -28,6 +31,7 @@ from ydbdoc_review.parsing.ast_types import (
     InlineSoftBreak,
     InlineStrong,
     InlineText,
+    InlineVariable,  # NEW
     ListItem,
     OrderedList,
     Paragraph,
@@ -38,13 +42,16 @@ from ydbdoc_review.parsing.ast_types import (
 )
 
 
+
 def create_parser() -> MarkdownIt:
     """Create a markdown-it parser configured for YDB documentation."""
     md = MarkdownIt("commonmark", {"html": True, "breaks": False, "linkify": False})
     md.enable("table")
     md.enable("strikethrough")
     md.use(front_matter_plugin)
+    md.use(yfm_variable_plugin)
     return md
+
 
 
 class _TokenStream:
@@ -405,6 +412,11 @@ def _parse_inline_until(stream: _TokenStream, close_type: str | None) -> list[In
             stream.expect("s_close")
             # For now, skip strikethrough rendering — preserve content as text.
             # TODO: add InlineStrike node.
+        elif t == "yfm_variable":
+            stream.advance()
+            children.append(
+                InlineVariable(name=tok.content, raw=tok.markup)
+            )
         else:
             raise ValueError(f"Unsupported inline token: {t} (content={tok.content!r})")
 

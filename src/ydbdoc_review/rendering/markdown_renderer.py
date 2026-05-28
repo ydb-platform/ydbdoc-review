@@ -31,6 +31,7 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    InlineVariable,  # NEW
 )
 
 
@@ -232,6 +233,8 @@ def _render_inline(nodes: list[InlineNode]) -> str:
 
 
 def _render_inline_node(n: InlineNode) -> str:
+    if isinstance(n, InlineVariable):
+        return n.raw
     if isinstance(n, InlineText):
         return n.content
     if isinstance(n, InlineCode):

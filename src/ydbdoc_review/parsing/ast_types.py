@@ -92,6 +92,17 @@ class InlineHardBreak(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["hardbreak"] = "hardbreak"
 
+class InlineVariable(BaseModel):
+    """YFM variable: {{ var-name }}."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_variable"] = "yfm_variable"
+    name: str
+    # Original whitespace inside braces, for exact round-trip.
+    # E.g. "{{ name }}" vs "{{name}}" vs "{{  name  }}".
+    raw: str
+
+
 
 InlineNode = Annotated[
     Union[
@@ -104,9 +115,11 @@ InlineNode = Annotated[
         InlineHTML,
         InlineSoftBreak,
         InlineHardBreak,
+        InlineVariable,
     ],
     Field(discriminator="kind"),
 ]
+
 
 
 # --- Block nodes ---
