@@ -50,7 +50,7 @@ cp .env.example .env
 
 Имена **моделей** (проверка / перевод) задаются в **`ydbdoc-review.toml`**: секция `[models]`, ключи `check` и `translate`. По умолчанию используется файл из пакета (`src/ydbdoc_review/ydbdoc-review.toml`); переопределение — свой `ydbdoc-review.toml` в каталоге запуска или **`YDBDOC_CONFIG`**. Значения из TOML можно сменить переменными **`YDBDOC_MODEL_CHECK`** и **`YDBDOC_MODEL_TRANSLATE`** (удобно в CI).
 
-**A/B переводчика (например DeepSeek):** в репозитории `ydb` заведите Actions variable **`YDBDOC_MODEL_TRANSLATE`** = `deepseek-v3.2/latest` (точный slug — в [Model gallery](https://aistudio.yandex.ru/model-gallery) для вашего каталога; модель должна быть **включена** для folder). Если slug недоступен (`Failed to get model`), переводчик автоматически пробует **`YDBDOC_MODEL_TRANSLATE_FALLBACKS`** (по умолчанию `yandexgpt-5.1`, `yandexgpt/latest`). Критик (`translation_verify`, по умолчанию Qwen) **не трогайте** — он должен оставаться другой семьёй, чем переводчик. Локально один файл:
+**Переводчик по умолчанию:** **`deepseek-v4-flash/latest`** (DeepSeek-V4-Flash в [Model gallery](https://aistudio.yandex.ru/model-gallery); модель должна быть **включена** для folder). В FM уходит `gpt://<folder>/deepseek-v4-flash/latest` (folder из `YANDEX_CLOUD_FOLDER_DOC_REVIEW`) или задайте полный URI: **`YDBDOC_MODEL_TRANSLATE=gpt://<folder>/deepseek-v4-flash/latest`**. Если slug недоступен (`Failed to get model`), пробуются **`YDBDOC_MODEL_TRANSLATE_FALLBACKS`** (`yandexgpt-5.1`, `yandexgpt/latest`). Критик (`translation_verify`, Qwen) **не трогайте**. Локально один файл:
 
 ```bash
 cp .env.example .env   # ключи FM
@@ -61,7 +61,7 @@ PYTHONPATH=src python scripts/translate_one_file.py \
 PYTHONPATH=src python scripts/translate_one_file.py \
   --source debug/pqe-source-ru.md \
   --out debug/pqe-en-deepseek.md \
-  --model deepseek-v3.2/latest
+  --model deepseek-v4-flash/latest
 diff -u debug/pqe-en-yandex.md debug/pqe-en-deepseek.md | less
 ```
 

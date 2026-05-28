@@ -37,6 +37,6 @@ def test_translate_fallbacks_default_includes_yandex(monkeypatch):
     monkeypatch.delenv("YDBDOC_MODEL_TRANSLATE_FALLBACKS", raising=False)
     fb = translation_model_fallbacks()
     assert "yandexgpt-5.1" in fb
-    chain = _expand_model_candidates("deepseek-v3.2/latest", fb)
-    assert chain[0] == "deepseek-v3.2/latest"
+    chain = _expand_model_candidates("deepseek-v4-flash/latest", fb)
+    assert chain[0] == "deepseek-v4-flash/latest"
     assert "yandexgpt-5.1" in chain

@@ -9,7 +9,7 @@ Use for A/B between translator models, e.g. yandexgpt-5.1 vs DeepSeek:
   PYTHONPATH=src python scripts/translate_one_file.py \\
     --source debug/pqe-source-ru.md \\
     --out debug/pqe-en-deepseek.md \\
-    --model deepseek-v3.2/latest
+    --model deepseek-v4-flash/latest
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def main() -> int:
     ap.add_argument(
         "--model",
         default="",
-        help="Override translator model slug (e.g. deepseek-v3.2/latest).",
+        help="Override translator slug or gpt://<folder>/… URI.",
     )
     ap.add_argument(
         "--disable-self-check",

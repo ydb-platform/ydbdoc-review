@@ -49,6 +49,8 @@ jobs:
           YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
           YDBDOC_REVIEW_ENABLED: ${{ vars.YDBDOC_REVIEW_ENABLED }}
           YDBDOC_MODEL_CHECK: ${{ vars.YDBDOC_MODEL_CHECK }}
+          # Default in image: deepseek-v4-flash/latest → gpt://<folder>/deepseek-v4-flash/latest
+          # Or full URI: gpt://b1g08jt28oei79r901r5/deepseek-v4-flash/latest
           YDBDOC_MODEL_TRANSLATE: ${{ vars.YDBDOC_MODEL_TRANSLATE }}
           # Self-check: по умолчанию из ydbdoc-review.toml в образе ([feature].translation_self_check).
           # Раскомментируйте env, чтобы временно переопределить без пересборки образа:
