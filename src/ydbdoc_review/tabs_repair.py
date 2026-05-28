@@ -107,7 +107,16 @@ def _repair_block(ru_block: str, en_block: str) -> tuple[str, bool]:
                 out.append(fixed)
                 label_i += 1
             else:
-                out.append(line)
+                changed = True
+                i += 1
+                while i < len(en_lines):
+                    nxt = en_lines[i]
+                    if _TAB_LABEL_LINE_RE.match(nxt):
+                        break
+                    if _LIST_TABS_CLOSE_RE.search(nxt):
+                        break
+                    i += 1
+                continue
             i += 1
             continue
         out.append(line)

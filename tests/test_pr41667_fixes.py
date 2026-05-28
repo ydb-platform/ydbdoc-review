@@ -51,11 +51,17 @@ def test_fix_en_heading_strips_links_and_duplicate_anchors():
     assert out.count("{#see-also}") == 1
 
 
-def test_normalize_en_spacing_macros_and_backticks():
+def test_normalize_en_spacing_macros_only():
     assert normalize_en_spacing_after_slots("{{ ydb-short-name }}The") == (
         "{{ ydb-short-name }} The"
     )
-    assert normalize_en_spacing_after_slots("stdin`or`stdout") == "stdin `or` stdout"
+    assert normalize_en_spacing_after_slots("stdin`or`stdout") == "stdin`or`stdout"
+
+
+def test_fix_spurious_backtick_handles_or():
+    from ydbdoc_review.translate_postprocess import fix_spurious_backtick_padding
+
+    assert "stdin `or` stdout" in fix_spurious_backtick_padding("stdin`or`stdout")
 
 
 def test_finalize_separator_and_fence():

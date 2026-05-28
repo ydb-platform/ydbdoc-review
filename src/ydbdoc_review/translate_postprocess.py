@@ -175,6 +175,8 @@ def fix_en_heading_lines(text: str) -> str:
         anchors = re.findall(r"\{#[^}]+\}", body)
         body = re.sub(r"\s*\{#[^}]+\}", "", body)
         body = re.sub(r"\s+", " ", body).strip()
+        body = re.sub(r"\s+`([a-z][a-z0-9_-]*)`\s*", " ", body, flags=re.IGNORECASE)
+        body = re.sub(r"\s+", " ", body).strip()
         unique_anchors: list[str] = []
         for a in anchors:
             if a not in unique_anchors:
@@ -188,12 +190,45 @@ def fix_en_heading_lines(text: str) -> str:
 
 
 def normalize_en_spacing_after_slots(text: str) -> str:
-    """Fix missing spaces around inline code and diplodoc macros in EN."""
-    out = re.sub(r"\}\}([A-Za-z])", r"}} \1", text)
-    out = re.sub(r"([a-zA-Z0-9])`([^`\n]+)`([a-zA-Z0-9])", r"\1 `\2` \3", out)
-    out = re.sub(r"([a-zA-Z0-9])`([^`\n]+)`(?![a-zA-Z0-9])", r"\1 `\2`", out)
-    out = re.sub(r"(?<![a-zA-Z0-9])`([^`\n]+)`([a-zA-Z0-9])", r"`\1` \2", out)
+    """Fix missing spaces after diplodoc macros (avoid generic backtick rules)."""
+    return re.sub(r"\}\}([A-Za-z])", r"}} \1", text)
+
+
+def fix_spurious_backtick_padding(text: str) -> str:
+    """`` ` stdin ` `` → `` `stdin` ``; ``stdin`or`stdout`` → spaced form."""
+    out = re.sub(r"`\s+([^`\n]+?)\s+`", r"`\1`", text)
+    out = re.sub(
+        r"([a-zA-Z0-9])`([^`\n]{1,8})`([a-zA-Z0-9])",
+        r"\1 `\2` \3",
+        out,
+    )
     return out
+
+
+def fix_space_before_markdown_link(text: str) -> str:
+    """``is[disabled]`` → ``is [disabled]``."""
+    return re.sub(r"(\w)\[([^\]]+)\]\(", r"\1 [\2](", text)
+
+
+_RU_LINK_LABEL_MAP: dict[str, str] = {
+    "выключено": "disabled",
+}
+
+
+def fix_ru_link_labels_in_en(text: str) -> str:
+    """Deterministic EN labels for common RU link text left untranslated."""
+    out = text
+    for ru_label, en_label in _RU_LINK_LABEL_MAP.items():
+        out = out.replace(f"[{ru_label}]", f"[{en_label}]")
+    return out
+
+
+_STRAY_ANCHOR_GLUE_RE = re.compile(r"([\w)\]])\{#([a-zA-Z0-9_-]+)\}(\.)")
+
+
+def strip_stray_heading_anchors_in_prose(text: str) -> str:
+    """Remove ``{#anchor}`` glued to prose (e.g. ``injections{#one-request}.``)."""
+    return _STRAY_ANCHOR_GLUE_RE.sub(r"\1\3", text)
 
 
 def fix_heading_anchors_from_ru(ru_source: str, en_text: str) -> str:
@@ -251,12 +286,19 @@ def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     out = apply_deterministic_cli_fixes(out, ru_source=ru_source)
     out = fix_dashed_cli_flags(out)
     out = fix_common_ru_leaks_in_en(out)
+    out = fix_ru_link_labels_in_en(out)
+    out = fix_spurious_backtick_padding(out)
     out = normalize_en_spacing_after_slots(out)
+    out = fix_space_before_markdown_link(out)
+    out = strip_stray_heading_anchors_in_prose(out)
     out = fix_yandex_cloud_links_for_en(out)
     out = fix_wikipedia_links_for_en(out)
     out = fix_en_heading_lines(out)
     out = fix_heading_anchors_from_ru(ru_source, out)
     out = fix_list_tabs_markdown_layout(out)
+    from ydbdoc_review.table_ast import repair_table_rows_from_ru
+
+    out = repair_table_rows_from_ru(ru_source, out)
     return out
 
 

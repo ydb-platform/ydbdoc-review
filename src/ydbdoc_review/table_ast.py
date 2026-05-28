@@ -176,3 +176,94 @@ def render_table_row_plan(
             cell_text = source_text
         out_cells.append(cell_text)
     return f"{row.leading}|{'|'.join(out_cells)}|{row.trailing}"
+
+
+_POSSIBLE_VALUES_MARKER = "Possible values:"
+
+
+def _dedup_possible_values_cell(cell: str) -> str:
+    if cell.count(_POSSIBLE_VALUES_MARKER) <= 1:
+        return cell
+    first = cell.find(_POSSIBLE_VALUES_MARKER)
+    second = cell.find(_POSSIBLE_VALUES_MARKER, first + 1)
+    if second < 0:
+        return cell
+    return cell[:second].rstrip()
+
+
+def _is_table_header_row(ru_cells: list[str], en_cells: list[str]) -> bool:
+    if len(ru_cells) < 2 or len(en_cells) < 2:
+        return False
+    ru_joined = " ".join(ru_cells).lower()
+    if any(k in ru_joined for k in ("имя", "описание", "name", "description")):
+        return True
+    return len(en_cells) > len(ru_cells) and any(
+        _CYRILLIC_RE.search(c) for c in en_cells
+    )
+
+
+def repair_table_rows_from_ru(ru_source: str, en_text: str) -> str:
+    """
+    Fix table column count drift, duplicated HTML in cells, and header row corruption.
+
+    Operates line-by-line when RU and EN share the same line count.
+    """
+    ru_lines = ru_source.splitlines()
+    en_lines = en_text.splitlines()
+    if not ru_lines or len(ru_lines) != len(en_lines):
+        return en_text
+
+    out: list[str] = []
+    changed = False
+    for ru_ln, en_ln in zip(ru_lines, en_lines, strict=True):
+        ru_parsed = split_table_row(ru_ln)
+        en_parsed = split_table_row(en_ln)
+        if ru_parsed is None or en_parsed is None:
+            out.append(en_ln)
+            continue
+        ru_lead, ru_cells, ru_trail = ru_parsed
+        en_lead, en_cells, en_trail = en_parsed
+        if _TABLE_SEP_ROW_RE.match(ru_ln):
+            out.append(ru_ln if not _TABLE_SEP_ROW_RE.match(en_ln) else en_ln)
+            if en_ln != out[-1]:
+                changed = True
+            continue
+
+        new_cells = list(en_cells)
+        if len(new_cells) > len(ru_cells):
+            new_cells = new_cells[: len(ru_cells)]
+            changed = True
+        if _is_table_header_row(ru_cells, en_cells):
+            for i, ru_cell in enumerate(ru_cells):
+                if i >= len(new_cells):
+                    break
+                if _CYRILLIC_RE.search(new_cells[i]) and not _CYRILLIC_RE.search(ru_cell):
+                    if i == 0 and re.search(r"(?i)name|имя", ru_cell):
+                        new_cells[i] = "Name"
+                    elif re.search(r"(?i)description|описание", ru_cell):
+                        new_cells[i] = "Description"
+                    else:
+                        new_cells[i] = ru_cell
+                    changed = True
+
+        for i in range(len(new_cells)):
+            deduped = _dedup_possible_values_cell(new_cells[i])
+            if deduped != new_cells[i]:
+                new_cells[i] = deduped
+                changed = True
+            if _CYRILLIC_RE.search(new_cells[i]):
+                for ru_label, en_label in (("выключено", "disabled"),):
+                    if f"[{ru_label}]" in new_cells[i]:
+                        new_cells[i] = new_cells[i].replace(
+                            f"[{ru_label}]", f"[{en_label}]"
+                        )
+                        changed = True
+
+        new_line = f"{en_lead}|{'|'.join(new_cells)}|{en_trail}"
+        if new_line != en_ln:
+            changed = True
+        out.append(new_line)
+
+    if not changed:
+        return en_text
+    return "\n".join(out)

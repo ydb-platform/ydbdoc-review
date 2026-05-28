@@ -19,6 +19,7 @@ from ydbdoc_review.markdown_links import (
     strip_duplicate_cyrillic_links,
 )
 from ydbdoc_review.table_ast import _TABLE_SEP_ROW_RE
+from ydbdoc_review.table_ast import repair_table_rows_from_ru
 from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 
 _LIST_TABS_OPEN_RE = re.compile(r"\{%\s*list\s+tabs", re.IGNORECASE)
@@ -79,8 +80,11 @@ def sync_fenced_blocks_from_source(source: str, translation: str) -> tuple[str, 
     out = translation
     changed = False
     for src_block, trn_block in zip(src_blocks, trn_blocks, strict=True):
-        inner_mismatch = _inner_line_count(src_block) != _inner_line_count(trn_block)
-        if src_block != trn_block or inner_mismatch:
+        src_inner = _inner_line_count(src_block)
+        trn_inner = _inner_line_count(trn_block)
+        inner_mismatch = src_inner != trn_inner
+        truncated = trn_inner < src_inner
+        if src_block != trn_block or inner_mismatch or truncated:
             out = out.replace(trn_block, src_block, 1)
             changed = True
     return out, changed
@@ -107,6 +111,34 @@ def restore_fence_openers_from_source(source: str, translation: str) -> tuple[st
             continue
         out.append(ln)
     return "\n".join(out), changed
+
+
+def sync_manual_tabs_fences_from_source(
+    source: str, translation: str
+) -> tuple[str, bool]:
+    """Restore fenced blocks inside instructional ``{% list tabs %}`` from RU."""
+    ru_parts = _LIST_TABS_BLOCK_RE.split(source)
+    en_parts = _LIST_TABS_BLOCK_RE.split(translation)
+    if len(ru_parts) != len(en_parts):
+        return translation, False
+
+    changed = False
+    out_parts: list[str] = []
+    for ru_p, en_p in zip(ru_parts, en_parts, strict=False):
+        if not _LIST_TABS_OPEN_RE.search(ru_p):
+            out_parts.append(en_p)
+            continue
+        if list_tabs_block_copy_verbatim(ru_p):
+            out_parts.append(en_p)
+            continue
+        block = en_p
+        block, c1 = sync_fenced_blocks_from_source(ru_p, block)
+        block, c2 = restore_fence_openers_from_source(ru_p, block)
+        changed = changed or c1 or c2
+        out_parts.append(block)
+    if not changed:
+        return translation, False
+    return "".join(out_parts), True
 
 
 def repair_table_separator_rows_from_ru(ru_source: str, en_text: str) -> str:
@@ -144,5 +176,7 @@ def finalize_en_document_from_ru(ru_source: str, en_text: str) -> str:
     out, _ = restore_fence_openers_from_source(ru_source, out)
     out = restore_markdown_links_from_ru(ru_source, out)
     out = repair_table_separator_rows_from_ru(ru_source, out)
+    out = repair_table_rows_from_ru(ru_source, out)
+    out, _ = sync_manual_tabs_fences_from_source(ru_source, out)
     out, _ = repair_tab_labels_from_source(ru_source, out)
     return out
