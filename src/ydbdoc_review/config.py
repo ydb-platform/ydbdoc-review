@@ -30,7 +30,7 @@ def fm_base_url_requires_yandex_folder(base_url: str) -> bool:
 
 
 _DEFAULT_MODEL_CHECK = "yandexgpt/latest"
-_DEFAULT_MODEL_TRANSLATE = "deepseek-v4-flash/latest"
+_DEFAULT_MODEL_TRANSLATE = "yandexgpt-5.1"
 
 
 def _candidate_config_files() -> list[Path]:

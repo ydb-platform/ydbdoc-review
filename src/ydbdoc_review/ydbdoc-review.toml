@@ -4,10 +4,8 @@
 [models]
 # Дешёвая модель для analyze-фазы (alignment check), а также для translate-фолбэков.
 check = "yandexgpt/latest"
-# Переводчик: DeepSeek-V4-Flash (быстрый, длинный контекст). Slug → gpt://<folder>/…
-# Полный URI без подстановки folder: env YDBDOC_MODEL_TRANSLATE=gpt://<folder>/deepseek-v4-flash/latest
-# Откат: translate = "yandexgpt-5.1" или fallbacks (см. YDBDOC_MODEL_TRANSLATE_FALLBACKS).
-translate = "deepseek-v4-flash/latest"
+# Переводчик: mask→translate→unmask и re-validate после fix-diff.
+translate = "yandexgpt-5.1"
 # Критик: сравнивает RU↔EN и (при «НЕ ПРИНИМАТЬ») возвращает fix-diff. ОБЯЗАТЕЛЬНО другая
 # семья моделей, не та же что translate — иначе критик/исправитель не отловят свои ошибки.
 # Фолбэки: см. YDBDOC_MODEL_VERIFY_FALLBACKS (по умолчанию тоже non-Yandex).
