@@ -4,8 +4,9 @@
 [models]
 # Дешёвая модель для analyze-фазы (alignment check), а также для translate-фолбэков.
 check = "yandexgpt/latest"
-# Переводчик: на нём идёт segment-translate и финальная re-validate после fix-diff.
-translate = "yandexgpt-5.1"
+# Переводчик: mask→translate→unmask и re-validate после fix-diff.
+# Откат на Yandex: translate = "yandexgpt-5.1" или env YDBDOC_MODEL_TRANSLATE.
+translate = "deepseek-v3.2/latest"
 # Критик: сравнивает RU↔EN и (при «НЕ ПРИНИМАТЬ») возвращает fix-diff. ОБЯЗАТЕЛЬНО другая
 # семья моделей, не та же что translate — иначе критик/исправитель не отловят свои ошибки.
 # Фолбэки: см. YDBDOC_MODEL_VERIFY_FALLBACKS (по умолчанию тоже non-Yandex).

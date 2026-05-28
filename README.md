@@ -50,6 +50,21 @@ cp .env.example .env
 
 Имена **моделей** (проверка / перевод) задаются в **`ydbdoc-review.toml`**: секция `[models]`, ключи `check` и `translate`. По умолчанию используется файл из пакета (`src/ydbdoc_review/ydbdoc-review.toml`); переопределение — свой `ydbdoc-review.toml` в каталоге запуска или **`YDBDOC_CONFIG`**. Значения из TOML можно сменить переменными **`YDBDOC_MODEL_CHECK`** и **`YDBDOC_MODEL_TRANSLATE`** (удобно в CI).
 
+**A/B переводчика (например DeepSeek):** в репозитории `ydb` заведите Actions variable **`YDBDOC_MODEL_TRANSLATE`** = `deepseek-v3.2/latest` (точный slug — в [Model gallery](https://aistudio.yandex.ru/model-gallery) для вашего каталога). Критик (`translation_verify`, по умолчанию Qwen) **не трогайте** — он должен оставаться другой семьёй, чем переводчик. Локально один файл:
+
+```bash
+cp .env.example .env   # ключи FM
+PYTHONPATH=src python scripts/translate_one_file.py \
+  --source debug/pqe-source-ru.md \
+  --out debug/pqe-en-yandex.md \
+  --model yandexgpt-5.1
+PYTHONPATH=src python scripts/translate_one_file.py \
+  --source debug/pqe-source-ru.md \
+  --out debug/pqe-en-deepseek.md \
+  --model deepseek-v3.2/latest
+diff -u debug/pqe-en-yandex.md debug/pqe-en-deepseek.md | less
+```
+
 **QA pipeline** (TOML: **`translation_self_check`**, **`translation_repair`**; модель-критик — **`[models].translation_verify`**): на каждый файл максимум три «тяжёлых» FM-запроса.
 
 1. **Compare** — критик сравнивает RU↔EN по `prompts/05_verify_translation.txt`, возвращает вердикт `ПРИНИМАТЬ` / `ПРИНИМАТЬ С ОГОВОРКАМИ` / `НЕ ПРИНИМАТЬ` с разделами «Блокеры» и «Оговорки».
