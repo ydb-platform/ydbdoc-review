@@ -9,9 +9,9 @@ from ydbdoc_review.annotated_translate import refine_tab_regions
 from ydbdoc_review.document_mask import MaskRegistry
 from ydbdoc_review.document_structure import analyze_document_structure
 from ydbdoc_review.file_translate import translate_text_with_plan
+from ydbdoc_review.masked_chunking import chunk_masked_text
 from ydbdoc_review.masked_translate import (
     build_masked_segments,
-    chunk_masked_text,
     translate_with_mask,
 )
 

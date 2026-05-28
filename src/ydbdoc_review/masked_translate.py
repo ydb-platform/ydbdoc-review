@@ -25,6 +25,7 @@ from ydbdoc_review.llm import (
     clamp_max_output_tokens,
     load_masked_document_instructions,
 )
+from ydbdoc_review.masked_chunking import chunk_masked_text as _split_masked_text
 from ydbdoc_review.placeholder_translate import (
     CopySegment,
     _join_segments,
@@ -103,44 +104,16 @@ def build_masked_segments(
     return out
 
 
-def _safe_chunk_end(text: str, start: int, max_end: int) -> int:
-    end = min(max_end, len(text))
-    if end >= len(text):
-        return len(text)
-    for m in PLACEHOLDER_RE.finditer(text):
-        if m.start() < end < m.end():
-            end = m.start()
-            break
-    if end <= start:
-        end = min(start + max_end, len(text))
-    return end
-
-
-def chunk_masked_text(text: str, *, max_chars: int | None = None) -> list[str]:
-    """Split masked markdown without breaking ``⟦…⟧`` placeholders."""
+def chunk_masked_text_for_translate(
+    text: str, *, max_chars: int | None = None
+) -> list[str]:
+    """Split masked markdown using :func:`masked_chunking.chunk_masked_text`."""
     limit = max_chars if max_chars is not None else _max_chunk_chars()
-    if len(text) <= limit:
-        return [text]
-    chunks: list[str] = []
-    start = 0
-    n = len(text)
-    while start < n:
-        hard_end = min(start + limit, n)
-        if hard_end >= n:
-            chunks.append(text[start:])
-            break
-        cut = text.rfind("\n\n", start, hard_end)
-        if cut <= start:
-            cut = _safe_chunk_end(text, start, hard_end)
-        else:
-            cut = _safe_chunk_end(text, start, cut + 2)
-        if cut <= start:
-            cut = _safe_chunk_end(text, start, hard_end)
-        chunks.append(text[start:cut])
-        start = cut
-        if start < n and text[start : start + 2] == "\n\n":
-            start += 2
-    return [c for c in chunks if c]
+    return _split_masked_text(text, max_chars=limit)
+
+
+# Backward-compatible alias for tests and scripts.
+chunk_masked_text = chunk_masked_text_for_translate
 
 
 def _build_masked_user_input(
@@ -164,7 +137,8 @@ def _build_masked_user_input(
         header += f"Chunk: {chunk_index}/{chunk_total}\n"
     return (
         f"{header}\n"
-        f"Translate the markdown below. Keep every `⟦…⟧` placeholder unchanged.\n\n"
+        f"Translate the markdown below. Keep every `⟦KIND:n⟧` placeholder "
+        f"byte-identical (count, order, spelling).\n\n"
         f"---\n\n"
         f"{masked}\n"
     )
@@ -231,7 +205,7 @@ def translate_masked_segment(
     if not _prose_needs_translation(segment.masked_text, source_is_russian=source_is_russian):
         return segment.source_text, 0
 
-    chunks = chunk_masked_text(segment.masked_text)
+    chunks = chunk_masked_text_for_translate(segment.masked_text)
     translated_parts: list[str] = []
     llm_calls = 0
     for i, chunk in enumerate(chunks, start=1):

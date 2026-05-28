@@ -11,10 +11,10 @@ from ydbdoc_review.config import Settings
 from ydbdoc_review.document_mask import MaskRegistry
 from ydbdoc_review.document_structure import analyze_document_structure
 from ydbdoc_review.llm import load_masked_document_instructions
+from ydbdoc_review.masked_chunking import chunk_masked_text
 from ydbdoc_review.masked_translate import (
     _build_masked_user_input,
     build_masked_segments,
-    chunk_masked_text,
     count_masked_stats,
 )
 
@@ -63,7 +63,9 @@ def main() -> None:
                 seg.text,
             )
             continue
-        chunks = chunk_masked_text(seg.masked_text)
+        from ydbdoc_review.masked_translate import _max_chunk_chars
+
+        chunks = chunk_masked_text(seg.masked_text, max_chars=_max_chunk_chars())
         for ci, masked in enumerate(chunks, start=1):
             chunk_idx += 1
             _dump(
