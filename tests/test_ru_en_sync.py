@@ -1,6 +1,7 @@
 from ydbdoc_review.heuristics import _check_tab_labels_parity
 from ydbdoc_review.ru_en_sync import (
     finalize_en_document_from_ru,
+    restore_fence_openers_from_source,
     sync_fenced_blocks_from_source,
     sync_verbatim_list_tabs_from_source,
 )
@@ -70,6 +71,15 @@ def test_sync_fenced_blocks_from_source():
     assert changed
     assert "key: 1" in out
     assert "key: 999" not in out
+
+
+def test_restore_fence_openers_from_source():
+    ru = "```bash\necho 1\n```\n\n```text\nok\n```\n"
+    en = "```\necho 1\n```\n\n```\nok\n```\n"
+    out, changed = restore_fence_openers_from_source(ru, en)
+    assert changed
+    assert "```bash" in out
+    assert "```text" in out
 
 
 def test_finalize_restores_markdown_link():

@@ -12,7 +12,9 @@ from ydbdoc_review.config import Settings
 from ydbdoc_review.document_mask import (
     PLACEHOLDER_RE,
     MaskRegistry,
+    has_broken_placeholder_tokens,
     mask_translatable_text,
+    placeholder_sequence_matches,
     restore_missing_placeholders,
     unmask_text,
     validate_placeholders,
@@ -28,9 +30,12 @@ from ydbdoc_review.llm import (
 from ydbdoc_review.masked_chunking import chunk_masked_text as _split_masked_text
 from ydbdoc_review.placeholder_translate import (
     CopySegment,
+    LineUnit,
     _join_segments,
+    _unit_id,
     _slice_lines,
     build_placeholder_segments,
+    translate_line_units,
 )
 
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
@@ -43,6 +48,7 @@ class MaskedTranslateSegment:
     end_line: int = 0
     source_text: str = ""
     masked_text: str = ""
+    action: str = "translate"
 
 
 MaskedSegment = CopySegment | MaskedTranslateSegment
@@ -66,6 +72,18 @@ def _prose_needs_translation(masked: str, *, source_is_russian: bool) -> bool:
             return True
         return bool(re.search(r"\[[^\]]*[\u0400-\u04FF]", prose))
     return bool(_CYRILLIC_RE.search(prose))
+
+
+def _segment_action(
+    regions: list[StructureRegion], start_line: int, end_line: int
+) -> str:
+    for r in regions:
+        if r.start_line == start_line and r.end_line == end_line:
+            return r.action
+    for r in regions:
+        if r.start_line <= end_line and r.end_line >= start_line:
+            return r.action
+    return "translate"
 
 
 def build_masked_segments(
@@ -99,6 +117,7 @@ def build_masked_segments(
                 end_line=seg.end_line,
                 source_text=body,
                 masked_text=masked,
+                action=_segment_action(regions, seg.start_line, seg.end_line),
             )
         )
     return out
@@ -187,6 +206,83 @@ def translate_masked_chunk(
     return _strip_code_fence(raw).strip()
 
 
+def _translate_table_segment_line_json(
+    settings: Settings,
+    segment: MaskedTranslateSegment,
+    *,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    source_is_russian: bool,
+) -> tuple[str, int]:
+    """Translate table lines one-by-one (JSON mode) to preserve `|` structure."""
+    lines = segment.source_text.splitlines()
+    units: list[LineUnit] = []
+    for offset, line in enumerate(lines, start=segment.start_line):
+        if not line.strip().startswith("|"):
+            continue
+        if source_is_russian and (
+            _CYRILLIC_RE.search(line)
+            or bool(re.search(r"\[[^\]]*[\u0400-\u04FF]", line))
+        ):
+            units.append(LineUnit(unit_id=_unit_id(offset), line_no=offset, source_line=line))
+    if not units:
+        return segment.source_text, 0
+    translations = translate_line_units(
+        settings,
+        units,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_path=source_path,
+    )
+    out: list[str] = []
+    for offset, line in enumerate(lines, start=segment.start_line):
+        uid = _unit_id(offset)
+        out.append(translations.get(uid, line))
+    return "\n".join(out), 1
+
+
+def _translate_chunk_with_placeholder_guard(
+    settings: Settings,
+    chunk: str,
+    *,
+    source_lang: str,
+    target_lang: str,
+    source_path: str,
+    chunk_index: int,
+    chunk_total: int,
+    start_line: int,
+    end_line: int,
+) -> str:
+    """
+    Translate one chunk with a retry when placeholders were corrupted.
+
+    If retry still breaks placeholder structure, return source chunk unchanged.
+    """
+    attempts = 2
+    last = chunk
+    for _ in range(attempts):
+        out = translate_masked_chunk(
+            settings,
+            chunk,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_path=source_path,
+            chunk_index=chunk_index,
+            chunk_total=chunk_total,
+            start_line=start_line,
+            end_line=end_line,
+        )
+        repaired = restore_missing_placeholders(chunk, out)
+        missing = validate_placeholders(chunk, repaired)
+        broken = has_broken_placeholder_tokens(repaired)
+        ordered = placeholder_sequence_matches(chunk, repaired)
+        last = repaired
+        if not missing and not broken and ordered:
+            return repaired
+    return chunk if has_broken_placeholder_tokens(last) else last
+
+
 def translate_masked_segment(
     settings: Settings,
     segment: MaskedTranslateSegment,
@@ -202,6 +298,16 @@ def translate_masked_segment(
 
     Returns ``(english_text, num_llm_calls)``.
     """
+    if segment.action == "translate_table":
+        return _translate_table_segment_line_json(
+            settings,
+            segment,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_path=source_path,
+            source_is_russian=source_is_russian,
+        )
+
     if not _prose_needs_translation(segment.masked_text, source_is_russian=source_is_russian):
         return segment.source_text, 0
 
@@ -213,7 +319,7 @@ def translate_masked_segment(
             f"masked-translate chunk {i}/{len(chunks)} | {source_path} | "
             f"lines {segment.start_line}-{segment.end_line}"
         )
-        out = translate_masked_chunk(
+        out = _translate_chunk_with_placeholder_guard(
             settings,
             chunk,
             source_lang=source_lang,
@@ -226,12 +332,12 @@ def translate_masked_segment(
         )
         llm_calls += 1
         missing = validate_placeholders(chunk, out)
-        if missing:
+        broken = has_broken_placeholder_tokens(out)
+        if missing or broken or not placeholder_sequence_matches(chunk, out):
             fm_log(
-                f"masked-translate placeholder repair | {source_path} | "
-                f"missing {len(missing)} key(s)"
+                f"masked-translate placeholder guard | {source_path} | "
+                f"missing={len(missing)} broken={int(broken)}"
             )
-        out = restore_missing_placeholders(chunk, out)
         translated_parts.append(out)
 
     masked_merged = "".join(translated_parts)

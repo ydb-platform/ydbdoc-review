@@ -2,7 +2,9 @@
 
 from ydbdoc_review.document_mask import (
     MaskRegistry,
+    has_broken_placeholder_tokens,
     mask_translatable_text,
+    placeholder_sequence_matches,
     placeholder_key_sequence,
     restore_missing_placeholders,
     unmask_text,
@@ -48,3 +50,13 @@ def test_validate_placeholders():
     ok = "X ⟦LINK:1⟧ Y ⟦VAR:1⟧"
     assert validate_placeholders(src, ok) == []
     assert validate_placeholders(src, "X Y") == ["LINK:1", "VAR:1"]
+
+
+def test_placeholder_sequence_and_broken_detection():
+    src = "A ⟦LINK:1⟧ B ⟦VAR:1⟧"
+    good = "X ⟦LINK:1⟧ Y ⟦VAR:1⟧"
+    bad_order = "X ⟦VAR:1⟧ Y ⟦LINK:1⟧"
+    broken = "X ⟦LINK:1 Y"
+    assert placeholder_sequence_matches(src, good)
+    assert not placeholder_sequence_matches(src, bad_order)
+    assert has_broken_placeholder_tokens(broken)

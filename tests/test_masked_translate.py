@@ -12,6 +12,7 @@ from ydbdoc_review.file_translate import translate_text_with_plan
 from ydbdoc_review.masked_chunking import chunk_masked_text
 from ydbdoc_review.masked_translate import (
     build_masked_segments,
+    translate_masked_segment,
     translate_with_mask,
 )
 
@@ -94,3 +95,36 @@ def test_build_masked_segments_preserves_links():
     tr = [s for s in segs if s.kind == "translate"][0]
     assert "⟦LINK:" in tr.masked_text
     assert len(reg.atoms) >= 2
+
+
+def test_translate_table_segment_uses_line_json():
+    ru = (
+        "| Name | Description |\n"
+        "| --- | --- |\n"
+        "| `--input-batch` | Пакетирование [выключено](#x). |\n"
+    )
+    regions = analyze_document_structure(ru, source_is_russian=True)
+    reg = MaskRegistry()
+    segs = build_masked_segments(ru, regions, reg, source_is_russian=True)
+    seg = [s for s in segs if s.kind == "translate"][0]
+    assert seg.action == "translate_table"
+    with patch(
+        "ydbdoc_review.masked_translate.translate_line_units",
+        return_value={"L00003": "| `--input-batch` | Batching is [disabled](#x). |"},
+    ) as mocked_lines, patch(
+        "ydbdoc_review.masked_translate.translate_masked_chunk",
+        side_effect=AssertionError("masked LLM path should not be used for table segments"),
+    ):
+        out, llm = translate_masked_segment(
+            MagicMock(),
+            seg,
+            reg,
+            source_lang="Russian",
+            target_lang="English",
+            source_path="x.md",
+            source_is_russian=True,
+        )
+    mocked_lines.assert_called_once()
+    assert llm == 1
+    assert out.count("|") >= 6
+    assert "Batching is" in out

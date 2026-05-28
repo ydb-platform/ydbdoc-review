@@ -17,6 +17,7 @@ from ydbdoc_review.markdown_links import (
 from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 
 _LIST_TABS_OPEN_RE = re.compile(r"\{%\s*list\s+tabs", re.IGNORECASE)
+_FENCE_OPEN_RE = re.compile(r"^\s*(```|~~~).*$")
 
 
 def sync_verbatim_list_tabs_from_source(source: str, translation: str) -> tuple[str, bool]:
@@ -61,6 +62,29 @@ def sync_fenced_blocks_from_source(source: str, translation: str) -> tuple[str, 
     return out, changed
 
 
+def restore_fence_openers_from_source(source: str, translation: str) -> tuple[str, bool]:
+    """
+    Restore opening fence lines (```lang) from SOURCE by order.
+
+    Useful when the model keeps fence bodies but drops `bash` / `text` info strings.
+    """
+    src_openers = [ln for ln in source.splitlines() if _FENCE_OPEN_RE.match(ln)]
+    tr_lines = translation.splitlines()
+    out: list[str] = []
+    idx = 0
+    changed = False
+    for ln in tr_lines:
+        if _FENCE_OPEN_RE.match(ln) and idx < len(src_openers):
+            src_ln = src_openers[idx]
+            if ln != src_ln:
+                changed = True
+            out.append(src_ln)
+            idx += 1
+            continue
+        out.append(ln)
+    return "\n".join(out), changed
+
+
 def finalize_en_document_from_ru(ru_source: str, en_text: str) -> str:
     """
     Last pass after LLM merge for RU→EN: prose stays translated; code/config/tabs sync.
@@ -72,6 +96,7 @@ def finalize_en_document_from_ru(ru_source: str, en_text: str) -> str:
     out = strip_duplicate_cyrillic_links(out, ru_source)
     out = fix_broken_fence_lines_from_ru(ru_source, out)
     out, _ = sync_fenced_blocks_from_source(ru_source, out)
+    out, _ = restore_fence_openers_from_source(ru_source, out)
     out = restore_markdown_links_from_ru(ru_source, out)
     out, _ = repair_tab_labels_from_source(ru_source, out)
     return out

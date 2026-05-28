@@ -197,3 +197,15 @@ def validate_placeholders(source_masked: str, translated: str) -> list[str]:
     src = placeholder_key_sequence(source_masked)
     tr_set = set(placeholder_key_sequence(translated))
     return [k for k in src if k not in tr_set]
+
+
+def has_broken_placeholder_tokens(text: str) -> bool:
+    """True when placeholder brackets are imbalanced or malformed."""
+    if text.count("⟦") != text.count("⟧"):
+        return True
+    return bool(re.search(r"⟦[^⟧\n]*$", text))
+
+
+def placeholder_sequence_matches(source_masked: str, translated: str) -> bool:
+    """True when placeholder key order is preserved exactly."""
+    return placeholder_key_sequence(source_masked) == placeholder_key_sequence(translated)
