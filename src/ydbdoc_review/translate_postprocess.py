@@ -161,6 +161,55 @@ def fix_list_tabs_markdown_layout(text: str) -> str:
     return out
 
 
+def fix_heading_structure_from_ru(ru_source: str, en_text: str) -> str:
+    """
+    When EN glued a section title and body into one heading line, split using RU anchors.
+    """
+    ru_by_anchor: dict[str, str] = {}
+    for line in ru_source.splitlines():
+        m = re.match(r"^(#{1,6}\s+)(.+?)(\s*\{#[^}]+\})\s*$", line)
+        if m:
+            ru_by_anchor[m.group(3).strip()] = m.group(2).strip()
+
+    out_lines: list[str] = []
+    for line in en_text.splitlines():
+        m = re.match(r"^(#{1,6}\s+)(.+)$", line)
+        if not m:
+            out_lines.append(line)
+            continue
+        prefix, body = m.group(1), m.group(2)
+        anchor_m = re.search(r"(\{#[^}]+\})\s*$", body)
+        if not anchor_m:
+            out_lines.append(line)
+            continue
+        anchor = anchor_m.group(1)
+        ru_title = ru_by_anchor.get(anchor)
+        if not ru_title:
+            out_lines.append(line)
+            continue
+        before_anchor = body[: body.rfind(anchor)].strip()
+        if len(before_anchor) <= len(ru_title) + 40:
+            out_lines.append(line)
+            continue
+        split_m = re.match(r"^(.{8,140}?[.!?])\s+(.+)$", before_anchor, re.DOTALL)
+        if split_m:
+            out_lines.append(f"{prefix}{split_m.group(1).strip()} {anchor}")
+            rest = split_m.group(2).strip()
+            if rest:
+                out_lines.append(rest)
+            continue
+        words = before_anchor.split()
+        if len(words) >= 8:
+            title_part = " ".join(words[: min(8, len(words) - 1)])
+            rest = " ".join(words[len(title_part.split()) :])
+            out_lines.append(f"{prefix}{title_part} {anchor}")
+            if rest.strip():
+                out_lines.append(rest.strip())
+            continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
 def fix_en_heading_lines(text: str) -> str:
     """Strip markdown links and duplicate anchors from heading lines."""
     out_lines: list[str] = []
@@ -293,6 +342,7 @@ def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     out = strip_stray_heading_anchors_in_prose(out)
     out = fix_yandex_cloud_links_for_en(out)
     out = fix_wikipedia_links_for_en(out)
+    out = fix_heading_structure_from_ru(ru_source, out)
     out = fix_en_heading_lines(out)
     out = fix_heading_anchors_from_ru(ru_source, out)
     out = fix_list_tabs_markdown_layout(out)

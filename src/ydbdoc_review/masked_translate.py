@@ -19,7 +19,11 @@ from ydbdoc_review.document_mask import (
     unmask_text,
     validate_placeholders,
 )
-from ydbdoc_review.document_structure import StructureRegion, analyze_document_structure
+from ydbdoc_review.document_structure import (
+    StructureRegion,
+    analyze_document_structure,
+)
+from ydbdoc_review.document_segments import _is_fence_toggle
 from ydbdoc_review.fm_progress import fm_log
 from ydbdoc_review.llm import (
     _strip_code_fence,
@@ -40,6 +44,57 @@ from ydbdoc_review.placeholder_translate import (
 from ydbdoc_review.table_ast import build_table_row_plan, render_table_row_plan
 
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
+_RAW_FENCE_LINE_RE = re.compile(r"^\s*```", re.MULTILINE)
+
+
+def _segment_regions(
+    regions: list[StructureRegion], start_line: int, end_line: int
+) -> list[StructureRegion]:
+    return [
+        r
+        for r in regions
+        if r.start_line <= end_line and r.end_line >= start_line
+    ]
+
+
+def _force_mask_raw_fences(body: str, registry: MaskRegistry) -> str:
+    """Line-based fence mask when regex ``_FENCE_BLOCK_RE`` missed a block."""
+    lines = body.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if not _is_fence_toggle(lines[i]):
+            out.append(lines[i])
+            i += 1
+            continue
+        start = i
+        i += 1
+        while i < len(lines) and not _is_fence_toggle(lines[i]):
+            i += 1
+        if i < len(lines):
+            i += 1
+        block = "\n".join(lines[start:i])
+        out.append(registry.reserve("FENCE", block))
+    return "\n".join(out)
+
+
+def _mask_body_for_translate(
+    body: str,
+    registry: MaskRegistry,
+    regions: list[StructureRegion],
+    *,
+    start_line: int,
+    end_line: int,
+) -> str:
+    """Mask prose for LLM; fenced blocks become ``⟦FENCE:n⟧``, never raw `` ``` ``."""
+    _ = _segment_regions(regions, start_line, end_line)
+    masked = mask_translatable_text(body, registry, include_fences=True)
+    if _RAW_FENCE_LINE_RE.search(masked):
+        masked = _force_mask_raw_fences(body, registry)
+        masked = mask_translatable_text(
+            masked, registry, include_fences=False, mask_links=True
+        )
+    return masked
 
 @dataclass(frozen=True)
 class MaskedTranslateSegment:
@@ -103,13 +158,12 @@ def build_masked_segments(
             out.append(seg)
             continue
         body = _slice_lines(text, seg.start_line, seg.end_line)
-        include_fences = any(
-            r.action == "fence_comments"
-            for r in regions
-            if r.start_line <= seg.end_line and r.end_line >= seg.start_line
-        )
-        masked = mask_translatable_text(
-            body, registry, include_fences=include_fences
+        masked = _mask_body_for_translate(
+            body,
+            registry,
+            regions,
+            start_line=seg.start_line,
+            end_line=seg.end_line,
         )
         out.append(
             MaskedTranslateSegment(
@@ -339,6 +393,10 @@ def translate_masked_segment(
     translated_parts: list[str] = []
     llm_calls = 0
     for i, chunk in enumerate(chunks, start=1):
+        if _RAW_FENCE_LINE_RE.search(chunk):
+            fm_log(
+                f"masked-translate raw ``` in chunk {i}/{len(chunks)} | {source_path}"
+            )
         fm_log(
             f"masked-translate chunk {i}/{len(chunks)} | {source_path} | "
             f"lines {segment.start_line}-{segment.end_line}"
@@ -415,6 +473,10 @@ def translate_with_mask(
         parts.append(en_body)
 
     merged = _join_segments(parts)
+    if source_is_russian and target_lang.lower().startswith("en"):
+        from ydbdoc_review.structural_resync import resync_en_structure_from_ru
+
+        merged = resync_en_structure_from_ru(source_text, merged)
     if source_text.endswith("\n") and merged and not merged.endswith("\n"):
         merged += "\n"
     return merged, llm_calls

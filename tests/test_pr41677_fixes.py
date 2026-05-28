@@ -6,6 +6,7 @@ from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 from ydbdoc_review.translate_postprocess import (
     apply_en_postprocess_from_ru,
     fix_en_heading_lines,
+    fix_heading_structure_from_ru,
     fix_ru_link_labels_in_en,
     fix_space_before_markdown_link,
     fix_spurious_backtick_padding,
@@ -109,6 +110,16 @@ def test_sync_manual_tabs_fences_restores_bash():
     out, changed = sync_manual_tabs_fences_from_source(ru, en)
     assert changed
     assert "```bash" in out
+
+
+def test_fix_heading_structure_splits_glued_title():
+    ru = "## Единичное исполнение запроса {#one-request}\n\nЭта команда поддерживает передачу параметров.\n"
+    en = "## Single query execution This command supports passing parameters via stdin. {#one-request}\n"
+    out = fix_heading_structure_from_ru(ru, en)
+    lines = out.splitlines()
+    assert lines[0].endswith("{#one-request}")
+    assert len(lines) >= 2
+    assert "stdin" in lines[1]
 
 
 def test_apply_postprocess_parameterized_style():

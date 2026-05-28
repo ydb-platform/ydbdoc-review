@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from ydbdoc_review.document_mask import PLACEHOLDER_RE
+from ydbdoc_review.document_segments import _is_fence_toggle
 
 # Cut *before* these line starts (chunk ends at the preceding newline).
 _LINE_BOUNDARY_RE = re.compile(
@@ -23,6 +24,26 @@ def _inside_placeholder(text: str, index: int) -> bool:
         if m.start() < index < m.end():
             return True
     return False
+
+
+def _extend_cut_past_open_fence(text: str, cut: int) -> int:
+    """If *cut* falls inside an unclosed fenced block, move to after its closing line."""
+    ticks = sum(1 for line in text[:cut].splitlines() if _is_fence_toggle(line))
+    if ticks % 2 == 0:
+        return cut
+    pos = text.find("\n", cut)
+    pos = cut if pos == -1 else pos + 1
+    while pos < len(text):
+        nxt = text.find("\n", pos)
+        if nxt == -1:
+            line = text[pos:]
+            nxt = len(text)
+        else:
+            line = text[pos:nxt]
+        if _is_fence_toggle(line):
+            return nxt + 1 if nxt < len(text) else len(text)
+        pos = nxt + 1
+    return len(text)
 
 
 def _clamp_cut(text: str, start: int, cut: int) -> int:
@@ -68,8 +89,9 @@ def find_chunk_end(text: str, start: int, limit: int) -> int:
     if best > start:
         return best
 
-    # Last resort: hard limit, but never mid-table-row.
+    # Last resort: hard limit, but never mid-table-row or inside a fence.
     end = _clamp_cut(text, start, hard_end)
+    end = _extend_cut_past_open_fence(text, end)
     line_start = text.rfind("\n", start, end) + 1
     line_end = text.find("\n", end)
     if line_end == -1:
