@@ -357,6 +357,7 @@ def push_branch(
     *,
     force_with_lease: bool = False,
     force: bool = False,
+    fallback_force_on_reject: bool = True,
 ) -> None:
     url = remote_push_url(base_https_url, token)
     subprocess.run(
@@ -372,7 +373,22 @@ def push_branch(
         push_args.insert(4, "--force")
     elif force_with_lease:
         push_args.insert(4, "--force-with-lease")
-    subprocess.run(push_args, check=True)
+    result = subprocess.run(push_args, capture_output=True, text=True)
+    if result.returncode == 0:
+        return
+    combined = f"{result.stderr or ''}\n{result.stdout or ''}".lower()
+    if (
+        fallback_force_on_reject
+        and force_with_lease
+        and not force
+        and ("stale" in combined or "rejected" in combined)
+    ):
+        force_args = ["git", "-C", repo, "push", "--force", remote_name, f"HEAD:refs/heads/{branch}"]
+        subprocess.run(force_args, check=True)
+        return
+    if result.stderr:
+        print(result.stderr, file=__import__("sys").stderr, end="")
+    result.check_returncode()
 
 
 def try_push_branch(

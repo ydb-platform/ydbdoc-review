@@ -1313,6 +1313,7 @@ def run_cmd(
             click.echo(f"Merged EN toc `{en_toc}` (kept labels from `{base_ref}`, new entries only)")
 
     translation_branch = _translation_branch_name(pr_number)
+    branch_delete = "missing"
     translation_pr_title = f"Translation of PR {pr_number}"
     translation_pr_url: str | None = None
     translation_pr_number: int | None = None
@@ -1424,20 +1425,28 @@ def run_cmd(
     committed = False
     if workdir and not dry_run and publish_paths and not no_commit and not blocked_only:
         try:
-            if github_api.delete_branch_if_exists(
+            branch_delete = github_api.delete_branch_if_exists(
                 base_owner,
                 base_repo,
                 translation_branch,
                 settings.github_push_token,
-            ):
+            )
+            if branch_delete == "deleted":
                 click.echo(
                     f"Deleted existing upstream branch `{translation_branch}` "
                     f"(fresh translation from `{base_ref}`)."
                 )
+            elif branch_delete == "denied":
+                click.echo(
+                    f"Warning: cannot delete `{translation_branch}` on upstream (403 Forbidden); "
+                    "will `--force` push the new translation.",
+                    err=True,
+                )
         except httpx.HTTPError as exc:
+            branch_delete = "denied"
             click.echo(
                 f"Warning: could not delete `{translation_branch}` on upstream ({exc}); "
-                "will force-push the new translation.",
+                "will `--force` push the new translation.",
                 err=True,
             )
         git_local.prepare_translation_branch_on_base(
@@ -1491,9 +1500,13 @@ def run_cmd(
         )
 
     if workdir and not dry_run and committed and not no_push:
+        # After API branch delete, a normal push is enough. If delete was forbidden
+        # (403) the remote tip differs — force-with-lease fails with "stale info".
+        use_force_push = branch_delete == "denied"
         click.echo(
             f"Pushing to upstream {base_owner}/{base_repo} branch `{translation_branch}` "
-            f"(base `{base_ref}`) …"
+            f"(base `{base_ref}`)"
+            f"{' with --force' if use_force_push else ''} …"
         )
         git_local.push_branch(
             workdir,
@@ -1501,7 +1514,8 @@ def run_cmd(
             branch=translation_branch,
             token=settings.github_push_token,
             base_https_url=base_clone_url,
-            force_with_lease=True,
+            force=use_force_push,
+            force_with_lease=not use_force_push and branch_delete == "deleted",
         )
         click.echo("Push completed.")
         pr_title = translation_pr_title

@@ -183,22 +183,26 @@ def pull_create_error(
         return r.text[:500] if r.text else f"HTTP {r.status_code}"
 
 
-def delete_branch_if_exists(owner: str, repo: str, branch: str, token: str) -> bool:
+def delete_branch_if_exists(
+    owner: str, repo: str, branch: str, token: str
+) -> str:
     """
     Delete ``refs/heads/{branch}`` when present.
 
-    Returns True if a branch was deleted, False if it did not exist.
-    Raises on other API errors (permissions, etc.).
+    Returns ``"deleted"``, ``"missing"``, or ``"denied"`` (HTTP 403).
+    Raises on other API errors.
     """
     ref = quote(f"heads/{branch}", safe="/")
     url = f"https://api.github.com/repos/{owner}/{repo}/git/refs/{ref}"
     r = httpx.delete(url, headers=_headers(token), timeout=60.0)
     if r.status_code == 204:
-        return True
+        return "deleted"
     if r.status_code == 404:
-        return False
+        return "missing"
+    if r.status_code == 403:
+        return "denied"
     r.raise_for_status()
-    return False
+    return "missing"
 
 
 def post_issue_comment(owner: str, repo: str, pr: int, body: str, token: str) -> str:
