@@ -148,8 +148,9 @@ def test_translate_table_segment_masks_html_inside_cells():
 
     def fake_line_json(_settings, units, **_kwargs):
         assert units, "expected table cell units"
-        # We should send masked cell text, not raw <ul>/<li>.
-        assert any("⟦HTML:" in u.source_line for u in units)
+        # We should send pure prose slots, not raw html/urls.
+        assert all("<ul>" not in u.source_line for u in units)
+        assert all("](#x)" not in u.source_line for u in units)
         out: dict[str, str] = {}
         for u in units:
             out[u.unit_id] = u.source_line.replace("Пакетирование", "Batching")

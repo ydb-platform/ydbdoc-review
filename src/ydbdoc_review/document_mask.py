@@ -91,9 +91,12 @@ def mask_translatable_text(
     registry: MaskRegistry,
     *,
     include_fences: bool = False,
+    mask_links: bool = True,
 ) -> str:
     """Replace links, HTML, vars, code, diplodoc directives with placeholders."""
     spans = _collect_spans(text, include_fences=include_fences)
+    if not mask_links:
+        spans = [s for s in spans if s.kind != "LINK"]
     if not spans:
         return text
     out: list[str] = []
