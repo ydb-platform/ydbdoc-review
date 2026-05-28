@@ -108,9 +108,15 @@ def test_translate_table_segment_uses_line_json():
     segs = build_masked_segments(ru, regions, reg, source_is_russian=True)
     seg = [s for s in segs if s.kind == "translate"][0]
     assert seg.action == "translate_table"
+    def fake_line_json(_settings, units, **_kwargs):
+        out: dict[str, str] = {}
+        for u in units:
+            out[u.unit_id] = u.source_line.replace("Пакетирование", "Batching")
+        return out
+
     with patch(
         "ydbdoc_review.masked_translate.translate_line_units",
-        return_value={"L00003": "| `--input-batch` | Batching is [disabled](#x). |"},
+        side_effect=fake_line_json,
     ) as mocked_lines, patch(
         "ydbdoc_review.masked_translate.translate_masked_chunk",
         side_effect=AssertionError("masked LLM path should not be used for table segments"),
@@ -127,4 +133,41 @@ def test_translate_table_segment_uses_line_json():
     mocked_lines.assert_called_once()
     assert llm == 1
     assert out.count("|") >= 6
-    assert "Batching is" in out
+    assert "Batching" in out
+
+
+def test_translate_table_segment_masks_html_inside_cells():
+    ru = (
+        "| Name | Description |\n"
+        "| --- | --- |\n"
+        "| `--input-batch` | <ul><li>Пакетирование [выключено](#x).</li></ul> |\n"
+    )
+    regions = analyze_document_structure(ru, source_is_russian=True)
+    reg = MaskRegistry()
+    seg = [s for s in build_masked_segments(ru, regions, reg, source_is_russian=True) if s.kind == "translate"][0]
+
+    def fake_line_json(_settings, units, **_kwargs):
+        assert units, "expected table cell units"
+        # We should send masked cell text, not raw <ul>/<li>.
+        assert any("⟦HTML:" in u.source_line for u in units)
+        out: dict[str, str] = {}
+        for u in units:
+            out[u.unit_id] = u.source_line.replace("Пакетирование", "Batching")
+        return out
+
+    with patch(
+        "ydbdoc_review.masked_translate.translate_line_units",
+        side_effect=fake_line_json,
+    ):
+        out, llm = translate_masked_segment(
+            MagicMock(),
+            seg,
+            reg,
+            source_lang="Russian",
+            target_lang="English",
+            source_path="x.md",
+            source_is_russian=True,
+        )
+    assert llm == 1
+    assert "<ul><li>" in out
+    assert "Batching" in out

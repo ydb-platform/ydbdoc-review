@@ -39,6 +39,7 @@ from ydbdoc_review.placeholder_translate import (
 )
 
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
+_TABLE_SEP_ROW_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
 
 
 @dataclass(frozen=True)
@@ -209,37 +210,101 @@ def translate_masked_chunk(
 def _translate_table_segment_line_json(
     settings: Settings,
     segment: MaskedTranslateSegment,
+    registry: MaskRegistry,
     *,
     source_lang: str,
     target_lang: str,
     source_path: str,
     source_is_russian: bool,
 ) -> tuple[str, int]:
-    """Translate table lines one-by-one (JSON mode) to preserve `|` structure."""
+    """
+    Translate table cells as independent units with masked markup.
+
+    This keeps table pipes and cell boundaries byte-stable while allowing prose
+    translation inside each cell.
+    """
     lines = segment.source_text.splitlines()
     units: list[LineUnit] = []
-    for offset, line in enumerate(lines, start=segment.start_line):
+    cell_sources: dict[str, str] = {}
+
+    for line_no, line in enumerate(lines, start=segment.start_line):
         if not line.strip().startswith("|"):
             continue
-        if source_is_russian and (
-            _CYRILLIC_RE.search(line)
-            or bool(re.search(r"\[[^\]]*[\u0400-\u04FF]", line))
-        ):
-            units.append(LineUnit(unit_id=_unit_id(offset), line_no=offset, source_line=line))
+        if _TABLE_SEP_ROW_RE.match(line):
+            continue
+        parsed = _split_table_row(line)
+        if parsed is None:
+            continue
+        _, cells, _ = parsed
+        for cell_idx, cell in enumerate(cells):
+            if not source_is_russian:
+                continue
+            if not (_CYRILLIC_RE.search(cell) or re.search(r"\[[^\]]*[\u0400-\u04FF]", cell)):
+                continue
+            uid = f"C{line_no:05d}_{cell_idx:02d}"
+            masked = mask_translatable_text(cell, registry, include_fences=False)
+            units.append(LineUnit(unit_id=uid, line_no=line_no, source_line=masked))
+            cell_sources[uid] = masked
+
     if not units:
         return segment.source_text, 0
+
     translations = translate_line_units(
         settings,
         units,
         source_lang=source_lang,
         target_lang=target_lang,
-        source_path=source_path,
+        source_path=f"{source_path}#table-cells",
     )
+
+    translated_cells: dict[str, str] = {}
+    for unit in units:
+        src = cell_sources[unit.unit_id]
+        out = translations.get(unit.unit_id, src)
+        out = restore_missing_placeholders(src, out)
+        if (
+            validate_placeholders(src, out)
+            or has_broken_placeholder_tokens(out)
+            or not placeholder_sequence_matches(src, out)
+        ):
+            out = src
+        translated_cells[unit.unit_id] = unmask_text(out, registry)
+
     out: list[str] = []
-    for offset, line in enumerate(lines, start=segment.start_line):
-        uid = _unit_id(offset)
-        out.append(translations.get(uid, line))
+    for line_no, line in enumerate(lines, start=segment.start_line):
+        parsed = _split_table_row(line)
+        if parsed is None or _TABLE_SEP_ROW_RE.match(line):
+            out.append(line)
+            continue
+        lead, cells, tail = parsed
+        rebuilt_cells: list[str] = []
+        for cell_idx, cell in enumerate(cells):
+            uid = f"C{line_no:05d}_{cell_idx:02d}"
+            rebuilt_cells.append(translated_cells.get(uid, cell))
+        out.append(_build_table_row(lead, rebuilt_cells, tail))
     return "\n".join(out), 1
+
+
+def _split_table_row(line: str) -> tuple[str, list[str], str] | None:
+    """
+    Split a markdown table row into `(leading_ws, cells, trailing_ws)`.
+
+    Keeps per-cell surrounding spaces intact.
+    """
+    leading = line[: len(line) - len(line.lstrip())]
+    core = line[len(leading) :]
+    if not core.startswith("|"):
+        return None
+    last = core.rfind("|")
+    if last <= 0:
+        return None
+    body = core[1:last]
+    trailing = core[last + 1 :]
+    return leading, body.split("|"), trailing
+
+
+def _build_table_row(leading: str, cells: list[str], trailing: str) -> str:
+    return f"{leading}|{'|'.join(cells)}|{trailing}"
 
 
 def _translate_chunk_with_placeholder_guard(
@@ -302,6 +367,7 @@ def translate_masked_segment(
         return _translate_table_segment_line_json(
             settings,
             segment,
+            registry,
             source_lang=source_lang,
             target_lang=target_lang,
             source_path=source_path,
