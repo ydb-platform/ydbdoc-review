@@ -93,8 +93,9 @@ def test_build_masked_segments_preserves_links():
     reg = MaskRegistry()
     segs = build_masked_segments(ru, regions, reg, source_is_russian=True)
     tr = [s for s in segs if s.kind == "translate"][0]
-    assert "⟦LINK:" in tr.masked_text
-    assert len(reg.atoms) >= 2
+    assert "⟦LINK_OPEN:" in tr.masked_text
+    assert "узла" in tr.masked_text
+    assert len(reg.atoms) >= 4
 
 
 def test_translate_table_segment_uses_line_json():

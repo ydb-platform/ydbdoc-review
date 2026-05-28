@@ -19,12 +19,12 @@ def test_mask_two_links_in_one_line():
     reg = MaskRegistry()
     masked = mask_translatable_text(line, reg)
     keys = placeholder_key_sequence(masked)
-    assert len(keys) == 2
-    assert keys[0].startswith("LINK:")
-    assert keys[1].startswith("LINK:")
-    assert "⟦LINK:1⟧" in masked
-    assert "⟦LINK:2⟧" in masked
-    assert "узла" not in masked
+    assert len(keys) == 4
+    assert keys[0].startswith("LINK_OPEN:")
+    assert keys[1].startswith("LINK_CLOSE:")
+    assert "⟦LINK_OPEN:1⟧" in masked
+    assert "узла" in masked
+    assert "a.md" not in masked
     restored = unmask_text(masked, reg)
     assert restored == line
 

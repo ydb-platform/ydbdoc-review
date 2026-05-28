@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import re
 
-from ydbdoc_review.fence_repair import extract_fence_blocks
+from ydbdoc_review.fence_repair import (
+    _fence_positions,
+    _inner_line_count,
+    extract_fence_blocks,
+)
 from ydbdoc_review.list_tabs_blocks import (
     _LIST_TABS_BLOCK_RE,
     list_tabs_block_copy_verbatim,
@@ -14,6 +18,7 @@ from ydbdoc_review.markdown_links import (
     restore_markdown_links_from_ru,
     strip_duplicate_cyrillic_links,
 )
+from ydbdoc_review.table_ast import _TABLE_SEP_ROW_RE
 from ydbdoc_review.tabs_repair import repair_tab_labels_from_source
 
 _LIST_TABS_OPEN_RE = re.compile(r"\{%\s*list\s+tabs", re.IGNORECASE)
@@ -49,14 +54,33 @@ def sync_verbatim_list_tabs_from_source(source: str, translation: str) -> tuple[
 def sync_fenced_blocks_from_source(source: str, translation: str) -> tuple[str, bool]:
     """Replace fenced blocks in *translation* with SOURCE blocks (same count, in order)."""
     src_blocks = extract_fence_blocks(source)
-    trn_blocks = extract_fence_blocks(translation)
-    if not src_blocks or len(src_blocks) != len(trn_blocks):
+    if not src_blocks:
         return translation, False
+
+    trn_blocks = extract_fence_blocks(translation)
+    if len(src_blocks) != len(trn_blocks):
+        src_lines = source.splitlines()
+        trn_lines = translation.splitlines()
+        src_pos = _fence_positions(src_lines)
+        trn_pos = _fence_positions(trn_lines)
+        if len(src_pos) != len(trn_pos) or not src_pos:
+            return translation, False
+        new_lines = list(trn_lines)
+        changed = False
+        for (ss, se), (ts, te) in zip(src_pos, trn_pos, strict=True):
+            ru_slice = src_lines[ss:se]
+            if ru_slice != new_lines[ts:te]:
+                new_lines[ts:te] = ru_slice
+                changed = True
+        if not changed:
+            return translation, False
+        return "\n".join(new_lines), True
 
     out = translation
     changed = False
     for src_block, trn_block in zip(src_blocks, trn_blocks, strict=True):
-        if src_block != trn_block:
+        inner_mismatch = _inner_line_count(src_block) != _inner_line_count(trn_block)
+        if src_block != trn_block or inner_mismatch:
             out = out.replace(trn_block, src_block, 1)
             changed = True
     return out, changed
@@ -85,6 +109,27 @@ def restore_fence_openers_from_source(source: str, translation: str) -> tuple[st
     return "\n".join(out), changed
 
 
+def repair_table_separator_rows_from_ru(ru_source: str, en_text: str) -> str:
+    """Restore corrupted ``| --- |`` separator rows from RU (same line index)."""
+    ru_lines = ru_source.splitlines()
+    en_lines = en_text.splitlines()
+    if not ru_lines or len(ru_lines) != len(en_lines):
+        return en_text
+    out = list(en_lines)
+    changed = False
+    for i, (ru_ln, en_ln) in enumerate(zip(ru_lines, en_lines, strict=True)):
+        if not _TABLE_SEP_ROW_RE.match(ru_ln):
+            continue
+        if _TABLE_SEP_ROW_RE.match(en_ln):
+            continue
+        if en_ln.lstrip().startswith("|") and "---" in en_ln:
+            out[i] = ru_ln
+            changed = True
+    if not changed:
+        return en_text
+    return "\n".join(out)
+
+
 def finalize_en_document_from_ru(ru_source: str, en_text: str) -> str:
     """
     Last pass after LLM merge for RU→EN: prose stays translated; code/config/tabs sync.
@@ -98,5 +143,6 @@ def finalize_en_document_from_ru(ru_source: str, en_text: str) -> str:
     out, _ = sync_fenced_blocks_from_source(ru_source, out)
     out, _ = restore_fence_openers_from_source(ru_source, out)
     out = restore_markdown_links_from_ru(ru_source, out)
+    out = repair_table_separator_rows_from_ru(ru_source, out)
     out, _ = repair_tab_labels_from_source(ru_source, out)
     return out

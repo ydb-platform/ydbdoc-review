@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from ydbdoc_review.document_mask import (
     MaskRegistry,
     PLACEHOLDER_RE,
+    mask_links_split_label,
     mask_translatable_text,
     unmask_text,
 )
@@ -16,6 +17,7 @@ from ydbdoc_review.placeholder_translate import LineUnit
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF\u0450-\u045F]")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _TABLE_SEP_ROW_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+_HTML_TAG_COUNTS = ("<ul>", "</ul>", "<li>", "</li>", "<br>", "<br/>", "<br />")
 
 
 @dataclass(frozen=True)
@@ -62,19 +64,9 @@ def _needs_translation(text: str, *, source_is_russian: bool) -> bool:
     return bool(_CYRILLIC_RE.search(text))
 
 
-def _mask_links_keep_label(text: str, registry: MaskRegistry) -> str:
-    out: list[str] = []
-    pos = 0
-    for m in _LINK_RE.finditer(text):
-        out.append(text[pos : m.start()])
-        label = m.group(1)
-        href = m.group(2)
-        open_ph = registry.reserve("LINK_OPEN", "[")
-        close_ph = registry.reserve("LINK_CLOSE", f"]({href})")
-        out.append(open_ph + label + close_ph)
-        pos = m.end()
-    out.append(text[pos:])
-    return "".join(out)
+def _html_tag_counts(text: str) -> tuple[int, ...]:
+    lower = text.lower()
+    return tuple(lower.count(tag) for tag in _HTML_TAG_COUNTS)
 
 
 def build_table_row_plan(
@@ -105,7 +97,7 @@ def build_table_row_plan(
     units: list[LineUnit] = []
     cell_plans: list[TableCellPlan] = []
     for cell_idx, cell in enumerate(cells):
-        masked_links = _mask_links_keep_label(cell, registry)
+        masked_links = mask_links_split_label(cell, registry)
         masked = mask_translatable_text(
             masked_links, registry, include_fences=False, mask_links=False
         )
@@ -169,9 +161,18 @@ def render_table_row_plan(
             value = p.text
             if p.translatable and p.unit_id:
                 cand = translations.get(p.unit_id, p.text)
-                if "|" in cand or "\n" in cand or PLACEHOLDER_RE.search(cand):
+                if (
+                    "|" in cand
+                    or "\n" in cand
+                    or PLACEHOLDER_RE.search(cand)
+                    or _html_tag_counts(cand) != _html_tag_counts(p.text)
+                ):
                     cand = p.text
                 value = cand
             masked_parts.append(value)
-        out_cells.append(unmask_text("".join(masked_parts), registry))
+        cell_text = unmask_text("".join(masked_parts), registry)
+        source_text = unmask_text("".join(p.text for p in cell.parts), registry)
+        if _html_tag_counts(cell_text) != _html_tag_counts(source_text):
+            cell_text = source_text
+        out_cells.append(cell_text)
     return f"{row.leading}|{'|'.join(out_cells)}|{row.trailing}"

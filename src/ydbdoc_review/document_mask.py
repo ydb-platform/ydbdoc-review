@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 PLACEHOLDER_RE = re.compile(r"⟦([A-Z][A-Z0-9_]*:\d+)⟧")
 
 _LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")
+_SPLIT_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _VAR_RE = re.compile(r"\{\{[^}]+\}\}")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _HTML_TAG_RE = re.compile(r"<[^>\n]+>")
@@ -86,6 +87,22 @@ def _dedupe_spans(spans: list[_Span]) -> list[_Span]:
     return kept
 
 
+def mask_links_split_label(text: str, registry: MaskRegistry) -> str:
+    """Mask ``[label](href)`` as LINK_OPEN + label + LINK_CLOSE (href frozen)."""
+    out: list[str] = []
+    pos = 0
+    for m in _SPLIT_LINK_RE.finditer(text):
+        out.append(text[pos : m.start()])
+        label = m.group(1)
+        href = m.group(2)
+        open_ph = registry.reserve("LINK_OPEN", "[")
+        close_ph = registry.reserve("LINK_CLOSE", f"]({href})")
+        out.append(open_ph + label + close_ph)
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def mask_translatable_text(
     text: str,
     registry: MaskRegistry,
@@ -94,6 +111,9 @@ def mask_translatable_text(
     mask_links: bool = True,
 ) -> str:
     """Replace links, HTML, vars, code, diplodoc directives with placeholders."""
+    if mask_links:
+        text = mask_links_split_label(text, registry)
+        mask_links = False
     spans = _collect_spans(text, include_fences=include_fences)
     if not mask_links:
         spans = [s for s in spans if s.kind != "LINK"]

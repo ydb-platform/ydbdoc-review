@@ -124,6 +124,9 @@ _WIKI_SLUG_MAP = {
 }
 
 _HEADING_LINE_RE = re.compile(r"^(#{1,3}\s+.+?)(\s*\{#([^}]+)\})?\s*$")
+_HEADING_PREFIX_RE = re.compile(r"^(#{1,6}\s+)(.*)$")
+_HEADING_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")
+_DIPLODOC_T_HEADING = "{#T}"
 
 
 def fix_wikipedia_links_for_en(text: str) -> str:
@@ -155,6 +158,41 @@ def fix_list_tabs_markdown_layout(text: str) -> str:
     out = _HEADING_BEFORE_LIST_TABS_RE.sub(r"\g<heading>\n\n\g<tabs>", text)
     out = _ENDLIST_GLUE_RE.sub(r"\1\n\n", out)
     out = _LIST_TABS_TRAILING_ANCHOR_RE.sub(r"\1\n\n", out)
+    return out
+
+
+def fix_en_heading_lines(text: str) -> str:
+    """Strip markdown links and duplicate anchors from heading lines."""
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        m = _HEADING_PREFIX_RE.match(line)
+        if not m:
+            out_lines.append(line)
+            continue
+        prefix, body = m.group(1), m.group(2)
+        body = _HEADING_LINK_RE.sub("", body)
+        body = body.replace("[{#T}]", "").replace(_DIPLODOC_T_HEADING, "")
+        anchors = re.findall(r"\{#[^}]+\}", body)
+        body = re.sub(r"\s*\{#[^}]+\}", "", body)
+        body = re.sub(r"\s+", " ", body).strip()
+        unique_anchors: list[str] = []
+        for a in anchors:
+            if a not in unique_anchors:
+                unique_anchors.append(a)
+        anchor = unique_anchors[0] if unique_anchors else ""
+        new_line = f"{prefix}{body}"
+        if anchor:
+            new_line = f"{new_line} {anchor}"
+        out_lines.append(new_line.rstrip())
+    return "\n".join(out_lines)
+
+
+def normalize_en_spacing_after_slots(text: str) -> str:
+    """Fix missing spaces around inline code and diplodoc macros in EN."""
+    out = re.sub(r"\}\}([A-Za-z])", r"}} \1", text)
+    out = re.sub(r"([a-zA-Z0-9])`([^`\n]+)`([a-zA-Z0-9])", r"\1 `\2` \3", out)
+    out = re.sub(r"([a-zA-Z0-9])`([^`\n]+)`(?![a-zA-Z0-9])", r"\1 `\2`", out)
+    out = re.sub(r"(?<![a-zA-Z0-9])`([^`\n]+)`([a-zA-Z0-9])", r"`\1` \2", out)
     return out
 
 
@@ -213,8 +251,10 @@ def apply_en_postprocess_from_ru(ru_source: str, en_text: str) -> str:
     out = apply_deterministic_cli_fixes(out, ru_source=ru_source)
     out = fix_dashed_cli_flags(out)
     out = fix_common_ru_leaks_in_en(out)
+    out = normalize_en_spacing_after_slots(out)
     out = fix_yandex_cloud_links_for_en(out)
     out = fix_wikipedia_links_for_en(out)
+    out = fix_en_heading_lines(out)
     out = fix_heading_anchors_from_ru(ru_source, out)
     out = fix_list_tabs_markdown_layout(out)
     return out
