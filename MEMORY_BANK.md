@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living document. Updated after each significant step.  
-> Last updated: Step 2.5 — `{% include %}` block plugin.
+> Last updated: Step 2.6 — `{% if %} … {% endif %}` block plugin.
 
 ---
 
@@ -96,8 +96,8 @@ src/ydbdoc_review/
 │       ├── notes.py          ✅ {% note ... %}…{% endnote %}
 │       ├── tabs.py           ✅ {% list tabs %}…{% endlist %}
 │       ├── includes.py       ✅ {% include [text](path) %}
-│       ├── cuts.py           ⏳ {% cut "title" %}…{% endcut %}
-│       └── conditionals.py   ⏳ {% if ... %}…{% endif %}
+│       ├── conditionals.py   ✅ {% if %} … {% elsif %} … {% else %} … {% endif %}
+│       └── cuts.py           ⏳ {% cut "title" %} … {% endcut %}
 ├── rendering/
 │   └── markdown_renderer.py  ✅ IR → markdown (stable round-trip)
 ├── segmentation/             ⏳ AST → translatable units
@@ -152,6 +152,9 @@ Top-level: `Document { front_matter?, children: list[BlockNode] }`.
 - `yfm_tabs` — variant (`tabs` / `tabs accordion` / `tabs radio`), children: list[YfmTab]
 - `yfm_tab` — title (inline), children (block)
 - `yfm_include` — text, path, notitle (single-line directive, no children)
+- `yfm_if` — branches: list[YfmIfBranch]
+- `yfm_if_branch` — condition (None for else), children
+
 
 ### Inline nodes
 - `text`, `code`, `em`, `strong`, `link`, `image`, `html_inline`,
@@ -223,9 +226,9 @@ tests/
         └── en/...
 ```
 
-### Current counters (Step 2.5)
-- Unit: 103 passed, 1 xfail
-- Integration: 66 passed (all real files round-trip stable)
+### Current counters (Step 2.6)
+- Unit: 118 passed, 1 xfail
+- Integration: 66 passed
 
 Real file count includes both RU and EN variants of:
 glossary, transactions, configuration-v2, cluster-expansion,
@@ -258,8 +261,8 @@ python scripts/scan_yfm.py                # YFM-construct frequency report
 - [x] 2.3 YFM `{% note %}` plugin
 - [x] 2.4 YFM `{% list tabs %}` plugin + table pipe-escape fix
 - [x] 2.5 YFM `{% include %}` plugin (inline include directive)
-- [ ] 2.6 YFM `{% if %}…{% endif %}` plugin (conditionals)
-- [ ] 2.7 YFM `{% cut "title" %}…{% endcut %}` plugin
+- [x] 2.6 YFM `{% if %} … {% endif %}` plugin (conditionals)
+- [ ] 2.7 YFM `{% cut "title" %} … {% endcut %}` plugin
 - [ ] 2.8 Term definitions `[*term]: definition`
 - [ ] 2.9 Image with size attribute `![alt](src =100x100)`
 - [ ] 2.10 Custom link rule for `{{ var }}` inside URLs (resolves TODO from 2.2)
