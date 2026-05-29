@@ -32,6 +32,7 @@ from ydbdoc_review.parsing.ast_types import (
     TableRow,
     ThematicBreak,
     InlineVariable,  
+    YfmCut,
     YfmIf,           
     YfmIfBranch,     # noqa: F401 — used by isinstance only
     YfmInclude,
@@ -143,6 +144,21 @@ def _render_yfm_if(node: YfmIf, indent: str) -> str:
     parts.append(f"{indent}{{% endif %}}\n")
     return "".join(parts)
 
+def _render_yfm_cut(c: YfmCut, indent: str) -> str:
+    open_line = f'{indent}{{% cut "{c.title}" %}}\n'
+    close_line = f"{indent}{{% endcut %}}\n"
+
+    inner_parts: list[str] = []
+    for i, child in enumerate(c.children):
+        if i > 0:
+            inner_parts.append("\n")
+        inner_parts.append(_render_block(child, indent=""))
+    inner = "".join(inner_parts)
+    if inner and not inner.endswith("\n"):
+        inner += "\n"
+
+    return f"{open_line}\n{inner}\n{close_line}"
+
 
 def _render_block(block: BlockNode, indent: str) -> str:
     kind = block.kind
@@ -174,6 +190,8 @@ def _render_block(block: BlockNode, indent: str) -> str:
         return _render_yfm_include(block, indent)
     if kind == "yfm_if":
         return _render_yfm_if(block, indent)
+    if kind == "yfm_cut":
+        return _render_yfm_cut(block, indent)
     raise ValueError(f"Unknown block kind: {kind}")
 
 

@@ -10,6 +10,7 @@ from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
 from ydbdoc_review.parsing.yfm_plugins.conditionals import yfm_if_plugin
+from ydbdoc_review.parsing.yfm_plugins.cuts import yfm_cut_plugin  # NEW
 from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
 from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
 from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
@@ -43,6 +44,7 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    YfmCut, 
     YfmIf,         
     YfmIfBranch,   
     YfmInclude,
@@ -63,6 +65,7 @@ def create_parser() -> MarkdownIt:
     md.use(yfm_tabs_plugin)
     md.use(yfm_include_plugin)
     md.use(yfm_if_plugin)  
+    md.use(yfm_cut_plugin) 
     return md
 
 
@@ -156,7 +159,8 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
         return _parse_yfm_include(stream)    
     if t == "yfm_if_open":
         return _parse_yfm_if(stream)
-       
+    if t == "yfm_cut_open":
+        return _parse_yfm_cut(stream)
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 
@@ -441,6 +445,20 @@ def _parse_yfm_if_branch(stream: _TokenStream) -> YfmIfBranch:
             children.append(block)
     stream.expect("yfm_if_branch_close")
     return YfmIfBranch(condition=condition, children=children)
+
+def _parse_yfm_cut(stream: _TokenStream) -> YfmCut:
+    open_tok = stream.expect("yfm_cut_open")
+    title = open_tok.meta.get("title", "")
+    children: list[BlockNode] = []
+    while True:
+        tok = stream.peek()
+        if tok is None or tok.type == "yfm_cut_close":
+            break
+        block = _parse_block(stream)
+        if block is not None:
+            children.append(block)
+    stream.expect("yfm_cut_close")
+    return YfmCut(title=title, children=children)
 
 
 def _list_item_to_tab(item: ListItem) -> YfmTab:

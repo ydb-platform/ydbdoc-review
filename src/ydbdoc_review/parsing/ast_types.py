@@ -290,7 +290,13 @@ class YfmIf(BaseModel):
     kind: Literal["yfm_if"] = "yfm_if"
     branches: list[YfmIfBranch]  # always non-empty; first is the {% if %} branch
 
+class YfmCut(BaseModel):
+    """YFM cut/collapsible: {% cut "title" %} ... {% endcut %}."""
 
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_cut"] = "yfm_cut"
+    title: str
+    children: list["BlockNode"]
 
 BlockNode = Annotated[
     Union[
@@ -308,6 +314,7 @@ BlockNode = Annotated[
         YfmTabs,
         YfmInclude,
         YfmIf,
+        YfmCut,
     ],
     Field(discriminator="kind"),
 ]
@@ -338,3 +345,4 @@ YfmTab.model_rebuild()
 YfmTabs.model_rebuild()
 YfmIfBranch.model_rebuild()
 YfmIf.model_rebuild()
+YfmCut.model_rebuild()
