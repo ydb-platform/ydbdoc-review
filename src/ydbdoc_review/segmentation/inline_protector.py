@@ -37,38 +37,48 @@ def protect_inline(
 
     Returns ``(text, placeholders)``.
 
-    - text: a markdown-rendered string where each protected atom is replaced
-      with ⟦K{n}⟧ markers (K = type prefix, n = 1-based index per prefix).
-    - placeholders: list of ProtectedInline entries describing what each marker
-      stands for. Order in the list matches order of appearance in text.
+    Placeholder indices are **globally unique within a segment**, including inside
+    nested emphasis/strong/link content. This is essential for correct round-trip:
+    the same `⟦L1⟧` must always refer to exactly one node.
     """
-    out: list[str] = []
-    placeholders: list[ProtectedInline] = []
-    counters: dict[str, int] = {}
+    state = _ProtectState()
+    text = _protect_walk(children, state)
+    return text, state.placeholders
 
-    def take_placeholder(kind: str) -> str:
+
+class _ProtectState:
+    """Mutable state shared across recursive calls."""
+
+    def __init__(self) -> None:
+        self.placeholders: list[ProtectedInline] = []
+        self.counters: dict[str, int] = {}
+
+    def next_placeholder(self, kind: str) -> str:
         prefix = _PREFIX_MAP[kind]
-        counters[prefix] = counters.get(prefix, 0) + 1
-        return f"⟦{prefix}{counters[prefix]}⟧"
+        self.counters[prefix] = self.counters.get(prefix, 0) + 1
+        return f"⟦{prefix}{self.counters[prefix]}⟧"
 
+
+def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
+    out: list[str] = []
     for node in children:
         kind = node.kind
         if kind in _PREFIX_MAP:
-            marker = take_placeholder(kind)
-            placeholders.append(ProtectedInline(placeholder=marker, node=node))
+            marker = state.next_placeholder(kind)
+            state.placeholders.append(
+                ProtectedInline(placeholder=marker, node=node)
+            )
             out.append(marker)
             continue
 
         if isinstance(node, InlineText):
             out.append(node.content)
         elif isinstance(node, InlineEmphasis):
-            inner_text, inner_phs = protect_inline(node.children)
+            inner_text = _protect_walk(node.children, state)
             out.append(f"{node.marker}{inner_text}{node.marker}")
-            placeholders.extend(inner_phs)
         elif isinstance(node, InlineStrong):
-            inner_text, inner_phs = protect_inline(node.children)
+            inner_text = _protect_walk(node.children, state)
             out.append(f"{node.marker}{inner_text}{node.marker}")
-            placeholders.extend(inner_phs)
         elif isinstance(node, InlineSoftBreak):
             out.append("\n")
         elif isinstance(node, InlineHardBreak):
@@ -77,22 +87,18 @@ def protect_inline(
             # Defensive: anything else passes through as-is via str().
             out.append(str(node))
 
-    # Re-index placeholders so the counters in `text` line up with positional ids.
-    # NOTE: counters already gave us correct per-prefix indices; re-indexing not needed.
-    return "".join(out), placeholders
+    return "".join(out)
 
 
 def restore_inline_text(text: str, placeholders: list[ProtectedInline]) -> str:
     """Restore the original markdown by replacing placeholders with rendered atoms.
 
-    Each placeholder maps to a single InlineNode; we render that node using the
-    same logic as the renderer. To avoid a circular import, the rendering is
-    inlined here (small subset of inline rendering).
+    Used in tests and for diagnostics; the main pipeline uses
+    ``reinsert.py``'s placeholder substitution at the AST level.
     """
-    from ydbdoc_review.rendering.markdown_renderer import _render_inline_node  # local
+    from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
 
     result = text
     for p in placeholders:
         result = result.replace(p.placeholder, _render_inline_node(p.node), 1)
     return result
-

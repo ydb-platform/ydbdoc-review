@@ -35,12 +35,11 @@ class Segment(BaseModel):
     """A translatable unit extracted from a document."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    id: str                          # stable, e.g. "s001"
+    id: str
     kind: SegmentKind
-    path: list[str]                  # breadcrumbs, e.g. ["Examples", "table:Options"]
-    text: str                        # markdown with ⟦K1⟧ placeholders
+    path: list[str]
+    text: str
     placeholders: list[ProtectedInline]
-    # Pointer back to the AST so we can write the translation back.
-    # We store (kind, path_indices) instead of a node ref to keep things serialisable.
-    ast_path: list[int]              # indices into the document tree
+    # Mixed: int indices into children, or string markers ("title", "header").
+    ast_path: list[int | str]
 

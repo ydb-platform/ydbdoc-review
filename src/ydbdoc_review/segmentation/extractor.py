@@ -2,6 +2,12 @@
 
 Walks a Document and emits one Segment per translatable inline-bearing leaf.
 Records an ``ast_path`` for each segment so translations can be written back.
+
+The ``ast_path`` is a list of mixed int/string steps:
+- ``int`` steps index into ``.children`` (for most nodes) or ``.branches``
+  (for ``YfmIf``).
+- ``"header"`` / ``"row"`` / ``"title"`` are typed markers used for nodes
+  whose structure is not a simple list of children (tables, tabs).
 """
 
 from __future__ import annotations
@@ -18,14 +24,10 @@ from ydbdoc_review.parsing.ast_types import (
     OrderedList,
     Paragraph,
     Table,
-    TableCell,
-    TableRow,
     TermDefinition,
     YfmCut,
     YfmIf,
-    YfmIfBranch,
     YfmNote,
-    YfmTab,
     YfmTabs,
 )
 from ydbdoc_review.segmentation.inline_protector import protect_inline
@@ -68,30 +70,28 @@ class _ExtractState:
 
     # -- block walking --
     def walk_blocks(
-        self, blocks: list[BlockNode], ast_path: list[int], path: list[str]
+        self,
+        blocks: list[BlockNode],
+        ast_path: list,
+        path: list[str],
     ) -> None:
         for i, block in enumerate(blocks):
             self.walk_block(block, ast_path + [i], path)
 
     def walk_block(
-        self, block: BlockNode, ast_path: list[int], path: list[str]
+        self,
+        block: BlockNode,
+        ast_path: list,
+        path: list[str],
     ) -> None:
         if isinstance(block, Paragraph):
             self._emit_inline_segment(
                 SegmentKind.PARAGRAPH, block.children, ast_path, path
             )
         elif isinstance(block, Heading):
-            heading_text_preview = _short_inline_preview(block.children)
             self._emit_inline_segment(
                 SegmentKind.HEADING, block.children, ast_path, path
             )
-            # Descend? No — heading itself has only inline children. The
-            # heading text becomes the new path component for following siblings.
-            # Mutate `path` is the caller's responsibility — we handle this in
-            # walk_blocks by tracking last heading per level. For simplicity in
-            # the first iteration we don't track section nesting; the segment's
-            # `path` is taken at extraction time. Future improvement.
-            _ = heading_text_preview
         elif isinstance(block, BulletList) or isinstance(block, OrderedList):
             for j, item in enumerate(block.children):
                 self.walk_list_item(item, ast_path + [j], path)
@@ -100,22 +100,24 @@ class _ExtractState:
         elif isinstance(block, Table):
             self.walk_table(block, ast_path, path)
         elif isinstance(block, YfmNote):
-            sub_path = path + [f"note:{block.note_type}"]
-            # The title is not a translatable inline list in our model — it's a
-            # plain string. We do NOT segment it here; if the LLM should
-            # translate it later, we'll handle it in a separate pass.
-            self.walk_blocks(block.children, ast_path, sub_path)
+            # Note titles are plain strings, not inline lists — we don't
+            # segment them here. Future work: add a separate pass for them.
+            self.walk_blocks(
+                block.children, ast_path, path + [f"note:{block.note_type}"]
+            )
         elif isinstance(block, YfmTabs):
             self.walk_tabs(block, ast_path, path)
         elif isinstance(block, YfmCut):
-            # Title is plain string; not segmented here.
+            # Cut titles are plain strings — not segmented in B.1.
             self.walk_blocks(block.children, ast_path, path + ["cut"])
         elif isinstance(block, YfmIf):
             for k, branch in enumerate(block.branches):
                 label = (
                     f"if:{branch.condition}" if branch.condition else "else"
                 )
-                self.walk_blocks(branch.children, ast_path + [k], path + [label])
+                self.walk_blocks(
+                    branch.children, ast_path + [k], path + [label]
+                )
         elif isinstance(block, TermDefinition):
             self._emit_inline_segment(
                 SegmentKind.TERM_DEFINITION,
@@ -127,50 +129,64 @@ class _ExtractState:
         # not translatable, do nothing.
 
     def walk_list_item(
-        self, item: ListItem, ast_path: list[int], path: list[str]
+        self,
+        item: ListItem,
+        ast_path: list,
+        path: list[str],
     ) -> None:
-        # In tight lists, the immediate Paragraph children represent the list
-        # item's own text. Nested blocks (sub-lists, code, notes) come after.
+        # The list item's own text is the first Paragraph child. Sub-lists,
+        # code blocks etc. follow as additional blocks.
         for k, child in enumerate(item.children):
             self.walk_block(child, ast_path + [k], path + ["list_item"])
 
     def walk_table(
-        self, table: Table, ast_path: list[int], path: list[str]
+        self,
+        table: Table,
+        ast_path: list,
+        path: list[str],
     ) -> None:
-        # Header row.
+        # Header cells: ast_path + ["header", col_idx]
         for cidx, cell in enumerate(table.header.cells):
             self._emit_inline_segment(
                 SegmentKind.TABLE_HEADER_CELL,
                 cell.children,
-                ast_path + [0, cidx],  # 0 = header
+                ast_path + ["header", cidx],
                 path + [f"table:header:col{cidx + 1}"],
             )
+        # Body cells: ast_path + ["row", row_idx, col_idx]
         for ridx, row in enumerate(table.rows):
             for cidx, cell in enumerate(row.cells):
                 self._emit_inline_segment(
                     SegmentKind.TABLE_BODY_CELL,
                     cell.children,
-                    ast_path + [1 + ridx, cidx],  # 1+ = body rows
+                    ast_path + ["row", ridx, cidx],
                     path + [f"table:row{ridx + 1}:col{cidx + 1}"],
                 )
 
     def walk_tabs(
-        self, tabs: YfmTabs, ast_path: list[int], path: list[str]
+        self,
+        tabs: YfmTabs,
+        ast_path: list,
+        path: list[str],
     ) -> None:
         for k, tab in enumerate(tabs.children):
             tab_title_text = _short_inline_preview(tab.title)
+            # Title segment: ast_path_to_yfmtabs + [tab_idx, "title"]
             if not _is_whitelisted_tab_title(
                 tab_title_text, self.tab_title_whitelist
             ):
                 self._emit_inline_segment(
                     SegmentKind.TAB_TITLE,
                     tab.title,
-                    ast_path + [k, 0],  # 0 = title
+                    ast_path + [k, "title"],
                     path + [f"tab:{tab_title_text}"],
                 )
+            # Tab body: descend through YfmTab.children as a normal block list.
+            # ast_path: ast_path_to_yfmtabs + [tab_idx]; walk_blocks adds child
+            # index, so a body block at index 0 becomes [..., tab_idx, 0].
             self.walk_blocks(
                 tab.children,
-                ast_path + [k, 1],  # 1 = children
+                ast_path + [k],
                 path + [f"tab:{tab_title_text}"],
             )
 
@@ -179,11 +195,11 @@ class _ExtractState:
         self,
         kind: SegmentKind,
         inline_children: list,
-        ast_path: list[int],
+        ast_path: list,
         path: list[str],
     ) -> None:
         if not inline_children:
-            return  # nothing to translate
+            return
         text, placeholders = protect_inline(inline_children)
         if not text.strip():
             return
@@ -216,4 +232,3 @@ def _short_inline_preview(children: Iterable) -> str:
 
 def _is_whitelisted_tab_title(title: str, whitelist: frozenset[str]) -> bool:
     return title.strip().lower() in whitelist
-
