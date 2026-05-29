@@ -230,6 +230,16 @@ class Table(BaseModel):
     rows: list[TableRow]
     aligns: list[Literal["left", "center", "right", "none"]] = []
 
+class YfmNote(BaseModel):
+    """YFM note container: {% note TYPE %} ... {% endnote %}."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_note"] = "yfm_note"
+    note_type: str  # info, tip, warning, alert, important
+    # Optional title in quotes: {% note info "Custom Title" %}
+    title: str | None = None
+    children: list["BlockNode"]
+
 
 BlockNode = Annotated[
     Union[
@@ -243,9 +253,11 @@ BlockNode = Annotated[
         OrderedList,
         HTMLBlock,
         Table,
+        YfmNote,
     ],
     Field(discriminator="kind"),
 ]
+
 
 
 # --- Document root ---
@@ -267,3 +279,4 @@ ListItem.model_rebuild()
 InlineEmphasis.model_rebuild()
 InlineStrong.model_rebuild()
 InlineLink.model_rebuild()
+YfmNote.model_rebuild()

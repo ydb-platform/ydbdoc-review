@@ -32,6 +32,7 @@ from ydbdoc_review.parsing.ast_types import (
     TableRow,
     ThematicBreak,
     InlineVariable,  # NEW
+    YfmNote,  # NEW
 )
 
 
@@ -48,6 +49,22 @@ def render_markdown(doc: Document) -> str:
     if not out.endswith("\n"):
         out += "\n"
     return out
+
+def _render_yfm_note(n: YfmNote, indent: str) -> str:
+    title_part = f' "{n.title}"' if n.title else ""
+    open_line = f"{indent}{{% note {n.note_type}{title_part} %}}\n"
+    close_line = f"{indent}{{% endnote %}}\n"
+
+    inner_parts: list[str] = []
+    for i, child in enumerate(n.children):
+        if i > 0:
+            inner_parts.append("\n")
+        inner_parts.append(_render_block(child, indent=""))
+    inner = "".join(inner_parts)
+
+    # YFM notes need a blank line after open tag and before close tag.
+    return f"{open_line}\n{inner}\n{close_line}"
+
 
 
 def _render_block(block: BlockNode, indent: str) -> str:
@@ -72,6 +89,8 @@ def _render_block(block: BlockNode, indent: str) -> str:
         return _render_html_block(block, indent)
     if kind == "table":
         return _render_table(block, indent)
+    if kind == "yfm_note":
+        return _render_yfm_note(block, indent)
     raise ValueError(f"Unknown block kind: {kind}")
 
 

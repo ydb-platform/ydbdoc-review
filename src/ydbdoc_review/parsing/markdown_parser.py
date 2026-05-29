@@ -9,6 +9,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
+from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
 from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
 
 
@@ -39,18 +40,20 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    YfmNote,  # NEW
 )
 
 
 
 def create_parser() -> MarkdownIt:
-    """Create a markdown-it parser configured for YDB documentation."""
     md = MarkdownIt("commonmark", {"html": True, "breaks": False, "linkify": False})
     md.enable("table")
     md.enable("strikethrough")
     md.use(front_matter_plugin)
     md.use(yfm_variable_plugin)
+    md.use(yfm_note_plugin)  # NEW
     return md
+
 
 
 
@@ -133,7 +136,8 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
         return _parse_html_block(stream)
     if t == "table_open":
         return _parse_table(stream)
-
+    if t == "yfm_note_open":
+        return _parse_yfm_note(stream)
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 
@@ -332,6 +336,23 @@ def _parse_table(stream: _TokenStream) -> Table:
 
     stream.expect("table_close")
     return Table(header=header_row, rows=rows, aligns=aligns)  # type: ignore[arg-type]
+
+def _parse_yfm_note(stream: _TokenStream) -> YfmNote:
+    open_tok = stream.expect("yfm_note_open")
+    note_type = open_tok.meta.get("note_type", "info")
+    title = open_tok.meta.get("title")
+
+    children: list[BlockNode] = []
+    while True:
+        tok = stream.peek()
+        if tok is None or tok.type == "yfm_note_close":
+            break
+        block = _parse_block(stream)
+        if block is not None:
+            children.append(block)
+
+    stream.expect("yfm_note_close")
+    return YfmNote(note_type=note_type, title=title, children=children)
 
 
 def _extract_align(cell_open: Token) -> str:
