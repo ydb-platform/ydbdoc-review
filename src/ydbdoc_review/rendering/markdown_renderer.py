@@ -32,6 +32,7 @@ from ydbdoc_review.parsing.ast_types import (
     TableRow,
     ThematicBreak,
     InlineVariable,  
+    YfmInclude,
     YfmNote,
     YfmTab,    
     YfmTabs,   
@@ -111,7 +112,9 @@ def _render_yfm_tab(tab: YfmTab, indent: str) -> str:
             out_lines.append(f"{indent}{cont_indent}{line}")
     return "\n".join(out_lines) + "\n"
 
-
+def _render_yfm_include(i: YfmInclude, indent: str) -> str:
+    notitle_part = "notitle " if i.notitle else ""
+    return f"{indent}{{% include {notitle_part}[{i.text}]({i.path}) %}}\n"
 
 def _render_block(block: BlockNode, indent: str) -> str:
     kind = block.kind
@@ -139,6 +142,9 @@ def _render_block(block: BlockNode, indent: str) -> str:
         return _render_yfm_note(block, indent)
     if kind == "yfm_tabs":
         return _render_yfm_tabs(block, indent)    
+    if kind == "yfm_include":
+        return _render_yfm_include(block, indent)
+    
     raise ValueError(f"Unknown block kind: {kind}")
 
 

@@ -260,6 +260,15 @@ class YfmTabs(BaseModel):
     variant: str = "tabs"
     children: list[YfmTab]
 
+class YfmInclude(BaseModel):
+    """YFM include directive: {% include [text](path) %} or {% include notitle [text](path) %}."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_include"] = "yfm_include"
+    text: str       # description in [brackets], not user-facing
+    path: str       # the included file path
+    notitle: bool = False
+
 
 
 BlockNode = Annotated[
@@ -276,6 +285,7 @@ BlockNode = Annotated[
         Table,
         YfmNote,
         YfmTabs,
+        YfmInclude,
     ],
     Field(discriminator="kind"),
 ]

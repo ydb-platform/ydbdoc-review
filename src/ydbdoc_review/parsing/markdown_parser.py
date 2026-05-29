@@ -10,9 +10,9 @@ from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
 from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
-from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
-from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin  # NEW
 from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
+from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
+from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
 
 
 from ydbdoc_review.parsing.ast_types import (
@@ -42,6 +42,7 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    YfmInclude,
     YfmNote,  
     YfmTab,    
     YfmTabs,   
@@ -57,6 +58,7 @@ def create_parser() -> MarkdownIt:
     md.use(yfm_variable_plugin)
     md.use(yfm_note_plugin)
     md.use(yfm_tabs_plugin) 
+    md.use(yfm_include_plugin) 
     return md
 
 
@@ -145,7 +147,9 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
     if t == "yfm_note_open":
         return _parse_yfm_note(stream)
     if t == "yfm_tabs_open":
-        return _parse_yfm_tabs(stream)    
+        return _parse_yfm_tabs(stream) 
+    if t == "yfm_include":
+        return _parse_yfm_include(stream)       
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 
@@ -390,6 +394,14 @@ def _parse_yfm_tabs(stream: _TokenStream) -> YfmTabs:
             tabs.append(YfmTab(title=[], children=[block]))
 
     return YfmTabs(variant=variant, children=tabs)
+
+def _parse_yfm_include(stream: _TokenStream) -> YfmInclude:
+    tok = stream.expect("yfm_include")
+    return YfmInclude(
+        text=tok.meta.get("text", ""),
+        path=tok.meta.get("path", ""),
+        notitle=tok.meta.get("notitle", False),
+    )
 
 
 def _list_item_to_tab(item: ListItem) -> YfmTab:
