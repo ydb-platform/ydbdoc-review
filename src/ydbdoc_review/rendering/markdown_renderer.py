@@ -32,6 +32,8 @@ from ydbdoc_review.parsing.ast_types import (
     TableRow,
     ThematicBreak,
     InlineVariable,  
+    YfmIf,           
+    YfmIfBranch,     # noqa: F401 — used by isinstance only
     YfmInclude,
     YfmNote,
     YfmTab,    
@@ -116,6 +118,32 @@ def _render_yfm_include(i: YfmInclude, indent: str) -> str:
     notitle_part = "notitle " if i.notitle else ""
     return f"{indent}{{% include {notitle_part}[{i.text}]({i.path}) %}}\n"
 
+def _render_yfm_if(node: YfmIf, indent: str) -> str:
+    parts: list[str] = []
+    for i, branch in enumerate(node.branches):
+        if i == 0:
+            tag = f"{{% if {branch.condition} %}}"
+        elif branch.condition is not None:
+            tag = f"{{% elsif {branch.condition} %}}"
+        else:
+            tag = "{% else %}"
+        parts.append(f"{indent}{tag}\n\n")
+
+        body_parts: list[str] = []
+        for j, child in enumerate(branch.children):
+            if j > 0:
+                body_parts.append("\n")
+            body_parts.append(_render_block(child, indent=""))
+        body = "".join(body_parts)
+        if body and not body.endswith("\n"):
+            body += "\n"
+        parts.append(body)
+        parts.append("\n")
+
+    parts.append(f"{indent}{{% endif %}}\n")
+    return "".join(parts)
+
+
 def _render_block(block: BlockNode, indent: str) -> str:
     kind = block.kind
     if kind == "paragraph":
@@ -144,7 +172,8 @@ def _render_block(block: BlockNode, indent: str) -> str:
         return _render_yfm_tabs(block, indent)    
     if kind == "yfm_include":
         return _render_yfm_include(block, indent)
-    
+    if kind == "yfm_if":
+        return _render_yfm_if(block, indent)
     raise ValueError(f"Unknown block kind: {kind}")
 
 

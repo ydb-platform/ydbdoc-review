@@ -9,10 +9,11 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
-from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
-from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
+from ydbdoc_review.parsing.yfm_plugins.conditionals import yfm_if_plugin
 from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
+from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
 from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
+from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
 
 
 from ydbdoc_review.parsing.ast_types import (
@@ -42,6 +43,8 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    YfmIf,         
+    YfmIfBranch,   
     YfmInclude,
     YfmNote,  
     YfmTab,    
@@ -57,8 +60,9 @@ def create_parser() -> MarkdownIt:
     md.use(front_matter_plugin)
     md.use(yfm_variable_plugin)
     md.use(yfm_note_plugin)
-    md.use(yfm_tabs_plugin) 
-    md.use(yfm_include_plugin) 
+    md.use(yfm_tabs_plugin)
+    md.use(yfm_include_plugin)
+    md.use(yfm_if_plugin)  
     return md
 
 
@@ -149,7 +153,10 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
     if t == "yfm_tabs_open":
         return _parse_yfm_tabs(stream) 
     if t == "yfm_include":
-        return _parse_yfm_include(stream)       
+        return _parse_yfm_include(stream)    
+    if t == "yfm_if_open":
+        return _parse_yfm_if(stream)
+       
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 
@@ -402,6 +409,38 @@ def _parse_yfm_include(stream: _TokenStream) -> YfmInclude:
         path=tok.meta.get("path", ""),
         notitle=tok.meta.get("notitle", False),
     )
+
+def _parse_yfm_if(stream: _TokenStream) -> YfmIf:
+    stream.expect("yfm_if_open")
+    branches: list[YfmIfBranch] = []
+    while True:
+        tok = stream.peek()
+        if tok is None or tok.type == "yfm_if_close":
+            break
+        if tok.type != "yfm_if_branch_open":
+            raise ValueError(
+                f"Expected yfm_if_branch_open inside yfm_if, got {tok.type}"
+            )
+        branches.append(_parse_yfm_if_branch(stream))
+    stream.expect("yfm_if_close")
+    if not branches:
+        raise ValueError("yfm_if must contain at least one branch")
+    return YfmIf(branches=branches)
+
+
+def _parse_yfm_if_branch(stream: _TokenStream) -> YfmIfBranch:
+    branch_open = stream.expect("yfm_if_branch_open")
+    condition = branch_open.meta.get("condition")
+    children: list[BlockNode] = []
+    while True:
+        tok = stream.peek()
+        if tok is None or tok.type == "yfm_if_branch_close":
+            break
+        block = _parse_block(stream)
+        if block is not None:
+            children.append(block)
+    stream.expect("yfm_if_branch_close")
+    return YfmIfBranch(condition=condition, children=children)
 
 
 def _list_item_to_tab(item: ListItem) -> YfmTab:

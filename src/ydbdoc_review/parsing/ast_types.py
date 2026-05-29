@@ -269,6 +269,27 @@ class YfmInclude(BaseModel):
     path: str       # the included file path
     notitle: bool = False
 
+class YfmIfBranch(BaseModel):
+    """One branch of an {% if %} block.
+
+    For the first branch, `condition` is the expression after `{% if`.
+    For `{% elsif %}` branches, `condition` is the expression after `{% elsif`.
+    For the `{% else %}` branch, `condition` is None.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_if_branch"] = "yfm_if_branch"
+    condition: str | None  # None for the else branch
+    children: list["BlockNode"]
+
+
+class YfmIf(BaseModel):
+    """YFM conditional block: {% if EXPR %} ... [{% elsif EXPR %}] ... [{% else %}] ... {% endif %}."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_if"] = "yfm_if"
+    branches: list[YfmIfBranch]  # always non-empty; first is the {% if %} branch
+
 
 
 BlockNode = Annotated[
@@ -286,6 +307,7 @@ BlockNode = Annotated[
         YfmNote,
         YfmTabs,
         YfmInclude,
+        YfmIf,
     ],
     Field(discriminator="kind"),
 ]
@@ -314,3 +336,5 @@ InlineLink.model_rebuild()
 YfmNote.model_rebuild()
 YfmTab.model_rebuild()
 YfmTabs.model_rebuild()
+YfmIfBranch.model_rebuild()
+YfmIf.model_rebuild()
