@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living document. Updated after each significant step.  
-> Last updated: Step 2.6 — `{% if %} … {% endif %}` block plugin.
+> Last updated: Phase A complete — full YFM parser/renderer foundation.
 
 ---
 
@@ -92,13 +92,15 @@ src/ydbdoc_review/
 │   ├── ast_types.py          ✅ pydantic models for IR
 │   ├── markdown_parser.py    ✅ markdown-it-py → IR
 │   └── yfm_plugins/
-│       ├── variables.py      ✅ {{ var }}
-│       ├── notes.py          ✅ {% note ... %}…{% endnote %}
-│       ├── tabs.py           ✅ {% list tabs %}…{% endlist %}
-│       ├── includes.py       ✅ {% include [text](path) %}
-│       ├── conditionals.py   ✅ {% if %} … {% elsif %} … {% else %} … {% endif %}
-│       └── cuts.py           ⏳ {% cut "title" %} … {% endcut %}
-├── rendering/
+│       ├── variables.py             ✅ {{ var }}
+│       ├── notes.py                 ✅ {% note ... %}…{% endnote %}
+│       ├── tabs.py                  ✅ {% list tabs %}…{% endlist %}
+│       ├── includes.py              ✅ {% include [text](path) %}
+│       ├── conditionals.py          ✅ {% if %}…{% elsif %}…{% else %}…{% endif %}
+│       ├── cuts.py                  ✅ {% cut "title" %}…{% endcut %}
+│       ├── terms.py                 ✅ [*term-id]: definition / [*term-id]
+│       ├── image_size.py            ✅ ![alt](src =WxH)
+│       └── link_with_variable.py    ✅ [text]({{ var }}) and ![alt]({{ var }})├── rendering/
 │   └── markdown_renderer.py  ✅ IR → markdown (stable round-trip)
 ├── segmentation/             ⏳ AST → translatable units
 │   ├── extractor.py
@@ -154,12 +156,15 @@ Top-level: `Document { front_matter?, children: list[BlockNode] }`.
 - `yfm_include` — text, path, notitle (single-line directive, no children)
 - `yfm_if` — branches: list[YfmIfBranch]
 - `yfm_if_branch` — condition (None for else), children
-
+- `term_definition` — term_id, children (inline)
 
 ### Inline nodes
 - `text`, `code`, `em`, `strong`, `link`, `image`, `html_inline`,
   `softbreak`, `hardbreak`
 - `yfm_variable` — name, raw (preserves original whitespace inside `{{ }}`)
+- `term_ref` — term_id ([*name] reference)
+- `image` — src, title, alt, width?, height? (Diplodoc =WxH support)
+
 
 ---
 
@@ -206,6 +211,28 @@ to plain text. Round-trip is stable, but we cannot model the link semantically.
 If `{% note ... %}` lacks `{% endnote %}`, the rule returns `False` and the
 opening line falls back to a plain paragraph. Tests verify this.
 
+### 6.8. Source-mutating preprocessing for variables in URLs and image sizes
+Two plugins use a `core.ruler.before("normalize")` preprocessing step to rewrite
+the source before markdown-it tokenizes it, then a `core.ruler.after("inline")`
+post-step restores the original semantics on the resulting tokens:
+
+- **link_with_variable**: rewrites `{{ var }}` inside `[...](...)` URLs to a
+  URL-safe placeholder (`yfmvar-N-yfmvarend`), then restores the original
+  variable text on `link_open.href` / `image.src` attributes.
+- **image_size**: strips ` =WxH` from inside `![alt](src ...)` to keep the URL
+  parseable, stashes the size in `state.env`, then attaches it to the image
+  token as `meta.width` / `meta.height`.
+
+This is the cleanest way to integrate Diplodoc-specific syntax without
+overriding markdown-it's link/image rules. Placeholders use alphanumerics + dashes
+only, which are valid URL characters; markdown-it never tries to interpret them.
+
+### 6.9. Term references vs ordinary links
+Term references `[*name]` are inline tokens registered **before** `link` in the
+inline ruler. They match only when the second character is `*`. Ordinary links
+`[text](url)` are unaffected.
+
+
 ---
 
 ## 7. Tests
@@ -226,9 +253,9 @@ tests/
         └── en/...
 ```
 
-### Current counters (Step 2.6)
-- Unit: 118 passed, 1 xfail
-- Integration: 66 passed
+### Current counters (Phase A complete)
+- Unit: 151 passed
+- Integration: 66 passed (all real files round-trip stable)
 
 Real file count includes both RU and EN variants of:
 glossary, transactions, configuration-v2, cluster-expansion,
@@ -255,17 +282,17 @@ python scripts/scan_yfm.py                # YFM-construct frequency report
 
 ## 8. Roadmap
 
-### Phase A — Parser/renderer foundation
+### Phase A — Parser/renderer foundation ✅ COMPLETE
 - [x] 2.1 markdown parser + renderer + round-trip on synthetic markdown
 - [x] 2.2 YFM `{{ variable }}` plugin
 - [x] 2.3 YFM `{% note %}` plugin
 - [x] 2.4 YFM `{% list tabs %}` plugin + table pipe-escape fix
-- [x] 2.5 YFM `{% include %}` plugin (inline include directive)
-- [x] 2.6 YFM `{% if %} … {% endif %}` plugin (conditionals)
-- [ ] 2.7 YFM `{% cut "title" %} … {% endcut %}` plugin
-- [ ] 2.8 Term definitions `[*term]: definition`
-- [ ] 2.9 Image with size attribute `![alt](src =100x100)`
-- [ ] 2.10 Custom link rule for `{{ var }}` inside URLs (resolves TODO from 2.2)
+- [x] 2.5 YFM `{% include %}` plugin
+- [x] 2.6 YFM `{% if %}…{% endif %}` plugin
+- [x] 2.7 YFM `{% cut %}` plugin
+- [x] 2.8 Term definitions `[*term]: definition`
+- [x] 2.9 Image with size attribute `![alt](src =100x100)`
+- [x] 2.10 Variables inside link URLs `[text]({{ var }})`
 
 ### Phase B — Segmentation
 - [ ] Extract translatable segments from AST (paragraphs, headings, list items,
@@ -320,19 +347,18 @@ python scripts/scan_yfm.py                # YFM-construct frequency report
 
 ## 9. TODO / Backlog
 
-- **YFM-link-with-variable**: custom markdown-it link rule that accepts
-  `{{ var }}` inside URLs. Currently `[text]({{ var }})` parses as plain text.
-  Test in `test_yfm_variables.py::test_variable_in_link_url` is `xfail`.
+- ~~**YFM-link-with-variable**~~: ✅ done in 2.10
 - **Strikethrough rendering**: GFM strikethrough is enabled in the parser but
   not modelled in IR; tokens are currently dropped silently. Add `InlineStrike`
-  node.
+  node. Low priority — verify if it's used in YDB docs.
 - **Hard line breaks** rendered as `␠␠\n`; some authors prefer `\\`. Verify
   YDB's actual usage and decide.
 - **Front matter** is round-tripped as a raw string. If we need to translate
   YAML values like `description:` later, parse it as YAML.
 - **Indented code blocks** are rendered with 4-space indent. Check whether YDB
   uses them; if not, keep but don't optimize.
-- **Image attributes** `=100x100` and `{ width="100" }` — not modelled.
+- **Image attribute syntax** `{ width="100" }` (alternative Diplodoc form) — not modelled.
+  Currently only `=WxH` is supported.
 
 ---
 
