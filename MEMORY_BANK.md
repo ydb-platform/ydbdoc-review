@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living document. Updated after each significant step.  
-> Last updated: Step 2.4 — `{% list tabs %}` block plugin + table pipe escaping.
+> Last updated: Step 2.5 — `{% include %}` block plugin.
 
 ---
 
@@ -95,8 +95,8 @@ src/ydbdoc_review/
 │       ├── variables.py      ✅ {{ var }}
 │       ├── notes.py          ✅ {% note ... %}…{% endnote %}
 │       ├── tabs.py           ✅ {% list tabs %}…{% endlist %}
+│       ├── includes.py       ✅ {% include [text](path) %}
 │       ├── cuts.py           ⏳ {% cut "title" %}…{% endcut %}
-│       ├── includes.py       ⏳ {% include [text](path) %}
 │       └── conditionals.py   ⏳ {% if ... %}…{% endif %}
 ├── rendering/
 │   └── markdown_renderer.py  ✅ IR → markdown (stable round-trip)
@@ -151,6 +151,7 @@ Top-level: `Document { front_matter?, children: list[BlockNode] }`.
 - `yfm_note` — note_type, optional title, children
 - `yfm_tabs` — variant (`tabs` / `tabs accordion` / `tabs radio`), children: list[YfmTab]
 - `yfm_tab` — title (inline), children (block)
+- `yfm_include` — text, path, notitle (single-line directive, no children)
 
 ### Inline nodes
 - `text`, `code`, `em`, `strong`, `link`, `image`, `html_inline`,
@@ -222,8 +223,8 @@ tests/
         └── en/...
 ```
 
-### Current counters (Step 2.4)
-- Unit: 87 passed, 1 xfail
+### Current counters (Step 2.5)
+- Unit: 103 passed, 1 xfail
 - Integration: 66 passed (all real files round-trip stable)
 
 Real file count includes both RU and EN variants of:
@@ -256,7 +257,7 @@ python scripts/scan_yfm.py                # YFM-construct frequency report
 - [x] 2.2 YFM `{{ variable }}` plugin
 - [x] 2.3 YFM `{% note %}` plugin
 - [x] 2.4 YFM `{% list tabs %}` plugin + table pipe-escape fix
-- [ ] 2.5 YFM `{% include %}` plugin (inline include directive)
+- [x] 2.5 YFM `{% include %}` plugin (inline include directive)
 - [ ] 2.6 YFM `{% if %}…{% endif %}` plugin (conditionals)
 - [ ] 2.7 YFM `{% cut "title" %}…{% endcut %}` plugin
 - [ ] 2.8 Term definitions `[*term]: definition`
