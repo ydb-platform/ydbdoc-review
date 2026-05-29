@@ -1,11 +1,24 @@
-.env
-.venv/
 __pycache__/
 *.pyc
+*.pyo
+.venv/
 .pytest_cache/
+.ruff_cache/
 .mypy_cache/
-dist/
 *.egg-info/
-work/
+build/
+dist/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# Local debug
 debug/
 *.log
