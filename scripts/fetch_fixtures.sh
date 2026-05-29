@@ -11,6 +11,13 @@ mkdir -p "$FIXTURES_DIR/ru" "$FIXTURES_DIR/en"
 
 # Format: relative_path_under_ydb/docs
 FILES=(
+
+  "ru/core/reference/ydb-sdk/_includes/auth.md"  
+  "en/core/reference/ydb-sdk/_includes/auth.md"
+
+  "ru/core/reference/ydb-sdk/topic.md"
+  "en/core/reference/ydb-sdk/topic.md"
+
   "ru/core/devops/deployment-options/manual/initial-deployment/deployment-configuration-v1.md"
   "en/core/devops/deployment-options/manual/initial-deployment/deployment-configuration-v1.md"
 

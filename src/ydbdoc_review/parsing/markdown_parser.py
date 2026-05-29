@@ -10,6 +10,8 @@ from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
 from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
+from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
+from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin  # NEW
 from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
 
 
@@ -32,7 +34,7 @@ from ydbdoc_review.parsing.ast_types import (
     InlineSoftBreak,
     InlineStrong,
     InlineText,
-    InlineVariable,  # NEW
+    InlineVariable,  
     ListItem,
     OrderedList,
     Paragraph,
@@ -40,7 +42,9 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
-    YfmNote,  # NEW
+    YfmNote,  
+    YfmTab,    
+    YfmTabs,   
 )
 
 
@@ -51,8 +55,10 @@ def create_parser() -> MarkdownIt:
     md.enable("strikethrough")
     md.use(front_matter_plugin)
     md.use(yfm_variable_plugin)
-    md.use(yfm_note_plugin)  # NEW
+    md.use(yfm_note_plugin)
+    md.use(yfm_tabs_plugin) 
     return md
+
 
 
 
@@ -138,6 +144,8 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
         return _parse_table(stream)
     if t == "yfm_note_open":
         return _parse_yfm_note(stream)
+    if t == "yfm_tabs_open":
+        return _parse_yfm_tabs(stream)    
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 
@@ -353,6 +361,55 @@ def _parse_yfm_note(stream: _TokenStream) -> YfmNote:
 
     stream.expect("yfm_note_close")
     return YfmNote(note_type=note_type, title=title, children=children)
+
+def _parse_yfm_tabs(stream: _TokenStream) -> YfmTabs:
+    open_tok = stream.expect("yfm_tabs_open")
+    variant = open_tok.meta.get("variant", "tabs")
+
+    # The content inside is normally one bullet_list. Each list_item becomes a YfmTab.
+    inner_blocks: list[BlockNode] = []
+    while True:
+        tok = stream.peek()
+        if tok is None or tok.type == "yfm_tabs_close":
+            break
+        block = _parse_block(stream)
+        if block is not None:
+            inner_blocks.append(block)
+    stream.expect("yfm_tabs_close")
+
+    # Convert bullet_list items into YfmTab nodes.
+    tabs: list[YfmTab] = []
+    for block in inner_blocks:
+        if isinstance(block, BulletList):
+            for item in block.children:
+                tab = _list_item_to_tab(item)
+                tabs.append(tab)
+        else:
+            # Unexpected content inside tabs container. We don't lose it:
+            # wrap as a tab with empty title.
+            tabs.append(YfmTab(title=[], children=[block]))
+
+    return YfmTabs(variant=variant, children=tabs)
+
+
+def _list_item_to_tab(item: ListItem) -> YfmTab:
+    """Convert a bullet list item into a YfmTab.
+
+    The first child should be a Paragraph whose inline children form the tab title.
+    All subsequent children form the tab body.
+    """
+    if not item.children:
+        return YfmTab(title=[], children=[])
+
+    first = item.children[0]
+    rest = item.children[1:]
+
+    if isinstance(first, Paragraph):
+        title = first.children
+        return YfmTab(title=title, children=list(rest))
+    else:
+        # Unusual: first block isn't a paragraph. Treat title as empty.
+        return YfmTab(title=[], children=list(item.children))
 
 
 def _extract_align(cell_open: Token) -> str:

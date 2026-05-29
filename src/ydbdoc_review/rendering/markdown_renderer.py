@@ -31,8 +31,10 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
-    InlineVariable,  # NEW
-    YfmNote,  # NEW
+    InlineVariable,  
+    YfmNote,
+    YfmTab,    
+    YfmTabs,   
 )
 
 
@@ -64,6 +66,50 @@ def _render_yfm_note(n: YfmNote, indent: str) -> str:
 
     # YFM notes need a blank line after open tag and before close tag.
     return f"{open_line}\n{inner}\n{close_line}"
+def _render_yfm_tabs(t: YfmTabs, indent: str) -> str:
+    open_line = f"{indent}{{% {t.variant} %}}\n"
+    # Diplodoc syntax: {% list tabs %} — variant already starts with "tabs",
+    # but the opening tag is "{% list <variant> %}".
+    open_line = f"{indent}{{% list {t.variant} %}}\n"
+    close_line = f"{indent}{{% endlist %}}\n"
+
+    if not t.children:
+        return f"{open_line}\n{close_line}"
+
+    parts: list[str] = [open_line, "\n"]
+    for i, tab in enumerate(t.children):
+        if i > 0:
+            parts.append("\n")
+        parts.append(_render_yfm_tab(tab, indent))
+    parts.append("\n")
+    parts.append(close_line)
+    return "".join(parts)
+
+
+def _render_yfm_tab(tab: YfmTab, indent: str) -> str:
+    title_text = _render_inline(tab.title)
+    marker = "- "
+    cont_indent = "  "
+
+    if not tab.children:
+        return f"{indent}{marker}{title_text}\n"
+
+    # Render body blocks.
+    body_parts: list[str] = []
+    for i, child in enumerate(tab.children):
+        if i > 0:
+            body_parts.append("\n")
+        body_parts.append(_render_block(child, indent=""))
+    body = "".join(body_parts).rstrip("\n")
+
+    body_lines = body.split("\n")
+    out_lines = [f"{indent}{marker}{title_text}", ""]
+    for line in body_lines:
+        if line == "":
+            out_lines.append("")
+        else:
+            out_lines.append(f"{indent}{cont_indent}{line}")
+    return "\n".join(out_lines) + "\n"
 
 
 
@@ -91,6 +137,8 @@ def _render_block(block: BlockNode, indent: str) -> str:
         return _render_table(block, indent)
     if kind == "yfm_note":
         return _render_yfm_note(block, indent)
+    if kind == "yfm_tabs":
+        return _render_yfm_tabs(block, indent)    
     raise ValueError(f"Unknown block kind: {kind}")
 
 
@@ -213,18 +261,26 @@ def _render_html_block(h: HTMLBlock, indent: str) -> str:
 
 
 def _render_table(t: Table, indent: str) -> str:
-    # Compute column widths from header and rows for nice alignment.
-    n_cols = len(t.header.cells)
-    cell_texts: list[list[str]] = []
-    cell_texts.append([_render_inline(c.children) for c in t.header.cells])
+    # Compute the actual column count: max of (header cells, any row cells).
+    header_cells = [
+        _escape_table_cell(_render_inline(c.children)) for c in t.header.cells
+    ]
+    body_rows: list[list[str]] = []
     for row in t.rows:
-        cells = [_render_inline(c.children) for c in row.cells]
-        # Pad row if it has fewer cells than header.
-        while len(cells) < n_cols:
-            cells.append("")
-        cell_texts.append(cells[:n_cols])
+        cells = [_escape_table_cell(_render_inline(c.children)) for c in row.cells]
+        body_rows.append(cells)
 
-    # Build separator from aligns.
+    n_cols = max(
+        [len(header_cells)] + [len(r) for r in body_rows],
+        default=1,
+    )
+
+    while len(header_cells) < n_cols:
+        header_cells.append("")
+    for r in body_rows:
+        while len(r) < n_cols:
+            r.append("")
+
     seps: list[str] = []
     for align in (t.aligns + ["none"] * n_cols)[:n_cols]:
         if align == "left":
@@ -237,11 +293,27 @@ def _render_table(t: Table, indent: str) -> str:
             seps.append("---")
 
     lines: list[str] = []
-    lines.append(f"{indent}| " + " | ".join(cell_texts[0]) + " |")
+    lines.append(f"{indent}| " + " | ".join(header_cells) + " |")
     lines.append(f"{indent}| " + " | ".join(seps) + " |")
-    for row in cell_texts[1:]:
+    for row in body_rows:
         lines.append(f"{indent}| " + " | ".join(row) + " |")
     return "\n".join(lines) + "\n"
+
+def _escape_table_cell(text: str) -> str:
+    """Escape literal pipes inside a rendered table cell.
+
+    Inside a markdown table row, a literal '|' must be written as '\\|',
+    otherwise it would be parsed as a column separator. We do this AFTER
+    rendering inline children to a string, because some inline constructs
+    (code, link href) may legitimately contain '|'.
+    """
+    # Replace standalone backslash-pipe sequence carefully: we don't want
+    # to double-escape something already escaped. Strategy: replace '|'
+    # with '\\|' only when it is NOT already preceded by an odd number of
+    # backslashes. Simpler & robust: just replace '|' → '\\|', because our
+    # renderer never produces '\\|' on its own (inline code preserves the
+    # raw '|' character, and escaping it doesn't change its visible meaning).
+    return text.replace("\\", "\\\\").replace("|", "\\|")
 
 
 # --- Inline rendering ---

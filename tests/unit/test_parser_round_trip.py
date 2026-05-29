@@ -7,6 +7,41 @@ import pytest
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
+def test_table_cell_with_escaped_pipe():
+    """A literal '|' inside a cell (written as '\\|') must round-trip."""
+    text = (
+        "| Type | Description |\n"
+        "| --- | --- |\n"
+        "| `res` | string \\| list of strings |\n"
+    )
+    out1 = round_trip(text)
+    # The cell content must be preserved (the literal '|' character).
+    assert "list of strings" in out1
+    # The next column must still exist (we didn't lose data).
+    assert out1.count("\n") >= 3
+    # And it must be stable.
+    assert_stable(text)
+
+
+def test_table_cell_with_multiple_pipes():
+    text = (
+        "| A | B |\n"
+        "| --- | --- |\n"
+        "| x \\| y \\| z | val |\n"
+    )
+    out1 = round_trip(text)
+    assert "val" in out1
+    assert_stable(text)
+
+
+def test_table_cell_with_backslash():
+    text = (
+        "| A | B |\n"
+        "| --- | --- |\n"
+        "| path\\\\to\\\\file | desc |\n"
+    )
+    assert_stable(text)
+
 
 def round_trip(text: str) -> str:
     """Parse then render once."""

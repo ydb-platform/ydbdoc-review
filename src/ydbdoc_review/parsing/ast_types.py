@@ -240,6 +240,27 @@ class YfmNote(BaseModel):
     title: str | None = None
     children: list["BlockNode"]
 
+class YfmTab(BaseModel):
+    """A single tab inside a {% list tabs %} container."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_tab"] = "yfm_tab"
+    # Tab title is inline content (usually plain text like "Python", "Go",
+    # but can contain code, links, variables).
+    title: list["InlineNode"]
+    children: list["BlockNode"]
+
+
+class YfmTabs(BaseModel):
+    """YFM tabs container: {% list tabs %} ... {% endlist %}."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["yfm_tabs"] = "yfm_tabs"
+    # Variant: "tabs" or "tabs accordion" or "tabs radio" etc.
+    variant: str = "tabs"
+    children: list[YfmTab]
+
+
 
 BlockNode = Annotated[
     Union[
@@ -254,6 +275,7 @@ BlockNode = Annotated[
         HTMLBlock,
         Table,
         YfmNote,
+        YfmTabs,
     ],
     Field(discriminator="kind"),
 ]
@@ -280,3 +302,5 @@ InlineEmphasis.model_rebuild()
 InlineStrong.model_rebuild()
 InlineLink.model_rebuild()
 YfmNote.model_rebuild()
+YfmTab.model_rebuild()
+YfmTabs.model_rebuild()
