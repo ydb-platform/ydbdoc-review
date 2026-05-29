@@ -359,7 +359,10 @@ python scripts/scan_yfm.py                # YFM-construct frequency report
   uses them; if not, keep but don't optimize.
 - **Image attribute syntax** `{ width="100" }` (alternative Diplodoc form) — not modelled.
   Currently only `=WxH` is supported.
-
+- **Front matter translation**: front matter is currently round-tripped as a
+  raw string. Fields like `title:` and `description:` are user-facing in YDB
+  docs and must be translated in Phase B/C. Plan: parse YAML, treat `title`
+  and `description` as segments; pass through others (e.g. `vcsPath`).
 ---
 
 ## 10. Working agreements (with the AI assistant)
