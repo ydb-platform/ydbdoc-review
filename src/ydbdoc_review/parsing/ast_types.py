@@ -62,13 +62,16 @@ class InlineLink(BaseModel):
 
 
 class InlineImage(BaseModel):
-    """![alt](src "title")."""
+    """![alt](src "title") with optional Diplodoc size: ![alt](src =WxH)."""
 
     model_config = ConfigDict(extra="forbid")
     kind: Literal["image"] = "image"
     src: str
     title: str | None = None
     alt: str = ""
+    width: str | None = None   # e.g. "100" or "" if only height given
+    height: str | None = None  # e.g. "200" or "" if only width given
+
 
 
 class InlineHTML(BaseModel):
@@ -102,6 +105,13 @@ class InlineVariable(BaseModel):
     # E.g. "{{ name }}" vs "{{name}}" vs "{{  name  }}".
     raw: str
 
+class InlineTermRef(BaseModel):
+    """Reference to a term definition: [*term-id]."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["term_ref"] = "term_ref"
+    term_id: str
+
 
 
 InlineNode = Annotated[
@@ -116,6 +126,7 @@ InlineNode = Annotated[
         InlineSoftBreak,
         InlineHardBreak,
         InlineVariable,
+        InlineTermRef,
     ],
     Field(discriminator="kind"),
 ]
@@ -298,6 +309,15 @@ class YfmCut(BaseModel):
     title: str
     children: list["BlockNode"]
 
+class TermDefinition(BaseModel):
+    """Term definition at block level: [*term-id]: definition text."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["term_definition"] = "term_definition"
+    term_id: str
+    children: list[InlineNode]
+
+
 BlockNode = Annotated[
     Union[
         Paragraph,
@@ -315,9 +335,11 @@ BlockNode = Annotated[
         YfmInclude,
         YfmIf,
         YfmCut,
+        TermDefinition,
     ],
     Field(discriminator="kind"),
 ]
+
 
 
 

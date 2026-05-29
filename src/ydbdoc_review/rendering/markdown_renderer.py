@@ -31,7 +31,9 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    InlineTermRef,    
     InlineVariable,  
+    TermDefinition,  
     YfmCut,
     YfmIf,           
     YfmIfBranch,     # noqa: F401 — used by isinstance only
@@ -159,6 +161,9 @@ def _render_yfm_cut(c: YfmCut, indent: str) -> str:
 
     return f"{open_line}\n{inner}\n{close_line}"
 
+def _render_term_definition(td: TermDefinition, indent: str) -> str:
+    text = _render_inline(td.children)
+    return f"{indent}[*{td.term_id}]: {text}\n"
 
 def _render_block(block: BlockNode, indent: str) -> str:
     kind = block.kind
@@ -192,6 +197,8 @@ def _render_block(block: BlockNode, indent: str) -> str:
         return _render_yfm_if(block, indent)
     if kind == "yfm_cut":
         return _render_yfm_cut(block, indent)
+    if kind == "term_definition":
+        return _render_term_definition(block, indent)    
     raise ValueError(f"Unknown block kind: {kind}")
 
 
@@ -400,13 +407,21 @@ def _render_inline_node(n: InlineNode) -> str:
         return f"[{inner}]({n.href}{title})"
     if isinstance(n, InlineImage):
         title = f' "{n.title}"' if n.title else ""
-        return f"![{n.alt}]({n.src}{title})"
+        size = ""
+        if n.width is not None or n.height is not None:
+            w = n.width or ""
+            h = n.height or ""
+            size = f" ={w}x{h}"
+        return f"![{n.alt}]({n.src}{size}{title})"
     if isinstance(n, InlineHTML):
         return n.content
     if isinstance(n, InlineSoftBreak):
         return "\n"
     if isinstance(n, InlineHardBreak):
         return "  \n"
+    if isinstance(n, InlineTermRef):
+        return f"[*{n.term_id}]"
+    
     raise ValueError(f"Unknown inline node: {type(n).__name__}")
 
 

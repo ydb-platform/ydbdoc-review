@@ -10,10 +10,13 @@ from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
 
 from ydbdoc_review.parsing.yfm_plugins.conditionals import yfm_if_plugin
-from ydbdoc_review.parsing.yfm_plugins.cuts import yfm_cut_plugin  # NEW
+from ydbdoc_review.parsing.yfm_plugins.cuts import yfm_cut_plugin
+from ydbdoc_review.parsing.yfm_plugins.image_size import yfm_image_size_plugin  # NEW
 from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
+from ydbdoc_review.parsing.yfm_plugins.link_with_variable import yfm_link_with_variable_plugin  # NEW
 from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
 from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
+from ydbdoc_review.parsing.yfm_plugins.terms import yfm_terms_plugin  
 from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
 
 
@@ -44,6 +47,8 @@ from ydbdoc_review.parsing.ast_types import (
     TableCell,
     TableRow,
     ThematicBreak,
+    InlineTermRef,    
+    TermDefinition,  
     YfmCut, 
     YfmIf,         
     YfmIfBranch,   
@@ -54,22 +59,21 @@ from ydbdoc_review.parsing.ast_types import (
 )
 
 
-
 def create_parser() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"html": True, "breaks": False, "linkify": False})
     md.enable("table")
     md.enable("strikethrough")
     md.use(front_matter_plugin)
+    md.use(yfm_link_with_variable_plugin)  # must be early (mutates source)
     md.use(yfm_variable_plugin)
     md.use(yfm_note_plugin)
     md.use(yfm_tabs_plugin)
     md.use(yfm_include_plugin)
-    md.use(yfm_if_plugin)  
-    md.use(yfm_cut_plugin) 
+    md.use(yfm_if_plugin)
+    md.use(yfm_cut_plugin)
+    md.use(yfm_terms_plugin)
+    md.use(yfm_image_size_plugin)
     return md
-
-
-
 
 
 class _TokenStream:
@@ -124,6 +128,13 @@ def _parse_document(stream: _TokenStream) -> Document:
 
     return Document(children=children, front_matter=front_matter)
 
+def _parse_term_definition(stream: _TokenStream) -> TermDefinition:
+    open_tok = stream.expect("term_definition_open")
+    term_id = open_tok.meta.get("term_id", "")
+    inline_tok = stream.expect("inline")
+    stream.expect("term_definition_close")
+    children = _parse_inline_children(inline_tok.children or [])
+    return TermDefinition(term_id=term_id, children=children)
 
 def _parse_block(stream: _TokenStream) -> BlockNode | None:
     tok = stream.peek()
@@ -161,6 +172,9 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
         return _parse_yfm_if(stream)
     if t == "yfm_cut_open":
         return _parse_yfm_cut(stream)
+    if t == "term_definition_open":
+        return _parse_term_definition(stream)
+    
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 
@@ -549,9 +563,20 @@ def _parse_inline_until(stream: _TokenStream, close_type: str | None) -> list[In
             stream.advance()
             src = tok.attrGet("src") or ""
             title = tok.attrGet("title")
-            # Image alt is in tok.content (text of inner tokens).
             alt = tok.content
-            children.append(InlineImage(src=src, title=title, alt=alt))
+            meta = tok.meta or {}
+            width = meta.get("width")
+            height = meta.get("height")
+            # Normalize empty strings: only one side may be missing.
+            children.append(
+                InlineImage(
+                    src=src,
+                    title=title,
+                    alt=alt,
+                    width=width if width else None,
+                    height=height if height else None,
+                )
+            )
         elif t == "s_open":
             # Strikethrough: not yet modelled, treat as text by collecting inner.
             stream.advance()
@@ -564,6 +589,9 @@ def _parse_inline_until(stream: _TokenStream, close_type: str | None) -> list[In
             children.append(
                 InlineVariable(name=tok.content, raw=tok.markup)
             )
+        elif t == "term_ref":
+            stream.advance()
+            children.append(InlineTermRef(term_id=tok.content))    
         else:
             raise ValueError(f"Unsupported inline token: {t} (content={tok.content!r})")
 

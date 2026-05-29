@@ -14,6 +14,11 @@ from ydbdoc_review.parsing.ast_types import (
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
+def assert_stable(text: str) -> None:
+    first = round_trip(text)
+    second = round_trip(first)
+    assert first == second, f"\nFirst:\n{first!r}\nSecond:\n{second!r}"
+
 
 def round_trip(text: str) -> str:
     return render_markdown(parse_markdown(text))
@@ -75,10 +80,6 @@ def test_variable_in_heading():
     assert "yfm_variable" in kinds
 
 
-@pytest.mark.xfail(
-    reason="markdown-it does not recognize {{ var }} inside link URLs. "
-    "TODO: add custom link rule that accepts YFM variables in href."
-)
 def test_variable_in_link_url():
     doc = parse_markdown("[glossary]({{ link-glossary }})\n")
     para = doc.children[0]
@@ -88,11 +89,39 @@ def test_variable_in_link_url():
 
 
 def test_variable_in_link_url_round_trip():
-    """Even if not parsed as a link, the text must round-trip stably."""
     text = "[glossary]({{ link-glossary }})\n"
-    out1 = round_trip(text)
-    out2 = round_trip(out1)
-    assert out1 == out2
+    assert_stable(text)
+
+
+def test_variable_in_image_src():
+    doc = parse_markdown("![alt]({{ image-path }})\n")
+    from ydbdoc_review.parsing.ast_types import InlineImage
+    para = doc.children[0]
+    img = para.children[0]
+    assert isinstance(img, InlineImage)
+    assert img.src == "{{ image-path }}"
+
+
+def test_variable_in_link_url_in_real_context():
+    text = "See [glossary]({{ link-glossary }}) for terms.\n"
+    out = round_trip(text)
+    assert "{{ link-glossary }}" in out
+    assert_stable(text)
+
+def test_variable_in_image_src():
+    doc = parse_markdown("![alt]({{ image-path }})\n")
+    from ydbdoc_review.parsing.ast_types import InlineImage
+    para = doc.children[0]
+    img = para.children[0]
+    assert isinstance(img, InlineImage)
+    assert img.src == "{{ image-path }}"
+
+
+def test_variable_in_link_url_in_real_context():
+    text = "See [glossary]({{ link-glossary }}) for terms.\n"
+    out = round_trip(text)
+    assert "{{ link-glossary }}" in out
+    assert_stable(text)
 
 
 def test_variable_in_link_text():
