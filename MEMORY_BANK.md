@@ -474,7 +474,9 @@ tests/
 │   ├── test_llm_structured.py       JSON/fence parsing
 │   ├── test_llm_retry.py            backoff + error classification
 │   ├── test_llm_client.py           mocked YandexLLMClient
-│   └── test_llm_usage.py            UsageTracker + cost estimate
+│   ├── test_llm_usage.py            UsageTracker + cost estimate
+│   ├── test_reinsert_coverage.py    reinsert error paths + segment kinds
+│   └── test_renderer_coverage.py    renderer edge cases
 ├── integration/                           on real fixtures, may include LLM
 │   ├── test_real_files_round_trip.py      parametrized over 66 fixtures
 │   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
@@ -488,12 +490,12 @@ Future:
 
 ### 7.2. Counters (end of Phase C)
 
-- **Unit**: 266 passed.
+- **Unit**: 295 passed.
 - **Integration (fixtures)**: 66 passed (all 33 fixture pairs round-trip stable).
-- **Default CI/local run**: 332 passed (266 unit + 66 fixture integration).
+- **Default CI/local run**: 361 passed (295 unit + 66 fixture integration).
 - **Integration (LLM smoke)**: 2 tests in `test_llm_smoke.py`, **local only** — not
   in default `pytest` run (see §7.3).
-- **Coverage (overall package)**: ~94% line coverage on `src/ydbdoc_review/`
+- **Coverage (overall package)**: ~97% line coverage on `src/ydbdoc_review/`
   (measured with `pytest --cov=ydbdoc_review`).
 
 ### 7.2.1. Coverage policy (90% target)
@@ -502,11 +504,11 @@ Future:
 
 | Package | Target | Notes (end of Phase C) |
 |---|---|---|
-| `parsing/` | 90%+ | ✅ ~94–100% per module |
-| `segmentation/` | 90%+ | ⚠️ `reinsert.py` ~77% — identity tests cover paths indirectly; expand unit tests in Phase D |
-| `rendering/` | 90%+ | ⚠️ ~89% — borderline; add tests when new block kinds appear |
-| `config/` | 90%+ | ✅ ~96% |
-| `llm/` | 90%+ | ✅ ~95%+ (unit tests with mocked SDK; live smoke optional) |
+| `parsing/` | 90%+ | ✅ ~91–100% per module |
+| `segmentation/` | 90%+ | ✅ ~92–100% (`reinsert.py` covered via `test_reinsert_coverage.py`) |
+| `rendering/` | 90%+ | ✅ ~95% (`test_renderer_coverage.py`) |
+| `config/` | 90%+ | ✅ ~95% |
+| `llm/` | 90%+ | ✅ ~92–100% (unit tests with mocked SDK; live smoke optional) |
 | `validation/`, `github/`, `pipeline/` | lower until implemented | integration/local tests when added |
 
 Check coverage before merge:
