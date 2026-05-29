@@ -1,0 +1,199 @@
+"""Yandex AI Studio client (OpenAI-compatible)."""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass
+from typing import Literal
+
+from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
+
+from ydbdoc_review.config.loader import Config, LLMConfig, ModelChoice
+from ydbdoc_review.llm.errors import LLMConfigError, LLMRetryExhaustedError
+from ydbdoc_review.llm.retry import (
+    classify_api_error,
+    compute_backoff_s,
+    is_model_unavailable,
+    is_retryable,
+)
+from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
+
+logger = logging.getLogger(__name__)
+
+LLMRole = Literal["analyze", "translate", "critic"]
+
+
+@dataclass(frozen=True)
+class ChatResult:
+    """Successful chat completion."""
+
+    content: str
+    model_slug: str
+    model_uri: str
+    usage: LLMUsage
+
+
+class YandexLLMClient:
+    """OpenAI-compatible client for Yandex AI Studio."""
+
+    def __init__(
+        self,
+        *,
+        folder_id: str,
+        api_key: str,
+        llm: LLMConfig,
+        client: OpenAI | None = None,
+        usage_tracker: UsageTracker | None = None,
+    ) -> None:
+        if not folder_id or not api_key:
+            raise LLMConfigError("folder_id and api_key are required")
+        self._folder_id = folder_id
+        self._llm = llm
+        self._client = client or OpenAI(
+            api_key=api_key,
+            base_url=llm.base_url,
+            timeout=float(llm.timeout_s),
+        )
+        self._usage = usage_tracker or UsageTracker()
+
+    @classmethod
+    def from_config(cls, config: Config) -> YandexLLMClient:
+        folder_id, api_key = config.secrets.require_yandex()
+        return cls(folder_id=folder_id, api_key=api_key, llm=config.llm)
+
+    @property
+    def usage_tracker(self) -> UsageTracker:
+        return self._usage
+
+    def model_uri(self, model_slug: str) -> str:
+        return f"gpt://{self._folder_id}/{model_slug}"
+
+    def chat(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        *,
+        role: LLMRole | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResult:
+        """Call chat completions with retries and model fallback chain."""
+        if model is not None and role is not None:
+            raise LLMConfigError("Pass either role= or model=, not both")
+        if model is not None:
+            chain = [model]
+        elif role is not None:
+            chain = self._model_chain_for_role(role)
+        else:
+            raise LLMConfigError("Either role= or model= is required")
+
+        temp = self._llm.temperature if temperature is None else temperature
+        tokens = self._llm.max_tokens if max_tokens is None else max_tokens
+
+        last_error: BaseException | None = None
+        session_retries = 0
+
+        for slug in chain:
+            for attempt in range(1, self._llm.retries.max_attempts + 1):
+                started = time.perf_counter()
+                try:
+                    result = self._call_once(
+                        slug=slug,
+                        messages=messages,
+                        temperature=temp,
+                        max_tokens=tokens,
+                        retries=session_retries,
+                        started=started,
+                    )
+                    return result
+                except BaseException as exc:
+                    exc = classify_api_error(exc)
+                    last_error = exc
+                    latency_ms = (time.perf_counter() - started) * 1000
+                    self._usage.add(
+                        LLMUsage(
+                            model_slug=slug,
+                            input_tokens=0,
+                            output_tokens=0,
+                            latency_ms=latency_ms,
+                            retries=session_retries,
+                            success=False,
+                        )
+                    )
+                    if is_model_unavailable(exc):
+                        logger.warning(
+                            "Model %s unavailable, trying fallback: %s",
+                            slug,
+                            exc,
+                        )
+                        break
+                    if is_retryable(exc) and attempt < self._llm.retries.max_attempts:
+                        session_retries += 1
+                        delay = compute_backoff_s(attempt, self._llm.retries)
+                        logger.warning(
+                            "LLM call failed (attempt %s/%s, model=%s): %s; retry in %.1fs",
+                            attempt,
+                            self._llm.retries.max_attempts,
+                            slug,
+                            exc,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        continue
+                    logger.warning(
+                        "LLM call failed for model %s after %s attempt(s): %s",
+                        slug,
+                        attempt,
+                        exc,
+                    )
+                    break
+
+        models = ", ".join(chain)
+        raise LLMRetryExhaustedError(
+            f"All models exhausted ({models}): {last_error}"
+        ) from last_error
+
+    def _model_chain_for_role(self, role: LLMRole) -> list[str]:
+        choice: ModelChoice = getattr(self._llm.models, role)
+        return choice.chain
+
+    def _call_once(
+        self,
+        *,
+        slug: str,
+        messages: list[ChatCompletionMessageParam],
+        temperature: float,
+        max_tokens: int,
+        retries: int,
+        started: float,
+    ) -> ChatResult:
+        uri = self.model_uri(slug)
+        completion = self._client.chat.completions.create(
+            model=uri,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        latency_ms = (time.perf_counter() - started) * 1000
+        choice = completion.choices[0]
+        content = choice.message.content or ""
+        usage_obj = completion.usage
+        input_tokens = usage_obj.prompt_tokens if usage_obj else 0
+        output_tokens = usage_obj.completion_tokens if usage_obj else 0
+        usage = LLMUsage(
+            model_slug=slug,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            retries=retries,
+            success=True,
+        )
+        self._usage.add(usage)
+        return ChatResult(
+            content=content,
+            model_slug=slug,
+            model_uri=uri,
+            usage=usage,
+        )

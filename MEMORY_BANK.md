@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: end of Phase B (segmentation complete). Phase C (LLM client) starts next.
+> Last updated: Phase C complete (LLM client). Phase D (translator + critic) starts next.
 
 This file is **deliberately verbose**. It is written so that any developer or
 AI assistant joining mid-project can reconstruct the full context: goals,
@@ -17,12 +17,13 @@ decisions, rationales, constraints, and conventions.
 │   ├── parsing/               # markdown → AST
 │   ├── rendering/             # AST → markdown
 │   ├── segmentation/          # AST ↔ translatable segments
-│   ├── llm/                   # Yandex AI Studio client (Phase C)
+│   ├── llm/                   # Yandex AI Studio client (✅ Phase C)
 │   ├── translation/           # translator + critic (Phase D)
 │   ├── validation/            # post-translation heuristics (Phase D)
 │   ├── pipeline/              # orchestration per-file and per-PR
 │   ├── github/                # PR/branch/comment operations
 │   ├── reporting/             # report builder
+│   ├── config/                # default.yaml + loader (✅)
 │   └── prompts/               # versioned prompts (v1/, ...) + glossary
 ├── tests/
 │   ├── unit/                  # fast, no I/O
@@ -179,7 +180,7 @@ ydbdoc-review CLI (mode=run)
 
 ## 4. Package layout
 
-### 4.1. Current state (end of Phase B)
+### 4.1. Current state (Phase C complete)
 
 ```
 src/ydbdoc_review/
@@ -205,10 +206,10 @@ src/ydbdoc_review/
 │   ├── extractor.py               AST → list[Segment]
 │   ├── reinsert.py                translations → updated AST
 │   └── chunker.py                 segments → batches (char budget)
-├── llm/                           ⏳ Phase C — STARTS NEXT
-│   ├── client.py                  Yandex AI Studio (OpenAI-compatible)
-│   ├── retry.py                   exponential backoff + model fallbacks
-│   ├── structured.py              JSON parse + pydantic validation
+├── llm/                           ✅ COMPLETE
+│   ├── client.py                  YandexLLMClient — OpenAI SDK, retry, fallback
+│   ├── retry.py                   exponential backoff + error classification
+│   ├── structured.py              JSON parse + fence strip + pydantic validate
 │   ├── errors.py                  typed exceptions
 │   └── usage.py                   token / cost tracking
 ├── translation/                   ⏳ Phase D
@@ -230,9 +231,9 @@ src/ydbdoc_review/
 │   └── comment.py                 source PR + translation PR comments
 ├── reporting/                     ⏳ Phase H
 │   └── builder.py                 markdown report
-├── config/                        ⏳ Phase C
+├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults
-│   └── loader.py                  YAML + env override
+│   └── loader.py                  Pydantic schema + YAML + env override
 └── prompts/                       ⏳ Phase D
     ├── v1/
     │   ├── translate.md
@@ -468,38 +469,70 @@ tests/
 │   ├── test_yfm_image_size.py
 │   ├── test_segmentation.py
 │   ├── test_reinsert.py
-│   └── test_chunker.py
+│   ├── test_chunker.py
+│   ├── test_config.py               YAML load, env overrides, secrets
+│   ├── test_llm_structured.py       JSON/fence parsing
+│   ├── test_llm_retry.py            backoff + error classification
+│   ├── test_llm_client.py           mocked YandexLLMClient
+│   └── test_llm_usage.py            UsageTracker + cost estimate
 ├── integration/                           on real fixtures, may include LLM
-│   └── test_real_files_round_trip.py      parametrized over 66 fixtures
+│   ├── test_real_files_round_trip.py      parametrized over 66 fixtures
+│   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
 └── fixtures/markdown_files/               real .md from ydb-platform/ydb
     ├── ru/...
     └── en/...
 ```
 
 Future:
-- `tests/integration/test_llm_smoke.py` — real API calls. **Local only**, not in CI.
 - `tests/integration/test_end_to_end.py` — full pipeline on a real file pair.
 
-### 7.2. Counters (end of Phase B)
+### 7.2. Counters (end of Phase C)
 
-- **Unit**: 215 passed.
-- **Integration**: 66 passed (all 33 fixture pairs round-trip stable).
-- **Coverage goal**: 90%+ for `parsing/`, `segmentation/`, `rendering/`,
-  `validation/`. Lower acceptable for `llm/`, `github/` because integration
-  tests there are local-only.
+- **Unit**: 266 passed.
+- **Integration (fixtures)**: 66 passed (all 33 fixture pairs round-trip stable).
+- **Default CI/local run**: 332 passed (266 unit + 66 fixture integration).
+- **Integration (LLM smoke)**: 2 tests in `test_llm_smoke.py`, **local only** — not
+  in default `pytest` run (see §7.3).
+- **Coverage (overall package)**: ~94% line coverage on `src/ydbdoc_review/`
+  (measured with `pytest --cov=ydbdoc_review`).
+
+### 7.2.1. Coverage policy (90% target)
+
+**Goal: 90%+ line coverage** for core pipeline packages:
+
+| Package | Target | Notes (end of Phase C) |
+|---|---|---|
+| `parsing/` | 90%+ | ✅ ~94–100% per module |
+| `segmentation/` | 90%+ | ⚠️ `reinsert.py` ~77% — identity tests cover paths indirectly; expand unit tests in Phase D |
+| `rendering/` | 90%+ | ⚠️ ~89% — borderline; add tests when new block kinds appear |
+| `config/` | 90%+ | ✅ ~96% |
+| `llm/` | 90%+ | ✅ ~95%+ (unit tests with mocked SDK; live smoke optional) |
+| `validation/`, `github/`, `pipeline/` | lower until implemented | integration/local tests when added |
+
+Check coverage before merge:
+
+```bash
+pytest tests/unit/ tests/integration/test_real_files_round_trip.py \
+  --cov=ydbdoc_review --cov-report=term-missing
+```
+
+Do **not** fail CI on LLM smoke tests — they require credentials and network.
 
 ### 7.3. How to run
 
 ```bash
-pytest                                    # everything (unit + integration on fixtures)
+pytest                                    # unit + fixture integration (no LLM smoke)
 pytest tests/unit/ -v                     # unit only
-pytest tests/integration/ -v --tb=line    # integration on fixtures
+pytest tests/integration/ -v --tb=line    # fixture integration only
+pytest tests/integration/test_llm_smoke.py -m llm -v   # live API (needs .env)
 pytest -k "tabs"                          # by keyword
 pytest -m "not slow"                      # exclude slow markers
+pytest --cov=ydbdoc_review --cov-report=term-missing   # coverage report
 ```
 
-LLM tests (when added) will be marked `@pytest.mark.llm` and only run with
-`pytest -m llm` (requires `.env` with credentials).
+Default `pytest` **ignores** `test_llm_smoke.py` (see `pyproject.toml` addopts).
+LLM smoke tests are marked `@pytest.mark.llm` and only run when invoked explicitly
+(requires `YDBDOC_YC_*` or v1 alias env vars + network).
 
 ### 7.4. Fixture refresh
 
@@ -536,20 +569,24 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 - [ ] Treat `title:` and `description:` as segments
 - [ ] Pass through other keys (`vcsPath:`, `editable:` etc.)
 
-### Phase C — LLM client ⏳ STARTS NEXT
-- [ ] OpenAI-compatible client for Yandex AI Studio
+### Phase C — LLM client ✅ COMPLETE
+- [x] OpenAI-compatible client for Yandex AI Studio
   - Endpoint: `https://ai.api.cloud.yandex.net/v1`
   - Auth: `Api-Key <key>` via openai SDK
   - Model URI: `gpt://<folder_id>/<model_slug>`
-- [ ] Config loader: YAML default + env override
-- [ ] Retry with exponential backoff
-- [ ] Model fallback chain on `Failed to get model`
-- [ ] JSON output parsing with code-fence stripping
-- [ ] Pydantic schema validation
-- [ ] Usage tracking (input/output tokens, latency, retries)
-- [ ] Smoke integration test (local only)
+- [x] Config loader: YAML default + env override (Pydantic schema, greedy path
+      resolution, unknown overrides ignored — see §13.3)
+- [x] Retry with exponential backoff
+- [x] Model fallback chain on `Failed to get model`
+- [x] JSON output parsing with code-fence stripping (`structured.py`)
+- [x] Pydantic schema validation (`parse_json_model`)
+- [x] Usage tracking (input/output tokens, latency, retries)
+- [x] Smoke integration test (local only, `@pytest.mark.llm`)
 
-### Phase D — Translator + Critic
+Public API: `YandexLLMClient.from_config(cfg).chat(messages, role=...)`.
+See `ydbdoc_review.llm` package.
+
+### Phase D — Translator + Critic ⏳ STARTS NEXT
 - [ ] Translator (per-batch, JSON I/O)
 - [ ] Critic (per-file, structured `suggested_text`)
 - [ ] Apply `suggested_text` to AST segments
@@ -755,7 +792,7 @@ src/ydbdoc_review/config/default.yaml
 
 Bundled with the package. Loaded by `config/loader.py`.
 
-### 13.2. Schema (initial draft, will be finalized in Phase C)
+### 13.2. Schema (implemented in `loader.py`)
 
 ```yaml
 llm:
@@ -807,12 +844,25 @@ reporting:
 
 ### 13.3. Env-var override
 
-Convention: `YDBDOC_<SECTION>_<KEY>` with dots → underscores.
+Convention: prefix `YDBDOC_`, then YAML path with **dots and snake_case field
+names → underscores**. Nested dict keys are single segments; multi-word field
+names stay one segment (e.g. `max_tokens`, not `max` + `tokens`).
+
+Resolution (`loader._resolve_config_path`): at each YAML level, greedily join
+the longest prefix of remaining env segments that matches an existing key.
+Unknown paths are **ignored** (no crash, no `extra` validation error).
+Secret vars (`YDBDOC_YC_*`, `YDBDOC_PUSH_*`) are routed to `_resolve_secrets`,
+not config overrides.
 
 Examples:
-- `YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY=deepseek-v4`
-- `YDBDOC_LLM_TEMPERATURE=0.2`
-- `YDBDOC_TRANSLATION_SEGMENTS_PER_BATCH_CHARS=2000`
+- `YDBDOC_LLM_TEMPERATURE=0.2` → `llm.temperature`
+- `YDBDOC_LLM_MAX_TOKENS=16000` → `llm.max_tokens`
+- `YDBDOC_LLM_BASE_URL=https://…/v1/` → `llm.base_url` (trailing slash stripped)
+- `YDBDOC_REPORTING_INCLUDE_COST=false` → `reporting.include_cost`
+- `YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY=deepseek-v4` → `llm.models.translate.primary`
+- `YDBDOC_LLM_MODELS_TRANSLATE_FALLBACKS=gpt-oss-120b, deepseek-v32` → CSV list
+- `YDBDOC_TRANSLATION_SEGMENTS_PER_BATCH_CHARS=2000` → `translation.segments_per_batch_chars`
+- `YDBDOC_FOO_BAR=baz` → ignored (no such path in default YAML)
 
 ### 13.4. Secrets (env only, never in YAML)
 
