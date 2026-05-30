@@ -34,6 +34,10 @@ ydbdoc-review = "ydbdoc_review.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"ydbdoc_review.config" = ["default.yaml"]
+"ydbdoc_review.prompts" = ["glossary.yaml", "v1/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

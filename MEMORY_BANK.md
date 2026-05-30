@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: Phase C complete (LLM client). Phase D (translator + critic) starts next.
+> Last updated: Phase D in progress — glossary loader complete (D.1).
 
 This file is **deliberately verbose**. It is written so that any developer or
 AI assistant joining mid-project can reconstruct the full context: goals,
@@ -212,11 +212,11 @@ src/ydbdoc_review/
 │   ├── structured.py              JSON parse + fence strip + pydantic validate
 │   ├── errors.py                  typed exceptions
 │   └── usage.py                   token / cost tracking
-├── translation/                   ⏳ Phase D
+├── translation/                   ⏳ Phase D — IN PROGRESS
+│   ├── glossary.py                ✅ load YAML + format for prompts (D.1)
+│   ├── prompts.py                 prompt rendering, versioned
 │   ├── translator.py              segments → translated segments
-│   ├── critic.py                  AST → issues + suggested_text
-│   ├── glossary.py                load YAML, inject into prompt
-│   └── prompts.py                 prompt rendering, versioned
+│   └── critic.py                  AST → issues + suggested_text
 ├── validation/                    ⏳ Phase D
 │   ├── markers.py                 placeholder count check
 │   ├── cli_tokens.py              --flag / $var preservation
@@ -235,7 +235,8 @@ src/ydbdoc_review/
 │   ├── default.yaml               packaged defaults
 │   └── loader.py                  Pydantic schema + YAML + env override
 └── prompts/                       ⏳ Phase D
-    ├── v1/
+    ├── glossary.yaml              ✅ seed glossary (D.1)
+    └── v1/
     │   ├── translate.md
     │   ├── critic.md
     │   ├── analyze.md
@@ -476,7 +477,8 @@ tests/
 │   ├── test_llm_client.py           mocked YandexLLMClient
 │   ├── test_llm_usage.py            UsageTracker + cost estimate
 │   ├── test_reinsert_coverage.py    reinsert error paths + segment kinds
-│   └── test_renderer_coverage.py    renderer edge cases
+│   ├── test_renderer_coverage.py    renderer edge cases
+│   └── test_glossary.py             glossary loader + prompt YAML
 ├── integration/                           on real fixtures, may include LLM
 │   ├── test_real_files_round_trip.py      parametrized over 66 fixtures
 │   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
@@ -490,9 +492,8 @@ Future:
 
 ### 7.2. Counters (end of Phase C)
 
-- **Unit**: 295 passed.
-- **Integration (fixtures)**: 66 passed (all 33 fixture pairs round-trip stable).
-- **Default CI/local run**: 361 passed (295 unit + 66 fixture integration).
+- **Unit**: 302 passed.
+- **Default CI/local run**: 368 passed (302 unit + 66 fixture integration).
 - **Integration (LLM smoke)**: 2 tests in `test_llm_smoke.py`, **local only** — not
   in default `pytest` run (see §7.3).
 - **Coverage (overall package)**: ~97% line coverage on `src/ydbdoc_review/`
@@ -588,13 +589,22 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 Public API: `YandexLLMClient.from_config(cfg).chat(messages, role=...)`.
 See `ydbdoc_review.llm` package.
 
-### Phase D — Translator + Critic ⏳ STARTS NEXT
+### Phase D — Translator + Critic ⏳ IN PROGRESS
+
+#### D.1 — Glossary ✅ COMPLETE
+- [x] `prompts/glossary.yaml` — seed (~25 entries)
+- [x] `translation/glossary.py` — load default/custom path, `to_prompt_yaml()`
+- [x] Unit tests: `tests/unit/test_glossary.py`
+
+#### D.2 — Prompt templates (next)
+- [ ] `prompts/v1/system_common.md`, `translate.md`, …
+- [ ] `translation/prompts.py` — render templates with glossary + batch JSON
+
+#### D.3+ — Translator, critic, apply fixes
 - [ ] Translator (per-batch, JSON I/O)
 - [ ] Critic (per-file, structured `suggested_text`)
 - [ ] Apply `suggested_text` to AST segments
 - [ ] Re-validate critic pass → unresolved issues
-- [ ] Glossary loader + full-glossary injection (subset is optimization)
-- [ ] Prompt templates v1, packaged
 
 ### Phase E — Validation heuristics
 - [ ] Placeholder count check (must match before/after)
@@ -903,6 +913,7 @@ User copies to `.env` and fills in. `.env` is gitignored.
 ### 14.1. Source of truth
 
 `src/ydbdoc_review/prompts/glossary.yaml` — committed, hand-maintained for now.
+Loaded by `translation/glossary.py` (`load_glossary()`, `Glossary.to_prompt_yaml()`).
 
 ### 14.2. Format
 

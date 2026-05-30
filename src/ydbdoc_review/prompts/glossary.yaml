@@ -1,0 +1,146 @@
+# Seed glossary for YDB documentation translation (RU → EN).
+# Hand-maintained. See MEMORY_BANK.md §14.
+
+- ru: "параметризованный запрос"
+  en: "parameterized query"
+  aliases_ru:
+    - "параметризованные запросы"
+    - "параметризованного запроса"
+  notes: "Always lowercase in prose."
+
+- ru: "узел"
+  en: "node"
+  aliases_ru:
+    - "узла"
+    - "узлу"
+    - "узлы"
+  context: "YDB cluster topology"
+
+- ru: "кластер"
+  en: "cluster"
+  aliases_ru:
+    - "кластера"
+    - "кластере"
+    - "кластеры"
+
+- ru: "планшет"
+  en: "tablet"
+  aliases_ru:
+    - "планшета"
+    - "планшету"
+    - "планшеты"
+  context: "YDB storage shard"
+
+- ru: "раздел"
+  en: "partition"
+  aliases_ru:
+    - "раздела"
+    - "разделу"
+    - "разделы"
+
+- ru: "транзакция"
+  en: "transaction"
+  aliases_ru:
+    - "транзакции"
+    - "транзакцию"
+    - "транзакций"
+
+- ru: "схема"
+  en: "schema"
+  aliases_ru:
+    - "схемы"
+    - "схеме"
+    - "схему"
+
+- ru: "таблица"
+  en: "table"
+  aliases_ru:
+    - "таблицы"
+    - "таблицу"
+    - "таблиц"
+
+- ru: "индекс"
+  en: "index"
+  aliases_ru:
+    - "индекса"
+    - "индексу"
+    - "индексы"
+
+- ru: "запрос"
+  en: "query"
+  aliases_ru:
+    - "запроса"
+    - "запросу"
+    - "запросы"
+
+- ru: "директория"
+  en: "directory"
+  aliases_ru:
+    - "директории"
+    - "директорию"
+  notes: "Prefer 'directory' over 'folder' in docs."
+
+- ru: "снимок"
+  en: "snapshot"
+  aliases_ru:
+    - "снимка"
+    - "снимку"
+    - "снимки"
+
+- ru: "реплика"
+  en: "replica"
+  aliases_ru:
+    - "реплики"
+    - "реплику"
+    - "реплик"
+
+- ru: "шард"
+  en: "shard"
+  aliases_ru:
+    - "шарда"
+    - "шарду"
+    - "шарды"
+
+- ru: "пул"
+  en: "pool"
+  aliases_ru:
+    - "пула"
+    - "пулу"
+    - "пулы"
+
+- ru: "база данных"
+  en: "database"
+  aliases_ru:
+    - "базы данных"
+    - "базе данных"
+
+- ru: "{{ ydb-short-name }}"
+  en: "{{ ydb-short-name }}"
+  do_not_translate: true
+  notes: "YFM variable; literal."
+
+- ru: "{{ backend_name }}"
+  en: "{{ backend_name }}"
+  do_not_translate: true
+  notes: "YFM variable; literal."
+
+- term: "YDB"
+  do_not_translate: true
+
+- term: "YQL"
+  do_not_translate: true
+
+- term: "SQL"
+  do_not_translate: true
+
+- term: "gRPC"
+  do_not_translate: true
+
+- term: "OAuth"
+  do_not_translate: true
+
+- term: "CLI"
+  do_not_translate: true
+
+- term: "API"
+  do_not_translate: true
