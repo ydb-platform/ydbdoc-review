@@ -124,7 +124,7 @@ Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 ### Phase I — Glue & shipping
 - [x] CLI (`run`, `verify`, `list-models`, `translate-file`, `extract`) — `cli.py`
 - [x] Docker `entrypoint.sh` + `Dockerfile` (pip install package)
-- [ ] Move tag `v0.1.0` to merge commit on `main` (deferred — do not move until release)
+- [x] Move tag `v0.1.0` to `doc-translate-ng` HEAD (`24589ad`) for real PR testing
 - [x] Rewrite README
 - [x] `ARCHITECTURE.md` and `CONTRIBUTING.md`
 - [x] Example workflows updated for v2 env vars
