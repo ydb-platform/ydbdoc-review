@@ -11,6 +11,7 @@ from ydbdoc_review.translation.prompts import (
     build_analyze_messages,
     build_critic_messages,
     build_translate_messages,
+    build_verify_messages,
     load_template,
     render_template,
     segments_to_batch_json,
@@ -103,3 +104,20 @@ def test_build_analyze_messages():
     assert isinstance(user, str)
     assert '"pairs"' in user
     assert "a.md" in user
+
+
+def test_build_verify_messages():
+    glossary = load_glossary()
+    seg = _segment("s0001", "x")
+    messages = build_verify_messages(
+        source_text="RU",
+        translated_text="EN",
+        segments=[seg],
+        prior_issues=[{"segment_id": "s0001", "severity": "warning", "category": "x", "comment": "y"}],
+        glossary=glossary,
+        file_path="docs/ru/foo.md",
+    )
+    user = messages[1]["content"]
+    assert isinstance(user, str)
+    assert "Previously reported issues" in user
+    assert "s0001" in user

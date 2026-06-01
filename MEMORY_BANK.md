@@ -28,7 +28,7 @@ use the parts below.
 | 4–5 | [02-codebase](docs/memory-bank/02-codebase.md) |
 | 6 | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
 | 7, 9–11 | [04-development](docs/memory-bank/04-development.md) |
-| 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phase D.3 translator done |
+| 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phase D.4 critic done |
 | 12–14, 18 | [06-llm-config](docs/memory-bank/06-llm-config.md) |
 | 15–17 | [07-pipeline](docs/memory-bank/07-pipeline.md) |
 | 19–21 | [08-operations](docs/memory-bank/08-operations.md) |

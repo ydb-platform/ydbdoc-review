@@ -44,7 +44,7 @@ src/ydbdoc_review/
 │   ├── prompts.py                 ✅ template load/render + message builders (D.2)
 │   ├── schemas.py                 ✅ translator JSON pydantic models (D.3)
 │   ├── translator.py              ✅ per-batch segment translation (D.3)
-│   └── critic.py                  AST → issues + suggested_text
+│   └── critic.py                  ✅ per-file review + apply fixes (D.4)
 ├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   └── redirects.py               Diplodoc redirect list — same pattern

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -18,3 +20,26 @@ class TranslateBatchResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     segments: list[TranslatedSegmentOut] = Field(min_length=1)
+
+
+CriticVerdict = Literal["ok", "warnings", "blocked"]
+CriticSeverity = Literal["warning", "blocked", "info"]
+
+
+class CriticIssueOut(BaseModel):
+    """One issue from critic or verify pass."""
+
+    model_config = ConfigDict(extra="forbid")
+    segment_id: str | None = None
+    severity: CriticSeverity
+    category: str
+    comment: str
+    suggested_text: str | None = None
+
+
+class CriticResponse(BaseModel):
+    """Expected top-level JSON from critic / verify LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+    verdict: CriticVerdict
+    issues: list[CriticIssueOut] = Field(default_factory=list)

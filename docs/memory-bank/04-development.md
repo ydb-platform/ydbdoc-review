@@ -32,6 +32,8 @@ tests/
 │   ├── test_reinsert_coverage.py    reinsert error paths + segment kinds
 │   ├── test_renderer_coverage.py    renderer edge cases
 │   └── test_glossary.py             glossary loader + prompt YAML
+│   ├── test_translator.py           segment translator (mocked LLM)
+│   └── test_critic.py               critic parse/apply/review (mocked LLM)
 ├── integration/                           on real fixtures, may include LLM
 │   ├── test_real_files_round_trip.py      parametrized over 66 fixtures
 │   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
@@ -43,14 +45,12 @@ tests/
 Future:
 - `tests/integration/test_end_to_end.py` — full pipeline on a real file pair.
 
-### 7.2. Counters (end of Phase C)
+### 7.2. Counters (post D.4)
 
-- **Unit**: 302 passed.
-- **Default CI/local run**: 368 passed (302 unit + 66 fixture integration).
-- **Integration (LLM smoke)**: 2 tests in `test_llm_smoke.py`, **local only** — not
-  in default `pytest` run (see §7.3).
-- **Coverage (overall package)**: ~97% line coverage on `src/ydbdoc_review/`
-  (measured with `pytest --cov=ydbdoc_review`).
+- **Default CI/local run**: unit + fixture integration (no LLM smoke).
+- **Integration (LLM smoke)**: 3 tests in `test_llm_smoke.py`, **local only** —
+  not in default `pytest` run (see §7.3).
+- **Coverage (overall package)**: 90%+ target; run with `--cov=ydbdoc_review`.
 
 ### 7.2.1. Coverage policy (90% target)
 
@@ -62,10 +62,34 @@ Future:
 | `segmentation/` | 90%+ | ✅ ~92–100% (`reinsert.py` covered via `test_reinsert_coverage.py`) |
 | `rendering/` | 90%+ | ✅ ~95% (`test_renderer_coverage.py`) |
 | `config/` | 90%+ | ✅ ~95% |
-| `llm/` | 90%+ | ✅ ~92–100% (unit tests with mocked SDK; live smoke optional) |
-| `validation/`, `github/`, `pipeline/` | lower until implemented | integration/local tests when added |
+| `llm/` | 90%+ | ✅ unit tests mocked; live smoke optional |
+| `translation/` | 90%+ | ✅ translator + critic (mocked LLM) |
+| `validation/` | 90%+ | ✅ markers + cli_tokens wired in translator |
+| `github/`, `pipeline/` | lower until implemented | integration when added |
 
-Check coverage before merge:
+### 7.2.2. LLM integration tests (policy)
+
+**Yes, we write them — but they are opt-in, not CI gates.**
+
+| Layer | What | Where | When to run |
+|---|---|---|---|
+| **Unit** | Mocked `YandexLLMClient`; parse/validate/apply logic | `tests/unit/test_*` | Every commit, CI |
+| **Fixture integration** | Parser/segmentation round-trip on real `.md` | `test_real_files_round_trip.py` | Every commit, CI |
+| **LLM smoke** | 1–3 live API calls (translate JSON, critic JSON) | `test_llm_smoke.py`, `@pytest.mark.llm` | Local only, credentials required |
+| **End-to-end** | Full `translate_file` on fixture pair | `test_end_to_end.py` (Phase F) | Local / nightly, not MVP CI |
+
+Rules:
+- Default `pytest` **excludes** `test_llm_smoke.py` (`pyproject.toml` addopts).
+- Smoke tests skip automatically when `YDBDOC_YC_*` env vars are missing.
+- **Do not** fail CI on LLM tests — API keys, quota, and network are not guaranteed in Actions.
+- New LLM-facing code: **unit tests with mocks first** (90% coverage); add smoke only
+  when a new role or JSON schema needs a one-shot live sanity check.
+
+Invoke locally:
+
+```bash
+pytest tests/integration/test_llm_smoke.py -m llm -v
+```
 
 ```bash
 pytest tests/unit/ tests/integration/test_real_files_round_trip.py \

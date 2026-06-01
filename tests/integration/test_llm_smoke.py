@@ -55,3 +55,32 @@ def test_smoke_json_translation(llm_client: YandexLLMClient) -> None:
     parsed = parse_json_content(result.content)
     assert parsed["translations"][0]["id"] == "s0001"
     assert parsed["translations"][0]["text"]
+
+
+@pytest.mark.skipif(not _has_credentials(), reason="no Yandex credentials")
+def test_smoke_critic_json(llm_client: YandexLLMClient) -> None:
+    from ydbdoc_review.translation.critic import parse_critic_response
+    from ydbdoc_review.translation.glossary import load_glossary
+    from ydbdoc_review.translation.prompts import build_critic_messages
+    from ydbdoc_review.segmentation.types import Segment, SegmentKind
+
+    seg = Segment(
+        id="s0001",
+        kind=SegmentKind.PARAGRAPH,
+        path=["Intro"],
+        text="Используйте параметризованные запросы.",
+        placeholders=[],
+        ast_path=[0],
+    )
+    messages = build_critic_messages(
+        source_text="## Введение\n\nИспользуйте параметризованные запросы.",
+        translated_text="## Introduction\n\nUse parameterized query.",
+        segments=[seg],
+        glossary=load_glossary(),
+        file_path="docs/ru/test.md",
+    )
+    result = llm_client.chat(messages, role="critic", max_tokens=1024)
+    parsed = parse_critic_response(result.content)
+    assert parsed.verdict in {"ok", "warnings", "blocked"}
+    assert isinstance(parsed.issues, list)
+

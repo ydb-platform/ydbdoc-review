@@ -70,10 +70,14 @@ See `ydbdoc_review.llm` package.
 - [x] `validation/markers.py`, `validation/cli_tokens.py` — structural checks
 - [x] Unit tests: `test_translator.py`, `test_validation_markers.py`
 
-#### D.4+ — Critic, apply fixes
-- [ ] Critic (per-file, structured `suggested_text`)
-- [ ] Apply `suggested_text` to AST segments
-- [ ] Re-validate critic pass → unresolved issues
+#### D.4 — Critic ✅ COMPLETE
+- [x] `translation/schemas.py` — `CriticResponse`, `CriticIssueOut`
+- [x] `translation/critic.py` — `run_critic`, `run_verify`, `apply_critic_fixes`, `review_with_critic`
+- [x] Unit tests: `tests/unit/test_critic.py`
+- [x] LLM smoke: `test_smoke_critic_json` in `test_llm_smoke.py` (local only)
+
+#### D.5+ — Pipeline glue
+- [ ] `translate_file.py` — wire translator + critic + reinsert + render
 
 ### Phase E — Validation heuristics
 - [x] Placeholder count check (`validation/markers.py` — wired in translator)
