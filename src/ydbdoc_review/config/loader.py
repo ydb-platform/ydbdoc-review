@@ -118,6 +118,21 @@ class Secrets(BaseModel):
             )
         return self.yc_folder_id, self.yc_api_key
 
+    def require_github(self) -> tuple[str, str]:
+        """Return (api_token, push_token) or raise if missing."""
+        api = self.github_token
+        push = self.github_push_token or api
+        if not api:
+            raise RuntimeError(
+                "GitHub token not configured. Set GITHUB_TOKEN."
+            )
+        if not push:
+            raise RuntimeError(
+                "GitHub push token not configured. "
+                "Set GITHUB_PUSH_TOKEN or GITHUB_TOKEN."
+            )
+        return api, push
+
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")

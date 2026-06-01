@@ -97,15 +97,18 @@ See `ydbdoc_review.llm` package.
 - [x] `pipeline/orchestrator.py` — `run_pr_translation` (sequential, per-PR cache)
 - [x] `translate_file` — `enable_translate=False` for critic-only QA
 - [x] Unit tests: `test_pipeline_pairs`, `test_pipeline_analyze`, `test_pipeline_orchestrator`
-- [ ] `navigation/paths.py` — toc/redirect path detection (Phase G glue)
+- [ ] `navigation/paths.py` — toc/redirect path detection (Phase I glue)
 
-### Phase G — GitHub integration
-- [ ] PR file enumeration (git diff vs base)
-- [ ] `ydbdoc-review/pr-N` branch creation, push
-- [ ] Short comment in source PR
-- [ ] Open translation PR
-- [ ] Post full report (translation + heuristics) in translation PR
-- [ ] Verify mode: comment new report on each `doc_verify` run
+### Phase G — GitHub integration ✅ COMPLETE
+- [x] `github/client.py` — REST API (PR, files, comments, open PR)
+- [x] `github/git_ops.py` — local git diff, branch, commit, push
+- [x] `github/pr.py` — enumerate changes, load pair contents, PR context
+- [x] `github/workflow.py` — `run_doc_translate`, `run_doc_verify`
+- [x] `reporting/builder.py` — short source comment + full QA report (minimal, Phase H expands)
+- [x] `Secrets.require_github()` in config loader
+- [x] Unit tests: `test_github_client`, `test_github_git_ops`, `test_github_pr`, `test_github_workflow`, `test_reporting_builder`
+
+Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 
 ### Phase H — Reporting
 - [ ] Per-file verdict + issues

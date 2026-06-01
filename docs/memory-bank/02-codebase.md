@@ -58,12 +58,14 @@ src/ydbdoc_review/
 │   ├── analyze.py                 ✅ pre-analyze plans (F)
 │   ├── orchestrator.py            ✅ run_pr_translation (F)
 │   └── types.py                   result dataclasses
-├── github/                        ⏳ Phase G
-│   ├── pr.py                      enumerate files, pair RU/EN
-│   ├── branch.py                  ydbdoc-review/pr-N branch ops
-│   └── comment.py                 source PR + translation PR comments
-├── reporting/                     ⏳ Phase H
-│   └── builder.py                 markdown report
+├── github/                        ✅ Phase G
+│   ├── client.py                  GitHub REST (requests)
+│   ├── git_ops.py                 local git diff / branch / commit / push
+│   ├── pr.py                      PR context, file changes, pair loading
+│   ├── workflow.py                run_doc_translate, run_doc_verify
+│   └── errors.py                  typed GitHub errors
+├── reporting/                     🟡 Phase G minimal / Phase H polish
+│   └── builder.py                 markdown reports (short + full)
 ├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults
 │   └── loader.py                  Pydantic schema + YAML + env override
