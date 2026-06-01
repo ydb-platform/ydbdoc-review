@@ -11,6 +11,7 @@ from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, plan_pairs
 from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.translation.errors import TranslationError
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def _run_plan(
             existing_target_text=existing_target if not enable_translate else None,
             enable_critic=enable_critic,
         )
-    except (LLMError, ValueError) as exc:
+    except (LLMError, TranslationError, ValueError) as exc:
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))
 

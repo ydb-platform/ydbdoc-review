@@ -113,6 +113,8 @@ def test_translate_batch_falls_back_to_single_segment():
     client = _mock_client(
         [
             _json_response([{"id": "s1", "text": "only one"}]),
+            _json_response([{"id": "s1", "text": "only one"}]),
+            _json_response([{"id": "s1", "text": "only one"}]),
             _json_response([{"id": "s1", "text": "Alpha"}]),
             _json_response([{"id": "s2", "text": "Beta"}]),
         ]
@@ -154,9 +156,21 @@ def test_translate_batch_rejects_dropped_cli_flag():
     seg = _segment("s1", "Use --yaml-config here")
     batch = Batch(index=0, segments=[seg])
     client = _mock_client(
-        [_json_response([{"id": "s1", "text": "Use yaml-config here"}])]
+        [_json_response([{"id": "s1", "text": "Use yaml-config here"}])] * 3
     )
     with pytest.raises(TranslationValidationError, match="CLI"):
         translate_batch(
             client, batch, load_glossary(), file_path="docs/ru/x.md"
         )
+
+
+def test_translate_batch_realigns_renumbered_placeholders():
+    seg = _segment("s1", "Use ⟦C1⟧ flag")
+    batch = Batch(index=0, segments=[seg])
+    client = _mock_client(
+        [_json_response([{"id": "s1", "text": "Use ⟦C99⟧ flag"}])]
+    )
+    out = translate_batch(
+        client, batch, load_glossary(), file_path="docs/ru/x.md"
+    )
+    assert out == {"s1": "Use ⟦C1⟧ flag"}

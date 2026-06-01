@@ -6,7 +6,11 @@ from ydbdoc_review.validation.cli_tokens import (
     cli_tokens_preserved,
     extract_cli_tokens,
 )
-from ydbdoc_review.validation.markers import extract_placeholders, placeholders_match
+from ydbdoc_review.validation.markers import (
+    extract_placeholders,
+    placeholders_match,
+    realign_placeholders,
+)
 
 
 def test_extract_placeholders_order():
@@ -30,3 +34,15 @@ def test_cli_tokens_inside_placeholder_ignored():
     # Placeholder masks inline code; flags in source prose must still match.
     assert cli_tokens_preserved("--verbose flag", "--verbose option")
     assert not cli_tokens_preserved("--verbose flag", "verbose option")
+
+
+def test_realign_placeholders_renumbers():
+    source = "See ⟦L1⟧ and ⟦C2⟧"
+    translated = "See ⟦L99⟧ and ⟦C1⟧"
+    fixed = realign_placeholders(source, translated)
+    assert fixed == "See ⟦L1⟧ and ⟦C2⟧"
+    assert placeholders_match(source, fixed)
+
+
+def test_realign_placeholders_count_mismatch_returns_none():
+    assert realign_placeholders("⟦C1⟧ ⟦L1⟧", "⟦C1⟧") is None

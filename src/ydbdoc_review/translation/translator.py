@@ -20,9 +20,11 @@ from ydbdoc_review.translation.prompts import (
 )
 from ydbdoc_review.translation.schemas import TranslateBatchResponse
 from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
-from ydbdoc_review.validation.markers import placeholders_match
+from ydbdoc_review.validation.markers import placeholders_match, realign_placeholders
 
 logger = logging.getLogger(__name__)
+
+_MAX_BATCH_ATTEMPTS = 3
 
 
 def parse_translate_response(raw: str, *, expected_ids: set[str]) -> dict[str, str]:
@@ -78,6 +80,16 @@ def _cache_key(seg: Segment, *, target_lang: str) -> str:
     return hashlib.sha256(payload.encode()).digest().hex()
 
 
+def _apply_placeholder_realignment(
+    batch: Batch, translations: dict[str, str]
+) -> None:
+    """In-place: swap renumbered placeholders to match each source segment."""
+    for seg in batch.segments:
+        aligned = realign_placeholders(seg.text, translations[seg.id])
+        if aligned is not None:
+            translations[seg.id] = aligned
+
+
 def _translate_batch_once(
     client: YandexLLMClient,
     batch: Batch,
@@ -88,19 +100,37 @@ def _translate_batch_once(
     target_lang: str,
     prompt_version: str,
 ) -> dict[str, str]:
-    messages = build_translate_messages(
-        batch,
-        glossary,
-        file_path=file_path,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        version=prompt_version,
-    )
-    result = client.chat(messages, role="translate")
-    expected = {seg.id for seg in batch.segments}
-    translations = parse_translate_response(result.content, expected_ids=expected)
-    validate_batch_translations(batch, translations)
-    return translations
+    last_exc: LLMParseError | TranslationValidationError | None = None
+    for attempt in range(1, _MAX_BATCH_ATTEMPTS + 1):
+        try:
+            messages = build_translate_messages(
+                batch,
+                glossary,
+                file_path=file_path,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                version=prompt_version,
+            )
+            result = client.chat(messages, role="translate")
+            expected = {seg.id for seg in batch.segments}
+            translations = parse_translate_response(
+                result.content, expected_ids=expected
+            )
+            _apply_placeholder_realignment(batch, translations)
+            validate_batch_translations(batch, translations)
+            return translations
+        except (LLMParseError, TranslationValidationError) as exc:
+            last_exc = exc
+            if attempt < _MAX_BATCH_ATTEMPTS:
+                logger.warning(
+                    "Translate batch %s attempt %s/%s failed: %s",
+                    batch.index,
+                    attempt,
+                    _MAX_BATCH_ATTEMPTS,
+                    exc,
+                )
+    assert last_exc is not None
+    raise last_exc
 
 
 def translate_batch(

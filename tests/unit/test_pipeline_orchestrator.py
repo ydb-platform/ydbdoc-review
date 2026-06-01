@@ -94,3 +94,25 @@ def test_run_pr_translation_missing_source():
     result = run_pr_translation([content], client, load_glossary(), use_analyze_llm=False)
     assert result.failed_count == 1
     assert result.pair_results[0].error is not None
+
+
+def test_run_pr_translation_isolates_validation_failure():
+    pair = DocPair(
+        ru_path="ydb/docs/ru/bad.md",
+        en_path="ydb/docs/en/bad.md",
+        ru_changed=True,
+    )
+    content = PairContent(pair=pair, ru_text="⟦C1⟧ and ⟦L1⟧ here.\n")
+    # Dropped placeholder — cannot realign (count mismatch).
+    bad = _translate_json("s0001", "⟦C1⟧ only")
+    client = _mock_client([bad, bad, bad])
+    result = run_pr_translation(
+        [content],
+        client,
+        load_glossary(),
+        use_analyze_llm=False,
+    )
+    assert result.failed_count == 1
+    assert result.translated_count == 0
+    err = result.pair_results[0].error or ""
+    assert "placeholder" in err.lower()
