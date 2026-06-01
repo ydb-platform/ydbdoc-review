@@ -33,9 +33,10 @@ llm:
       fallbacks:
         - yandexgpt-5-pro
     critic:
-      primary: qwen3.6-35b-a3b
+      primary: deepseek-v32
       fallbacks:
-        - qwen3-235b-a22b-fp8
+        - yandexgpt-5.1
+        - yandexgpt-5-pro
 
 translation:
   source_lang: ru
