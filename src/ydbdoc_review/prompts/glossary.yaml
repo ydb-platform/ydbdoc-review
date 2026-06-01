@@ -1,5 +1,5 @@
 # Seed glossary for YDB documentation translation (RU → EN).
-# Hand-maintained. See MEMORY_BANK.md §14.
+# Hand-maintained. See Memory Bank §14 (docs/memory-bank/06-llm-config.md).
 
 - ru: "параметризованный запрос"
   en: "parameterized query"
