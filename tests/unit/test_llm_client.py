@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -26,10 +27,27 @@ def _llm_config(**overrides: object) -> LLMConfig:
     return LLMConfig.model_validate(data)
 
 
-def _completion(content: str, *, prompt_tokens: int = 10, completion_tokens: int = 5):
+def _completion(
+    content: str | None,
+    *,
+    prompt_tokens: int = 10,
+    completion_tokens: int = 5,
+    finish_reason: str = "stop",
+    completion_id: str = "cmpl-test",
+):
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-        usage=SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+        id=completion_id,
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content),
+                finish_reason=finish_reason,
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + (completion_tokens or 0),
+        ),
     )
 
 
@@ -88,6 +106,9 @@ def test_chat_success_null_completion_tokens():
 
     assert result.usage.output_tokens == 0
     assert client.usage_tracker.estimate_cost_usd() >= 0
+
+
+def test_chat_uses_role_chain():
     client, mock = _client_with_mock()
     mock.chat.completions.create.return_value = _completion("ok")
 
@@ -95,6 +116,32 @@ def test_chat_success_null_completion_tokens():
 
     call_kwargs = mock.chat.completions.create.call_args.kwargs
     assert call_kwargs["model"] == "gpt://b1test/yandexgpt-5.1"
+
+
+def test_empty_completion_logs_diagnostics(caplog: pytest.LogCaptureFixture):
+    client, mock = _client_with_mock()
+    mock.chat.completions.create.return_value = _completion(
+        None,
+        prompt_tokens=18000,
+        completion_tokens=0,
+        finish_reason="content_filter",
+        completion_id="cmpl-empty-1",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="ydbdoc_review.llm.client"):
+        result = client.chat(
+            [{"role": "user", "content": "x" * 5000}],
+            role="critic",
+        )
+
+    assert result.content == ""
+    joined = caplog.text
+    assert "Empty LLM completion" in joined
+    assert "content_filter" in joined
+    assert "cmpl-empty-1" in joined
+    assert "role=critic" in joined
+    assert "usage_prompt=18000" in joined
+    assert "request_chars=5000" in joined
 
 
 def test_chat_model_fallback_on_unavailable():

@@ -25,6 +25,57 @@ logger = logging.getLogger(__name__)
 LLMRole = Literal["analyze", "translate", "critic"]
 
 
+def _message_char_count(messages: list[ChatCompletionMessageParam]) -> tuple[int, int]:
+    """Return (message_count, total content characters) for diagnostics."""
+    total = 0
+    for msg in messages:
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if isinstance(content, str):
+            total += len(content)
+    return len(messages), total
+
+
+def _usage_fields(usage_obj: object | None) -> tuple[int | None, int | None, int | None]:
+    if usage_obj is None:
+        return None, None, None
+    prompt = getattr(usage_obj, "prompt_tokens", None)
+    completion = getattr(usage_obj, "completion_tokens", None)
+    total = getattr(usage_obj, "total_tokens", None)
+    return prompt, completion, total
+
+
+def _log_empty_completion_diagnostics(
+    *,
+    slug: str,
+    uri: str,
+    role: LLMRole | None,
+    messages: list[ChatCompletionMessageParam],
+    choice: object,
+    completion: object,
+    usage_obj: object | None,
+) -> None:
+    """Log API metadata when the model returns no usable text (debugging flaky critic)."""
+    finish_reason = getattr(choice, "finish_reason", None)
+    message_count, request_chars = _message_char_count(messages)
+    prompt_t, completion_t, total_t = _usage_fields(usage_obj)
+    completion_id = getattr(completion, "id", None)
+    logger.warning(
+        "Empty LLM completion: model=%s uri=%s role=%s finish_reason=%s "
+        "usage_prompt=%s usage_completion=%s usage_total=%s "
+        "request_messages=%s request_chars=%s completion_id=%s",
+        slug,
+        uri,
+        role,
+        finish_reason,
+        prompt_t,
+        completion_t,
+        total_t,
+        message_count,
+        request_chars,
+        completion_id,
+    )
+
+
 @dataclass(frozen=True)
 class ChatResult:
     """Successful chat completion."""
@@ -181,7 +232,18 @@ class YandexLLMClient:
         )
         latency_ms = (time.perf_counter() - started) * 1000
         choice = completion.choices[0]
-        content = choice.message.content or ""
+        raw_content = choice.message.content
+        content = raw_content or ""
+        if not content.strip():
+            _log_empty_completion_diagnostics(
+                slug=slug,
+                uri=uri,
+                role=role,
+                messages=messages,
+                choice=choice,
+                completion=completion,
+                usage_obj=completion.usage,
+            )
         usage_obj = completion.usage
         input_tokens = int(usage_obj.prompt_tokens or 0) if usage_obj else 0
         output_tokens = int(usage_obj.completion_tokens or 0) if usage_obj else 0
