@@ -7,14 +7,15 @@
 
 ## 4. Package layout
 
-### 4.1. Current state (Phase C complete)
+### 4.1. Current state (Phase I complete)
 
 ```
 src/ydbdoc_review/
-├── parsing/                       ✅ COMPLETE
+├── parsing/                       ✅ COMPLETE (+ B.4 front matter)
 │   ├── ast_types.py               IR pydantic models
 │   ├── markdown_parser.py         markdown-it-py → IR
 │   ├── inline_parser.py           re-parse a string as inline-only
+│   ├── front_matter.py            YAML title/description segments
 │   └── yfm_plugins/
 │       ├── variables.py           ✅ {{ var }}
 │       ├── notes.py               ✅ {% note ... %}
@@ -30,7 +31,7 @@ src/ydbdoc_review/
 ├── segmentation/                  ✅ COMPLETE
 │   ├── types.py                   Segment, ProtectedInline, SegmentKind
 │   ├── inline_protector.py        protect inline atoms with ⟦C1⟧/⟦L1⟧/...
-│   ├── extractor.py               AST → list[Segment]
+│   ├── extractor.py               AST → list[Segment] (incl. front matter)
 │   ├── reinsert.py                translations → updated AST
 │   └── chunker.py                 segments → batches (char budget)
 ├── llm/                           ✅ COMPLETE
@@ -39,36 +40,33 @@ src/ydbdoc_review/
 │   ├── structured.py              JSON parse + fence strip + pydantic validate
 │   ├── errors.py                  typed exceptions
 │   └── usage.py                   token / cost tracking
-├── translation/                   ⏳ Phase D — IN PROGRESS
-│   ├── glossary.py                ✅ load YAML + format for prompts (D.1)
-│   ├── prompts.py                 ✅ template load/render + message builders (D.2)
-│   ├── schemas.py                 ✅ translator JSON pydantic models (D.3)
-│   ├── translator.py              ✅ per-batch segment translation (D.3)
-│   └── critic.py                  ✅ per-file review + apply fixes (D.4)
-├── parsing/                       ✅ COMPLETE (+ B.4 front matter)
-│   ├── front_matter.py            YAML title/description segments
-│   └── …
+├── translation/                   ✅ COMPLETE (Phase D)
+│   ├── glossary.py                load YAML + format for prompts (D.1)
+│   ├── prompts.py                 template load/render + message builders (D.2)
+│   ├── schemas.py                 translator/critic JSON pydantic models (D.3–D.4)
+│   ├── translator.py              per-batch segment translation (D.3)
+│   └── critic.py                  per-file review + apply fixes (D.4)
 ├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5 + E)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
-├── validation/                    ✅ Phase E
+├── validation/                    ✅ COMPLETE (Phase E)
 │   ├── markers.py                 placeholder parity (D.3)
 │   ├── cli_tokens.py              CLI token preservation (D.3)
-│   └── heuristics.py              length ratio, cyrillic, parity checks, nav merge
-├── pipeline/                      ✅ Phase F
-│   ├── translate_file.py          ✅ per-file pipeline (D.5)
-│   ├── pairs.py                   ✅ RU/EN pairing (F)
-│   ├── analyze.py                 ✅ pre-analyze plans (F)
-│   ├── orchestrator.py            ✅ run_pr_translation (F)
+│   └── heuristics.py              length ratio, cyrillic, parity, nav merge wrappers
+├── pipeline/                      ✅ COMPLETE (Phase F)
+│   ├── translate_file.py          per-file pipeline (D.5 + E heuristics)
+│   ├── pairs.py                   RU/EN pairing (F)
+│   ├── analyze.py                 pre-analyze plans (F)
+│   ├── orchestrator.py            run_pr_translation (F)
 │   └── types.py                   result dataclasses
-├── github/                        ✅ Phase G
+├── github/                        ✅ COMPLETE (Phase G)
 │   ├── client.py                  GitHub REST (requests)
 │   ├── git_ops.py                 local git diff / branch / commit / push
 │   ├── pr.py                      PR context, file changes, pair loading
 │   ├── workflow.py                run_doc_translate, run_doc_verify
 │   └── errors.py                  typed GitHub errors
-├── reporting/                     ✅ Phase H
+├── reporting/                     ✅ COMPLETE (Phase H)
 │   └── builder.py                 markdown reports (§17 format)
 ├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults
@@ -78,6 +76,9 @@ src/ydbdoc_review/
 ```
 
 Legend: ✅ done · ⏳ pending · 🟡 partial.
+
+**Not yet wired:** navigation YAML scoped merge in `github/workflow.py` / orchestrator
+(merge + validate APIs exist; see §6 in **03-design-decisions** and roadmap TBD).
 
 ### 4.2. Files outside the package
 
@@ -140,11 +141,12 @@ Top-level: `Document { front_matter?, children: list[BlockNode] }`.
 A `Segment` is what we translate. See `src/ydbdoc_review/segmentation/types.py`.
 
 - `id: str` — stable, `s0001`, `s0002`, …
-- `kind: SegmentKind` — paragraph, heading, list_item, table_header_cell,
-  table_body_cell, blockquote_paragraph, tab_title, term_definition.
+- `kind: SegmentKind` — `front_matter`, paragraph, heading, list_item,
+  table_header_cell, table_body_cell, blockquote_paragraph, tab_title,
+  term_definition.
 - `path: list[str]` — breadcrumbs for LLM context, e.g.
-  `["note:info", "table:header:col1"]`.
-- `text: str` — markdown with `⟦K{n}⟧` placeholders.
+  `["note:info", "table:header:col1"]` or `["front_matter:title"]`.
+- `text: str` — markdown with `⟦K{n}⟧` placeholders (plain prose for front matter).
 - `placeholders: list[ProtectedInline]` — what each marker means.
 - `ast_path: list[int | str]` — mixed-step path to navigate AST when
   re-inserting. Strings are typed markers (`"header"`, `"row"`, `"title"`).

@@ -11,44 +11,53 @@
 
 ```
 tests/
-├── unit/                                  fast, no I/O, no LLM
+├── unit/                                  fast, no I/O, no LLM (~430 tests)
 │   ├── test_parser_round_trip.py          plain markdown
-│   ├── test_yfm_variables.py
-│   ├── test_yfm_notes.py
-│   ├── test_yfm_tabs.py
-│   ├── test_yfm_includes.py
-│   ├── test_yfm_conditionals.py
-│   ├── test_yfm_cuts.py
-│   ├── test_yfm_terms.py
-│   ├── test_yfm_image_size.py
+│   ├── test_yfm_*.py                      YFM plugins (variables, notes, tabs, …)
+│   ├── test_front_matter.py               YAML title/description (B.4)
 │   ├── test_segmentation.py
-│   ├── test_reinsert.py
+│   ├── test_reinsert.py                   + identity on 33 real fixtures
+│   ├── test_reinsert_coverage.py
 │   ├── test_chunker.py
-│   ├── test_config.py               YAML load, env overrides, secrets
-│   ├── test_llm_structured.py       JSON/fence parsing
-│   ├── test_llm_retry.py            backoff + error classification
-│   ├── test_llm_client.py           mocked YandexLLMClient
-│   ├── test_llm_usage.py            UsageTracker + cost estimate
-│   ├── test_reinsert_coverage.py    reinsert error paths + segment kinds
-│   ├── test_renderer_coverage.py    renderer edge cases
-│   └── test_glossary.py             glossary loader + prompt YAML
-│   ├── test_translator.py           segment translator (mocked LLM)
-│   └── test_critic.py               critic parse/apply/review (mocked LLM)
-│   └── test_translate_file.py       per-file pipeline (mocked LLM)
-├── integration/                           on real fixtures, may include LLM
-│   ├── test_real_files_round_trip.py      parametrized over 66 fixtures
+│   ├── test_renderer_coverage.py
+│   ├── test_config.py                     YAML load, env overrides, secrets
+│   ├── test_llm_*.py                      client, retry, structured, usage
+│   ├── test_glossary.py
+│   ├── test_prompts.py
+│   ├── test_translator.py
+│   ├── test_validation_markers.py
+│   ├── test_critic.py
+│   ├── test_translate_file.py             incl. heuristic verdict bump
+│   ├── test_validation_heuristics.py      Phase E (+ list_tab, redirect nav)
+│   ├── test_navigation_toc.py
+│   ├── test_navigation_redirects.py
+│   ├── test_navigation_paths.py
+│   ├── test_pipeline_pairs.py
+│   ├── test_pipeline_analyze.py
+│   ├── test_pipeline_orchestrator.py
+│   ├── test_github_client.py
+│   ├── test_github_git_ops.py
+│   ├── test_github_pr.py
+│   ├── test_github_workflow.py
+│   ├── test_reporting_builder.py
+│   └── test_cli.py                        run, verify, translate-file, extract
+├── integration/
+│   ├── test_real_files_round_trip.py      33 files × 2 tests = 66 cases
 │   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
-└── fixtures/markdown_files/               real .md from ydb-platform/ydb
+└── fixtures/markdown_files/               real .md from ydb-platform/ydb (33 files)
     ├── ru/...
     └── en/...
 ```
 
+Default run (`pytest`): **~499 tests** (unit + fixture integration, no LLM smoke).
+
 Future:
 - `tests/integration/test_end_to_end.py` — full pipeline on a real file pair.
+- Front matter fixture: add a committed `.md` with YAML `---` block (optional).
 
-### 7.2. Counters (post D.4)
+### 7.2. Counters (post Phase I)
 
-- **Default CI/local run**: unit + fixture integration (no LLM smoke).
+- **Default CI/local run**: unit + fixture integration (no LLM smoke); ~499 tests.
 - **Integration (LLM smoke)**: 3 tests in `test_llm_smoke.py`, **local only** —
   not in default `pytest` run (see §7.3).
 - **Coverage (overall package)**: 90%+ target; run with `--cov=ydbdoc_review`.
@@ -57,17 +66,18 @@ Future:
 
 **Goal: 90%+ line coverage** for core pipeline packages:
 
-| Package | Target | Notes (end of Phase C) |
+| Package | Target | Notes |
 |---|---|---|
 | `parsing/` | 90%+ | ✅ ~91–100% per module |
-| `segmentation/` | 90%+ | ✅ ~92–100% (`reinsert.py` covered via `test_reinsert_coverage.py`) |
+| `segmentation/` | 90%+ | ✅ ~92–100% (`reinsert.py` via `test_reinsert_coverage.py`) |
 | `rendering/` | 90%+ | ✅ ~95% (`test_renderer_coverage.py`) |
 | `config/` | 90%+ | ✅ ~95% |
 | `llm/` | 90%+ | ✅ unit tests mocked; live smoke optional |
 | `translation/` | 90%+ | ✅ translator + critic + translate_file (mocked LLM) |
-| `pipeline/` | 90%+ | ✅ `translate_file.py` (D.5) |
-| `validation/` | 90%+ | ✅ markers + cli_tokens wired in translator |
-| `github/`, `pipeline/` | lower until implemented | integration when added |
+| `pipeline/` | 90%+ | ✅ translate_file, pairs, analyze, orchestrator |
+| `validation/` | 90%+ | ✅ markers, cli_tokens, heuristics |
+| `github/` | 90%+ | ✅ client, git_ops, pr, workflow (mocked) |
+| `reporting/` | 90%+ | ✅ `test_reporting_builder.py` |
 
 ### 7.2.2. LLM integration tests (policy)
 
@@ -131,7 +141,9 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 
 ## 9. TODO / Backlog (not in main roadmap)
 
-- **Front matter translation** (Phase B.4 above).
+- **Navigation YAML merge in workflow**: wire `merge_en_toc_yaml` /
+  `merge_en_redirects_yaml` into orchestrator / `github/workflow.py` when PR
+  touches `toc*.yaml` or redirect YAML. APIs + validation wrappers exist.
 - **Glossary YAML maintenance**: now seeded with ~30-50 terms manually.
   Future: script that parses https://ydb.tech/docs/ru/concepts/glossary into
   YAML and proposes a diff. Currently `prompts/glossary.yaml` is the source
@@ -150,6 +162,9 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
   to override per-repo settings. Not in MVP.
 - **Cost dashboard**: collect cost from each PR run, persist to a markdown
   log. Currently just reported per-PR.
+- **Front matter real fixture**: add a committed `.md` with YAML `---` to
+  `tests/fixtures/markdown_files/` (B.4 covered synthetically today).
+- **`test_end_to_end.py`**: full `translate_file` on a fixture pair (local/nightly).
 
 ---
 

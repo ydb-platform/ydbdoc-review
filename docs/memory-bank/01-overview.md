@@ -14,9 +14,9 @@
 │   ├── rendering/             # AST → markdown
 │   ├── segmentation/          # AST ↔ translatable segments
 │   ├── llm/                   # Yandex AI Studio client (✅ Phase C)
-│   ├── translation/           # translator + critic (Phase D)
+│   ├── translation/           # translator + critic (✅ Phase D)
 │   ├── navigation/            # toc.yaml + redirect YAML scoped merge (D.1.5)
-│   ├── validation/            # post-translation heuristics (Phase D)
+│   ├── validation/            # post-translation heuristics (✅ Phase E)
 │   ├── pipeline/              # orchestration per-file and per-PR
 │   ├── github/                # PR/branch/comment operations
 │   ├── reporting/             # report builder

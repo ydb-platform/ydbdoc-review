@@ -164,11 +164,18 @@ known. Orchestrator (Phase F) should union: `new_hrefs` ∪ `toc_translate_scope
 **Phase E hook:** `validate_toc_merge` / `validate_redirect_merge` flag
 `unexpected_*`, `missing_*`, and `scope_not_applied` for the report.
 
-**Phase F/G:** After per-file `.md` translation, if PR touches `toc*.yaml` or
-redirect YAML, run scoped merge against EN-main + RU PR head; write result to
-the paired EN path. Do **not** run merge for navigation files outside the PR diff.
+**Phase F/G (workflow glue — TBD):** After per-file `.md` translation, if PR
+touches `toc*.yaml` or redirect YAML, run scoped merge against EN-main + RU PR
+head; write result to the paired EN path. Do **not** run merge for navigation
+files outside the PR diff.
 
-Tests: `tests/unit/test_navigation_toc.py`, `tests/unit/test_navigation_redirects.py`.
+> **Status (2025-05):** merge/validate **APIs are implemented and tested**
+> (`merge_en_toc_yaml`, `merge_en_redirects_yaml`, `validate_*`,
+> `validate_navigation_merge_warnings`). **Not yet wired** into
+> `pipeline/orchestrator.py` or `github/workflow.py` — markdown-only today.
+
+Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
+`test_navigation_paths.py`, `test_validation_heuristics.py`.
 
 ---
 

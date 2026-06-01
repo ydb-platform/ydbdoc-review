@@ -18,6 +18,7 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
 2. EXTRACT
    segments = extract_segments(doc)
    # Each segment has id, kind, path, text (with ⟦C1⟧ markers), placeholders, ast_path.
+   # Front matter → SegmentKind.FRONT_MATTER for title / description (B.4).
 
 3. CHUNK
    batches = chunk_segments(segments, max_chars=4000)
@@ -53,8 +54,9 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
    unresolved = parse_critic_response(verify_response).issues
 
 9. HEURISTICS (deterministic)
-   warnings = run_heuristics(source_text, translated_text)
-   # length_ratio, cyrillic_in_en, fence_parity, heading_parity, etc.
+   warnings = run_file_heuristics(source_text, translated_text, ...)
+   # length_ratio, cyrillic_in_en, fence/heading/list_tab parity
+   verdict = bump_verdict_for_heuristics(verdict, warnings)  # ok → warnings
 
 10. RENDER
     final_text = render_markdown(translated_doc)

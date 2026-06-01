@@ -79,10 +79,8 @@ See `ydbdoc_review.llm` package.
 
 #### D.5 — Per-file pipeline ✅ COMPLETE
 - [x] `pipeline/types.py` — `FileTranslationResult`, verdict + usage summary
-- [x] `pipeline/translate_file.py` — parse → translate → reinsert → critic → verify → render
-- [x] Unit tests: `tests/unit/test_translate_file.py`
-
-### Phase D — Translator + Critic ✅ COMPLETE
+- [x] `pipeline/translate_file.py` — parse → translate → reinsert → critic → verify → heuristics → render
+- [x] Unit tests: `tests/unit/test_translate_file.py` (incl. heuristic verdict bump)
 
 ### Phase E — Validation heuristics ✅ COMPLETE
 - [x] Placeholder count check (`validation/markers.py` — wired in translator)
@@ -91,7 +89,7 @@ See `ydbdoc_review.llm` package.
 - [x] TOC / redirect merge validation wrappers (`validate_toc_merge`, `validate_redirect_merge`)
 - [x] `navigation/paths.py` — detect toc/redirect YAML paths
 - [x] Wired in `translate_file` (markdown heuristics + verdict bump)
-- [x] Unit tests: `test_validation_heuristics`, `test_navigation_paths`
+- [x] Unit tests: `test_validation_heuristics`, `test_navigation_paths` (list_tab, redirect nav, translate_file integration)
 
 ### Phase F — Pipeline & orchestrator ✅ COMPLETE
 - [x] `pipeline/pairs.py` — RU/EN mirroring, `build_doc_pairs`
@@ -108,6 +106,7 @@ See `ydbdoc_review.llm` package.
 - [x] `github/workflow.py` — `run_doc_translate`, `run_doc_verify`
 - [x] `Secrets.require_github()` in config loader
 - [x] Unit tests: `test_github_client`, `test_github_git_ops`, `test_github_pr`, `test_github_workflow`, `test_reporting_builder`
+- [ ] Navigation YAML scoped merge in `workflow.py` / orchestrator (API + validation ✅; glue TBD)
 
 Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 
@@ -129,7 +128,7 @@ Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 - [x] Rewrite README
 - [x] `ARCHITECTURE.md` and `CONTRIBUTING.md`
 - [x] Example workflows updated for v2 env vars
-- [x] Unit tests: `test_cli.py`
+- [x] Unit tests: `test_cli.py` (run, verify, translate-file, extract, list-models)
 
 ---
 
