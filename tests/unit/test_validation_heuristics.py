@@ -10,8 +10,10 @@ from ydbdoc_review.validation.heuristics import (
     check_fence_parity,
     check_heading_parity,
     check_length_ratio,
+    check_list_tab_parity,
     run_file_heuristics,
     validate_navigation_merge_warnings,
+    validate_redirect_merge_warnings,
 )
 
 
@@ -41,6 +43,20 @@ def test_heading_parity():
     src = "# One\n\n## Two\n"
     tgt = "# One\n"
     assert check_heading_parity(src, tgt)
+
+
+def test_list_tab_parity_match():
+    block = "{% list tabs %}\n\n- Tab\n\n  Body.\n\n{% endlist %}\n"
+    assert check_list_tab_parity(block, block) == []
+
+
+def test_list_tab_parity_mismatch():
+    src = "{% list tabs %}\n\n- A\n\n  One.\n\n{% endlist %}\n"
+    tgt = "No tabs here.\n"
+    warnings = check_list_tab_parity(src, tgt)
+    assert len(warnings) == 1
+    assert "list_tab_parity" in warnings[0]
+    assert "source 1 tab blocks vs target 0" in warnings[0]
 
 
 def test_length_ratio_short_text_skipped():
@@ -81,3 +97,40 @@ def test_validate_navigation_merge_warnings_toc():
         translate_scope=set(),
     )
     assert isinstance(warnings, list)
+
+
+def test_validate_redirect_merge_warnings_clean():
+    ru = dedent("""
+        - from: /old
+          to: /new
+    """).strip()
+    en = ru
+    warnings = validate_redirect_merge_warnings(
+        ru,
+        en,
+        translate_from_paths=set(),
+        en_main_yaml=en,
+    )
+    assert warnings == []
+
+
+def test_validate_navigation_merge_warnings_redirect():
+    ru = dedent("""
+        - from: /old
+          to: /new
+        - from: /brand-new
+          to: /target
+    """).strip()
+    en = dedent("""
+        - from: /old
+          to: /new
+    """).strip()
+    warnings = validate_navigation_merge_warnings(
+        "ydb/docs/ru/redirects.yaml",
+        ru,
+        en,
+        en_main_yaml=en,
+        translate_scope=set(),
+    )
+    assert warnings
+    assert any("missing_from" in w for w in warnings)

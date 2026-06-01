@@ -224,3 +224,73 @@ def test_translate_file_critic_only_mode():
     )
     assert result.final_text == target
     assert result.critic_initial is not None
+
+
+def test_translate_file_heuristics_bump_verdict_to_warnings():
+    source = "Текст для перевода.\n"
+    segments = extract_segments(parse_markdown(source))
+    seg_id = segments[0].id
+    # Critic OK, but translation leaves Cyrillic in EN target.
+    translate_raw = _translate_json(segments, {seg_id: "Text with привет inside."})
+    critic_raw = json.dumps({"verdict": "ok", "issues": []})
+
+    client = _mock_client([translate_raw, critic_raw])
+    result = translate_file(
+        source,
+        client,
+        load_glossary(),
+        file_path="docs/ru/heuristics.md",
+        target_lang="en",
+    )
+
+    assert result.verdict == "warnings"
+    assert result.heuristic_warnings
+    assert any("cyrillic_in_en" in w for w in result.heuristic_warnings)
+
+
+def test_translate_file_heuristics_do_not_downgrade_blocked():
+    source = "Проблема.\n"
+    segments = extract_segments(parse_markdown(source))
+    seg_id = segments[0].id
+
+    translate_raw = _translate_json(segments, {seg_id: "Problem with привет."})
+    critic_raw = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": seg_id,
+                    "severity": "blocked",
+                    "category": "meaning",
+                    "comment": "wrong",
+                    "suggested_text": None,
+                }
+            ],
+        }
+    )
+    verify_raw = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": seg_id,
+                    "severity": "blocked",
+                    "category": "meaning",
+                    "comment": "still wrong",
+                    "suggested_text": None,
+                }
+            ],
+        }
+    )
+
+    client = _mock_client([translate_raw, critic_raw, verify_raw])
+    result = translate_file(
+        source,
+        client,
+        load_glossary(),
+        file_path="docs/ru/blocked.md",
+        target_lang="en",
+    )
+
+    assert result.verdict == "blocked"
+    assert result.heuristic_warnings
