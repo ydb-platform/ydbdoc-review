@@ -294,3 +294,23 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
 
     assert result.verdict == "blocked"
     assert result.heuristic_warnings
+
+
+def test_translate_file_survives_empty_critic_response():
+    source = "Привет.\n"
+    segments = extract_segments(parse_markdown(source))
+    seg_id = segments[0].id
+    translate_raw = _translate_json(segments, {seg_id: "Hello."})
+
+    client = _mock_client([translate_raw, "", "", ""])
+    result = translate_file(
+        source,
+        client,
+        load_glossary(),
+        file_path="docs/ru/hello.md",
+    )
+
+    assert "Hello." in result.final_text
+    assert result.verdict == "warnings"
+    assert result.critic_initial is not None
+    assert result.critic_initial.issues == []

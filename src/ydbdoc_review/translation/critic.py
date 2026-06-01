@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.llm.structured import parse_json_model
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
@@ -19,6 +20,41 @@ from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.translation.translator import validate_segment_translation
 
 logger = logging.getLogger(__name__)
+
+_MAX_CRITIC_ATTEMPTS = 3
+
+
+def _fallback_critic_response(*, reason: str) -> CriticResponse:
+    """Safe default when critic JSON cannot be parsed after retries."""
+    logger.error("Critic skipped (%s); treating as warnings with no issues", reason)
+    return CriticResponse(verdict="warnings", issues=[])
+
+
+def _fetch_critic_response(
+    client: YandexLLMClient,
+    messages: list,
+    *,
+    pass_label: str,
+) -> CriticResponse:
+    """Call critic model with parse retries; fallback instead of raising."""
+    last_exc: LLMParseError | None = None
+    for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
+        try:
+            result = client.chat(messages, role="critic")
+            content = (result.content or "").strip()
+            if not content:
+                raise LLMParseError("Empty LLM response")
+            return parse_critic_response(content)
+        except LLMParseError as exc:
+            last_exc = exc
+            logger.warning(
+                "%s parse attempt %s/%s failed: %s",
+                pass_label,
+                attempt,
+                _MAX_CRITIC_ATTEMPTS,
+                exc,
+            )
+    return _fallback_critic_response(reason=str(last_exc or "unknown parse error"))
 
 
 def parse_critic_response(raw: str) -> CriticResponse:
@@ -92,8 +128,7 @@ def run_critic(
         target_lang=target_lang,
         version=prompt_version,
     )
-    result = client.chat(messages, role="critic")
-    return parse_critic_response(result.content)
+    return _fetch_critic_response(client, messages, pass_label="Critic")
 
 
 def run_verify(
@@ -122,8 +157,7 @@ def run_verify(
         target_lang=target_lang,
         version=prompt_version,
     )
-    result = client.chat(messages, role="critic")
-    return parse_critic_response(result.content)
+    return _fetch_critic_response(client, messages, pass_label="Verify")
 
 
 @dataclass

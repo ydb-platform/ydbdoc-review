@@ -30,7 +30,7 @@ CriticSeverity = Literal["warning", "blocked", "info"]
 class CriticIssueOut(BaseModel):
     """One issue from critic or verify pass."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     segment_id: str | None = None
     severity: CriticSeverity
     category: str

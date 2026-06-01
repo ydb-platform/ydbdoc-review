@@ -133,6 +133,50 @@ def test_run_critic_calls_llm():
     assert out.verdict == "ok"
 
 
+def test_run_critic_empty_response_fallback():
+    client = _mock_client(["", "", ""])
+    out = run_critic(
+        client,
+        source_text="RU",
+        translated_text="EN",
+        segments=[_segment("s1", "x")],
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+    assert out.verdict == "warnings"
+    assert out.issues == []
+
+
+def test_run_critic_retries_then_parses():
+    raw = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(["", "not json", raw])
+    out = run_critic(
+        client,
+        source_text="RU",
+        translated_text="EN",
+        segments=[_segment("s1", "x")],
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+    assert out.verdict == "ok"
+
+
+def test_run_verify_empty_response_fallback():
+    client = _mock_client(["", "", ""])
+    prior = [_issue(segment_id="s1", suggested_text="fixed")]
+    out = run_verify(
+        client,
+        source_text="RU",
+        translated_text="EN fixed",
+        segments=[_segment("s1", "x")],
+        prior_issues=prior,
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+    assert out.verdict == "warnings"
+    assert out.issues == []
+
+
 def test_run_verify_calls_llm():
     raw = json.dumps({"verdict": "ok", "issues": []})
     client = _mock_client([raw])
