@@ -9,6 +9,11 @@ from ydbdoc_review.translation.prompts import (
     build_verify_messages,
     load_template,
 )
+from ydbdoc_review.translation.translator import (
+    parse_translate_response,
+    translate_batch,
+    translate_segments,
+)
 
 __all__ = [
     "DEFAULT_PROMPT_VERSION",
@@ -20,4 +25,7 @@ __all__ = [
     "build_verify_messages",
     "load_glossary",
     "load_template",
+    "parse_translate_response",
+    "translate_batch",
+    "translate_segments",
 ]

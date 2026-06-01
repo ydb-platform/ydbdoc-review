@@ -42,14 +42,15 @@ src/ydbdoc_review/
 ├── translation/                   ⏳ Phase D — IN PROGRESS
 │   ├── glossary.py                ✅ load YAML + format for prompts (D.1)
 │   ├── prompts.py                 ✅ template load/render + message builders (D.2)
-│   ├── translator.py              segments → translated segments
+│   ├── schemas.py                 ✅ translator JSON pydantic models (D.3)
+│   ├── translator.py              ✅ per-batch segment translation (D.3)
 │   └── critic.py                  AST → issues + suggested_text
 ├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   └── redirects.py               Diplodoc redirect list — same pattern
-├── validation/                    ⏳ Phase D
-│   ├── markers.py                 placeholder count check
-│   ├── cli_tokens.py              --flag / $var preservation
+├── validation/                    ⏳ Phase D/E
+│   ├── markers.py                 ✅ placeholder parity (D.3)
+│   ├── cli_tokens.py              ✅ --flag / $var preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic-in-en, fence parity
 ├── pipeline/                      ⏳ Phase E/F
 │   ├── analyze.py                 pre-analyze: does this need translation?

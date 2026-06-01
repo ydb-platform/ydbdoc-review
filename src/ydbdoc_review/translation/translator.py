@@ -1,0 +1,219 @@
+"""Per-batch segment translator (JSON I/O + validation)."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.llm.structured import parse_json_model
+from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
+from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.translation.glossary import Glossary
+from ydbdoc_review.translation.prompts import (
+    DEFAULT_PROMPT_VERSION,
+    build_translate_messages,
+)
+from ydbdoc_review.translation.schemas import TranslateBatchResponse
+from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
+from ydbdoc_review.validation.markers import placeholders_match
+
+logger = logging.getLogger(__name__)
+
+
+def parse_translate_response(raw: str, *, expected_ids: set[str]) -> dict[str, str]:
+    """Parse and validate translator JSON; return id → translated text."""
+    parsed = parse_json_model(raw, TranslateBatchResponse)
+    got_ids = {item.id for item in parsed.segments}
+    if got_ids != expected_ids:
+        missing = expected_ids - got_ids
+        extra = got_ids - expected_ids
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing ids: {sorted(missing)}")
+        if extra:
+            parts.append(f"extra ids: {sorted(extra)}")
+        raise LLMParseError("Segment id mismatch: " + "; ".join(parts))
+    return {item.id: item.text for item in parsed.segments}
+
+
+def validate_segment_translation(source: Segment, translated_text: str) -> None:
+    """Structural checks for one segment translation."""
+    if not placeholders_match(source.text, translated_text):
+        raise TranslationValidationError(
+            f"placeholder mismatch for {source.id!r}: "
+            f"expected placeholders from source in same order",
+            segment_id=source.id,
+        )
+    if not cli_tokens_preserved(source.text, translated_text):
+        raise TranslationValidationError(
+            f"CLI/shell token missing in translation for {source.id!r}",
+            segment_id=source.id,
+        )
+
+
+def validate_batch_translations(
+    batch: Batch, translations: dict[str, str]
+) -> None:
+    """Validate all segments in a batch."""
+    for seg in batch.segments:
+        if seg.id not in translations:
+            raise TranslationValidationError(
+                f"missing translation for {seg.id!r}",
+                segment_id=seg.id,
+            )
+        validate_segment_translation(seg, translations[seg.id])
+
+
+def _cache_key(seg: Segment, *, target_lang: str) -> str:
+    payload = json.dumps(
+        {"text": seg.text, "path": seg.path, "lang": target_lang},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode()).digest().hex()
+
+
+def _translate_batch_once(
+    client: YandexLLMClient,
+    batch: Batch,
+    glossary: Glossary,
+    *,
+    file_path: str,
+    source_lang: str,
+    target_lang: str,
+    prompt_version: str,
+) -> dict[str, str]:
+    messages = build_translate_messages(
+        batch,
+        glossary,
+        file_path=file_path,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        version=prompt_version,
+    )
+    result = client.chat(messages, role="translate")
+    expected = {seg.id for seg in batch.segments}
+    translations = parse_translate_response(result.content, expected_ids=expected)
+    validate_batch_translations(batch, translations)
+    return translations
+
+
+def translate_batch(
+    client: YandexLLMClient,
+    batch: Batch,
+    glossary: Glossary,
+    *,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+) -> dict[str, str]:
+    """Translate one batch; fall back to per-segment calls on batch failure."""
+    try:
+        return _translate_batch_once(
+            client,
+            batch,
+            glossary,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+        )
+    except (LLMParseError, TranslationValidationError) as exc:
+        if len(batch.segments) == 1:
+            raise
+        logger.warning(
+            "Batch %s failed (%s); retrying %d segments individually",
+            batch.index,
+            exc,
+            len(batch.segments),
+        )
+
+    out: dict[str, str] = {}
+    for seg in batch.segments:
+        single = Batch(index=batch.index, segments=[seg])
+        out.update(
+            _translate_batch_once(
+                client,
+                single,
+                glossary,
+                file_path=file_path,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                prompt_version=prompt_version,
+            )
+        )
+    return out
+
+
+def translate_segments(
+    segments: list[Segment],
+    client: YandexLLMClient,
+    glossary: Glossary,
+    *,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    max_chars: int = 4000,
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+    cache: dict[str, str] | None = None,
+    max_parallel_batches: int = 3,
+) -> dict[str, str]:
+    """Translate all segments (chunked batches, optional cache, parallel I/O)."""
+    if not segments:
+        return {}
+
+    translations: dict[str, str] = {}
+    pending: list[Segment] = []
+
+    for seg in segments:
+        if cache is not None:
+            key = _cache_key(seg, target_lang=target_lang)
+            cached = cache.get(key)
+            if cached is not None:
+                validate_segment_translation(seg, cached)
+                translations[seg.id] = cached
+                continue
+        pending.append(seg)
+
+    if not pending:
+        return translations
+
+    batches = chunk_segments(pending, max_chars=max_chars)
+    if max_parallel_batches < 1:
+        raise ValueError("max_parallel_batches must be >= 1")
+
+    def _run_batch(batch: Batch) -> dict[str, str]:
+        return translate_batch(
+            client,
+            batch,
+            glossary,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+        )
+
+    if max_parallel_batches == 1 or len(batches) == 1:
+        batch_results = [_run_batch(b) for b in batches]
+    else:
+        results_by_index: dict[int, dict[str, str]] = {}
+        with ThreadPoolExecutor(max_workers=max_parallel_batches) as pool:
+            futures = {pool.submit(_run_batch, b): i for i, b in enumerate(batches)}
+            for fut in as_completed(futures):
+                results_by_index[futures[fut]] = fut.result()
+        batch_results = [results_by_index[i] for i in range(len(batches))]
+
+    for batch, batch_trans in zip(batches, batch_results, strict=True):
+        for seg in batch.segments:
+            text = batch_trans[seg.id]
+            translations[seg.id] = text
+            if cache is not None:
+                cache[_cache_key(seg, target_lang=target_lang)] = text
+
+    return translations

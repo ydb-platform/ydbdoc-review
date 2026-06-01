@@ -64,15 +64,20 @@ See `ydbdoc_review.llm` package.
 - [x] `translation/prompts.py` — load/render templates, build chat messages + batch JSON
 - [x] Unit tests: `tests/unit/test_prompts.py`
 
-#### D.3+ — Translator, critic, apply fixes
-- [ ] Translator (per-batch, JSON I/O)
+#### D.3 — Translator ✅ COMPLETE
+- [x] `translation/schemas.py` — pydantic JSON I/O models
+- [x] `translation/translator.py` — per-batch translate, per-segment fallback, cache, parallel batches
+- [x] `validation/markers.py`, `validation/cli_tokens.py` — structural checks
+- [x] Unit tests: `test_translator.py`, `test_validation_markers.py`
+
+#### D.4+ — Critic, apply fixes
 - [ ] Critic (per-file, structured `suggested_text`)
 - [ ] Apply `suggested_text` to AST segments
 - [ ] Re-validate critic pass → unresolved issues
 
 ### Phase E — Validation heuristics
-- [ ] Placeholder count check (must match before/after)
-- [ ] CLI-token preservation (`--flag`, `$var`, file paths)
+- [x] Placeholder count check (`validation/markers.py` — wired in translator)
+- [x] CLI-token preservation (`validation/cli_tokens.py` — wired in translator)
 - [ ] Length ratio (RU↔EN sane bounds)
 - [ ] Cyrillic-in-EN detector
 - [ ] Fence parity, heading parity, list-tab parity
