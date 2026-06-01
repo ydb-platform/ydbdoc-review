@@ -183,8 +183,8 @@ class YandexLLMClient:
         choice = completion.choices[0]
         content = choice.message.content or ""
         usage_obj = completion.usage
-        input_tokens = usage_obj.prompt_tokens if usage_obj else 0
-        output_tokens = usage_obj.completion_tokens if usage_obj else 0
+        input_tokens = int(usage_obj.prompt_tokens or 0) if usage_obj else 0
+        output_tokens = int(usage_obj.completion_tokens or 0) if usage_obj else 0
         usage = LLMUsage(
             model_slug=slug,
             input_tokens=input_tokens,

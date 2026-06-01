@@ -71,6 +71,24 @@ def test_parse_translate_response_id_mismatch():
         parse_translate_response(raw, expected_ids={"s1"})
 
 
+def test_parse_translate_response_ignores_echoed_input_fields():
+    raw = json.dumps(
+        {
+            "segments": [
+                {
+                    "id": "s1",
+                    "kind": "paragraph",
+                    "path": ["Intro"],
+                    "text": "Hello",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    out = parse_translate_response(raw, expected_ids={"s1"})
+    assert out == {"s1": "Hello"}
+
+
 def test_validate_segment_placeholder_mismatch():
     seg = _segment("s1", "Use ⟦C1⟧")
     with pytest.raises(TranslationValidationError, match="placeholder"):

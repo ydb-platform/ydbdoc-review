@@ -75,7 +75,19 @@ def test_chat_success_records_usage():
     assert len(client.usage_tracker.records) == 1
 
 
-def test_chat_uses_role_chain():
+def test_chat_success_null_completion_tokens():
+    client, mock = _client_with_mock()
+    mock.chat.completions.create.return_value = _completion(
+        "hello", prompt_tokens=12, completion_tokens=None  # type: ignore[arg-type]
+    )
+
+    result = client.chat(
+        [{"role": "user", "content": "hi"}],
+        model="yandexgpt-5.1",
+    )
+
+    assert result.usage.output_tokens == 0
+    assert client.usage_tracker.estimate_cost_usd() >= 0
     client, mock = _client_with_mock()
     mock.chat.completions.create.return_value = _completion("ok")
 

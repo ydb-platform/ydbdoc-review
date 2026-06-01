@@ -27,6 +27,12 @@ def test_estimate_cost_usd_unknown_model():
     assert tracker.estimate_cost_usd() == 0.0
 
 
+def test_estimate_cost_usd_null_output_tokens():
+    tracker = UsageTracker()
+    tracker.add(LLMUsage("yandexgpt-5.1", 1_000_000, None, 0.0, 0, True))  # type: ignore[arg-type]
+    assert tracker.estimate_cost_usd() == pytest.approx(0.40)
+
+
 def test_tokens_for_role_and_retries():
     tracker = UsageTracker()
     tracker.add(LLMUsage("yandexgpt-5.1", 100, 50, 10.0, 2, True, role="translate"))

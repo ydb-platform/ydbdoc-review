@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class TranslatedSegmentOut(BaseModel):
     """One segment in a translator response."""
 
-    model_config = ConfigDict(extra="forbid")
+    # LLMs often echo input fields (kind, path) — ignore extras, keep id+text.
+    model_config = ConfigDict(extra="ignore")
     id: str
     text: str
 

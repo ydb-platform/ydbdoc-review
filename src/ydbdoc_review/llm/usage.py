@@ -47,11 +47,11 @@ class UsageTracker:
 
     @property
     def total_input_tokens(self) -> int:
-        return sum(r.input_tokens for r in self.records if r.success)
+        return sum(r.input_tokens or 0 for r in self.records if r.success)
 
     @property
     def total_output_tokens(self) -> int:
-        return sum(r.output_tokens for r in self.records if r.success)
+        return sum(r.output_tokens or 0 for r in self.records if r.success)
 
     def estimate_cost_usd(self) -> float:
         """Rough USD cost from the hard-coded price table."""
@@ -63,8 +63,8 @@ class UsageTracker:
             if prices is None:
                 continue
             in_price, out_price = prices
-            total += record.input_tokens / 1_000_000 * in_price
-            total += record.output_tokens / 1_000_000 * out_price
+            total += (record.input_tokens or 0) / 1_000_000 * in_price
+            total += (record.output_tokens or 0) / 1_000_000 * out_price
         return total
 
     def tokens_for_role(self, role: LLMRole) -> tuple[int, int]:
@@ -72,8 +72,8 @@ class UsageTracker:
         inp = out = 0
         for record in self.records:
             if record.success and record.role == role:
-                inp += record.input_tokens
-                out += record.output_tokens
+                inp += record.input_tokens or 0
+                out += record.output_tokens or 0
         return inp, out
 
     @property
