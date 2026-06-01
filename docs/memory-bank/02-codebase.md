@@ -52,9 +52,9 @@ src/ydbdoc_review/
 │   ├── markers.py                 ✅ placeholder parity (D.3)
 │   ├── cli_tokens.py              ✅ --flag / $var preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic-in-en, fence parity
-├── pipeline/                      ⏳ Phase E/F
+├── pipeline/                      ⏳ Phase F
+│   ├── translate_file.py          ✅ per-file pipeline glue (D.5)
 │   ├── analyze.py                 pre-analyze: does this need translation?
-│   ├── translate_file.py          full per-file pipeline
 │   └── orchestrator.py            PR-level orchestration
 ├── github/                        ⏳ Phase G
 │   ├── pr.py                      enumerate files, pair RU/EN

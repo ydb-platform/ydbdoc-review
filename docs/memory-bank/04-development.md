@@ -34,6 +34,7 @@ tests/
 │   └── test_glossary.py             glossary loader + prompt YAML
 │   ├── test_translator.py           segment translator (mocked LLM)
 │   └── test_critic.py               critic parse/apply/review (mocked LLM)
+│   └── test_translate_file.py       per-file pipeline (mocked LLM)
 ├── integration/                           on real fixtures, may include LLM
 │   ├── test_real_files_round_trip.py      parametrized over 66 fixtures
 │   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
@@ -63,7 +64,8 @@ Future:
 | `rendering/` | 90%+ | ✅ ~95% (`test_renderer_coverage.py`) |
 | `config/` | 90%+ | ✅ ~95% |
 | `llm/` | 90%+ | ✅ unit tests mocked; live smoke optional |
-| `translation/` | 90%+ | ✅ translator + critic (mocked LLM) |
+| `translation/` | 90%+ | ✅ translator + critic + translate_file (mocked LLM) |
+| `pipeline/` | 90%+ | ✅ `translate_file.py` (D.5) |
 | `validation/` | 90%+ | ✅ markers + cli_tokens wired in translator |
 | `github/`, `pipeline/` | lower until implemented | integration when added |
 

@@ -46,7 +46,7 @@
 Public API: `YandexLLMClient.from_config(cfg).chat(messages, role=...)`.
 See `ydbdoc_review.llm` package.
 
-### Phase D — Translator + Critic ⏳ IN PROGRESS
+### Phase D — Translator + Critic ✅ COMPLETE
 
 #### D.1 — Glossary ✅ COMPLETE
 - [x] `prompts/glossary.yaml` — seed (~25 entries)
@@ -76,8 +76,12 @@ See `ydbdoc_review.llm` package.
 - [x] Unit tests: `tests/unit/test_critic.py`
 - [x] LLM smoke: `test_smoke_critic_json` in `test_llm_smoke.py` (local only)
 
-#### D.5+ — Pipeline glue
-- [ ] `translate_file.py` — wire translator + critic + reinsert + render
+#### D.5 — Per-file pipeline ✅ COMPLETE
+- [x] `pipeline/types.py` — `FileTranslationResult`, verdict + usage summary
+- [x] `pipeline/translate_file.py` — parse → translate → reinsert → critic → verify → render
+- [x] Unit tests: `tests/unit/test_translate_file.py`
+
+### Phase D — Translator + Critic ✅ COMPLETE
 
 ### Phase E — Validation heuristics
 - [x] Placeholder count check (`validation/markers.py` — wired in translator)
@@ -89,7 +93,7 @@ See `ydbdoc_review.llm` package.
 
 ### Phase F — Pipeline & orchestrator
 - [ ] Pre-analyze pass: which files need translation
-- [ ] Per-file pipeline glue
+- [x] Per-file pipeline glue (`pipeline/translate_file.py`, D.5)
 - [ ] PR-level orchestrator: pair RU/EN, new/deleted/renamed
 - [ ] Per-PR cache
 - [ ] Sequential files, parallel batches (limit 3)
