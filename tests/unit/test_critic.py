@@ -11,6 +11,8 @@ from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.critic import (
     apply_critic_fixes,
+    merge_critic_responses,
+    merge_verdicts,
     parse_critic_response,
     review_with_critic,
     run_critic,
@@ -122,11 +124,11 @@ def test_apply_critic_fixes_skips_unknown_segment_id():
 def test_run_critic_calls_llm():
     raw = json.dumps({"verdict": "ok", "issues": []})
     client = _mock_client([raw])
+    seg = _segment("s1", "x")
     out = run_critic(
         client,
-        source_text="RU",
-        translated_text="EN",
-        segments=[_segment("s1", "x")],
+        segments=[seg],
+        translations={"s1": "EN x"},
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
@@ -135,11 +137,11 @@ def test_run_critic_calls_llm():
 
 def test_run_critic_empty_response_fallback():
     client = _mock_client(["", "", ""])
+    seg = _segment("s1", "x")
     out = run_critic(
         client,
-        source_text="RU",
-        translated_text="EN",
-        segments=[_segment("s1", "x")],
+        segments=[seg],
+        translations={"s1": "EN x"},
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
@@ -150,25 +152,82 @@ def test_run_critic_empty_response_fallback():
 def test_run_critic_retries_then_parses():
     raw = json.dumps({"verdict": "ok", "issues": []})
     client = _mock_client(["", "not json", raw])
+    seg = _segment("s1", "x")
     out = run_critic(
         client,
-        source_text="RU",
-        translated_text="EN",
-        segments=[_segment("s1", "x")],
+        segments=[seg],
+        translations={"s1": "EN x"},
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
     assert out.verdict == "ok"
 
 
+def test_run_critic_merges_multiple_batches():
+    long_text = "x" * 3000
+    seg1 = _segment("s1", long_text)
+    seg2 = _segment("s2", long_text)
+    batch1 = json.dumps(
+        {
+            "verdict": "warnings",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "severity": "warning",
+                    "category": "terminology",
+                    "comment": "a",
+                    "suggested_text": None,
+                }
+            ],
+        }
+    )
+    batch2 = json.dumps(
+        {
+            "verdict": "warnings",
+            "issues": [
+                {
+                    "segment_id": "s2",
+                    "severity": "warning",
+                    "category": "terminology",
+                    "comment": "b",
+                    "suggested_text": None,
+                }
+            ],
+        }
+    )
+    client = _mock_client([batch1, batch2])
+    out = run_critic(
+        client,
+        segments=[seg1, seg2],
+        translations={"s1": "EN1", "s2": "EN2"},
+        glossary=load_glossary(),
+        file_path="docs/ru/big.md",
+        max_chars=4000,
+    )
+    assert len(out.issues) == 2
+    assert {i.segment_id for i in out.issues} == {"s1", "s2"}
+
+
+def test_merge_verdicts_and_responses():
+    assert merge_verdicts("ok", "warnings") == "warnings"
+    assert merge_verdicts("warnings", "blocked") == "blocked"
+    r1 = parse_critic_response(
+        json.dumps({"verdict": "ok", "issues": [{"segment_id": "s1", "severity": "warning", "category": "x", "comment": "y", "suggested_text": None}]})
+    )
+    r2 = parse_critic_response(json.dumps({"verdict": "ok", "issues": []}))
+    merged = merge_critic_responses([r1, r2])
+    assert merged.verdict == "warnings"
+    assert len(merged.issues) == 1
+
+
 def test_run_verify_empty_response_fallback():
     client = _mock_client(["", "", ""])
     prior = [_issue(segment_id="s1", suggested_text="fixed")]
+    seg = _segment("s1", "x")
     out = run_verify(
         client,
-        source_text="RU",
-        translated_text="EN fixed",
-        segments=[_segment("s1", "x")],
+        segments=[seg],
+        translations={"s1": "EN fixed"},
         prior_issues=prior,
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
@@ -181,11 +240,11 @@ def test_run_verify_calls_llm():
     raw = json.dumps({"verdict": "ok", "issues": []})
     client = _mock_client([raw])
     prior = [_issue(segment_id="s1", suggested_text="fixed")]
+    seg = _segment("s1", "x")
     out = run_verify(
         client,
-        source_text="RU",
-        translated_text="EN fixed",
-        segments=[_segment("s1", "x")],
+        segments=[seg],
+        translations={"s1": "EN fixed"},
         prior_issues=prior,
         glossary=load_glossary(),
         file_path="docs/ru/a.md",

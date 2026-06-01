@@ -73,7 +73,7 @@ See `ydbdoc_review.llm` package.
 
 #### D.4 — Critic ✅ COMPLETE
 - [x] `translation/schemas.py` — `CriticResponse`, `CriticIssueOut`
-- [x] `translation/critic.py` — `run_critic`, `run_verify`, `apply_critic_fixes`, `review_with_critic`
+- [x] `translation/critic.py` — batched `run_critic`, `run_verify`, merge + apply fixes
 - [x] Unit tests: `tests/unit/test_critic.py`
 - [x] LLM smoke: `test_smoke_critic_json` in `test_llm_smoke.py` (local only)
 

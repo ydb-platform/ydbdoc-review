@@ -146,14 +146,14 @@ def translate_file(
     if enable_critic:
         critic_initial = run_critic_pass(
             client,
-            source_text=source_text,
-            translated_text=translated_text,
             segments=segments,
+            translations=translations,
             glossary=glossary,
             file_path=file_path,
             source_lang=src_lang,
             target_lang=tgt_lang,
             prompt_version=version,
+            max_chars=batch_chars,
         )
         translations, critic_applied, critic_skipped = apply_critic_fixes(
             translations, segments, critic_initial.issues
@@ -164,15 +164,15 @@ def translate_file(
             )
             critic_unresolved = run_verify(
                 client,
-                source_text=source_text,
-                translated_text=text_after_fixes,
                 segments=segments,
+                translations=translations,
                 prior_issues=critic_initial.issues,
                 glossary=glossary,
                 file_path=file_path,
                 source_lang=src_lang,
                 target_lang=tgt_lang,
                 prompt_version=version,
+                max_chars=batch_chars,
             )
             translated_text = text_after_fixes
 

@@ -198,6 +198,23 @@ has write on the upstream repo (`ydb-platform/ydb`), so fork pushes fail with
 Helpers: `is_fork_head`, `translation_pr_base`, `repo_https_clone_url` in
 `github/pr.py`. See **07-pipeline** §16.3.
 
+### 6.19. Batched critic (not whole-file)
+
+**Problem:** Whole-file critic on large CLI docs (~600 lines, 150+ segments)
+sends ~74k chars in one prompt and often needs a huge JSON response. With
+`max_tokens=8000` the model hits `finish_reason=length` → empty/truncated JSON →
+fallback with no issues.
+
+**Decision:** Critic and verify use the **same segment chunker** as the
+translator (`chunk_segments`, budget `translation.segments_per_batch_chars`).
+Each batch prompt contains only `{id, kind, path, source_text, translated_text}`
+for segments in that batch — not full file bodies. Batch results are merged
+(`merge_critic_responses`).
+
+Templates: `prompts/v1/critic_batch.md`, `verify_batch.md`. Legacy whole-file
+templates (`critic.md`, `verify.md`) remain for reference but are not used in
+the pipeline.
+
 ---
 
 ---

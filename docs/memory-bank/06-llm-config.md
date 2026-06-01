@@ -270,7 +270,8 @@ Each prompt template is markdown with `{placeholders}` filled at runtime by
 
 Public builders:
 - `build_translate_messages(batch, glossary, file_path=…)` — segment JSON I/O
-- `build_critic_messages(…)` / `build_verify_messages(…)` — per-file review
+- `build_critic_batch_messages(…)` / `build_verify_batch_messages(…)` — batched review
+- `build_critic_messages(…)` / `build_verify_messages(…)` — legacy whole-file (unused)
 - `build_analyze_messages(pairs, glossary)` — PR pre-analyze
 
 ### 18.2. Versioning policy

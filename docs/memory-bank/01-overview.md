@@ -150,10 +150,11 @@ ydbdoc-review CLI (mode=run)
         │      validate placeholders + CLI tokens             │
         │      retry per-segment on failure                   │
         │ e. reinsert_segments(ast, translations) → new AST   │
-        │ f. critic LLM (JSON I/O) on the WHOLE file:         │
-        │      issues[] with structured suggested_text        │
-        │      apply suggested_text to segments               │
-        │      re-validate critic pass → unresolved_issues[]  │
+        │ f. critic LLM (JSON I/O) in **batches** (same char budget as translator):
+        │      segment pairs {source_text, translated_text} per batch
+        │      issues[] with structured suggested_text
+        │      apply suggested_text to segments
+        │      re-validate critic pass (batched) → unresolved_issues[]
         │ g. heuristics: length, cyrillic-in-EN, fence parity │
         │ h. render_markdown(ast) → final markdown            │
         └─────────────────────────────────────────────────────┘

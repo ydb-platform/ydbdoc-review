@@ -35,11 +35,11 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
 5. REINSERT (preserves AST structure)
    translated_doc = reinsert_segments(doc, segments, translations)
 
-6. CRITIC PASS 1 (whole file)
-   translated_text = render_markdown(translated_doc)
-   critic_request = build_critic_prompt(source_text, translated_text, segments, glossary)
-   critic_response = await llm_client.chat(critic_model, critic_request)
-   issues = parse_critic_response(critic_response)
+6. CRITIC PASS 1 (batched segment pairs)
+   batches = chunk_segments(segments, max_chars=4000)
+   for batch in batches:
+       critic_response = llm_client.chat(critic_model, build_critic_batch_prompt(batch, translations))
+       issues += parse_critic_response(critic_response).issues
    # issues = [{segment_id, severity, category, comment, suggested_text}]
 
 7. APPLY CRITIC FIXES
@@ -48,10 +48,10 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
            translations[issue.segment_id] = issue.suggested_text
    translated_doc = reinsert_segments(doc, segments, translations)
 
-8. CRITIC PASS 2 (re-validate)
-   translated_text = render_markdown(translated_doc)
-   verify_response = await llm_client.chat(critic_model, build_verify_prompt(...))
-   unresolved = parse_critic_response(verify_response).issues
+8. CRITIC PASS 2 (batched re-validate)
+   for batch in batches:
+       verify_response = llm_client.chat(critic_model, build_verify_batch_prompt(...))
+       unresolved += parse_critic_response(verify_response).issues
 
 9. HEURISTICS (deterministic)
    warnings = run_file_heuristics(source_text, translated_text, ...)

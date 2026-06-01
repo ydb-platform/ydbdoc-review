@@ -8,20 +8,43 @@ from dataclasses import dataclass, field
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.llm.structured import parse_json_model
+from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import (
     DEFAULT_PROMPT_VERSION,
-    build_critic_messages,
-    build_verify_messages,
+    build_critic_batch_messages,
+    build_verify_batch_messages,
 )
-from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
+from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, CriticVerdict
 from ydbdoc_review.translation.translator import validate_segment_translation
 
 logger = logging.getLogger(__name__)
 
 _MAX_CRITIC_ATTEMPTS = 3
+_VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
+
+
+def merge_verdicts(*verdicts: CriticVerdict) -> CriticVerdict:
+    """Pick the strictest verdict across critic batches."""
+    return max(verdicts, key=lambda v: _VERDICT_RANK[v])
+
+
+def merge_critic_responses(responses: list[CriticResponse]) -> CriticResponse:
+    """Combine batch-level critic/verify responses into one file-level result."""
+    if not responses:
+        return CriticResponse(verdict="ok", issues=[])
+    issues: list[CriticIssueOut] = []
+    verdict: CriticVerdict = "ok"
+    for response in responses:
+        issues.extend(response.issues)
+        verdict = merge_verdicts(verdict, response.verdict)
+    if any(issue.severity == "blocked" for issue in issues):
+        verdict = "blocked"
+    elif issues and verdict == "ok":
+        verdict = "warnings"
+    return CriticResponse(verdict=verdict, issues=issues)
 
 
 def _fallback_critic_response(*, reason: str) -> CriticResponse:
@@ -35,12 +58,13 @@ def _fetch_critic_response(
     messages: list,
     *,
     pass_label: str,
+    max_tokens: int | None = None,
 ) -> CriticResponse:
     """Call critic model with parse retries; fallback instead of raising."""
     last_exc: LLMParseError | None = None
     for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
         try:
-            result = client.chat(messages, role="critic")
+            result = client.chat(messages, role="critic", max_tokens=max_tokens)
             content = (result.content or "").strip()
             if not content:
                 raise LLMParseError("Empty LLM response")
@@ -64,6 +88,94 @@ def parse_critic_response(raw: str) -> CriticResponse:
 
 def _segments_by_id(segments: list[Segment]) -> dict[str, Segment]:
     return {seg.id: seg for seg in segments}
+
+
+def _critic_batches(
+    segments: list[Segment],
+    *,
+    max_chars: int,
+) -> list[Batch]:
+    return chunk_segments(segments, max_chars=max_chars)
+
+
+def _batch_segment_ids(batch: Batch) -> set[str]:
+    return {seg.id for seg in batch.segments}
+
+
+def _prior_issues_for_batch(
+    prior_issues: list[CriticIssueOut],
+    batch: Batch,
+    *,
+    include_global: bool,
+) -> list[dict[str, object]]:
+    """Filter prior issues to those relevant to a verify batch."""
+    ids = _batch_segment_ids(batch)
+    out: list[dict[str, object]] = []
+    for issue in prior_issues:
+        if issue.segment_id is None:
+            if include_global:
+                out.append(issue.model_dump())
+            continue
+        if issue.segment_id in ids:
+            out.append(issue.model_dump())
+    return out
+
+
+def _run_critic_batches(
+    client: YandexLLMClient,
+    *,
+    batches: list[Batch],
+    translations: dict[str, str],
+    glossary: Glossary,
+    file_path: str,
+    source_lang: str,
+    target_lang: str,
+    prompt_version: str,
+    max_tokens: int | None,
+    pass_label: str,
+    prior_issues: list[CriticIssueOut] | None = None,
+) -> CriticResponse:
+    batch_count = len(batches)
+    responses: list[CriticResponse] = []
+    for batch in batches:
+        if prior_issues is None:
+            messages = build_critic_batch_messages(
+                batch,
+                translations,
+                glossary,
+                file_path=file_path,
+                batch_count=batch_count,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                version=prompt_version,
+            )
+            label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
+        else:
+            messages = build_verify_batch_messages(
+                batch,
+                translations,
+                _prior_issues_for_batch(
+                    prior_issues,
+                    batch,
+                    include_global=batch.index == 0,
+                ),
+                glossary,
+                file_path=file_path,
+                batch_count=batch_count,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                version=prompt_version,
+            )
+            label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
+        responses.append(
+            _fetch_critic_response(
+                client,
+                messages,
+                pass_label=label,
+                max_tokens=max_tokens,
+            )
+        )
+    return merge_critic_responses(responses)
 
 
 def apply_critic_fixes(
@@ -108,56 +220,78 @@ def apply_critic_fixes(
 def run_critic(
     client: YandexLLMClient,
     *,
-    source_text: str,
-    translated_text: str,
     segments: list[Segment],
+    translations: dict[str, str],
     glossary: Glossary,
     file_path: str,
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    max_chars: int = 4000,
+    max_tokens: int | None = None,
+    source_text: str = "",
+    translated_text: str = "",
 ) -> CriticResponse:
-    """First-pass whole-file critic review."""
-    messages = build_critic_messages(
-        source_text=source_text,
-        translated_text=translated_text,
-        segments=segments,
+    """First-pass batched critic review over segment pairs."""
+    del source_text, translated_text  # kept for call-site compatibility
+    if not segments:
+        return CriticResponse(verdict="ok", issues=[])
+    batches = _critic_batches(segments, max_chars=max_chars)
+    logger.info(
+        "Critic %s: %s segments in %s batch(es), max_chars=%s",
+        file_path or "<file>",
+        len(segments),
+        len(batches),
+        max_chars,
+    )
+    return _run_critic_batches(
+        client,
+        batches=batches,
+        translations=translations,
         glossary=glossary,
         file_path=file_path,
         source_lang=source_lang,
         target_lang=target_lang,
-        version=prompt_version,
+        prompt_version=prompt_version,
+        max_tokens=max_tokens,
+        pass_label="Critic",
     )
-    return _fetch_critic_response(client, messages, pass_label="Critic")
 
 
 def run_verify(
     client: YandexLLMClient,
     *,
-    source_text: str,
-    translated_text: str,
     segments: list[Segment],
+    translations: dict[str, str],
     prior_issues: list[CriticIssueOut],
     glossary: Glossary,
     file_path: str,
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    max_chars: int = 4000,
+    max_tokens: int | None = None,
+    source_text: str = "",
+    translated_text: str = "",
 ) -> CriticResponse:
-    """Second-pass verify after fixes were applied."""
-    prior_payload = [issue.model_dump() for issue in prior_issues]
-    messages = build_verify_messages(
-        source_text=source_text,
-        translated_text=translated_text,
-        segments=segments,
-        prior_issues=prior_payload,
+    """Second-pass batched verify after fixes were applied."""
+    del source_text, translated_text
+    if not segments:
+        return CriticResponse(verdict="ok", issues=[])
+    batches = _critic_batches(segments, max_chars=max_chars)
+    return _run_critic_batches(
+        client,
+        batches=batches,
+        translations=translations,
         glossary=glossary,
         file_path=file_path,
         source_lang=source_lang,
         target_lang=target_lang,
-        version=prompt_version,
+        prompt_version=prompt_version,
+        max_tokens=max_tokens,
+        pass_label="Verify",
+        prior_issues=prior_issues,
     )
-    return _fetch_critic_response(client, messages, pass_label="Verify")
 
 
 @dataclass
@@ -183,41 +317,43 @@ def review_with_critic(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    max_chars: int = 4000,
+    max_tokens: int | None = None,
     run_second_pass: bool = True,
     translated_text_after_fixes: str | None = None,
 ) -> CriticReviewResult:
-    """Run critic, apply safe fixes, optionally re-verify unresolved issues.
-
-    Pass ``translated_text_after_fixes`` (re-rendered markdown after reinsert) for
-    an accurate verify pass; otherwise verify uses ``translated_text``.
-    """
+    """Run critic, apply safe fixes, optionally re-verify unresolved issues."""
+    del source_text, translated_text_after_fixes
     initial = run_critic(
         client,
-        source_text=source_text,
-        translated_text=translated_text,
         segments=segments,
+        translations=translations,
         glossary=glossary,
         file_path=file_path,
         source_lang=source_lang,
         target_lang=target_lang,
         prompt_version=prompt_version,
+        max_chars=max_chars,
+        max_tokens=max_tokens,
+        translated_text=translated_text,
     )
     fixed, applied, skipped = apply_critic_fixes(translations, segments, initial.issues)
 
-    verify_text = translated_text_after_fixes or translated_text
     unresolved: CriticResponse | None = None
     if run_second_pass and initial.issues:
         unresolved = run_verify(
             client,
-            source_text=source_text,
-            translated_text=verify_text,
             segments=segments,
+            translations=fixed,
             prior_issues=initial.issues,
             glossary=glossary,
             file_path=file_path,
             source_lang=source_lang,
             target_lang=target_lang,
             prompt_version=prompt_version,
+            max_chars=max_chars,
+            max_tokens=max_tokens,
+            translated_text=translated_text,
         )
 
     return CriticReviewResult(

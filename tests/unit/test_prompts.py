@@ -9,12 +9,15 @@ from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.translation.prompts import (
     build_analyze_messages,
+    build_critic_batch_messages,
     build_critic_messages,
     build_translate_messages,
+    build_verify_batch_messages,
     build_verify_messages,
     load_template,
     render_template,
     segments_to_batch_json,
+    segments_to_critic_batch_json,
 )
 
 
@@ -121,3 +124,48 @@ def test_build_verify_messages():
     assert isinstance(user, str)
     assert "Previously reported issues" in user
     assert "s0001" in user
+
+
+def test_segments_to_critic_batch_json():
+    seg = _segment("s0001", "RU text")
+    payload = json.loads(
+        segments_to_critic_batch_json([seg], {"s0001": "EN text"})
+    )
+    row = payload["segments"][0]
+    assert row["source_text"] == "RU text"
+    assert row["translated_text"] == "EN text"
+
+
+def test_build_critic_batch_messages():
+    glossary = load_glossary()
+    batch = Batch(index=0, segments=[_segment("s0001", "RU")])
+    messages = build_critic_batch_messages(
+        batch,
+        {"s0001": "EN"},
+        glossary,
+        file_path="docs/ru/foo.md",
+        batch_count=3,
+    )
+    user = messages[1]["content"]
+    assert isinstance(user, str)
+    assert "Batch: 1 of 3" in user
+    assert '"source_text": "RU"' in user
+    assert '"translated_text": "EN"' in user
+    assert "RU body" not in user
+
+
+def test_build_verify_batch_messages():
+    glossary = load_glossary()
+    batch = Batch(index=1, segments=[_segment("s0002", "RU")])
+    messages = build_verify_batch_messages(
+        batch,
+        {"s0002": "EN"},
+        [{"segment_id": "s0002", "severity": "warning", "category": "x", "comment": "y"}],
+        glossary,
+        file_path="docs/ru/foo.md",
+        batch_count=2,
+    )
+    user = messages[1]["content"]
+    assert isinstance(user, str)
+    assert "Batch: 2 of 2" in user
+    assert "Previously reported issues" in user

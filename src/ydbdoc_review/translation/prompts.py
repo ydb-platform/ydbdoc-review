@@ -15,7 +15,16 @@ from ydbdoc_review.translation.glossary import Glossary
 DEFAULT_PROMPT_VERSION = "v1"
 
 _TEMPLATE_NAMES = frozenset(
-    {"system_common", "translate", "critic", "verify", "analyze", "en_style_guide"}
+    {
+        "system_common",
+        "translate",
+        "critic",
+        "critic_batch",
+        "verify",
+        "verify_batch",
+        "analyze",
+        "en_style_guide",
+    }
 )
 
 
@@ -99,6 +108,90 @@ def build_translate_messages(
             "batch_json": segments_to_batch_json(batch.segments),
             "style_guide_block": _style_guide_block(
                 target_lang=target_lang, version=version
+            ),
+        },
+    )
+    return [
+        {"role": "system", "content": _system_message(glossary, version=version)},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def segments_to_critic_batch_json(
+    segments: list[Segment],
+    translations: dict[str, str],
+) -> str:
+    """Segment source/target pairs for batched critic or verify."""
+    payload = {
+        "segments": [
+            {
+                "id": seg.id,
+                "kind": seg.kind.value,
+                "path": seg.path,
+                "source_text": seg.text,
+                "translated_text": translations.get(seg.id, seg.text),
+            }
+            for seg in segments
+        ]
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def build_critic_batch_messages(
+    batch: Batch,
+    translations: dict[str, str],
+    glossary: Glossary,
+    *,
+    file_path: str,
+    batch_count: int,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    version: str = DEFAULT_PROMPT_VERSION,
+) -> list[ChatCompletionMessageParam]:
+    """Chat messages for one critic batch."""
+    template = load_template("critic_batch", version=version)
+    user_content = render_template(
+        template,
+        {
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "file_path": file_path,
+            "batch_index": str(batch.index + 1),
+            "batch_count": str(batch_count),
+            "batch_json": segments_to_critic_batch_json(batch.segments, translations),
+        },
+    )
+    return [
+        {"role": "system", "content": _system_message(glossary, version=version)},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_verify_batch_messages(
+    batch: Batch,
+    translations: dict[str, str],
+    prior_issues: list[dict[str, Any]],
+    glossary: Glossary,
+    *,
+    file_path: str,
+    batch_count: int,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    version: str = DEFAULT_PROMPT_VERSION,
+) -> list[ChatCompletionMessageParam]:
+    """Chat messages for one verify batch."""
+    template = load_template("verify_batch", version=version)
+    user_content = render_template(
+        template,
+        {
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "file_path": file_path,
+            "batch_index": str(batch.index + 1),
+            "batch_count": str(batch_count),
+            "batch_json": segments_to_critic_batch_json(batch.segments, translations),
+            "prior_issues_json": json.dumps(
+                prior_issues, ensure_ascii=False, indent=2
             ),
         },
     )
