@@ -45,13 +45,17 @@ src/ydbdoc_review/
 │   ├── schemas.py                 ✅ translator JSON pydantic models (D.3)
 │   ├── translator.py              ✅ per-batch segment translation (D.3)
 │   └── critic.py                  ✅ per-file review + apply fixes (D.4)
-├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5)
+├── parsing/                       ✅ COMPLETE (+ B.4 front matter)
+│   ├── front_matter.py            YAML title/description segments
+│   └── …
+├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5 + E)
 │   ├── toc.py                     parse, diff scope, merge, validate
-│   └── redirects.py               Diplodoc redirect list — same pattern
-├── validation/                    ⏳ Phase D/E
-│   ├── markers.py                 ✅ placeholder parity (D.3)
-│   ├── cli_tokens.py              ✅ --flag / $var preservation (D.3)
-│   └── heuristics.py              length ratio, cyrillic-in-en, fence parity
+│   ├── redirects.py               Diplodoc redirect list — same pattern
+│   └── paths.py                   toc/redirect path detection
+├── validation/                    ✅ Phase E
+│   ├── markers.py                 placeholder parity (D.3)
+│   ├── cli_tokens.py              CLI token preservation (D.3)
+│   └── heuristics.py              length ratio, cyrillic, parity checks, nav merge
 ├── pipeline/                      ✅ Phase F
 │   ├── translate_file.py          ✅ per-file pipeline (D.5)
 │   ├── pairs.py                   ✅ RU/EN pairing (F)
