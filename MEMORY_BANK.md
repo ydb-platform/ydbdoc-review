@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: Phase D — glossary (D.1) + navigation TOC/redirect scope merge.
+> Last updated: Phase D — prompt templates and renderer (D.2).
 
 This file is **deliberately verbose**. It is written so that any developer or
 AI assistant joining mid-project can reconstruct the full context: goals,
@@ -215,7 +215,7 @@ src/ydbdoc_review/
 │   └── usage.py                   token / cost tracking
 ├── translation/                   ⏳ Phase D — IN PROGRESS
 │   ├── glossary.py                ✅ load YAML + format for prompts (D.1)
-│   ├── prompts.py                 prompt rendering, versioned
+│   ├── prompts.py                 ✅ template load/render + message builders (D.2)
 │   ├── translator.py              segments → translated segments
 │   └── critic.py                  AST → issues + suggested_text
 ├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5)
@@ -649,9 +649,10 @@ See `ydbdoc_review.llm` package.
 - [x] Unit tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`
 - [ ] `navigation/paths.py` — detect `toc*.yaml` / redirect paths in repo (Phase F)
 
-#### D.2 — Prompt templates (next)
-- [ ] `prompts/v1/system_common.md`, `translate.md`, …
-- [ ] `translation/prompts.py` — render templates with glossary + batch JSON
+#### D.2 — Prompt templates ✅ COMPLETE
+- [x] `prompts/v1/system_common.md`, `translate.md`, `critic.md`, `verify.md`, `analyze.md`, `en_style_guide.md`
+- [x] `translation/prompts.py` — load/render templates, build chat messages + batch JSON
+- [x] Unit tests: `tests/unit/test_prompts.py`
 
 #### D.3+ — Translator, critic, apply fixes
 - [ ] Translator (per-batch, JSON I/O)
@@ -1285,22 +1286,29 @@ remain visible for history.
 
 ---
 
-## 18. Prompts (will be filled in Phase D)
+## 18. Prompts
 
 ### 18.1. Versioning
 
 ```
 src/ydbdoc_review/prompts/
 ├── v1/
-│   ├── system_common.md       Shared system instructions
-│   ├── translate.md           Translator prompt template
+│   ├── system_common.md       Shared system instructions + glossary injection
+│   ├── translate.md           Translator user prompt (batch JSON)
 │   ├── critic.md              Critic prompt template
 │   ├── verify.md              Verify pass prompt template
-│   └── analyze.md             Pre-analyze prompt template
+│   ├── analyze.md             Pre-analyze prompt template
+│   └── en_style_guide.md      EN style rules (injected for ru→en translate)
 └── glossary.yaml              Glossary (shared across versions)
 ```
 
-Each prompt template is markdown with `{placeholders}` filled at runtime.
+Each prompt template is markdown with `{placeholders}` filled at runtime by
+`translation/prompts.py` (`load_template`, `render_template`, `build_*_messages`).
+
+Public builders:
+- `build_translate_messages(batch, glossary, file_path=…)` — segment JSON I/O
+- `build_critic_messages(…)` / `build_verify_messages(…)` — per-file review
+- `build_analyze_messages(pairs, glossary)` — PR pre-analyze
 
 ### 18.2. Versioning policy
 
@@ -1309,25 +1317,11 @@ Each prompt template is markdown with `{placeholders}` filled at runtime.
 - New version (`v2/`) created when behavior changes are non-trivial.
 - The report footer always includes the prompt version used.
 
-### 18.3. Common system instructions (sketch)
+### 18.3. Common system instructions
 
-```
-You are a professional technical translator working on YDB documentation.
-
-CRITICAL RULES:
-- Translate ONLY the provided segments. Do not add, remove, or merge segments.
-- Preserve every placeholder ⟦X{n}⟧ exactly as-is. Do not translate or modify them.
-- Preserve CLI flags exactly: --yaml stays --yaml; do not split into "-- yaml".
-- Preserve identifiers, file paths, URLs, and code snippets verbatim.
-- Use the glossary entries provided. Match terms even across morphological forms.
-- Never use em-dash or en-dash where a hyphen is required (e.g. in --flag).
-- Return ONLY the JSON object requested. No prose, no markdown fences.
-
-GLOSSARY:
-{glossary_yaml}
-```
-
-Exact prompts will be finalized when Phase D starts.
+Implemented in `prompts/v1/system_common.md` (glossary via `{glossary_yaml}`).
+Translator batch schema: `{"segments": [{"id", "kind", "path", "text"}, …]}` →
+response `{"segments": [{"id", "text"}, …]}`.
 
 ---
 
