@@ -58,7 +58,7 @@ See `ydbdoc_review.llm` package.
 - [x] `navigation/toc.py` — parse, `toc_translate_scope`, `merge_en_toc_yaml`, `validate_toc_merge`
 - [x] `navigation/redirects.py` — same pattern for Diplodoc redirect lists
 - [x] Unit tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`
-- [ ] `navigation/paths.py` — detect `toc*.yaml` / redirect paths in repo (Phase F)
+- [x] `navigation/paths.py` — toc/redirect path detection (Phase E)
 
 #### D.2 — Prompt templates ✅ COMPLETE
 - [x] `prompts/v1/system_common.md`, `translate.md`, `critic.md`, `verify.md`, `analyze.md`, `en_style_guide.md`
@@ -99,7 +99,7 @@ See `ydbdoc_review.llm` package.
 - [x] `pipeline/orchestrator.py` — `run_pr_translation` (sequential, per-PR cache)
 - [x] `translate_file` — `enable_translate=False` for critic-only QA
 - [x] Unit tests: `test_pipeline_pairs`, `test_pipeline_analyze`, `test_pipeline_orchestrator`
-- [ ] `navigation/paths.py` — toc/redirect path detection (Phase I glue)
+- [ ] `navigation/paths.py` — toc/redirect path detection (Phase E ✅; workflow merge TBD)
 
 ### Phase G — GitHub integration ✅ COMPLETE
 - [x] `github/client.py` — REST API (PR, files, comments, open PR)
