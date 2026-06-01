@@ -177,6 +177,27 @@ files outside the PR diff.
 Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 `test_navigation_paths.py`, `test_validation_heuristics.py`.
 
+### 6.18. Translation branch always on upstream (fork PRs)
+
+**Problem:** Pushing `ydbdoc-review/pr-N` to the contributor fork (PR head repo)
+requires write access to someone else's fork. GitHub Actions `GITHUB_TOKEN` only
+has write on the upstream repo (`ydb-platform/ydb`), so fork pushes fail with
+`permission denied`.
+
+**Decision:**
+
+1. **Fetch** source content from the PR head remote (fork or same-repo) when
+   building the translation branch.
+2. **Push** the translation branch always to upstream (`repo_https_clone_url`).
+3. **Open translation PR** on upstream with `head=ydbdoc-review/pr-N` and
+   `base=translation_pr_base(ctx)`:
+   - same-repo source PR → base = source head branch (stacked PR);
+   - fork source PR → base = source PR base branch (`main`, etc.) because the
+     contributor feature branch does not exist on upstream.
+
+Helpers: `is_fork_head`, `translation_pr_base`, `repo_https_clone_url` in
+`github/pr.py`. See **07-pipeline** §16.3.
+
 ---
 
 ---

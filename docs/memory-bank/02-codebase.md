@@ -63,7 +63,7 @@ src/ydbdoc_review/
 ├── github/                        ✅ COMPLETE (Phase G)
 │   ├── client.py                  GitHub REST (requests)
 │   ├── git_ops.py                 local git diff / branch / commit / push
-│   ├── pr.py                      PR context, file changes, pair loading
+│   ├── pr.py                      PR context, fork/upstream helpers, file changes
 │   ├── workflow.py                run_doc_translate, run_doc_verify
 │   └── errors.py                  typed GitHub errors
 ├── reporting/                     ✅ COMPLETE (Phase H)

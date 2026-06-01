@@ -218,6 +218,104 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     assert result.committed is True
     assert result.pushed is True
     assert mock_gh.return_value.post_issue_comment.call_count == 2
+    mock_gh.return_value.create_pull.assert_called_once()
+    _, kwargs = mock_gh.return_value.create_pull.call_args
+    assert kwargs["head"] == "ydbdoc-review/pr-7"
+    assert kwargs["base"] == "feature/docs"
+
+
+def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
+    """Fork PR: branch is pushed to upstream, translation PR targets base branch."""
+    pull = {
+        "title": "docs",
+        "head": {
+            "ref": "parameterized-query",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/contrib/ydb.git",
+                "full_name": "contrib/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+    with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prep:
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.return_value = pull
+                        mock_gh.return_value.create_pull.return_value = (
+                            "https://github.com/o/r/pull/99",
+                            99,
+                        )
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/ru/a.md", "modified")],
+                        ):
+                            run_doc_translate(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=7,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
+
+    prep.assert_called_once()
+    assert prep.call_args.kwargs["base_remote_url"] == "https://github.com/contrib/ydb.git"
+    push.assert_called_once()
+    assert push.call_args.args[4] == "https://github.com/o/r.git"
+    _, kwargs = mock_gh.return_value.create_pull.call_args
+    assert kwargs["base"] == "main"
+    assert kwargs["head"] == "ydbdoc-review/pr-7"
+
+
+def test_run_doc_verify_pushes_upstream(git_repo: str):
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+
+    pull = {
+        "title": "Auto-translate docs from PR #3",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/pr-3",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/contrib/ydb.git",
+                "full_name": "contrib/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ):
+        with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+            with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                    mock_gh.return_value.get_pull.return_value = pull
+                    mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                    mock_gh.return_value.post_issue_comment.return_value = "url"
+                    with patch(
+                        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                        return_value=[("ydb/docs/en/a.md", "modified")],
+                    ):
+                        run_doc_verify(
+                            repo_path=git_repo,
+                            github_repo="o/r",
+                            pr_number=11,
+                            merge_base_with="HEAD",
+                            dry_run=False,
+                            config=load_config(env=_env()),
+                        )
+
+    push.assert_called_once()
+    assert push.call_args.args[4] == "https://github.com/o/r.git"
 
 
 def test_run_doc_verify_posts_comment(git_repo: str):

@@ -19,12 +19,14 @@ from ydbdoc_review.github.git_ops import (
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    list_pr_file_changes_git,
     load_pair_contents,
     parse_repo,
     parse_source_pr_from_text,
     pull_request_context,
+    repo_https_clone_url,
     source_pr_number_from_branch,
-    list_pr_file_changes_git,
+    translation_pr_base,
 )
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMError
@@ -193,6 +195,7 @@ def run_doc_translate(
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
     branch = f"{cfg.paths.translation_branch_prefix}{pr_number}"
+    upstream_url = repo_https_clone_url(owner, repo)
 
     changes = list_pr_file_changes_git(repo_path, merge_base_with)
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
@@ -244,12 +247,19 @@ def run_doc_translate(
             _GITHUB_ACTOR_EMAIL,
         )
         if committed:
+            logger.info(
+                "Pushing translation branch %s to upstream %s/%s (source head: %s)",
+                branch,
+                owner,
+                repo,
+                ctx.head_repo_full_name,
+            )
             push_branch(
                 repo_path,
                 "ydbdoc-review-push",
                 branch,
                 push_token,
-                ctx.head_repo_https_url,
+                upstream_url,
             )
             pushed = True
     job.committed = committed
@@ -271,7 +281,7 @@ def run_doc_translate(
             repo,
             title=title,
             head=branch,
-            base=ctx.head_ref,
+            base=translation_pr_base(ctx),
             body=body,
         )
         if opened:
@@ -333,6 +343,7 @@ def run_doc_verify(
     gh = GitHubClient(api_token)
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
+    upstream_url = repo_https_clone_url(owner, repo)
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
@@ -391,7 +402,7 @@ def run_doc_verify(
                 "ydbdoc-review-push",
                 ctx.head_ref,
                 push_token,
-                ctx.head_repo_https_url,
+                upstream_url,
             )
             pushed = True
     job.committed = committed

@@ -205,7 +205,9 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 - Secrets in the `ydb` repo:
   - `YANDEX_CLOUD_FOLDER_DOC_REVIEW`
   - `YANDEX_CLOUD_API_KEY_DOC_REVIEW`
-  - `YDBDOC_PUSH_PAT` (for push to head of PR; required for forks)
+  - `YDBDOC_PUSH_PAT` (optional; same as `GITHUB_PUSH_TOKEN` if upstream push needs
+    a PAT with `contents: write`; **not** required for fork PRs since v0.1.0 pushes
+    translation branches to upstream, not the contributor fork)
 - Tag `v0.1.0` will be **moved forward** to the v2 merge commit at release time
   (the user has limited ability to change CI config in `ydb`).
 

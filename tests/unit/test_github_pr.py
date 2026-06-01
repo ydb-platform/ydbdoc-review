@@ -8,18 +8,82 @@ from pathlib import Path
 import pytest
 
 from ydbdoc_review.github.pr import (
+    PullRequestContext,
     build_pairs_from_changes,
+    is_fork_head,
     list_pr_file_changes_api,
     load_pair_contents,
     parse_repo,
     parse_source_pr_from_text,
     pull_request_context,
+    repo_https_clone_url,
     source_pr_number_from_branch,
+    translation_pr_base,
 )
 
 
 def test_parse_repo():
     assert parse_repo("ydb-platform/ydb") == ("ydb-platform", "ydb")
+
+
+def test_repo_https_clone_url():
+    assert repo_https_clone_url("ydb-platform", "ydb") == (
+        "https://github.com/ydb-platform/ydb.git"
+    )
+
+
+def test_is_fork_head():
+    same = PullRequestContext(
+        number=1,
+        title="t",
+        owner="o",
+        repo="r",
+        head_ref="feat",
+        head_sha="abc",
+        head_repo_https_url="https://github.com/o/r.git",
+        head_repo_full_name="o/r",
+        base_ref="main",
+    )
+    fork = PullRequestContext(
+        number=2,
+        title="t",
+        owner="o",
+        repo="r",
+        head_ref="feat",
+        head_sha="abc",
+        head_repo_https_url="https://github.com/contrib/r.git",
+        head_repo_full_name="contrib/r",
+        base_ref="main",
+    )
+    assert is_fork_head(same) is False
+    assert is_fork_head(fork) is True
+
+
+def test_translation_pr_base():
+    same = PullRequestContext(
+        number=1,
+        title="t",
+        owner="o",
+        repo="r",
+        head_ref="feature/docs",
+        head_sha="abc",
+        head_repo_https_url="https://github.com/o/r.git",
+        head_repo_full_name="o/r",
+        base_ref="main",
+    )
+    fork = PullRequestContext(
+        number=2,
+        title="t",
+        owner="o",
+        repo="r",
+        head_ref="contrib-feature",
+        head_sha="abc",
+        head_repo_https_url="https://github.com/contrib/r.git",
+        head_repo_full_name="contrib/r",
+        base_ref="main",
+    )
+    assert translation_pr_base(same) == "feature/docs"
+    assert translation_pr_base(fork) == "main"
 
 
 def test_parse_repo_invalid():

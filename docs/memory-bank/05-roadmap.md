@@ -102,7 +102,7 @@ See `ydbdoc_review.llm` package.
 ### Phase G — GitHub integration ✅ COMPLETE
 - [x] `github/client.py` — REST API (PR, files, comments, open PR)
 - [x] `github/git_ops.py` — local git diff, branch, commit, push
-- [x] `github/pr.py` — enumerate changes, load pair contents, PR context
+- [x] `github/pr.py` — enumerate changes, load pair contents, PR context; fork detection + upstream push helpers
 - [x] `github/workflow.py` — `run_doc_translate`, `run_doc_verify`
 - [x] `Secrets.require_github()` in config loader
 - [x] Unit tests: `test_github_client`, `test_github_git_ops`, `test_github_pr`, `test_github_workflow`, `test_reporting_builder`

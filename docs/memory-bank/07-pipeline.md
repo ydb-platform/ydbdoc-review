@@ -105,14 +105,14 @@ INPUT: pr_number, source_repo, target_branch_base
 
 4. GIT
    branch = f"ydbdoc-review/pr-{pr_number}"
-   git.create_branch_from(source_pr_head_ref, branch)
+   git.create_branch_from(source_pr_head_ref, branch)  # fetch from PR head (fork OK)
    git.commit_all(branch, message=build_commit_message(reports))
-   git.push(branch)
+   git.push(branch, remote=upstream)  # always ydb-platform/ydb, not contributor fork
 
 5. GITHUB
    tr_pr = github.open_pr(
        head=branch,
-       base=source_pr_head_ref,  # i.e. the PR's HEAD branch
+       base=translation_pr_base(ctx),  # same-repo: source head; fork: source base (main)
        title=f"Auto-translate docs from PR #{pr_number}",
        body=build_pr_description(reports),
    )
@@ -174,7 +174,10 @@ If EN exists but RU doesn't → create RU from EN.
 ### 16.3. Translation branch and PR
 
 - Branch: `ydbdoc-review/pr-<source_pr_number>`.
-- Branch base: the HEAD of the source PR (not `main`).
+- **Push target:** always the upstream repository (`ydb-platform/ydb`), not the
+  contributor fork. Content is still fetched from the source PR head (fork or
+  same-repo).
+- Branch base when building: the HEAD of the source PR (not `main`).
 - One commit per run. Message:
   ```
   Auto-translate docs from PR #N
@@ -186,10 +189,14 @@ If EN exists but RU doesn't → create RU from EN.
   Critic: <model>
   ydbdoc-review v0.2.0
   ```
-- Translation PR base: the source PR's HEAD branch.
+- Translation PR base:
+  - **Same-repo PR:** the source PR's HEAD branch (stacked PR).
+  - **Fork PR:** the source PR's base branch on upstream (`main`, etc.) — the
+    contributor feature branch does not exist on upstream.
 - Translation PR title: "Auto-translate docs from PR #N".
 - Translation PR body: short summary + link to source PR.
-- Committer/author: GitHub Actions bot (uses `GITHUB_TOKEN`).
+- Committer/author: GitHub Actions bot (uses `GITHUB_TOKEN` / `GITHUB_PUSH_TOKEN`
+  with `contents: write` on upstream).
 
 ### 16.4. Verify mode commits
 

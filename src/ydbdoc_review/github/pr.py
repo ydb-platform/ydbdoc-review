@@ -71,6 +71,29 @@ def pull_request_context(
     )
 
 
+def repo_https_clone_url(owner: str, repo: str) -> str:
+    """HTTPS clone URL for the upstream (target) repository."""
+    return f"https://github.com/{owner}/{repo}.git"
+
+
+def is_fork_head(ctx: PullRequestContext) -> bool:
+    """True when the source PR head branch lives on a contributor fork."""
+    upstream = f"{ctx.owner}/{ctx.repo}".casefold()
+    return ctx.head_repo_full_name.casefold() != upstream
+
+
+def translation_pr_base(ctx: PullRequestContext) -> str:
+    """Base branch for the auto-translation PR opened on upstream.
+
+    Same-repo PRs merge translations back into the source feature branch.
+    Fork PRs target the source PR base branch on upstream (``main``, etc.)
+    because the contributor feature branch does not exist on upstream.
+    """
+    if is_fork_head(ctx):
+        return ctx.base_ref
+    return ctx.head_ref
+
+
 def list_pr_file_changes_api(
     client: GitHubClient, owner: str, repo: str, pr_number: int
 ) -> list[tuple[str, ChangeKind]]:

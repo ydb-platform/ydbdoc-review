@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: post Phase I + self-check tests (`2370b12`); see [05-roadmap](docs/memory-bank/05-roadmap.md).
+> Last updated: upstream translation branch push for fork PRs; see [05-roadmap](docs/memory-bank/05-roadmap.md).
 
 The Memory Bank is **deliberately verbose** — written so any developer or AI
 assistant can reconstruct full project context. It no longer lives in one file;

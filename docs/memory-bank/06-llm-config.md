@@ -170,8 +170,9 @@ Order of precedence:
 
 All four pairs supported simultaneously; first found wins.
 
-GitHub: `GITHUB_TOKEN` (built-in), `GITHUB_PUSH_TOKEN`/`YDBDOC_PUSH_PAT`
-(for fork pushes).
+GitHub: `GITHUB_TOKEN` (built-in), optional `GITHUB_PUSH_TOKEN`/`YDBDOC_PUSH_PAT`
+(with `contents: write` on upstream). Translation branches push to upstream, not
+contributor forks.
 
 ### 13.5. `.env.example` (committed)
 
