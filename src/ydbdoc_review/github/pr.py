@@ -82,16 +82,25 @@ def is_fork_head(ctx: PullRequestContext) -> bool:
     return ctx.head_repo_full_name.casefold() != upstream
 
 
-def translation_pr_base(ctx: PullRequestContext) -> str:
-    """Base branch for the auto-translation PR opened on upstream.
+def translation_branch_base(ctx: PullRequestContext) -> tuple[str, str]:
+    """Remote URL and branch ref to create the translation branch on upstream.
 
-    Same-repo PRs merge translations back into the source feature branch.
-    Fork PRs target the source PR base branch on upstream (``main``, etc.)
-    because the contributor feature branch does not exist on upstream.
+    Fork PRs: branch from upstream ``base_ref`` (e.g. ``main``) — the branch the
+    source PR targets / merges into. Contributor feature branches do not exist on
+    upstream; basing on the fork head pulls foreign history and can break push.
+
+    Same-repo PRs: branch from the source PR head on upstream (stacked PR).
     """
+    upstream = repo_https_clone_url(ctx.owner, ctx.repo)
     if is_fork_head(ctx):
-        return ctx.base_ref
-    return ctx.head_ref
+        return upstream, ctx.base_ref
+    return upstream, ctx.head_ref
+
+
+def translation_pr_base(ctx: PullRequestContext) -> str:
+    """Base branch for the auto-translation PR opened on upstream."""
+    _, base_ref = translation_branch_base(ctx)
+    return base_ref
 
 
 def list_pr_file_changes_api(

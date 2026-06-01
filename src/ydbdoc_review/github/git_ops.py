@@ -212,7 +212,21 @@ def push_branch(
 ) -> None:
     url = remote_push_url(base_https_url, token)
     ensure_remote(repo, remote_name, url)
-    subprocess.run(
+    proc = subprocess.run(
         ["git", "-C", repo, "push", remote_name, f"HEAD:refs/heads/{branch}"],
-        check=True,
+        capture_output=True,
+        text=True,
     )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        hint = ""
+        if "workflows" in err.lower():
+            hint = (
+                " Hint: branch may include fork history or workflow changes; "
+                "translation branches must be based on upstream base (main), "
+                "not the contributor fork. Ensure YDBDOC_PUSH_PAT has "
+                "contents:write on the upstream repo."
+            )
+        raise RuntimeError(
+            f"git push to {base_https_url} refs/heads/{branch} failed: {err}.{hint}"
+        ) from None

@@ -186,16 +186,18 @@ has write on the upstream repo (`ydb-platform/ydb`), so fork pushes fail with
 
 **Decision:**
 
-1. **Fetch** source content from the PR head remote (fork or same-repo) when
-   building the translation branch.
-2. **Push** the translation branch always to upstream (`repo_https_clone_url`).
-3. **Open translation PR** on upstream with `head=ydbdoc-review/pr-N` and
-   `base=translation_pr_base(ctx)`:
-   - same-repo source PR → base = source head branch (stacked PR);
-   - fork source PR → base = source PR base branch (`main`, etc.) because the
-     contributor feature branch does not exist on upstream.
+1. **Translate** from the source PR diff / checkout (fork head content in CI).
+2. **Create branch** on upstream only — never on the contributor fork.
+3. **Branch from** `translation_branch_base(ctx)`:
+   - fork PR → upstream `base_ref` (`main`);
+   - same-repo → upstream source head branch.
+4. **Push** to upstream; **open translation PR** with `base=translation_pr_base(ctx)`
+   (same ref as branch start for fork PRs: merge translation into `main`).
 
-Helpers: `is_fork_head`, `translation_pr_base`, `repo_https_clone_url` in
+Do not base the translation branch on the fork head: that replays foreign commits
+and GitHub may reject push (`workflows` scope / permission errors).
+
+Helpers: `translation_branch_base`, `translation_pr_base`, `is_fork_head` in
 `github/pr.py`. See **07-pipeline** §16.3.
 
 ### 6.19. Batched critic (not whole-file)

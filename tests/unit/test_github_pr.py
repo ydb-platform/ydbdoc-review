@@ -19,6 +19,7 @@ from ydbdoc_review.github.pr import (
     repo_https_clone_url,
     source_pr_number_from_branch,
     translation_pr_base,
+    translation_branch_base,
 )
 
 
@@ -59,7 +60,7 @@ def test_is_fork_head():
     assert is_fork_head(fork) is True
 
 
-def test_translation_pr_base():
+def test_translation_branch_base():
     same = PullRequestContext(
         number=1,
         title="t",
@@ -81,6 +82,14 @@ def test_translation_pr_base():
         head_repo_https_url="https://github.com/contrib/r.git",
         head_repo_full_name="contrib/r",
         base_ref="main",
+    )
+    assert translation_branch_base(same) == (
+        "https://github.com/o/r.git",
+        "feature/docs",
+    )
+    assert translation_branch_base(fork) == (
+        "https://github.com/o/r.git",
+        "main",
     )
     assert translation_pr_base(same) == "feature/docs"
     assert translation_pr_base(fork) == "main"

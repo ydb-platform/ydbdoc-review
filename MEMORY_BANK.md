@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: batched critic; see [03-design-decisions](docs/memory-bank/03-design-decisions.md) §6.19.
+> Last updated: fork translation branch from upstream main (not fork head); §6.18.
 
 The Memory Bank is **deliberately verbose** — written so any developer or AI
 assistant can reconstruct full project context. It no longer lives in one file;

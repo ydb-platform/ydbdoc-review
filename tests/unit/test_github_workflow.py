@@ -225,7 +225,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
 
 
 def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
-    """Fork PR: branch is pushed to upstream, translation PR targets base branch."""
+    """Fork PR: branch from upstream main, push translation branch, PR targets main."""
     pull = {
         "title": "docs",
         "head": {
@@ -264,7 +264,9 @@ def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
                             )
 
     prep.assert_called_once()
-    assert prep.call_args.kwargs["base_remote_url"] == "https://github.com/contrib/ydb.git"
+    assert prep.call_args.kwargs["base_remote_url"] == "https://github.com/o/r.git"
+    assert prep.call_args.kwargs["base_branch"] == "main"
+    assert prep.call_args.kwargs["base_remote_name"] == "ydbdoc-review-upstream"
     push.assert_called_once()
     assert push.call_args.args[4] == "https://github.com/o/r.git"
     _, kwargs = mock_gh.return_value.create_pull.call_args

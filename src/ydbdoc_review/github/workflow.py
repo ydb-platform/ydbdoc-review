@@ -26,6 +26,7 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
+    translation_branch_base,
     translation_pr_base,
 )
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -196,6 +197,7 @@ def run_doc_translate(
     ctx = pull_request_context(gh, owner, repo, pr_number)
     branch = f"{cfg.paths.translation_branch_prefix}{pr_number}"
     upstream_url = repo_https_clone_url(owner, repo)
+    branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
     changes = list_pr_file_changes_git(repo_path, merge_base_with)
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
@@ -233,9 +235,9 @@ def run_doc_translate(
         prepare_translation_branch_on_base(
             repo_path,
             translation_branch=branch,
-            base_remote_url=ctx.head_repo_https_url,
-            base_remote_name="ydbdoc-review-base",
-            base_branch=ctx.head_ref,
+            base_remote_url=branch_remote_url,
+            base_remote_name="ydbdoc-review-upstream",
+            base_branch=branch_start_ref,
             paths=touched,
         )
         msg = build_commit_message(pr_number, pr_result, config=cfg)
@@ -248,10 +250,11 @@ def run_doc_translate(
         )
         if committed:
             logger.info(
-                "Pushing translation branch %s to upstream %s/%s (source head: %s)",
+                "Pushing translation branch %s to %s/%s (from upstream %s, source PR head: %s)",
                 branch,
                 owner,
                 repo,
+                branch_start_ref,
                 ctx.head_repo_full_name,
             )
             push_branch(
