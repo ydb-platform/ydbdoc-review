@@ -17,11 +17,28 @@ from ydbdoc_review.translation.critic import (
     run_critic as run_critic_pass,
     run_verify,
 )
+from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
+
+
+def _align_translations(
+    source_segments: list[Segment],
+    target_text: str,
+) -> dict[str, str]:
+    """Map source segment ids → target segment texts (same structure required)."""
+    target_segments = extract_segments(parse_markdown(target_text))
+    if len(target_segments) != len(source_segments):
+        raise TranslationValidationError(
+            f"segment count mismatch: source {len(source_segments)} vs "
+            f"target {len(target_segments)}"
+        )
+    return {
+        src.id: tgt.text for src, tgt in zip(source_segments, target_segments, strict=True)
+    }
 
 
 def _render_with_translations(
@@ -72,6 +89,8 @@ def translate_file(
     cache: dict[str, str] | None = None,
     max_parallel_batches: int | None = None,
     enable_critic: bool = True,
+    enable_translate: bool = True,
+    existing_target_text: str | None = None,
 ) -> FileTranslationResult:
     """Run the full per-file translation pipeline on markdown ``source_text``."""
     cfg = config or load_config()
@@ -89,26 +108,34 @@ def translate_file(
         return FileTranslationResult.from_usage(
             tracker=client.usage_tracker,
             file_path=file_path,
-            final_text=source_text,
+            final_text=existing_target_text or source_text,
             segments_count=0,
             verdict="ok",
             prompt_version=version,
         )
 
-    translations = translate_segments(
-        segments,
-        client,
-        glossary,
-        file_path=file_path,
-        source_lang=src_lang,
-        target_lang=tgt_lang,
-        max_chars=batch_chars,
-        prompt_version=version,
-        cache=cache,
-        max_parallel_batches=parallel,
-    )
-
-    translated_text = _render_with_translations(source_doc, segments, translations)
+    if enable_translate:
+        translations = translate_segments(
+            segments,
+            client,
+            glossary,
+            file_path=file_path,
+            source_lang=src_lang,
+            target_lang=tgt_lang,
+            max_chars=batch_chars,
+            prompt_version=version,
+            cache=cache,
+            max_parallel_batches=parallel,
+        )
+        translated_text = _render_with_translations(source_doc, segments, translations)
+    else:
+        if existing_target_text is None:
+            raise ValueError("existing_target_text is required when enable_translate=False")
+        try:
+            translations = _align_translations(segments, existing_target_text)
+        except TranslationValidationError:
+            translations = {seg.id: seg.text for seg in segments}
+        translated_text = existing_target_text
 
     critic_initial: CriticResponse | None = None
     critic_applied = []

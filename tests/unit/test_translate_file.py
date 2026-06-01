@@ -206,3 +206,21 @@ def test_translate_file_verdict_blocked_on_unresolved():
 
     assert result.verdict == "blocked"
     assert result.critic_unresolved is not None
+
+
+def test_translate_file_critic_only_mode():
+    source = "Привет.\n"
+    target = "Hello.\n"
+    segments = extract_segments(parse_markdown(source))
+    critic_raw = json.dumps({"verdict": "ok", "issues": []})
+    # critic_only: no translate call — only critic
+    client = _mock_client([critic_raw])
+    result = translate_file(
+        source,
+        client,
+        load_glossary(),
+        enable_translate=False,
+        existing_target_text=target,
+    )
+    assert result.final_text == target
+    assert result.critic_initial is not None

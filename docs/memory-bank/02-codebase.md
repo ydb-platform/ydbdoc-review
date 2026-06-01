@@ -52,10 +52,12 @@ src/ydbdoc_review/
 │   ├── markers.py                 ✅ placeholder parity (D.3)
 │   ├── cli_tokens.py              ✅ --flag / $var preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic-in-en, fence parity
-├── pipeline/                      ⏳ Phase F
-│   ├── translate_file.py          ✅ per-file pipeline glue (D.5)
-│   ├── analyze.py                 pre-analyze: does this need translation?
-│   └── orchestrator.py            PR-level orchestration
+├── pipeline/                      ✅ Phase F
+│   ├── translate_file.py          ✅ per-file pipeline (D.5)
+│   ├── pairs.py                   ✅ RU/EN pairing (F)
+│   ├── analyze.py                 ✅ pre-analyze plans (F)
+│   ├── orchestrator.py            ✅ run_pr_translation (F)
+│   └── types.py                   result dataclasses
 ├── github/                        ⏳ Phase G
 │   ├── pr.py                      enumerate files, pair RU/EN
 │   ├── branch.py                  ydbdoc-review/pr-N branch ops

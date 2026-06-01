@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from ydbdoc_review.llm.usage import UsageTracker
+from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
@@ -44,3 +45,42 @@ class FileTranslationResult:
         data.setdefault("output_tokens", tracker.total_output_tokens)
         data.setdefault("estimated_cost_usd", tracker.estimate_cost_usd())
         return cls(**data)  # type: ignore[arg-type]
+
+
+@dataclass
+class PairRunResult:
+    """Outcome for one pair in a PR translation run."""
+
+    plan: PairPlan
+    target_text: str | None = None
+    deleted: bool = False
+    skipped: bool = False
+    file_result: FileTranslationResult | None = None
+    error: str | None = None
+
+
+@dataclass
+class PRTranslationResult:
+    """Aggregate outcome for a PR-level translation job."""
+
+    pair_results: list[PairRunResult] = field(default_factory=list)
+
+    @property
+    def translated_count(self) -> int:
+        return sum(
+            1
+            for r in self.pair_results
+            if r.file_result is not None and not r.skipped and not r.deleted
+        )
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for r in self.pair_results if r.error is not None)
+
+    def usage_summary(self, tracker: UsageTracker) -> dict[str, float | int | list[str]]:
+        return {
+            "input_tokens": tracker.total_input_tokens,
+            "output_tokens": tracker.total_output_tokens,
+            "estimated_cost_usd": tracker.estimate_cost_usd(),
+            "models_used": sorted({r.model_slug for r in tracker.records if r.success}),
+        }

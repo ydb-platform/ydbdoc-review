@@ -91,12 +91,13 @@ See `ydbdoc_review.llm` package.
 - [ ] Fence parity, heading parity, list-tab parity
 - [ ] TOC / redirect merge validation (`validate_toc_merge`, `validate_redirect_merge`)
 
-### Phase F — Pipeline & orchestrator
-- [ ] Pre-analyze pass: which files need translation
-- [x] Per-file pipeline glue (`pipeline/translate_file.py`, D.5)
-- [ ] PR-level orchestrator: pair RU/EN, new/deleted/renamed
-- [ ] Per-PR cache
-- [ ] Sequential files, parallel batches (limit 3)
+### Phase F — Pipeline & orchestrator ✅ COMPLETE
+- [x] `pipeline/pairs.py` — RU/EN mirroring, `build_doc_pairs`
+- [x] `pipeline/analyze.py` — heuristic + LLM pre-analyze, `plan_pairs`
+- [x] `pipeline/orchestrator.py` — `run_pr_translation` (sequential, per-PR cache)
+- [x] `translate_file` — `enable_translate=False` for critic-only QA
+- [x] Unit tests: `test_pipeline_pairs`, `test_pipeline_analyze`, `test_pipeline_orchestrator`
+- [ ] `navigation/paths.py` — toc/redirect path detection (Phase G glue)
 
 ### Phase G — GitHub integration
 - [ ] PR file enumeration (git diff vs base)

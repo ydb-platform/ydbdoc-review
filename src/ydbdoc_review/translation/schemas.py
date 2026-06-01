@@ -43,3 +43,26 @@ class CriticResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     verdict: CriticVerdict
     issues: list[CriticIssueOut] = Field(default_factory=list)
+
+
+AnalyzeTarget = Literal["en", "ru"]
+
+
+class AnalyzePairResult(BaseModel):
+    """One pair from pre-analyze LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+    ru_path: str
+    en_path: str
+    ru_present: bool
+    en_present: bool
+    semantically_aligned: bool
+    needs_generation_for: AnalyzeTarget | None = None
+    summary: str
+
+
+class AnalyzeBatchResponse(BaseModel):
+    """Top-level JSON from analyze prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+    results: list[AnalyzePairResult]
