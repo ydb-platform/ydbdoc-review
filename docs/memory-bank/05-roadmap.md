@@ -24,10 +24,11 @@
 - [x] B.2 Re-insertion + identity round-trip on all 33 real fixtures
 - [x] B.3 Chunker (greedy character budget, no segment split)
 
-### Phase B.4 — Front matter (deferred to after Phase C)
-- [ ] Parse YAML front matter
-- [ ] Treat `title:` and `description:` as segments
-- [ ] Pass through other keys (`vcsPath:`, `editable:` etc.)
+### Phase B.4 — Front matter ✅ COMPLETE
+- [x] `parsing/front_matter.py` — parse/dump YAML; `title` / `description` translatable
+- [x] `segmentation/extractor.py` — front matter segments (`SegmentKind.FRONT_MATTER`)
+- [x] `segmentation/reinsert.py` — apply translations; pass through `vcsPath`, `editable`, …
+- [x] Unit tests: `test_front_matter.py`
 
 ### Phase C — LLM client ✅ COMPLETE
 - [x] OpenAI-compatible client for Yandex AI Studio
@@ -83,13 +84,14 @@ See `ydbdoc_review.llm` package.
 
 ### Phase D — Translator + Critic ✅ COMPLETE
 
-### Phase E — Validation heuristics
+### Phase E — Validation heuristics ✅ COMPLETE
 - [x] Placeholder count check (`validation/markers.py` — wired in translator)
 - [x] CLI-token preservation (`validation/cli_tokens.py` — wired in translator)
-- [ ] Length ratio (RU↔EN sane bounds)
-- [ ] Cyrillic-in-EN detector
-- [ ] Fence parity, heading parity, list-tab parity
-- [ ] TOC / redirect merge validation (`validate_toc_merge`, `validate_redirect_merge`)
+- [x] `validation/heuristics.py` — length ratio, cyrillic-in-EN, fence/heading/list-tab parity
+- [x] TOC / redirect merge validation wrappers (`validate_toc_merge`, `validate_redirect_merge`)
+- [x] `navigation/paths.py` — detect toc/redirect YAML paths
+- [x] Wired in `translate_file` (markdown heuristics + verdict bump)
+- [x] Unit tests: `test_validation_heuristics`, `test_navigation_paths`
 
 ### Phase F — Pipeline & orchestrator ✅ COMPLETE
 - [x] `pipeline/pairs.py` — RU/EN mirroring, `build_doc_pairs`

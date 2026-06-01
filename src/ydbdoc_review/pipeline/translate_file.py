@@ -23,6 +23,7 @@ from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
+from ydbdoc_review.validation.heuristics import bump_verdict_for_heuristics, run_file_heuristics
 
 
 def _align_translations(
@@ -180,8 +181,13 @@ def translate_file(
         unresolved=critic_unresolved,
     )
 
-    # Phase E: deterministic heuristics hook (empty until implemented).
-    heuristic_warnings: list[str] = []
+    heuristic_warnings = run_file_heuristics(
+        source_text,
+        translated_text,
+        source_lang=src_lang,
+        target_lang=tgt_lang,
+    )
+    verdict = bump_verdict_for_heuristics(verdict, heuristic_warnings)
 
     return FileTranslationResult.from_usage(
         tracker=client.usage_tracker,

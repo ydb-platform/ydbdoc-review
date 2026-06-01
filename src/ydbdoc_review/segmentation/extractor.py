@@ -30,6 +30,7 @@ from ydbdoc_review.parsing.ast_types import (
     YfmNote,
     YfmTabs,
 )
+from ydbdoc_review.parsing.front_matter import translatable_front_matter_fields
 from ydbdoc_review.segmentation.inline_protector import protect_inline
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 
@@ -55,6 +56,7 @@ def extract_segments(
 ) -> list[Segment]:
     """Top-level: extract all translatable segments from a document."""
     state = _ExtractState(tab_title_whitelist)
+    state.extract_front_matter(doc)
     state.walk_blocks(doc.children, ast_path=[], path=[])
     return state.segments
 
@@ -67,6 +69,21 @@ class _ExtractState:
     # -- id helpers --
     def next_id(self) -> str:
         return f"s{len(self.segments) + 1:04d}"
+
+    def extract_front_matter(self, doc: Document) -> None:
+        if doc.front_matter is None:
+            return
+        for key, text in translatable_front_matter_fields(doc.front_matter).items():
+            self.segments.append(
+                Segment(
+                    id=self.next_id(),
+                    kind=SegmentKind.FRONT_MATTER,
+                    path=[f"front_matter:{key}"],
+                    text=text,
+                    placeholders=[],
+                    ast_path=[key],
+                )
+            )
 
     # -- block walking --
     def walk_blocks(

@@ -18,6 +18,7 @@ from ydbdoc_review.parsing.ast_types import (
     YfmTab,
     YfmTabs,
 )
+from ydbdoc_review.parsing.front_matter import apply_front_matter_updates
 from ydbdoc_review.parsing.inline_parser import parse_inline_text
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 
@@ -40,10 +41,18 @@ def reinsert_segments(
     the input doc is modified. (Pydantic models are mutable.) Callers that
     need immutability should deepcopy first.
     """
+    fm_updates: dict[str, str] = {}
     for seg in segments:
         translated = translations.get(seg.id, seg.text)
+        if seg.kind == SegmentKind.FRONT_MATTER:
+            key = seg.ast_path[0]
+            if isinstance(key, str):
+                fm_updates[key] = translated
+            continue
         new_inline = _build_inline_from_translation(translated, seg.placeholders)
         _set_inline_at_ast_path(doc, seg, new_inline)
+    if fm_updates and doc.front_matter is not None:
+        doc.front_matter = apply_front_matter_updates(doc.front_matter, fm_updates)
     return doc
 
 

@@ -1,5 +1,11 @@
 """TOC and redirect YAML — scoped merge (only PR-changed entries)."""
 
+from ydbdoc_review.navigation.paths import (
+    is_navigation_yaml,
+    is_redirect_yaml,
+    is_toc_yaml,
+    navigation_yaml_kind,
+)
 from ydbdoc_review.navigation.redirects import (
     merge_en_redirects_yaml,
     parse_redirect_entries,
@@ -14,8 +20,12 @@ from ydbdoc_review.navigation.toc import (
 )
 
 __all__ = [
+    "is_navigation_yaml",
+    "is_redirect_yaml",
+    "is_toc_yaml",
     "merge_en_redirects_yaml",
     "merge_en_toc_yaml",
+    "navigation_yaml_kind",
     "parse_redirect_entries",
     "parse_toc_items",
     "redirect_translate_scope",

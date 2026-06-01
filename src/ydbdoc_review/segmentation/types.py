@@ -21,6 +21,7 @@ class SegmentKind(str, Enum):
     BLOCKQUOTE_PARAGRAPH = "blockquote_paragraph"
     TAB_TITLE = "tab_title"
     TERM_DEFINITION = "term_definition"
+    FRONT_MATTER = "front_matter"
 
 
 class ProtectedInline(BaseModel):
