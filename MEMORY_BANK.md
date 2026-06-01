@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng branch)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: Phase D in progress — glossary loader complete (D.1).
+> Last updated: Phase D — glossary (D.1) + navigation TOC/redirect scope merge.
 
 This file is **deliberately verbose**. It is written so that any developer or
 AI assistant joining mid-project can reconstruct the full context: goals,
@@ -19,6 +19,7 @@ decisions, rationales, constraints, and conventions.
 │   ├── segmentation/          # AST ↔ translatable segments
 │   ├── llm/                   # Yandex AI Studio client (✅ Phase C)
 │   ├── translation/           # translator + critic (Phase D)
+│   ├── navigation/            # toc.yaml + redirect YAML scoped merge (D.1.5)
 │   ├── validation/            # post-translation heuristics (Phase D)
 │   ├── pipeline/              # orchestration per-file and per-PR
 │   ├── github/                # PR/branch/comment operations
@@ -217,6 +218,9 @@ src/ydbdoc_review/
 │   ├── prompts.py                 prompt rendering, versioned
 │   ├── translator.py              segments → translated segments
 │   └── critic.py                  AST → issues + suggested_text
+├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5)
+│   ├── toc.py                     parse, diff scope, merge, validate
+│   └── redirects.py               Diplodoc redirect list — same pattern
 ├── validation/                    ⏳ Phase D
 │   ├── markers.py                 placeholder count check
 │   ├── cli_tokens.py              --flag / $var preservation
@@ -450,6 +454,49 @@ This project is being co-developed by the human owner and an AI assistant
 across many chat sessions. Context loss between sessions is a real risk.
 The Memory Bank is the canonical handover document. Verbosity is intentional.
 
+### 6.17. TOC and redirect YAML — strict PR scope (not whole-file rewrite)
+
+Diplodoc navigation files (`toc.yaml`, `toc*.yaml`, redirect/preservation YAML)
+must **not** be fully re-translated on every PR. Only entries **changed in the
+source PR** may be updated in the EN mirror.
+
+**Problem:** A naive "translate the whole YAML" pass can (a) add EN menu items
+for RU-only pages outside the PR, (b) drop EN-only legacy entries, or (c)
+re-translate unchanged labels and drift from EN-main wording.
+
+**Scope detection (RU base vs RU PR head):**
+
+| File kind | Scope key | In scope when |
+|---|---|---|
+| TOC | `href` | New item, or existing item whose Russian `name` changed |
+| Redirects | `from` | New entry, or existing entry whose `to` target changed |
+
+Implementation: `navigation/toc.py` (`toc_translate_scope`, `merge_en_toc_yaml`,
+`validate_toc_merge`) and `navigation/redirects.py` (same pattern).
+
+**Merge rules (both kinds):**
+
+1. **Unchanged key, already in EN-main** → keep EN block verbatim (no LLM).
+2. **Key in scope** → take structure/value from RU PR; translate label (`name`)
+   or copy `to` (redirects are usually language-neutral).
+3. **RU-only key outside scope** → **skip** (do not invent EN entries).
+4. **RU removed key** → omit from output (mirror RU PR structure).
+5. **EN-only legacy key not in RU PR** → append unchanged at end.
+
+This is **stricter than v1** (`main:toc_yaml.py`), which used `new_hrefs` (basenames
+of newly translated `.md` files). v2 adds diff-based scope so **title-only**
+changes on existing pages are picked up even when the `.md` basename was already
+known. Orchestrator (Phase F) should union: `new_hrefs` ∪ `toc_translate_scope()`.
+
+**Phase E hook:** `validate_toc_merge` / `validate_redirect_merge` flag
+`unexpected_*`, `missing_*`, and `scope_not_applied` for the report.
+
+**Phase F/G:** After per-file `.md` translation, if PR touches `toc*.yaml` or
+redirect YAML, run scoped merge against EN-main + RU PR head; write result to
+the paired EN path. Do **not** run merge for navigation files outside the PR diff.
+
+Tests: `tests/unit/test_navigation_toc.py`, `tests/unit/test_navigation_redirects.py`.
+
 ---
 
 ## 7. Test strategy
@@ -596,6 +643,12 @@ See `ydbdoc_review.llm` package.
 - [x] `translation/glossary.py` — load default/custom path, `to_prompt_yaml()`
 - [x] Unit tests: `tests/unit/test_glossary.py`
 
+#### D.1.5 — Navigation YAML (TOC + redirects) ✅ COMPLETE
+- [x] `navigation/toc.py` — parse, `toc_translate_scope`, `merge_en_toc_yaml`, `validate_toc_merge`
+- [x] `navigation/redirects.py` — same pattern for Diplodoc redirect lists
+- [x] Unit tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`
+- [ ] `navigation/paths.py` — detect `toc*.yaml` / redirect paths in repo (Phase F)
+
 #### D.2 — Prompt templates (next)
 - [ ] `prompts/v1/system_common.md`, `translate.md`, …
 - [ ] `translation/prompts.py` — render templates with glossary + batch JSON
@@ -612,6 +665,7 @@ See `ydbdoc_review.llm` package.
 - [ ] Length ratio (RU↔EN sane bounds)
 - [ ] Cyrillic-in-EN detector
 - [ ] Fence parity, heading parity, list-tab parity
+- [ ] TOC / redirect merge validation (`validate_toc_merge`, `validate_redirect_merge`)
 
 ### Phase F — Pipeline & orchestrator
 - [ ] Pre-analyze pass: which files need translation
