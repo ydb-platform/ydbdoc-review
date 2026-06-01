@@ -64,8 +64,8 @@ src/ydbdoc_review/
 │   ├── pr.py                      PR context, file changes, pair loading
 │   ├── workflow.py                run_doc_translate, run_doc_verify
 │   └── errors.py                  typed GitHub errors
-├── reporting/                     🟡 Phase G minimal / Phase H polish
-│   └── builder.py                 markdown reports (short + full)
+├── reporting/                     ✅ Phase H
+│   └── builder.py                 markdown reports (§17 format)
 ├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults
 │   └── loader.py                  Pydantic schema + YAML + env override

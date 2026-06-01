@@ -288,6 +288,7 @@ def run_doc_translate(
             translation_pr_number=tr_pr_number,
             meta=meta,
             config=cfg,
+            usage=client.usage_tracker,
         ),
     )
 
@@ -302,7 +303,13 @@ def run_doc_translate(
             owner,
             repo,
             tr_pr_number,
-            build_full_report(pr_result, meta=meta, config=cfg),
+            build_full_report(
+                pr_result,
+                meta=meta,
+                config=cfg,
+                usage=client.usage_tracker,
+                glossary=glossary,
+            ),
         )
 
     return job
@@ -404,6 +411,12 @@ def run_doc_verify(
         owner,
         repo,
         pr_number,
-        build_full_report(pr_result, meta=meta, config=cfg),
+        build_full_report(
+            pr_result,
+            meta=meta,
+            config=cfg,
+            usage=client.usage_tracker,
+            glossary=glossary,
+        ),
     )
     return job

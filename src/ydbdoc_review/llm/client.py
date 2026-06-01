@@ -106,6 +106,7 @@ class YandexLLMClient:
                         max_tokens=tokens,
                         retries=session_retries,
                         started=started,
+                        role=role,
                     )
                     return result
                 except BaseException as exc:
@@ -120,6 +121,7 @@ class YandexLLMClient:
                             latency_ms=latency_ms,
                             retries=session_retries,
                             success=False,
+                            role=role,
                         )
                     )
                     if is_model_unavailable(exc):
@@ -168,6 +170,7 @@ class YandexLLMClient:
         max_tokens: int,
         retries: int,
         started: float,
+        role: LLMRole | None,
     ) -> ChatResult:
         uri = self.model_uri(slug)
         completion = self._client.chat.completions.create(
@@ -189,6 +192,7 @@ class YandexLLMClient:
             latency_ms=latency_ms,
             retries=retries,
             success=True,
+            role=role,
         )
         self._usage.add(usage)
         return ChatResult(

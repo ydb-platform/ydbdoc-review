@@ -104,17 +104,21 @@ See `ydbdoc_review.llm` package.
 - [x] `github/git_ops.py` — local git diff, branch, commit, push
 - [x] `github/pr.py` — enumerate changes, load pair contents, PR context
 - [x] `github/workflow.py` — `run_doc_translate`, `run_doc_verify`
-- [x] `reporting/builder.py` — short source comment + full QA report (minimal, Phase H expands)
 - [x] `Secrets.require_github()` in config loader
 - [x] Unit tests: `test_github_client`, `test_github_git_ops`, `test_github_pr`, `test_github_workflow`, `test_reporting_builder`
 
 Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 
-### Phase H — Reporting
-- [ ] Per-file verdict + issues
-- [ ] Heuristics block (separate from critic issues)
-- [ ] Cost / usage block
-- [ ] Models + prompt version footer
+### Phase H — Reporting ✅ COMPLETE
+- [x] Per-file verdict table + detailed critic/heuristic sections (§17.2)
+- [x] Heuristics block separate from critic issues
+- [x] Cost / usage block with translator/critic token split via `UsageTracker`
+- [x] Retry stats, models by role, prompt version footer
+- [x] Source PR comment: new vs updated file counts
+- [x] Glossary `<details>` block in full report
+- [x] `LLMUsage.role` + `UsageTracker.tokens_for_role()` for role-aware reporting
+- [x] Workflow passes `usage` + `glossary` into report builders
+- [x] Unit tests: expanded `test_reporting_builder`, `test_llm_usage`
 
 ### Phase I — Glue & shipping
 - [ ] CLI (`run`, `verify`, `list-models`, `translate-file`, `extract`)

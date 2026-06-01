@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ydbdoc_review.llm.usage import UsageTracker
+    from ydbdoc_review.translation.glossary import Glossary
 
 # USD per 1M tokens (input, output). Updated manually — Yandex does not
 # expose prices in API responses.
@@ -28,6 +33,7 @@ class LLMUsage:
     latency_ms: float
     retries: int
     success: bool
+    role: LLMRole | None = None
 
 
 @dataclass
@@ -60,3 +66,27 @@ class UsageTracker:
             total += record.input_tokens / 1_000_000 * in_price
             total += record.output_tokens / 1_000_000 * out_price
         return total
+
+    def tokens_for_role(self, role: LLMRole) -> tuple[int, int]:
+        """Return (input_tokens, output_tokens) for successful calls with ``role``."""
+        inp = out = 0
+        for record in self.records:
+            if record.success and record.role == role:
+                inp += record.input_tokens
+                out += record.output_tokens
+        return inp, out
+
+    @property
+    def total_retry_count(self) -> int:
+        """Sum of per-call retry counters (failed attempts before success)."""
+        return sum(record.retries for record in self.records)
+
+    def models_for_role(self, role: LLMRole) -> list[str]:
+        """Distinct model slugs used successfully for a role."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for record in self.records:
+            if record.success and record.role == role and record.model_slug not in seen:
+                seen.add(record.model_slug)
+                out.append(record.model_slug)
+        return out
