@@ -1,8 +1,5 @@
-# Пример для репозитория ydb (или форка): положите как .github/workflows/ydbdoc-review.yml
-# и настройте секреты. Запуск только когда на PR вешают лейбл doc_translate.
-#
-# Важно: pull_request_target — контекст базовой ветки; secrets доступны.
-# Для PR из форка push в head обычно не сработает без отдельного PAT (см. README ydbdoc-review).
+# Пример для репозитория ydb: .github/workflows/ydbdoc-review.yml
+# Запуск по лейблу doc_translate на PR с изменениями ydb/docs/**
 
 name: ydbdoc-review (doc_translate label)
 
@@ -18,7 +15,6 @@ permissions:
 
 jobs:
   ydbdoc-review:
-    # PR и из основного репо, и из форка: push в head — через PAT в YDBDOC_PUSH_PAT (см. README).
     if: github.event.label.name == 'doc_translate'
     runs-on: ubuntu-latest
     concurrency:
@@ -35,30 +31,18 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
-      - name: Documentation translation review
-        # Репозиторий с action.yml в корне; v0.1.0 — git-тег релиза (см. README «Публикация»).
-        uses: ydb-platform/ydbdoc-review@main
+      - name: Documentation translation (v2)
+        uses: ydb-platform/ydbdoc-review@v0.1.0
         with:
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}
           merge_base_with: origin/${{ github.event.pull_request.base.ref }}
-          # dry_run: "true"   # раскомментируйте для прогона без записи/commit/push
-          # no_commit: "true" # или только запись файлов без коммита (см. README)
+          mode: run
+          # dry_run: "true"
+          # no_commit: "true"
         env:
-          YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
-          YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
-          YDBDOC_REVIEW_ENABLED: ${{ vars.YDBDOC_REVIEW_ENABLED }}
-          YDBDOC_MODEL_CHECK: ${{ vars.YDBDOC_MODEL_CHECK }}
-          # Default in image: deepseek-v4-flash/latest → gpt://<folder>/deepseek-v4-flash/latest
-          # Or full URI: gpt://b1g08jt28oei79r901r5/deepseek-v4-flash/latest
-          YDBDOC_MODEL_TRANSLATE: ${{ vars.YDBDOC_MODEL_TRANSLATE }}
-          # Self-check: по умолчанию из ydbdoc-review.toml в образе ([feature].translation_self_check).
-          # Раскомментируйте env, чтобы временно переопределить без пересборки образа:
-          # YDBDOC_TRANSLATION_SELF_CHECK: "true"
-          # Optional critic override (default in image TOML: qwen3.6-35b-a3b):
-          # YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
-          YDBDOC_REPO_PATH: ${{ github.workspace }}
+          YDBDOC_YC_FOLDER_ID: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
+          YDBDOC_YC_API_KEY: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Секрет не может называться GITHUB_* — PAT (ваш или бота) → env GITHUB_PUSH_TOKEN для приложения.
-          # Если секрета нет, пустая строка → приложение использует GITHUB_TOKEN (достаточно для ветки в том же репо).
           GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
+          YDBDOC_REPO_PATH: ${{ github.workspace }}

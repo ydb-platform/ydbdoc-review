@@ -7,14 +7,13 @@ RUN apt-get update \
 
 WORKDIR /app
 
-ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-COPY prompts /app/prompts
+COPY requirements.txt pyproject.toml /app/
 COPY src /app/src
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+    && pip install --no-cache-dir /app
+
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

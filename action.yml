@@ -1,6 +1,6 @@
 # https://docs.github.com/en/actions/sharing-automations/creating-actions/metadata-syntax-for-github-actions
 name: "ydbdoc-review"
-description: "Check RU/EN YDB documentation parity and optionally generate translations (Yandex AI Studio)."
+description: "AST-based RU/EN YDB docs translation with critic QA (Yandex AI Studio)."
 branding:
   icon: "book-open"
   color: "blue"
@@ -22,7 +22,7 @@ inputs:
     description: 'If "true", pass --no-commit (run: no translation commit; verify: no repair commit/push).'
     default: "false"
   mode:
-    description: '"run" — doc_translate. "verify" — doc_verify (critic + repair + translator on PR branch).'
+    description: '"run" — doc_translate. "verify" — doc_verify (critic QA + optional repair commit).'
     default: "run"
 
 runs:

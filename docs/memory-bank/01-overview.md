@@ -27,14 +27,14 @@
 │   ├── integration/           # round-trip on real fixtures, LLM (local only)
 │   └── fixtures/markdown_files/   # real YDB docs (committed)
 ├── scripts/                   # one-off utilities (fetch fixtures, smoke tests)
-├── action.yml                 # GitHub Action manifest (unchanged from v1)
-├── Dockerfile                 # Docker image for the action (unchanged from v1)
-├── entrypoint.sh              # action entrypoint (unchanged from v1)
+├── action.yml                 # GitHub Action manifest
+├── Dockerfile                 # Docker image for the action (v2)
+├── entrypoint.sh              # maps INPUT_* → ydbdoc-review CLI
 ├── docs/memory-bank/          # Memory Bank parts (see MEMORY_BANK.md index)
 ├── MEMORY_BANK.md             # index → docs/memory-bank/*.md
-├── ARCHITECTURE.md            # human-developer-oriented architecture (TBD)
-├── CONTRIBUTING.md            # developer guide (TBD)
-└── README.md                  # user-oriented overview (rewrite at v2 release)
+├── ARCHITECTURE.md            # developer architecture overview (v2)
+├── CONTRIBUTING.md            # contributor guide
+└── README.md                  # user-oriented overview (v2)
 ```
 
 Important branch: **`doc-translate-ng`** — the v2 rewrite. To be merged into

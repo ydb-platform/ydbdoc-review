@@ -69,14 +69,8 @@ src/ydbdoc_review/
 ├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults
 │   └── loader.py                  Pydantic schema + YAML + env override
-└── prompts/                       ⏳ Phase D
-    ├── glossary.yaml              ✅ seed glossary (D.1)
-    └── v1/
-    │   ├── translate.md
-    │   ├── critic.md
-    │   ├── analyze.md
-    │   └── system_common.md
-    └── glossary.yaml              seed (~30-50 terms)
+├── cli.py                         ✅ Phase I — Typer CLI + __main__.py
+└── prompts/                       ✅ v1 templates + glossary (packaged)
 ```
 
 Legend: ✅ done · ⏳ pending · 🟡 partial.

@@ -28,16 +28,21 @@ OPTS=""
 case "${INPUT_DRY_RUN:-false}" in true|True|TRUE) OPTS="${OPTS} --dry-run" ;; esac
 case "${INPUT_NO_COMMIT:-false}" in true|True|TRUE) OPTS="${OPTS} --no-commit" ;; esac
 
+CLI="python -m ydbdoc_review"
+if command -v ydbdoc-review >/dev/null 2>&1; then
+  CLI="ydbdoc-review"
+fi
+
 case "${MODE}" in
   verify)
-    set -- python -m ydbdoc_review verify \
+    set -- ${CLI} verify \
       --repo "${INPUT_REPO}" \
       --pr "${INPUT_PR}" \
       --merge-base-with "${MB}" \
       ${OPTS}
     ;;
   *)
-    set -- python -m ydbdoc_review run \
+    set -- ${CLI} run \
       --repo "${INPUT_REPO}" \
       --pr "${INPUT_PR}" \
       --merge-base-with "${MB}" \

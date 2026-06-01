@@ -121,11 +121,13 @@ Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 - [x] Unit tests: expanded `test_reporting_builder`, `test_llm_usage`
 
 ### Phase I — Glue & shipping
-- [ ] CLI (`run`, `verify`, `list-models`, `translate-file`, `extract`)
-- [ ] Adapt Docker `entrypoint.sh`
-- [ ] Move tag `v0.1.0` to merge commit on `main`
-- [ ] Rewrite README
-- [ ] Add `ARCHITECTURE.md` and `CONTRIBUTING.md`
+- [x] CLI (`run`, `verify`, `list-models`, `translate-file`, `extract`) — `cli.py`
+- [x] Docker `entrypoint.sh` + `Dockerfile` (pip install package)
+- [ ] Move tag `v0.1.0` to merge commit on `main` (deferred — do not move until release)
+- [x] Rewrite README
+- [x] `ARCHITECTURE.md` and `CONTRIBUTING.md`
+- [x] Example workflows updated for v2 env vars
+- [x] Unit tests: `test_cli.py`
 
 ---
 

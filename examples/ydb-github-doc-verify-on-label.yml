@@ -1,5 +1,4 @@
-# Проверка PR с переводом (или bilingual): лейбл doc_verify.
-# RU и EN берутся с ветки PR; цикл как после doc_translate: критик → repair → переводчик.
+# Verify translation PR: label doc_verify on branch ydbdoc-review/pr-N (or bilingual PR).
 
 name: ydbdoc-review (doc_verify label)
 
@@ -9,7 +8,6 @@ on:
     paths:
       - "ydb/docs/**"
 
-# contents: write нужен для commit/push repair; read-only даёт 403 даже с PAT, если PAT не передан в env.
 permissions:
   contents: write
   pull-requests: write
@@ -32,22 +30,17 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
-      - name: Verify translation on PR branch
-        uses: ydb-platform/ydbdoc-review@main
+      - name: Verify translation on PR branch (v2)
+        uses: ydb-platform/ydbdoc-review@v0.1.0
         with:
           mode: verify
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}
           merge_base_with: origin/${{ github.event.pull_request.base.ref }}
-          # no_commit: "true"  # только отчёт в комментарии, без commit/push правок
+          # no_commit: "true"
         env:
-          YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
-          YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
-          YDBDOC_REVIEW_ENABLED: ${{ vars.YDBDOC_REVIEW_ENABLED }}
-          YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
-          YDBDOC_REPO_PATH: ${{ github.workspace }}
+          YDBDOC_YC_FOLDER_ID: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
+          YDBDOC_YC_API_KEY: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Обязательно: без этого в контейнер попадает только GITHUB_TOKEN → 403 на push.
           GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
-          # Допустимо вместо строки выше (код читает оба имени):
-          # YDBDOC_PUSH_PAT: ${{ secrets.YDBDOC_PUSH_PAT }}
+          YDBDOC_REPO_PATH: ${{ github.workspace }}
