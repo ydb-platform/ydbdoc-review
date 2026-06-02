@@ -60,11 +60,14 @@ def test_build_translate_messages_includes_glossary_and_batch():
     system = messages[0]["content"]
     user = messages[1]["content"]
     assert isinstance(system, str) and "GLOSSARY:" in system
+    assert "NOT TRANSLATABLE TEXT" in system
+    assert "⟦U1⟧" in system
     assert "параметризованный запрос" in system or "YDB" in system
     assert isinstance(user, str)
     assert "docs/ru/foo.md" in user
     assert '"id": "s0001"' in user
     assert "English style" in user
+    assert "never put a real URL in place of" in user
 
 
 def test_build_translate_messages_skips_style_guide_for_ru_target():

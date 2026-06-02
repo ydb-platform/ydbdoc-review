@@ -284,6 +284,9 @@ Public builders:
 ### 18.3. Common system instructions
 
 Implemented in `prompts/v1/system_common.md` (glossary via `{glossary_yaml}`).
+The **PLACEHOLDERS** block tells the model that `⟦X{n}⟧` tokens are opaque:
+translate only prose between them; never expand to `{{ var }}`, URLs, or `` `code` ``.
+User prompt `translate.md` repeats link shape `[anchor](⟦U{n}⟧)` and no reordering.
 Translator batch schema: `{"segments": [{"id", "kind", "path", "text"}, …]}` →
 response `{"segments": [{"id", "text"}, …]}`.
 
