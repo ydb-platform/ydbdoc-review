@@ -36,6 +36,34 @@ def test_repair_exposed_yfm_variable_and_link_atoms():
     assert "{{ ydb-short-name }}" not in fixed
 
 
+def test_repair_absolute_url_in_link():
+    seg = _segment_s0003()
+    translated = (
+        "⟦V1⟧ CLI can execute parameterized queries. "
+        "To use parameters, declare them using "
+        "[the YQL `DECLARE` command](https://ydb.tech/docs/en/yql/reference/syntax/declare.md) "
+        "in your query text."
+    )
+    fixed = repair_translation_placeholders(seg, translated)
+    assert placeholders_match(seg.text, fixed)
+    assert "⟦U1⟧" in fixed
+
+
+def test_repair_s0124_duplicate_code_atoms():
+    path = (
+        Path(__file__).parent.parent
+        / "fixtures/markdown_files/ru/core/reference/ydb-cli/parameterized-query-execution.md"
+    )
+    seg = next(
+        s
+        for s in extract_segments(parse_markdown(path.read_text(encoding="utf-8")))
+        if s.id == "s0124"
+    )
+    translated = seg.text.replace("⟦C1⟧", "`stdin`", 1).replace("⟦C2⟧", "`--input-file`", 1)
+    fixed = repair_translation_placeholders(seg, translated)
+    assert placeholders_match(seg.text, fixed)
+
+
 def test_repair_realigns_renumbered_placeholders():
     seg = _segment_s0003()
     translated = (

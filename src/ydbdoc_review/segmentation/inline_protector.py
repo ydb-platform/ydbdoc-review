@@ -19,6 +19,11 @@ from ydbdoc_review.parsing.ast_types import (
 from ydbdoc_review.segmentation.types import ProtectedInline
 
 
+# List/table HTML scaffolding — leave literal so the model does not drop ⟦H⟧ markers.
+_BORING_HTML: frozenset[str] = frozenset(
+    {"<br/>", "<br>", "<ul>", "</ul>", "<li>", "</li>"}
+)
+
 # Map node kind → placeholder prefix (whole-atom protection).
 _PREFIX_MAP: dict[str, str] = {
     "code": "C",
@@ -82,6 +87,9 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
             continue
 
         kind = node.kind
+        if isinstance(node, InlineHTML) and node.content in _BORING_HTML:
+            out.append(node.content)
+            continue
         if kind in _PREFIX_MAP:
             marker = state.next_placeholder(kind)
             state.placeholders.append(

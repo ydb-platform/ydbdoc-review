@@ -75,6 +75,10 @@ and reinsert copied the entire RU `InlineLink`. Links now serialize as
 `[protected anchor](⟦U{n}⟧)` with an href-only template in the placeholder map;
 `reinsert` restores the original href from the `⟦U⟧` template; `mirror_link_href` runs only in `translate_file` via `localize_links_in_document`.
 
+List/table HTML scaffolding (`<br/>`, `<ul>`, `<li>`, …) is **not** wrapped in
+`⟦H⟧` so dense table cells stay translatable. `placeholder_repair` restores
+`⟦V⟧`/`⟦C⟧`/`⟦U⟧` when the model emits `{{ var }}`, backticks, or bare URLs.
+
 ### 6.10. Mixed-type `ast_path` for re-insertion
 For most nodes, `ast_path` is a list of int indices into `.children`. For
 tables and tabs, we use typed string markers (`"header"`, `"row"`,
