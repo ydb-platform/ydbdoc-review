@@ -20,7 +20,8 @@ from ydbdoc_review.translation.prompts import (
 )
 from ydbdoc_review.translation.schemas import TranslateBatchResponse
 from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
-from ydbdoc_review.validation.markers import placeholders_match, realign_placeholders
+from ydbdoc_review.validation.markers import placeholders_match
+from ydbdoc_review.validation.placeholder_repair import repair_translation_placeholders
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +84,11 @@ def _cache_key(seg: Segment, *, target_lang: str) -> str:
 def _apply_placeholder_realignment(
     batch: Batch, translations: dict[str, str]
 ) -> None:
-    """In-place: swap renumbered placeholders to match each source segment."""
+    """In-place: fix renumbered or exposed atoms before validation."""
     for seg in batch.segments:
-        aligned = realign_placeholders(seg.text, translations[seg.id])
-        if aligned is not None:
-            translations[seg.id] = aligned
+        text = translations[seg.id]
+        text = repair_translation_placeholders(seg, text)
+        translations[seg.id] = text
 
 
 def _translate_batch_once(

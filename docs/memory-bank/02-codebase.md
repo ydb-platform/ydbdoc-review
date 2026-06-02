@@ -52,6 +52,7 @@ src/ydbdoc_review/
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
 │   ├── markers.py                 placeholder parity (D.3)
+│   ├── placeholder_repair.py      restore ⟦X⟧ when LLM emits raw atoms/URLs
 │   ├── link_locale.py             RU→EN URL mirror + post-reinsert pass
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic, parity, nav merge wrappers
