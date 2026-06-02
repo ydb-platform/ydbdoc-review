@@ -174,3 +174,17 @@ def test_translate_batch_realigns_renumbered_placeholders():
         client, batch, load_glossary(), file_path="docs/ru/x.md"
     )
     assert out == {"s1": "Use ⟦C1⟧ flag"}
+
+
+def test_translate_batch_placeholder_mismatch_tries_fallback_model():
+    seg = _segment("s1", "Use ⟦C1⟧ flag")
+    batch = Batch(index=0, segments=[seg])
+    # Primary model keeps breaking placeholders for 3 attempts.
+    bad = _json_response([{"id": "s1", "text": "Use ⟦C2⟧ flag"}])
+    # First fallback returns valid output.
+    good = _json_response([{"id": "s1", "text": "Use ⟦C1⟧ flag"}])
+    client = _mock_client([bad, bad, bad, good])
+    out = translate_batch(
+        client, batch, load_glossary(), file_path="docs/ru/x.md"
+    )
+    assert out == {"s1": "Use ⟦C1⟧ flag"}

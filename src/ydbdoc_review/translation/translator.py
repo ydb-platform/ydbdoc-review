@@ -26,6 +26,7 @@ from ydbdoc_review.validation.placeholder_repair import repair_translation_place
 logger = logging.getLogger(__name__)
 
 _MAX_BATCH_ATTEMPTS = 3
+_PLACEHOLDER_MISMATCH_HINT = "placeholder mismatch"
 
 
 def parse_translate_response(raw: str, *, expected_ids: set[str]) -> dict[str, str]:
@@ -102,6 +103,8 @@ def _translate_batch_once(
     prompt_version: str,
 ) -> dict[str, str]:
     last_exc: LLMParseError | TranslationValidationError | None = None
+    model_chain = client.model_chain_for_role("translate")
+    primary_model = model_chain[0]
     for attempt in range(1, _MAX_BATCH_ATTEMPTS + 1):
         try:
             messages = build_translate_messages(
@@ -112,7 +115,7 @@ def _translate_batch_once(
                 target_lang=target_lang,
                 version=prompt_version,
             )
-            result = client.chat(messages, role="translate")
+            result = client.chat(messages, model=primary_model)
             expected = {seg.id for seg in batch.segments}
             translations = parse_translate_response(
                 result.content, expected_ids=expected
@@ -128,6 +131,44 @@ def _translate_batch_once(
                     batch.index,
                     attempt,
                     _MAX_BATCH_ATTEMPTS,
+                    exc,
+                )
+    if (
+        len(model_chain) > 1
+        and isinstance(last_exc, TranslationValidationError)
+        and _PLACEHOLDER_MISMATCH_HINT in str(last_exc)
+    ):
+        for fallback_model in model_chain[1:]:
+            try:
+                logger.warning(
+                    "Translate batch %s retry with fallback model %s: %s",
+                    batch.index,
+                    fallback_model,
+                    last_exc,
+                )
+                messages = build_translate_messages(
+                    batch,
+                    glossary,
+                    file_path=file_path,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    version=prompt_version,
+                )
+                result = client.chat(messages, model=fallback_model)
+                expected = {seg.id for seg in batch.segments}
+                translations = parse_translate_response(
+                    result.content, expected_ids=expected
+                )
+                _apply_placeholder_realignment(batch, translations)
+                validate_batch_translations(batch, translations)
+                return translations
+            except (LLMParseError, TranslationValidationError) as exc:
+                last_exc = exc
+            except Exception as exc:  # noqa: BLE001 - keep original validation error if fallback infra fails
+                logger.warning(
+                    "Translate batch %s fallback model %s failed: %s",
+                    batch.index,
+                    fallback_model,
                     exc,
                 )
     assert last_exc is not None

@@ -31,7 +31,7 @@ def test_load_default_no_env():
     assert cfg.llm.provider == "yandex"
     assert cfg.llm.base_url == "https://ai.api.cloud.yandex.net/v1"
     assert cfg.llm.temperature == 0.1
-    assert cfg.llm.models.translate.primary == "yandexgpt-5.1"
+    assert cfg.llm.models.translate.primary == "deepseek-v32"
     assert cfg.llm.models.critic.primary == "deepseek-v32"
     assert cfg.llm.models.analyze.primary == "yandexgpt-5-lite"
 

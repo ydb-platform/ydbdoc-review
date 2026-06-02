@@ -115,7 +115,7 @@ def test_chat_uses_role_chain():
     client.chat([{"role": "user", "content": "x"}], role="translate")
 
     call_kwargs = mock.chat.completions.create.call_args.kwargs
-    assert call_kwargs["model"] == "gpt://b1test/yandexgpt-5.1"
+    assert call_kwargs["model"] == "gpt://b1test/deepseek-v32"
 
 
 def test_empty_completion_logs_diagnostics(caplog: pytest.LogCaptureFixture):

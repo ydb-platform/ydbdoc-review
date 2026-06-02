@@ -118,6 +118,10 @@ class YandexLLMClient:
     def usage_tracker(self) -> UsageTracker:
         return self._usage
 
+    def model_chain_for_role(self, role: LLMRole) -> list[str]:
+        """Return configured model chain for the given role."""
+        return list(self._model_chain_for_role(role))
+
     def model_uri(self, model_slug: str) -> str:
         return f"gpt://{self._folder_id}/{model_slug}"
 

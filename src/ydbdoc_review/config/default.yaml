@@ -29,8 +29,9 @@ llm:
       fallbacks:
         - yandexgpt-5.1
     translate:
-      primary: yandexgpt-5.1
+      primary: deepseek-v32
       fallbacks:
+        - yandexgpt-5.1
         - yandexgpt-5-pro
     critic:
       primary: deepseek-v32
