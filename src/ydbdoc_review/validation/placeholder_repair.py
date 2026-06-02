@@ -12,7 +12,6 @@ from ydbdoc_review.parsing.ast_types import (
 )
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment
 from ydbdoc_review.validation.markers import (
-    PLACEHOLDER_RE,
     extract_placeholders,
     placeholders_match,
     realign_placeholders,
@@ -54,15 +53,33 @@ def _repair_legacy_whole_link_marker(segment: Segment, text: str) -> str:
     return _LEGACY_LINK_RE.sub(replacement, text, count=1)
 
 
-def _prepend_missing_variable(segment: Segment, text: str) -> str:
-    """Ensure the leading ``⟦V⟧`` marker exists (model often drops it)."""
+def _prepend_missing_leading_variable(segment: Segment, text: str) -> str:
+    """Restore leading ``⟦V⟧`` only when the source segment starts with it."""
     var = _variable_placeholder(segment)
     if var is None or var.placeholder in text or re.search(r"⟦V\d+⟧", text):
+        return text
+    if not segment.text.lstrip().startswith(var.placeholder):
         return text
     stripped = text.lstrip()
     if isinstance(var.node, InlineVariable) and stripped.startswith(var.node.raw):
         return var.placeholder + stripped[len(var.node.raw) :].lstrip()
     return f"{var.placeholder} {stripped}"
+
+
+def _strip_stray_leading_variable(segment: Segment, text: str) -> str:
+    """Drop a spurious leading ``⟦V⟧`` when the source keeps ``⟦V⟧`` only inside a link."""
+    var = _variable_placeholder(segment)
+    if var is None or segment.text.lstrip().startswith(var.placeholder):
+        return text
+    marker = var.placeholder
+    if text.lstrip().startswith(marker):
+        text = re.sub(
+            rf"^\s*{re.escape(marker)}\s+",
+            "",
+            text.lstrip(),
+            count=1,
+        )
+    return text
 
 
 def _dedupe_markers_before_first_link(text: str) -> str:
@@ -86,27 +103,40 @@ def _dedupe_markers_before_first_link(text: str) -> str:
     return prefix + rest
 
 
-def _normalize_link_anchor_codes(segment: Segment, text: str) -> str:
-    """Put in-link ``⟦C⟧`` markers back when the model left bare ``DECLARE`` etc."""
-    match = _LINK_RE.search(text)
-    if not match:
-        return text
-    anchor, dest = match.group(1), match.group(2)
-    for protected in _code_placeholders(segment):
-        marker = protected.placeholder
-        if marker in anchor:
-            continue
-        node = protected.node
-        assert isinstance(node, InlineCode)
-        for candidate in (f"`{node.content}`", node.content):
-            if candidate in anchor:
-                anchor = anchor.replace(candidate, marker, 1)
-                break
-    url_ph = next((p.placeholder for p in _url_placeholders(segment)), None)
-    if url_ph and not dest.startswith("⟦"):
-        dest = url_ph
-    rebuilt = f"[{anchor}]({dest})"
-    return text[: match.start()] + rebuilt + text[match.end() :]
+def _normalize_all_link_anchors(segment: Segment, text: str) -> str:
+    """Fix every ``[anchor](dest)`` — restore in-link ``⟦C⟧`` and ``⟦U⟧`` slots."""
+    pos = 0
+    while True:
+        match = _LINK_RE.search(text, pos)
+        if not match:
+            break
+        anchor, dest = match.group(1), match.group(2)
+        for protected in _code_placeholders(segment):
+            marker = protected.placeholder
+            if marker in anchor:
+                continue
+            node = protected.node
+            assert isinstance(node, InlineCode)
+            for candidate in (f"`{node.content}`", node.content):
+                if candidate in anchor:
+                    anchor = anchor.replace(candidate, marker, 1)
+                    break
+        if isinstance(_variable_placeholder(segment), ProtectedInline):
+            var = _variable_placeholder(segment)
+            assert var is not None
+            marker = var.placeholder
+            if marker not in anchor and isinstance(var.node, InlineVariable):
+                for candidate in (var.node.raw, var.node.name):
+                    if candidate in anchor:
+                        anchor = anchor.replace(candidate, marker, 1)
+                        break
+        url_ph = next((p.placeholder for p in _url_placeholders(segment)), None)
+        if url_ph and not dest.startswith("⟦"):
+            dest = url_ph
+        rebuilt = f"[{anchor}]({dest})"
+        text = text[: match.start()] + rebuilt + text[match.end() :]
+        pos = match.start() + len(rebuilt)
+    return text
 
 
 def _repair_missing_url_markers(
@@ -124,7 +154,7 @@ def _repair_missing_url_markers(
 
 
 def _repair_atoms_in_order(segment: Segment, text: str) -> str:
-    """Replace rendered atoms left-to-right (handles duplicate ``<br/>``, etc.)."""
+    """Replace rendered atoms left-to-right (handles duplicate ``stdin``, etc.)."""
     from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
 
     cursor = 0
@@ -166,22 +196,36 @@ def _repair_atoms_in_order(segment: Segment, text: str) -> str:
                 continue
 
         if isinstance(node, InlineCode):
-            pos = text.find(node.content, cursor)
-            if pos != -1:
-                text = text[:pos] + marker + text[pos + len(node.content) :]
-                cursor = pos + len(marker)
+            for candidate in (f"`{node.content}`", node.content):
+                pos = text.find(candidate, cursor)
+                if pos != -1:
+                    text = text[:pos] + marker + text[pos + len(candidate) :]
+                    cursor = pos + len(marker)
+                    break
     return text
+
+
+def _try_realign(segment: Segment, text: str) -> str:
+    """Apply index realignment when placeholder count already matches."""
+    src_ph = extract_placeholders(segment.text)
+    tgt_ph = extract_placeholders(text)
+    if len(src_ph) != len(tgt_ph):
+        return text
+    aligned = realign_placeholders(segment.text, text)
+    return aligned if aligned is not None else text
 
 
 def _repair_core(segment: Segment, translated: str) -> str:
     """Single pass of structural fixes + atom restoration."""
     text = _repair_legacy_whole_link_marker(segment, translated)
-    text = _prepend_missing_variable(segment, text)
+    text = _strip_stray_leading_variable(segment, text)
+    text = _prepend_missing_leading_variable(segment, text)
     text = _dedupe_markers_before_first_link(text)
-    text = realign_placeholders(segment.text, text) or text
-    text = _normalize_link_anchor_codes(segment, text)
+    text = _normalize_all_link_anchors(segment, text)
     text = _repair_missing_url_markers(text, _url_placeholders(segment))
     text = _repair_atoms_in_order(segment, text)
+    text = _strip_stray_leading_variable(segment, text)
+    text = _try_realign(segment, text)
     return text
 
 
@@ -190,7 +234,9 @@ def _strip_placeholders_preserving_atoms(segment: Segment, text: str) -> str:
     from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
 
     for protected in sorted(
-        segment.placeholders, key=lambda p: text.find(p.placeholder), reverse=True
+        segment.placeholders,
+        key=lambda p: text.find(p.placeholder) if p.placeholder in text else -1,
+        reverse=True,
     ):
         marker = protected.placeholder
         if marker not in text:
@@ -215,4 +261,7 @@ def repair_translation_placeholders(segment: Segment, translated: str) -> str:
         return text
     stripped = _strip_placeholders_preserving_atoms(segment, translated)
     text = _repair_core(segment, stripped)
-    return text
+    if placeholders_match(segment.text, text):
+        return text
+    text = _repair_core(segment, _strip_placeholders_preserving_atoms(segment, text))
+    return _try_realign(segment, text)

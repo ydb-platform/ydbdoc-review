@@ -13,6 +13,9 @@ from pydantic import BaseModel, ConfigDict
 
 from ydbdoc_review.segmentation.types import Segment
 
+# Dense table cells: translate alone so the model keeps every ⟦C⟧/⟦U⟧ marker.
+_HEAVY_PLACEHOLDER_COUNT = 8
+
 
 class Batch(BaseModel):
     """A group of segments sent to the LLM as a single request."""
@@ -33,8 +36,8 @@ def chunk_segments(
 ) -> list[Batch]:
     """Greedy packing of segments into batches.
 
-    A segment longer than ``max_chars`` becomes its own batch (one segment per
-    batch). All other segments are packed greedily up to the budget.
+    Segments with ``len(placeholders) >= 8`` always get their own batch (dense
+    table cells). A segment longer than ``max_chars`` becomes its own batch.
     """
     if max_chars < 1:
         raise ValueError("max_chars must be >= 1")
@@ -52,6 +55,11 @@ def chunk_segments(
 
     for seg in segments:
         seg_size = len(seg.text)
+
+        if len(seg.placeholders) >= _HEAVY_PLACEHOLDER_COUNT:
+            flush()
+            batches.append(Batch(index=len(batches), segments=[seg]))
+            continue
 
         # Oversized segment → its own batch.
         if seg_size > max_chars:
