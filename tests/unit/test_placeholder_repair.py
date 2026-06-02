@@ -72,3 +72,33 @@ def test_repair_realigns_renumbered_placeholders():
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
+
+
+def test_repair_legacy_whole_link_marker():
+    seg = _segment_s0003()
+    translated = (
+        "⟦V1⟧ CLI can execute parameterized queries. "
+        "To use parameters, you need to declare them using ⟦L1⟧ in your query text."
+    )
+    fixed = repair_translation_placeholders(seg, translated)
+    assert placeholders_match(seg.text, fixed)
+
+
+def test_repair_missing_leading_variable():
+    seg = _segment_s0003()
+    translated = (
+        "YDB CLI can execute parameterized queries. "
+        "To use parameters, declare them using [the YQL DECLARE command](⟦U1⟧)."
+    )
+    fixed = repair_translation_placeholders(seg, translated)
+    assert placeholders_match(seg.text, fixed)
+
+
+def test_repair_wrong_marker_order():
+    seg = _segment_s0003()
+    translated = (
+        "⟦C1⟧ ⟦V1⟧ CLI can execute parameterized queries. "
+        "To use parameters, declare them using [the YQL ⟦C2⟧ command](⟦U3⟧)."
+    )
+    fixed = repair_translation_placeholders(seg, translated)
+    assert placeholders_match(seg.text, fixed)
