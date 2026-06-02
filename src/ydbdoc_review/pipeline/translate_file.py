@@ -23,6 +23,8 @@ from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
+from ydbdoc_review.translation.manual import ManualAction
+from ydbdoc_review.reporting.locations import build_segment_line_map
 from ydbdoc_review.validation.heuristics import bump_verdict_for_heuristics, run_file_heuristics
 from ydbdoc_review.validation.link_locale import localize_links_in_document
 
@@ -122,7 +124,7 @@ def translate_file(
         )
 
     if enable_translate:
-        manual_actions: list[str] = []
+        manual_actions: list[ManualAction] = []
         translations = translate_segments(
             segments,
             client,
@@ -200,6 +202,10 @@ def translate_file(
     if manual_actions and verdict == "ok":
         verdict = "warnings"
 
+    segment_lines = build_segment_line_map(
+        translated_text, segments, translations
+    )
+
     return FileTranslationResult.from_usage(
         tracker=client.usage_tracker,
         file_path=file_path,
@@ -214,4 +220,5 @@ def translate_file(
         heuristic_warnings=heuristic_warnings,
         manual_actions=manual_actions,
         segment_locations=segment_locations,
+        segment_lines=segment_lines,
     )

@@ -42,6 +42,7 @@ from ydbdoc_review.reporting.builder import (
     build_source_pr_comment,
     build_translation_pr_body,
 )
+from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 
 logger = logging.getLogger(__name__)
@@ -322,6 +323,7 @@ def run_doc_translate(
                 config=cfg,
                 usage=client.usage_tracker,
                 glossary=glossary,
+                link=ReportLinkContext(github_repo=github_repo, ref=branch),
             ),
         )
 
@@ -431,6 +433,7 @@ def run_doc_verify(
             config=cfg,
             usage=client.usage_tracker,
             glossary=glossary,
+            link=ReportLinkContext(github_repo=github_repo, ref=ctx.head_ref),
         ),
     )
     return job

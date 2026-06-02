@@ -5,7 +5,13 @@ from __future__ import annotations
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
+from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
+    ManualAction,
+    PRTranslationResult,
+    PairRunResult,
+)
+from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
@@ -60,9 +66,17 @@ def _sample_result(*, new_file: bool = False) -> PRTranslationResult:
         critic_unresolved=CriticResponse(verdict="warnings", issues=[unresolved]),
         heuristic_warnings=["Кириллица в EN-тексте (строка ~5): «командой YQL»"],
         manual_actions=[
-            "Таблица не переведена автоматически (table:row1:col2, `s0124`); оставлена на русском. Переведите вручную."
+            ManualAction(
+                segment_id="s0124",
+                location="table:row1:col2",
+                message=(
+                    "Таблица не переведена автоматически (table:row1:col2, `s0124`); "
+                    "оставлена на русском. Переведите вручную."
+                ),
+            )
         ],
-        segment_locations={"s0042": "Overview"},
+        segment_locations={"s0042": "Overview", "s0124": "table:row1:col2"},
+        segment_lines={"s0124": (355, 358)},
     )
     return PRTranslationResult(
         pair_results=[
@@ -91,14 +105,16 @@ def test_build_full_report_reviewer_focused():
         _sample_result(),
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=90),
         config=cfg,
+        link=ReportLinkContext(github_repo="ydb-platform/ydb", ref="ydbdoc-review/pr-1"),
     )
     assert "Рекомендация:" in body
     assert "Что исправить" in body
-    assert "Overview (`s0042`)" in body
+    assert "Overview" in body and "`s0042`" in body
     assert "string table" in body
     assert "💡 Совет: row table" in body
-    assert "Кириллица в EN-тексте" in body
+    assert "table:row1:col2" in body
     assert "Таблица не переведена автоматически" in body
+    assert "355" in body
     assert "Переведите вручную" in body
     assert "fixed spacing" not in body
     assert "Сегментов переведено" not in body

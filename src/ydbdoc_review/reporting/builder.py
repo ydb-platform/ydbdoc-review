@@ -8,6 +8,13 @@ from datetime import datetime, timezone
 from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
+from ydbdoc_review.reporting.locations import (
+    ReportLinkContext,
+    consolidate_heuristic_warnings,
+    filter_critic_for_report,
+    format_location_label,
+    manual_action_segment_ids,
+)
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
 
@@ -138,8 +145,26 @@ def _format_critic_item(
     segment_locations: dict[str, str],
     *,
     index: int,
+    file_path: str,
+    segment_lines: dict[str, tuple[int, int]],
+    link: ReportLinkContext | None,
 ) -> str:
-    location = _location_label(issue, segment_locations)
+    path_label = None
+    if issue.segment_id and issue.segment_id in segment_locations:
+        path_label = segment_locations[issue.segment_id]
+    line_range = (
+        segment_lines.get(issue.segment_id) if issue.segment_id else None
+    )
+    if path_label or issue.segment_id:
+        location = format_location_label(
+            file_path=file_path,
+            segment_id=issue.segment_id,
+            path_label=path_label,
+            line_range=line_range,
+            link=link,
+        )
+    else:
+        location = _location_label(issue, segment_locations)
     category = issue.category.replace("_", " ")
     problem = f"({category}) {issue.comment}"
     return _format_reviewer_item(
@@ -166,36 +191,71 @@ def _file_reviewer_section(
     *,
     config: Config,
     item_index: int,
+    link: ReportLinkContext | None,
 ) -> tuple[str, int]:
     """Build markdown for one file's open issues; return (text, next item index)."""
     fr = run.file_result
     if fr is None or run.skipped or run.deleted or run.error:
         return "", item_index
 
-    critic_items = _remaining_critic_issues(fr)
-    heuristics = fr.heuristic_warnings if config.reporting.include_heuristics else []
     manual_actions = fr.manual_actions
+    manual_ids = manual_action_segment_ids(manual_actions)
+    critic_items = filter_critic_for_report(
+        _remaining_critic_issues(fr), manual_ids
+    )
+    raw_heuristics = (
+        fr.heuristic_warnings if config.reporting.include_heuristics else []
+    )
+    manual_ranges = [
+        fr.segment_lines[mid]
+        for mid in manual_ids
+        if mid in fr.segment_lines
+    ]
+    heuristics = consolidate_heuristic_warnings(
+        raw_heuristics,
+        manual_ids=manual_ids,
+        manual_line_ranges=manual_ranges,
+    )
 
     if not critic_items and not heuristics and not manual_actions:
         if fr.verdict == "ok":
             return f"### 🟢 `{run.plan.target_path}`\n\nЗамечаний нет.\n\n", item_index
         return "", item_index
 
-    out = f"### {_verdict_emoji(fr.verdict)} `{run.plan.target_path}`\n\n"
-    for note in manual_actions:
+    file_path = run.plan.target_path
+    out = f"### {_verdict_emoji(fr.verdict)} `{file_path}`\n\n"
+    for action in manual_actions:
+        line_range = fr.segment_lines.get(action.segment_id)
+        location = format_location_label(
+            file_path=file_path,
+            segment_id=action.segment_id,
+            path_label=action.location,
+            line_range=line_range,
+            link=link,
+        )
         out += _format_reviewer_item(
             index=item_index,
-            location="таблица",
-            problem=note,
+            location=location,
+            problem=action.message,
         ) + "\n\n"
         item_index += 1
     for issue in critic_items:
-        out += _format_critic_item(issue, fr.segment_locations, index=item_index) + "\n\n"
+        out += (
+            _format_critic_item(
+                issue,
+                fr.segment_locations,
+                index=item_index,
+                file_path=file_path,
+                segment_lines=fr.segment_lines,
+                link=link,
+            )
+            + "\n\n"
+        )
         item_index += 1
     for warning in heuristics:
         out += _format_reviewer_item(
             index=item_index,
-            location="эвристика",
+            location="эвристика (файл)",
             problem=warning,
         ) + "\n\n"
         item_index += 1
@@ -306,6 +366,7 @@ def build_full_report(
     config: Config,
     usage: UsageTracker | None = None,
     glossary: Glossary | None = None,
+    link: ReportLinkContext | None = None,
 ) -> str:
     """Reviewer-focused QA report: open problems per file with location and advice."""
     del usage, glossary  # stats/glossary omitted from reviewer report
@@ -346,7 +407,7 @@ def build_full_report(
     item_index = 1
     for run in problem_runs:
         section, item_index = _file_reviewer_section(
-            run, config=config, item_index=item_index
+            run, config=config, item_index=item_index, link=link
         )
         body += section
 
