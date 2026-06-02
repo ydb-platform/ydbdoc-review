@@ -197,7 +197,7 @@ def test_translate_segments_keeps_ru_table_on_placeholder_failure():
     )
     assert out == {"s1": seg.text}
     assert notes
-    assert "Переведите вручную" in notes[0]
+    assert "Переведите вручную" in notes[0].message
 
 
 def test_translate_batch_placeholder_mismatch_tries_fallback_model():

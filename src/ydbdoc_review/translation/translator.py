@@ -10,9 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.llm.structured import parse_json_model
+from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.translation.repair import repair_segment_translation
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import (
     DEFAULT_PROMPT_VERSION,
@@ -92,6 +94,10 @@ def _apply_placeholder_realignment(
         translations[seg.id] = text
 
 
+def _segment_location(seg: Segment) -> str:
+    return " › ".join(seg.path) if seg.path else "(начало документа)"
+
+
 def _translate_batch_once(
     client: YandexLLMClient,
     batch: Batch,
@@ -101,6 +107,7 @@ def _translate_batch_once(
     source_lang: str,
     target_lang: str,
     prompt_version: str,
+    last_attempt: dict[str, str] | None = None,
 ) -> dict[str, str]:
     last_exc: LLMParseError | TranslationValidationError | None = None
     model_chain = client.model_chain_for_role("translate")
@@ -121,6 +128,9 @@ def _translate_batch_once(
                 result.content, expected_ids=expected
             )
             _apply_placeholder_realignment(batch, translations)
+            if last_attempt is not None:
+                last_attempt.clear()
+                last_attempt.update(translations)
             validate_batch_translations(batch, translations)
             return translations
         except (LLMParseError, TranslationValidationError) as exc:
@@ -160,6 +170,9 @@ def _translate_batch_once(
                     result.content, expected_ids=expected
                 )
                 _apply_placeholder_realignment(batch, translations)
+                if last_attempt is not None:
+                    last_attempt.clear()
+                    last_attempt.update(translations)
                 validate_batch_translations(batch, translations)
                 return translations
             except (LLMParseError, TranslationValidationError) as exc:
@@ -175,6 +188,75 @@ def _translate_batch_once(
     raise last_exc
 
 
+def _record_manual_action(
+    manual_actions: list[ManualAction] | None,
+    seg: Segment,
+    *,
+    message: str,
+) -> None:
+    if manual_actions is None:
+        return
+    action = ManualAction(
+        segment_id=seg.id,
+        location=_segment_location(seg),
+        message=message,
+    )
+    if not any(
+        a.segment_id == action.segment_id and a.message == action.message
+        for a in manual_actions
+    ):
+        manual_actions.append(action)
+
+
+def _recover_or_fallback_segment(
+    seg: Segment,
+    exc: Exception,
+    *,
+    client: YandexLLMClient,
+    glossary: Glossary,
+    file_path: str,
+    source_lang: str,
+    target_lang: str,
+    prompt_version: str,
+    failed_attempt: str | None,
+    manual_actions: list[ManualAction] | None,
+) -> dict[str, str]:
+    """Repair-pass, then table fail-soft; otherwise re-raise."""
+    if isinstance(exc, TranslationValidationError):
+        repaired = repair_segment_translation(
+            client,
+            seg,
+            glossary,
+            validation_error=str(exc),
+            failed_attempt=failed_attempt,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+        )
+        if repaired is not None:
+            return {seg.id: repaired}
+
+    if seg.kind in {
+        SegmentKind.TABLE_HEADER_CELL,
+        SegmentKind.TABLE_BODY_CELL,
+    }:
+        where = _segment_location(seg)
+        message = (
+            f"Таблица не переведена автоматически ({where}, `{seg.id}`); "
+            "оставлена на русском. Переведите вручную."
+        )
+        _record_manual_action(manual_actions, seg, message=message)
+        logger.warning(
+            "Translate kept source table segment %s after validation failure: %s",
+            seg.id,
+            exc,
+        )
+        return {seg.id: seg.text}
+
+    raise exc
+
+
 def translate_batch(
     client: YandexLLMClient,
     batch: Batch,
@@ -184,24 +266,10 @@ def translate_batch(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
-    manual_actions: list[str] | None = None,
+    manual_actions: list[ManualAction] | None = None,
 ) -> dict[str, str]:
     """Translate one batch; fall back to per-segment calls on batch failure."""
-    def _table_fallback(seg: Segment, exc: Exception) -> dict[str, str]:
-        where = " › ".join(seg.path) if seg.path else "table"
-        note = (
-            f"Таблица не переведена автоматически ({where}, `{seg.id}`); "
-            "оставлена на русском. Переведите вручную."
-        )
-        if manual_actions is not None and note not in manual_actions:
-            manual_actions.append(note)
-        logger.warning(
-            "Translate kept source table segment %s after validation failure: %s",
-            seg.id,
-            exc,
-        )
-        return {seg.id: seg.text}
-
+    last_attempt: dict[str, str] = {}
     try:
         return _translate_batch_once(
             client,
@@ -211,15 +279,24 @@ def translate_batch(
             source_lang=source_lang,
             target_lang=target_lang,
             prompt_version=prompt_version,
+            last_attempt=last_attempt,
         )
     except (LLMParseError, TranslationValidationError) as exc:
         if len(batch.segments) == 1:
             seg = batch.segments[0]
-            if isinstance(exc, TranslationValidationError) and seg.kind in {
-                SegmentKind.TABLE_HEADER_CELL,
-                SegmentKind.TABLE_BODY_CELL,
-            }:
-                return _table_fallback(seg, exc)
+            if isinstance(exc, TranslationValidationError):
+                return _recover_or_fallback_segment(
+                    seg,
+                    exc,
+                    client=client,
+                    glossary=glossary,
+                    file_path=file_path,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    prompt_version=prompt_version,
+                    failed_attempt=last_attempt.get(seg.id),
+                    manual_actions=manual_actions,
+                )
             raise
         logger.warning(
             "Batch %s failed (%s); retrying %d segments individually",
@@ -231,6 +308,7 @@ def translate_batch(
     out: dict[str, str] = {}
     for seg in batch.segments:
         single = Batch(index=batch.index, segments=[seg])
+        seg_attempt: dict[str, str] = {}
         try:
             out.update(
                 _translate_batch_once(
@@ -241,13 +319,24 @@ def translate_batch(
                     source_lang=source_lang,
                     target_lang=target_lang,
                     prompt_version=prompt_version,
+                    last_attempt=seg_attempt,
                 )
             )
         except TranslationValidationError as exc:
-            if seg.kind in {SegmentKind.TABLE_HEADER_CELL, SegmentKind.TABLE_BODY_CELL}:
-                out.update(_table_fallback(seg, exc))
-                continue
-            raise
+            out.update(
+                _recover_or_fallback_segment(
+                    seg,
+                    exc,
+                    client=client,
+                    glossary=glossary,
+                    file_path=file_path,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    prompt_version=prompt_version,
+                    failed_attempt=seg_attempt.get(seg.id),
+                    manual_actions=manual_actions,
+                )
+            )
         except LLMParseError:
             raise
     return out
@@ -265,7 +354,7 @@ def translate_segments(
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     cache: dict[str, str] | None = None,
     max_parallel_batches: int = 3,
-    manual_actions: list[str] | None = None,
+    manual_actions: list[ManualAction] | None = None,
 ) -> dict[str, str]:
     """Translate all segments (chunked batches, optional cache, parallel I/O)."""
     if not segments:

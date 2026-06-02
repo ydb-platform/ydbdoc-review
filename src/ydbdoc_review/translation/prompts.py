@@ -24,6 +24,7 @@ _TEMPLATE_NAMES = frozenset(
         "verify_batch",
         "analyze",
         "en_style_guide",
+        "repair",
     }
 )
 
@@ -106,6 +107,43 @@ def build_translate_messages(
             "target_lang": target_lang,
             "file_path": file_path,
             "batch_json": segments_to_batch_json(batch.segments),
+            "style_guide_block": _style_guide_block(
+                target_lang=target_lang, version=version
+            ),
+        },
+    )
+    return [
+        {"role": "system", "content": _system_message(glossary, version=version)},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_repair_messages(
+    segment: Segment,
+    glossary: Glossary,
+    *,
+    validation_error: str,
+    failed_attempt: str,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    version: str = DEFAULT_PROMPT_VERSION,
+) -> list[ChatCompletionMessageParam]:
+    """Chat messages for a single-segment repair after validation failure."""
+    user_template = load_template("repair", version=version)
+    path_label = " › ".join(segment.path) if segment.path else "(document root)"
+    user_content = render_template(
+        user_template,
+        {
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "file_path": file_path,
+            "segment_id": segment.id,
+            "segment_kind": segment.kind.value,
+            "segment_path": path_label,
+            "validation_error": validation_error,
+            "source_text": segment.text,
+            "failed_attempt": failed_attempt or "(none)",
             "style_guide_block": _style_guide_block(
                 target_lang=target_lang, version=version
             ),
