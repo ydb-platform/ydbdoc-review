@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
 ARG YDBDOC_GIT_SHA=dev
+ENV YDBDOC_GIT_SHA=${YDBDOC_GIT_SHA}
 LABEL org.opencontainers.image.source="https://github.com/ydb-platform/ydbdoc-review" \
       org.opencontainers.image.revision="${YDBDOC_GIT_SHA}"
 

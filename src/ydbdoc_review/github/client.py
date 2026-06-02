@@ -138,6 +138,22 @@ class GitHubClient:
         num = int(item.get("number", 0))
         return (html, num) if html and num else None
 
+    def add_issue_labels(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        labels: list[str],
+    ) -> None:
+        """Add labels to a PR/issue (PRs are issues in the GitHub API)."""
+        if not labels:
+            return
+        url = (
+            f"https://api.github.com/repos/{owner}/{repo}/issues/"
+            f"{issue_number}/labels"
+        )
+        self._request("POST", url, json_body={"labels": labels})
+
     def create_pull(
         self,
         owner: str,
@@ -147,12 +163,18 @@ class GitHubClient:
         head: str,
         base: str,
         body: str,
-    ) -> tuple[str, int] | None:
+    ) -> tuple[str, int, bool] | None:
+        """Open a PR or return an existing one.
+
+        Returns ``(html_url, number, created)`` where ``created`` is False if the
+        PR already existed for the same head/base.
+        """
         existing = self.find_open_pull_by_head(
             owner, repo, head_branch=head, base=base
         )
         if existing:
-            return existing
+            url, num = existing
+            return url, num, False
         url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
         try:
             data = self._request(
@@ -162,12 +184,16 @@ class GitHubClient:
             )
         except GitHubAPIError as exc:
             if exc.status_code == 422:
-                return self.find_open_pull_by_head(
+                found = self.find_open_pull_by_head(
                     owner, repo, head_branch=head, base=base
                 )
+                if found:
+                    u, n = found
+                    return u, n, False
+                return None
             raise
         if not isinstance(data, dict):
             return None
         html = str(data.get("html_url", ""))
         num = int(data.get("number", 0))
-        return (html, num) if html and num else None
+        return (html, num, True) if html and num else None

@@ -63,7 +63,16 @@ def test_create_pull_idempotent(mock_request):
     opened = client.create_pull(
         "o", "r", title="t", head="h", base="b", body="body"
     )
-    assert opened == ("https://github.com/o/r/pull/9", 9)
+    assert opened == ("https://github.com/o/r/pull/9", 9, True)
+
+
+@patch("ydbdoc_review.github.client.requests.request")
+def test_add_issue_labels(mock_request):
+    mock_request.return_value = MagicMock(status_code=200, content=b"[]", json=lambda: [])
+    client = GitHubClient("tok")
+    client.add_issue_labels("o", "r", 9, ["documentation"])
+    assert mock_request.call_args[0][0] == "POST"
+    assert "/issues/9/labels" in mock_request.call_args[0][1]
 
 
 @patch("ydbdoc_review.github.client.requests.request")

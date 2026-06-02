@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.github.client import GitHubClient
-from ydbdoc_review.github.errors import GitHubConfigError
+from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.git_ops import (
     git_commit_paths,
     prepare_translation_branch_on_base,
@@ -289,9 +289,20 @@ def run_doc_translate(
             body=body,
         )
         if opened:
-            tr_pr_url, tr_pr_number = opened
+            tr_pr_url, tr_pr_number, created = opened
             job.translation_pr_url = tr_pr_url
             job.translation_pr_number = tr_pr_number
+            if created:
+                try:
+                    gh.add_issue_labels(
+                        owner, repo, tr_pr_number, ["documentation"]
+                    )
+                except GitHubAPIError as exc:
+                    logger.warning(
+                        "Could not add documentation label to PR #%s: %s",
+                        tr_pr_number,
+                        exc,
+                    )
 
     job.source_comment_url = gh.post_issue_comment(
         owner,

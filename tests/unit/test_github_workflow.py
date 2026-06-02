@@ -198,6 +198,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
                         mock_gh.return_value.create_pull.return_value = (
                             "https://github.com/o/r/pull/99",
                             99,
+                            True,
                         )
                         mock_gh.return_value.iter_issue_comments.return_value = iter([])
                         mock_gh.return_value.post_issue_comment.return_value = "url"
@@ -219,6 +220,9 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     assert result.pushed is True
     assert mock_gh.return_value.post_issue_comment.call_count == 2
     mock_gh.return_value.create_pull.assert_called_once()
+    mock_gh.return_value.add_issue_labels.assert_called_once_with(
+        "o", "r", 99, ["documentation"]
+    )
     _, kwargs = mock_gh.return_value.create_pull.call_args
     assert kwargs["head"] == "ydbdoc-review/pr-7"
     assert kwargs["base"] == "feature/docs"
@@ -247,6 +251,7 @@ def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
                         mock_gh.return_value.create_pull.return_value = (
                             "https://github.com/o/r/pull/99",
                             99,
+                            True,
                         )
                         mock_gh.return_value.iter_issue_comments.return_value = iter([])
                         mock_gh.return_value.post_issue_comment.return_value = "url"
