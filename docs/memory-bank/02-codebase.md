@@ -30,7 +30,7 @@ src/ydbdoc_review/
 │   └── markdown_renderer.py       IR → markdown (stable round-trip)
 ├── segmentation/                  ✅ COMPLETE
 │   ├── types.py                   Segment, ProtectedInline, SegmentKind
-│   ├── inline_protector.py        protect inline atoms with ⟦C1⟧/⟦L1⟧/...
+│   ├── inline_protector.py        protect inline atoms with ⟦C1⟧/⟦U1⟧/...
 │   ├── extractor.py               AST → list[Segment] (incl. front matter)
 │   ├── reinsert.py                translations → updated AST
 │   └── chunker.py                 segments → batches (char budget)
@@ -52,6 +52,7 @@ src/ydbdoc_review/
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
 │   ├── markers.py                 placeholder parity (D.3)
+│   ├── link_locale.py             RU→EN URL mirror + post-reinsert pass
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic, parity, nav merge wrappers
 ├── pipeline/                      ✅ COMPLETE (Phase F)
@@ -155,20 +156,18 @@ A `Segment` is what we translate. See `src/ydbdoc_review/segmentation/types.py`.
 
 | Prefix | Meaning | Example |
 |---|---|---|
-| `C` | inline code | ` `--yaml` ` → `⟦C1⟧` |
-| `L` | link (including text and url) | `[docs](http://x)` → `⟦L1⟧` |
+| `C` | inline code | `` `--yaml` `` → `⟦C1⟧` |
+| `U` | link URL only (anchor text is translated) | `[docs](http://x)` → `[docs](⟦U1⟧)` |
 | `I` | image | `![alt](img.png)` → `⟦I1⟧` |
 | `H` | inline html | `<br/>` → `⟦H1⟧` |
 | `V` | YFM variable | `{{ ydb-short-name }}` → `⟦V1⟧` |
 | `T` | term ref | `[*cluster]` → `⟦T1⟧` |
 
 **Counter is global per segment** (including inside `**bold**` / `*em*`).
-This is critical: two `[link]` inside one paragraph must get different
-indices `⟦L1⟧` and `⟦L2⟧`, never the same. Was a bug discovered in B.2,
-fixed by sharing `_ProtectState` across recursion.
+Two links in one paragraph get `⟦U1⟧` and `⟦U2⟧`, never the same index.
+Was a bug discovered in B.2, fixed by sharing `_ProtectState` across recursion.
 
----
-
----
+After reinsert in `pipeline/translate_file.py`, `localize_links_in_document` runs a safety-net pass (`mirror_link_href`)
+so any remaining `/docs/ru/` or `ru.wikipedia.org` URLs are rewritten to EN.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

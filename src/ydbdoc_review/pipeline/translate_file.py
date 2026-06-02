@@ -24,6 +24,7 @@ from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
 from ydbdoc_review.validation.heuristics import bump_verdict_for_heuristics, run_file_heuristics
+from ydbdoc_review.validation.link_locale import localize_links_in_document
 
 
 def _align_translations(
@@ -49,6 +50,7 @@ def _render_with_translations(
 ) -> str:
     doc = copy.deepcopy(source_doc)
     reinsert_segments(doc, segments, translations)
+    localize_links_in_document(doc)
     return render_markdown(doc)
 
 
@@ -104,6 +106,10 @@ def translate_file(
 
     source_doc = parse_markdown(source_text)
     segments = extract_segments(source_doc)
+    segment_locations = {
+        seg.id: " › ".join(seg.path) if seg.path else "(начало документа)"
+        for seg in segments
+    }
 
     if not segments:
         return FileTranslationResult.from_usage(
@@ -201,4 +207,5 @@ def translate_file(
         critic_skipped=critic_skipped,
         critic_unresolved=critic_unresolved,
         heuristic_warnings=heuristic_warnings,
+        segment_locations=segment_locations,
     )

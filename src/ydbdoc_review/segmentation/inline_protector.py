@@ -19,15 +19,15 @@ from ydbdoc_review.parsing.ast_types import (
 from ydbdoc_review.segmentation.types import ProtectedInline
 
 
-# Map node kind → placeholder prefix.
+# Map node kind → placeholder prefix (whole-atom protection).
 _PREFIX_MAP: dict[str, str] = {
     "code": "C",
-    "link": "L",
     "image": "I",
     "html_inline": "H",
     "yfm_variable": "V",
     "term_ref": "T",
 }
+# Links: anchor text is translated; href is protected as ⟦U{n}⟧ (see InlineLink branch).
 
 
 def protect_inline(
@@ -39,7 +39,7 @@ def protect_inline(
 
     Placeholder indices are **globally unique within a segment**, including inside
     nested emphasis/strong/link content. This is essential for correct round-trip:
-    the same `⟦L1⟧` must always refer to exactly one node.
+    the same `⟦U{n}⟧` must always refer to exactly one URL template.
     """
     state = _ProtectState()
     text = _protect_walk(children, state)
@@ -54,7 +54,10 @@ class _ProtectState:
         self.counters: dict[str, int] = {}
 
     def next_placeholder(self, kind: str) -> str:
-        prefix = _PREFIX_MAP[kind]
+        if kind == "url":
+            prefix = "U"
+        else:
+            prefix = _PREFIX_MAP[kind]
         self.counters[prefix] = self.counters.get(prefix, 0) + 1
         return f"⟦{prefix}{self.counters[prefix]}⟧"
 
@@ -62,6 +65,22 @@ class _ProtectState:
 def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
     out: list[str] = []
     for node in children:
+        if isinstance(node, InlineLink):
+            inner = _protect_walk(node.children, state)
+            marker = state.next_placeholder("url")
+            state.placeholders.append(
+                ProtectedInline(
+                    placeholder=marker,
+                    node=InlineLink(
+                        href=node.href,
+                        title=node.title,
+                        children=[],
+                    ),
+                )
+            )
+            out.append(f"[{inner}]({marker})")
+            continue
+
         kind = node.kind
         if kind in _PREFIX_MAP:
             marker = state.next_placeholder(kind)
@@ -100,5 +119,13 @@ def restore_inline_text(text: str, placeholders: list[ProtectedInline]) -> str:
 
     result = text
     for p in placeholders:
-        result = result.replace(p.placeholder, _render_inline_node(p.node), 1)
+        if (
+            isinstance(p.node, InlineLink)
+            and not p.node.children
+            and p.node.href
+        ):
+            replacement = p.node.href
+        else:
+            replacement = _render_inline_node(p.node)
+        result = result.replace(p.placeholder, replacement, 1)
     return result

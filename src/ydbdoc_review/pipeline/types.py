@@ -26,6 +26,7 @@ class FileTranslationResult:
     critic_skipped: list[CriticIssueOut] = field(default_factory=list)
     critic_unresolved: CriticResponse | None = None
     heuristic_warnings: list[str] = field(default_factory=list)
+    segment_locations: dict[str, str] = field(default_factory=dict)
     models_used: list[str] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0

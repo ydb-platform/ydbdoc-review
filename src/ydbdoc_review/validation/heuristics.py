@@ -81,8 +81,25 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
     matches = list(_CYRILLIC.finditer(body))
     if not matches:
         return []
-    sample = body[max(0, matches[0].start() - 20) : matches[0].start() + 40].replace("\n", " ")
-    return [f"cyrillic_in_en: {len(matches)} occurrence(s) near {sample!r}"]
+    warnings: list[str] = []
+    seen_snippets: set[str] = set()
+    for match in matches[:12]:
+        start = max(0, match.start() - 25)
+        end = min(len(body), match.end() + 25)
+        snippet = body[start:end].replace("\n", " ").strip()
+        if snippet in seen_snippets:
+            continue
+        seen_snippets.add(snippet)
+        line = body.count("\n", 0, match.start()) + 1
+        warnings.append(
+            f"Кириллица в EN-тексте (строка ~{line}): «{snippet}»"
+        )
+    if len(matches) > 12:
+        warnings.append(
+            f"… и ещё {len(matches) - 12} вхождений кириллицы "
+            f"(всего {len(matches)} символов)"
+        )
+    return warnings
 
 
 def check_fence_parity(source_text: str, target_text: str) -> list[str]:

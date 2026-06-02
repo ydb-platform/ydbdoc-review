@@ -245,7 +245,7 @@ def test_translate_file_heuristics_bump_verdict_to_warnings():
 
     assert result.verdict == "warnings"
     assert result.heuristic_warnings
-    assert any("cyrillic_in_en" in w for w in result.heuristic_warnings)
+    assert any("Кириллица в EN-тексте" in w for w in result.heuristic_warnings)
 
 
 def test_translate_file_heuristics_do_not_downgrade_blocked():

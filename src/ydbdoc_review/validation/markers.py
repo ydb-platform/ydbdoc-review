@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 
-PLACEHOLDER_RE = re.compile(r"⟦[CLIHVT]\d+⟧")
+PLACEHOLDER_RE = re.compile(r"⟦[CLIHVTU]\d+⟧")
 # Capturing split keeps marker tokens in the parts list.
-PLACEHOLDER_SPLIT_RE = re.compile(r"(⟦[CLIHVT]\d+⟧)")
+PLACEHOLDER_SPLIT_RE = re.compile(r"(⟦[CLIHVTU]\d+⟧)")
 
 
 def extract_placeholders(text: str) -> list[str]:

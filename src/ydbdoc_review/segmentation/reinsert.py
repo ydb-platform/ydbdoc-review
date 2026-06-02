@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 from ydbdoc_review.parsing.ast_types import (
-    BlockNode,
     Document,
     Heading,
+    InlineLink,
     InlineNode,
     InlineText,
     ListItem,
@@ -67,20 +69,43 @@ def _build_inline_from_translation(
     return _substitute_placeholders(nodes, mapping)
 
 
+def _is_url_placeholder_template(node: InlineNode) -> bool:
+    """True for href-only templates stored when protecting link URLs."""
+    return (
+        isinstance(node, InlineLink)
+        and not node.children
+        and bool(node.href)
+    )
+
+
+def _resolve_url_placeholder(
+    href: str, mapping: dict[str, InlineNode]
+) -> InlineNode | None:
+    """Return URL template for href if it is a ⟦U⟧ placeholder (possibly URL-encoded)."""
+    template = mapping.get(href) or mapping.get(unquote(href))
+    if template is not None and _is_url_placeholder_template(template):
+        return template
+    return None
+
+
 def _substitute_placeholders(
     nodes: list[InlineNode], mapping: dict[str, InlineNode]
 ) -> list[InlineNode]:
-    """Walk inline nodes and replace any text containing placeholders.
-
-    A single InlineText("foo ⟦C1⟧ bar ⟦L1⟧ baz") becomes:
-       [InlineText("foo "), <original C1>, InlineText(" bar "), <original L1>, InlineText(" baz")]
-    """
+    """Walk inline nodes and replace any text containing placeholders."""
     out: list[InlineNode] = []
     for node in nodes:
+        if isinstance(node, InlineLink):
+            template = _resolve_url_placeholder(node.href, mapping)
+            if template is not None:
+                node.href = template.href
+                node.title = template.title
+            if hasattr(node, "children") and isinstance(node.children, list):
+                node.children = _substitute_placeholders(node.children, mapping)
+            out.append(node)
+            continue
         if isinstance(node, InlineText):
             out.extend(_split_text_by_placeholders(node.content, mapping))
         elif hasattr(node, "children") and isinstance(node.children, list):
-            # Descend into emphasis/strong/link.
             node.children = _substitute_placeholders(node.children, mapping)
             out.append(node)
         else:

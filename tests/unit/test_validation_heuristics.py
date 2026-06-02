@@ -20,7 +20,8 @@ from ydbdoc_review.validation.heuristics import (
 def test_cyrillic_in_en_detects_prose():
     warnings = check_cyrillic_in_en("Hello привет world", target_lang="en")
     assert len(warnings) == 1
-    assert "cyrillic_in_en" in warnings[0]
+    assert "Кириллица в EN-тексте" in warnings[0]
+    assert "строка ~1" in warnings[0]
 
 
 def test_cyrillic_in_en_ignores_fenced_code():

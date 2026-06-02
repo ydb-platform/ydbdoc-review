@@ -227,11 +227,11 @@ def test_translate_with_link_placeholder():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    translated = "См. ⟦L1⟧ для деталей."
+    translated = "See [documentation](⟦U1⟧) for details."
     translations = {seg.id: translated}
     new_doc = reinsert_segments(doc, segments, translations)
     out = render_markdown(new_doc)
-    assert "См. [docs](http://x) для деталей." in out
+    assert "See [documentation](http://x) for details." in out
 
 
 def test_translate_with_multiple_placeholders():
@@ -239,7 +239,7 @@ def test_translate_with_multiple_placeholders():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    translated = "Запустите ⟦C1⟧, затем смотрите ⟦L1⟧ с ⟦V1⟧."
+    translated = "Run ⟦C1⟧ then see [docs](⟦U1⟧) with ⟦V1⟧."
     translations = {seg.id: translated}
     new_doc = reinsert_segments(doc, segments, translations)
     out = render_markdown(new_doc)

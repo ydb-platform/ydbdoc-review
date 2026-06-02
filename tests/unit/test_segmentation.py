@@ -37,8 +37,28 @@ def test_protect_link_yields_marker():
     doc = parse_markdown("See [docs](http://x) for details.\n")
     para = doc.children[0]
     text, placeholders = protect_inline(para.children)
-    assert text == "See ⟦L1⟧ for details."
-    assert placeholders[0].placeholder == "⟦L1⟧"
+    assert text == "See [docs](⟦U1⟧) for details."
+    assert placeholders[0].placeholder == "⟦U1⟧"
+    assert placeholders[0].node.href == "http://x"
+    assert placeholders[0].node.children == []
+
+
+def test_protect_link_ru_url_roundtrip_reinsert():
+    from ydbdoc_review.segmentation.reinsert import reinsert_segments
+    from ydbdoc_review.rendering.markdown_renderer import render_markdown
+
+    text = "См. [документация](https://ydb.tech/docs/ru/path) здесь.\n"
+    doc = parse_markdown(text)
+    segments = extract_segments(doc)
+    seg = segments[0]
+    translated = "See [documentation](⟦U1⟧) here."
+    new_doc = reinsert_segments(doc, segments, {seg.id: translated})
+    from ydbdoc_review.validation.link_locale import localize_links_in_document
+
+    localize_links_in_document(new_doc)
+    out = render_markdown(new_doc)
+    assert "[documentation](https://ydb.tech/docs/en/path)" in out
+    assert "ru/" not in out
 
 
 def test_protect_variable_yields_marker():
@@ -57,7 +77,7 @@ def test_protect_multiple_mixed():
     text, placeholders = protect_inline(para.children)
     # Order: code, link, variable.
     assert "⟦C1⟧" in text
-    assert "⟦L1⟧" in text
+    assert "⟦U1⟧" in text
     assert "⟦V1⟧" in text
     assert len(placeholders) == 3
 
@@ -319,6 +339,9 @@ def test_extract_placeholders_match_kind():
         prefix = p.placeholder[1]  # ⟦C1⟧ → 'C'
         if prefix == "C":
             assert p.node.kind == "code"
+        elif prefix == "U":
+            assert p.node.kind == "link"
+            assert p.node.children == []
         elif prefix == "L":
             assert p.node.kind == "link"
         elif prefix == "V":

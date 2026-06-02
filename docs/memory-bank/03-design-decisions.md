@@ -66,8 +66,14 @@ container construct.
 See §5.4. The counter and placeholder list are kept in a shared
 `_ProtectState` passed by reference through recursion in
 `protect_inline`. Without this, nested constructs (link inside strong)
-would reuse `⟦L1⟧` and collisions in the restore map would silently swap
+would reuse `⟦U1⟧` and collisions in the restore map would silently swap
 links.
+
+### 6.12. Split link protection (anchor vs URL)
+Whole-link `⟦L⟧` placeholders forced the model to keep Russian anchor text
+and reinsert copied the entire RU `InlineLink`. Links now serialize as
+`[protected anchor](⟦U{n}⟧)` with an href-only template in the placeholder map;
+`reinsert` restores the original href from the `⟦U⟧` template; `mirror_link_href` runs only in `translate_file` via `localize_links_in_document`.
 
 ### 6.10. Mixed-type `ast_path` for re-insertion
 For most nodes, `ast_path` is a list of int indices into `.children`. For
