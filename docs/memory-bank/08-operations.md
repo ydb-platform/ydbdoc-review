@@ -19,12 +19,19 @@ CI (Actions captures stdout fine).
 - **WARNING**: retry attempts, heuristic flags, fallback model used.
 - **ERROR**: unrecoverable per-file failures (still don't fail the job).
 
-### 19.3. Debug log file
+### 19.4. Docker image (GitHub Action)
 
-CLI flag `--debug-log <path>` writes full LLM request/response bodies to a
-file for offline analysis. Off by default to avoid leaking content.
+The Action uses `action.yml` → `Dockerfile`; GitHub **rebuilds the image on each run**
+from the commit behind the ref (e.g. `ydb-platform/ydbdoc-review@v0.1.0`). No local
+`docker build` is required for ydb workflows.
 
----
+After changing translation/validation code, move the tag workflows use:
+
+```bash
+git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
+```
+
+Label `org.opencontainers.image.revision` records the git SHA in the Dockerfile for debugging.
 
 ---
 

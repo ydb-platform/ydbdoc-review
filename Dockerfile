@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+ARG YDBDOC_GIT_SHA=dev
+LABEL org.opencontainers.image.source="https://github.com/ydb-platform/ydbdoc-review" \
+      org.opencontainers.image.revision="${YDBDOC_GIT_SHA}"
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/* \
