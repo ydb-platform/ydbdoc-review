@@ -176,6 +176,30 @@ def test_translate_batch_realigns_renumbered_placeholders():
     assert out == {"s1": "Use ⟦C1⟧ flag"}
 
 
+def test_translate_segments_keeps_ru_table_on_placeholder_failure():
+    seg = Segment(
+        id="s1",
+        kind=SegmentKind.TABLE_BODY_CELL,
+        path=["table:row1:col2"],
+        text="Значение `stdin` и [ссылка](⟦U1⟧)",
+        placeholders=[],
+        ast_path=[0],
+    )
+    bad = _json_response([{"id": "s1", "text": "Value stdin only"}])
+    client = _mock_client([bad, bad, bad, bad, bad])
+    notes: list[str] = []
+    out = translate_segments(
+        [seg],
+        client,
+        load_glossary(),
+        file_path="docs/ru/x.md",
+        manual_actions=notes,
+    )
+    assert out == {"s1": seg.text}
+    assert notes
+    assert "Переведите вручную" in notes[0]
+
+
 def test_translate_batch_placeholder_mismatch_tries_fallback_model():
     seg = _segment("s1", "Use ⟦C1⟧ flag")
     batch = Batch(index=0, segments=[seg])

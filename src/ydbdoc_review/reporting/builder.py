@@ -156,6 +156,8 @@ def _file_has_open_issues(run: PairRunResult) -> bool:
         return False
     if _remaining_critic_issues(fr):
         return True
+    if fr.manual_actions:
+        return True
     return bool(fr.heuristic_warnings)
 
 
@@ -172,13 +174,21 @@ def _file_reviewer_section(
 
     critic_items = _remaining_critic_issues(fr)
     heuristics = fr.heuristic_warnings if config.reporting.include_heuristics else []
+    manual_actions = fr.manual_actions
 
-    if not critic_items and not heuristics:
+    if not critic_items and not heuristics and not manual_actions:
         if fr.verdict == "ok":
             return f"### 🟢 `{run.plan.target_path}`\n\nЗамечаний нет.\n\n", item_index
         return "", item_index
 
     out = f"### {_verdict_emoji(fr.verdict)} `{run.plan.target_path}`\n\n"
+    for note in manual_actions:
+        out += _format_reviewer_item(
+            index=item_index,
+            location="таблица",
+            problem=note,
+        ) + "\n\n"
+        item_index += 1
     for issue in critic_items:
         out += _format_critic_item(issue, fr.segment_locations, index=item_index) + "\n\n"
         item_index += 1

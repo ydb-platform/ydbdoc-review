@@ -204,6 +204,18 @@ If EN exists but RU doesn't → create RU from EN.
   ydbdoc-review v0.2.0
   ```
 
+### 16.5. Fail-soft policy for table segments
+
+- Table cells (`table_header_cell`, `table_body_cell`) are the most fragile
+  segments for placeholder parity.
+- If translation keeps failing with `placeholder mismatch` on a table segment,
+  pipeline does **not** fail the whole file:
+  - keep the source RU table segment text in output as-is;
+  - continue translating other segments/files;
+  - add an explicit manual-action note to the report: table was not translated
+    and must be translated manually.
+- File verdict is bumped to `warnings` when such manual actions exist.
+
 ---
 
 ---

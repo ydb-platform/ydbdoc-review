@@ -11,7 +11,7 @@ from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.llm.structured import parse_json_model
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
-from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import (
@@ -184,8 +184,24 @@ def translate_batch(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    manual_actions: list[str] | None = None,
 ) -> dict[str, str]:
     """Translate one batch; fall back to per-segment calls on batch failure."""
+    def _table_fallback(seg: Segment, exc: Exception) -> dict[str, str]:
+        where = " › ".join(seg.path) if seg.path else "table"
+        note = (
+            f"Таблица не переведена автоматически ({where}, `{seg.id}`); "
+            "оставлена на русском. Переведите вручную."
+        )
+        if manual_actions is not None and note not in manual_actions:
+            manual_actions.append(note)
+        logger.warning(
+            "Translate kept source table segment %s after validation failure: %s",
+            seg.id,
+            exc,
+        )
+        return {seg.id: seg.text}
+
     try:
         return _translate_batch_once(
             client,
@@ -198,6 +214,12 @@ def translate_batch(
         )
     except (LLMParseError, TranslationValidationError) as exc:
         if len(batch.segments) == 1:
+            seg = batch.segments[0]
+            if isinstance(exc, TranslationValidationError) and seg.kind in {
+                SegmentKind.TABLE_HEADER_CELL,
+                SegmentKind.TABLE_BODY_CELL,
+            }:
+                return _table_fallback(seg, exc)
             raise
         logger.warning(
             "Batch %s failed (%s); retrying %d segments individually",
@@ -209,17 +231,25 @@ def translate_batch(
     out: dict[str, str] = {}
     for seg in batch.segments:
         single = Batch(index=batch.index, segments=[seg])
-        out.update(
-            _translate_batch_once(
-                client,
-                single,
-                glossary,
-                file_path=file_path,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                prompt_version=prompt_version,
+        try:
+            out.update(
+                _translate_batch_once(
+                    client,
+                    single,
+                    glossary,
+                    file_path=file_path,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    prompt_version=prompt_version,
+                )
             )
-        )
+        except TranslationValidationError as exc:
+            if seg.kind in {SegmentKind.TABLE_HEADER_CELL, SegmentKind.TABLE_BODY_CELL}:
+                out.update(_table_fallback(seg, exc))
+                continue
+            raise
+        except LLMParseError:
+            raise
     return out
 
 
@@ -235,6 +265,7 @@ def translate_segments(
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     cache: dict[str, str] | None = None,
     max_parallel_batches: int = 3,
+    manual_actions: list[str] | None = None,
 ) -> dict[str, str]:
     """Translate all segments (chunked batches, optional cache, parallel I/O)."""
     if not segments:
@@ -269,6 +300,7 @@ def translate_segments(
             source_lang=source_lang,
             target_lang=target_lang,
             prompt_version=prompt_version,
+            manual_actions=manual_actions,
         )
 
     if max_parallel_batches == 1 or len(batches) == 1:

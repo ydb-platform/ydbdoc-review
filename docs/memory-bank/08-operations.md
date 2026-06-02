@@ -67,7 +67,7 @@ that appends one line per PR run. Not in MVP.
 - **AST / IR**: our pydantic representation of a parsed markdown document.
 - **Segment**: a translatable unit extracted from AST (a paragraph, a heading,
   a table cell, a list item, etc.).
-- **Placeholder / marker**: `⟦C1⟧`, `⟦L1⟧`, etc., representing a protected
+- **Placeholder / marker**: `⟦C1⟧`, `⟦U1⟧`, etc., representing a protected
   inline atom in the LLM-visible text.
 - **Batch**: a group of segments sent to the LLM in one request.
 - **Round-trip**: parse → render → equal (or idempotent after first pass).

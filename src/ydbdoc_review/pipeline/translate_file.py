@@ -122,6 +122,7 @@ def translate_file(
         )
 
     if enable_translate:
+        manual_actions: list[str] = []
         translations = translate_segments(
             segments,
             client,
@@ -133,9 +134,11 @@ def translate_file(
             prompt_version=version,
             cache=cache,
             max_parallel_batches=parallel,
+            manual_actions=manual_actions,
         )
         translated_text = _render_with_translations(source_doc, segments, translations)
     else:
+        manual_actions = []
         if existing_target_text is None:
             raise ValueError("existing_target_text is required when enable_translate=False")
         try:
@@ -194,6 +197,8 @@ def translate_file(
         target_lang=tgt_lang,
     )
     verdict = bump_verdict_for_heuristics(verdict, heuristic_warnings)
+    if manual_actions and verdict == "ok":
+        verdict = "warnings"
 
     return FileTranslationResult.from_usage(
         tracker=client.usage_tracker,
@@ -207,5 +212,6 @@ def translate_file(
         critic_skipped=critic_skipped,
         critic_unresolved=critic_unresolved,
         heuristic_warnings=heuristic_warnings,
+        manual_actions=manual_actions,
         segment_locations=segment_locations,
     )

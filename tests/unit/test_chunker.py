@@ -50,6 +50,7 @@ def test_multiple_small_segments_in_one_batch():
     assert len(batches[0].segments) == 5
 
 
+
 def test_packing_splits_when_budget_exceeded():
     # Each segment 30 chars, budget 100 → 3 fit per batch.
     segs = [make_seg(i, "x" * 30) for i in range(7)]

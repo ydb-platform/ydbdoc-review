@@ -59,6 +59,9 @@ def _sample_result(*, new_file: bool = False) -> PRTranslationResult:
         ],
         critic_unresolved=CriticResponse(verdict="warnings", issues=[unresolved]),
         heuristic_warnings=["Кириллица в EN-тексте (строка ~5): «командой YQL»"],
+        manual_actions=[
+            "Таблица не переведена автоматически (table:row1:col2, `s0124`); оставлена на русском. Переведите вручную."
+        ],
         segment_locations={"s0042": "Overview"},
     )
     return PRTranslationResult(
@@ -95,6 +98,8 @@ def test_build_full_report_reviewer_focused():
     assert "string table" in body
     assert "💡 Совет: row table" in body
     assert "Кириллица в EN-тексте" in body
+    assert "Таблица не переведена автоматически" in body
+    assert "Переведите вручную" in body
     assert "fixed spacing" not in body
     assert "Сегментов переведено" not in body
     assert "Critic fixes auto-applied" not in body
