@@ -10,12 +10,13 @@ CRITICAL RULES:
 
 ## PLACEHOLDERS (⟦X{n}⟧) — NOT TRANSLATABLE TEXT
 
-Segment `text` contains opaque tokens like `⟦C1⟧`, `⟦V1⟧`, `⟦U1⟧`. They are **not** words, code, or URLs for you to rewrite.
+Segment `text` contains opaque tokens like `⟦C1⟧`, `⟦V1⟧`, `⟦U1⟧`, `⟦S1⟧`. They are **not** words, code, or URLs for you to rewrite.
 
 **You must:**
 - Copy every placeholder **byte-for-byte**: same characters `⟦` `⟧`, same letter (`C`, `V`, `U`, `I`, `H`, `T`), same number, **same left-to-right order** as in the input.
 - Translate **only** the human-language prose **between** placeholders (and inside link anchor text between `[` and `](…)`).
 - Keep the markdown link **shape** `[translated anchor](⟦U1⟧)` — translate the anchor words; leave `⟦U{n}⟧` in the **href** position only.
+- Keep the image **shape** `![translated alt](⟦S1⟧)` — translate the alt words; leave `⟦S{n}⟧` as the path placeholder.
 
 **You must never:**
 - Remove, add, renumber, or reorder placeholders (e.g. `⟦C1⟧` → `⟦C2⟧`, or `⟦L1⟧` instead of `⟦U1⟧`).

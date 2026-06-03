@@ -27,12 +27,11 @@ _BORING_HTML: frozenset[str] = frozenset(
 # Map node kind → placeholder prefix (whole-atom protection).
 _PREFIX_MAP: dict[str, str] = {
     "code": "C",
-    "image": "I",
     "html_inline": "H",
     "yfm_variable": "V",
     "term_ref": "T",
 }
-# Links: anchor text is translated; href is protected as ⟦U{n}⟧ (see InlineLink branch).
+# Links: anchor translated, href as ⟦U{n}⟧. Images: alt translated, src as ⟦S{n}⟧.
 
 
 def protect_inline(
@@ -61,6 +60,8 @@ class _ProtectState:
     def next_placeholder(self, kind: str) -> str:
         if kind == "url":
             prefix = "U"
+        elif kind == "src":
+            prefix = "S"
         else:
             prefix = _PREFIX_MAP[kind]
         self.counters[prefix] = self.counters.get(prefix, 0) + 1
@@ -84,6 +85,29 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
                 )
             )
             out.append(f"[{inner}]({marker})")
+            continue
+
+        if isinstance(node, InlineImage):
+            marker = state.next_placeholder("src")
+            size = ""
+            if node.width is not None or node.height is not None:
+                w = node.width or ""
+                h = node.height or ""
+                size = f" ={w}x{h}"
+            state.placeholders.append(
+                ProtectedInline(
+                    placeholder=marker,
+                    node=InlineImage(
+                        src=node.src,
+                        title=node.title,
+                        alt="",
+                        width=node.width,
+                        height=node.height,
+                    ),
+                )
+            )
+            title = f' "{node.title}"' if node.title else ""
+            out.append(f"![{node.alt}]({marker}{size}{title})")
             continue
 
         kind = node.kind
@@ -133,6 +157,10 @@ def restore_inline_text(text: str, placeholders: list[ProtectedInline]) -> str:
             and p.node.href
         ):
             replacement = p.node.href
+        elif isinstance(p.node, InlineImage) and not p.node.alt:
+            from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
+
+            replacement = _render_inline_node(p.node)
         else:
             replacement = _render_inline_node(p.node)
         result = result.replace(p.placeholder, replacement, 1)

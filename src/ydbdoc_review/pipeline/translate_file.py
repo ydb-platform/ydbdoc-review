@@ -26,6 +26,7 @@ from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.reporting.locations import build_segment_line_map
 from ydbdoc_review.validation.heuristics import bump_verdict_for_heuristics, run_file_heuristics
+from ydbdoc_review.validation.homoglyphs import fix_cyrillic_homoglyphs_in_en
 from ydbdoc_review.validation.link_locale import localize_links_in_document
 
 
@@ -49,11 +50,16 @@ def _render_with_translations(
     source_doc: Document,
     segments: list[Segment],
     translations: dict[str, str],
+    *,
+    target_lang: str = "en",
 ) -> str:
     doc = copy.deepcopy(source_doc)
     reinsert_segments(doc, segments, translations)
     localize_links_in_document(doc)
-    return render_markdown(doc)
+    text = render_markdown(doc)
+    if target_lang.lower() in {"en", "english"}:
+        text = fix_cyrillic_homoglyphs_in_en(text)
+    return text
 
 
 def _compute_verdict(
@@ -138,7 +144,9 @@ def translate_file(
             max_parallel_batches=parallel,
             manual_actions=manual_actions,
         )
-        translated_text = _render_with_translations(source_doc, segments, translations)
+        translated_text = _render_with_translations(
+            source_doc, segments, translations, target_lang=tgt_lang
+        )
     else:
         manual_actions = []
         if existing_target_text is None:
@@ -171,7 +179,7 @@ def translate_file(
         )
         if critic_initial.issues:
             text_after_fixes = _render_with_translations(
-                source_doc, segments, translations
+                source_doc, segments, translations, target_lang=tgt_lang
             )
             critic_unresolved = run_verify(
                 client,

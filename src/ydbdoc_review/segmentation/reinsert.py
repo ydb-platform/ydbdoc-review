@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from ydbdoc_review.parsing.ast_types import (
     Document,
     Heading,
+    InlineImage,
     InlineLink,
     InlineNode,
     InlineText,
@@ -78,6 +79,11 @@ def _is_url_placeholder_template(node: InlineNode) -> bool:
     )
 
 
+def _is_image_src_placeholder_template(node: InlineNode) -> bool:
+    """True for src-only templates stored when protecting image paths."""
+    return isinstance(node, InlineImage) and not node.alt and bool(node.src)
+
+
 def _resolve_url_placeholder(
     href: str, mapping: dict[str, InlineNode]
 ) -> InlineNode | None:
@@ -101,6 +107,15 @@ def _substitute_placeholders(
                 node.title = template.title
             if hasattr(node, "children") and isinstance(node.children, list):
                 node.children = _substitute_placeholders(node.children, mapping)
+            out.append(node)
+            continue
+        if isinstance(node, InlineImage):
+            template = mapping.get(node.src) or mapping.get(unquote(node.src))
+            if template is not None and _is_image_src_placeholder_template(template):
+                node.src = template.src
+                node.title = template.title
+                node.width = template.width
+                node.height = template.height
             out.append(node)
             continue
         if isinstance(node, InlineText):
