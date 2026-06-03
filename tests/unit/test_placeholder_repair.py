@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import urllib.request
 from pathlib import Path
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -130,6 +131,27 @@ def test_repair_s0010_literals_with_link_variable():
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
     assert fixed.count("⟦V1⟧") == 1
+
+
+def test_repair_swapped_variable_and_url_vscode_s0077():
+    url = (
+        "https://raw.githubusercontent.com/ydb-platform/ydb/main/"
+        "ydb/docs/ru/core/integrations/gui/vscode-plugin.md"
+    )
+    text = urllib.request.urlopen(url, timeout=30).read().decode()
+    seg = next(
+        s for s in extract_segments(parse_markdown(text)) if s.id == "s0077"
+    )
+    broken = (
+        "Authentication by login and password. Specify the username in the "
+        "**Username** field and the password in the **Password** field. "
+        "Used if [login and password authentication](⟦V1⟧) is enabled on the "
+        "[](../../security/authentication.md#static-credentials) server."
+    )
+    fixed = repair_translation_placeholders(seg, broken)
+    assert placeholders_match(seg.text, fixed)
+    assert "[login and password authentication](⟦U1⟧)" in fixed
+    assert "on the ⟦V1⟧ server" in fixed
 
 
 def test_repair_s0124_all_literals():

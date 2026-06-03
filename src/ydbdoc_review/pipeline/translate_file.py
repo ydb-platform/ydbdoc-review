@@ -26,7 +26,7 @@ from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.reporting.locations import build_segment_line_map
 from ydbdoc_review.validation.heuristics import bump_verdict_for_heuristics, run_file_heuristics
-from ydbdoc_review.validation.homoglyphs import fix_cyrillic_homoglyphs_in_en
+from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 from ydbdoc_review.validation.link_locale import localize_links_in_document
 
 
@@ -58,7 +58,7 @@ def _render_with_translations(
     localize_links_in_document(doc)
     text = render_markdown(doc)
     if target_lang.lower() in {"en", "english"}:
-        text = fix_cyrillic_homoglyphs_in_en(text)
+        text = postprocess_en_target_markdown(text)
     return text
 
 

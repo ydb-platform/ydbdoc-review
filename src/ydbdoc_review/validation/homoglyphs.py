@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 # Common Cyrillic → Latin confusables in technical text (not full alphabet).
 _CYRILLIC_TO_LATIN: dict[int, str] = {
     ord("А"): "A",
@@ -61,3 +63,61 @@ def fix_cyrillic_homoglyphs_in_en(text: str) -> str:
         else:
             out.append(line)
     return "".join(out)
+
+
+_FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})")
+_CYRILLIC_IN_ANGLE = re.compile(r"[а-яА-ЯёЁ]")
+# Russian angle-bracket placeholders in shell examples (RU source often uses these).
+_ANGLE_PLACEHOLDER_EN: dict[str, str] = {
+    "строка": "string",
+    "значение": "value",
+    "имя": "name",
+    "путь": "path",
+    "адрес": "address",
+    "uuid": "uuid",
+}
+
+
+def _fix_angle_placeholders_on_line(line: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        inner = match.group(1)
+        if not _CYRILLIC_IN_ANGLE.search(inner):
+            return match.group(0)
+        en = _ANGLE_PLACEHOLDER_EN.get(inner.lower())
+        if en is None:
+            return match.group(0)
+        return f"<{en}>"
+
+    return re.sub(r"<([^<>]+)>", repl, line)
+
+
+def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
+    """Inside fenced code blocks, map RU ``<строка>``-style placeholders to EN."""
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    in_fence = False
+    fence_char = ""
+    for line in lines:
+        m = _FENCE_OPEN.match(line)
+        if m:
+            marker = m.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_char = marker[0]
+            elif marker[0] == fence_char:
+                in_fence = False
+            out.append(line)
+            continue
+        if in_fence:
+            body = line.rstrip("\n\r")
+            suffix = line[len(body) :]
+            out.append(_fix_angle_placeholders_on_line(body) + suffix)
+        else:
+            out.append(line)
+    return "".join(out)
+
+
+def postprocess_en_target_markdown(text: str) -> str:
+    """Homoglyphs in YAML comments + RU angle placeholders inside fences."""
+    text = fix_cyrillic_homoglyphs_in_en(text)
+    return fix_russian_angle_placeholders_in_en_fences(text)

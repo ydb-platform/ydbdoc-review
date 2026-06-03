@@ -22,8 +22,10 @@ from ydbdoc_review.translation.prompts import (
 )
 from ydbdoc_review.translation.schemas import TranslateBatchResponse
 from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
+from ydbdoc_review.validation.heuristics import count_fence_markers
 from ydbdoc_review.validation.markers import placeholders_match
 from ydbdoc_review.validation.placeholder_repair import repair_translation_placeholders
+from ydbdoc_review.validation.placeholder_roles import placeholder_roles_valid
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +57,23 @@ def validate_segment_translation(source: Segment, translated_text: str) -> None:
             f"expected placeholders from source in same order",
             segment_id=source.id,
         )
+    if not placeholder_roles_valid(source, translated_text):
+        raise TranslationValidationError(
+            f"placeholder role mismatch for {source.id!r}: "
+            f"⟦V⟧ must not appear in link URLs unless the source does",
+            segment_id=source.id,
+        )
     if not cli_tokens_preserved(source.text, translated_text):
         raise TranslationValidationError(
             f"CLI/shell token missing in translation for {source.id!r}",
+            segment_id=source.id,
+        )
+    src_fences = count_fence_markers(source.text)
+    tgt_fences = count_fence_markers(translated_text)
+    if src_fences != tgt_fences:
+        raise TranslationValidationError(
+            f"fence count mismatch for {source.id!r}: "
+            f"source {src_fences} vs translation {tgt_fences}",
             segment_id=source.id,
         )
 

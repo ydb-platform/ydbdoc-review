@@ -40,6 +40,11 @@ def test_fence_parity_mismatch():
     assert any("fence_parity" in w for w in warnings)
 
 
+def test_fence_parity_ignores_triple_backticks_inside_block_body():
+    block = "```bash\necho '```'\nmore\n```\n"
+    assert check_fence_parity(block, block) == []
+
+
 def test_heading_parity():
     src = "# One\n\n## Two\n"
     tgt = "# One\n"

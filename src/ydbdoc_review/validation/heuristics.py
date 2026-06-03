@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Literal
 
+from ydbdoc_review.parsing.ast_types import FencedCode
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.redirects import (
     RedirectValidationIssue,
@@ -102,9 +104,32 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
     return warnings
 
 
+def count_fence_markers(text: str) -> int:
+    """Opening fence markers inside one segment's text (paragraph/table cells)."""
+    return len(_FENCE_OPEN.findall(text))
+
+
+def _count_fenced_code_blocks(text: str) -> int:
+    """Fenced code blocks in a full markdown file (AST), not ``` lines inside blocks."""
+    doc = parse_markdown(text)
+    count = 0
+
+    def walk(blocks: list) -> None:
+        nonlocal count
+        for block in blocks:
+            if isinstance(block, FencedCode):
+                count += 1
+            children = getattr(block, "children", None)
+            if children:
+                walk(children)
+
+    walk(doc.children)
+    return count
+
+
 def check_fence_parity(source_text: str, target_text: str) -> list[str]:
-    src = len(_FENCE_OPEN.findall(source_text))
-    tgt = len(_FENCE_OPEN.findall(target_text))
+    src = _count_fenced_code_blocks(source_text)
+    tgt = _count_fenced_code_blocks(target_text)
     if src == tgt:
         return []
     return [f"fence_parity: source {src} fenced blocks vs target {tgt}"]

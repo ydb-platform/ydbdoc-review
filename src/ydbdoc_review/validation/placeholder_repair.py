@@ -16,6 +16,7 @@ from ydbdoc_review.validation.markers import (
     placeholders_match,
     realign_placeholders,
 )
+from ydbdoc_review.validation.placeholder_roles import placeholder_roles_valid
 
 # Markdown link destinations that are not already placeholders.
 _LINK_DEST_RE = re.compile(r"\]\((?!⟦)([^)]+)\)")
@@ -205,6 +206,65 @@ def _repair_atoms_in_order(segment: Segment, text: str) -> str:
     return text
 
 
+def _move_variable_clause_before_link(segment: Segment, text: str) -> str:
+    """When source has ⟦V⟧ before the link, put the «… ⟦V⟧ server» clause before «Used if [»."""
+    var = _variable_placeholder(segment)
+    if var is None:
+        return text
+    var_ph = var.placeholder
+    link_pos = segment.text.find("[")
+    if link_pos < 0 or segment.text.find(var_ph) > link_pos:
+        return text
+    if text.find(var_ph) < text.find("["):
+        return text
+    tail_m = re.search(
+        rf"(?P<tail>\s+on the\s+{re.escape(var_ph)}\s+server)\.?\s*$",
+        text,
+    )
+    if not tail_m:
+        return text
+    tail = tail_m.group("tail").strip()
+    base = text[: tail_m.start()].rstrip().rstrip(".")
+    used_m = re.search(r"\bUsed if\s+", base)
+    if not used_m:
+        return text
+    prefix = base[: used_m.start()].rstrip().rstrip(".")
+    suffix = base[used_m.start() :].strip()
+    return f"{prefix}. {tail}. {suffix}"
+
+
+def _repair_swapped_variable_and_url(segment: Segment, text: str) -> str:
+    """Fix V marker in link dest and U href in a spurious empty link (vscode-plugin pattern)."""
+    var = _variable_placeholder(segment)
+    urls = _url_placeholders(segment)
+    if var is None or not urls:
+        return text
+    var_ph = var.placeholder
+    url_ph = urls[0].placeholder
+    href = urls[0].node.href
+    assert href
+
+    if f"]({var_ph})" in segment.text:
+        return text
+    if f"]({var_ph})" not in text:
+        return text
+
+    text = re.sub(
+        rf"\[([^\]]+)\]\({re.escape(var_ph)}\)",
+        rf"[\1]({url_ph})",
+        text,
+        count=1,
+    )
+    for pattern in (
+        rf"\[\]\({re.escape(href)}\)",
+        rf"\[\]\({re.escape(url_ph)}\)",
+    ):
+        text, n = re.subn(pattern, var_ph, text, count=1)
+        if n:
+            break
+    return text
+
+
 def _try_realign(segment: Segment, text: str) -> str:
     """Apply index realignment when placeholder count already matches."""
     src_ph = extract_placeholders(segment.text)
@@ -222,8 +282,11 @@ def _repair_core(segment: Segment, translated: str) -> str:
     text = _prepend_missing_leading_variable(segment, text)
     text = _dedupe_markers_before_first_link(text)
     text = _normalize_all_link_anchors(segment, text)
+    text = _repair_swapped_variable_and_url(segment, text)
     text = _repair_missing_url_markers(text, _url_placeholders(segment))
     text = _repair_atoms_in_order(segment, text)
+    text = _repair_swapped_variable_and_url(segment, text)
+    text = _move_variable_clause_before_link(segment, text)
     text = _strip_stray_leading_variable(segment, text)
     text = _try_realign(segment, text)
     return text
@@ -250,6 +313,12 @@ def _strip_placeholders_preserving_atoms(segment: Segment, text: str) -> str:
     return text
 
 
+def _translation_placeholders_ok(segment: Segment, text: str) -> bool:
+    return placeholders_match(segment.text, text) and placeholder_roles_valid(
+        segment, text
+    )
+
+
 def repair_translation_placeholders(segment: Segment, translated: str) -> str:
     """Fix common LLM placeholder mistakes using segment placeholder metadata.
 
@@ -257,11 +326,14 @@ def repair_translation_placeholders(segment: Segment, translated: str) -> str:
     to inline atoms and rebuilds markers from segment metadata (last resort).
     """
     text = _repair_core(segment, translated)
-    if placeholders_match(segment.text, text):
+    if _translation_placeholders_ok(segment, text):
         return text
     stripped = _strip_placeholders_preserving_atoms(segment, translated)
     text = _repair_core(segment, stripped)
-    if placeholders_match(segment.text, text):
+    if _translation_placeholders_ok(segment, text):
         return text
     text = _repair_core(segment, _strip_placeholders_preserving_atoms(segment, text))
-    return _try_realign(segment, text)
+    text = _try_realign(segment, text)
+    if _translation_placeholders_ok(segment, text):
+        return text
+    return text
