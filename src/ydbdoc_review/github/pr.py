@@ -46,6 +46,8 @@ class PullRequestContext:
     head_repo_full_name: str
     head_repo_https_url: str
     base_ref: str
+    merged: bool = False
+    state: str = "open"
 
 
 def pull_request_context(
@@ -68,6 +70,8 @@ def pull_request_context(
         head_repo_full_name=str(head_repo.get("full_name") or f"{owner}/{repo}"),
         head_repo_https_url=clone_url,
         base_ref=str(base.get("ref") or ""),
+        merged=bool(data.get("merged")),
+        state=str(data.get("state") or "open"),
     )
 
 
@@ -89,10 +93,13 @@ def translation_branch_base(ctx: PullRequestContext) -> tuple[str, str]:
     source PR targets / merges into. Contributor feature branches do not exist on
     upstream; basing on the fork head pulls foreign history and can break push.
 
-    Same-repo PRs: branch from the source PR head on upstream (stacked PR).
+    Same-repo open PRs: branch from the source PR head on upstream (stacked PR).
+
+    Merged PRs (any repo): branch from ``base_ref`` — the head branch is often
+    deleted after merge (e.g. ``alexnick88-patch-1`` on #40070).
     """
     upstream = repo_https_clone_url(ctx.owner, ctx.repo)
-    if is_fork_head(ctx):
+    if is_fork_head(ctx) or ctx.merged:
         return upstream, ctx.base_ref
     return upstream, ctx.head_ref
 

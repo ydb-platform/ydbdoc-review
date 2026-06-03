@@ -95,6 +95,28 @@ def test_translation_branch_base():
     assert translation_pr_base(fork) == "main"
 
 
+def test_translation_branch_base_merged_same_repo():
+    """Merged PR: head branch may be deleted; base translation branch on main."""
+    merged = PullRequestContext(
+        number=40070,
+        title="t",
+        owner="ydb-platform",
+        repo="ydb",
+        head_ref="alexnick88-patch-1",
+        head_sha="b2a17bd",
+        head_repo_https_url="https://github.com/ydb-platform/ydb.git",
+        head_repo_full_name="ydb-platform/ydb",
+        base_ref="main",
+        merged=True,
+        state="closed",
+    )
+    assert translation_branch_base(merged) == (
+        "https://github.com/ydb-platform/ydb.git",
+        "main",
+    )
+    assert translation_pr_base(merged) == "main"
+
+
 def test_parse_repo_invalid():
     with pytest.raises(ValueError):
         parse_repo("bad")
@@ -171,8 +193,11 @@ def test_pull_request_context():
                     },
                 },
                 "base": {"ref": "main"},
+                "merged": False,
+                "state": "open",
             }
 
     ctx = pull_request_context(FakeClient(), "o", "r", 5)  # type: ignore[arg-type]
     assert ctx.number == 5
     assert ctx.head_ref == "feat"
+    assert ctx.merged is False
