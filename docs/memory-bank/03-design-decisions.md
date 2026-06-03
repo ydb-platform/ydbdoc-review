@@ -227,6 +227,60 @@ Templates: `prompts/v1/critic_batch.md`, `verify_batch.md`. Legacy whole-file
 templates (`critic.md`, `verify.md`) remain for reference but are not used in
 the pipeline.
 
+### 6.20. EN postprocess after render (homoglyphs + fence placeholders)
+
+**Problem (PR #42380):** RU docs use `<строка>` inside shell examples; the model
+copies it into EN. Cyrillic homoglyphs in YAML comments (`#FQDN ВМ`) slip through.
+Cyrillic-in-EN heuristic skips fenced bodies, so `<строка>` was not flagged.
+
+**Decision:** `postprocess_en_target_markdown` in `validation/homoglyphs.py` runs
+on the full rendered EN string in `translate_file._render_with_translations`:
+
+1. **Line homoglyphs** — on ASCII-heavy config lines (`#FQDN`, `host:`, …),
+   map look-alike Cyrillic letters to Latin (`В`→`V`, `М`→`M`, …).
+2. **Fence angle placeholders** — inside fenced code blocks only, map known RU
+   words in `<…>` to EN (`<строка>`→`<string>`, `<значение>`→`<value>`, …).
+
+Does not alter Russian prose or segment-level placeholder validation.
+
+### 6.21. Placeholder roles (V in prose, U in link URL)
+
+**Problem:** LLM may keep placeholder **order** (`⟦V1⟧` then `⟦U1⟧`) but swap
+**roles** — e.g. `[login](⟦V1⟧)` and `[](../../auth#…)` with empty anchor
+(vscode-plugin `s0077`).
+
+**Decision:**
+
+- `placeholder_roles_valid` (`validation/placeholder_roles.py`) — `⟦V⟧` may
+  appear in `](⟦V⟧)` only if the source segment does; `⟦U⟧` must appear in a
+  link destination iff the source does.
+- `placeholder_repair._repair_swapped_variable_and_url` + `_move_variable_clause_before_link`
+  fix the common swap before validation; repair-pass handles remaining cases.
+
+Order-only checks (`markers.placeholders_match`) are necessary but not sufficient.
+
+### 6.22. Fence parity: AST at file level, regex per segment
+
+**Problem:** `fence_parity` on raw markdown counted every line starting with
+`` ``` `` **inside** fenced block bodies → false positives (14 vs 20 on
+`deployment-preparation.md` when AST had 14 blocks each).
+
+**Decision:**
+
+- **File heuristic** `check_fence_parity` — count `FencedCode` nodes via
+  `parse_markdown` (`heuristics._count_fenced_code_blocks`).
+- **Segment validation** — `count_fence_markers` on segment `text` only (regex);
+  catches model-added fences inside a translatable paragraph; triggers repair-pass.
+
+Standalone `fenced_code` blocks are **not** segments (extractor skips them); they
+round-trip from the source AST unchanged.
+
+### 6.23. Merged source PR branch base
+
+If the source PR is **merged** (`ctx.merged`), `translation_branch_base` uses
+upstream `base_ref` (e.g. `main`), not the deleted head branch — same rule as
+fork PRs. See `github/pr.py` (`PullRequestContext.merged`).
+
 ---
 
 ---

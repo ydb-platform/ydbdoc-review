@@ -24,16 +24,19 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
    batches = chunk_segments(segments, max_chars=4000)
 
 4. TRANSLATE (parallel batches, limit 3)
-   async for batch in batches:
-       request = build_translate_prompt(batch, glossary, path_context)
-       response = await llm_client.chat(translate_model, request)
-       translations[batch] = parse_json(response)
-       validate_placeholders(batch, translations[batch])
-       validate_cli_tokens(batch, translations[batch])
-       # On failure: retry per-segment
+   for batch in batches:
+       response = llm_client.chat(translate_model, build_translate_messages(...))
+       translations = parse_json(response)
+       repair_translation_placeholders()  # per segment, before validate
+       validate: placeholder order + roles (V not in link URL unless source is)
+                 + cli_tokens + fence count per segment
+       # On batch failure: per-segment retry; on segment failure: repair-pass LLM
+       #   (translation/repair.py, prompts/v1/repair.md), then table fail-soft
 
 5. REINSERT (preserves AST structure)
    translated_doc = reinsert_segments(doc, segments, translations)
+   localize_links_in_document(translated_doc)
+   postprocess_en_target_markdown(rendered)  # homoglyphs + fence angle placeholders
 
 6. CRITIC PASS 1 (batched segment pairs)
    batches = chunk_segments(segments, max_chars=4000)
@@ -53,13 +56,15 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
        verify_response = llm_client.chat(critic_model, build_verify_batch_prompt(...))
        unresolved += parse_critic_response(verify_response).issues
 
-9. HEURISTICS (deterministic)
+9. HEURISTICS (deterministic, on final rendered text)
    warnings = run_file_heuristics(source_text, translated_text, ...)
-   # length_ratio, cyrillic_in_en, fence/heading/list_tab parity
+   # length_ratio, cyrillic_in_en (prose only, fences stripped)
+   # fence_parity: AST FencedCode count (not raw ``` lines inside block bodies)
+   # heading/list_tab parity
    verdict = bump_verdict_for_heuristics(verdict, warnings)  # ok → warnings
 
-10. RENDER
-    final_text = render_markdown(translated_doc)
+10. OUTPUT TEXT
+    final_text = translated_text after step 5 (render + link locale + EN postprocess)
 
 OUTPUT: final_text, file_report = {
     file_path,
@@ -106,7 +111,8 @@ INPUT: pr_number, source_repo, target_branch_base
 4. GIT
    branch = f"ydbdoc-review/pr-{pr_number}"
    upstream_url = repo_https_clone_url(owner, repo)
-   start_ref = translation_branch_base(ctx)  # fork → upstream main; same-repo → head
+   start_ref = translation_branch_base(ctx)
+   # fork or merged source PR → upstream base_ref (main); open same-repo → head_ref
    git.fetch(upstream_url, start_ref)
    git.create_branch_from(start_ref, branch)
    git.commit_all(branch, message=build_commit_message(reports))
@@ -204,7 +210,20 @@ If EN exists but RU doesn't → create RU from EN.
   ydbdoc-review v0.2.0
   ```
 
-### 16.5. Fail-soft policy for table segments
+### 16.5. Repair-pass and EN postprocess
+
+- **Repair-pass** (`translation/repair.py`): after `TranslationValidationError`
+  on a single segment (placeholder order/roles, fence count, CLI tokens), one
+  focused LLM call with `prompts/v1/repair.md` (up to 2 attempts). Used before
+  table fail-soft.
+- **Placeholder repair** (`validation/placeholder_repair.py`): deterministic fixes
+  before validation — restore `⟦U⟧`/`⟦V⟧`/`⟦C⟧`, swap V↔U when the model puts
+  `⟦V⟧` in `[text](...)`, move «on the ⟦V⟧ server» before «Used if […]» when
+  source has variable before link (`placeholder_roles.py` enforces roles).
+- **EN postprocess** (`homoglyphs.postprocess_en_target_markdown`): after render;
+  does not change segment validation, only final file text.
+
+### 16.6. Fail-soft policy for table segments
 
 - Table cells (`table_header_cell`, `table_body_cell`) are the most fragile
   segments for placeholder parity.

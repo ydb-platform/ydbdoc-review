@@ -44,18 +44,22 @@ src/ydbdoc_review/
 │   ├── glossary.py                load YAML + format for prompts (D.1)
 │   ├── prompts.py                 template load/render + message builders (D.2)
 │   ├── schemas.py                 translator/critic JSON pydantic models (D.3–D.4)
-│   ├── translator.py              per-batch segment translation (D.3)
+│   ├── translator.py              per-batch translation + repair-pass trigger (D.3)
+│   ├── repair.py                  focused LLM repair after validation failure
+│   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched per-file review + apply fixes (D.4)
 ├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5 + E)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
-│   ├── markers.py                 placeholder parity (D.3)
-│   ├── placeholder_repair.py      restore ⟦X⟧ when LLM emits raw atoms/URLs
+│   ├── markers.py                 placeholder order + realign by index
+│   ├── placeholder_roles.py       semantic V/U placement (link dest vs prose)
+│   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
+│   ├── homoglyphs.py              EN postprocess: YAML homoglyphs + `<строка>` in fences
 │   ├── link_locale.py             RU→EN URL mirror + post-reinsert pass
 │   ├── cli_tokens.py              CLI token preservation (D.3)
-│   └── heuristics.py              length ratio, cyrillic, parity, nav merge wrappers
+│   └── heuristics.py              length ratio, cyrillic, AST fence parity, nav merge
 ├── pipeline/                      ✅ COMPLETE (Phase F)
 │   ├── translate_file.py          per-file pipeline (D.5 + E heuristics)
 │   ├── pairs.py                   RU/EN pairing (F)
@@ -69,7 +73,9 @@ src/ydbdoc_review/
 │   ├── workflow.py                run_doc_translate, run_doc_verify
 │   └── errors.py                  typed GitHub errors
 ├── reporting/                     ✅ COMPLETE (Phase H)
-│   └── builder.py                 markdown reports (§17 format)
+│   ├── builder.py                 markdown reports (§17 format)
+│   └── locations.py               segment line links, heuristic dedup
+├── version.py                     action_release_label() for report footer
 ├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults
 │   └── loader.py                  Pydantic schema + YAML + env override
@@ -159,16 +165,20 @@ A `Segment` is what we translate. See `src/ydbdoc_review/segmentation/types.py`.
 |---|---|---|
 | `C` | inline code | `` `--yaml` `` → `⟦C1⟧` |
 | `U` | link URL only (anchor text is translated) | `[docs](http://x)` → `[docs](⟦U1⟧)` |
-| `I` | image | `![alt](img.png)` → `⟦I1⟧` |
+| `S` | image src only (alt text is translated) | `![alt](img.png)` → `![alt](⟦S1⟧)` |
 | `H` | inline html | `<br/>` → `⟦H1⟧` |
-| `V` | YFM variable | `{{ ydb-short-name }}` → `⟦V1⟧` |
+| `V` | YFM variable | `{{ ydb-short-name }}` → `⟦V1⟧` (prose only — not in `](...)`) |
 | `T` | term ref | `[*cluster]` → `⟦T1⟧` |
 
 **Counter is global per segment** (including inside `**bold**` / `*em*`).
 Two links in one paragraph get `⟦U1⟧` and `⟦U2⟧`, never the same index.
 Was a bug discovered in B.2, fixed by sharing `_ProtectState` across recursion.
 
-After reinsert in `pipeline/translate_file.py`, `localize_links_in_document` runs a safety-net pass (`mirror_link_href`)
-so any remaining `/docs/ru/` or `ru.wikipedia.org` URLs are rewritten to EN.
+After reinsert in `pipeline/translate_file.py`:
+
+1. `localize_links_in_document` — safety-net `mirror_link_href` for `/docs/ru/` etc.
+2. `postprocess_en_target_markdown` (`validation/homoglyphs.py`) — Cyrillic→Latin
+   on ASCII-heavy YAML comment lines; RU angle placeholders inside fenced blocks
+   (e.g. `<строка>` → `<string>`).
 
 [← Memory Bank index](../../MEMORY_BANK.md)

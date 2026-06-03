@@ -11,7 +11,7 @@
 
 ```
 tests/
-├── unit/                                  fast, no I/O, no LLM (~430 tests)
+├── unit/                                  fast, no I/O, no LLM (~500 tests)
 │   ├── test_parser_round_trip.py          plain markdown
 │   ├── test_yfm_*.py                      YFM plugins (variables, notes, tabs, …)
 │   ├── test_front_matter.py               YAML title/description (B.4)
@@ -26,6 +26,10 @@ tests/
 │   ├── test_prompts.py
 │   ├── test_translator.py
 │   ├── test_validation_markers.py
+│   ├── test_placeholder_repair.py         V/U swap, s0077, s0124, realign
+│   ├── test_homoglyphs.py               YAML homoglyphs + `<строка>` in fences
+│   ├── test_segment_fence_validation.py segment fence count
+│   ├── test_placeholder_roles.py          V in link URL role check
 │   ├── test_critic.py
 │   ├── test_translate_file.py             incl. heuristic verdict bump
 │   ├── test_validation_heuristics.py      Phase E (+ list_tab, redirect nav)
@@ -49,7 +53,7 @@ tests/
     └── en/...
 ```
 
-Default run (`pytest`): **~499 tests** (unit + fixture integration, no LLM smoke).
+Default run (`pytest`): **~568 tests** (unit + fixture integration, no LLM smoke).
 
 Future:
 - `tests/integration/test_end_to_end.py` — full pipeline on a real file pair.
@@ -57,10 +61,25 @@ Future:
 
 ### 7.2. Counters (post Phase I)
 
-- **Default CI/local run**: unit + fixture integration (no LLM smoke); ~499 tests.
+- **Default CI/local run**: unit + fixture integration (no LLM smoke); **568 tests**
+  (May 2026).
 - **Integration (LLM smoke)**: 3 tests in `test_llm_smoke.py`, **local only** —
   not in default `pytest` run (see §7.3).
-- **Coverage (overall package)**: 90%+ target; run with `--cov=ydbdoc_review`.
+- **Coverage (overall package)**: **91%** line coverage on `ydbdoc_review`
+  (May 2026, `pytest tests/unit/ tests/integration/test_real_files_round_trip.py --cov`).
+
+**New-module coverage (May 2026):**
+
+| Module | Coverage | Tests |
+|---|---|---|
+| `validation/homoglyphs.py` | 93% | `test_homoglyphs.py` |
+| `validation/placeholder_roles.py` | 92%+ | `test_placeholder_roles.py` |
+| `validation/placeholder_repair.py` | 92% | `test_placeholder_repair.py` (+ live s0077) |
+| `translation/repair.py` | 100% | `test_translator.py` (mocked repair path) |
+
+**Below 90% (known gaps):** `validation/link_locale.py` (67%),
+`reporting/locations.py` (72%), `reporting/builder.py` (84%) — acceptable for
+MVP; add tests if touching those modules.
 
 ### 7.2.1. Coverage policy (90% target)
 
@@ -73,9 +92,9 @@ Future:
 | `rendering/` | 90%+ | ✅ ~95% (`test_renderer_coverage.py`) |
 | `config/` | 90%+ | ✅ ~95% |
 | `llm/` | 90%+ | ✅ unit tests mocked; live smoke optional |
-| `translation/` | 90%+ | ✅ translator + critic + translate_file (mocked LLM) |
+| `translation/` | 90%+ | ✅ translator + repair + critic + translate_file (mocked LLM) |
 | `pipeline/` | 90%+ | ✅ translate_file, pairs, analyze, orchestrator |
-| `validation/` | 90%+ | ✅ markers, cli_tokens, heuristics |
+| `validation/` | 90%+ | ✅ markers, cli_tokens, heuristics, homoglyphs, placeholder_repair/roles |
 | `github/` | 90%+ | ✅ client, git_ops, pr, workflow (mocked) |
 | `reporting/` | 90%+ | ✅ `test_reporting_builder.py` |
 
@@ -165,6 +184,8 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 - **Front matter real fixture**: add a committed `.md` with YAML `---` to
   `tests/fixtures/markdown_files/` (B.4 covered synthetically today).
 - **`test_end_to_end.py`**: full `translate_file` on a fixture pair (local/nightly).
+- **Reporting coverage**: raise `reporting/locations.py` and `link_locale.py` toward 90%
+  when editing report dedup or URL mirror logic.
 
 ---
 
