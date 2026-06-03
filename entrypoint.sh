@@ -12,7 +12,7 @@ elif [ ! -e "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -e "${GITHUB
 fi
 export YDBDOC_REPO_PATH="${REPO}"
 
-# Workflow may pass PAT only as YDBDOC_PUSH_PAT (secret name); app reads GITHUB_PUSH_TOKEN.
+# Legacy: workflow may still pass YDBDOC_PUSH_PAT; app reads GITHUB_PUSH_TOKEN. ydb CI uses GITHUB_TOKEN only.
 if [ -n "${YDBDOC_PUSH_PAT:-}" ] && [ -z "${GITHUB_PUSH_TOKEN:-}" ]; then
   export GITHUB_PUSH_TOKEN="${YDBDOC_PUSH_PAT}"
 fi

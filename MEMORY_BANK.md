@@ -1,8 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: EN postprocess (homoglyphs, fence placeholders, V/U repair), AST
-> fence parity, segment validation; §6.20–§6.23; ~568 tests, 91% cov.
+> Last updated: ydb CI — GITHUB_TOKEN only (§16.7); examples/README; no PAT in doc_translate.
 
 The Memory Bank is **deliberately verbose** — written so any developer or AI
 assistant can reconstruct full project context. It no longer lives in one file;
@@ -31,7 +30,7 @@ use the parts below.
 | 7, 9–11 | [04-development](docs/memory-bank/04-development.md) |
 | 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phases A–I done; nav YAML workflow glue TBD |
 | 12–14, 18 | [06-llm-config](docs/memory-bank/06-llm-config.md) |
-| 15–17 | [07-pipeline](docs/memory-bank/07-pipeline.md) |
+| 15–17 (incl. §16.7 CI tokens) | [07-pipeline](docs/memory-bank/07-pipeline.md) |
 | 19–21 | [08-operations](docs/memory-bank/08-operations.md) |
 
 ## For AI assistants

@@ -19,7 +19,7 @@ GitHub Action и CLI для автоматического перевода до
 
 - Python **3.11+** (локально) или Docker (GitHub Action).
 - **Yandex AI Studio:** folder id + API key.
-- **GitHub:** `GITHUB_TOKEN`; для push в форк — `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT`.
+- **GitHub:** `GITHUB_TOKEN` (в CI — job token с `permissions` в workflow; локально — PAT в `.env`).
 
 ## Быстрый старт (локально)
 
@@ -93,34 +93,34 @@ ydbdoc-review list-models --live
 
 - Defaults: `src/ydbdoc_review/config/default.yaml` (в пакете).
 - Overrides: env `YDBDOC_<SECTION>_<KEY>` — см. `.env.example` и [Memory Bank §13](docs/memory-bank/06-llm-config.md).
-- Секреты **только** из env: `YDBDOC_YC_FOLDER_ID`, `YDBDOC_YC_API_KEY`, `GITHUB_TOKEN`, `GITHUB_PUSH_TOKEN`.
+- Секреты из env: `YDBDOC_YC_*` (или `YANDEX_CLOUD_*` в workflow ydb), `GITHUB_TOKEN`.
+  Опционально `GITHUB_PUSH_TOKEN` — только если push job-токеном в CI даёт 403.
 
 ## GitHub Action
 
-`action.yml` в корне этого репозитория. В workflow репозитория **ydb**:
+`action.yml` в корне этого репозитория. В workflow репозитория **ydb** — полные примеры в [`examples/`](examples/).
+
+Минимум для **`doc_translate`**:
 
 ```yaml
-uses: ydb-platform/ydbdoc-review@v0.1.0   # тег на main после merge v2
-with:
-  repo: ${{ github.repository }}
-  pr: ${{ github.event.pull_request.number }}
-  merge_base_with: origin/${{ github.event.pull_request.base.ref }}
-  mode: run          # или verify
-  dry_run: "false"
-  no_commit: "false"
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write   # лейблы documentation + rebuild_docs
+
+uses: ydb-platform/ydbdoc-review@v0.1.0
 env:
-  YDBDOC_YC_FOLDER_ID: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
-  YDBDOC_YC_API_KEY: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
+  YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
+  YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
   YDBDOC_REPO_PATH: ${{ github.workspace }}
 ```
 
-Примеры workflow: [`examples/`](examples/).
+Шаг «Trigger docs rebuild» (`github-script`) — тот же `secrets.GITHUB_TOKEN`, не отдельный PAT.
 
 **Checkout:** `fetch-depth: 0` и `git fetch` базовой ветки PR обязательны для `merge-base`.
 
-**Форк:** нужен PAT в секрете `YDBDOC_PUSH_PAT` → env `GITHUB_PUSH_TOKEN`; у автора PR — *Allow edits by maintainers*.
+**Форк:** ветка перевода пушится в **upstream** `ydb-platform/ydb`, не в fork автора; отдельный `YDBDOC_PUSH_PAT` в CI **не нужен** (см. Memory Bank §16.7).
 
 ## Тесты
 

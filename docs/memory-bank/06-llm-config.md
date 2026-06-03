@@ -170,9 +170,9 @@ Order of precedence:
 
 All four pairs supported simultaneously; first found wins.
 
-GitHub: `GITHUB_TOKEN` (built-in), optional `GITHUB_PUSH_TOKEN`/`YDBDOC_PUSH_PAT`
-(with `contents: write` on upstream). Translation branches push to upstream, not
-contributor forks.
+GitHub: **`GITHUB_TOKEN`** in CI (job token; see **07-pipeline** §16.7). Optional
+`GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` only if push with job token fails. Translation
+branches push to upstream, not contributor forks.
 
 ### 13.5. `.env.example` (committed)
 
@@ -185,8 +185,9 @@ YDBDOC_YC_API_KEY=
 # YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY=
 # YDBDOC_LLM_MODELS_CRITIC_PRIMARY=
 
-# GitHub (for local PR operations)
+# GitHub (local PR operations; in ydb CI use job GITHUB_TOKEN only)
 # GITHUB_TOKEN=
+# GITHUB_PUSH_TOKEN=   # optional; omit in ydb workflows unless push 403
 ```
 
 User copies to `.env` and fills in. `.env` is gitignored.

@@ -196,8 +196,29 @@ If EN exists but RU doesn't → create RU from EN.
 - **Translation PR** on upstream: `head=ydbdoc-review/pr-N`, `base` = same ref
   the translation branch was created from (fork → `main`; same-repo → feature branch).
 - Translation PR title: "Auto-translate docs from PR #N".
-- Committer/author: GitHub Actions bot (`GITHUB_TOKEN` / `YDBDOC_PUSH_PAT` with
-  `contents: write` on upstream).
+- Committer/author: GitHub Actions bot (`github-actions[bot]`), push/API via job
+  `GITHUB_TOKEN` when workflow grants `contents: write`.
+
+### 16.7. GitHub tokens in `ydb` CI (2026-06)
+
+**Default (after ydb workflow change):** only `secrets.GITHUB_TOKEN`.
+
+| Step | Token | Workflow `permissions` |
+|------|--------|-------------------------|
+| Action: API (PR, comments, `documentation` label) | `GITHUB_TOKEN` | `pull-requests: write`, `issues: write` |
+| Action: `git push` branch `ydbdoc-review/pr-N` | same (`GITHUB_PUSH_TOKEN` unset → falls back to `GITHUB_TOKEN`) | `contents: write` |
+| Post-step: `rebuild_docs` on translation PR | `GITHUB_TOKEN` in `github-script` | `issues: write` |
+
+Do **not** set `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` in env unless `git push` returns 403
+(org policy blocking default `GITHUB_TOKEN`).
+
+**Legacy:** `YDBDOC_PUSH_PAT` secret + `GITHUB_PUSH_TOKEN` env still work (`entrypoint.sh`
+maps `YDBDOC_PUSH_PAT` → `GITHUB_PUSH_TOKEN` for older workflows).
+
+**Local CLI:** use a personal PAT in `GITHUB_TOKEN` (or classic `repo` scope) in `.env`.
+
+Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-github-doc-translate-on-label.yml),
+[`examples/ydb-github-doc-verify-on-label.yml`](../../examples/ydb-github-doc-verify-on-label.yml).
 
 ### 16.4. Verify mode commits
 

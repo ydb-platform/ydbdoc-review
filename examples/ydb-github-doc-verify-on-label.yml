@@ -1,4 +1,5 @@
-# Verify translation PR: label doc_verify on branch ydbdoc-review/pr-N (or bilingual PR).
+# Verify translation PR: label doc_verify (ветка ydbdoc-review/pr-N).
+# Токены: только GITHUB_TOKEN (push repair-коммитов — тот же токен).
 
 name: ydbdoc-review (doc_verify label)
 
@@ -21,7 +22,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -30,17 +31,17 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
-      - name: Verify translation on PR branch (v2)
+      - name: Verify translation PR
         uses: ydb-platform/ydbdoc-review@v0.1.0
         with:
           mode: verify
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}
           merge_base_with: origin/${{ github.event.pull_request.base.ref }}
-          # no_commit: "true"
         env:
-          YDBDOC_YC_FOLDER_ID: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
-          YDBDOC_YC_API_KEY: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
+          YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
+          YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
+          YDBDOC_REVIEW_ENABLED: ${{ vars.YDBDOC_REVIEW_ENABLED }}
+          YDBDOC_MODEL_TRANSLATION_VERIFY: ${{ vars.YDBDOC_MODEL_TRANSLATION_VERIFY }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

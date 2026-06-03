@@ -224,7 +224,7 @@ def push_branch(
             hint = (
                 " Hint: branch may include fork history or workflow changes; "
                 "translation branches must be based on upstream base (main), "
-                "not the contributor fork. Ensure YDBDOC_PUSH_PAT has "
+                "not the contributor fork. Ensure workflow GITHUB_TOKEN has "
                 "contents:write on the upstream repo."
             )
         raise RuntimeError(
