@@ -56,7 +56,8 @@ src/ydbdoc_review/
 │   ├── markers.py                 placeholder order + realign by index
 │   ├── placeholder_roles.py       semantic V/U placement (link dest vs prose)
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
-│   ├── homoglyphs.py              EN postprocess: YAML homoglyphs + `<строка>` in fences
+│   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
+│   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
 │   ├── link_locale.py             RU→EN URL mirror + post-reinsert pass
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic, AST fence parity, nav merge
@@ -179,6 +180,8 @@ After reinsert in `pipeline/translate_file.py`:
 1. `localize_links_in_document` — safety-net `mirror_link_href` for `/docs/ru/` etc.
 2. `postprocess_en_target_markdown` (`validation/homoglyphs.py`) — Cyrillic→Latin
    on ASCII-heavy YAML comment lines; RU angle placeholders inside fenced blocks
-   (e.g. `<строка>` → `<string>`).
+   (e.g. `<строка>` → `<string>`); MD031 blank lines via `markdown_layout.py`.
+3. **Renderer** (`markdown_renderer._join_blocks`) — `\n\n` between `fenced_code` and
+   adjacent blocks; extra gap between tight list items when a fence precedes prose.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -281,6 +281,28 @@ If the source PR is **merged** (`ctx.merged`), `translation_branch_base` uses
 upstream `base_ref` (e.g. `main`), not the deleted head branch — same rule as
 fork PRs. See `github/pr.py` (`PullRequestContext.merged`).
 
+### 6.24. MD031 blanks around fences (tight lists + render)
+
+**Problem (PR #42404):** markdownlint `MD031` / `blanks-around-fences` on EN
+`deployment-configuration-v1.md` and `v2.md` — closing `` ``` `` immediately
+followed by `- Section …` or `4. Set account …` with no blank line.
+
+**Cause:** RU source has a blank line (e.g. after `` ``` `` before the next list
+item). Parser marks the list **tight**; `render_markdown` joined list items with
+no extra `\n` when `tight=True`, and joined `fenced_code` to the next block with
+only a single `\n`.
+
+**Decision:**
+
+1. **`_join_blocks`** in `markdown_renderer.py` — `\n\n` between adjacent blocks
+   when either is `fenced_code` / `indented_code`; between tight list items when
+   the previous item ends with a fence and the next begins with prose.
+2. **`fix_blanks_around_fences`** in `validation/markdown_layout.py` — line-based
+   safety net in `postprocess_en_target_markdown` for already-rendered EN text.
+
+**Tests:** `tests/unit/test_markdown_layout.py` (MD031 regression patterns from
+#42404).
+
 ---
 
 ---

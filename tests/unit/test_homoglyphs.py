@@ -34,6 +34,44 @@ def test_fix_stroka_in_fenced_block():
     assert "<строка>" not in fixed
 
 
+def test_fix_stroka_in_indented_fenced_block():
+    """Fences inside numbered lists are indented (initial-deployment.md pattern)."""
+    text = (
+        "5. The cluster initialization command is executed in the following form:\n"
+        "\n"
+        "   ```bash\n"
+        "   export LD_LIBRARY_PATH=/opt/ydb/lib\n"
+        "   ydb admin cluster bootstrap --uuid <строка>\n"
+        "   echo $?\n"
+        "   ```\n"
+    )
+    fixed = fix_russian_angle_placeholders_in_en_fences(text)
+    assert "bootstrap --uuid <string>" in fixed
+    assert "<строка>" not in fixed
+    assert "   ```bash" in fixed
+
+
+def test_postprocess_fixes_indented_fence_stroka():
+    text = (
+        "Prose line.\n"
+        "\n"
+        "   ```bash\n"
+        "   ydb admin cluster bootstrap --uuid <строка>\n"
+        "   ```\n"
+    )
+    fixed = postprocess_en_target_markdown(text)
+    assert "<string>" in fixed
+    assert "<строка>" not in fixed
+
+
 def test_postprocess_leaves_prose_cyrillic():
     text = "Простой текст с <строка> вне fence.\n"
     assert postprocess_en_target_markdown(text) == text
+
+
+def test_postprocess_inserts_blank_after_fence():
+    text = "  ```\n- item\n"
+    fixed = postprocess_en_target_markdown(text)
+    lines = fixed.splitlines()
+    assert lines[1] == ""
+    assert lines[2] == "- item"

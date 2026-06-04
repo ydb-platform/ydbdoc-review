@@ -28,6 +28,7 @@ tests/
 │   ├── test_validation_markers.py
 │   ├── test_placeholder_repair.py         V/U swap, s0077, s0124, realign
 │   ├── test_homoglyphs.py               YAML homoglyphs + `<строка>` in fences
+│   ├── test_markdown_layout.py          MD031 blanks-around-fences (render + postprocess)
 │   ├── test_segment_fence_validation.py segment fence count
 │   ├── test_placeholder_roles.py          V in link URL role check
 │   ├── test_critic.py

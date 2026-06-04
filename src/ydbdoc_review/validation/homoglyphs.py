@@ -65,7 +65,8 @@ def fix_cyrillic_homoglyphs_in_en(text: str) -> str:
     return "".join(out)
 
 
-_FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})")
+# Diplodoc often indents fences inside list items (leading spaces before ```).
+_FENCE_OPEN = re.compile(r"^\s*(`{3,}|~{3,})")
 _CYRILLIC_IN_ANGLE = re.compile(r"[а-яА-ЯёЁ]")
 # Russian angle-bracket placeholders in shell examples (RU source often uses these).
 _ANGLE_PLACEHOLDER_EN: dict[str, str] = {
@@ -118,6 +119,9 @@ def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
 
 
 def postprocess_en_target_markdown(text: str) -> str:
-    """Homoglyphs in YAML comments + RU angle placeholders inside fences."""
+    """Homoglyphs, fence placeholders, and markdownlint-friendly fence spacing."""
+    from ydbdoc_review.validation.markdown_layout import fix_blanks_around_fences
+
     text = fix_cyrillic_homoglyphs_in_en(text)
-    return fix_russian_angle_placeholders_in_en_fences(text)
+    text = fix_russian_angle_placeholders_in_en_fences(text)
+    return fix_blanks_around_fences(text)

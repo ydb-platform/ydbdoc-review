@@ -43,6 +43,30 @@ from ydbdoc_review.parsing.ast_types import (
     YfmTabs,   
 )
 
+_FENCE_BLOCK_KINDS = frozenset({"fenced_code", "indented_code"})
+
+
+def _blocks_need_blank_gap(prev: BlockNode, curr: BlockNode) -> bool:
+    """MD031: fenced blocks need a blank line vs adjacent non-fence blocks."""
+    return prev.kind in _FENCE_BLOCK_KINDS or curr.kind in _FENCE_BLOCK_KINDS
+
+
+def _join_blocks(blocks: list[BlockNode], *, indent: str) -> str:
+    parts: list[str] = []
+    prev: BlockNode | None = None
+    for child in blocks:
+        if prev is not None:
+            parts.append("\n\n" if _blocks_need_blank_gap(prev, child) else "\n")
+        parts.append(_render_block(child, indent=indent))
+        prev = child
+    return "".join(parts)
+
+
+def _list_items_need_blank_gap(prev: ListItem, curr: ListItem) -> bool:
+    if not prev.children or not curr.children:
+        return False
+    return _blocks_need_blank_gap(prev.children[-1], curr.children[0])
+
 
 def render_markdown(doc: Document) -> str:
     """Render a Document back to markdown text."""
@@ -51,7 +75,9 @@ def render_markdown(doc: Document) -> str:
         parts.append(f"---\n{doc.front_matter}---\n")
     for i, block in enumerate(doc.children):
         if i > 0:
-            parts.append("\n")
+            prev = doc.children[i - 1]
+            gap = "\n\n" if _blocks_need_blank_gap(prev, block) else "\n"
+            parts.append(gap)
         parts.append(_render_block(block, indent=""))
     out = "".join(parts)
     if not out.endswith("\n"):
@@ -63,12 +89,7 @@ def _render_yfm_note(n: YfmNote, indent: str) -> str:
     open_line = f"{indent}{{% note {n.note_type}{title_part} %}}\n"
     close_line = f"{indent}{{% endnote %}}\n"
 
-    inner_parts: list[str] = []
-    for i, child in enumerate(n.children):
-        if i > 0:
-            inner_parts.append("\n")
-        inner_parts.append(_render_block(child, indent=""))
-    inner = "".join(inner_parts)
+    inner = _join_blocks(n.children, indent="")
 
     # YFM notes need a blank line after open tag and before close tag.
     return f"{open_line}\n{inner}\n{close_line}"
@@ -100,13 +121,7 @@ def _render_yfm_tab(tab: YfmTab, indent: str) -> str:
     if not tab.children:
         return f"{indent}{marker}{title_text}\n"
 
-    # Render body blocks.
-    body_parts: list[str] = []
-    for i, child in enumerate(tab.children):
-        if i > 0:
-            body_parts.append("\n")
-        body_parts.append(_render_block(child, indent=""))
-    body = "".join(body_parts).rstrip("\n")
+    body = _join_blocks(tab.children, indent="").rstrip("\n")
 
     body_lines = body.split("\n")
     out_lines = [f"{indent}{marker}{title_text}", ""]
@@ -132,12 +147,7 @@ def _render_yfm_if(node: YfmIf, indent: str) -> str:
             tag = "{% else %}"
         parts.append(f"{indent}{tag}\n\n")
 
-        body_parts: list[str] = []
-        for j, child in enumerate(branch.children):
-            if j > 0:
-                body_parts.append("\n")
-            body_parts.append(_render_block(child, indent=""))
-        body = "".join(body_parts)
+        body = _join_blocks(branch.children, indent="")
         if body and not body.endswith("\n"):
             body += "\n"
         parts.append(body)
@@ -150,12 +160,7 @@ def _render_yfm_cut(c: YfmCut, indent: str) -> str:
     open_line = f'{indent}{{% cut "{c.title}" %}}\n'
     close_line = f"{indent}{{% endcut %}}\n"
 
-    inner_parts: list[str] = []
-    for i, child in enumerate(c.children):
-        if i > 0:
-            inner_parts.append("\n")
-        inner_parts.append(_render_block(child, indent=""))
-    inner = "".join(inner_parts)
+    inner = _join_blocks(c.children, indent="")
     if inner and not inner.endswith("\n"):
         inner += "\n"
 
@@ -252,12 +257,7 @@ def _render_thematic_break(t: ThematicBreak, indent: str) -> str:
 
 
 def _render_blockquote(b: BlockQuote, indent: str) -> str:
-    inner_parts: list[str] = []
-    for i, child in enumerate(b.children):
-        if i > 0:
-            inner_parts.append("\n")
-        inner_parts.append(_render_block(child, indent=""))
-    inner = "".join(inner_parts)
+    inner = _join_blocks(b.children, indent="")
     # Prefix each line with "> ".
     out_lines = []
     for line in inner.split("\n"):
@@ -274,7 +274,10 @@ def _render_blockquote(b: BlockQuote, indent: str) -> str:
 def _render_bullet_list(lst: BulletList, indent: str) -> str:
     parts: list[str] = []
     for i, item in enumerate(lst.children):
-        if i > 0 and not lst.tight:
+        if i > 0 and (
+            not lst.tight
+            or _list_items_need_blank_gap(lst.children[i - 1], item)
+        ):
             parts.append("\n")
         parts.append(_render_list_item(item, indent, marker=lst.marker, ordered=False))
     return "".join(parts)
@@ -283,7 +286,10 @@ def _render_bullet_list(lst: BulletList, indent: str) -> str:
 def _render_ordered_list(lst: OrderedList, indent: str) -> str:
     parts: list[str] = []
     for i, item in enumerate(lst.children):
-        if i > 0 and not lst.tight:
+        if i > 0 and (
+            not lst.tight
+            or _list_items_need_blank_gap(lst.children[i - 1], item)
+        ):
             parts.append("\n")
         number = lst.start + i
         marker = f"{number}{lst.delimiter}"
@@ -295,12 +301,7 @@ def _render_list_item(
     item: ListItem, indent: str, marker: str, ordered: bool
 ) -> str:
     # Build inner content with proper indentation for continuation lines.
-    inner_parts: list[str] = []
-    for i, child in enumerate(item.children):
-        if i > 0:
-            inner_parts.append("\n")
-        inner_parts.append(_render_block(child, indent=""))
-    inner = "".join(inner_parts).rstrip("\n")
+    inner = _join_blocks(item.children, indent="").rstrip("\n")
 
     cont_indent = " " * (len(marker) + 1)
     inner_lines = inner.split("\n")

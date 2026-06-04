@@ -110,6 +110,13 @@ def translation_pr_base(ctx: PullRequestContext) -> str:
     return base_ref
 
 
+def verify_push_remote_url(ctx: PullRequestContext) -> str:
+    """HTTPS remote for ``doc_verify`` repair push (PR head repo, including forks)."""
+    if is_fork_head(ctx):
+        return ctx.head_repo_https_url
+    return repo_https_clone_url(ctx.owner, ctx.repo)
+
+
 def list_pr_file_changes_api(
     client: GitHubClient, owner: str, repo: str, pr_number: int
 ) -> list[tuple[str, ChangeKind]]:

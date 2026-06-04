@@ -279,7 +279,7 @@ def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
     assert kwargs["head"] == "ydbdoc-review/pr-7"
 
 
-def test_run_doc_verify_pushes_upstream(git_repo: str):
+def test_run_doc_verify_pushes_head_repo_for_fork(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
@@ -293,6 +293,52 @@ def test_run_doc_verify_pushes_upstream(git_repo: str):
             "repo": {
                 "clone_url": "https://github.com/contrib/ydb.git",
                 "full_name": "contrib/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ):
+        with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+            with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                    mock_gh.return_value.get_pull.return_value = pull
+                    mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                    mock_gh.return_value.post_issue_comment.return_value = "url"
+                    with patch(
+                        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                        return_value=[("ydb/docs/en/a.md", "modified")],
+                    ):
+                        run_doc_verify(
+                            repo_path=git_repo,
+                            github_repo="o/r",
+                            pr_number=11,
+                            merge_base_with="HEAD",
+                            dry_run=False,
+                            config=load_config(env=_env()),
+                        )
+
+    push.assert_called_once()
+    assert push.call_args.args[4] == "https://github.com/contrib/ydb.git"
+
+
+def test_run_doc_verify_pushes_upstream_for_same_repo(git_repo: str):
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+
+    pull = {
+        "title": "Auto-translate docs from PR #3",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/pr-3",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
             },
         },
         "base": {"ref": "main"},

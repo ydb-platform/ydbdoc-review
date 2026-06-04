@@ -28,6 +28,7 @@ from ydbdoc_review.github.pr import (
     source_pr_number_from_branch,
     translation_branch_base,
     translation_pr_base,
+    verify_push_remote_url,
 )
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMError
@@ -359,7 +360,7 @@ def run_doc_verify(
     gh = GitHubClient(api_token)
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
-    upstream_url = repo_https_clone_url(owner, repo)
+    push_remote_url = verify_push_remote_url(ctx)
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
@@ -413,12 +414,17 @@ def run_doc_verify(
             _GITHUB_ACTOR_EMAIL,
         )
         if committed:
+            logger.info(
+                "Pushing doc_verify repair to %s (head %s)",
+                push_remote_url,
+                ctx.head_repo_full_name,
+            )
             push_branch(
                 repo_path,
                 "ydbdoc-review-push",
                 ctx.head_ref,
                 push_token,
-                upstream_url,
+                push_remote_url,
             )
             pushed = True
     job.committed = committed

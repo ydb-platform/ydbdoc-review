@@ -242,7 +242,11 @@ Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-
   `⟦V⟧` in `[text](...)`, move «on the ⟦V⟧ server» before «Used if […]» when
   source has variable before link (`placeholder_roles.py` enforces roles).
 - **EN postprocess** (`homoglyphs.postprocess_en_target_markdown`): after render;
-  does not change segment validation, only final file text.
+  homoglyphs, `<строка>`→`<string>` in fences (incl. indented `` ``` ``), and
+  **MD031** blank lines around fences (`markdown_layout.fix_blanks_around_fences`).
+- **Renderer MD031** (`markdown_renderer._join_blocks`): prevents missing blank
+  lines after `` ``` `` in tight lists when re-rendering translated AST (root cause
+  of PR #42404 markdownlint warnings).
 
 ### 16.6. Fail-soft policy for table segments
 
