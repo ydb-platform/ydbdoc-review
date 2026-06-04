@@ -47,7 +47,7 @@ src/ydbdoc_review/
 │   ├── translator.py              per-batch translation + repair-pass trigger (D.3)
 │   ├── repair.py                  focused LLM repair after validation failure
 │   ├── manual.py                  ManualAction for fail-soft table cells
-│   └── critic.py                  batched per-file review + apply fixes (D.4)
+│   └── critic.py                  batched critic/verify + verdict alias normalize (D.4)
 ├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5 + E)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   ├── redirects.py               Diplodoc redirect list — same pattern
@@ -58,9 +58,11 @@ src/ydbdoc_review/
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
+│   ├── fence_integrity.py         copy fences from source; detect pipeline drift
+│   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
 │   ├── link_locale.py             RU→EN URL mirror + post-reinsert pass
 │   ├── cli_tokens.py              CLI token preservation (D.3)
-│   └── heuristics.py              length ratio, cyrillic, AST fence parity, nav merge
+│   └── heuristics.py              length ratio, cyrillic, fence parity, ru_source, anchors
 ├── pipeline/                      ✅ COMPLETE (Phase F)
 │   ├── translate_file.py          per-file pipeline (D.5 + E heuristics)
 │   ├── pairs.py                   RU/EN pairing (F)
@@ -71,7 +73,7 @@ src/ydbdoc_review/
 │   ├── client.py                  GitHub REST (requests)
 │   ├── git_ops.py                 local git diff / branch / commit / push
 │   ├── pr.py                      PR context, fork/upstream helpers, file changes
-│   ├── workflow.py                run_doc_translate, run_doc_verify
+│   ├── workflow.py                run_doc_translate, run_doc_verify (+ checkout sha in reports)
 │   └── errors.py                  typed GitHub errors
 ├── reporting/                     ✅ COMPLETE (Phase H)
 │   ├── builder.py                 markdown reports (§17 format)

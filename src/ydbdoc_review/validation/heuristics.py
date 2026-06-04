@@ -159,7 +159,18 @@ def run_file_heuristics(
     target_lang: str = "en",
 ) -> list[str]:
     """Run all markdown file heuristics; return human-readable warning strings."""
+    from ydbdoc_review.validation.fence_integrity import (
+        check_absolute_paths_in_fences,
+        check_fence_body_copy,
+    )
+    from ydbdoc_review.validation.ru_source_bugs import (
+        check_required_anchor_lines,
+        detect_ru_source_bugs,
+    )
+
     warnings: list[str] = []
+    if source_lang.lower() in {"ru", "russian"}:
+        warnings.extend(detect_ru_source_bugs(source_text))
     warnings.extend(
         check_length_ratio(
             source_text, target_text, source_lang=source_lang, target_lang=target_lang
@@ -167,6 +178,9 @@ def run_file_heuristics(
     )
     warnings.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
     warnings.extend(check_fence_parity(source_text, target_text))
+    warnings.extend(check_fence_body_copy(source_text, target_text))
+    warnings.extend(check_absolute_paths_in_fences(source_text, target_text))
+    warnings.extend(check_required_anchor_lines(source_text, target_text))
     warnings.extend(check_heading_parity(source_text, target_text))
     warnings.extend(check_list_tab_parity(source_text, target_text))
     return warnings

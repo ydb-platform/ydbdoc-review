@@ -28,6 +28,7 @@ class ReportMeta:
     report_number: int
     elapsed_s: float
     timestamp: datetime | None = None
+    checkout_ref: str | None = None  # git HEAD sha of the workspace when QA ran
 
     @property
     def ts_label(self) -> str:
@@ -49,17 +50,18 @@ def _verdict_emoji(verdict: str) -> str:
 
 
 def _count_verdicts(result: PRTranslationResult) -> tuple[int, int, int]:
+    """Count files by merge readiness (open issues), not raw critic verdict alone."""
     ok = warn = blocked = 0
     for run in result.pair_results:
         if run.skipped or run.deleted or run.error or run.file_result is None:
             continue
-        v = run.file_result.verdict
-        if v == "ok":
-            ok += 1
-        elif v == "warnings":
+        fr = run.file_result
+        if fr.verdict == "blocked":
+            blocked += 1
+        elif _file_has_open_issues(run):
             warn += 1
         else:
-            blocked += 1
+            ok += 1
     return ok, warn, blocked
 
 
@@ -260,6 +262,8 @@ def _file_has_open_issues(run: PairRunResult) -> bool:
     fr = run.file_result
     if fr is None:
         return False
+    if fr.segment_alignment_error:
+        return True
     if _remaining_critic_issues(fr):
         return True
     if fr.manual_actions:
@@ -297,6 +301,19 @@ def _file_reviewer_section(
         manual_ids=manual_ids,
         manual_line_ranges=manual_ranges,
     )
+
+    if fr.segment_alignment_error:
+        file_path = run.plan.target_path
+        out = f"### 🔴 `{file_path}`\n\n"
+        out += _format_reviewer_item(
+            index=item_index,
+            location="сегменты RU/EN",
+            problem=(
+                f"(alignment) EN не совпадает со структурой RU: "
+                f"{fr.segment_alignment_error}"
+            ),
+        ) + "\n\n"
+        return out, item_index + 1
 
     if not critic_items and not heuristics and not manual_actions:
         if fr.verdict == "ok":
@@ -463,9 +480,14 @@ def build_full_report(
     del glossary
     rec_emoji, rec_label = _merge_recommendation(result)
 
+    checkout_line = ""
+    if meta.checkout_ref:
+        short = meta.checkout_ref[:12]
+        checkout_line = f"Checkout: `{short}`\n\n"
     header = (
         f"🤖 **ydbdoc-review** — отчёт #{meta.report_number} "
         f"({meta.mode}, {meta.ts_label})\n\n"
+        f"{checkout_line}"
         f"## Рекомендация: {rec_emoji} {rec_label}\n\n"
     )
 

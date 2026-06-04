@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError
-from ydbdoc_review.llm.structured import parse_json_model
+from ydbdoc_review.llm.structured import parse_json_content
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
@@ -24,6 +24,34 @@ logger = logging.getLogger(__name__)
 
 _MAX_CRITIC_ATTEMPTS = 3
 _VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
+
+# LLMs sometimes invent verdict strings; map to the schema literals before validate.
+_VERDICT_ALIASES: dict[str, CriticVerdict] = {
+    "ok": "ok",
+    "pass": "ok",
+    "success": "ok",
+    "clean": "ok",
+    "warnings": "warnings",
+    "warning": "warnings",
+    "needs_fix": "warnings",
+    "need_fix": "warnings",
+    "issues": "warnings",
+    "issues_found": "warnings",
+    "issue_found": "warnings",
+    "fail": "warnings",
+    "failed": "warnings",
+    "error": "warnings",
+    "blocked": "blocked",
+    "block": "blocked",
+    "reject": "blocked",
+    "rejected": "blocked",
+}
+
+
+def normalize_critic_verdict_value(raw: str) -> CriticVerdict | None:
+    """Map a free-form LLM verdict string to ``ok`` | ``warnings`` | ``blocked``."""
+    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    return _VERDICT_ALIASES.get(key)
 
 
 def merge_verdicts(*verdicts: CriticVerdict) -> CriticVerdict:
@@ -82,8 +110,18 @@ def _fetch_critic_response(
 
 
 def parse_critic_response(raw: str) -> CriticResponse:
-    """Parse and validate critic / verify JSON."""
-    return parse_json_model(raw, CriticResponse)
+    """Parse and validate critic / verify JSON (with verdict alias normalization)."""
+    data = parse_json_content(raw)
+    if isinstance(data, dict):
+        verdict_raw = data.get("verdict")
+        if isinstance(verdict_raw, str):
+            normalized = normalize_critic_verdict_value(verdict_raw)
+            if normalized is not None:
+                data = {**data, "verdict": normalized}
+    try:
+        return CriticResponse.model_validate(data)
+    except Exception as exc:
+        raise LLMParseError(f"JSON schema validation failed: {exc}") from exc
 
 
 def _segments_by_id(segments: list[Segment]) -> dict[str, Segment]:

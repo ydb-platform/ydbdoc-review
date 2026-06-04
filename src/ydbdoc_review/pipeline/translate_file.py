@@ -26,7 +26,9 @@ from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.reporting.locations import build_segment_line_map
 from ydbdoc_review.validation.heuristics import bump_verdict_for_heuristics, run_file_heuristics
+from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 from ydbdoc_review.validation.link_locale import localize_links_in_document
 
 
@@ -71,8 +73,8 @@ def _compute_verdict(
         if initial is None:
             return "ok"
         if not initial.issues:
-            if initial.verdict in ("blocked", "warnings"):
-                return initial.verdict
+            if initial.verdict == "blocked":
+                return "blocked"
             return "ok"
         if initial.verdict == "blocked":
             return "blocked"
@@ -112,12 +114,17 @@ def translate_file(
     version = prompt_version or cfg.prompts.version
     parallel = max_parallel_batches or cfg.llm.concurrency.batches_per_file
 
+    raw_source_text = source_text
+    if enable_translate and src_lang.lower() in {"ru", "russian"}:
+        source_text = normalize_ru_source_for_translation(source_text)
+
     source_doc = parse_markdown(source_text)
     segments = extract_segments(source_doc)
     segment_locations = {
         seg.id: " › ".join(seg.path) if seg.path else "(начало документа)"
         for seg in segments
     }
+    segment_alignment_error: str | None = None
 
     if not segments:
         return FileTranslationResult.from_usage(
@@ -147,22 +154,26 @@ def translate_file(
         translated_text = _render_with_translations(
             source_doc, segments, translations, target_lang=tgt_lang
         )
+        translated_text = enforce_source_fenced_blocks(translated_text, source_text)
     else:
         manual_actions = []
         if existing_target_text is None:
             raise ValueError("existing_target_text is required when enable_translate=False")
         try:
             translations = _align_translations(segments, existing_target_text)
-        except TranslationValidationError:
-            translations = {seg.id: seg.text for seg in segments}
-        translated_text = existing_target_text
+        except TranslationValidationError as exc:
+            segment_alignment_error = str(exc)
+            translations = {}
+            translated_text = existing_target_text
+        else:
+            translated_text = existing_target_text
 
     critic_initial: CriticResponse | None = None
     critic_applied = []
     critic_skipped = []
     critic_unresolved: CriticResponse | None = None
 
-    if enable_critic:
+    if enable_critic and not segment_alignment_error:
         critic_initial = run_critic_pass(
             client,
             segments=segments,
@@ -194,14 +205,17 @@ def translate_file(
                 max_chars=batch_chars,
             )
             translated_text = text_after_fixes
+            translated_text = enforce_source_fenced_blocks(translated_text, source_text)
 
     verdict = _compute_verdict(
         initial=critic_initial,
         unresolved=critic_unresolved,
     )
+    if segment_alignment_error:
+        verdict = "blocked"
 
     heuristic_warnings = run_file_heuristics(
-        source_text,
+        raw_source_text,
         translated_text,
         source_lang=src_lang,
         target_lang=tgt_lang,
@@ -229,4 +243,5 @@ def translate_file(
         manual_actions=manual_actions,
         segment_locations=segment_locations,
         segment_lines=segment_lines,
+        segment_alignment_error=segment_alignment_error,
     )

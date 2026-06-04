@@ -30,6 +30,14 @@ def merge_base(repo: str, ref1: str, ref2: str) -> str:
     return _git(repo, "merge-base", ref1, ref2)
 
 
+def git_head_sha(repo: str) -> str | None:
+    """Current HEAD commit in ``repo``, or None if not a git checkout."""
+    try:
+        return _git(repo, "rev-parse", "HEAD")
+    except RuntimeError:
+        return None
+
+
 def list_local_changes(
     repo: str, merge_base_with: str
 ) -> list[tuple[str, ChangeKind]]:

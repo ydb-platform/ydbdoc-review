@@ -53,6 +53,12 @@ def test_compute_verdict_initial_blocked_without_verify():
     assert _compute_verdict(initial=initial, unresolved=None) == "blocked"
 
 
+def test_compute_verdict_initial_warnings_without_issues_is_ok():
+    """Critic verdict warnings with empty issues → merge-ready ok after auto-fixes."""
+    initial = CriticResponse(verdict="warnings", issues=[])
+    assert _compute_verdict(initial=initial, unresolved=None) == "ok"
+
+
 def test_compute_verdict_unresolved_blocked_severity():
     unresolved = CriticResponse(
         verdict="warnings",
@@ -208,6 +214,23 @@ def test_translate_file_verdict_blocked_on_unresolved():
     assert result.critic_unresolved is not None
 
 
+def test_translate_file_critic_only_alignment_mismatch_blocks():
+    source = "Первый.\n\nВторой.\n"
+    target = "Only one paragraph.\n"
+    client = _mock_client([])
+    result = translate_file(
+        source,
+        client,
+        load_glossary(),
+        enable_translate=False,
+        existing_target_text=target,
+    )
+    assert result.verdict == "blocked"
+    assert result.segment_alignment_error
+    assert "segment count mismatch" in result.segment_alignment_error
+    assert result.critic_initial is None
+
+
 def test_translate_file_critic_only_mode():
     source = "Привет.\n"
     target = "Hello.\n"
@@ -311,6 +334,6 @@ def test_translate_file_survives_empty_critic_response():
     )
 
     assert "Hello." in result.final_text
-    assert result.verdict == "warnings"
+    assert result.verdict == "ok"
     assert result.critic_initial is not None
     assert result.critic_initial.issues == []

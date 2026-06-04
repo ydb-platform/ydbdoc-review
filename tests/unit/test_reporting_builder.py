@@ -199,6 +199,77 @@ def test_build_full_report_error_and_deleted_rows():
     assert "API down" in body
 
 
+def test_full_report_shows_alignment_error():
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="EN",
+        segments_count=2,
+        verdict="blocked",
+        segment_alignment_error="segment count mismatch: source 2 vs target 1",
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
+        meta=ReportMeta(
+            mode="doc_verify",
+            report_number=1,
+            elapsed_s=1,
+            checkout_ref="abc123def456",
+        ),
+        config=cfg,
+    )
+    assert "Checkout: `abc123def456`" in body
+    assert "(alignment)" in body
+    assert "не мержить" in body or "требует правок" in body
+
+
+def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
+    """Regression: verdict warnings + empty issue list must not yield yellow header."""
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="Hello",
+        segments_count=1,
+        verdict="warnings",
+        critic_initial=CriticResponse(verdict="warnings", issues=[]),
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "можно мержить" in body
+    assert "требует правок" not in body
+
+
 def test_build_full_report_all_ok():
     cfg = _cfg()
     pair = DocPair(

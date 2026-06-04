@@ -243,6 +243,37 @@ on the full rendered EN string in `translate_file._render_with_translations`:
 
 Does not alter Russian prose or segment-level placeholder validation.
 
+### 6.22. Fenced code is never sent to the translator
+
+**Fact:** `segmentation/extractor.py` does **not** emit segments for `FencedCode` /
+`IndentedCode` — only prose, headings, tables, tab titles, etc.
+
+**Implication:** EN fenced bodies are copied from the RU AST at render time, not
+from the LLM. If EN fences differ from RU, either (1) postprocess corrupted them
+(now prevented), or (2) **RU SOURCE on the PR branch** already differed (e.g.
+PR #40070 had `--config-dir/opt` and shortened `ca.crt` paths before translate).
+
+**Pipeline guards (v0.1.0+):**
+
+1. `normalize_ru_source_for_translation` — fix known RU typos (`--config-dir/opt`)
+   on the RU string **before** parse/translate.
+2. `enforce_source_fenced_blocks` — after render/postprocess, copy every code block
+   body from source onto the target AST and re-render.
+3. Heuristics: `fence_body_copy`, `fence_path_stripped`, `missing_anchor`,
+   `detect_ru_source_bugs` (report fixes needed in **RU SOURCE**).
+
+Allowed change inside a fence: RU→EN angle placeholders (`<строка>`→`<string>`)
+via `fix_russian_angle_placeholders_in_en_fences` only.
+
+### 6.23. Merge recommendation vs file verdict
+
+**Problem:** Critic could return `verdict=warnings` with `issues=[]` after
+auto-fixes; report listed files as OK but header stayed 🟡.
+
+**Decision:** `_compute_verdict` treats empty `issues` as `ok` unless verdict is
+`blocked`. `_merge_recommendation` counts files with **open** report items
+(`_file_has_open_issues`), not raw `warnings` verdict alone.
+
 ### 6.21. Placeholder roles (V in prose, U in link URL)
 
 **Problem:** LLM may keep placeholder **order** (`⟦V1⟧` then `⟦U1⟧`) but swap
@@ -302,6 +333,31 @@ only a single `\n`.
 
 **Tests:** `tests/unit/test_markdown_layout.py` (MD031 regression patterns from
 #42404).
+
+### 6.25. Critic / verify verdict normalization
+
+**Problem:** Yandex models sometimes return non-schema `verdict` values (`needs_fix`,
+`issues`, `issues_found`) → Pydantic parse fails → batch treated as empty warnings
+(CI log noise, lost QA for that batch).
+
+**Decision:** `normalize_critic_verdict_value` + alias map in `parse_critic_response`
+before `CriticResponse` validation. Prompt `verify_batch.md` lists allowed literals
+(same as `critic_batch.md`).
+
+### 6.26. `doc_verify` segment alignment (no RU fallback)
+
+**Problem:** On `enable_translate=False`, a failed `_align_translations` used to
+fall back to `{seg.id: seg.text}` (Russian) → critic reported mass `(untranslated)`
+on a structurally valid EN file.
+
+**Decision:** Set `segment_alignment_error`, skip critic, `verdict=blocked`. Report
+shows `(alignment)` under the file. Repair commit still only applies when critic
+produced writable `target_text` changes.
+
+### 6.27. Report checkout ref
+
+Full reports include `Checkout: \`<short-sha>\`` from `git_head_sha(repo_path)` so
+`doc_translate` vs `doc_verify` comments can be tied to the exact tree QA ran on.
 
 ---
 

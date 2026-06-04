@@ -13,6 +13,7 @@ from ydbdoc_review.translation.critic import (
     apply_critic_fixes,
     merge_critic_responses,
     merge_verdicts,
+    normalize_critic_verdict_value,
     parse_critic_response,
     review_with_critic,
     run_critic,
@@ -63,6 +64,19 @@ def _mock_client(responses: list[str]) -> YandexLLMClient:
         llm=cfg.llm,
         client=mock_openai,
     )
+
+
+def test_normalize_critic_verdict_aliases():
+    assert normalize_critic_verdict_value("issues_found") == "warnings"
+    assert normalize_critic_verdict_value("needs_fix") == "warnings"
+    assert normalize_critic_verdict_value("OK") == "ok"
+
+
+def test_parse_critic_response_normalizes_issues_found():
+    raw = json.dumps({"verdict": "issues_found", "issues": []})
+    out = parse_critic_response(raw)
+    assert out.verdict == "warnings"
+    assert out.issues == []
 
 
 def test_parse_critic_response_ok():

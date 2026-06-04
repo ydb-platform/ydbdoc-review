@@ -13,6 +13,7 @@ from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.git_ops import (
     git_commit_paths,
+    git_head_sha,
     prepare_translation_branch_on_base,
     push_branch,
     write_text,
@@ -324,6 +325,7 @@ def run_doc_translate(
             mode="doc_translate",
             report_number=report_num,
             elapsed_s=elapsed,
+            checkout_ref=git_head_sha(repo_path),
         )
         job.translation_comment_url = gh.post_issue_comment(
             owner,
@@ -439,6 +441,7 @@ def run_doc_verify(
         mode="doc_verify",
         report_number=report_num,
         elapsed_s=elapsed,
+        checkout_ref=git_head_sha(repo_path),
     )
     job.translation_comment_url = gh.post_issue_comment(
         owner,
