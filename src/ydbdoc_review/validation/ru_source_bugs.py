@@ -13,7 +13,8 @@ def detect_ru_source_bugs(text: str) -> list[str]:
     issues: list[str] = []
     if _CONFIG_DIR_GLUED_OPT.search(text):
         issues.append(
-            "ru_source: use `--config-dir /opt/...` not `--config-dir/opt/...` (missing space)"
+            "ru_source (исправьте в RU PR, не в EN): "
+            "опечатка `--config-dir/opt/...` — нужен пробел `--config-dir /opt/...`"
         )
     return issues
 

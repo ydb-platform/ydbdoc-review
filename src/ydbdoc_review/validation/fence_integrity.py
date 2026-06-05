@@ -8,6 +8,7 @@ from ydbdoc_review.parsing.ast_types import BlockNode, Document, FencedCode, Ind
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.homoglyphs import fix_russian_angle_placeholders_in_en_fences
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 def _walk_blocks(blocks: list[BlockNode], out: list[FencedCode | IndentedCode]) -> None:
     for block in blocks:
@@ -43,8 +44,18 @@ def fence_content_matches_source(source_content: str, target_content: str) -> bo
     )
 
 
-def check_fence_body_copy(source_text: str, target_text: str) -> list[str]:
+def _source_text_for_fence_compare(source_text: str, *, source_lang: str) -> str:
+    """RU workdir text as the pipeline sees it (after normalize, before translate)."""
+    if source_lang.lower() in {"ru", "russian"}:
+        return normalize_ru_source_for_translation(source_text)
+    return source_text
+
+
+def check_fence_body_copy(
+    source_text: str, target_text: str, *, source_lang: str = "ru"
+) -> list[str]:
     """Warn when any fenced/indented block body differs from source (pipeline corruption)."""
+    source_text = _source_text_for_fence_compare(source_text, source_lang=source_lang)
     src_blocks = code_blocks_from_text(source_text)
     tgt_blocks = code_blocks_from_text(target_text)
     if len(src_blocks) != len(tgt_blocks):

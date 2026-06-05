@@ -58,10 +58,13 @@ def _render_with_translations(
     doc = copy.deepcopy(source_doc)
     reinsert_segments(doc, segments, translations)
     localize_links_in_document(doc)
-    text = render_markdown(doc)
-    if target_lang.lower() in {"en", "english"}:
-        text = postprocess_en_target_markdown(text)
-    return text
+    return render_markdown(doc)
+
+
+def _finalize_en_target(text: str, normalized_source_text: str) -> str:
+    """Copy fenced bodies from normalized RU, then EN postprocess (homoglyphs, <строка>)."""
+    text = enforce_source_fenced_blocks(text, normalized_source_text)
+    return postprocess_en_target_markdown(text)
 
 
 def _compute_verdict(
@@ -154,7 +157,8 @@ def translate_file(
         translated_text = _render_with_translations(
             source_doc, segments, translations, target_lang=tgt_lang
         )
-        translated_text = enforce_source_fenced_blocks(translated_text, source_text)
+        if tgt_lang.lower() in {"en", "english"}:
+            translated_text = _finalize_en_target(translated_text, source_text)
     else:
         manual_actions = []
         if existing_target_text is None:
@@ -205,7 +209,8 @@ def translate_file(
                 max_chars=batch_chars,
             )
             translated_text = text_after_fixes
-            translated_text = enforce_source_fenced_blocks(translated_text, source_text)
+            if tgt_lang.lower() in {"en", "english"}:
+                translated_text = _finalize_en_target(translated_text, source_text)
 
     verdict = _compute_verdict(
         initial=critic_initial,

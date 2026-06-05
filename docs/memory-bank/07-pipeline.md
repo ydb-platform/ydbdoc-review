@@ -42,8 +42,8 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
 5. REINSERT (preserves AST structure)
    translated_doc = reinsert_segments(doc, segments, translations)
    localize_links_in_document(translated_doc)
-   postprocess_en_target_markdown(rendered)  # homoglyphs + fence angle placeholders
-   enforce_source_fenced_blocks(rendered, source_text)  # verbatim fence bodies from RU
+   enforce_source_fenced_blocks(rendered, source_text)  # verbatim fence bodies from normalized RU
+   postprocess_en_target_markdown(rendered)  # homoglyphs + `<строка>`→`<string>` in fences (§6.28)
 
 6. CRITIC PASS 1 (batched segment pairs)
    batches = chunk_segments(segments, max_chars=4000)

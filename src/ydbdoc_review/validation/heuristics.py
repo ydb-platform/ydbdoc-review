@@ -32,7 +32,7 @@ def _strip_fenced_blocks(text: str) -> str:
     in_fence = False
     fence_char = ""
     for line in lines:
-        m = re.match(r"^(`{3,}|~{3,})", line)
+        m = re.match(r"^\s*(`{3,}|~{3,})", line)
         if m:
             marker = m.group(1)
             if not in_fence:
@@ -178,7 +178,11 @@ def run_file_heuristics(
     )
     warnings.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
     warnings.extend(check_fence_parity(source_text, target_text))
-    warnings.extend(check_fence_body_copy(source_text, target_text))
+    warnings.extend(
+        check_fence_body_copy(
+            source_text, target_text, source_lang=source_lang
+        )
+    )
     warnings.extend(check_absolute_paths_in_fences(source_text, target_text))
     warnings.extend(check_required_anchor_lines(source_text, target_text))
     warnings.extend(check_heading_parity(source_text, target_text))

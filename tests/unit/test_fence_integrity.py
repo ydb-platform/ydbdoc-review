@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ydbdoc_review.pipeline.translate_file import _finalize_en_target
 from ydbdoc_review.validation.fence_integrity import (
     check_fence_body_copy,
     enforce_source_fenced_blocks,
@@ -54,3 +55,38 @@ def test_normalize_ru_config_dir_before_translate():
     norm = normalize_ru_source_for_translation(ru)
     assert "--config-dir /opt" in norm
     assert "--config-dir/opt" not in norm
+
+
+def test_check_fence_body_copy_ignores_normalize_fix():
+    """EN may differ from raw RU when pipeline fixed --config-dir/opt in fences."""
+    raw_ru = "```bash\ninit --config-dir/opt/ydb/cfg\n```\n"
+    en = "```bash\ninit --config-dir /opt/ydb/cfg\n```\n"
+    assert not check_fence_body_copy(raw_ru, en, source_lang="ru")
+
+
+def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
+    """Regression: postprocess must run after enforce, not before."""
+    raw_ru = (
+        "5. Init:\n\n"
+        "   ```yaml\n"
+        "    - host: static-node-1.ydb-cluster.com #FQDN ВМ\n"
+        "   ```\n\n"
+        "   ```bash\n"
+        "   ydb admin cluster bootstrap --uuid <строка>\n"
+        "   ```\n"
+    )
+    norm = normalize_ru_source_for_translation(raw_ru)
+    en_rendered = (
+        "5. Init translated.\n\n"
+        "   ```yaml\n"
+        "    - host: static-node-1.ydb-cluster.com #FQDN ВМ\n"
+        "   ```\n\n"
+        "   ```bash\n"
+        "   ydb admin cluster bootstrap --uuid <строка>\n"
+        "   ```\n"
+    )
+    final = _finalize_en_target(en_rendered, norm)
+    assert "#FQDN VM" in final
+    assert "ВМ" not in final
+    assert "<string>" in final
+    assert "<строка>" not in final

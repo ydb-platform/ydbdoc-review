@@ -359,6 +359,22 @@ produced writable `target_text` changes.
 Full reports include `Checkout: \`<short-sha>\`` from `git_head_sha(repo_path)` so
 `doc_translate` vs `doc_verify` comments can be tied to the exact tree QA ran on.
 
+### 6.28. EN finalize order: enforce fences, then postprocess
+
+**Problem (PR #42548):** `postprocess_en_target_markdown` (homoglyphs, `<строка>`→`<string>`)
+ran inside `_render_with_translations`, then `enforce_source_fenced_blocks` copied
+verbatim RU fence bodies **over** those fixes → EN still had `#FQDN ВМ` and `<строка>`.
+
+**Decision:** `_finalize_en_target` = `enforce_source_fenced_blocks` →
+`postprocess_en_target_markdown`. Homoglyphs and angle placeholders apply to the
+final EN text, including list-indented fences.
+
+**Heuristics:** `check_fence_body_copy` compares against `normalize_ru_source_for_translation`
+(raw RU), not raw typo text — avoids false `fence_body_copy` when EN correctly has
+`--config-dir /opt`. `ru_source` still warns on **raw** RU (author must fix source PR).
+`detect_ru_source_bugs` message states «исправьте в RU PR». `_strip_fenced_blocks` in
+cyrillic check allows leading whitespace before `` ``` `` (indented fences).
+
 ---
 
 ---
