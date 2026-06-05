@@ -1,8 +1,9 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: §6.25–§6.27 critic verdict aliases, verify align, report checkout;
-> §6.22–§6.24 fence copy / merge recommendation / MD031; §16.7 CI tokens.
+> Last updated: §6.30 full re-translate from PR source; §6.29 unified QA;
+> §6.28 finalize order;
+> §6.25–§6.27 critic verdict / report checkout; §16.7 CI tokens.
 
 The Memory Bank is **deliberately verbose** — written so any developer or AI
 assistant can reconstruct full project context. It no longer lives in one file;
@@ -27,7 +28,7 @@ use the parts below.
 |---|------|
 | 0–3 | [01-overview](docs/memory-bank/01-overview.md) |
 | 4–5 | [02-codebase](docs/memory-bank/02-codebase.md) |
-| 6 (incl. §6.25–§6.27 QA stability, §6.22 fence copy) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
+| 6 (incl. §6.30 full re-translate, §6.29 unified QA) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
 | 7, 9–11 | [04-development](docs/memory-bank/04-development.md) |
 | 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phases A–I done; nav YAML workflow glue TBD |
 | 12–14, 18 | [06-llm-config](docs/memory-bank/06-llm-config.md) |

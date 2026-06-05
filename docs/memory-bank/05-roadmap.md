@@ -93,7 +93,7 @@ See `ydbdoc_review.llm` package.
 
 ### Phase F — Pipeline & orchestrator ✅ COMPLETE
 - [x] `pipeline/pairs.py` — RU/EN mirroring, `build_doc_pairs`
-- [x] `pipeline/analyze.py` — heuristic + LLM pre-analyze, `plan_pairs`
+- [x] `pipeline/analyze.py` — deterministic full re-translate plans (§6.30); LLM analyze deprecated for CI
 - [x] `pipeline/orchestrator.py` — `run_pr_translation` (sequential, per-PR cache)
 - [x] `translate_file` — `enable_translate=False` for critic-only QA
 - [x] Unit tests: `test_pipeline_pairs`, `test_pipeline_analyze`, `test_pipeline_orchestrator`

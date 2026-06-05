@@ -64,7 +64,7 @@ def _sample_result(*, new_file: bool = False) -> PRTranslationResult:
             )
         ],
         critic_unresolved=CriticResponse(verdict="warnings", issues=[unresolved]),
-        heuristic_warnings=["Кириллица в EN-тексте (строка ~5): «командой YQL»"],
+        heuristic_blocking=["Кириллица в EN-тексте (строка ~5): «командой YQL»"],
         manual_actions=[
             ManualAction(
                 segment_id="s0124",
@@ -235,6 +235,38 @@ def test_full_report_shows_alignment_error():
     assert "Checkout: `abc123def456`" in body
     assert "(alignment)" in body
     assert "не мержить" in body or "требует правок" in body
+
+
+def test_full_report_includes_info_section():
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="EN",
+        segments_count=1,
+        verdict="ok",
+        heuristic_info=["ru_source (исправьте в RU PR): typo"],
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "Справка (не блокирует merge EN)" in body
+    assert "ru_source" in body
 
 
 def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():

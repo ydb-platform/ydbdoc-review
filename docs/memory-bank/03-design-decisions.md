@@ -359,6 +359,50 @@ produced writable `target_text` changes.
 Full reports include `Checkout: \`<short-sha>\`` from `git_head_sha(repo_path)` so
 `doc_translate` vs `doc_verify` comments can be tied to the exact tree QA ran on.
 
+### 6.30. Full re-translate from PR source (no incremental EN patch)
+
+**Problem:** Legacy EN on `main` could have fewer segments/fences than current RU
+(e.g. 90 vs 110). `doc_translate` updated wording inside the old EN skeleton;
+`doc_verify` then reported `segment count mismatch`. LLM pre-analyze could also
+choose `critic_only` when both sides looked «semantically aligned», skipping a
+full render from the source AST.
+
+**Decision:**
+
+1. **`doc_translate` always full re-translate:** read source text from the PR
+   checkout, parse → translate all segments → render target from the **source AST**.
+   Commit overwrites the mirror file; existing target text is never merged or patched.
+2. **Source language** = the side authors edited in the PR (merge-base diff):
+   - RU changed (with or without EN changed) → `translate_to_en` from RU when RU
+     text exists (default YDB path).
+   - EN changed, RU unchanged → `translate_to_ru` from EN.
+   - Both changed, RU missing → `translate_to_ru` from EN.
+3. **No LLM analyze for action selection** in CI (`plan_pairs`, `use_analyze_llm=False`).
+   `critic_only` remains only for **`doc_verify`** (`enable_translate=False`).
+4. Pair with **`gate_round_trip`** (§6.29) blocks merge when render does not preserve
+   segment parity.
+
+**Tests:** `tests/unit/test_pipeline_analyze.py` (both-changed → RU→EN);
+orchestrator + workflow pass `use_analyze_llm=False`.
+
+### 6.29. Unified QA (doc_translate ≡ doc_verify)
+
+**Problem:** `doc_translate` ran critic on in-memory translations; `doc_verify`
+re-parsed EN and required `_align_translations`. Identical EN could be 🟡 then 🔴.
+
+**Decision (`pipeline/qa.py`, `translate_file.py`):**
+
+1. **Always** `normalize_ru_source_for_translation` before parse (both modes).
+2. After render/finalize (translate) or reading EN (verify): **`gate_round_trip`**
+   — re-parse EN, segment count must match RU; else `segment_alignment_error` + 🔴.
+3. Critic uses translations from successful round-trip only.
+4. **Classified heuristics:** `blocking` | `warnings` | `info` (`ru_source` → info only).
+5. **`compose_file_verdict`** — one rule for merge recommendation.
+6. `fence_content_matches_source` allows homoglyph + angle-placeholder deltas;
+   `check_absolute_paths_in_fences` skips when block counts differ (no `zip` crash).
+
+Report: blocking/warnings in «Что исправить»; `heuristic_info` in «Справка (не блокирует merge EN)».
+
 ### 6.28. EN finalize order: enforce fences, then postprocess
 
 **Problem (PR #42548):** `postprocess_en_target_markdown` (homoglyphs, `<строка>`→`<string>`)

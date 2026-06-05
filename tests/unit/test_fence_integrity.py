@@ -57,10 +57,23 @@ def test_normalize_ru_config_dir_before_translate():
     assert "--config-dir/opt" not in norm
 
 
+def test_fence_content_allows_homoglyph_vm():
+    assert fence_content_matches_source(
+        "    - host: x #FQDN ВМ\n",
+        "    - host: x #FQDN VM\n",
+    )
+
+
 def test_check_fence_body_copy_ignores_normalize_fix():
     """EN may differ from raw RU when pipeline fixed --config-dir/opt in fences."""
     raw_ru = "```bash\ninit --config-dir/opt/ydb/cfg\n```\n"
     en = "```bash\ninit --config-dir /opt/ydb/cfg\n```\n"
+    assert not check_fence_body_copy(raw_ru, en, source_lang="ru")
+
+
+def test_check_fence_body_copy_ignores_homoglyph_only_diff():
+    raw_ru = "```yaml\n    - host: x #FQDN ВМ\n```\n"
+    en = "```yaml\n    - host: x #FQDN VM\n```\n"
     assert not check_fence_body_copy(raw_ru, en, source_lang="ru")
 
 

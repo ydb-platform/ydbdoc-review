@@ -7,7 +7,10 @@ import re
 from ydbdoc_review.parsing.ast_types import BlockNode, Document, FencedCode, IndentedCode
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
-from ydbdoc_review.validation.homoglyphs import fix_russian_angle_placeholders_in_en_fences
+from ydbdoc_review.validation.homoglyphs import (
+    fix_cyrillic_homoglyphs_in_en,
+    fix_russian_angle_placeholders_in_en_fences,
+)
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 def _walk_blocks(blocks: list[BlockNode], out: list[FencedCode | IndentedCode]) -> None:
@@ -31,10 +34,10 @@ def code_blocks_from_text(text: str) -> list[FencedCode | IndentedCode]:
 
 
 def _normalize_fence_content_for_compare(text: str) -> str:
-    """Allow only EN angle-placeholder substitution inside otherwise identical fences."""
-    return fix_russian_angle_placeholders_in_en_fences(
-        f"```\n{text}\n```"
-    ).strip().removeprefix("```\n").removesuffix("\n```")
+    """Normalize fence body for compare: angle placeholders + YAML homoglyphs."""
+    inner = fix_russian_angle_placeholders_in_en_fences(f"```\n{text}\n```")
+    inner = inner.strip().removeprefix("```\n").removesuffix("\n```")
+    return fix_cyrillic_homoglyphs_in_en(inner)
 
 
 def fence_content_matches_source(source_content: str, target_content: str) -> bool:
@@ -95,6 +98,8 @@ def check_absolute_paths_in_fences(source_text: str, target_text: str) -> list[s
     warnings: list[str] = []
     src_blocks = code_blocks_from_text(source_text)
     tgt_blocks = code_blocks_from_text(target_text)
+    if len(src_blocks) != len(tgt_blocks):
+        return warnings
     for i, (src, tgt) in enumerate(zip(src_blocks, tgt_blocks, strict=True), start=1):
         src_lines = src.content.splitlines()
         tgt_lines = tgt.content.splitlines()

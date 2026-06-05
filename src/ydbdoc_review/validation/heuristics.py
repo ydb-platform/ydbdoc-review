@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Literal
 
 from ydbdoc_review.parsing.ast_types import FencedCode
@@ -151,14 +152,37 @@ def check_list_tab_parity(source_text: str, target_text: str) -> list[str]:
     return [f"list_tab_parity: source {src} tab blocks vs target {tgt}"]
 
 
-def run_file_heuristics(
+@dataclass
+class ClassifiedHeuristics:
+    """Heuristic findings split by merge impact."""
+
+    blocking: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    info: list[str] = field(default_factory=list)
+
+    @property
+    def all_non_info(self) -> list[str]:
+        return [*self.blocking, *self.warnings]
+
+
+def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]:
+    if message.startswith("ru_source"):
+        return "info"
+    if message.startswith("length_ratio:") and "borderline" in message:
+        return "warnings"
+    if message.startswith("fence_body_copy:"):
+        return "warnings"
+    return "blocking"
+
+
+def _collect_raw_heuristics(
     source_text: str,
     target_text: str,
     *,
-    source_lang: str = "ru",
-    target_lang: str = "en",
+    normalized_source_text: str,
+    source_lang: str,
+    target_lang: str,
 ) -> list[str]:
-    """Run all markdown file heuristics; return human-readable warning strings."""
     from ydbdoc_review.validation.fence_integrity import (
         check_absolute_paths_in_fences,
         check_fence_body_copy,
@@ -168,26 +192,77 @@ def run_file_heuristics(
         detect_ru_source_bugs,
     )
 
-    warnings: list[str] = []
+    raw: list[str] = []
     if source_lang.lower() in {"ru", "russian"}:
-        warnings.extend(detect_ru_source_bugs(source_text))
-    warnings.extend(
+        raw.extend(detect_ru_source_bugs(source_text))
+    raw.extend(
         check_length_ratio(
             source_text, target_text, source_lang=source_lang, target_lang=target_lang
         )
     )
-    warnings.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
-    warnings.extend(check_fence_parity(source_text, target_text))
-    warnings.extend(
+    raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
+    raw.extend(check_fence_parity(normalized_source_text, target_text))
+    raw.extend(
         check_fence_body_copy(
-            source_text, target_text, source_lang=source_lang
+            source_text,
+            target_text,
+            source_lang=source_lang,
         )
     )
-    warnings.extend(check_absolute_paths_in_fences(source_text, target_text))
-    warnings.extend(check_required_anchor_lines(source_text, target_text))
-    warnings.extend(check_heading_parity(source_text, target_text))
-    warnings.extend(check_list_tab_parity(source_text, target_text))
-    return warnings
+    raw.extend(
+        check_absolute_paths_in_fences(normalized_source_text, target_text)
+    )
+    raw.extend(check_required_anchor_lines(source_text, target_text))
+    raw.extend(check_heading_parity(normalized_source_text, target_text))
+    raw.extend(check_list_tab_parity(normalized_source_text, target_text))
+    return raw
+
+
+def run_file_heuristics_classified(
+    source_text: str,
+    target_text: str,
+    *,
+    normalized_source_text: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+) -> ClassifiedHeuristics:
+    """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
+    out = ClassifiedHeuristics()
+    for message in _collect_raw_heuristics(
+        source_text,
+        target_text,
+        normalized_source_text=normalized_source_text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    ):
+        bucket = _classify_heuristic(message)
+        getattr(out, bucket).append(message)
+    return out
+
+
+def run_file_heuristics(
+    source_text: str,
+    target_text: str,
+    *,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+) -> list[str]:
+    """Run all markdown file heuristics; return non-info warning strings."""
+    from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
+
+    norm = (
+        normalize_ru_source_for_translation(source_text)
+        if source_lang.lower() in {"ru", "russian"}
+        else source_text
+    )
+    classified = run_file_heuristics_classified(
+        source_text,
+        target_text,
+        normalized_source_text=norm,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
+    return classified.all_non_info
 
 
 def _issue_strings(issues: list[TocValidationIssue] | list[RedirectValidationIssue]) -> list[str]:
@@ -260,4 +335,13 @@ def validate_navigation_merge_warnings(
 def bump_verdict_for_heuristics(verdict: Literal["ok", "warnings", "blocked"], warnings: list[str]) -> Literal["ok", "warnings", "blocked"]:
     if warnings and verdict == "ok":
         return "warnings"
+    return verdict
+
+
+def bump_verdict_for_blocking_heuristics(
+    verdict: Literal["ok", "warnings", "blocked"],
+    blocking: list[str],
+) -> Literal["ok", "warnings", "blocked"]:
+    if blocking:
+        return "blocked"
     return verdict

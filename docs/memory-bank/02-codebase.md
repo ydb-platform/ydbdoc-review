@@ -64,9 +64,10 @@ src/ydbdoc_review/
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic, fence parity, ru_source, anchors
 ├── pipeline/                      ✅ COMPLETE (Phase F)
-│   ├── translate_file.py          per-file pipeline (D.5 + E heuristics)
+│   ├── translate_file.py          per-file pipeline (translate + unified QA)
+│   ├── qa.py                      round-trip gate, compose_file_verdict
 │   ├── pairs.py                   RU/EN pairing (F)
-│   ├── analyze.py                 pre-analyze plans (F)
+│   ├── analyze.py                 pair plans — full re-translate (§6.30)
 │   ├── orchestrator.py            run_pr_translation (F)
 │   └── types.py                   result dataclasses
 ├── github/                        ✅ COMPLETE (Phase G)

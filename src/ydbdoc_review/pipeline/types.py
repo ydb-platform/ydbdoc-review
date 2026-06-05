@@ -27,7 +27,9 @@ class FileTranslationResult:
     critic_applied: list[CriticIssueOut] = field(default_factory=list)
     critic_skipped: list[CriticIssueOut] = field(default_factory=list)
     critic_unresolved: CriticResponse | None = None
+    heuristic_blocking: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
+    heuristic_info: list[str] = field(default_factory=list)
     manual_actions: list[ManualAction] = field(default_factory=list)
     segment_locations: dict[str, str] = field(default_factory=dict)
     segment_lines: dict[str, tuple[int, int]] = field(default_factory=dict)

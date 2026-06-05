@@ -63,11 +63,14 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
        verify_response = llm_client.chat(critic_model, build_verify_batch_prompt(...))
        unresolved += parse_critic_response(verify_response).issues
 
-9. HEURISTICS (deterministic; source = raw_source_text)
-   warnings = run_file_heuristics(raw_source_text, translated_text, ...)
-   # ru_source: `--config-dir/opt` on PR RU; fence_body_copy; fence_path_stripped
-   # missing_anchor (e.g. web.pem test); length_ratio; cyrillic_in_en; fence_parity
-   verdict = bump_verdict_for_heuristics(verdict, warnings)  # ok → warnings
+9. ROUND-TRIP GATE (translate + verify — same code)
+   translations, err = gate_round_trip(segments, final_text)
+   # fail → segment_alignment_error, critic skipped, verdict blocked
+
+10. HEURISTICS (classified; raw RU + normalized RU for parity checks)
+    blocking / warnings / info = run_file_heuristics_classified(...)
+    # info: ru_source (fix in RU PR). blocking: cyrillic, parity, missing_anchor, …
+    verdict = compose_file_verdict(critic, alignment, heuristics, manual_actions)
 
 10. OUTPUT TEXT
     final_text = translated_text after step 5 (render + link locale + EN postprocess)
@@ -94,9 +97,11 @@ INPUT: pr_number, source_repo, target_branch_base
    pairs = pair_ru_en(changed_md)
    # pairs: [{ru_path, en_path, ru_exists, en_exists, ru_changed, en_changed}]
 
-2. PRE-ANALYZE (cheap model, batched)
-   needs_translate = pre_analyze_pairs(pairs, analyze_model)
-   # For each pair: {action: translate_to_en | translate_to_ru | skip}
+2. PLAN (deterministic — §6.30)
+   plans = plan_pairs(contents)   # no LLM analyze in CI
+   # RU changed → translate_to_en (full render, overwrite EN)
+   # EN changed only → translate_to_ru
+   # both changed → translate_to_en from RU when RU text exists
 
 3. PER-FILE TRANSLATION (sequential)
    per_pr_cache = {}
@@ -169,14 +174,14 @@ For each changed `.md` under `ydb/docs/`:
 - `ydb/docs/ru/X` ↔ `ydb/docs/en/X` (mirror).
 - `ydb/docs/_includes/Y` — language-neutral; not translated.
 
-If RU changed and EN did not → translate to EN (overwrite).
-If EN changed and RU did not → translate to RU (overwrite).
-If both changed:
-  - Pre-analyze decides: if they look like a synced manual edit, skip
-    translation, but still run critic.
-  - Otherwise: re-translate from source language (RU is default source).
+If RU changed (EN changed or not) → **full** translate RU→EN; commit replaces EN
+entirely (render from RU AST — §6.30). Existing EN on `main` is ignored.
+If EN changed and RU did not → full translate EN→RU (overwrite RU).
+If both changed and RU text exists → full RU→EN (RU is default source).
+If both changed and RU missing → full EN→RU.
 If RU exists but EN doesn't → create EN from RU.
 If EN exists but RU doesn't → create RU from EN.
+`critic_only` is **not** used in `doc_translate` (verify mode only).
 
 ### 16.2. New / deleted / renamed
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from ydbdoc_review.validation.heuristics import (
+    bump_verdict_for_blocking_heuristics,
     bump_verdict_for_heuristics,
     check_cyrillic_in_en,
     check_fence_parity,
@@ -12,9 +13,11 @@ from ydbdoc_review.validation.heuristics import (
     check_length_ratio,
     check_list_tab_parity,
     run_file_heuristics,
+    run_file_heuristics_classified,
     validate_navigation_merge_warnings,
     validate_redirect_merge_warnings,
 )
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 
 def test_cyrillic_in_en_detects_prose():
@@ -86,6 +89,18 @@ def test_run_file_heuristics_combined():
 def test_bump_verdict_for_heuristics():
     assert bump_verdict_for_heuristics("ok", ["x"]) == "warnings"
     assert bump_verdict_for_heuristics("blocked", ["x"]) == "blocked"
+
+
+def test_bump_verdict_for_blocking_heuristics():
+    assert bump_verdict_for_blocking_heuristics("ok", ["fence_parity: x"]) == "blocked"
+    assert bump_verdict_for_blocking_heuristics("warnings", []) == "warnings"
+
+
+def test_run_file_heuristics_classified_ru_source_is_info():
+    ru = "x --config-dir/opt/ydb/cfg\n"
+    norm = normalize_ru_source_for_translation(ru)
+    c = run_file_heuristics_classified(ru, "x --config-dir /opt/ydb/cfg\n", normalized_source_text=norm)
+    assert c.info and not c.blocking
 
 
 def test_validate_navigation_merge_warnings_toc():

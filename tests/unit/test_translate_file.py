@@ -11,7 +11,7 @@ from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.pipeline.translate_file import _compute_verdict, translate_file
+from ydbdoc_review.pipeline.translate_file import translate_file
 
 
 def _completion(content: str):
@@ -46,32 +46,6 @@ def _translate_json(segments, mapping: dict[str, str]) -> str:
 
 
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
-
-
-def test_compute_verdict_initial_blocked_without_verify():
-    initial = CriticResponse(verdict="blocked", issues=[])
-    assert _compute_verdict(initial=initial, unresolved=None) == "blocked"
-
-
-def test_compute_verdict_initial_warnings_without_issues_is_ok():
-    """Critic verdict warnings with empty issues → merge-ready ok after auto-fixes."""
-    initial = CriticResponse(verdict="warnings", issues=[])
-    assert _compute_verdict(initial=initial, unresolved=None) == "ok"
-
-
-def test_compute_verdict_unresolved_blocked_severity():
-    unresolved = CriticResponse(
-        verdict="warnings",
-        issues=[
-            CriticIssueOut(
-                segment_id="s1",
-                severity="blocked",
-                category="x",
-                comment="y",
-            )
-        ],
-    )
-    assert _compute_verdict(initial=None, unresolved=unresolved) == "blocked"
 
 
 def test_translate_file_no_segments():
@@ -266,9 +240,9 @@ def test_translate_file_heuristics_bump_verdict_to_warnings():
         target_lang="en",
     )
 
-    assert result.verdict == "warnings"
-    assert result.heuristic_warnings
-    assert any("Кириллица в EN-тексте" in w for w in result.heuristic_warnings)
+    assert result.verdict == "blocked"
+    assert result.heuristic_blocking
+    assert any("Кириллица в EN-тексте" in w for w in result.heuristic_blocking)
 
 
 def test_translate_file_heuristics_do_not_downgrade_blocked():
@@ -316,7 +290,7 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
     )
 
     assert result.verdict == "blocked"
-    assert result.heuristic_warnings
+    assert result.heuristic_blocking or result.heuristic_warnings
 
 
 def test_translate_file_survives_empty_critic_response():

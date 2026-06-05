@@ -63,7 +63,7 @@ Flags: `enable_translate=False` for verify-only; `existing_target_text` for crit
 
 1. **Enumerate** changed paths (`github/git_ops.list_local_changes` or GitHub API).
 2. **Pair** `docs/ru/X.md` ↔ `docs/en/X.md` (`pipeline/pairs.py`).
-3. **Pre-analyze** heuristics + optional LLM batch (`pipeline/analyze.py`).
+3. **Plan** deterministic full re-translate from PR source (`pipeline/analyze.py`, §6.30).
 4. **Run** `translate_file` per planned pair; partial failure skips file, continues PR.
 5. **Git** — branch from source PR head, commit, push (`github/git_ops.py`).
 6. **GitHub** — open/find translation PR, post short + full reports (`reporting/builder.py`).

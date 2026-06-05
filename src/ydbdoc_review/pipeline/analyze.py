@@ -1,4 +1,4 @@
-"""Pre-analyze: decide translate / skip / critic-only per RU/EN pair."""
+"""Plan per-pair work for doc_translate (full re-translate) and doc_verify."""
 
 from __future__ import annotations
 
@@ -51,8 +51,17 @@ def _non_trivial(text: str | None) -> bool:
     return bool(text and text.strip())
 
 
-def plan_pair_heuristic(content: PairContent) -> PairPlan | None:
-    """Deterministic plan for obvious cases; ``None`` if LLM analyze is needed."""
+def plan_pair_heuristic(content: PairContent) -> PairPlan:
+    """Deterministic plan: always full re-translate from PR source language.
+
+    ``doc_translate`` renders the target from the source AST (``translate_file``
+    with ``enable_translate=True``), replacing any existing mirror text. The
+    analyze LLM is not used for action selection.
+
+    Source language: whichever side the PR authors edited. RU→EN is the common
+    case; EN→RU when only EN changed. When both sides changed, RU is the default
+    source (YDB docs are RU-first); EN wins only when RU text is missing.
+    """
     pair = content.pair
     ru_ok = _non_trivial(content.ru_text)
     en_ok = _non_trivial(content.en_text)
@@ -68,29 +77,27 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan | None:
             summary="RU file deleted in PR — remove EN mirror",
         )
 
-    if pair.ru_changed and not pair.en_changed:
-        return PairPlan(
-            pair=pair,
-            action="translate_to_en",
-            source_path=pair.ru_path,
-            target_path=pair.en_path,
-            source_lang="ru",
-            target_lang="en",
-            summary="RU changed, EN unchanged",
-        )
-
-    if pair.en_changed and not pair.ru_changed:
-        return PairPlan(
-            pair=pair,
-            action="translate_to_ru",
-            source_path=pair.en_path,
-            target_path=pair.ru_path,
-            source_lang="en",
-            target_lang="ru",
-            summary="EN changed, RU unchanged",
-        )
-
     if not ru_ok and not en_ok:
+        if pair.en_changed and not pair.ru_changed:
+            return PairPlan(
+                pair=pair,
+                action="translate_to_ru",
+                source_path=pair.en_path,
+                target_path=pair.ru_path,
+                source_lang="en",
+                target_lang="ru",
+                summary="EN changed but source text missing",
+            )
+        if pair.ru_changed:
+            return PairPlan(
+                pair=pair,
+                action="translate_to_en",
+                source_path=pair.ru_path,
+                target_path=pair.en_path,
+                source_lang="ru",
+                target_lang="en",
+                summary="RU changed but source text missing",
+            )
         return PairPlan(
             pair=pair,
             action="skip",
@@ -101,18 +108,18 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan | None:
             summary="Both sides empty",
         )
 
-    if ru_ok and not en_ok and pair.ru_changed:
+    if not pair.ru_changed and not pair.en_changed:
         return PairPlan(
             pair=pair,
-            action="translate_to_en",
+            action="skip",
             source_path=pair.ru_path,
             target_path=pair.en_path,
             source_lang="ru",
             target_lang="en",
-            summary="EN missing — generate from RU",
+            summary="No changes on either side",
         )
 
-    if en_ok and not ru_ok and pair.en_changed:
+    if pair.en_changed and not pair.ru_changed:
         return PairPlan(
             pair=pair,
             action="translate_to_ru",
@@ -120,11 +127,34 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan | None:
             target_path=pair.ru_path,
             source_lang="en",
             target_lang="ru",
-            summary="RU missing — generate from EN",
+            summary="EN changed — full re-translate to RU (ignore existing RU)",
         )
 
-    if pair.ru_changed and pair.en_changed:
-        return None
+    if ru_ok:
+        return PairPlan(
+            pair=pair,
+            action="translate_to_en",
+            source_path=pair.ru_path,
+            target_path=pair.en_path,
+            source_lang="ru",
+            target_lang="en",
+            summary=(
+                "RU changed — full re-translate to EN (ignore existing EN)"
+                if pair.en_changed
+                else "RU changed — full re-translate to EN"
+            ),
+        )
+
+    if en_ok:
+        return PairPlan(
+            pair=pair,
+            action="translate_to_ru",
+            source_path=pair.en_path,
+            target_path=pair.ru_path,
+            source_lang="en",
+            target_lang="ru",
+            summary="EN changed — full re-translate to RU (RU text missing)",
+        )
 
     return PairPlan(
         pair=pair,
@@ -133,7 +163,7 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan | None:
         target_path=pair.en_path,
         source_lang="ru",
         target_lang="en",
-        summary="No changes on either side",
+        summary="No translatable source text",
     )
 
 
@@ -206,57 +236,23 @@ def run_analyze_batch(
 
 def plan_pairs(
     contents: list[PairContent],
-    client: YandexLLMClient | None,
-    glossary: Glossary,
+    client: YandexLLMClient | None = None,
+    glossary: Glossary | None = None,
     *,
-    use_analyze_llm: bool = True,
+    use_analyze_llm: bool = False,
     prompt_version: str = DEFAULT_PROMPT_VERSION,
 ) -> list[PairPlan]:
-    """Build execution plans for all pairs (heuristic + optional LLM)."""
-    plans: list[PairPlan] = []
-    need_llm: list[PairContent] = []
+    """Build execution plans for ``doc_translate`` (deterministic full re-translate).
 
-    for content in contents:
-        heuristic = plan_pair_heuristic(content)
-        if heuristic is not None:
-            plans.append(heuristic)
-        else:
-            need_llm.append(content)
-
-    if need_llm and use_analyze_llm and client is not None:
-        analyzed = run_analyze_batch(
-            client, need_llm, glossary, prompt_version=prompt_version
+    ``use_analyze_llm=True`` is deprecated: it may yield ``critic_only`` (no full
+    render) and is not used in CI. ``run_analyze_batch`` / ``plan_from_analyze``
+    remain for tests and tooling only.
+    """
+    del client, glossary, prompt_version  # reserved for deprecated analyze path
+    if use_analyze_llm:
+        raise ValueError(
+            "use_analyze_llm=True is no longer supported for doc_translate; "
+            "use plan_from_analyze() directly if needed"
         )
-        by_key = {(r.ru_path, r.en_path): r for r in analyzed.results}
-        for content in need_llm:
-            key = (content.pair.ru_path, content.pair.en_path)
-            result = by_key.get(key)
-            if result is None:
-                plans.append(
-                    PairPlan(
-                        pair=content.pair,
-                        action="translate_to_en",
-                        source_path=content.pair.ru_path,
-                        target_path=content.pair.en_path,
-                        source_lang="ru",
-                        target_lang="en",
-                        summary="Analyze missing pair result — default RU→EN",
-                    )
-                )
-            else:
-                plans.append(plan_from_analyze(content, result))
-    elif need_llm:
-        for content in need_llm:
-            plans.append(
-                PairPlan(
-                    pair=content.pair,
-                    action="translate_to_en",
-                    source_path=content.pair.ru_path,
-                    target_path=content.pair.en_path,
-                    source_lang="ru",
-                    target_lang="en",
-                    summary="Both sides changed — default RU→EN (no analyze LLM)",
-                )
-            )
-
+    plans = [plan_pair_heuristic(content) for content in contents]
     return sorted(plans, key=lambda p: p.pair.ru_path)

@@ -166,7 +166,7 @@ def _run_verify_pairs(
                 existing_target_text=content.en_text,
                 enable_critic=True,
             )
-        except (LLMError, ValueError) as exc:
+        except LLMError as exc:
             logger.exception("Verify failed for %s", pair.en_path)
             results.append(PairRunResult(plan=plan, error=str(exc)))
             continue
@@ -227,7 +227,7 @@ def run_doc_translate(
         client,
         glossary,
         config=cfg,
-        use_analyze_llm=True,
+        use_analyze_llm=False,
     )
     job.pr_result = pr_result
 

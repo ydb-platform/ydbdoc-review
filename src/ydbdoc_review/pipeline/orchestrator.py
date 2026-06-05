@@ -84,7 +84,7 @@ def run_pr_translation(
     glossary: Glossary | None = None,
     *,
     config: Config | None = None,
-    use_analyze_llm: bool = True,
+    use_analyze_llm: bool = False,
     per_pr_cache: dict[str, str] | None = None,
 ) -> PRTranslationResult:
     """Plan and execute translation for all pairs (sequential, one shared cache)."""
