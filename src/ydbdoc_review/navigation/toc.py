@@ -8,13 +8,14 @@ from dataclasses import dataclass
 
 _ITEM_SPLIT = re.compile(r"(?m)^- name: ")
 _HREF_LINE = re.compile(r"^  href: (.+)$", re.MULTILINE)
+# Diplodoc ydb docs often use one-line inline items:
+#   - { name: Overview, href: index.md, when: ... }
+_INLINE_ITEM = re.compile(
+    r"(?m)^\s*- \{\s*name:\s*(.+?)\s*,\s*href:\s*(\S+)",
+)
 
 
-def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
-    """Return ``[{name, href, block}, ...]`` preserving each item's YAML block."""
-    text = yaml_text.replace("\r\n", "\n")
-    if not text.strip():
-        return []
+def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
     parts = _ITEM_SPLIT.split(text)
     items: list[dict[str, str]] = []
     for part in parts:
@@ -34,6 +35,34 @@ def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
             }
         )
     return items
+
+
+def _parse_toc_items_inline(text: str) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for m in _INLINE_ITEM.finditer(text):
+        line_end = text.find("\n", m.start())
+        if line_end == -1:
+            line_end = len(text)
+        block = text[m.start() : line_end].rstrip() + "\n"
+        items.append(
+            {
+                "name": m.group(1).strip(),
+                "href": m.group(2).strip().rstrip(","),
+                "block": block,
+            }
+        )
+    return items
+
+
+def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
+    """Return ``[{name, href, block}, ...]`` preserving each item's YAML block."""
+    text = yaml_text.replace("\r\n", "\n")
+    if not text.strip():
+        return []
+    inline = _parse_toc_items_inline(text)
+    if inline:
+        return inline
+    return _parse_toc_items_block(text)
 
 
 def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> set[str]:
@@ -99,6 +128,13 @@ def merge_en_toc_yaml(
 
 
 def _replace_item_name(block: str, new_name: str) -> str:
+    if re.match(r"^\s*- \{", block):
+        return re.sub(
+            r"(\{\s*name:\s*)(.+?)(\s*,\s*href:)",
+            rf"\1{new_name}\3",
+            block,
+            count=1,
+        )
     return re.sub(r"(?m)^- name: .+$", f"- name: {new_name}", block, count=1)
 
 
@@ -143,6 +179,14 @@ def validate_toc_merge(
             TocValidationIssue(
                 kind="missing_href",
                 detail=f"RU PR hrefs missing from EN toc: {sorted(missing_ru)}",
+            )
+        )
+
+    if parse_toc_items(ru_pr_yaml) and not parse_toc_items(en_merged_yaml):
+        issues.append(
+            TocValidationIssue(
+                kind="empty_toc",
+                detail="EN toc has no items but RU PR does",
             )
         )
 

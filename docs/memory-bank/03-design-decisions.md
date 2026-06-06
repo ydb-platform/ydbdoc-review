@@ -188,6 +188,21 @@ files outside the PR diff.
 Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 `test_navigation_paths.py`, `test_validation_heuristics.py`.
 
+**Inline TOC format (§6.33):** ydb `toc*.yaml` uses one-line items
+`- { name: …, href: …, when: … }`. `parse_toc_items` must handle both this
+and block `- name:` / `href:` layout. Empty merge (parser miss) is flagged
+`empty_toc` + `scope_not_applied` → navigation verdict **blocked** → report 🔴.
+
+### 6.33. Inline Diplodoc TOC parsing + navigation blocking verdicts
+
+**Problem:** PR #42725 — inline `toc_i.yaml` was parsed as zero items; merge
+wrote `items:` only and ydbdoc-review still reported 🟢.
+
+**Decision:** `navigation/toc.py` detects inline `- { name:, href: }` lines;
+`validate_toc_merge` adds `empty_toc`; `scope_not_applied`, `missing_href`,
+`unexpected_href`, `empty_toc` → `NavigationRunResult.verdict = blocked`;
+`_merge_recommendation` treats nav `warnings` as 🟡 and nav `blocked` as 🔴.
+
 ### 6.18. Translation branch always on upstream (fork PRs)
 
 **Problem:** Pushing `ydbdoc-review/pr-N` to the contributor fork (PR head repo)

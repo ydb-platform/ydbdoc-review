@@ -48,7 +48,7 @@ src/ydbdoc_review/
 │   ├── repair.py                  focused LLM repair after validation failure
 │   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched critic/verify + verdict alias normalize (D.4)
-├── navigation/                    ✅ scoped TOC + redirect merge (D.1.5 + E)
+├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection

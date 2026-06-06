@@ -74,9 +74,12 @@ def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
     nav_blocked = any(
         n.verdict == "blocked" or n.error for n in result.navigation_results
     )
+    nav_warn = any(
+        n.verdict == "warnings" and not n.error for n in result.navigation_results
+    )
     if blocked or nav_blocked:
         return "🔴", "не мержить — есть блокирующие проблемы"
-    if warn:
+    if warn or nav_warn:
         return "🟡", "требует правок перед merge"
     if ok:
         return "🟢", "можно мержить"

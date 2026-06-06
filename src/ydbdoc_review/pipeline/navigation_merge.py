@@ -26,6 +26,20 @@ from ydbdoc_review.validation.heuristics import validate_navigation_merge_warnin
 
 logger = logging.getLogger(__name__)
 
+_NAV_BLOCKING_WARNING_KINDS = frozenset(
+    {"scope_not_applied", "missing_href", "unexpected_href", "empty_toc"}
+)
+
+
+def _navigation_verdict(warnings: list[str]) -> FileVerdict:
+    for w in warnings:
+        kind = w.split(":", 1)[0]
+        if kind in _NAV_BLOCKING_WARNING_KINDS:
+            return "blocked"
+    if warnings:
+        return "warnings"
+    return "ok"
+
 _MENU_LABELS_PROMPT = """\
 Translate Russian Diplodoc sidebar menu labels to English.
 Return JSON only: {"translations": [{"ru": "<source>", "en": "<translation>"}, ...]}
@@ -169,7 +183,7 @@ def merge_navigation_pair(
             translate_scope=scope,
         )
 
-    verdict: FileVerdict = "warnings" if warnings else "ok"
+    verdict = _navigation_verdict(warnings)
     return NavigationRunResult(
         ru_path=pair.ru_path,
         en_path=pair.en_path,

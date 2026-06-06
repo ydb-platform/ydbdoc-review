@@ -12,27 +12,25 @@ from ydbdoc_review.translation.glossary import load_glossary
 
 RU_BASE = dedent("""
     items:
-    - name: INDEX
-      href: index.md
+     - { name: Обзор,      href: index.md                                          }
+     - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
 """).strip()
 
 RU_PR = dedent("""
     items:
-    - name: INDEX
-      href: index.md
-    - name: COMPACT
-      href: compact.md
-      when: backend_name == "YDB"
+     - { name: Обзор,      href: index.md                                          }
+     - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+     - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
 """).strip()
 
 EN_MAIN = dedent("""
     items:
-    - name: INDEX
-      href: index.md
+     - { name: Overview,    href: index.md                                          }
+     - { name: FAMILY,      href: family.md                                         }
 """).strip()
 
 
-def test_merge_navigation_pair_toc():
+def test_merge_navigation_pair_inline_toc():
     client = MagicMock()
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
     glossary = load_glossary()
@@ -68,5 +66,8 @@ def test_merge_navigation_pair_toc():
 
     assert result.error is None
     assert result.target_text is not None
+    assert result.verdict == "ok"
     assert "compact.md" in result.target_text
     assert "COMPACT" in result.target_text
+    assert "Overview" in result.target_text
+    assert "FAMILY" in result.target_text

@@ -89,6 +89,66 @@ def test_merge_skips_ru_only_not_in_scope():
     assert "old.md" in hrefs
 
 
+ALTER_TABLE_RU_BASE = dedent("""
+    items:
+    - { name: Обзор,      href: index.md                                          }
+    - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+""").strip()
+
+ALTER_TABLE_RU_PR = dedent("""
+    items:
+    - { name: Обзор,      href: index.md                                          }
+    - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+    - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
+""").strip()
+
+ALTER_TABLE_EN_MAIN = dedent("""
+    items:
+     - { name: Overview,    href: index.md                                          }
+     - { name: FAMILY,      href: family.md                                         }
+""").strip()
+
+
+def test_parse_toc_items_inline_ydb_format():
+    items = parse_toc_items(ALTER_TABLE_RU_PR)
+    assert len(items) == 3
+    assert items[-1]["href"] == "compact.md"
+    assert items[-1]["name"] == "COMPACT"
+
+
+def test_merge_inline_toc_adds_compact_preserves_en_blocks():
+    scope = toc_translate_scope(ALTER_TABLE_RU_BASE, ALTER_TABLE_RU_PR)
+    assert scope == {"compact.md"}
+
+    merged = merge_en_toc_yaml(
+        ALTER_TABLE_EN_MAIN,
+        ALTER_TABLE_RU_PR,
+        translate_hrefs=scope,
+        translate_name=lambda n: "COMPACT" if n == "COMPACT" else n,
+    )
+    items = parse_toc_items(merged)
+    by_href = {it["href"]: it["name"] for it in items}
+
+    assert len(items) == 3
+    assert by_href["index.md"] == "Overview"
+    assert by_href["family.md"] == "FAMILY"
+    assert by_href["compact.md"] == "COMPACT"
+    assert "- {" in items[0]["block"]
+
+
+def test_validate_toc_merge_empty_inline_toc_is_blocking():
+    scope = {"compact.md", "index.md"}
+    issues = validate_toc_merge(
+        ALTER_TABLE_RU_PR,
+        "items:\n",
+        translate_hrefs=scope,
+        en_main_yaml=ALTER_TABLE_EN_MAIN,
+    )
+    kinds = {i.kind for i in issues}
+    assert "empty_toc" in kinds
+    assert "scope_not_applied" in kinds
+
+
 def test_validate_toc_merge_clean():
     scope = toc_translate_scope(RU_BASE, RU_PR)
     merged = merge_en_toc_yaml(

@@ -1,7 +1,8 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: §6.32 completeness gate + navigation YAML wired; §6.31 verify RU ref;
+> Last updated: §6.33 inline TOC parse + nav blocking verdicts; §6.32 completeness;
+> §6.31 verify RU ref;
 > §6.30 full re-translate;
 > §6.29 unified QA;
 > §6.28 finalize order;
@@ -30,7 +31,7 @@ use the parts below.
 |---|------|
 | 0–3 | [01-overview](docs/memory-bank/01-overview.md) |
 | 4–5 | [02-codebase](docs/memory-bank/02-codebase.md) |
-| 6 (incl. §6.32 completeness, §6.17 nav merge wired) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
+| 6 (incl. §6.33 inline TOC, §6.32 completeness) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
 | 7, 9–11 | [04-development](docs/memory-bank/04-development.md) |
 | 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phases A–I done; nav YAML workflow glue TBD |
 | 12–14, 18 | [06-llm-config](docs/memory-bank/06-llm-config.md) |
