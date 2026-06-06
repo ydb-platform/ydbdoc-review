@@ -149,6 +149,74 @@ def source_pr_number_from_branch(branch: str, *, prefix: str) -> int | None:
     return None
 
 
+def source_pr_content_ref(
+    gh: GitHubClient, owner: str, repo: str, source_pr: int
+) -> tuple[str, str, str]:
+    """Git ref for RU files — same tree ``doc_translate`` uses (source PR head).
+
+    Returns ``(repo_owner, repo_name, head_sha)``. Head may live on a fork.
+    """
+    data = gh.get_pull(owner, repo, source_pr)
+    head = data.get("head") or {}
+    head_repo = head.get("repo") or {}
+    head_owner = head_repo.get("owner") or {}
+    ru_owner = str(head_owner.get("login") or owner)
+    ru_repo = str(head_repo.get("name") or repo)
+    sha = str(head.get("sha") or "")
+    if not sha:
+        raise ValueError(f"Source PR #{source_pr} has no head sha")
+    return ru_owner, ru_repo, sha
+
+
+def load_verify_pair_contents(
+    repo_path: str,
+    pairs: list[DocPair],
+    *,
+    merge_base_with: str,
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    source_pr: int,
+) -> list[PairContent]:
+    """Load EN from translation PR checkout; RU from source PR head (not ``main``).
+
+    Translation branches only commit EN paths — RU on disk is the branch base
+    (often newer ``main``). QA must compare against the same RU ``doc_translate``
+    translated from.
+    """
+    ru_owner, ru_repo, ru_ref = source_pr_content_ref(gh, owner, repo, source_pr)
+    contents: list[PairContent] = []
+    for pair in pairs:
+        en_text = read_text(repo_path, pair.en_path)
+        if en_text is None and not pair.en_deleted:
+            en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+
+        ru_text: str | None = None
+        if not pair.ru_deleted:
+            ru_text = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
+
+        ru_diff = (
+            file_diff_range(repo_path, merge_base_with, pair.ru_path)
+            if pair.ru_changed
+            else None
+        )
+        en_diff = (
+            file_diff_range(repo_path, merge_base_with, pair.en_path)
+            if pair.en_changed
+            else None
+        )
+        contents.append(
+            PairContent(
+                pair=pair,
+                ru_text=ru_text,
+                en_text=en_text,
+                ru_diff_vs_base=ru_diff or None,
+                en_diff_vs_base=en_diff or None,
+            )
+        )
+    return contents
+
+
 def load_pair_contents(
     repo_path: str,
     pairs: list[DocPair],

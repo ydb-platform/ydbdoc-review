@@ -128,12 +128,27 @@ def test_run_doc_verify_dry_run(git_repo: str):
         "base": {"ref": "feature/docs"},
     }
 
+    source_pull = {
+        "head": {
+            "sha": "source-head-sha",
+            "repo": {"owner": {"login": "o"}, "name": "r"},
+        }
+    }
+
+    def _get_pull(_owner: str, _repo: str, number: int) -> dict:
+        if number == 11:
+            return pull
+        if number == 3:
+            return source_pull
+        raise AssertionError(f"unexpected PR {number}")
+
     with patch(
         "ydbdoc_review.github.workflow._run_verify_pairs",
         return_value=_fake_pr_result(),
     ):
         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-            mock_gh.return_value.get_pull.return_value = pull
+            mock_gh.return_value.get_pull.side_effect = _get_pull
+            mock_gh.return_value.get_file_text.return_value = "RU.\n"
             mock_gh.return_value.iter_issue_comments.return_value = iter([])
             with patch(
                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",

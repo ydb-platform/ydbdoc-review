@@ -22,6 +22,7 @@ from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
     list_pr_file_changes_git,
     load_pair_contents,
+    load_verify_pair_contents,
     parse_repo,
     parse_source_pr_from_text,
     pull_request_context,
@@ -388,9 +389,24 @@ def run_doc_verify(
         logger.info("No doc pairs for verify on PR #%s", pr_number)
         return job
 
-    contents = load_pair_contents(
-        repo_path, pairs, merge_base_with=merge_base_with
-    )
+    if source_pr is None:
+        logger.warning(
+            "doc_verify PR #%s: source PR unknown — RU from checkout (may differ from doc_translate)",
+            pr_number,
+        )
+        contents = load_pair_contents(
+            repo_path, pairs, merge_base_with=merge_base_with
+        )
+    else:
+        contents = load_verify_pair_contents(
+            repo_path,
+            pairs,
+            merge_base_with=merge_base_with,
+            gh=gh,
+            owner=owner,
+            repo=repo,
+            source_pr=source_pr,
+        )
     cfg.secrets.require_yandex()
     client = YandexLLMClient.from_config(cfg)
     glossary = load_glossary()

@@ -153,7 +153,7 @@ OUTPUT: exit code 0 unless infrastructure failure.
 INPUT: translation_pr_number
 
 1. Discover source PR number from translation PR description
-2. Read ru + en files from translation PR head (NOT main)
+2. Read **EN** from translation PR checkout; **RU** from source PR head (§6.31)
 3. Run critic + heuristics (no translator)
 4. Apply critic fixes (suggested_text per segment_id)
 5. If any fixes applied: commit + push to translation PR branch

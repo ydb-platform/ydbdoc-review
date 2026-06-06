@@ -359,6 +359,21 @@ produced writable `target_text` changes.
 Full reports include `Checkout: \`<short-sha>\`` from `git_head_sha(repo_path)` so
 `doc_translate` vs `doc_verify` comments can be tied to the exact tree QA ran on.
 
+### 6.31. `doc_verify` RU from source PR head (not translation branch)
+
+**Problem:** Translation branches commit **EN only**; RU on disk is the branch
+base (often current `main`). After the source PR merges, `main` RU can grow (e.g.
+111 segments) while `doc_translate` used **source PR head** RU (e.g. 90).
+`doc_verify` then compared `main` RU vs translation EN → false 🔴 alignment
+(111 vs 90) while `doc_translate` reported 🟢 (90 vs 90 in-memory).
+
+**Decision:** `load_verify_pair_contents` loads **EN** from the translation PR
+checkout and **RU** via GitHub API at the **source PR head** commit (same tree as
+`doc_translate` checkout). `source_pr_content_ref` resolves fork head repo when
+needed.
+
+**Tests:** `tests/unit/test_github_pr_verify.py`, updated `test_github_workflow.py`.
+
 ### 6.30. Full re-translate from PR source (no incremental EN patch)
 
 **Problem:** Legacy EN on `main` could have fewer segments/fences than current RU
