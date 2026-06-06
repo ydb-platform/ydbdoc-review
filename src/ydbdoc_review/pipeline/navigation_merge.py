@@ -27,7 +27,13 @@ from ydbdoc_review.validation.heuristics import validate_navigation_merge_warnin
 logger = logging.getLogger(__name__)
 
 _NAV_BLOCKING_WARNING_KINDS = frozenset(
-    {"scope_not_applied", "missing_href", "unexpected_href", "empty_toc"}
+    {
+        "scope_not_applied",
+        "missing_href",
+        "unexpected_href",
+        "empty_toc",
+        "inconsistent_indent",
+    }
 )
 
 

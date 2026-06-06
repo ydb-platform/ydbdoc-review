@@ -67,7 +67,7 @@ src/ydbdoc_review/
 │   ├── translate_file.py          per-file pipeline (translate + unified QA)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
 │   ├── pairs.py                   RU/EN md + navigation YAML pairing
-│   ├── navigation_merge.py        scoped toc/redirect merge (§6.17, wired)
+│   ├── navigation_merge.py        scoped toc/redirect merge; EN-main indent (§6.36)
 │   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)
 │   ├── orchestrator.py            run_pr_translation (F)

@@ -193,6 +193,15 @@ Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 and block `- name:` / `href:` layout. Empty merge (parser miss) is flagged
 `empty_toc` + `scope_not_applied` → navigation verdict **blocked** → report 🔴.
 
+### 6.36. Inline TOC indentation preserved from EN-main
+
+**Problem:** PR #42726 — merge appended RU inline lines as ``- {`` while EN-main
+used `` - {``; Diplodoc failed with ``bad indentation of a sequence entry``.
+
+**Decision:** ``merge_en_toc_yaml`` reads list-entry prefix from EN-main's first
+inline item and normalizes every output line in ``_serialize_toc``.
+``validate_toc_merge`` flags ``inconsistent_indent`` (blocking).
+
 ### 6.35. Navigation YAML in `doc_verify`
 
 **Problem:** `doc_verify` only ran critic/heuristics on `.md`; `toc_i.yaml` never

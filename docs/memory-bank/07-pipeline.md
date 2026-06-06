@@ -336,7 +336,12 @@ Each `doc_verify` run posts a NEW comment of the same format, with a header
 
 Navigation YAML (§6.35): EN ``toc*.yaml`` / redirect files changed in the
 translation PR are validated against RU from source PR head; listed in the
-report as ``(навигация)`` like ``doc_translate``.
+report as ``(навигация)`` like ``doc_translate``. Inline TOC lines keep the
+list-entry prefix from EN ``main`` (§6.36); ``inconsistent_indent`` is blocking.
+
+``doc_verify`` validates navigation only — it does **not** rewrite YAML on disk.
+To fix a bad ``toc_i.yaml`` already on the translation branch, re-run
+``doc_translate`` or edit the file manually, then ``doc_verify``.
 `Checkout: \`<sha>\``. Previous comments remain visible for history.
 
 **Not a diff against the prior report:** each run re-parses RU + current EN,

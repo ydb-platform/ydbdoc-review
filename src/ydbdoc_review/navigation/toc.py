@@ -40,10 +40,11 @@ def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
 def _parse_toc_items_inline(text: str) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for m in _INLINE_ITEM.finditer(text):
+        line_start, _ = _inline_item_line_bounds(text, m)
         line_end = text.find("\n", m.start())
         if line_end == -1:
             line_end = len(text)
-        block = text[m.start() : line_end].rstrip() + "\n"
+        block = text[line_start:line_end].rstrip() + "\n"
         items.append(
             {
                 "name": m.group(1).strip(),
@@ -52,6 +53,45 @@ def _parse_toc_items_inline(text: str) -> list[dict[str, str]]:
             }
         )
     return items
+
+
+def _inline_item_line_bounds(text: str, match: re.Match[str]) -> tuple[int, int]:
+    """Return ``(line_start, dash_index)`` for an inline toc item match."""
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    line_end = text.find("\n", match.start())
+    if line_end == -1:
+        line_end = len(text)
+    line = text[line_start:line_end]
+    dash_index = line_start + line.index("-")
+    return line_start, dash_index
+
+
+def _inline_list_line_prefix(yaml_text: str) -> str | None:
+    """Leading whitespace before ``-`` on the first inline toc item line."""
+    text = yaml_text.replace("\r\n", "\n")
+    m = _INLINE_ITEM.search(text)
+    if not m:
+        return None
+    line_start, dash_index = _inline_item_line_bounds(text, m)
+    return text[line_start:dash_index]
+
+
+def _normalize_inline_block(block: str, line_prefix: str) -> str:
+    """Apply EN-main list-entry indentation to one inline ``- { ... }`` line."""
+    stripped = block.strip()
+    if not stripped.startswith("- {"):
+        return block if block.endswith("\n") else block + "\n"
+    return line_prefix + stripped + "\n"
+
+
+def _inline_line_prefixes(yaml_text: str) -> set[str]:
+    """Distinct leading whitespace prefixes before ``-`` on inline toc lines."""
+    text = yaml_text.replace("\r\n", "\n")
+    prefixes: set[str] = set()
+    for m in _INLINE_ITEM.finditer(text):
+        line_start, dash_index = _inline_item_line_bounds(text, m)
+        prefixes.add(text[line_start:dash_index])
+    return prefixes
 
 
 def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
@@ -96,6 +136,7 @@ def merge_en_toc_yaml(
     - RU removed ``href``: omit from output (mirror RU structure).
     - EN-only ``href`` not in RU PR: append unchanged at end (legacy entries).
     """
+    line_prefix = _inline_list_line_prefix(en_main_yaml)
     en_by_href = {it["href"]: it for it in parse_toc_items(en_main_yaml)}
     ru_items = parse_toc_items(ru_pr_yaml)
     ru_hrefs = {it["href"] for it in ru_items}
@@ -111,11 +152,14 @@ def merge_en_toc_yaml(
             merged.append(en_by_href[href])
         elif href in translate_hrefs:
             en_name = translate_name(rit["name"]).strip()
+            block = _replace_item_name(rit["block"], en_name)
+            if line_prefix is not None:
+                block = _normalize_inline_block(block, line_prefix)
             merged.append(
                 {
                     "name": en_name,
                     "href": href,
-                    "block": _replace_item_name(rit["block"], en_name),
+                    "block": block,
                 }
             )
         # else: RU-only href outside scope — skip (do not invent EN menu items)
@@ -124,7 +168,7 @@ def merge_en_toc_yaml(
         if it["href"] not in seen and it["href"] not in ru_hrefs:
             merged.append(it)
 
-    return _serialize_toc(merged)
+    return _serialize_toc(merged, line_prefix=line_prefix)
 
 
 def _replace_item_name(block: str, new_name: str) -> str:
@@ -138,8 +182,18 @@ def _replace_item_name(block: str, new_name: str) -> str:
     return re.sub(r"(?m)^- name: .+$", f"- name: {new_name}", block, count=1)
 
 
-def _serialize_toc(items: list[dict[str, str]]) -> str:
-    body = "".join(it["block"] for it in items)
+def _serialize_toc(
+    items: list[dict[str, str]],
+    *,
+    line_prefix: str | None = None,
+) -> str:
+    blocks: list[str] = []
+    for it in items:
+        block = it["block"]
+        if line_prefix is not None and re.match(r"^\s*- \{", block):
+            block = _normalize_inline_block(block, line_prefix)
+        blocks.append(block)
+    body = "".join(blocks)
     if not body.endswith("\n"):
         body += "\n"
     return "items:\n" + body
@@ -198,5 +252,17 @@ def validate_toc_merge(
                     detail=f"href {href!r} was in translate scope but missing from EN toc",
                 )
             )
+
+    prefixes = _inline_line_prefixes(en_merged_yaml)
+    if len(prefixes) > 1:
+        issues.append(
+            TocValidationIssue(
+                kind="inconsistent_indent",
+                detail=(
+                    "inline toc list entries use mixed indentation "
+                    f"(prefixes: {sorted(prefixes)!r})"
+                ),
+            )
+        )
 
     return issues

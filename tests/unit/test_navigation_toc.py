@@ -133,7 +133,47 @@ def test_merge_inline_toc_adds_compact_preserves_en_blocks():
     assert by_href["index.md"] == "Overview"
     assert by_href["family.md"] == "FAMILY"
     assert by_href["compact.md"] == "COMPACT"
-    assert "- {" in items[0]["block"]
+    for line in merged.splitlines():
+        if line.strip().startswith("- {"):
+            assert line.startswith(" - {"), line
+
+
+def test_merge_inline_toc_matches_alter_table_en_main_style():
+    """Regression: PR #42726 — mixed ``- {`` / `` - {`` breaks Diplodoc YAML parse."""
+    en_main = dedent("""
+        items:
+         - { name: Overview,    href: index.md                                          }
+         - { name: INDEX,       href: indexes.md, when: feature_secondary_index }
+         - { name: FAMILY,      href: family.md                                         }
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - { name: Обзор,      href: index.md                                          }
+        - { name: INDEX,      href: indexes.md, when: feature_secondary_index }
+        - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+        - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
+    """).strip()
+    scope = {"compact.md"}
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=scope,
+        translate_name=lambda n: "COMPACT" if n == "COMPACT" else n,
+    )
+    assert validate_toc_merge(ru_pr, merged, translate_hrefs=scope, en_main_yaml=en_main) == []
+    for line in merged.splitlines():
+        if line.strip().startswith("- {"):
+            assert line.startswith(" - {"), line
+
+
+def test_validate_toc_merge_flags_inconsistent_indent():
+    bad = dedent("""
+        items:
+        - { name: A, href: a.md }
+         - { name: B, href: b.md }
+    """).strip()
+    issues = validate_toc_merge("items:\n", bad, translate_hrefs=set(), en_main_yaml="items:\n")
+    assert any(i.kind == "inconsistent_indent" for i in issues)
 
 
 def test_validate_toc_merge_empty_inline_toc_is_blocking():

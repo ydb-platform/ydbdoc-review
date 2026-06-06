@@ -12,15 +12,15 @@ from ydbdoc_review.translation.glossary import load_glossary
 
 RU_BASE = dedent("""
     items:
-     - { name: Обзор,      href: index.md                                          }
-     - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+    - { name: Обзор,      href: index.md                                          }
+    - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
 """).strip()
 
 RU_PR = dedent("""
     items:
-     - { name: Обзор,      href: index.md                                          }
-     - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
-     - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
+    - { name: Обзор,      href: index.md                                          }
+    - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+    - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
 """).strip()
 
 EN_MAIN = dedent("""
@@ -71,3 +71,6 @@ def test_merge_navigation_pair_inline_toc():
     assert "COMPACT" in result.target_text
     assert "Overview" in result.target_text
     assert "FAMILY" in result.target_text
+    for line in result.target_text.splitlines():
+        if line.strip().startswith("- {"):
+            assert line.startswith(" - {"), line
