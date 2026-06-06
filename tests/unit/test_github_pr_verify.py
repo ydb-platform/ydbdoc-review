@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from ydbdoc_review.github.pr import load_verify_pair_contents, source_pr_content_ref
-from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.github.pr import (
+    load_verify_navigation_ru_texts,
+    load_verify_pair_contents,
+    source_pr_content_ref,
+)
+from ydbdoc_review.pipeline.pairs import DocPair, NavigationPair
 
 
 def test_source_pr_content_ref_fork_head():
@@ -60,3 +64,27 @@ def test_load_verify_pair_contents_ru_from_api(tmp_path):
     gh.get_file_text.assert_called_once_with(
         "o", "r", "ydb/docs/ru/a.md", "src-sha"
     )
+
+
+def test_load_verify_navigation_ru_texts():
+    gh = MagicMock()
+    gh.get_pull.return_value = {
+        "head": {
+            "sha": "src-sha",
+            "repo": {"owner": {"login": "o"}, "name": "r"},
+        }
+    }
+    gh.get_file_text.return_value = "items:\n"
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/a/toc_i.yaml",
+        en_path="ydb/docs/en/a/toc_i.yaml",
+        en_changed=True,
+    )
+    texts = load_verify_navigation_ru_texts(
+        [pair],
+        gh=gh,
+        owner="o",
+        repo="r",
+        source_pr=42414,
+    )
+    assert texts["ydb/docs/ru/a/toc_i.yaml"] == "items:\n"

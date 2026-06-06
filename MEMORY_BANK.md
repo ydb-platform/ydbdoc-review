@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: §6.34 link_locale QA; §6.33 inline TOC; §6.32 completeness;
+> Last updated: §6.35 doc_verify navigation; §6.34 link_locale; §6.33 inline TOC;
 > §6.31 verify RU ref;
 > §6.30 full re-translate;
 > §6.29 unified QA;

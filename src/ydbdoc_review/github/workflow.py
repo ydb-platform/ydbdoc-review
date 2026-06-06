@@ -16,12 +16,16 @@ from ydbdoc_review.github.git_ops import (
     git_head_sha,
     prepare_translation_branch_on_base,
     push_branch,
+    read_text,
+    read_text_at_ref,
     write_text,
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    list_pr_file_changes_api,
     list_pr_file_changes_git,
     load_pair_contents,
+    load_verify_navigation_ru_texts,
     load_verify_pair_contents,
     parse_repo,
     parse_source_pr_from_text,
@@ -39,9 +43,13 @@ from ydbdoc_review.pipeline.completeness import completeness_gaps
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
+    run_navigation_verifies,
 )
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
-from ydbdoc_review.pipeline.pairs import build_navigation_pairs
+from ydbdoc_review.pipeline.pairs import (
+    build_navigation_pairs,
+    build_verify_navigation_pairs,
+)
 from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
 from ydbdoc_review.reporting.builder import (
@@ -414,6 +422,16 @@ def run_doc_verify(
 
     changes = list_pr_file_changes_git(repo_path, merge_base_with)
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
+    source_changes = (
+        list_pr_file_changes_api(gh, owner, repo, source_pr)
+        if source_pr is not None
+        else None
+    )
+    nav_pairs = build_verify_navigation_pairs(
+        changes,
+        docs_root=cfg.paths.docs_root,
+        source_changes=source_changes,
+    )
     job = DocJobResult(
         mode="doc_verify",
         pr_number=pr_number,
@@ -422,33 +440,66 @@ def run_doc_verify(
         translation_pr_number=pr_number,
         dry_run=dry_run,
     )
-    if not pairs:
-        logger.info("No doc pairs for verify on PR #%s", pr_number)
+    if not pairs and not nav_pairs:
+        logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
         return job
 
-    if source_pr is None:
-        logger.warning(
-            "doc_verify PR #%s: source PR unknown — RU from checkout (may differ from doc_translate)",
-            pr_number,
-        )
-        contents = load_pair_contents(
-            repo_path, pairs, merge_base_with=merge_base_with
-        )
-    else:
-        contents = load_verify_pair_contents(
-            repo_path,
-            pairs,
-            merge_base_with=merge_base_with,
-            gh=gh,
-            owner=owner,
-            repo=repo,
-            source_pr=source_pr,
-        )
     cfg.secrets.require_yandex()
     client = YandexLLMClient.from_config(cfg)
     glossary = load_glossary()
 
-    pr_result = _run_verify_pairs(contents, client, glossary, cfg)
+    if pairs:
+        if source_pr is None:
+            logger.warning(
+                "doc_verify PR #%s: source PR unknown — RU from checkout (may differ from doc_translate)",
+                pr_number,
+            )
+            contents = load_pair_contents(
+                repo_path, pairs, merge_base_with=merge_base_with
+            )
+        else:
+            contents = load_verify_pair_contents(
+                repo_path,
+                pairs,
+                merge_base_with=merge_base_with,
+                gh=gh,
+                owner=owner,
+                repo=repo,
+                source_pr=source_pr,
+            )
+        pr_result = _run_verify_pairs(contents, client, glossary, cfg)
+    else:
+        pr_result = PRTranslationResult()
+
+    if nav_pairs:
+        if source_pr is not None:
+            ru_nav_texts = load_verify_navigation_ru_texts(
+                nav_pairs,
+                gh=gh,
+                owner=owner,
+                repo=repo,
+                source_pr=source_pr,
+            )
+        else:
+            ru_nav_texts = {}
+            for nav in nav_pairs:
+                if nav.ru_deleted:
+                    continue
+                text = read_text(repo_path, nav.ru_path)
+                if text is None:
+                    text = read_text_at_ref(repo_path, "HEAD", nav.ru_path)
+                if text is not None:
+                    ru_nav_texts[nav.ru_path] = text
+
+        md_en_paths = {p.en_path for p in pairs if p.en_changed}
+        pr_result.navigation_results = run_navigation_verifies(
+            nav_pairs,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            ru_pr_by_path=ru_nav_texts,
+            extra_toc_hrefs=extra_toc_hrefs_from_md_targets(md_en_paths),
+        )
+
     job.pr_result = pr_result
 
     touched = _apply_results_to_disk(repo_path, pr_result, dry_run=dry_run)

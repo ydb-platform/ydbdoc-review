@@ -23,6 +23,15 @@ def is_docs_ru_navigation(path: str, docs_root: str) -> bool:
     return is_navigation_yaml(p)
 
 
+def is_docs_en_navigation(path: str, docs_root: str) -> bool:
+    """True for changed ``docs/en/…`` Diplodoc toc/redirect YAML."""
+    p = _norm(path)
+    root = docs_root.strip("/")
+    if not p.startswith(f"{root}/en/"):
+        return False
+    return is_navigation_yaml(p)
+
+
 def is_docs_markdown(path: str, docs_root: str) -> bool:
     """True for ``docs/ru/…`` or ``docs/en/…`` ``.md`` files (not ``_includes``)."""
     p = _norm(path)
@@ -129,11 +138,12 @@ def build_doc_pairs(
 
 @dataclass(frozen=True)
 class NavigationPair:
-    """Mirrored RU/EN navigation YAML paths touched in the source PR."""
+    """Mirrored RU/EN navigation YAML paths touched in a PR."""
 
     ru_path: str
     en_path: str
     ru_changed: bool = False
+    en_changed: bool = False
     ru_deleted: bool = False
 
 
@@ -166,6 +176,97 @@ def build_navigation_pairs(
             ru_path=ru_path,
             en_path=en_path,
             ru_changed=state["ru_changed"],
+            ru_deleted=state["ru_deleted"],
+        )
+        for (ru_path, en_path), state in sorted(flags.items())
+    ]
+
+
+def _merge_navigation_pair_flags(
+    flags: dict[tuple[str, str], dict[str, bool]],
+    *,
+    ru_path: str,
+    en_path: str,
+    path: str,
+    kind: ChangeKind,
+    docs_root: str,
+) -> None:
+    key = (ru_path, en_path)
+    state = flags.setdefault(
+        key,
+        {"ru_changed": False, "en_changed": False, "ru_deleted": False},
+    )
+    if is_docs_ru_navigation(path, docs_root):
+        state["ru_changed"] = True
+        if kind == "deleted":
+            state["ru_deleted"] = True
+    else:
+        state["en_changed"] = True
+
+
+def build_verify_navigation_pairs(
+    translation_changes: list[tuple[str, ChangeKind]],
+    *,
+    docs_root: str = "ydb/docs",
+    source_changes: list[tuple[str, ChangeKind]] | None = None,
+) -> list[NavigationPair]:
+    """Navigation pairs for ``doc_verify`` on a translation PR.
+
+    Includes EN navigation files changed in the translation PR and RU navigation
+    files changed in the source PR (when ``source_changes`` is provided).
+    """
+    flags: dict[tuple[str, str], dict[str, bool]] = {}
+
+    for raw_path, kind in translation_changes:
+        path = _norm(raw_path)
+        if is_docs_en_navigation(path, docs_root):
+            ru_path = counterpart(path, docs_root)
+            if ru_path is None:
+                continue
+            _merge_navigation_pair_flags(
+                flags,
+                ru_path=ru_path,
+                en_path=path,
+                path=path,
+                kind=kind,
+                docs_root=docs_root,
+            )
+        elif is_docs_ru_navigation(path, docs_root):
+            en_path = counterpart(path, docs_root)
+            if en_path is None:
+                continue
+            _merge_navigation_pair_flags(
+                flags,
+                ru_path=path,
+                en_path=en_path,
+                path=path,
+                kind=kind,
+                docs_root=docs_root,
+            )
+
+    if source_changes:
+        for raw_path, kind in source_changes:
+            path = _norm(raw_path)
+            if not is_docs_ru_navigation(path, docs_root):
+                continue
+            en_path = counterpart(path, docs_root)
+            if en_path is None:
+                continue
+            _merge_navigation_pair_flags(
+                flags,
+                ru_path=path,
+                en_path=en_path,
+                path=path,
+                kind=kind,
+                docs_root=docs_root,
+            )
+
+    return [
+        NavigationPair(
+            ru_path=ru_path,
+            en_path=en_path,
+            ru_changed=state["ru_changed"],
+            en_changed=state["en_changed"],
             ru_deleted=state["ru_deleted"],
         )
         for (ru_path, en_path), state in sorted(flags.items())

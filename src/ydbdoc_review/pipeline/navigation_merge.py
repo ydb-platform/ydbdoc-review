@@ -194,6 +194,126 @@ def merge_navigation_pair(
     )
 
 
+def verify_navigation_pair(
+    pair: NavigationPair,
+    *,
+    ru_pr: str,
+    en_text: str,
+    ru_base: str,
+    en_main: str,
+    extra_toc_hrefs: set[str],
+) -> NavigationRunResult:
+    """Validate committed EN navigation YAML against RU PR scope (no LLM merge)."""
+    kind = navigation_yaml_kind(pair.ru_path)
+    if kind is None:
+        return NavigationRunResult(
+            ru_path=pair.ru_path,
+            en_path=pair.en_path,
+            kind="unknown",
+            error=f"not a navigation file: {pair.ru_path!r}",
+            verdict="blocked",
+        )
+
+    if pair.ru_deleted:
+        return NavigationRunResult(
+            ru_path=pair.ru_path,
+            en_path=pair.en_path,
+            kind=kind,
+            verdict="ok",
+        )
+
+    if kind == "toc":
+        scope = toc_translate_scope(ru_base, ru_pr) | extra_toc_hrefs
+    else:
+        scope = redirect_translate_scope(ru_base, ru_pr)
+
+    warnings = validate_navigation_merge_warnings(
+        pair.ru_path,
+        ru_pr,
+        en_text,
+        en_main_yaml=en_main,
+        translate_scope=scope,
+    )
+    verdict = _navigation_verdict(warnings)
+    return NavigationRunResult(
+        ru_path=pair.ru_path,
+        en_path=pair.en_path,
+        kind=kind,
+        target_text=None,
+        warnings=warnings,
+        verdict=verdict,
+    )
+
+
+def run_navigation_verifies(
+    pairs: list[NavigationPair],
+    *,
+    repo_path: str,
+    merge_base_with: str,
+    ru_pr_by_path: dict[str, str],
+    extra_toc_hrefs: set[str] | None = None,
+) -> list[NavigationRunResult]:
+    """Validate navigation YAML pairs for ``doc_verify``."""
+    hrefs = extra_toc_hrefs or set()
+    results: list[NavigationRunResult] = []
+    for pair in pairs:
+        if not pair.en_changed and not pair.ru_changed:
+            continue
+        kind = navigation_yaml_kind(pair.ru_path)
+        if pair.ru_deleted:
+            results.append(
+                NavigationRunResult(
+                    ru_path=pair.ru_path,
+                    en_path=pair.en_path,
+                    kind=kind or "unknown",
+                    verdict="ok",
+                )
+            )
+            continue
+
+        ru_pr = ru_pr_by_path.get(pair.ru_path)
+        if ru_pr is None:
+            results.append(
+                NavigationRunResult(
+                    ru_path=pair.ru_path,
+                    en_path=pair.en_path,
+                    kind=kind or "unknown",
+                    error=f"RU navigation text missing for {pair.ru_path!r}",
+                    verdict="blocked",
+                )
+            )
+            continue
+
+        en_text = read_text(repo_path, pair.en_path)
+        if en_text is None:
+            en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+        if en_text is None:
+            results.append(
+                NavigationRunResult(
+                    ru_path=pair.ru_path,
+                    en_path=pair.en_path,
+                    kind=kind or "unknown",
+                    error=f"EN navigation text missing for {pair.en_path!r}",
+                    verdict="blocked",
+                )
+            )
+            continue
+
+        ru_base = _read_at_base(repo_path, merge_base_with, pair.ru_path)
+        en_main = _read_at_base(repo_path, merge_base_with, pair.en_path)
+        results.append(
+            verify_navigation_pair(
+                pair,
+                ru_pr=ru_pr,
+                en_text=en_text,
+                ru_base=ru_base,
+                en_main=en_main,
+                extra_toc_hrefs=hrefs,
+            )
+        )
+    return results
+
+
 def run_navigation_merges(
     pairs: list[NavigationPair],
     *,

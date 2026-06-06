@@ -193,6 +193,17 @@ Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 and block `- name:` / `href:` layout. Empty merge (parser miss) is flagged
 `empty_toc` + `scope_not_applied` → navigation verdict **blocked** → report 🔴.
 
+### 6.35. Navigation YAML in `doc_verify`
+
+**Problem:** `doc_verify` only ran critic/heuristics on `.md`; `toc_i.yaml` never
+appeared in verify reports even when present in the translation PR.
+
+**Decision:** `build_verify_navigation_pairs` detects EN nav changes in the
+translation PR diff and unions RU nav changes from the source PR (GitHub API).
+`run_navigation_verifies` validates committed EN YAML against RU source PR head
+(§6.31) using `validate_navigation_merge_warnings` — no LLM merge, read-only.
+Results go to `navigation_results` and appear in the report like `doc_translate`.
+
 ### 6.34. External link locale QA (`link_locale` heuristic)
 
 **Problem:** PR #42726 — `mirror_link_href` swapped `ru.wikipedia.org` →

@@ -13,7 +13,12 @@ from ydbdoc_review.github.git_ops import (
     read_text_at_ref,
 )
 from ydbdoc_review.pipeline.analyze import PairContent
-from ydbdoc_review.pipeline.pairs import ChangeKind, DocPair, build_doc_pairs
+from ydbdoc_review.pipeline.pairs import (
+    ChangeKind,
+    DocPair,
+    NavigationPair,
+    build_doc_pairs,
+)
 
 _STATUS_TO_KIND: dict[str, ChangeKind] = {
     "added": "added",
@@ -259,6 +264,26 @@ def build_pairs_from_changes(
     changes: list[tuple[str, ChangeKind]], *, docs_root: str
 ) -> list[DocPair]:
     return build_doc_pairs(changes, docs_root=docs_root)
+
+
+def load_verify_navigation_ru_texts(
+    pairs: list[NavigationPair],
+    *,
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    source_pr: int,
+) -> dict[str, str]:
+    """Load RU navigation YAML from source PR head (§6.31)."""
+    ru_owner, ru_repo, ru_ref = source_pr_content_ref(gh, owner, repo, source_pr)
+    texts: dict[str, str] = {}
+    for pair in pairs:
+        if pair.ru_deleted:
+            continue
+        text = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
+        if text is not None:
+            texts[pair.ru_path] = text
+    return texts
 
 
 _BRANCH_SOURCE_RE = re.compile(
