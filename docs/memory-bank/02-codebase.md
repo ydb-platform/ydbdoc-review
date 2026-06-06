@@ -60,7 +60,7 @@ src/ydbdoc_review/
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
 │   ├── fence_integrity.py         copy fences from source; detect pipeline drift
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
-│   ├── link_locale.py             RU→EN URL mirror + post-reinsert pass
+│   ├── link_locale.py             RU→EN URL mirror + link_locale QA (§6.34)
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic, fence parity, ru_source, anchors
 ├── pipeline/                      ✅ COMPLETE (Phase F)

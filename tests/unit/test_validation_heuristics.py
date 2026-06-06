@@ -79,6 +79,21 @@ def test_length_ratio_out_of_bounds():
     assert warnings and "length_ratio" in warnings[0]
 
 
+def test_run_file_heuristics_flags_broken_wikipedia_link():
+    src = (
+        "См. [CoW](https://ru.wikipedia.org/wiki/Копирование_при_записи).\n"
+        + "Текст. " * 30
+    )
+    tgt = (
+        "See [CoW](https://en.wikipedia.org/wiki/%D0%9A%D0%BE%D0%BF%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5_%D0%BF%D1%80%D0%B8_%D0%B7%D0%B0%D0%BF%D0%B8%D1%81%D0%B8).\n"
+        + "Text. " * 30
+    )
+    classified = run_file_heuristics_classified(
+        src, tgt, normalized_source_text=src, source_lang="ru", target_lang="en"
+    )
+    assert any("link_locale:" in w for w in classified.blocking)
+
+
 def test_run_file_heuristics_combined():
     src = "# Title\n\n" + ("Paragraph. " * 30) + "\n\n```\nru\n```\n"
     tgt = "# Title\n\n" + ("Paragraph. " * 30) + "\n\n```\nen\n```\n"

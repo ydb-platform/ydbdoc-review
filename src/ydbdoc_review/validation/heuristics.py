@@ -187,6 +187,7 @@ def _collect_raw_heuristics(
         check_absolute_paths_in_fences,
         check_fence_body_copy,
     )
+    from ydbdoc_review.validation.link_locale import check_link_locale_in_en
     from ydbdoc_review.validation.ru_source_bugs import (
         check_required_anchor_lines,
         detect_ru_source_bugs,
@@ -215,6 +216,7 @@ def _collect_raw_heuristics(
     raw.extend(check_required_anchor_lines(source_text, target_text))
     raw.extend(check_heading_parity(normalized_source_text, target_text))
     raw.extend(check_list_tab_parity(normalized_source_text, target_text))
+    raw.extend(check_link_locale_in_en(target_text, target_lang=target_lang))
     return raw
 
 

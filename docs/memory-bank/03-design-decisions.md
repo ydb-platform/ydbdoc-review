@@ -193,6 +193,20 @@ Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 and block `- name:` / `href:` layout. Empty merge (parser miss) is flagged
 `empty_toc` + `scope_not_applied` → navigation verdict **blocked** → report 🔴.
 
+### 6.34. External link locale QA (`link_locale` heuristic)
+
+**Problem:** PR #42726 — `mirror_link_href` swapped `ru.wikipedia.org` →
+`en.wikipedia.org` but left the Russian article slug; QA reported 🟢.
+
+**Decision:** `validation/link_locale.py` — `check_link_locale_in_en` walks the
+EN AST and flags (blocking):
+
+- RU-locale URLs left in EN docs (`ru.wikipedia.org`, `/docs/ru/`, …);
+- Cyrillic (incl. percent-encoded) paths on EN-locale hosts (`en.wikipedia.org`,
+  `yandex.cloud/en/docs`).
+
+Wired in `run_file_heuristics_classified` for `target_lang=en`.
+
 ### 6.33. Inline Diplodoc TOC parsing + navigation blocking verdicts
 
 **Problem:** PR #42725 — inline `toc_i.yaml` was parsed as zero items; merge
