@@ -35,7 +35,13 @@ from ydbdoc_review.github.pr import (
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
+from ydbdoc_review.pipeline.completeness import completeness_gaps
+from ydbdoc_review.pipeline.navigation_merge import (
+    extra_toc_hrefs_from_md_targets,
+    run_navigation_merges,
+)
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
+from ydbdoc_review.pipeline.pairs import build_navigation_pairs
 from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
 from ydbdoc_review.reporting.builder import (
@@ -101,7 +107,7 @@ def _next_report_number(
 def _apply_results_to_disk(
     repo_path: str, result: PRTranslationResult, *, dry_run: bool
 ) -> list[str]:
-    """Write translated / delete mirrored files; return affected paths."""
+    """Write translated markdown, navigation YAML, and deletes; return paths."""
     touched: list[str] = []
     for run in result.pair_results:
         if run.skipped or run.error:
@@ -120,6 +126,13 @@ def _apply_results_to_disk(
         touched.append(rel)
         if not dry_run:
             write_text(repo_path, rel, run.target_text)
+    for nav in result.navigation_results:
+        if nav.error or nav.target_text is None:
+            continue
+        rel = nav.en_path
+        touched.append(rel)
+        if not dry_run:
+            write_text(repo_path, rel, nav.target_text)
     return touched
 
 
@@ -205,6 +218,7 @@ def run_doc_translate(
 
     changes = list_pr_file_changes_git(repo_path, merge_base_with)
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
+    nav_pairs = build_navigation_pairs(changes, docs_root=cfg.paths.docs_root)
     job = DocJobResult(
         mode="doc_translate",
         pr_number=pr_number,
@@ -212,23 +226,46 @@ def run_doc_translate(
         translation_branch=branch,
         dry_run=dry_run,
     )
-    if not pairs:
-        logger.info("No doc pairs in PR #%s", pr_number)
+    if not pairs and not nav_pairs:
+        logger.info("No doc or navigation pairs in PR #%s", pr_number)
         return job
 
-    contents = load_pair_contents(
-        repo_path, pairs, merge_base_with=merge_base_with
-    )
     cfg.secrets.require_yandex()
     client = YandexLLMClient.from_config(cfg)
     glossary = load_glossary()
 
-    pr_result = run_pr_translation(
-        contents,
-        client,
-        glossary,
-        config=cfg,
-        use_analyze_llm=False,
+    if pairs:
+        contents = load_pair_contents(
+            repo_path, pairs, merge_base_with=merge_base_with
+        )
+        pr_result = run_pr_translation(
+            contents,
+            client,
+            glossary,
+            config=cfg,
+            use_analyze_llm=False,
+        )
+    else:
+        pr_result = PRTranslationResult()
+
+    if nav_pairs:
+        md_en_paths = {
+            r.plan.target_path
+            for r in pr_result.pair_results
+            if r.target_text is not None and not r.error
+        }
+        pr_result.navigation_results = run_navigation_merges(
+            nav_pairs,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            client=client,
+            glossary=glossary,
+            config=cfg,
+            extra_toc_hrefs=extra_toc_hrefs_from_md_targets(md_en_paths),
+        )
+
+    pr_result.completeness_gaps = completeness_gaps(
+        changes, pr_result, docs_root=cfg.paths.docs_root
     )
     job.pr_result = pr_result
 

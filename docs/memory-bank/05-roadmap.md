@@ -98,6 +98,7 @@ See `ydbdoc_review.llm` package.
 - [x] `translate_file` — `enable_translate=False` for critic-only QA
 - [x] Unit tests: `test_pipeline_pairs`, `test_pipeline_analyze`, `test_pipeline_orchestrator`
 - [x] `navigation/paths.py` — used by navigation merge validation (Phase E)
+- [x] `pipeline/navigation_merge.py` + `completeness.py` wired in `workflow.py` (§6.17, §6.32)
 
 ### Phase G — GitHub integration ✅ COMPLETE
 - [x] `github/client.py` — REST API (PR, files, comments, open PR)

@@ -12,7 +12,14 @@ from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
 
-__all__ = ["ManualAction", "FileTranslationResult", "FileVerdict", "PairRunResult", "PRTranslationResult"]
+__all__ = [
+    "ManualAction",
+    "FileTranslationResult",
+    "FileVerdict",
+    "NavigationRunResult",
+    "PairRunResult",
+    "PRTranslationResult",
+]
 
 @dataclass
 class FileTranslationResult:
@@ -56,6 +63,19 @@ class FileTranslationResult:
 
 
 @dataclass
+class NavigationRunResult:
+    """Outcome of scoped navigation YAML merge for one RU/EN pair."""
+
+    ru_path: str
+    en_path: str
+    kind: str
+    target_text: str | None = None
+    error: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    verdict: FileVerdict = "ok"
+
+
+@dataclass
 class PairRunResult:
     """Outcome for one pair in a PR translation run."""
 
@@ -72,14 +92,22 @@ class PRTranslationResult:
     """Aggregate outcome for a PR-level translation job."""
 
     pair_results: list[PairRunResult] = field(default_factory=list)
+    navigation_results: list[NavigationRunResult] = field(default_factory=list)
+    completeness_gaps: list[str] = field(default_factory=list)
 
     @property
     def translated_count(self) -> int:
-        return sum(
+        md = sum(
             1
             for r in self.pair_results
             if r.file_result is not None and not r.skipped and not r.deleted
         )
+        nav = sum(
+            1
+            for n in self.navigation_results
+            if n.target_text is not None and not n.error
+        )
+        return md + nav
 
     @property
     def failed_count(self) -> int:

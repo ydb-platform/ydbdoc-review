@@ -103,7 +103,14 @@ INPUT: pr_number, source_repo, target_branch_base
    # EN changed only → translate_to_ru
    # both changed → translate_to_en from RU when RU text exists
 
-3. PER-FILE TRANSLATION (sequential)
+3. NAVIGATION (when PR touches RU ``toc*.yaml`` / redirect YAML — §6.17)
+   nav_pairs = build_navigation_pairs(changes)
+   scope = toc_translate_scope(ru_base, ru_pr) ∪ new_md_hrefs
+   merge_en_toc_yaml / merge_en_redirects_yaml → write EN mirror
+4. COMPLETENESS (§6.32)
+   completeness_gaps = expected_en_mirrors(diff) − committed_en_paths
+
+5. PER-FILE TRANSLATION (sequential)
    per_pr_cache = {}
    reports = []
    for pair in needs_translate:

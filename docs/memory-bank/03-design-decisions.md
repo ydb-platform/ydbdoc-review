@@ -179,10 +179,11 @@ touches `toc*.yaml` or redirect YAML, run scoped merge against EN-main + RU PR
 head; write result to the paired EN path. Do **not** run merge for navigation
 files outside the PR diff.
 
-> **Status (2025-05):** merge/validate **APIs are implemented and tested**
-> (`merge_en_toc_yaml`, `merge_en_redirects_yaml`, `validate_*`,
-> `validate_navigation_merge_warnings`). **Not yet wired** into
-> `pipeline/orchestrator.py` or `github/workflow.py` — markdown-only today.
+> **Status (2026-06):** wired in `github/workflow.py` via
+> `pipeline/navigation_merge.py` (`run_navigation_merges`) after markdown
+> translation. `build_navigation_pairs` detects changed RU `toc*.yaml` /
+> redirect YAML; `completeness_gaps` (§6.32) blocks merge if any source PR
+> mirror is missing from the commit.
 
 Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 `test_navigation_paths.py`, `test_validation_heuristics.py`.
@@ -358,6 +359,18 @@ produced writable `target_text` changes.
 
 Full reports include `Checkout: \`<short-sha>\`` from `git_head_sha(repo_path)` so
 `doc_translate` vs `doc_verify` comments can be tied to the exact tree QA ran on.
+
+### 6.32. Source PR completeness gate (md + navigation YAML)
+
+**Problem:** `doc_translate` could report 🟢 while omitting changed RU files
+(e.g. `toc_i.yaml` filtered out by markdown-only pairing).
+
+**Decision:** After markdown + navigation merge, `completeness_gaps` compares
+`expected_en_mirrors(source PR diff)` with committed EN paths. Any missing
+mirror → `completeness_gaps` on `PRTranslationResult` → 🔴 in report and commit
+message still lists only what was written.
+
+**Tests:** `tests/unit/test_completeness.py`, `test_navigation_pairs.py`.
 
 ### 6.31. `doc_verify` RU from source PR head (not translation branch)
 

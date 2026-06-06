@@ -66,7 +66,9 @@ src/ydbdoc_review/
 ├── pipeline/                      ✅ COMPLETE (Phase F)
 │   ├── translate_file.py          per-file pipeline (translate + unified QA)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
-│   ├── pairs.py                   RU/EN pairing (F)
+│   ├── pairs.py                   RU/EN md + navigation YAML pairing
+│   ├── navigation_merge.py        scoped toc/redirect merge (§6.17, wired)
+│   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)
 │   ├── orchestrator.py            run_pr_translation (F)
 │   └── types.py                   result dataclasses
@@ -89,8 +91,8 @@ src/ydbdoc_review/
 
 Legend: ✅ done · ⏳ pending · 🟡 partial.
 
-**Not yet wired:** navigation YAML scoped merge in `github/workflow.py` / orchestrator
-(merge + validate APIs exist; see §6 in **03-design-decisions** and roadmap TBD).
+Navigation YAML merge runs in `github/workflow.py` after per-file markdown
+translation (`navigation_merge.run_navigation_merges`).
 
 ### 4.2. Files outside the package
 
