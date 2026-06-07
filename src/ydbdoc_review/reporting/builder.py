@@ -108,13 +108,13 @@ def _file_translation_counts(result: PRTranslationResult) -> tuple[int, int, int
     return total, new, updated
 
 
-def _format_cost_usd(cost: float) -> str:
-    """Human-readable USD estimate; keep sub-cent precision when needed."""
+def _format_cost_rub(cost: float) -> str:
+    """Human-readable RUB estimate (Yandex AI Studio sync tariffs)."""
     if cost <= 0:
-        return "~$0.00"
-    if cost >= 0.01:
-        return f"~${cost:.2f}"
-    return f"~${cost:.4f}"
+        return "~₽0.00"
+    if cost >= 10:
+        return f"~₽{cost:.1f}"
+    return f"~₽{cost:.2f}"
 
 
 def _aggregate_file_usage(result: PRTranslationResult) -> dict[str, float | int]:
@@ -169,13 +169,10 @@ def _usage_lines(
             if an_in or an_out:
                 lines.append(f"- Токены (analyze): {an_in:,} / {an_out:,}")
                 role_lines += 1
-            if not role_lines and (
-                usage.total_input_tokens or usage.total_output_tokens
-            ):
-                lines.append(
-                    f"- Токены (всего): {usage.total_input_tokens:,} / "
-                    f"{usage.total_output_tokens:,}"
-                )
+            total_in = usage.total_input_tokens
+            total_out = usage.total_output_tokens
+            if total_in or total_out:
+                lines.append(f"- Токены (всего): {total_in:,} / {total_out:,}")
             retries = usage.total_retry_count
             if retries:
                 total_calls = sum(1 for r in usage.records if r.success)
@@ -198,7 +195,7 @@ def _usage_lines(
             and (usage.total_input_tokens or usage.total_output_tokens)
         ) or bool(file_usage["input_tokens"] or file_usage["output_tokens"])
         if has_tokens or cost > 0:
-            lines.append(f"- Оценка стоимости: {_format_cost_usd(cost)}")
+            lines.append(f"- Оценка стоимости: {_format_cost_rub(cost)}")
 
     if usage:
         tr_models = usage.models_for_role("translate")
@@ -500,7 +497,7 @@ def build_source_pr_comment(
             and (usage.total_input_tokens or usage.total_output_tokens)
         ) or bool(_aggregate_file_usage(result)["input_tokens"])
         if has_tokens or cost > 0:
-            cost_line = f"| Стоимость | {_format_cost_usd(cost)} |\n"
+            cost_line = f"| Стоимость | {_format_cost_rub(cost)} |\n"
 
     body = (
         "🤖 **ydbdoc-review** — перевод готов\n\n"

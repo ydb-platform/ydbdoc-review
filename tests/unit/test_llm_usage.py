@@ -15,22 +15,22 @@ def test_usage_tracker_totals_skip_failed():
     assert tracker.total_output_tokens == 500
 
 
-def test_estimate_cost_usd_known_model():
+def test_estimate_cost_rub_known_model():
     tracker = UsageTracker()
-    tracker.add(LLMUsage("yandexgpt-5.1", 1_000_000, 1_000_000, 0.0, 0, True))
-    assert tracker.estimate_cost_usd() == pytest.approx(0.80)
+    tracker.add(LLMUsage("yandexgpt-5.1", 1_000, 1_000, 0.0, 0, True))
+    assert tracker.estimate_cost_rub() == pytest.approx(1.60)
 
 
-def test_estimate_cost_usd_unknown_model():
+def test_estimate_cost_rub_unknown_model():
     tracker = UsageTracker()
-    tracker.add(LLMUsage("unknown-model", 1_000_000, 1_000_000, 0.0, 0, True))
-    assert tracker.estimate_cost_usd() == 0.0
+    tracker.add(LLMUsage("unknown-model", 1_000, 1_000, 0.0, 0, True))
+    assert tracker.estimate_cost_rub() == 0.0
 
 
-def test_estimate_cost_usd_null_output_tokens():
+def test_estimate_cost_rub_null_output_tokens():
     tracker = UsageTracker()
-    tracker.add(LLMUsage("yandexgpt-5.1", 1_000_000, None, 0.0, 0, True))  # type: ignore[arg-type]
-    assert tracker.estimate_cost_usd() == pytest.approx(0.40)
+    tracker.add(LLMUsage("yandexgpt-5.1", 1_000, None, 0.0, 0, True))  # type: ignore[arg-type]
+    assert tracker.estimate_cost_rub() == pytest.approx(0.80)
 
 
 def test_metrics_since_per_file_slice():

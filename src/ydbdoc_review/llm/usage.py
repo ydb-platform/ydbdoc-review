@@ -9,31 +9,32 @@ if TYPE_CHECKING:
     from ydbdoc_review.llm.usage import UsageTracker
     from ydbdoc_review.translation.glossary import Glossary
 
-# USD per 1M tokens (input, output). Updated manually — Yandex does not
-# expose prices in API responses.
-MODEL_PRICE_USD_PER_1M: dict[str, tuple[float, float]] = {
-    "yandexgpt-5.1": (0.40, 0.40),
-    "yandexgpt-5-pro": (0.40, 0.40),
+# RUB per 1K tokens (input, output), sync mode incl. VAT — Yandex AI Studio.
+# Updated manually; the API does not return prices in responses.
+MODEL_PRICE_RUB_PER_1K: dict[str, tuple[float, float]] = {
+    "yandexgpt-5.1": (0.80, 0.80),
+    "yandexgpt-5-pro": (0.80, 0.80),
     "yandexgpt-5-lite": (0.20, 0.20),
-    "deepseek-v32": (0.30, 0.30),
-    "qwen3.6-35b-a3b": (0.25, 0.25),
-    "qwen3-235b-a22b-fp8": (0.50, 0.50),
+    "deepseek-v32": (0.50, 0.40),
+    "deepseek-v4-flash": (0.30, 0.50),
+    "qwen3.6-35b-a3b": (0.50, 0.40),
+    "qwen3-235b-a22b-fp8": (0.80, 0.80),
     "gpt-oss-120b": (0.20, 0.20),
     "gpt-oss-20b": (0.10, 0.10),
 }
 
 
-def _estimate_cost_usd(records: list[LLMUsage]) -> float:
+def _estimate_cost_rub(records: list[LLMUsage]) -> float:
     total = 0.0
     for record in records:
         if not record.success:
             continue
-        prices = MODEL_PRICE_USD_PER_1M.get(record.model_slug)
+        prices = MODEL_PRICE_RUB_PER_1K.get(record.model_slug)
         if prices is None:
             continue
         in_price, out_price = prices
-        total += (record.input_tokens or 0) / 1_000_000 * in_price
-        total += (record.output_tokens or 0) / 1_000_000 * out_price
+        total += (record.input_tokens or 0) / 1_000 * in_price
+        total += (record.output_tokens or 0) / 1_000 * out_price
     return total
 
 
@@ -67,9 +68,13 @@ class UsageTracker:
     def total_output_tokens(self) -> int:
         return sum(r.output_tokens or 0 for r in self.records if r.success)
 
+    def estimate_cost_rub(self, *, since: int = 0) -> float:
+        """Rough RUB cost from the hard-coded Yandex AI Studio price table."""
+        return _estimate_cost_rub(self.records[since:])
+
     def estimate_cost_usd(self, *, since: int = 0) -> float:
-        """Rough USD cost from the hard-coded price table."""
-        return _estimate_cost_usd(self.records[since:])
+        """Deprecated alias — returns RUB estimate (kept for callers)."""
+        return self.estimate_cost_rub(since=since)
 
     def metrics_since(self, record_index: int = 0) -> dict[str, float | int | list[str]]:
         """Token/cost totals for records appended after ``record_index``."""
@@ -78,7 +83,7 @@ class UsageTracker:
         return {
             "input_tokens": sum(r.input_tokens or 0 for r in records if r.success),
             "output_tokens": sum(r.output_tokens or 0 for r in records if r.success),
-            "estimated_cost_usd": _estimate_cost_usd(records),
+            "estimated_cost_usd": _estimate_cost_rub(records),
             "models_used": models,
         }
 

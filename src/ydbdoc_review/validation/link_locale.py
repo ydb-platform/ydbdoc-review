@@ -1,4 +1,4 @@
-"""Deterministic EN locale fixes and QA checks for link/image URLs."""
+"""Deterministic locale fixes and QA checks for link/image URLs."""
 
 from __future__ import annotations
 
@@ -23,18 +23,35 @@ from ydbdoc_review.parsing.ast_types import (
     YfmNote,
     YfmTabs,
 )
+from ydbdoc_review.validation.wikipedia_links import (
+    resolve_wikipedia_href,
+    wiki_lang_for_target,
+)
 
-_HOST_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+_HOST_REPLACEMENTS_EN: tuple[tuple[str, str], ...] = (
     ("ru.wikipedia.org", "en.wikipedia.org"),
     ("www.ru.wikipedia.org", "en.wikipedia.org"),
 )
 
-_PATH_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+_HOST_REPLACEMENTS_RU: tuple[tuple[str, str], ...] = (
+    ("en.wikipedia.org", "ru.wikipedia.org"),
+    ("www.en.wikipedia.org", "ru.wikipedia.org"),
+)
+
+_PATH_REPLACEMENTS_EN: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)yandex\.cloud/ru/docs"), "yandex.cloud/en/docs"),
     (re.compile(r"(?i)kubernetes\.io/ru/docs"), "kubernetes.io/docs"),
     (re.compile(r"(?i)(/docs/)ru/"), r"\1en/"),
     (re.compile(r"/ydb/docs/ru/"), "/ydb/docs/en/"),
     (re.compile(r"(?i)json-ru\.html"), "index.html"),
+)
+
+_PATH_REPLACEMENTS_RU: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)yandex\.cloud/en/docs"), "yandex.cloud/ru/docs"),
+    (re.compile(r"(?i)kubernetes\.io/docs/"), "kubernetes.io/ru/docs/"),
+    (re.compile(r"(?i)(/docs/)en/"), r"\1ru/"),
+    (re.compile(r"/ydb/docs/en/"), "/ydb/docs/ru/"),
+    (re.compile(r"(?i)index\.html"), "json-ru.html"),
 )
 
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
@@ -52,68 +69,89 @@ _EN_LOCALE_HOSTS = (
 )
 
 
-def mirror_link_href(href: str) -> str:
-    """Apply deterministic RU→EN URL locale fixes to a single href."""
+def mirror_link_href(href: str, *, target_lang: str = "en") -> str:
+    """Apply deterministic URL locale fixes, including Wikipedia langlinks."""
     if not href or href.startswith("#"):
         return href
+
+    wiki = resolve_wikipedia_href(href, target_lang=target_lang)
+    if wiki is not None:
+        return wiki
+
+    tgt = target_lang.strip().lower()
+    if tgt in {"en", "english"}:
+        host_repl = _HOST_REPLACEMENTS_EN
+        path_repl = _PATH_REPLACEMENTS_EN
+    elif tgt in {"ru", "russian"}:
+        host_repl = _HOST_REPLACEMENTS_RU
+        path_repl = _PATH_REPLACEMENTS_RU
+    else:
+        return href
+
     out = href
-    for old, new in _HOST_REPLACEMENTS:
+    for old, new in host_repl:
         out = out.replace(old, new)
-    for pattern, repl in _PATH_REPLACEMENTS:
+    for pattern, repl in path_repl:
         out = pattern.sub(repl, out)
     return out
 
 
-def _walk_inline(nodes: Iterable[InlineNode], *, on_href: Callable[[str], None] | None = None) -> None:
+def _walk_inline(
+    nodes: Iterable[InlineNode],
+    *,
+    target_lang: str,
+    on_href: Callable[[str], None] | None = None,
+) -> None:
     for node in nodes:
         if isinstance(node, InlineLink):
             if on_href is not None:
                 on_href(node.href)
             else:
-                node.href = mirror_link_href(node.href)
+                node.href = mirror_link_href(node.href, target_lang=target_lang)
         elif isinstance(node, InlineImage):
             if on_href is not None:
                 on_href(node.src)
             else:
-                node.src = mirror_link_href(node.src)
+                node.src = mirror_link_href(node.src, target_lang=target_lang)
         elif hasattr(node, "children") and isinstance(node.children, list):
-            _walk_inline(node.children, on_href=on_href)
+            _walk_inline(node.children, target_lang=target_lang, on_href=on_href)
 
 
 def _walk_blocks(
     blocks: Iterable[BlockNode],
     *,
+    target_lang: str,
     on_href: Callable[[str], None] | None = None,
 ) -> None:
     from ydbdoc_review.parsing.ast_types import Heading, TermDefinition
 
     for block in blocks:
         if isinstance(block, (Paragraph, Heading, TermDefinition)):
-            _walk_inline(block.children, on_href=on_href)
+            _walk_inline(block.children, target_lang=target_lang, on_href=on_href)
         elif isinstance(block, (BulletList, OrderedList)):
             for item in block.children:
                 if isinstance(item, ListItem):
                     for child in item.children:
-                        _walk_blocks([child], on_href=on_href)
+                        _walk_blocks([child], target_lang=target_lang, on_href=on_href)
         elif isinstance(block, BlockQuote):
-            _walk_blocks(block.children, on_href=on_href)
+            _walk_blocks(block.children, target_lang=target_lang, on_href=on_href)
         elif isinstance(block, Table):
             for cell in block.header.cells:
-                _walk_inline(cell.children, on_href=on_href)
+                _walk_inline(cell.children, target_lang=target_lang, on_href=on_href)
             for row in block.rows:
                 for cell in row.cells:
-                    _walk_inline(cell.children, on_href=on_href)
+                    _walk_inline(cell.children, target_lang=target_lang, on_href=on_href)
         elif isinstance(block, YfmNote):
-            _walk_blocks(block.children, on_href=on_href)
+            _walk_blocks(block.children, target_lang=target_lang, on_href=on_href)
         elif isinstance(block, YfmTabs):
             for tab in block.children:
-                _walk_inline(tab.title, on_href=on_href)
-                _walk_blocks(tab.children, on_href=on_href)
+                _walk_inline(tab.title, target_lang=target_lang, on_href=on_href)
+                _walk_blocks(tab.children, target_lang=target_lang, on_href=on_href)
         elif isinstance(block, YfmCut):
-            _walk_blocks(block.children, on_href=on_href)
+            _walk_blocks(block.children, target_lang=target_lang, on_href=on_href)
         elif isinstance(block, YfmIf):
             for branch in block.branches:
-                _walk_blocks(branch.children, on_href=on_href)
+                _walk_blocks(branch.children, target_lang=target_lang, on_href=on_href)
 
 
 def collect_link_hrefs(doc: Document) -> list[str]:
@@ -124,7 +162,7 @@ def collect_link_hrefs(doc: Document) -> list[str]:
         if href and _HTTP_HREF.match(href):
             hrefs.append(href)
 
-    _walk_blocks(doc.children, on_href=remember)
+    _walk_blocks(doc.children, target_lang="en", on_href=remember)
     return hrefs
 
 
@@ -146,7 +184,7 @@ def _en_host_ru_slug(href: str) -> bool:
 
 def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> list[str]:
     """Flag broken locale pairing in EN markdown URLs (QA heuristic)."""
-    if target_lang.lower() != "en":
+    if wiki_lang_for_target(target_lang) != "en":
         return []
     from ydbdoc_review.parsing.markdown_parser import parse_markdown
 
@@ -173,6 +211,6 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
     return issues
 
 
-def localize_links_in_document(doc: Document) -> None:
-    """Rewrite link/image URLs in-place for EN locale (safety net after reinsert)."""
-    _walk_blocks(doc.children)
+def localize_links_in_document(doc: Document, *, target_lang: str = "en") -> None:
+    """Rewrite link/image URLs in-place for the target document locale."""
+    _walk_blocks(doc.children, target_lang=target_lang)
