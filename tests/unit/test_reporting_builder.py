@@ -365,13 +365,22 @@ def test_build_full_report_all_ok():
         verdict="ok",
         prompt_version="v1",
     )
+    from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
+
+    tracker = UsageTracker()
+    tracker.add(
+        LLMUsage("deepseek-v32", 7_000, 4_000, 100.0, 0, True, role="translate")
+    )
     body = build_full_report(
         PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=cfg,
+        usage=tracker,
     )
     assert "можно мержить" in body
     assert "открытых замечаний нет" in body
+    assert "Стоимость и токены" in body
+    assert "Оценка стоимости" in body
 
 
 def test_build_commit_message():
