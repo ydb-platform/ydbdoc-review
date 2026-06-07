@@ -77,6 +77,31 @@ def test_check_fence_body_copy_ignores_homoglyph_only_diff():
     assert not check_fence_body_copy(raw_ru, en, source_lang="ru")
 
 
+def test_fence_content_allows_cyrillic_comment_translation_only():
+    ru = (
+        "package main\n\n"
+        "func main() {\n"
+        "    // 1. Настраиваем провайдер логов.\n"
+        "    // ... используйте db ...\n"
+        "}\n"
+    )
+    en = (
+        "package main\n\n"
+        "func main() {\n"
+        "    // 1. Configure the log provider.\n"
+        "    // ... use db ...\n"
+        "}\n"
+    )
+    assert fence_content_matches_source(ru, en)
+    assert not check_fence_body_copy(f"```go\n{ru}```", f"```go\n{en}```")
+
+
+def test_fence_content_rejects_code_line_change_beside_comments():
+    ru = "x := 1 // значение\n"
+    en = "y := 1 // value\n"
+    assert not fence_content_matches_source(ru, en)
+
+
 def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
     """Regression: postprocess must run after enforce, not before."""
     raw_ru = (

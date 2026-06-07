@@ -82,6 +82,7 @@ src/ydbdoc_review/
 │   └── errors.py                  typed GitHub errors
 ├── reporting/                     ✅ COMPLETE (Phase H)
 │   ├── builder.py                 markdown reports (§17 format)
+│   ├── heuristic_messages.py      Russian labels for heuristic warnings (§6.40)
 │   └── locations.py               segment line links, heuristic dedup
 ├── version.py                     action_release_label() for report footer
 ├── config/                        ✅ COMPLETE

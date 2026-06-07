@@ -390,6 +390,19 @@ was invisible to QA. Diplodoc build did not flag it either.
 Implementation: `validation/fence_comments.py`. Tests:
 `tests/unit/test_fence_comments.py`, `test_validation_heuristics.py`.
 
+`check_fence_body_copy` treats comment-only ``//``/``#`` diffs (Cyrillic→EN) as
+allowed — not pipeline corruption (PR #42762 false positives).
+
+### 6.40. Human-readable heuristic messages in PR reports
+
+**Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,
+`эвристика (файл)`), unclear to doc authors.
+
+**Decision:** `reporting/heuristic_messages.py` — `humanize_heuristic()` and
+`heuristic_location_label()` wired in `reporting/builder.py` for file and nav
+warnings. Internal machine strings unchanged in `FileTranslationResult`; only
+display layer translates them.
+
 ### 6.23. Merge recommendation vs file verdict
 
 **Problem:** Critic could return `verdict=warnings` with `issues=[]` after

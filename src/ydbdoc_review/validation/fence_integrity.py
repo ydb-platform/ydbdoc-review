@@ -40,11 +40,41 @@ def _normalize_fence_content_for_compare(text: str) -> str:
     return fix_cyrillic_homoglyphs_in_en(inner)
 
 
-def fence_content_matches_source(source_content: str, target_content: str) -> bool:
-    """True when target fence body equals source, modulo RU→EN angle placeholders."""
-    return _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
-        target_content
+def _fence_diff_is_comment_translation_only(
+    source_content: str,
+    target_content: str,
+) -> bool:
+    """True when EN differs from RU only on ``//`` / ``#`` lines that had Cyrillic."""
+    from ydbdoc_review.validation.fence_comments import (
+        _CYRILLIC,
+        _comment_body_if_cyrillic,
     )
+
+    src_lines = source_content.splitlines()
+    tgt_lines = target_content.splitlines()
+    if len(src_lines) != len(tgt_lines):
+        return False
+    saw_diff = False
+    for src_line, tgt_line in zip(src_lines, tgt_lines, strict=True):
+        if src_line == tgt_line:
+            continue
+        saw_diff = True
+        if _comment_body_if_cyrillic(src_line) is None:
+            return False
+        if _comment_body_if_cyrillic(tgt_line) is not None and _CYRILLIC.search(
+            tgt_line
+        ):
+            return False
+    return saw_diff
+
+
+def fence_content_matches_source(source_content: str, target_content: str) -> bool:
+    """True when target fence body equals source, modulo allowed pipeline edits."""
+    if _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
+        target_content
+    ):
+        return True
+    return _fence_diff_is_comment_translation_only(source_content, target_content)
 
 
 def _source_text_for_fence_compare(source_text: str, *, source_lang: str) -> str:

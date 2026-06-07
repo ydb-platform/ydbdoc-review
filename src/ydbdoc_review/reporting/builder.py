@@ -9,6 +9,10 @@ from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.completeness import gap_label
 from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
+from ydbdoc_review.reporting.heuristic_messages import (
+    heuristic_location_label,
+    humanize_heuristic,
+)
 from ydbdoc_review.reporting.locations import (
     ReportLinkContext,
     consolidate_heuristic_warnings,
@@ -393,8 +397,8 @@ def _file_reviewer_section(
     for warning in heuristics:
         out += _format_reviewer_item(
             index=item_index,
-            location="эвристика (файл)",
-            problem=warning,
+            location=heuristic_location_label(warning),
+            problem=humanize_heuristic(warning),
         ) + "\n\n"
         item_index += 1
     return out, item_index
@@ -611,7 +615,10 @@ def build_full_report(
         emoji = _verdict_emoji(nav.verdict)
         body += f"### {emoji} `{nav.en_path}` (навигация)\n\n"
         for w in nav.warnings:
-            body += f"{item_index}. **эвристика (файл)** — {w}\n\n"
+            body += (
+                f"{item_index}. **{heuristic_location_label(w)}** — "
+                f"{humanize_heuristic(w)}\n\n"
+            )
             item_index += 1
 
     errors = [r for r in result.pair_results if r.error]
