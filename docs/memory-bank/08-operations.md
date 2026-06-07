@@ -39,21 +39,43 @@ Label `org.opencontainers.image.revision` records the git SHA in the Dockerfile 
 
 ### 20.1. Per-call tracking
 
-Every `llm.chat()` call records:
-- `model`, `input_tokens`, `output_tokens`, `latency_ms`, `retries`, `success`.
+Every `llm.chat()` call records via `UsageTracker`:
+- `model_slug`, `input_tokens`, `output_tokens`, `latency_ms`, `retries`,
+  `success`, optional `role` (`translate` | `critic` | `analyze`).
+
+Translate/repair pass `role="translate"` even when `model=` is explicit so
+per-role breakdown appears in reports (§6.38).
 
 ### 20.2. Aggregation per PR
 
-Sum tokens and approximate cost. Cost calculation uses a hard-coded price
-table per model slug (updated manually). Yandex AI Studio doesn't return
-prices in headers as of writing.
+- **Session total:** `usage_tracker` on the shared `YandexLLMClient` for the run.
+- **Per file:** `metrics_since(record_start)` — delta since file pipeline start
+  (avoids cumulative double-count in `FileTranslationResult`).
 
-### 20.3. Reporting
+### 20.3. Price table (manual)
 
-Cost block appears in the full report (translation PR) and the short summary
-(source PR).
+`MODEL_PRICE_RUB_PER_1K` in `llm/usage.py` — **₽ per 1000 tokens** (input, output),
+sync mode incl. VAT. Yandex AI Studio does not return prices in API responses.
+Update when tariffs change (see [Yandex AI Studio pricing](https://yandex.cloud/ru/docs/foundation-models/pricing)
+and community summaries e.g. [Habr](https://habr.com/ru/articles/1030524/)).
 
-### 20.4. Backlog: persistent cost log
+| Model slug (examples) | In ₽/1K | Out ₽/1K |
+|-----------------------|---------|----------|
+| `yandexgpt-5-lite` | 0.20 | 0.20 |
+| `yandexgpt-5.1` | 0.80 | 0.80 |
+| `deepseek-v32` | 0.50 | 0.40 |
+| `deepseek-v4-flash` | 0.30 | 0.50 |
+
+Formula: `(input_tokens / 1000) × in_price + (output_tokens / 1000) × out_price`.
+
+### 20.4. Reporting
+
+- **Source PR** (`build_source_pr_comment`): table row `Стоимость | ~₽X.XX`.
+- **Translation PR** (`build_full_report`): section «Стоимость и токены» with
+  per-role tokens, total, models — including 🟢 all-green reports (§6.38).
+- Toggle: `reporting.include_cost`, `reporting.include_token_usage` in config.
+
+### 20.5. Backlog: persistent cost log
 
 `docs-internal/cost-log.md` (in `ydbdoc-review` repo) maintained by a script
 that appends one line per PR run. Not in MVP.
@@ -78,6 +100,8 @@ that appends one line per PR run. Not in MVP.
 - **Verify**: re-running QA on a translation PR via `doc_verify` label.
 - **YFM**: Yandex Flavored Markdown — the markdown superset Diplodoc parses.
 - **Diplodoc**: open-source documentation framework by Yandex.
+- **Langlink**: Wikipedia interlanguage link between article titles in different
+  editions; resolved via MediaWiki API (§6.37).
 
 ---
 
