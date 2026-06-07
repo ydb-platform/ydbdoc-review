@@ -68,7 +68,7 @@ src/ydbdoc_review/
 ├── pipeline/                      ✅ COMPLETE (Phase F)
 │   ├── translate_file.py          per-file pipeline (translate + unified QA)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
-│   ├── pairs.py                   RU/EN md + navigation YAML pairing
+│   ├── pairs.py                   RU/EN md/includes + nav YAML pairing (§6.41)
 │   ├── navigation_merge.py        scoped toc/redirect merge; EN-main indent (§6.36)
 │   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)
