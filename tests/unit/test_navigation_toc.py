@@ -199,3 +199,125 @@ def test_validate_toc_merge_clean():
     )
     issues = validate_toc_merge(RU_PR, merged, translate_hrefs=scope, en_main_yaml=EN_MAIN)
     assert not issues
+
+
+YDB_SDK_EN_MAIN = dedent("""
+    items:
+    - name: Overview
+      href: index.md
+    - name: Authentication
+      items:
+      - name: Overview
+        href: auth.md
+      - name: Using a token
+        href: auth-access-token.md
+    - name: Troubleshooting
+      items:
+      - name: Overview
+        href: debug.md
+      - name: Enable logging
+        href: debug-logs.md
+      - name: Tracing with OpenTelemetry
+        href: debug-otel.md
+""").strip()
+
+YDB_SDK_RU_BASE = dedent("""
+    items:
+    - name: Обзор
+      href: index.md
+    - name: Аутентификация
+      items:
+      - name: Обзор
+        href: auth.md
+      - name: С помощью токена
+        href: auth-access-token.md
+    - name: Диагностика проблем
+      items:
+      - name: Обзор
+        href: debug.md
+      - name: Включить логирование
+        href: debug-logs.md
+      - name: Трассировка с OpenTelemetry
+        href: debug-otel.md
+""").strip()
+
+YDB_SDK_RU_PR = dedent("""
+    items:
+    - name: Обзор
+      href: index.md
+    - name: Аутентификация
+      items:
+      - name: Обзор
+        href: auth.md
+      - name: С помощью токена
+        href: auth-access-token.md
+    - name: Диагностика проблем
+      items:
+      - name: Обзор
+        href: debug.md
+      - name: Включить логирование
+        href: debug-logs.md
+      - name: Экспорт логов в OpenTelemetry
+        href: debug-logs-otel.md
+      - name: Трассировка с OpenTelemetry
+        href: debug-otel.md
+""").strip()
+
+
+def test_parse_toc_items_nested_ydb_sdk_format():
+    items = parse_toc_items(YDB_SDK_RU_PR)
+    hrefs = [it["href"] for it in items]
+    assert hrefs == [
+        "index.md",
+        "auth.md",
+        "auth-access-token.md",
+        "debug.md",
+        "debug-logs.md",
+        "debug-logs-otel.md",
+        "debug-otel.md",
+    ]
+
+
+def test_toc_translate_scope_nested_detects_new_href():
+    scope = toc_translate_scope(YDB_SDK_RU_BASE, YDB_SDK_RU_PR)
+    assert scope == {"debug-logs-otel.md"}
+
+
+def test_merge_nested_toc_adds_otel_logs_preserves_structure():
+    scope = toc_translate_scope(YDB_SDK_RU_BASE, YDB_SDK_RU_PR)
+
+    def fake_translate(name: str) -> str:
+        return {
+            "Экспорт логов в OpenTelemetry": "Export logs to OpenTelemetry",
+        }[name]
+
+    merged = merge_en_toc_yaml(
+        YDB_SDK_EN_MAIN,
+        YDB_SDK_RU_PR,
+        translate_hrefs=scope,
+        translate_name=fake_translate,
+    )
+    items = parse_toc_items(merged)
+    by_href = {it["href"]: it["name"] for it in items}
+
+    assert by_href["index.md"] == "Overview"
+    assert by_href["auth.md"] == "Overview"
+    assert by_href["auth-access-token.md"] == "Using a token"
+    assert by_href["debug-logs-otel.md"] == "Export logs to OpenTelemetry"
+    assert by_href["debug-logs.md"] == "Enable logging"
+
+    hrefs = [it["href"] for it in items]
+    assert hrefs.index("debug-logs.md") < hrefs.index("debug-logs-otel.md")
+    assert hrefs.index("debug-logs-otel.md") < hrefs.index("debug-otel.md")
+
+    assert "Authentication" in merged
+    assert "Troubleshooting" in merged
+    assert merged.count("- name: Overview") >= 2
+
+    issues = validate_toc_merge(
+        YDB_SDK_RU_PR,
+        merged,
+        translate_hrefs=scope,
+        en_main_yaml=YDB_SDK_EN_MAIN,
+    )
+    assert not issues
