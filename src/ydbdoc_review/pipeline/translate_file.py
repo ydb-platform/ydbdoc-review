@@ -108,6 +108,8 @@ def translate_file(
     version = prompt_version or cfg.prompts.version
     parallel = max_parallel_batches or cfg.llm.concurrency.batches_per_file
 
+    usage_record_start = len(client.usage_tracker.records)
+
     raw_source_text = source_text
     source_text = _normalize_source_text(source_text, source_lang=src_lang)
 
@@ -121,6 +123,7 @@ def translate_file(
     if not segments:
         return FileTranslationResult.from_usage(
             tracker=client.usage_tracker,
+            record_start=usage_record_start,
             file_path=file_path,
             final_text=existing_target_text or source_text,
             segments_count=0,
@@ -228,6 +231,7 @@ def translate_file(
 
     return FileTranslationResult.from_usage(
         tracker=client.usage_tracker,
+        record_start=usage_record_start,
         file_path=file_path,
         final_text=translated_text,
         segments_count=len(segments),

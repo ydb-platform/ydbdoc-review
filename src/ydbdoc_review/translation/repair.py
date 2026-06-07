@@ -54,7 +54,7 @@ def repair_segment_translation(
                     target_lang=target_lang,
                     version=prompt_version,
                 )
-                result = client.chat(messages, model=model)
+                result = client.chat(messages, model=model, role="translate")
                 translations = parse_translate_response(
                     result.content, expected_ids={segment.id}
                 )

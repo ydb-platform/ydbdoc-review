@@ -138,7 +138,7 @@ def _translate_batch_once(
                 target_lang=target_lang,
                 version=prompt_version,
             )
-            result = client.chat(messages, model=primary_model)
+            result = client.chat(messages, model=primary_model, role="translate")
             expected = {seg.id for seg in batch.segments}
             translations = parse_translate_response(
                 result.content, expected_ids=expected
@@ -180,7 +180,7 @@ def _translate_batch_once(
                     target_lang=target_lang,
                     version=prompt_version,
                 )
-                result = client.chat(messages, model=fallback_model)
+                result = client.chat(messages, model=fallback_model, role="translate")
                 expected = {seg.id for seg in batch.segments}
                 translations = parse_translate_response(
                     result.content, expected_ids=expected

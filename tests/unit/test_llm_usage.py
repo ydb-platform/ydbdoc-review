@@ -33,6 +33,17 @@ def test_estimate_cost_usd_null_output_tokens():
     assert tracker.estimate_cost_usd() == pytest.approx(0.40)
 
 
+def test_metrics_since_per_file_slice():
+    tracker = UsageTracker()
+    tracker.add(LLMUsage("deepseek-v32", 100, 50, 10.0, 0, True, role="translate"))
+    start = len(tracker.records)
+    tracker.add(LLMUsage("deepseek-v32", 200, 80, 10.0, 0, True, role="critic"))
+    metrics = tracker.metrics_since(start)
+    assert metrics["input_tokens"] == 200
+    assert metrics["output_tokens"] == 80
+    assert tracker.estimate_cost_usd() > tracker.estimate_cost_usd(since=start)
+
+
 def test_tokens_for_role_and_retries():
     tracker = UsageTracker()
     tracker.add(LLMUsage("yandexgpt-5.1", 100, 50, 10.0, 2, True, role="translate"))

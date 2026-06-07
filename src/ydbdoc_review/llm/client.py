@@ -135,8 +135,6 @@ class YandexLLMClient:
         max_tokens: int | None = None,
     ) -> ChatResult:
         """Call chat completions with retries and model fallback chain."""
-        if model is not None and role is not None:
-            raise LLMConfigError("Pass either role= or model=, not both")
         if model is not None:
             chain = [model]
         elif role is not None:

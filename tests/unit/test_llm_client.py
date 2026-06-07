@@ -203,11 +203,17 @@ def test_chat_requires_role_or_model():
         client.chat([{"role": "user", "content": "x"}])
 
 
-def test_chat_rejects_role_and_model():
+def test_chat_model_with_role_tags_usage():
     client, mock = _client_with_mock()
-    with pytest.raises(LLMConfigError, match="not both"):
-        client.chat([{"role": "user", "content": "x"}], role="translate", model="x")
-    mock.chat.completions.create.assert_not_called()
+    mock.chat.completions.create.return_value = _completion("hello")
+    client.chat(
+        [{"role": "user", "content": "x"}],
+        model="deepseek-v32",
+        role="translate",
+    )
+    record = client.usage_tracker.records[-1]
+    assert record.model_slug == "deepseek-v32"
+    assert record.role == "translate"
 
 
 def test_init_requires_credentials():

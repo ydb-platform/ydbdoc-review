@@ -51,14 +51,15 @@ class FileTranslationResult:
         cls,
         *,
         tracker: UsageTracker,
+        record_start: int = 0,
         **kwargs: object,
     ) -> FileTranslationResult:
-        models = sorted({r.model_slug for r in tracker.records if r.success})
+        metrics = tracker.metrics_since(record_start)
         data = dict(kwargs)
-        data.setdefault("models_used", models)
-        data.setdefault("input_tokens", tracker.total_input_tokens)
-        data.setdefault("output_tokens", tracker.total_output_tokens)
-        data.setdefault("estimated_cost_usd", tracker.estimate_cost_usd())
+        data.setdefault("models_used", metrics["models_used"])
+        data.setdefault("input_tokens", metrics["input_tokens"])
+        data.setdefault("output_tokens", metrics["output_tokens"])
+        data.setdefault("estimated_cost_usd", metrics["estimated_cost_usd"])
         return cls(**data)  # type: ignore[arg-type]
 
 

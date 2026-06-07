@@ -23,6 +23,20 @@ MODEL_PRICE_USD_PER_1M: dict[str, tuple[float, float]] = {
 }
 
 
+def _estimate_cost_usd(records: list[LLMUsage]) -> float:
+    total = 0.0
+    for record in records:
+        if not record.success:
+            continue
+        prices = MODEL_PRICE_USD_PER_1M.get(record.model_slug)
+        if prices is None:
+            continue
+        in_price, out_price = prices
+        total += (record.input_tokens or 0) / 1_000_000 * in_price
+        total += (record.output_tokens or 0) / 1_000_000 * out_price
+    return total
+
+
 @dataclass(frozen=True)
 class LLMUsage:
     """Metrics for a single successful or failed chat completion attempt."""
@@ -53,19 +67,20 @@ class UsageTracker:
     def total_output_tokens(self) -> int:
         return sum(r.output_tokens or 0 for r in self.records if r.success)
 
-    def estimate_cost_usd(self) -> float:
+    def estimate_cost_usd(self, *, since: int = 0) -> float:
         """Rough USD cost from the hard-coded price table."""
-        total = 0.0
-        for record in self.records:
-            if not record.success:
-                continue
-            prices = MODEL_PRICE_USD_PER_1M.get(record.model_slug)
-            if prices is None:
-                continue
-            in_price, out_price = prices
-            total += (record.input_tokens or 0) / 1_000_000 * in_price
-            total += (record.output_tokens or 0) / 1_000_000 * out_price
-        return total
+        return _estimate_cost_usd(self.records[since:])
+
+    def metrics_since(self, record_index: int = 0) -> dict[str, float | int | list[str]]:
+        """Token/cost totals for records appended after ``record_index``."""
+        records = self.records[record_index:]
+        models = sorted({r.model_slug for r in records if r.success})
+        return {
+            "input_tokens": sum(r.input_tokens or 0 for r in records if r.success),
+            "output_tokens": sum(r.output_tokens or 0 for r in records if r.success),
+            "estimated_cost_usd": _estimate_cost_usd(records),
+            "models_used": models,
+        }
 
     def tokens_for_role(self, role: LLMRole) -> tuple[int, int]:
         """Return (input_tokens, output_tokens) for successful calls with ``role``."""
