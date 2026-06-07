@@ -32,12 +32,25 @@ def is_docs_en_navigation(path: str, docs_root: str) -> bool:
     return is_navigation_yaml(p)
 
 
+def is_language_neutral_docs_path(path: str, docs_root: str) -> bool:
+    """True for assets outside the ``docs/ru`` / ``docs/en`` mirror trees.
+
+    Examples: ``ydb/docs/_includes/…`` (repo-root snippets), images, binaries.
+    Locale-specific fragments live under ``docs/ru/…/_includes/`` and are translated.
+    """
+    p = _norm(path)
+    root = docs_root.strip("/")
+    if p.startswith(f"{root}/ru/") or p.startswith(f"{root}/en/"):
+        return False
+    return p.startswith(f"{root}/")
+
+
 def is_docs_markdown(path: str, docs_root: str) -> bool:
-    """True for ``docs/ru/…`` or ``docs/en/…`` ``.md`` files (not ``_includes``)."""
+    """True for mirrored ``docs/ru/…`` or ``docs/en/…`` ``.md`` pages and includes."""
     p = _norm(path)
     if not p.endswith(".md"):
         return False
-    if "/_includes/" in p:
+    if is_language_neutral_docs_path(path, docs_root):
         return False
     root = docs_root.strip("/")
     return p.startswith(f"{root}/ru/") or p.startswith(f"{root}/en/")

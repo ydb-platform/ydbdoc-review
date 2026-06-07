@@ -183,8 +183,11 @@ INPUT: translation_pr_number
 
 For each changed `.md` under `ydb/docs/`:
 
-- `ydb/docs/ru/X` ↔ `ydb/docs/en/X` (mirror).
-- `ydb/docs/_includes/Y` — language-neutral; not translated.
+- `ydb/docs/ru/X` ↔ `ydb/docs/en/X` (mirror), including `ru/…/_includes/*.md`
+  ↔ `en/…/_includes/*.md` (locale-specific fragments: tables, auth snippets, …).
+- `ydb/docs/_includes/Y` and other paths **outside** `docs/ru` / `docs/en` —
+  language-neutral (images, shared assets); not translated.
+- Non-`.md` under `_includes/` (png, svg, …) — never sent to the translator.
 
 If RU changed (EN changed or not) → **full** translate RU→EN; commit replaces EN
 entirely (render from RU AST — §6.30). Existing EN on `main` is ignored.

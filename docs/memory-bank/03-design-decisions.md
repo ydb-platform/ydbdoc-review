@@ -393,6 +393,24 @@ Implementation: `validation/fence_comments.py`. Tests:
 `check_fence_body_copy` treats comment-only ``//``/``#`` diffs (Cyrillic→EN) as
 allowed — not pipeline corruption (PR #42762 false positives).
 
+### 6.41. Locale-specific `_includes` in doc_translate scope
+
+**Problem:** PR #40166 touched `ru/…/orm/_includes/toc-table.md`; translation PR #42766
+had only 2 files — EN table on the ORM index page stayed without Kotlin Exposed.
+
+**Root cause:** `is_docs_markdown` rejected **all** paths containing `/_includes/`.
+That conflated two Diplodoc layouts:
+
+| Path pattern | Role | Translate? |
+|---|---|---|
+| `ydb/docs/ru/…/_includes/*.md` ↔ `en/…/_includes/*.md` | Locale mirror (toc-table, auth, …) | **Yes** |
+| `ydb/docs/_includes/…` (no `ru`/`en` prefix) | Repo-root neutral assets | No |
+| `*.png`, `*.svg` under any `_includes/` | Images | No (not `.md`) |
+
+**Decision:** `is_language_neutral_docs_path()` — neutral only when path is under
+`docs/` but **not** under `docs/ru/` or `docs/en/`. `build_doc_pairs` and
+`expected_en_mirrors` pick up locale includes automatically.
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,

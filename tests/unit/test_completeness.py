@@ -13,6 +13,19 @@ from ydbdoc_review.pipeline.types import (
 )
 
 
+def test_expected_en_mirrors_includes_locale_include():
+    changes = [
+        (
+            "ydb/docs/ru/core/integrations/orm/_includes/toc-table.md",
+            "modified",
+        ),
+    ]
+    expected = expected_en_mirrors(changes)
+    assert expected == {
+        "ydb/docs/en/core/integrations/orm/_includes/toc-table.md",
+    }
+
+
 def test_expected_en_mirrors_includes_md_and_toc():
     changes = [
         ("ydb/docs/ru/a/compact.md", "added"),
