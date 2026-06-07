@@ -11,6 +11,12 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# MediaWiki returns HTTP 403 without a descriptive User-Agent (T400119).
+_WIKI_USER_AGENT = (
+    "ydbdoc-review/0.1 (+https://github.com/ydb-platform/ydbdoc-review; "
+    "YDB docs translation)"
+)
+
 _WIKI_PATH = "/wiki/"
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 _TARGET_TO_WIKI_LANG = {
@@ -58,7 +64,12 @@ class WikipediaResolver:
             "formatversion": "2",
         }
         try:
-            resp = requests.get(url, params=params, timeout=self.timeout_s)
+            resp = requests.get(
+                url,
+                params=params,
+                timeout=self.timeout_s,
+                headers={"User-Agent": _WIKI_USER_AGENT},
+            )
             resp.raise_for_status()
             pages = resp.json().get("query", {}).get("pages", [])
             if not pages:

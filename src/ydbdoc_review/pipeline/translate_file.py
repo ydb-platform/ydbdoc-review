@@ -30,7 +30,10 @@ from ydbdoc_review.reporting.locations import build_segment_line_map
 from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
-from ydbdoc_review.validation.link_locale import localize_links_in_document
+from ydbdoc_review.validation.link_locale import (
+    localize_links_in_document,
+    localize_links_in_text,
+)
 
 
 def _normalize_source_text(raw: str, *, source_lang: str) -> str:
@@ -55,6 +58,7 @@ def _render_with_translations(
 def _finalize_en_target(text: str, normalized_source_text: str) -> str:
     """Copy fenced bodies from normalized RU, then EN postprocess (homoglyphs, <строка>)."""
     text = enforce_source_fenced_blocks(text, normalized_source_text)
+    text = localize_links_in_text(text, target_lang="en")
     return postprocess_en_target_markdown(text)
 
 

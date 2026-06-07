@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 from ydbdoc_review.validation.link_locale import (
     check_link_locale_in_en,
     localize_links_in_document,
+    localize_links_in_text,
     mirror_link_href,
 )
 from ydbdoc_review.validation import wikipedia_links
@@ -24,6 +25,19 @@ def test_mirror_link_href_wikipedia_resolves_ru_slug(monkeypatch):
     monkeypatch.setattr(wikipedia_links, "get_wikipedia_resolver", lambda: resolver)
     href = "https://ru.wikipedia.org/wiki/Копирование_при_записи"
     assert mirror_link_href(href) == "https://en.wikipedia.org/wiki/Copy-on-write"
+
+
+def test_localize_links_in_text_fixes_percent_encoded_wikipedia_slug(monkeypatch):
+    resolver = MagicMock()
+    resolver.resolve_title.return_value = "Copy-on-write"
+    monkeypatch.setattr(wikipedia_links, "get_wikipedia_resolver", lambda: resolver)
+    md = (
+        "See [CoW](https://en.wikipedia.org/wiki/"
+        "%D0%9A%D0%BE%D0%BF%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5_%D0%BF%D1%80%D0%B8_%D0%B7%D0%B0%D0%BF%D0%B8%D1%81%D0%B8).\n"
+    )
+    out = localize_links_in_text(md)
+    assert "Copy-on-write" in out
+    assert check_link_locale_in_en(out) == []
 
 
 def test_localize_links_fixes_broken_en_wikipedia_slug(monkeypatch):

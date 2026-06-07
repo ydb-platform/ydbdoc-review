@@ -59,6 +59,37 @@ def test_resolve_wikipedia_href_en_cyrillic_slug_uses_ru_lookup():
     )
 
 
+def test_fetch_langlink_sends_user_agent(monkeypatch):
+    import requests
+
+    resolver = WikipediaResolver(timeout_s=10.0)
+    captured: dict[str, object] = {}
+
+    def fake_get(url, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.json.return_value = {
+            "query": {
+                "pages": [
+                    {
+                        "langlinks": [{"lang": "en", "title": "Copy-on-write"}],
+                    }
+                ]
+            }
+        }
+        return response
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert (
+        resolver.resolve_title("ru", "Копирование при записи", "en")
+        == "Copy-on-write"
+    )
+    headers = captured.get("headers") or {}
+    assert "User-Agent" in headers
+    assert "ydbdoc-review" in str(headers["User-Agent"])
+
+
 @pytest.mark.integration
 def test_resolver_live_ru_to_en_copy_on_write():
     resolver = WikipediaResolver(timeout_s=15.0)

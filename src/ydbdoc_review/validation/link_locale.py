@@ -214,3 +214,18 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
 def localize_links_in_document(doc: Document, *, target_lang: str = "en") -> None:
     """Rewrite link/image URLs in-place for the target document locale."""
     _walk_blocks(doc.children, target_lang=target_lang)
+
+
+_WIKI_HREF_IN_TEXT = re.compile(
+    r"https?://(?:[a-z]{2,3})\.wikipedia\.org/wiki/[^\s\)\]>\"']+",
+    re.IGNORECASE,
+)
+
+
+def localize_links_in_text(text: str, *, target_lang: str = "en") -> str:
+    """Fix Wikipedia (and other locale) URLs in raw markdown after render."""
+
+    def _replace(match: re.Match[str]) -> str:
+        return mirror_link_href(match.group(0), target_lang=target_lang)
+
+    return _WIKI_HREF_IN_TEXT.sub(_replace, text)
