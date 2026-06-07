@@ -27,6 +27,9 @@ from ydbdoc_review.pipeline.qa import compose_file_verdict, gate_round_trip
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.reporting.locations import build_segment_line_map
+from ydbdoc_review.validation.fence_comments import (
+    translate_cyrillic_fence_comments_with_client,
+)
 from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -55,9 +58,29 @@ def _render_with_translations(
     return render_markdown(doc)
 
 
-def _finalize_en_target(text: str, normalized_source_text: str) -> str:
-    """Copy fenced bodies from normalized RU, then EN postprocess (homoglyphs, <строка>)."""
+def _finalize_en_target(
+    text: str,
+    normalized_source_text: str,
+    *,
+    client: YandexLLMClient | None = None,
+    glossary: Glossary | None = None,
+    file_path: str = "",
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+) -> str:
+    """Copy fenced bodies from RU, translate Cyrillic comments, EN postprocess."""
     text = enforce_source_fenced_blocks(text, normalized_source_text)
+    if client is not None and glossary is not None:
+        text = translate_cyrillic_fence_comments_with_client(
+            text,
+            client,
+            glossary,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+        )
     text = localize_links_in_text(text, target_lang="en")
     return postprocess_en_target_markdown(text)
 
@@ -158,7 +181,16 @@ def translate_file(
             source_doc, segments, translations, target_lang=tgt_lang
         )
         if tgt_lang.lower() in {"en", "english"}:
-            translated_text = _finalize_en_target(translated_text, source_text)
+            translated_text = _finalize_en_target(
+                translated_text,
+                source_text,
+                client=client,
+                glossary=glossary,
+                file_path=file_path,
+                source_lang=src_lang,
+                target_lang=tgt_lang,
+                prompt_version=version,
+            )
     else:
         if existing_target_text is None:
             raise ValueError("existing_target_text is required when enable_translate=False")
@@ -191,7 +223,16 @@ def translate_file(
                 source_doc, segments, translations, target_lang=tgt_lang
             )
             if tgt_lang.lower() in {"en", "english"}:
-                translated_text = _finalize_en_target(translated_text, source_text)
+                translated_text = _finalize_en_target(
+                    translated_text,
+                    source_text,
+                    client=client,
+                    glossary=glossary,
+                    file_path=file_path,
+                    source_lang=src_lang,
+                    target_lang=tgt_lang,
+                    prompt_version=version,
+                )
             translations, segment_alignment_error = gate_round_trip(
                 segments, translated_text
             )

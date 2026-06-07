@@ -172,6 +172,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("fence_body_copy:"):
         return "warnings"
+    if message.startswith("cyrillic_in_fence:"):
+        return "warnings"
     return "blocking"
 
 
@@ -183,6 +185,9 @@ def _collect_raw_heuristics(
     source_lang: str,
     target_lang: str,
 ) -> list[str]:
+    from ydbdoc_review.validation.fence_comments import (
+        check_cyrillic_in_en_fence_comments,
+    )
     from ydbdoc_review.validation.fence_integrity import (
         check_absolute_paths_in_fences,
         check_fence_body_copy,
@@ -202,6 +207,9 @@ def _collect_raw_heuristics(
         )
     )
     raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
+    raw.extend(
+        check_cyrillic_in_en_fence_comments(target_text, target_lang=target_lang)
+    )
     raw.extend(check_fence_parity(normalized_source_text, target_text))
     raw.extend(
         check_fence_body_copy(

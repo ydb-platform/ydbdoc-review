@@ -32,6 +32,19 @@ def test_cyrillic_in_en_ignores_fenced_code():
     assert check_cyrillic_in_en(text, target_lang="en") == []
 
 
+def test_cyrillic_in_en_fence_comments_warns_on_line_comments():
+    text = "Intro\n\n```go\n// настраиваем провайдер\n```\n"
+    classified = run_file_heuristics_classified(
+        text,
+        text,
+        normalized_source_text=text,
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
+    assert not classified.blocking
+
+
 def test_cyrillic_skipped_for_ru_target():
     assert check_cyrillic_in_en("привет", target_lang="ru") == []
 

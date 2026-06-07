@@ -59,10 +59,12 @@ src/ydbdoc_review/
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
 │   ├── fence_integrity.py         copy fences from source; detect pipeline drift
+│   ├── fence_comments.py          Cyrillic ``//``/``#`` comment translate + QA (§6.39)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
-│   ├── link_locale.py             RU→EN URL mirror + link_locale QA (§6.34)
+│   ├── link_locale.py             URL locale mirror + link_locale QA (§6.34, §6.37)
+│   ├── wikipedia_links.py         MediaWiki langlinks API (RU↔EN slugs, §6.37)
 │   ├── cli_tokens.py              CLI token preservation (D.3)
-│   └── heuristics.py              length ratio, cyrillic, fence parity, ru_source, anchors
+│   └── heuristics.py              length ratio, cyrillic (+ fence comments), parity, anchors
 ├── pipeline/                      ✅ COMPLETE (Phase F)
 │   ├── translate_file.py          per-file pipeline (translate + unified QA)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
@@ -182,11 +184,17 @@ Was a bug discovered in B.2, fixed by sharing `_ProtectState` across recursion.
 
 After reinsert in `pipeline/translate_file.py`:
 
-1. `localize_links_in_document` — safety-net `mirror_link_href` for `/docs/ru/` etc.
-2. `postprocess_en_target_markdown` (`validation/homoglyphs.py`) — Cyrillic→Latin
-   on ASCII-heavy YAML comment lines; RU angle placeholders inside fenced blocks
-   (e.g. `<строка>` → `<string>`); MD031 blank lines via `markdown_layout.py`.
+1. `localize_links_in_document` — AST walk: `mirror_link_href` for `/docs/ru/`,
+   Wikipedia langlinks, Yandex/K8s path swaps (§6.37).
+2. `_finalize_en_target` (§6.28): `enforce_source_fenced_blocks` →
+   `localize_links_in_text` (regex safety net for Wikipedia URLs in raw markdown) →
+   `postprocess_en_target_markdown` — homoglyphs, `<строка>`→`<string>` in fences,
+   MD031 via `markdown_layout.py`.
 3. **Renderer** (`markdown_renderer._join_blocks`) — `\n\n` between `fenced_code` and
    adjacent blocks; extra gap between tight list items when a fence precedes prose.
+
+`llm/usage.py` — `UsageTracker.metrics_since(record_start)` for per-file token/cost
+slices; `MODEL_PRICE_RUB_PER_1K` (§6.38). `reporting/builder.py` — cost block in
+**all** report paths, including 🟢 «открытых замечаний нет» (§6.38).
 
 [← Memory Bank index](../../MEMORY_BANK.md)

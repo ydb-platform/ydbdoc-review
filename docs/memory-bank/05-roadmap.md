@@ -86,6 +86,7 @@ See `ydbdoc_review.llm` package.
 - [x] Placeholder count check (`validation/markers.py` — wired in translator)
 - [x] CLI-token preservation (`validation/cli_tokens.py` — wired in translator)
 - [x] `validation/heuristics.py` — length ratio, cyrillic-in-EN, fence/heading/list-tab parity
+- [x] `validation/fence_comments.py` — translate Cyrillic ``//``/``#`` fence comments; `cyrillic_in_fence` QA (§6.39)
 - [x] TOC / redirect merge validation wrappers (`validate_toc_merge`, `validate_redirect_merge`)
 - [x] `navigation/paths.py` — detect toc/redirect YAML paths
 - [x] Wired in `translate_file` (markdown heuristics + verdict bump)

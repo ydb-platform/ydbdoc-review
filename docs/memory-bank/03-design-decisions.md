@@ -193,6 +193,52 @@ Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 and block `- name:` / `href:` layout. Empty merge (parser miss) is flagged
 `empty_toc` + `scope_not_applied` → navigation verdict **blocked** → report 🔴.
 
+### 6.38. Token usage and cost reporting (₽ per 1K tokens)
+
+**Problems:**
+
+1. Cost showed `~$0.00X` — price table used **USD per 1M** while Yandex AI Studio
+   bills in **₽ per 1000 tokens** (sync mode, incl. VAT; see
+   [Habr overview](https://habr.com/ru/articles/1030524/)).
+2. Translate/repair `client.chat(model=…)` did not pass `role="translate"` →
+   per-role token lines were empty in reports.
+3. `FileTranslationResult.from_usage` stored **cumulative** tracker totals per
+   file → misleading per-file aggregation fallback.
+4. All-green reports (`По всем файлам открытых замечаний нет`) returned early
+   **without** the «Стоимость и токены» block (PR #42745); source PR summary
+   still showed cost.
+
+**Decision:**
+
+- `llm/usage.py`: `MODEL_PRICE_RUB_PER_1K`; `estimate_cost_rub()` divides tokens
+  by **1000** (not 1_000_000). `estimate_cost_usd()` kept as alias returning RUB.
+- `translator.py` / `repair.py`: `role="translate"` with explicit `model=` for
+  usage tagging; `client.chat` allows both for tagging.
+- `translate_file.py`: snapshot `usage_record_start`; `from_usage(record_start=…)`.
+- `reporting/builder.py`: `_format_cost_rub()`; «Токены (всего)»; usage section
+  appended on the all-green early-return path too.
+
+Example (PR #42414, 3 files): ~14k in / ~8.5k out → **~₽10**.
+
+### 6.37. Wikipedia links — deterministic langlink resolution
+
+**Problem:** PR #42743–#42744 — LLM left `en.wikipedia.org/wiki/Копирование_при_записи`;
+`mirror_link_href` only swapped host. MediaWiki API returned **403** without
+`User-Agent` ([T400119](https://phabricator.wikimedia.org/T400119)) → silent
+lookup failure in CI.
+
+**Decision:** `validation/wikipedia_links.py`:
+
+- `WikipediaResolver` calls `{lang}.wikipedia.org/w/api.php?action=query&prop=langlinks`
+  with required `User-Agent: ydbdoc-review/0.1 (…)`.
+- `resolve_wikipedia_href` — Cyrillic slug on `en.wikipedia.org` → lookup from
+  `ru` article title; RU↔EN bidirectional via `target_lang`.
+- Wired in `mirror_link_href` (AST) and `localize_links_in_text` (regex on final
+  markdown in `_finalize_en_target`, §6.28).
+
+QA `check_link_locale_in_en` still flags unresolved bad pairs (blocking). Success:
+PR #42745 — `Copy-on-write` slug, 🟢 merge.
+
 ### 6.36. Inline TOC indentation preserved from EN-main
 
 **Problem:** PR #42726 — merge appended RU inline lines as ``- {`` while EN-main
@@ -213,17 +259,20 @@ translation PR diff and unions RU nav changes from the source PR (GitHub API).
 (§6.31) using `validate_navigation_merge_warnings` — no LLM merge, read-only.
 Results go to `navigation_results` and appear in the report like `doc_translate`.
 
-### 6.34. External link locale QA (`link_locale` heuristic)
+### 6.34. External link locale (`link_locale`)
 
-**Problem:** PR #42726 — `mirror_link_href` swapped `ru.wikipedia.org` →
-`en.wikipedia.org` but left the Russian article slug; QA reported 🟢.
+**Problem:** PR #42726 — host swap left Russian Wikipedia slugs on `en.wikipedia.org`;
+QA initially reported 🟢.
 
-**Decision:** `validation/link_locale.py` — `check_link_locale_in_en` walks the
-EN AST and flags (blocking):
+**Decision:** Two layers:
 
-- RU-locale URLs left in EN docs (`ru.wikipedia.org`, `/docs/ru/`, …);
-- Cyrillic (incl. percent-encoded) paths on EN-locale hosts (`en.wikipedia.org`,
-  `yandex.cloud/en/docs`).
+1. **Fix (§6.37):** `mirror_link_href` / `localize_links_in_document` /
+   `localize_links_in_text` — deterministic locale + Wikipedia langlinks.
+2. **QA:** `check_link_locale_in_en` walks the EN AST and flags (blocking) if fix
+   did not run or API failed:
+
+   - RU-locale URLs (`ru.wikipedia.org`, `/docs/ru/`, …);
+   - Cyrillic (incl. percent-encoded) paths on EN-locale hosts.
 
 Wired in `run_file_heuristics_classified` for `target_lang=en`.
 
@@ -307,13 +356,39 @@ PR #40070 had `--config-dir/opt` and shortened `ca.crt` paths before translate).
 
 1. `normalize_ru_source_for_translation` — fix known RU typos (`--config-dir/opt`)
    on the RU string **before** parse/translate.
-2. `enforce_source_fenced_blocks` — after render/postprocess, copy every code block
-   body from source onto the target AST and re-render.
-3. Heuristics: `fence_body_copy`, `fence_path_stripped`, `missing_anchor`,
-   `detect_ru_source_bugs` (report fixes needed in **RU SOURCE**).
+2. `enforce_source_fenced_blocks` — after render, copy every code block body from
+   source onto the target AST and re-render.
+3. `translate_cyrillic_fence_comments_with_client` — **after** fence copy, batch-
+   translate Cyrillic in ``//`` / ``#`` **line comments** only (§6.39).
+4. Heuristics: `fence_body_copy`, `fence_path_stripped`, `missing_anchor`,
+   `cyrillic_in_fence`, `detect_ru_source_bugs` (report fixes needed in **RU SOURCE**).
 
-Allowed change inside a fence: RU→EN angle placeholders (`<строка>`→`<string>`)
-via `fix_russian_angle_placeholders_in_en_fences` only.
+Allowed deterministic changes inside a fence (besides comment translate): RU→EN
+angle placeholders (`<строка>`→`<string>`) via
+`fix_russian_angle_placeholders_in_en_fences` in `postprocess_en_target_markdown`.
+
+### 6.39. Cyrillic in fenced code comments (PR #42756 / debug-logs-otel)
+
+**Problem:** PR #42756 — EN `debug-logs-otel.md` kept Russian ``//`` / ``#``
+comments (e.g. `// 1. Настраиваем провайдер…`). ydbdoc-review reported 🟢.
+
+**Root cause:** By design (§6.22) fenced bodies are copied verbatim from RU;
+`check_cyrillic_in_en` **strips all fences** before scanning, so comment Cyrillic
+was invisible to QA. Diplodoc build did not flag it either.
+
+**Decision:**
+
+1. **Finalize step** (`translate_file._finalize_en_target`): after
+   `enforce_source_fenced_blocks`, run
+   `translate_cyrillic_fence_comments_with_client` — one LLM JSON batch per file
+   for ``//`` / ``#`` lines whose comment body contains Cyrillic. Code tokens,
+   URLs, and identifiers stay unchanged.
+2. **Heuristic** `check_cyrillic_in_en_fence_comments` → `cyrillic_in_fence: …`
+   classified as **warnings** (not blocking). Runs on verify and translate QA.
+   Prose Cyrillic remains **blocking** via `check_cyrillic_in_en`.
+
+Implementation: `validation/fence_comments.py`. Tests:
+`tests/unit/test_fence_comments.py`, `test_validation_heuristics.py`.
 
 ### 6.23. Merge recommendation vs file verdict
 
@@ -487,6 +562,7 @@ ran inside `_render_with_translations`, then `enforce_source_fenced_blocks` copi
 verbatim RU fence bodies **over** those fixes → EN still had `#FQDN ВМ` and `<строка>`.
 
 **Decision:** `_finalize_en_target` = `enforce_source_fenced_blocks` →
+`localize_links_in_text` (Wikipedia + locale URLs, §6.37) →
 `postprocess_en_target_markdown`. Homoglyphs and angle placeholders apply to the
 final EN text, including list-indented fences.
 
