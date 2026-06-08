@@ -151,6 +151,7 @@ def prepare_translation_branch_on_base(
     base_remote_name: str,
     base_branch: str,
     paths: list[str],
+    deleted_paths: list[str] | None = None,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="ydbdoc-review-staging-") as staging:
         saved: list[str] = []
@@ -173,6 +174,10 @@ def prepare_translation_branch_on_base(
             dest = Path(repo) / rel.replace("/", os.sep)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
+        for rel in deleted_paths or []:
+            dest = Path(repo) / rel.replace("/", os.sep)
+            if dest.is_file():
+                dest.unlink()
 
 
 def git_commit_paths(
@@ -182,6 +187,7 @@ def git_commit_paths(
     author_name: str,
     author_email: str,
     *,
+    deleted_paths: list[str] | None = None,
     all_paths: bool = False,
 ) -> bool:
     subprocess.run(["git", "-C", repo, "config", "user.name", author_name], check=True)
@@ -191,6 +197,11 @@ def git_commit_paths(
     if all_paths:
         subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
     else:
+        for rel in deleted_paths or []:
+            subprocess.run(
+                ["git", "-C", repo, "rm", "--ignore-unmatch", "--", rel],
+                check=True,
+            )
         for rel in paths:
             subprocess.run(["git", "-C", repo, "add", "--", rel], check=True)
     st = subprocess.run(

@@ -69,6 +69,17 @@ _GITHUB_ACTOR_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 _REPORT_MARKER = "ydbdoc-review — отчёт"
 
 
+@dataclass(frozen=True)
+class TouchedPaths:
+    """Paths written or removed by ``doc_translate`` / ``doc_verify``."""
+
+    written: list[str]
+    deleted: list[str]
+
+    def __bool__(self) -> bool:
+        return bool(self.written or self.deleted)
+
+
 @dataclass
 class DocJobResult:
     """Outcome of ``run_doc_translate`` or ``run_doc_verify``."""
@@ -114,15 +125,16 @@ def _next_report_number(
 
 def _apply_results_to_disk(
     repo_path: str, result: PRTranslationResult, *, dry_run: bool
-) -> list[str]:
+) -> TouchedPaths:
     """Write translated markdown, navigation YAML, and deletes; return paths."""
-    touched: list[str] = []
+    written: list[str] = []
+    deleted: list[str] = []
     for run in result.pair_results:
         if run.skipped or run.error:
             continue
         rel = run.plan.target_path
         if run.deleted:
-            touched.append(rel)
+            deleted.append(rel)
             if dry_run:
                 continue
             path = Path(repo_path) / rel.replace("/", os.sep)
@@ -131,17 +143,17 @@ def _apply_results_to_disk(
             continue
         if run.target_text is None:
             continue
-        touched.append(rel)
+        written.append(rel)
         if not dry_run:
             write_text(repo_path, rel, run.target_text)
     for nav in result.navigation_results:
         if nav.error or nav.target_text is None:
             continue
         rel = nav.en_path
-        touched.append(rel)
+        written.append(rel)
         if not dry_run:
             write_text(repo_path, rel, nav.target_text)
-    return touched
+    return TouchedPaths(written=written, deleted=deleted)
 
 
 def _run_verify_pairs(
@@ -287,15 +299,17 @@ def run_doc_translate(
             base_remote_url=branch_remote_url,
             base_remote_name="ydbdoc-review-upstream",
             base_branch=branch_start_ref,
-            paths=touched,
+            paths=touched.written,
+            deleted_paths=touched.deleted,
         )
         msg = build_commit_message(pr_number, pr_result, config=cfg)
         committed = git_commit_paths(
             repo_path,
-            touched,
+            touched.written,
             msg,
             _GITHUB_ACTOR_NAME,
             _GITHUB_ACTOR_EMAIL,
+            deleted_paths=touched.deleted,
         )
         if committed:
             logger.info(
@@ -514,10 +528,11 @@ def run_doc_verify(
         )
         committed = git_commit_paths(
             repo_path,
-            touched,
+            touched.written,
             msg,
             _GITHUB_ACTOR_NAME,
             _GITHUB_ACTOR_EMAIL,
+            deleted_paths=touched.deleted,
         )
         if committed:
             logger.info(

@@ -426,6 +426,22 @@ are not sidebar ``href``s — they must never appear in ``toc*.yaml``.
 `toc_translate_scope(ru_base, ru_pr)`; only standalone pages contribute
 ``new_hrefs``.
 
+### 6.43. ``delete_en`` commits use ``git rm``, not ``git add``
+
+**Problem:** PR #37955 renamed ``S3-enrichment.md`` → ``enrichment.md`` (RU delete +
+add). ``doc_translate`` crashed on commit: ``pathspec '…/S3-enrichment.md' did not
+match any files``.
+
+**Root cause:** ``delete_en`` paths were appended to the same ``touched`` list as
+writes; ``git_commit_paths`` always ran ``git add``. After
+``prepare_translation_branch_on_base`` reset the tree to upstream ``main``, the EN
+mirror was often already gone — ``git add`` fails with exit 128.
+
+**Decision:** ``TouchedPaths(written, deleted)`` in ``workflow.py``.
+``prepare_translation_branch_on_base`` unlinks ``deleted_paths`` on the new base;
+``git_commit_paths`` runs ``git rm --ignore-unmatch`` for deletes, then ``git add``
+for writes. Idempotent when EN mirror is already absent (merged/rename PRs).
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,
