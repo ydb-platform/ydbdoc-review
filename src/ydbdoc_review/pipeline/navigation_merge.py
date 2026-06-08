@@ -53,10 +53,26 @@ Keep technical tokens (INDEX, SET, COMPACT, CLI) when appropriate.
 Use the glossary when provided."""
 
 
-def _read_at_base(repo_path: str, merge_base_with: str, rel_path: str) -> str:
+def _read_navigation_baselines(
+    repo_path: str,
+    merge_base_with: str,
+    *,
+    ru_path: str,
+    en_path: str,
+) -> tuple[str, str]:
+    """RU/EN navigation YAML at PR merge-base, with upstream EN fallback (§6.44).
+
+    Fork PR checkouts often lack EN files at ``merge-base(merge_base_with, HEAD)``.
+    ``en_main`` falls back to ``merge_base_with`` (upstream ``main``).
+    """
     mb = merge_base(repo_path, merge_base_with, "HEAD")
-    text = read_text_at_ref(repo_path, mb, rel_path)
-    return text if text is not None else ""
+    ru_text = read_text_at_ref(repo_path, mb, ru_path)
+    ru_base = ru_text if ru_text is not None else ""
+    en_text = read_text_at_ref(repo_path, mb, en_path)
+    if en_text is None:
+        en_text = read_text_at_ref(repo_path, merge_base_with, en_path)
+    en_main = en_text if en_text is not None else ""
+    return ru_base, en_main
 
 
 def extra_toc_hrefs_from_md_targets(
@@ -72,6 +88,12 @@ def extra_toc_hrefs_from_md_targets(
         for p in translated_en_paths
         if "/_includes/" not in p
     }
+
+
+def extra_toc_hrefs_for_pair(ru_pr_yaml: str, md_href_basenames: set[str]) -> set[str]:
+    """Restrict translated-page hrefs to entries present in this toc (§6.44)."""
+    toc_hrefs = {it["href"] for it in parse_toc_items(ru_pr_yaml)}
+    return md_href_basenames & toc_hrefs
 
 
 def _translate_menu_labels(
@@ -156,11 +178,16 @@ def merge_navigation_pair(
             verdict="blocked",
         )
 
-    ru_base = _read_at_base(repo_path, merge_base_with, pair.ru_path)
-    en_main = _read_at_base(repo_path, merge_base_with, pair.en_path)
+    ru_base, en_main = _read_navigation_baselines(
+        repo_path,
+        merge_base_with,
+        ru_path=pair.ru_path,
+        en_path=pair.en_path,
+    )
 
     if kind == "toc":
-        scope = toc_translate_scope(ru_base, ru_pr) | extra_toc_hrefs
+        pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
+        scope = toc_translate_scope(ru_base, ru_pr) | pair_extra
         labels = [
             it["name"]
             for it in parse_toc_items(ru_pr)
@@ -237,7 +264,8 @@ def verify_navigation_pair(
         )
 
     if kind == "toc":
-        scope = toc_translate_scope(ru_base, ru_pr) | extra_toc_hrefs
+        pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
+        scope = toc_translate_scope(ru_base, ru_pr) | pair_extra
     else:
         scope = redirect_translate_scope(ru_base, ru_pr)
 
@@ -313,8 +341,12 @@ def run_navigation_verifies(
             )
             continue
 
-        ru_base = _read_at_base(repo_path, merge_base_with, pair.ru_path)
-        en_main = _read_at_base(repo_path, merge_base_with, pair.en_path)
+        ru_base, en_main = _read_navigation_baselines(
+            repo_path,
+            merge_base_with,
+            ru_path=pair.ru_path,
+            en_path=pair.en_path,
+        )
         results.append(
             verify_navigation_pair(
                 pair,

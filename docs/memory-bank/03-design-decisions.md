@@ -442,6 +442,24 @@ mirror was often already gone — ``git add`` fails with exit 128.
 ``git_commit_paths`` runs ``git rm --ignore-unmatch`` for deletes, then ``git add``
 for writes. Idempotent when EN mirror is already absent (merged/rename PRs).
 
+### 6.44. Fork PR navigation baselines read upstream EN toc
+
+**Problem:** PR #42884 (source #37955, fork, RU-only) collapsed ``toc_i.yaml`` to a
+single ``enrichment.md`` item and blocked on ``index.md`` / ``topics.md`` in scope.
+
+**Root cause:**
+
+1. ``en_main`` was read at ``merge-base(origin/main, fork_HEAD)`` on the fork
+   checkout — EN navigation files are often **absent** there. Scoped merge kept
+   only in-scope hrefs.
+2. ``extra_toc_hrefs_from_md_targets`` unioned every translated ``.md`` basename
+   into **every** toc pair (``topics.md`` from recipes/, ``index.md`` page file).
+
+**Decision:** ``_read_navigation_baselines()`` — RU at merge-base; EN at
+merge-base with **fallback to** ``merge_base_with`` (upstream ``main``).
+``extra_toc_hrefs_for_pair()`` intersects translated basenames with hrefs in
+that RU PR toc before scope union.
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,
