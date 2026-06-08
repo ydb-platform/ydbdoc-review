@@ -62,8 +62,16 @@ def _read_at_base(repo_path: str, merge_base_with: str, rel_path: str) -> str:
 def extra_toc_hrefs_from_md_targets(
     translated_en_paths: set[str],
 ) -> set[str]:
-    """Basenames of newly translated EN pages (§6.17 union with toc scope)."""
-    return {PurePosixPath(p).name for p in translated_en_paths}
+    """Basenames of newly translated EN pages (§6.17 union with toc scope).
+
+    Locale ``_includes/*.md`` fragments are translated but are not sidebar
+    ``href``s — exclude them (§6.42).
+    """
+    return {
+        PurePosixPath(p).name
+        for p in translated_en_paths
+        if "/_includes/" not in p
+    }
 
 
 def _translate_menu_labels(

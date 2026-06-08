@@ -411,6 +411,21 @@ That conflated two Diplodoc layouts:
 `docs/` but **not** under `docs/ru/` or `docs/en/`. `build_doc_pairs` and
 `expected_en_mirrors` pick up locale includes automatically.
 
+### 6.42. ``extra_toc_hrefs`` must not list locale ``_includes``
+
+**Problem:** After §6.41, PR #42768 translated `orm/_includes/toc-table.md` but
+`doc_translate` blocked merge: ``scope_not_applied: href 'toc-table.md' was in
+translate scope but missing from EN toc``.
+
+**Root cause:** `extra_toc_hrefs_from_md_targets()` unioned **every** translated
+``.md`` basename into TOC scope. Include fragments (toc-table, auth snippets)
+are not sidebar ``href``s — they must never appear in ``toc*.yaml``.
+
+**Decision:** Skip paths containing ``/_includes/`` in
+`extra_toc_hrefs_from_md_targets()`. TOC diff scope still comes from
+`toc_translate_scope(ru_base, ru_pr)`; only standalone pages contribute
+``new_hrefs``.
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,

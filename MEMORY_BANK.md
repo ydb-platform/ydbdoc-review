@@ -31,7 +31,7 @@ use the parts below.
 |---|------|
 | 0–3 | [01-overview](docs/memory-bank/01-overview.md) |
 | 4–5 | [02-codebase](docs/memory-bank/02-codebase.md) |
-| 6 (incl. §6.41 locale _includes, §6.40–§6.39, §6.37–§6.36, §6.35 verify nav) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
+| 6 (incl. §6.42 extra_toc_hrefs, §6.41 locale _includes, §6.40–§6.39, §6.37–§6.36) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
 | 7, 9–11 | [04-development](docs/memory-bank/04-development.md) |
 | 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phases A–I done; nav YAML workflow glue TBD |
 | 12–14, 18 | [06-llm-config](docs/memory-bank/06-llm-config.md) |
