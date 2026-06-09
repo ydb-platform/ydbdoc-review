@@ -142,12 +142,6 @@ Model URI format: `gpt://<folder_id>/<model_slug>` (constructed in `YandexLLMCli
 | Report format | `reporting/builder.py`, Memory Bank §17 |
 | Nav merge rule | `navigation/toc.py`, `pipeline/navigation_merge.py` |
 
-## v1 vs v2
-
-v1 (legacy on `main` before `doc-translate-ng`) used line/region masking and TOML config. v2 replaces
-that with a structured AST, pydantic JSON schemas for LLM I/O, and YAML config.
-The Action entrypoint interface (`action.yml` inputs) is preserved for the `ydb` repo.
-
 ## Testing layers
 
 1. **Unit** — parser, segmentation, navigation, mocked LLM (`tests/unit/`).
