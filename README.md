@@ -2,7 +2,7 @@
 
 GitHub Action и CLI для автоматического перевода документации YDB (**RU ↔ EN**) с QA-критиком.
 
-Релиз: **`v0.1.0`** (ветка `doc-translate-ng`) — AST-пайплайн: parse → segment → translate → critic → render.
+Релиз: **`v0.1.0`** на ветке `main` — AST-пайплайн: parse → segment → translate → critic → render.
 
 ## Архитектура
 

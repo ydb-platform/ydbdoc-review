@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 720" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="720" viewBox="0 0 1120 720" role="img" aria-label="ydbdoc-review architecture">
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0,0 L8,4 L0,8 Z" fill="#475569"/>
@@ -8,92 +7,67 @@
       <stop offset="0%" stop-color="#f8fafc"/>
       <stop offset="100%" stop-color="#eef2ff"/>
     </linearGradient>
-    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
-    </filter>
   </defs>
 
   <rect width="1120" height="720" fill="url(#bg)"/>
-  <text x="560" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">ydbdoc-review  architecture</text>
-  <text x="560" y="56" text-anchor="middle" font-size="13" fill="#64748b">AST pipeline for YDB docs RU î EN ∑ GitHub Action + CLI ∑ v0.1.0</text>
+  <text x="560" y="34" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" fill="#0f172a">ydbdoc-review - architecture</text>
+  <text x="560" y="56" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" fill="#64748b">AST pipeline for YDB docs RU &lt;-&gt; EN - GitHub Action + CLI - v0.1.0</text>
 
-  <!-- External -->
-  <g filter="url(#shadow)">
-    <rect x="40" y="84" width="220" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
-    <text x="150" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">ydb-platform/ydb</text>
-    <text x="150" y="134" text-anchor="middle" font-size="12" fill="#475569">PR with docs changes</text>
-    <text x="150" y="154" text-anchor="middle" font-size="12" fill="#475569">labels: doc_translate ∑ doc_verify</text>
-  </g>
+  <rect x="40" y="84" width="220" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="150" y="112" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" fill="#0f172a">ydb-platform/ydb</text>
+  <text x="150" y="134" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#475569">PR with docs changes</text>
+  <text x="150" y="154" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#475569">labels: doc_translate, doc_verify</text>
 
-  <g filter="url(#shadow)">
-    <rect x="860" y="84" width="220" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
-    <text x="970" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Yandex AI Studio</text>
-    <text x="970" y="134" text-anchor="middle" font-size="12" fill="#475569">OpenAI-compatible API</text>
-    <text x="970" y="154" text-anchor="middle" font-size="12" fill="#475569">translate + critic models</text>
-  </g>
+  <rect x="860" y="84" width="220" height="88" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="970" y="112" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" fill="#0f172a">Yandex AI Studio</text>
+  <text x="970" y="134" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#475569">OpenAI-compatible API</text>
+  <text x="970" y="154" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#475569">translate + critic models</text>
 
-  <!-- Entry -->
-  <g filter="url(#shadow)">
-    <rect x="330" y="84" width="460" height="88" rx="10" fill="#dbeafe" stroke="#93c5fd"/>
-    <text x="560" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">Entry points</text>
-    <text x="420" y="138" text-anchor="middle" font-size="12" fill="#1d4ed8">GitHub Action (Docker)</text>
-    <text x="420" y="156" text-anchor="middle" font-size="11" fill="#1e40af">action.yml í entrypoint.sh</text>
-    <text x="700" y="138" text-anchor="middle" font-size="12" fill="#1d4ed8">CLI</text>
-    <text x="700" y="156" text-anchor="middle" font-size="11" fill="#1e40af">ydbdoc-review run | verify</text>
-  </g>
+  <rect x="330" y="84" width="460" height="88" rx="10" fill="#dbeafe" stroke="#93c5fd"/>
+  <text x="560" y="112" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" fill="#1e3a8a">Entry points</text>
+  <text x="420" y="138" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#1d4ed8">GitHub Action (Docker)</text>
+  <text x="420" y="156" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#1e40af">action.yml - entrypoint.sh</text>
+  <text x="700" y="138" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#1d4ed8">CLI</text>
+  <text x="700" y="156" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#1e40af">ydbdoc-review run | verify</text>
 
   <line x1="260" y1="128" x2="330" y2="128" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="790" y1="128" x2="860" y2="128" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Workflow -->
-  <g filter="url(#shadow)">
-    <rect x="330" y="200" width="460" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
-    <text x="560" y="226" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">github/workflow.py</text>
-    <text x="560" y="248" text-anchor="middle" font-size="12" fill="#475569">run_doc_translate ∑ run_doc_verify</text>
-    <text x="560" y="264" text-anchor="middle" font-size="11" fill="#64748b">git diff ∑ PR context ∑ branch push ∑ comments</text>
-  </g>
+  <rect x="330" y="200" width="460" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="560" y="226" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" fill="#0f172a">github/workflow.py</text>
+  <text x="560" y="248" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#475569">run_doc_translate, run_doc_verify</text>
+  <text x="560" y="264" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#64748b">git diff, PR context, branch push, comments</text>
   <line x1="560" y1="172" x2="560" y2="200" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- PR orchestration row -->
-  <g filter="url(#shadow)">
-    <rect x="40" y="300" width="200" height="110" rx="10" fill="#fef3c7" stroke="#fcd34d"/>
-    <text x="140" y="326" text-anchor="middle" font-size="13" font-weight="600" fill="#92400e">Pairing</text>
-    <text x="140" y="348" text-anchor="middle" font-size="11" fill="#78350f">pipeline/pairs.py</text>
-    <text x="140" y="368" text-anchor="middle" font-size="11" fill="#78350f">ru/& î en/&</text>
-    <text x="140" y="388" text-anchor="middle" font-size="11" fill="#78350f">nav YAML ∑ _includes</text>
-  </g>
+  <rect x="40" y="300" width="200" height="110" rx="10" fill="#fef3c7" stroke="#fcd34d"/>
+  <text x="140" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" fill="#92400e">Pairing</text>
+  <text x="140" y="348" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#78350f">pipeline/pairs.py</text>
+  <text x="140" y="368" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#78350f">ru/... &lt;-&gt; en/...</text>
+  <text x="140" y="388" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#78350f">nav YAML, _includes</text>
 
-  <g filter="url(#shadow)">
-    <rect x="260" y="300" width="240" height="110" rx="10" fill="#dcfce7" stroke="#86efac"/>
-    <text x="380" y="326" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">Per-file pipeline</text>
-    <text x="380" y="348" text-anchor="middle" font-size="11" fill="#14532d">pipeline/translate_file.py</text>
-    <text x="380" y="368" text-anchor="middle" font-size="11" fill="#14532d">orchestrator.py (sequential)</text>
-    <text x="380" y="388" text-anchor="middle" font-size="11" fill="#14532d">shared segment cache per PR</text>
-  </g>
+  <rect x="260" y="300" width="240" height="110" rx="10" fill="#dcfce7" stroke="#86efac"/>
+  <text x="380" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" fill="#166534">Per-file pipeline</text>
+  <text x="380" y="348" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#14532d">pipeline/translate_file.py</text>
+  <text x="380" y="368" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#14532d">orchestrator.py (sequential)</text>
+  <text x="380" y="388" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#14532d">shared segment cache per PR</text>
 
-  <g filter="url(#shadow)">
-    <rect x="520" y="300" width="200" height="110" rx="10" fill="#ede9fe" stroke="#c4b5fd"/>
-    <text x="620" y="326" text-anchor="middle" font-size="13" font-weight="600" fill="#5b21b6">Navigation merge</text>
-    <text x="620" y="348" text-anchor="middle" font-size="11" fill="#4c1d95">navigation_merge.py</text>
-    <text x="620" y="368" text-anchor="middle" font-size="11" fill="#4c1d95">toc*.yaml ∑ redirects</text>
-    <text x="620" y="388" text-anchor="middle" font-size="11" fill="#4c1d95">scoped merge vs EN-main</text>
-  </g>
+  <rect x="520" y="300" width="200" height="110" rx="10" fill="#ede9fe" stroke="#c4b5fd"/>
+  <text x="620" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" fill="#5b21b6">Navigation merge</text>
+  <text x="620" y="348" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#4c1d95">navigation_merge.py</text>
+  <text x="620" y="368" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#4c1d95">toc*.yaml, redirects</text>
+  <text x="620" y="388" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#4c1d95">scoped merge vs EN-main</text>
 
-  <g filter="url(#shadow)">
-    <rect x="740" y="300" width="160" height="110" rx="10" fill="#fee2e2" stroke="#fca5a5"/>
-    <text x="820" y="326" text-anchor="middle" font-size="13" font-weight="600" fill="#991b1b">Gates</text>
-    <text x="820" y="348" text-anchor="middle" font-size="11" fill="#7f1d1d">completeness.py</text>
-    <text x="820" y="368" text-anchor="middle" font-size="11" fill="#7f1d1d">validation/heuristics</text>
-    <text x="820" y="388" text-anchor="middle" font-size="11" fill="#7f1d1d">nav validate_toc_merge</text>
-  </g>
+  <rect x="740" y="300" width="160" height="110" rx="10" fill="#fee2e2" stroke="#fca5a5"/>
+  <text x="820" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" fill="#991b1b">Gates</text>
+  <text x="820" y="348" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#7f1d1d">completeness.py</text>
+  <text x="820" y="368" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#7f1d1d">validation/heuristics</text>
+  <text x="820" y="388" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#7f1d1d">nav validate_toc_merge</text>
 
-  <g filter="url(#shadow)">
-    <rect x="920" y="300" width="160" height="110" rx="10" fill="#e0f2fe" stroke="#7dd3fc"/>
-    <text x="1000" y="326" text-anchor="middle" font-size="13" font-weight="600" fill="#075985">Reporting</text>
-    <text x="1000" y="348" text-anchor="middle" font-size="11" fill="#0c4a6e">reporting/builder.py</text>
-    <text x="1000" y="368" text-anchor="middle" font-size="11" fill="#0c4a6e">=‚/=·/=4 per file</text>
-    <text x="1000" y="388" text-anchor="middle" font-size="11" fill="#0c4a6e">tokens ∑ cost estimate</text>
-  </g>
+  <rect x="920" y="300" width="160" height="110" rx="10" fill="#e0f2fe" stroke="#7dd3fc"/>
+  <text x="1000" y="326" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="600" fill="#075985">Reporting</text>
+  <text x="1000" y="348" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#0c4a6e">reporting/builder.py</text>
+  <text x="1000" y="368" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#0c4a6e">ok / warn / block per file</text>
+  <text x="1000" y="388" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#0c4a6e">tokens, cost estimate</text>
 
   <line x1="560" y1="272" x2="140" y2="300" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="560" y1="272" x2="380" y2="300" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
@@ -102,53 +76,46 @@
   <line x1="560" y1="272" x2="1000" y2="300" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="500" y1="355" x2="860" y2="128" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
 
-  <!-- Per-file detail -->
-  <g filter="url(#shadow)">
-    <rect x="40" y="440" width="1040" height="148" rx="12" fill="#ffffff" stroke="#cbd5e1"/>
-    <text x="560" y="466" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Per-file AST pipeline (translate_file)</text>
+  <rect x="40" y="440" width="1040" height="148" rx="12" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="560" y="466" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" fill="#0f172a">Per-file AST pipeline (translate_file)</text>
 
-    <rect x="60" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="119" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">parse</text>
-    <rect x="194" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="253" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">segment</text>
-    <rect x="328" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="387" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">translate</text>
-    <rect x="462" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="521" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">reinsert</text>
-    <rect x="596" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="655" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">critic</text>
-    <rect x="730" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="789" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">validate</text>
-    <rect x="864" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="923" y="508" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">render</text>
+  <rect x="60" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="119" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">parse</text>
+  <rect x="194" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="253" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">segment</text>
+  <rect x="328" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="387" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">translate</text>
+  <rect x="462" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="521" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">reinsert</text>
+  <rect x="596" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="655" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">critic</text>
+  <rect x="730" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="789" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">validate</text>
+  <rect x="864" y="482" width="118" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="923" y="508" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="600" fill="#334155">render</text>
 
-    <line x1="178" y1="504" x2="194" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
-    <line x1="312" y1="504" x2="328" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
-    <line x1="446" y1="504" x2="462" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
-    <line x1="580" y1="504" x2="596" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
-    <line x1="714" y1="504" x2="730" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
-    <line x1="848" y1="504" x2="864" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="178" y1="504" x2="194" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="312" y1="504" x2="328" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="446" y1="504" x2="462" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="580" y1="504" x2="596" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="714" y1="504" x2="730" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="848" y1="504" x2="864" y2="504" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
 
-    <text x="119" y="548" text-anchor="middle" font-size="10" fill="#64748b">parsing/</text>
-    <text x="253" y="548" text-anchor="middle" font-size="10" fill="#64748b">segmentation/</text>
-    <text x="387" y="548" text-anchor="middle" font-size="10" fill="#64748b">translation/</text>
-    <text x="521" y="548" text-anchor="middle" font-size="10" fill="#64748b">segmentation/</text>
-    <text x="655" y="548" text-anchor="middle" font-size="10" fill="#64748b">translation/</text>
-    <text x="789" y="548" text-anchor="middle" font-size="10" fill="#64748b">validation/</text>
-    <text x="923" y="548" text-anchor="middle" font-size="10" fill="#64748b">rendering/</text>
-
-    <text x="560" y="572" text-anchor="middle" font-size="11" fill="#64748b">Fenced code &amp; YFM structure never sent to LLM ∑ critic fixes by segment_id ∑ placeholders ÊC1Á preserved</text>
-  </g>
+  <text x="119" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">parsing/</text>
+  <text x="253" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">segmentation/</text>
+  <text x="387" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">translation/</text>
+  <text x="521" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">segmentation/</text>
+  <text x="655" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">translation/</text>
+  <text x="789" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">validation/</text>
+  <text x="923" y="548" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">rendering/</text>
+  <text x="560" y="572" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#64748b">Fenced code and YFM never sent to LLM; critic fixes by segment_id; placeholders preserved</text>
 
   <line x1="380" y1="410" x2="560" y2="440" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Output -->
-  <g filter="url(#shadow)">
-    <rect x="260" y="620" width="600" height="72" rx="10" fill="#ecfdf5" stroke="#6ee7b7"/>
-    <text x="560" y="646" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">Output (doc_translate)</text>
-    <text x="560" y="668" text-anchor="middle" font-size="12" fill="#047857">branch ydbdoc-review/pr-N on upstream ∑ translation PR ∑ reports in both PRs</text>
-  </g>
+  <rect x="260" y="620" width="600" height="72" rx="10" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="560" y="646" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="600" fill="#065f46">Output (doc_translate)</text>
+  <text x="560" y="668" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#047857">branch ydbdoc-review/pr-N on upstream, translation PR, reports</text>
   <line x1="560" y1="588" x2="560" y2="620" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <text x="560" y="706" text-anchor="middle" font-size="11" fill="#94a3b8">Package map and extension points: ARCHITECTURE.md ∑ design rationale: MEMORY_BANK.md</text>
+  <text x="560" y="706" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#94a3b8">Details: ARCHITECTURE.md and MEMORY_BANK.md</text>
 </svg>
