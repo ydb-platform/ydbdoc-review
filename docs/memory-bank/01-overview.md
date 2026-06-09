@@ -32,6 +32,7 @@
 ├── entrypoint.sh              # maps INPUT_* → ydbdoc-review CLI
 ├── docs/memory-bank/          # Memory Bank parts (see MEMORY_BANK.md index)
 ├── MEMORY_BANK.md             # index → docs/memory-bank/*.md
+├── architecture.svg           # component diagram (next to README)
 ├── ARCHITECTURE.md            # developer architecture overview (v2)
 ├── CONTRIBUTING.md            # contributor guide
 └── README.md                  # user-oriented overview (v2)
