@@ -1,7 +1,6 @@
 # Architecture — ydbdoc-review v2
 
-This document describes the **v2 AST pipeline** (release tag `v0.1.0`, branch
-`doc-translate-ng`). For narrative design rationale, see [Memory Bank](MEMORY_BANK.md).
+This document describes the **v2 AST pipeline**. For narrative design rationale, see [Memory Bank](MEMORY_BANK.md).
 
 **Diagram (overview):** [architecture.svg](architecture.svg) — component map next to [README.md](README.md).
 
