@@ -46,6 +46,7 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
    _finalize_en_target(rendered, source_text):
      enforce_source_fenced_blocks  # verbatim fence bodies from normalized RU
      translate_cyrillic_fence_comments_with_client  # ``//`` / ``#`` lines only (§6.39)
+     translate_cyrillic_prose_with_client  # residual Cyrillic in prose/backticks (§6.45)
      localize_links_in_text      # Wikipedia langlinks safety net (§6.37)
      postprocess_en_target_markdown  # homoglyphs + `<строка>`→`<string>` (§6.28)
 

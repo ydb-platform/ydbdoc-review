@@ -35,6 +35,23 @@ def _mock_client(responses: list[str]) -> YandexLLMClient:
     )
 
 
+def _prose_unfixed_cyrillic_json(text: str) -> str:
+    """Prose-pass JSON that keeps Cyrillic (rejected when applying fixes)."""
+    from ydbdoc_review.validation.prose_cyrillic import collect_cyrillic_prose_spans
+
+    spans = collect_cyrillic_prose_spans(text)
+    if not spans:
+        return json.dumps({"spans": []})
+    return json.dumps(
+        {
+            "spans": [
+                {"id": span.span_id, "text": span.text} for span in spans
+            ]
+        },
+        ensure_ascii=False,
+    )
+
+
 def _translate_json(segments, mapping: dict[str, str]) -> str:
     payload = {
         "segments": [
@@ -228,10 +245,13 @@ def test_translate_file_heuristics_bump_verdict_to_warnings():
     segments = extract_segments(parse_markdown(source))
     seg_id = segments[0].id
     # Critic OK, but translation leaves Cyrillic in EN target.
-    translate_raw = _translate_json(segments, {seg_id: "Text with привет inside."})
+    translated = "Text with привет inside."
+    translate_raw = _translate_json(segments, {seg_id: translated})
     critic_raw = json.dumps({"verdict": "ok", "issues": []})
 
-    client = _mock_client([translate_raw, critic_raw])
+    client = _mock_client(
+        [translate_raw, _prose_unfixed_cyrillic_json(translated), critic_raw]
+    )
     result = translate_file(
         source,
         client,
@@ -250,7 +270,8 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
     segments = extract_segments(parse_markdown(source))
     seg_id = segments[0].id
 
-    translate_raw = _translate_json(segments, {seg_id: "Problem with привет."})
+    translated = "Problem with привет."
+    translate_raw = _translate_json(segments, {seg_id: translated})
     critic_raw = json.dumps(
         {
             "verdict": "blocked",
@@ -280,7 +301,16 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
         }
     )
 
-    client = _mock_client([translate_raw, critic_raw, verify_raw])
+    prose_raw = _prose_unfixed_cyrillic_json(translated)
+    client = _mock_client(
+        [
+            translate_raw,
+            prose_raw,
+            critic_raw,
+            prose_raw,
+            verify_raw,
+        ]
+    )
     result = translate_file(
         source,
         client,

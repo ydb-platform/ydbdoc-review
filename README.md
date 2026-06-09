@@ -15,7 +15,7 @@ GitHub Action и CLI для автоматического перевода до
 | Пары | `pipeline/pairs.py` | `docs/ru/…` ↔ `docs/en/…`, locale `_includes`, nav YAML |
 | Перевод | `pipeline/translate_file.py` | AST-пайплайн на файл |
 | Навигация | `pipeline/navigation_merge.py` | Scoped merge `toc*.yaml` и redirect YAML |
-| QA | `validation/`, `translation/critic.py` | Эвристики, fence integrity, nav gates |
+| QA | `validation/`, `translation/critic.py` | Эвристики, fence integrity, дочистка кириллицы в prose (§6.45), nav gates |
 | Отчёты | `reporting/builder.py` | 🟢/🟡/🔴, токены, оценка стоимости |
 | LLM | `llm/client.py` | Yandex AI Studio (OpenAI-compatible API) |
 
@@ -27,8 +27,9 @@ GitHub Action и CLI для автоматического перевода до
 
 1. Находит изменённые пары `ydb/docs/ru/…` ↔ `ydb/docs/en/…` (включая locale `_includes/*.md`).
 2. Переводит `.md` через Yandex AI Studio; мержит изменённые `toc*.yaml` / redirect YAML.
-3. Запускает **critic** + эвристики; применяет безопасные правки по `segment_id`.
-4. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**, комментирует оба PR.
+3. Дочищает остатки кириллицы в EN prose и inline `` `…` `` (после копирования fenced code).
+4. Запускает **critic** + эвристики; применяет безопасные правки по `segment_id`.
+5. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**, комментирует оба PR.
 
 ### `doc_verify` (лейбл на translation PR)
 

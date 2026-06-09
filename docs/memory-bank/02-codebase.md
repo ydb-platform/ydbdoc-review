@@ -60,6 +60,7 @@ src/ydbdoc_review/
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
 │   ├── fence_integrity.py         copy fences from source; detect pipeline drift
 │   ├── fence_comments.py          Cyrillic ``//``/``#`` comment translate + QA (§6.39)
+│   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
 │   ├── link_locale.py             URL locale mirror + link_locale QA (§6.34, §6.37)
 │   ├── wikipedia_links.py         MediaWiki langlinks API (RU↔EN slugs, §6.37)

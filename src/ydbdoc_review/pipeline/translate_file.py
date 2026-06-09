@@ -30,6 +30,9 @@ from ydbdoc_review.reporting.locations import build_segment_line_map
 from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_fence_comments_with_client,
 )
+from ydbdoc_review.validation.prose_cyrillic import (
+    translate_cyrillic_prose_with_client,
+)
 from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -69,10 +72,19 @@ def _finalize_en_target(
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
 ) -> str:
-    """Copy fenced bodies from RU, translate Cyrillic comments, EN postprocess."""
+    """Copy fenced bodies from RU, translate residual Cyrillic, EN postprocess."""
     text = enforce_source_fenced_blocks(text, normalized_source_text)
     if client is not None and glossary is not None:
         text = translate_cyrillic_fence_comments_with_client(
+            text,
+            client,
+            glossary,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+        )
+        text = translate_cyrillic_prose_with_client(
             text,
             client,
             glossary,

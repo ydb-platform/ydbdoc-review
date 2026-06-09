@@ -460,6 +460,34 @@ merge-base with **fallback to** ``merge_base_with`` (upstream ``main``).
 ``extra_toc_hrefs_for_pair()`` intersects translated basenames with hrefs in
 that RU PR toc before scope union.
 
+### 6.45. Residual Cyrillic in EN prose and inline backticks (PR #43018 / topic.md)
+
+**Problem:** PR #43018 — EN ``topic.md`` kept Russian inline terms
+(`` `смещением` ``, `` `топик`, `источник` ``) inside otherwise English prose.
+Critic returned ``ok``; ``check_cyrillic_in_en`` blocked the file (48 Cyrillic chars).
+
+**Root cause:**
+
+1. Translator/critic treat inline `` `…` `` as identifiers; LLM copied RU terms
+   from bilingual RU patterns (`` `смещением` (offset) ``).
+2. §6.39 fence-comment pass does not touch prose outside fences.
+3. Homoglyph postprocess (§6.28) only fixes look-alike letters on ASCII-heavy
+   config lines — not prose Cyrillic.
+4. ``check_cyrillic_in_en`` detects but does not repair.
+
+**Decision:**
+
+1. **Finalize step** (`translate_file._finalize_en_target`): after fence-comment
+   translate, run ``translate_cyrillic_prose_with_client`` — one LLM JSON batch
+   per file for Cyrillic snippets in prose and inline backticks (fences excluded).
+2. **Critic** prompt: flag residual Cyrillic in target prose/backticks as
+   ``blocked``.
+3. **Heuristic** ``check_cyrillic_in_en`` unchanged — still blocking when the
+   prose pass fails or LLM leaves Cyrillic.
+
+Implementation: ``validation/prose_cyrillic.py``. Tests:
+``tests/unit/test_prose_cyrillic.py``.
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,

@@ -96,7 +96,7 @@ flowchart LR
 2. **Extract** translatable segments (headings, prose, table cells, note bodies, …).
 3. **Translate** segments in char-budget batches (`translation/translator.py`); per-PR segment cache.
 4. **Reinsert** translations into a copy of the AST (`segmentation/reinsert.py`).
-5. **Finalize EN** — fence copy, Cyrillic fence comments, link locale, homoglyphs.
+5. **Finalize EN** — fence copy, Cyrillic fence comments, prose Cyrillic cleanup, link locale, homoglyphs.
 6. **Critic** reviews target text; applies fixes via `suggested_text` per `segment_id` (not find/replace).
 7. **Verify** pass on unresolved issues (optional second critic call).
 8. **Heuristics** — length, Cyrillic-in-EN, fence parity, anchors, nav-adjacent checks.

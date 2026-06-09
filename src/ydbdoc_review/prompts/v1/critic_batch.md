@@ -13,7 +13,7 @@ Each item has `source_text` ({source_lang}) and `translated_text` ({target_lang}
 
 ## Task
 
-Find translation issues **only in the segments listed above**: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), placeholder corruption, CLI flag damage.
+Find translation issues **only in the segments listed above**: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), placeholder corruption, CLI flag damage, **residual Cyrillic in {target_lang} prose or inline `` `…` `` terms** (severity `blocked` when present).
 
 Return **only** JSON:
 
