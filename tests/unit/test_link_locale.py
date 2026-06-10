@@ -65,6 +65,14 @@ def test_localize_links_fixes_broken_en_wikipedia_slug(monkeypatch):
         ("https://example.com/json-ru.html", "https://example.com/index.html"),
         ("#anchor", "#anchor"),
         ("", ""),
+        (
+            "../../_assets/example-topic-design-rub.svg",
+            "../../_assets/example-topic-design.svg",
+        ),
+        (
+            "../../_assets/example-basic-design-rub.png",
+            "../../_assets/example-basic-design.png",
+        ),
     ],
 )
 def test_mirror_link_href(href: str, expected: str, monkeypatch) -> None:
@@ -98,6 +106,23 @@ def test_check_link_locale_flags_ru_host_in_en_document():
 def test_check_link_locale_skipped_for_ru_target():
     md = "См. [wiki](https://ru.wikipedia.org/wiki/Foo).\n"
     assert check_link_locale_in_en(md, target_lang="ru") == []
+
+
+def test_localize_links_in_document_fixes_ru_asset_suffix_in_image():
+    md = "![topic-design](../../_assets/example-topic-design-rub.svg)\n"
+    doc = parse_markdown(md)
+    localize_links_in_document(doc)
+    out = render_markdown(doc)
+    assert "example-topic-design.svg" in out
+    assert "-rub" not in out
+    assert check_link_locale_in_en(out) == []
+
+
+def test_check_link_locale_flags_ru_asset_suffix_in_relative_image():
+    md = "![topic-design](../../_assets/example-topic-design-rub.svg)\n"
+    issues = check_link_locale_in_en(md)
+    assert len(issues) == 1
+    assert "RU asset suffix in EN relative path" in issues[0]
 
 
 def test_localize_links_in_document_table_cell():

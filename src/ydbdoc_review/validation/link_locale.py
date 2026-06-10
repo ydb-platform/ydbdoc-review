@@ -67,6 +67,30 @@ _EN_LOCALE_HOSTS = (
     re.compile(r"(?i)en\.wikipedia\.org"),
     re.compile(r"(?i)yandex\.cloud/en/docs"),
 )
+# ydb docs: RU diagrams use ``-rub.svg``; EN mirror uses the same basename without ``-rub``.
+_RU_ASSET_SUFFIX_BEFORE_EXT = re.compile(
+    r"-rub(?=\.(?:svg|png|jpe?g|gif|webp)$)",
+    re.IGNORECASE,
+)
+_RELATIVE_HREF = re.compile(r"^(?:\.\.?/|[^:/?#]+/)")
+
+
+def _is_relative_href(href: str) -> bool:
+    if not href or href.startswith("#"):
+        return False
+    if _HTTP_HREF.match(href) or href.startswith("mailto:"):
+        return False
+    return bool(_RELATIVE_HREF.match(href) or "/" in href and "://" not in href)
+
+
+def _mirror_relative_asset_path(href: str, *, target_lang: str) -> str:
+    """Map locale-specific asset filenames on relative image/link paths."""
+    if not _is_relative_href(href):
+        return href
+    tgt = target_lang.strip().lower()
+    if tgt in {"en", "english"}:
+        return _RU_ASSET_SUFFIX_BEFORE_EXT.sub("", href)
+    return href
 
 
 def mirror_link_href(href: str, *, target_lang: str = "en") -> str:
@@ -93,7 +117,7 @@ def mirror_link_href(href: str, *, target_lang: str = "en") -> str:
         out = out.replace(old, new)
     for pattern, repl in path_repl:
         out = pattern.sub(repl, out)
-    return out
+    return _mirror_relative_asset_path(out, target_lang=target_lang)
 
 
 def _walk_inline(
@@ -166,6 +190,18 @@ def collect_link_hrefs(doc: Document) -> list[str]:
     return hrefs
 
 
+def collect_relative_hrefs(doc: Document) -> list[str]:
+    """Return relative link/image paths from a parsed markdown document."""
+    hrefs: list[str] = []
+
+    def remember(href: str) -> None:
+        if _is_relative_href(href):
+            hrefs.append(href)
+
+    _walk_blocks(doc.children, target_lang="en", on_href=remember)
+    return hrefs
+
+
 def _href_has_cyrillic(href: str) -> bool:
     parsed = urlparse(href)
     path_query = f"{parsed.path}?{parsed.query}"
@@ -180,6 +216,10 @@ def _en_host_ru_slug(href: str) -> bool:
     if not any(pattern.search(href) for pattern in _EN_LOCALE_HOSTS):
         return False
     return _href_has_cyrillic(href)
+
+
+def _relative_path_has_ru_asset_suffix(href: str) -> bool:
+    return bool(_RU_ASSET_SUFFIX_BEFORE_EXT.search(href))
 
 
 def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> list[str]:
@@ -208,6 +248,14 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
                 issues.append(
                     f"link_locale: Cyrillic path on EN-locale URL: {href}"
                 )
+    for href in collect_relative_hrefs(doc):
+        if href in seen:
+            continue
+        seen.add(href)
+        if _relative_path_has_ru_asset_suffix(href):
+            issues.append(
+                f"link_locale: RU asset suffix in EN relative path: {href}"
+            )
     return issues
 
 

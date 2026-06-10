@@ -504,6 +504,27 @@ warning as §6.39.
 
 Tests: ``tests/unit/test_fence_comments.py`` (YQL sample).
 
+### 6.47. RU ``-rub`` asset suffix in EN image paths (PR #43034 / topic.md)
+
+**Problem:** PR #43034 — EN ``topic.md`` referenced
+``../../_assets/example-topic-design-rub.svg``. Diplodoc build failed:
+``ENOENT: …/en/_assets/example-topic-design-rub.svg``. Report was 🟢.
+
+**Root cause:**
+
+1. Image ``src`` is copied from RU via ``⟦S{n}⟧`` placeholders (§6.22) — RU uses
+   ``-rub.svg``, EN ``_assets/`` uses the same basename **without** ``-rub``.
+2. ``mirror_link_href`` fixed HTTP locale URLs only, not relative asset paths.
+3. ``check_link_locale_in_en`` scanned HTTP(S) hrefs only.
+
+**Decision:** ``validation/link_locale.py``:
+
+1. ``mirror_link_href`` — strip ``-rub`` before image extensions on relative paths
+   when ``target_lang`` is EN.
+2. ``check_link_locale_in_en`` — flag ``link_locale: RU asset suffix in EN relative path``.
+
+Tests: ``tests/unit/test_link_locale.py``.
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,
