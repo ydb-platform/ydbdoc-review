@@ -27,7 +27,7 @@ GitHub Action и CLI для автоматического перевода до
 
 1. Находит изменённые пары `ydb/docs/ru/…` ↔ `ydb/docs/en/…` (включая locale `_includes/*.md`).
 2. Переводит `.md` через Yandex AI Studio; мержит изменённые `toc*.yaml` / redirect YAML.
-3. Дочищает остатки кириллицы в EN prose и inline `` `…` `` (после копирования fenced code).
+3. Дочищает остатки кириллицы в EN prose, inline `` `…` `` и комментарии ``//`` / ``#`` / ``--`` в fenced code.
 4. Запускает **critic** + эвристики; применяет безопасные правки по `segment_id`.
 5. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**, комментирует оба PR.
 

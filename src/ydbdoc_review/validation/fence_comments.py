@@ -20,10 +20,14 @@ logger = logging.getLogger(__name__)
 
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 _FENCE_OPEN = re.compile(r"^\s*(`{3,}|~{3,})")
-# Line comments used in ydb docs: Go/C++/C#/Java ``//``, Python/shell ``#``.
+# Line comments in ydb docs: Go/C++/C#/Java ``//``, Python/shell ``#``, YQL/SQL ``--``.
 _COMMENT_LINE = re.compile(
     r"^(?P<indent>\s*)(?P<marker>//|#)(?P<spacing>\s*)(?P<body>.*)$"
 )
+_SQL_LINE_COMMENT = re.compile(
+    r"^(?P<indent>\s*)--(?P<spacing>\s+)(?P<body>.*)$"
+)
+_SQL_TRAILING_COMMENT = re.compile(r"(?P<prefix>.*?)(?P<marker>\s--\s+)(?P<body>[^\n]*)$")
 
 
 @dataclass(frozen=True)
@@ -35,17 +39,43 @@ class FenceCommentLine:
 
 
 def _comment_body_if_cyrillic(line: str) -> str | None:
+    for matcher in (_COMMENT_LINE.match, _SQL_LINE_COMMENT.match):
+        m = matcher(line)
+        if m is None:
+            continue
+        body = m.group("body")
+        if body.strip() and _CYRILLIC.search(body):
+            return body
+    trail = _SQL_TRAILING_COMMENT.match(line)
+    if trail is not None:
+        body = trail.group("body")
+        if body.strip() and _CYRILLIC.search(body):
+            return body
+    return None
+
+
+def _replace_comment_body(line: str, new_body: str, *, old_body: str | None = None) -> str:
     m = _COMMENT_LINE.match(line)
-    if not m:
-        return None
-    body = m.group("body")
-    if not body.strip() or not _CYRILLIC.search(body):
-        return None
-    return body
+    if m:
+        spacing = m.group("spacing") or " "
+        return (
+            f"{m.group('indent')}{m.group('marker')}{spacing}{new_body.lstrip()}"
+        )
+    m = _SQL_LINE_COMMENT.match(line)
+    if m:
+        spacing = m.group("spacing") or " "
+        return f"{m.group('indent')}--{spacing}{new_body.lstrip()}"
+    trail = _SQL_TRAILING_COMMENT.match(line)
+    if trail is not None:
+        body = trail.group("body")
+        if old_body is not None and body.strip() != old_body.strip():
+            return line
+        return f"{trail.group('prefix')}{trail.group('marker')}{new_body.lstrip()}"
+    return line
 
 
 def collect_cyrillic_fence_comment_lines(text: str) -> list[FenceCommentLine]:
-    """Ordered ``//`` / ``#`` comment lines with Cyrillic inside fenced blocks."""
+    """Ordered ``//`` / ``#`` / ``--`` comment lines with Cyrillic inside fenced blocks."""
     blocks = collect_code_blocks(parse_markdown(text))
     found: list[FenceCommentLine] = []
     for block_index, block in enumerate(blocks, start=1):
@@ -63,21 +93,11 @@ def collect_cyrillic_fence_comment_lines(text: str) -> list[FenceCommentLine]:
     return found
 
 
-def _replace_comment_body(line: str, new_body: str) -> str:
-    m = _COMMENT_LINE.match(line)
-    if not m:
-        return line
-    spacing = m.group("spacing") or " "
-    return (
-        f"{m.group('indent')}{m.group('marker')}{spacing}{new_body.lstrip()}"
-    )
-
-
 def translate_cyrillic_fence_comments(
     text: str,
     translate_fn: Callable[[str], str],
 ) -> str:
-    """Replace Cyrillic bodies of ``//`` / ``#`` comment lines inside fences."""
+    """Replace Cyrillic bodies of ``//`` / ``#`` / ``--`` comment lines inside fences."""
     doc = parse_markdown(text)
     blocks = collect_code_blocks(doc)
     if not blocks:
@@ -93,7 +113,7 @@ def translate_cyrillic_fence_comments(
             translated = translate_fn(body.strip()).strip()
             if not translated or translated == body.strip():
                 continue
-            new_line = _replace_comment_body(line, translated)
+            new_line = _replace_comment_body(line, translated, old_body=body)
             if new_line != line:
                 lines[line_index] = new_line
                 block_changed = True
@@ -133,7 +153,7 @@ def check_cyrillic_in_en_fence_comments(
     *,
     target_lang: str,
 ) -> list[str]:
-    """Warn when EN fenced ``//`` / ``#`` comments still contain Cyrillic."""
+    """Warn when EN fenced ``//`` / ``#`` / ``--`` comments still contain Cyrillic."""
     if target_lang.lower() != "en":
         return []
     all_items = list(_iter_fence_comment_lines_in_text(target_text))
@@ -201,7 +221,7 @@ def translate_cyrillic_fence_comments_with_client(
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
 ) -> str:
-    """LLM batch translate for Cyrillic ``//`` / ``#`` lines inside fences."""
+    """LLM batch translate for Cyrillic ``//`` / ``#`` / ``--`` lines inside fences."""
     items = collect_cyrillic_fence_comment_lines(text)
     if not items:
         return text
@@ -272,7 +292,9 @@ def translate_cyrillic_fence_comments_with_client(
         if item.line_index >= len(lines):
             continue
         translated = _lookup(item.body, item)
-        new_line = _replace_comment_body(lines[item.line_index], translated)
+        new_line = _replace_comment_body(
+            lines[item.line_index], translated, old_body=item.body
+        )
         if new_line != lines[item.line_index]:
             lines[item.line_index] = new_line
             block.content = "\n".join(lines)

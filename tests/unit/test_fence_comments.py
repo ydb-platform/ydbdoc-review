@@ -24,6 +24,19 @@ from ydbdoc_review.validation.heuristics import (
 )
 
 
+YQL_SAMPLE = dedent("""
+    Data enrichment example with enough English prose for length heuristics here.
+
+    ```yql
+    -- Секрет с токеном для подключения к YDB
+    CREATE SECRET `secrets/ydb_token` WITH (value = "<ydb_token>");
+
+    -- Чтение событий из входного топика
+    $topic_data = SELECT * FROM ydb_source.input_topic;
+    ```
+""").strip()
+
+
 GO_SAMPLE = dedent("""
     Intro paragraph with enough English words for length checks here.
 
@@ -36,6 +49,38 @@ GO_SAMPLE = dedent("""
     }
     ```
 """).strip()
+
+
+def test_collect_cyrillic_fence_comment_lines_yql_sql_dash():
+    items = collect_cyrillic_fence_comment_lines(YQL_SAMPLE)
+    assert len(items) == 2
+    assert "Секрет" in items[0].body
+    assert "Чтение" in items[1].body
+
+
+def test_check_cyrillic_in_en_fence_comments_warns_on_yql_dash():
+    warnings = check_cyrillic_in_en_fence_comments(YQL_SAMPLE, target_lang="en")
+    assert warnings
+    assert warnings[0].startswith("cyrillic_in_fence:")
+
+
+def test_translate_cyrillic_fence_comments_yql_dash():
+    def _fake_translate(body: str) -> str:
+        mapping = {
+            "Секрет с токеном для подключения к YDB": (
+                "Secret with token for connecting to YDB"
+            ),
+            "Чтение событий из входного топика": (
+                "Read events from the input topic"
+            ),
+        }
+        return mapping.get(body.strip(), body)
+
+    translated = translate_cyrillic_fence_comments(YQL_SAMPLE, _fake_translate)
+    assert "Secret with token" in translated
+    assert "Read events from the input topic" in translated
+    assert "Секрет" not in translated
+    assert check_cyrillic_in_en_fence_comments(translated, target_lang="en") == []
 
 
 def test_collect_cyrillic_fence_comment_lines():

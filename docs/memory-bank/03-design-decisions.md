@@ -488,6 +488,22 @@ Critic returned ``ok``; ``check_cyrillic_in_en`` blocked the file (48 Cyrillic c
 Implementation: ``validation/prose_cyrillic.py``. Tests:
 ``tests/unit/test_prose_cyrillic.py``.
 
+### 6.46. YQL/SQL ``--`` comments in fenced blocks (PR #42886 / enrichment.md)
+
+**Problem:** PR #42886 — EN ``enrichment.md`` kept Russian ``--`` comments in
+`` ```yql `` blocks (10 lines). Report was 🟢 «можно мержить».
+
+**Root cause:** §6.39 fence-comment pass and ``check_cyrillic_in_en_fence_comments``
+only handled ``//`` and ``#``. YQL/SQL ``--`` lines were copied verbatim from RU
+with no translate pass and no QA visibility (``check_cyrillic_in_en`` strips all
+fences).
+
+**Decision:** Extend ``validation/fence_comments.py`` — recognize line-start
+``-- `` and trailing `` -- `` comments; same LLM batch translate + ``cyrillic_in_fence``
+warning as §6.39.
+
+Tests: ``tests/unit/test_fence_comments.py`` (YQL sample).
+
 ### 6.40. Human-readable heuristic messages in PR reports
 
 **Problem:** Reports showed raw codes (`fence_body_copy: block 2…`,
