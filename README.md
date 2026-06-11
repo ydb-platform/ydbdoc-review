@@ -120,7 +120,9 @@ ydbdoc-review list-models --live
 
 ## GitHub Action
 
-`action.yml` в корне. Примеры workflow для **ydb** — [`examples/`](examples/).
+`action.yml` в корне. Образ публикуется в **GHCR** при push тега `v*` (workflow
+`docker-publish.yml`); ydb workflows тянут `ghcr.io/ydb-platform/ydbdoc-review:v0.1.0`,
+а не собирают Dockerfile на каждом запуске. Примеры workflow для **ydb** — [`examples/`](examples/).
 
 ```yaml
 permissions:

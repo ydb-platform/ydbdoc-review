@@ -27,4 +27,6 @@ inputs:
 
 runs:
   using: "docker"
-  image: "Dockerfile"
+  # Pre-built on tag push (see .github/workflows/docker-publish.yml). Avoids
+  # Docker Hub timeouts when ydb workflows reference @v0.1.0.
+  image: "docker://ghcr.io/ydb-platform/ydbdoc-review:v0.1.0"

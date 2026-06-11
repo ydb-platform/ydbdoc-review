@@ -21,17 +21,27 @@ CI (Actions captures stdout fine).
 
 ### 19.4. Docker image (GitHub Action)
 
-The Action uses `action.yml` → `Dockerfile`; GitHub **rebuilds the image on each run**
-from the commit behind the ref (e.g. `ydb-platform/ydbdoc-review@v0.1.0`). No local
-`docker build` is required for ydb workflows.
+Consumer workflows (`ydb-platform/ydb@v0.1.0`) pull a **pre-built** image from GHCR:
 
-After changing translation/validation code, move the tag workflows use:
+`ghcr.io/ydb-platform/ydbdoc-review:v0.1.0`
+
+(`action.yml` → `docker://…`, not `Dockerfile` on each run.) This avoids Docker Hub
+timeouts when runners cannot reach `registry-1.docker.io`.
+
+**Publish:** push (or force-move) a `v*` tag — workflow `.github/workflows/docker-publish.yml`
+builds from `Dockerfile` (base `public.ecr.aws/docker/library/python:3.12-slim`) and
+pushes to GHCR. **Always wait for that workflow to finish** before re-running
+`doc_translate` in ydb.
+
+After changing translation/validation code:
 
 ```bash
 git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
+# wait for "Publish action image" on ydbdoc-review
 ```
 
-Label `org.opencontainers.image.revision` records the git SHA in the Dockerfile for debugging.
+`YDBDOC_GIT_SHA` / `org.opencontainers.image.revision` record the ydbdoc-review git SHA
+baked into the image at publish time.
 
 ---
 

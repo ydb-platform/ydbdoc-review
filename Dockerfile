@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# AWS ECR Public mirrors Docker Hub library images; more reliable from GitHub runners.
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 ARG YDBDOC_GIT_SHA=dev
 ENV YDBDOC_GIT_SHA=${YDBDOC_GIT_SHA}
