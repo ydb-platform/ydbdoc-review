@@ -43,6 +43,6 @@ jobs:
           YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
           YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           # Если push repair даёт 403 (fork/upstream): раскомментируйте
           # GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}

@@ -46,7 +46,7 @@ jobs:
         env:
           YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
           YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           # GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}  # только при 403 push
           YDBDOC_REPO_PATH: ${{ github.workspace }}
 
@@ -54,7 +54,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;

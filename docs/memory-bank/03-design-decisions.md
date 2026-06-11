@@ -700,6 +700,31 @@ re-parsed EN and required `_align_translations`. Identical EN could be 🟡 then
 
 Report: blocking/warnings in «Что исправить»; `heuristic_info` in «Справка (не блокирует merge EN)».
 
+### 6.48. Translation report before source PR comment (PR #43151)
+
+**Problem:** [PR #43151](https://github.com/ydb-platform/ydb/pull/43151) — translation
+commit and branch were pushed, but the QA report comment was missing. CI run
+`27288680755` failed with `HTTP 401` on
+`POST …/issues/42789/comments` (short summary on the **source** fork PR).
+
+**Root cause:** `run_doc_translate` posted the source-PR comment **before** the
+translation-PR QA report. `post_issue_comment` raised `GitHubAPIError` → CLI
+exited with code 1 → translation report never posted. Push / `create_pull` /
+`add_issue_labels` had already succeeded on the translation PR.
+
+**Decision:**
+
+1. Post the **translation PR** full report (`build_full_report`) **first**.
+2. Post the **source PR** short summary (`build_source_pr_comment`) second.
+3. Wrap both in `_safe_post_issue_comment` — log `warning`, return `None`; do
+   **not** fail the job when a comment POST returns 4xx (fork source PRs may
+   intermittently get 401 even when translation-PR API calls work).
+
+Same helper for `doc_verify` report posting.
+
+**Tests:** `tests/unit/test_github_workflow.py`
+(`test_run_doc_translate_source_comment_failure_still_posts_report`).
+
 ### 6.28. EN finalize order: enforce fences, then postprocess
 
 **Problem (PR #42548):** `postprocess_en_target_markdown` (homoglyphs, `<строка>`→`<string>`)

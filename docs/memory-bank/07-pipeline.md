@@ -293,6 +293,18 @@ Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-
 
 ## 17. Reporting format
 
+### 17.0. Comment posting order (`doc_translate`)
+
+After push and translation PR open:
+
+1. **Translation PR** — full QA report (`build_full_report`). Primary deliverable
+   for reviewers (§6.48).
+2. **Source PR** — short summary (`build_source_pr_comment`). Best-effort; failures
+   are logged as warnings and do not fail the job (fork source PRs may return HTTP
+   401 on `issues/{n}/comments` while translation-PR API calls succeed).
+
+`doc_verify` posts only the translation PR report (same `_safe_post_issue_comment`).
+
 ### 17.1. Short comment in source PR (after `doc_translate`)
 
 ```markdown

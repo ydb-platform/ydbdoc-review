@@ -123,6 +123,30 @@ def _next_report_number(
     return count + 1
 
 
+def _safe_post_issue_comment(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    body: str,
+    *,
+    label: str,
+) -> str | None:
+    """Post a PR/issue comment; log and return None instead of aborting the job."""
+    try:
+        return gh.post_issue_comment(owner, repo, issue_number, body)
+    except GitHubAPIError as exc:
+        logger.warning(
+            "Could not post %s comment on %s/%s#%s: %s",
+            label,
+            owner,
+            repo,
+            issue_number,
+            exc,
+        )
+        return None
+
+
 def _apply_results_to_disk(
     repo_path: str, result: PRTranslationResult, *, dry_run: bool
 ) -> TouchedPaths:
@@ -366,7 +390,34 @@ def run_doc_translate(
                         exc,
                     )
 
-    job.source_comment_url = gh.post_issue_comment(
+    # Translation QA report first: reviewers need it on the translation PR even when
+    # the short source-PR summary cannot be posted (fork PRs may return HTTP 401).
+    if tr_pr_number is not None:
+        report_num = _next_report_number(gh, owner, repo, tr_pr_number)
+        report_meta = ReportMeta(
+            mode="doc_translate",
+            report_number=report_num,
+            elapsed_s=elapsed,
+            checkout_ref=git_head_sha(repo_path),
+        )
+        job.translation_comment_url = _safe_post_issue_comment(
+            gh,
+            owner,
+            repo,
+            tr_pr_number,
+            build_full_report(
+                pr_result,
+                meta=report_meta,
+                config=cfg,
+                usage=client.usage_tracker,
+                glossary=glossary,
+                link=ReportLinkContext(github_repo=github_repo, ref=branch),
+            ),
+            label="translation QA report",
+        )
+
+    job.source_comment_url = _safe_post_issue_comment(
+        gh,
         owner,
         repo,
         pr_number,
@@ -377,29 +428,8 @@ def run_doc_translate(
             config=cfg,
             usage=client.usage_tracker,
         ),
+        label="source PR summary",
     )
-
-    if tr_pr_number is not None:
-        report_num = _next_report_number(gh, owner, repo, tr_pr_number)
-        meta = ReportMeta(
-            mode="doc_translate",
-            report_number=report_num,
-            elapsed_s=elapsed,
-            checkout_ref=git_head_sha(repo_path),
-        )
-        job.translation_comment_url = gh.post_issue_comment(
-            owner,
-            repo,
-            tr_pr_number,
-            build_full_report(
-                pr_result,
-                meta=meta,
-                config=cfg,
-                usage=client.usage_tracker,
-                glossary=glossary,
-                link=ReportLinkContext(github_repo=github_repo, ref=branch),
-            ),
-        )
 
     return job
 
@@ -562,7 +592,8 @@ def run_doc_verify(
         elapsed_s=elapsed,
         checkout_ref=git_head_sha(repo_path),
     )
-    job.translation_comment_url = gh.post_issue_comment(
+    job.translation_comment_url = _safe_post_issue_comment(
+        gh,
         owner,
         repo,
         pr_number,
@@ -574,5 +605,6 @@ def run_doc_verify(
             glossary=glossary,
             link=ReportLinkContext(github_repo=github_repo, ref=ctx.head_ref),
         ),
+        label="doc_verify QA report",
     )
     return job

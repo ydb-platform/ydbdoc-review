@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.github.errors import GitHubConfigError
+from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.workflow import run_doc_translate, run_doc_verify
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
@@ -234,6 +234,9 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     assert result.committed is True
     assert result.pushed is True
     assert mock_gh.return_value.post_issue_comment.call_count == 2
+    comment_calls = mock_gh.return_value.post_issue_comment.call_args_list
+    assert comment_calls[0][0][2] == 99
+    assert comment_calls[1][0][2] == 7
     mock_gh.return_value.create_pull.assert_called_once()
     mock_gh.return_value.add_issue_labels.assert_called_once_with(
         "o", "r", 99, ["documentation"]
@@ -241,6 +244,58 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     _, kwargs = mock_gh.return_value.create_pull.call_args
     assert kwargs["head"] == "ydbdoc-review/pr-7"
     assert kwargs["base"] == "feature/docs"
+
+
+def test_run_doc_translate_source_comment_failure_still_posts_report(git_repo: str):
+    """Translation QA report must be posted even when source PR comment fails."""
+    pull = {
+        "title": "docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+                with patch("ydbdoc_review.github.workflow.push_branch"):
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.return_value = pull
+                        mock_gh.return_value.create_pull.return_value = (
+                            "https://github.com/o/r/pull/99",
+                            99,
+                            True,
+                        )
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.side_effect = [
+                            "https://github.com/o/r/pull/99#issuecomment-1",
+                            GitHubAPIError(
+                                "GitHub API POST .../issues/7/comments failed: HTTP 401",
+                                status_code=401,
+                            ),
+                        ]
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/ru/a.md", "modified")],
+                        ):
+                            result = run_doc_translate(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=7,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
+
+    assert result.translation_comment_url == (
+        "https://github.com/o/r/pull/99#issuecomment-1"
+    )
+    assert result.source_comment_url is None
+    comment_calls = mock_gh.return_value.post_issue_comment.call_args_list
+    assert comment_calls[0][0][2] == 99
+    assert comment_calls[1][0][2] == 7
 
 
 def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
