@@ -26,7 +26,15 @@ inputs:
     default: "run"
 
 runs:
-  using: "docker"
-  # Pre-built on tag push (see .github/workflows/docker-publish.yml). Avoids
-  # Docker Hub timeouts when ydb workflows reference @v0.1.0.
-  image: "docker://ghcr.io/ydb-platform/ydbdoc-review:v0.1.0"
+  using: "composite"
+  steps:
+    - name: Run ydbdoc-review
+      shell: bash
+      run: bash "${{ github.action_path }}/action-docker.sh"
+      env:
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_PR: ${{ inputs.pr }}
+        INPUT_MERGE_BASE_WITH: ${{ inputs.merge_base_with }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_NO_COMMIT: ${{ inputs.no_commit }}
+        INPUT_MODE: ${{ inputs.mode }}

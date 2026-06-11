@@ -21,27 +21,28 @@ CI (Actions captures stdout fine).
 
 ### 19.4. Docker image (GitHub Action)
 
-Consumer workflows (`ydb-platform/ydb@v0.1.0`) pull a **pre-built** image from GHCR:
+`action.yml` is a **composite** action (`action-docker.sh`):
 
-`ghcr.io/ydb-platform/ydbdoc-review:v0.1.0`
+1. **Try** `docker build` from `Dockerfile` in the checked-out action ref (normal
+   path after `git tag -f v0.1.0` — no GHCR publish wait).
+2. **On build failure** (e.g. Docker Hub / ECR timeout) → `docker pull`
+   `ghcr.io/ydb-platform/ydbdoc-review:<GITHUB_ACTION_REF>` and run that image.
 
-(`action.yml` → `docker://…`, not `Dockerfile` on each run.) This avoids Docker Hub
-timeouts when runners cannot reach `registry-1.docker.io`.
+Base image: `public.ecr.aws/docker/library/python:3.12-slim` (Docker Hub mirror).
 
-**Publish:** push (or force-move) a `v*` tag — workflow `.github/workflows/docker-publish.yml`
-builds from `Dockerfile` (base `public.ecr.aws/docker/library/python:3.12-slim`) and
-pushes to GHCR. **Always wait for that workflow to finish** before re-running
-`doc_translate` in ydb.
+**GHCR publish (optional):** workflow `.github/workflows/docker-publish.yml` —
+`workflow_dispatch` only. Run manually when you want a fresh fallback image after
+large changes; not required for every tag move.
 
-After changing translation/validation code:
+After bugfixes:
 
 ```bash
 git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
-# wait for "Publish action image" on ydbdoc-review
+# re-add doc_translate in ydb — no wait for GHCR
 ```
 
-`YDBDOC_GIT_SHA` / `org.opencontainers.image.revision` record the ydbdoc-review git SHA
-baked into the image at publish time.
+`YDBDOC_GIT_SHA` is set at local build time from the action ref; GHCR fallback bakes
+SHA at last manual publish.
 
 ---
 
