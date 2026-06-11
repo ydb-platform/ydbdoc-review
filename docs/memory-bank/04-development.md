@@ -220,19 +220,22 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 
 ### 11.2. CI
 
-- GitHub Actions in `ydb-platform/ydb` repo, two workflows:
-  - `ydbdoc-review (doc_translate label)` → calls `ydb-platform/ydbdoc-review@v0.1.0` with `mode: run` (default).
-  - `ydbdoc-review (doc_verify label)` → same action with `mode: verify`.
-- Action is a Dockerfile-based action; the container runs Python 3.11+.
+- GitHub Actions in `ydb-platform/ydb` repo, two workflows (see **07-pipeline** §16.7):
+  - `ydbdoc-review (doc_translate label)` → `ydb-platform/ydbdoc-review@v0.1.0`, `mode: run`.
+  - `ydbdoc-verify (doc_verify label)` → same action, `mode: verify`.
+- Each workflow has **two jobs**: translate/verify with `GITHUB_TOKEN`; label
+  trigger (`ok-to-test`, `rebuild_docs`) with `YDBOT_TOKEN` and **no checkout**
+  ([ydb #43126](https://github.com/ydb-platform/ydb/pull/43126)).
+- Action is **composite** (`action-docker.sh`): builds `Dockerfile` on the runner
+  per ref; GHCR fallback optional — **08-operations** §19.4, **03** §6.49.
 - Secrets in the `ydb` repo:
-  - `YANDEX_CLOUD_FOLDER_DOC_REVIEW`
-  - `YANDEX_CLOUD_API_KEY_DOC_REVIEW`
-  - GitHub: **`GITHUB_TOKEN` only** in workflows (`permissions`: `contents`,
-    `pull-requests`, `issues` write for `doc_translate`). Do **not** set
-    `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` unless job-token push returns 403.
-  - Optional legacy: `YDBDOC_PUSH_PAT` — only if org blocks `GITHUB_TOKEN` push.
-- Tag `v0.1.0` will be **moved forward** to the v2 merge commit at release time
-  (the user has limited ability to change CI config in `ydb`).
+  - `YANDEX_CLOUD_FOLDER_DOC_REVIEW`, `YANDEX_CLOUD_API_KEY_DOC_REVIEW`
+  - `YDBOT_TOKEN` — only in `trigger-*-ci` jobs (not in action `env`)
+  - `GITHUB_TOKEN` in translate/verify job (`permissions`: `contents`,
+    `pull-requests`, `issues` write). No `GITHUB_PUSH_TOKEN` unless push 403.
+- **Release tag:** `v0.1.0` is force-moved on `ydbdoc-review` `main` after fixes;
+  no need to wait for GHCR publish. Re-add `doc_translate` / `doc_verify` label in ydb.
+- Optional: run **Publish action image** in `ydbdoc-review` when updating GHCR fallback.
 
 ### 11.3. Tooling
 

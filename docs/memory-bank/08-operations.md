@@ -19,30 +19,64 @@ CI (Actions captures stdout fine).
 - **WARNING**: retry attempts, heuristic flags, fallback model used.
 - **ERROR**: unrecoverable per-file failures (still don't fail the job).
 
-### 19.4. Docker image (GitHub Action)
+### 19.4. GitHub Action runtime (Docker)
 
-`action.yml` is a **composite** action (`action-docker.sh`):
+**Files (repo root):**
 
-1. **Try** `docker build` from `Dockerfile` in the checked-out action ref (normal
-   path after `git tag -f v0.1.0` — no GHCR publish wait).
-2. **On build failure** (e.g. Docker Hub / ECR timeout) → `docker pull`
-   `ghcr.io/ydb-platform/ydbdoc-review:<GITHUB_ACTION_REF>` and run that image.
+| File | Purpose |
+|------|---------|
+| `action.yml` | Composite action metadata + `INPUT_*` env for `action-docker.sh` |
+| `action-docker.sh` | Build or pull image, `docker run` with workspace mount |
+| `Dockerfile` | Python 3.12 + git + `pip install` package; `ENTRYPOINT` → `entrypoint.sh` |
+| `entrypoint.sh` | Map `YDBDOC_REPO_PATH` / `GITHUB_WORKSPACE`; invoke `ydbdoc-review run\|verify` |
+| `.github/workflows/docker-publish.yml` | Optional push to GHCR (`workflow_dispatch`) |
 
-Base image: `public.ecr.aws/docker/library/python:3.12-slim` (Docker Hub mirror).
+**Runtime flow (`action-docker.sh`):**
 
-**GHCR publish (optional):** workflow `.github/workflows/docker-publish.yml` —
-`workflow_dispatch` only. Run manually when you want a fresh fallback image after
-large changes; not required for every tag move.
+1. `docker build -t ydbdoc-review-local:$$ -f "$ACTION_PATH/Dockerfile" "$ACTION_PATH"`
+   with `YDBDOC_GIT_SHA` build-arg (defaults to action ref).
+2. On failure → log stderr, `docker pull ghcr.io/ydb-platform/ydbdoc-review:<ref>`
+   where `<ref>` = `GITHUB_ACTION_REF` without `refs/tags/` (e.g. `v0.1.0`).
+3. `docker run --rm -v "$GITHUB_WORKSPACE:/github/workspace"` + forwarded env
+   (`GITHUB_TOKEN`, `YDBDOC_*`, `YANDEX_CLOUD_*`, `INPUT_*`, …).
+4. Remove local build tag on exit.
 
-After bugfixes:
+Base image in `Dockerfile`: `public.ecr.aws/docker/library/python:3.12-slim`
+(AWS ECR Public mirror of Docker Hub `library/python`).
+
+**Why not native `image: Dockerfile`?** GitHub builds that internally with no
+fallback hook when registry pulls fail.
+
+**GHCR fallback image:**
+
+- Registry: `ghcr.io/ydb-platform/ydbdoc-review`
+- Tags: `<ref>` (e.g. `v0.1.0`) and `<git-sha>` on manual publish
+- Publish: Actions → **Publish action image** → Run workflow (not on every tag push)
+- Stale fallback is acceptable for emergency use; run publish after major releases
+  or if builds keep failing on runners
+
+**Typical bugfix loop (no GHCR):**
 
 ```bash
+# ydbdoc-review repo
 git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
-# re-add doc_translate in ydb — no wait for GHCR
+# ydb: re-add doc_translate on source PR
 ```
 
-`YDBDOC_GIT_SHA` is set at local build time from the action ref; GHCR fallback bakes
-SHA at last manual publish.
+ydb workflow checks out action at `@v0.1.0`; runner builds fresh image from that
+commit's `Dockerfile`.
+
+**Troubleshooting:**
+
+| Symptom | Likely cause | Mitigation |
+|---------|----------------|------------|
+| `python:3.12-slim` / ECR timeout on build | Registry unreachable from runner | Retry; or run `docker-publish` and rely on GHCR fallback |
+| Action exits 0 but no report on translation PR | Fixed in §6.48 — update `@v0.1.0` | Tag must include `_safe_post_issue_comment` + report-first order |
+| `trigger-translation-ci` skipped | `ydbdoc-review` job failed (exit 1) | Same as above; see **07-pipeline** §16.7 |
+| GHCR pull 404 on fallback | Image never published for that ref | Run `docker-publish` workflow_dispatch for current tag |
+
+`action_release_label()` in reports: `GITHUB_ACTION_REF` + `YDBDOC_GIT_SHA` from
+image build (local) or last GHCR publish (fallback).
 
 ---
 

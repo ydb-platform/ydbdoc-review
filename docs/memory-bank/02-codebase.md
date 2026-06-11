@@ -79,7 +79,7 @@ src/ydbdoc_review/
 │   ├── client.py                  GitHub REST (requests)
 │   ├── git_ops.py                 local git diff / branch / commit / push
 │   ├── pr.py                      PR context; load_pair / load_verify_pair (§6.31)
-│   ├── workflow.py                run_doc_translate, run_doc_verify (+ checkout sha in reports)
+│   ├── workflow.py                run_doc_translate, run_doc_verify; _safe_post_issue_comment (§6.48)
 │   └── errors.py                  typed GitHub errors
 ├── reporting/                     ✅ COMPLETE (Phase H)
 │   ├── builder.py                 markdown reports (§17 format)
@@ -100,6 +100,11 @@ translation (`navigation_merge.run_navigation_merges`).
 
 ### 4.2. Files outside the package
 
+- **GitHub Action (repo root):** `action.yml` (composite), `action-docker.sh`
+  (build + GHCR fallback + `docker run`), `Dockerfile`, `entrypoint.sh` — see
+  **08-operations** §19.4, **03-design-decisions** §6.49.
+- `.github/workflows/docker-publish.yml` — optional GHCR publish (`workflow_dispatch`).
+- `examples/ydb-github-doc-*.yml` — reference workflows for `ydb-platform/ydb`.
 - `tests/fixtures/markdown_files/` — **committed** real YDB docs (RU+EN), 33
   files total, ~600 KB. Used for unit and integration round-trip tests. They
   are NOT regenerated automatically; refresh via `scripts/fetch_fixtures.sh`.

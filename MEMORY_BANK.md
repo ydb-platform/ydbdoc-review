@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: §6.48 translation report before source comment; §6.47 RU ``-rub`` asset paths; §6.46 YQL ``--`` fence comments; §6.45 prose Cyrillic cleanup; §6.44 fork nav EN baseline; §6.41 locale _includes; §6.39 fence comment Cyrillic; §6.38 cost reporting (₽/1K); §6.37 Wikipedia langlinks; §6.36 TOC indent;
+> Last updated: §6.49 action Docker build + GHCR fallback; §6.48 translation report before source comment; §16.7 YDBOT_TOKEN CI split (#43126); §6.47 RU ``-rub`` asset paths; §6.46 YQL ``--`` fence comments; §6.45 prose Cyrillic cleanup; §6.44 fork nav EN baseline; §6.41 locale _includes; §6.39 fence comment Cyrillic; §6.38 cost reporting (₽/1K); §6.37 Wikipedia langlinks; §6.36 TOC indent;
 > §6.35 doc_verify nav; §6.34 link_locale; §6.31 verify RU ref;
 > §6.30 full re-translate;
 > §6.29 unified QA;
@@ -31,12 +31,12 @@ use the parts below.
 |---|------|
 | 0–3 | [01-overview](docs/memory-bank/01-overview.md) |
 | 4–5 | [02-codebase](docs/memory-bank/02-codebase.md) |
-| 6 (incl. §6.48 report comment order, §6.47 ``-rub`` assets, §6.46 YQL ``--`` comments, §6.45 prose Cyrillic, §6.44 fork nav EN baseline, §6.43–§6.41, §6.40–§6.39, §6.37–§6.36) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
+| 6 (incl. §6.49 action Docker/GHCR, §6.48 report comment order, §6.47 ``-rub`` assets, §6.46 YQL ``--`` comments, §6.45 prose Cyrillic, §6.44 fork nav EN baseline, §6.43–§6.41, §6.40–§6.39, §6.37–§6.36) | [03-design-decisions](docs/memory-bank/03-design-decisions.md) |
 | 7, 9–11 | [04-development](docs/memory-bank/04-development.md) |
 | 8 | [05-roadmap](docs/memory-bank/05-roadmap.md) | Phases A–I done; nav YAML workflow glue TBD |
 | 12–14, 18 | [06-llm-config](docs/memory-bank/06-llm-config.md) |
-| 15–17 (incl. §16.7 CI tokens) | [07-pipeline](docs/memory-bank/07-pipeline.md) |
-| 19–21 | [08-operations](docs/memory-bank/08-operations.md) |
+| 15–17 (incl. §16.7 GITHUB_TOKEN + YDBOT_TOKEN, §17.0 report order) | [07-pipeline](docs/memory-bank/07-pipeline.md) |
+| 19–21 (incl. §19.4 action-docker.sh / GHCR) | [08-operations](docs/memory-bank/08-operations.md) |
 
 ## For AI assistants
 

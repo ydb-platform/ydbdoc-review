@@ -725,6 +725,46 @@ Same helper for `doc_verify` report posting.
 **Tests:** `tests/unit/test_github_workflow.py`
 (`test_run_doc_translate_source_comment_failure_still_posts_report`).
 
+**Note:** unrelated to [ydb #43126](https://github.com/ydb-platform/ydb/pull/43126) (CI
+cascade / `YDBOT_TOKEN` for `ok-to-test` + `rebuild_docs`). After #43126,
+`trigger-translation-ci` runs only when `ydbdoc-review` job **succeeds** — so
+`_safe_post_issue_comment` (§6.48) also keeps downstream CI labels working when
+source-PR comment fails.
+
+### 6.49. GitHub Action: local Docker build + GHCR fallback
+
+**Problem (Jun 2026):** `action.yml` with `image: Dockerfile` made every `doc_translate`
+in ydb rebuild the image on the runner. GitHub-hosted runners intermittently failed
+with `i/o timeout` pulling `python:3.12-slim` from `registry-1.docker.io`.
+
+**Attempted fix (reverted pattern):** `image: docker://ghcr.io/.../v0.1.0` only +
+auto-publish on every tag push — worked but forced **waiting for GHCR publish** on
+each `git tag -f v0.1.0` bugfix.
+
+**Decision (current):**
+
+| Piece | Role |
+|-------|------|
+| `action.yml` | `composite` — runs `action-docker.sh` |
+| `action-docker.sh` | 1) `docker build` from checked-out action ref; 2) on failure `docker pull ghcr.io/ydb-platform/ydbdoc-review:<GITHUB_ACTION_REF>` |
+| `Dockerfile` | Base `public.ecr.aws/docker/library/python:3.12-slim` (Docker Hub mirror) |
+| `entrypoint.sh` | Unchanged; container entrypoint |
+| `.github/workflows/docker-publish.yml` | **Optional** GHCR publish — `workflow_dispatch` only |
+
+**Release loop (bugfix):**
+
+```bash
+git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
+# re-add doc_translate in ydb — no GHCR wait
+```
+
+Run **Publish action image** manually when fallback image should match latest code
+(e.g. after long period of Docker Hub outages). Fallback tag matches action ref
+(`@v0.1.0` → `:v0.1.0`).
+
+**Implementation:** repo root `action-docker.sh`, `action.yml`, `Dockerfile`;
+details in **08-operations** §19.4.
+
 ### 6.28. EN finalize order: enforce fences, then postprocess
 
 **Problem (PR #42548):** `postprocess_en_target_markdown` (homoglyphs, `<строка>`→`<string>`)

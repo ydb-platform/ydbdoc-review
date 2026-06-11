@@ -228,13 +228,28 @@ If EN exists but RU doesn't → create RU from EN.
 
 ### 16.7. GitHub tokens in `ydb` CI (2026-06)
 
-**Default (after ydb workflow change):** only `secrets.GITHUB_TOKEN`.
+**Two-job split** ([ydb #43126](https://github.com/ydb-platform/ydb/pull/43126), merged 2026-06-10):
+
+| Job | What | Token |
+|-----|------|--------|
+| `ydbdoc-review` / `ydbdoc-verify` | checkout PR code, run action, push branch / repair commit | `GITHUB_TOKEN` |
+| `trigger-translation-ci` / `trigger-verify-ci` | **no checkout** — add labels on translation PR | `YDBOT_TOKEN` |
+
+Why: events from `GITHUB_TOKEN` **do not cascade** into other workflows (PR-check,
+docs rebuild). Translation PR author is `github-actions[bot]` — PR-check needs
+`ok-to-test`. PAT labels from a job without fork code avoid exposing `YDBOT_TOKEN`
+next to untrusted PR content.
 
 | Step | Token | Workflow `permissions` |
 |------|--------|-------------------------|
 | Action: API (PR, comments, `documentation` label) | `GITHUB_TOKEN` | `pull-requests: write`, `issues: write` |
 | Action: `git push` branch `ydbdoc-review/pr-N` | same (`GITHUB_PUSH_TOKEN` unset → falls back to `GITHUB_TOKEN`) | `contents: write` |
-| Post-step: `rebuild_docs` on translation PR | `GITHUB_TOKEN` in `github-script` | `issues: write` |
+| `trigger-translation-ci`: `rebuild_docs` + `ok-to-test` | `YDBOT_TOKEN` in `github-script` | (job has no checkout) |
+| `trigger-verify-ci`: `ok-to-test` + `rebuild_docs` | `YDBOT_TOKEN` | same |
+
+`trigger-translation-ci` runs only when `needs.ydbdoc-review.result == 'success'`.
+Therefore `run_doc_translate` must not exit 1 after push when only the source-PR
+comment fails — see §6.48 (`_safe_post_issue_comment`).
 
 Do **not** set `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` in env unless `git push` returns 403
 (org policy blocking default `GITHUB_TOKEN`).
