@@ -731,6 +731,47 @@ cascade / `YDBOT_TOKEN` for `ok-to-test` + `rebuild_docs`). After #43126,
 `_safe_post_issue_comment` (§6.48) also keeps downstream CI labels working when
 source-PR comment fails.
 
+### 6.50. `doc_verify` fork fallback: open separate fixup PR ([ydb #41451](https://github.com/ydb-platform/ydb/pull/41451))
+
+**Problem (Jun 2026):** running `doc_verify` on a contributor PR whose head is on a
+fork (e.g. `AlejandroMokhovani/ydb`, `YDBDOCS-943-...` branch) failed with
+`git push ... permission denied`. CI `GITHUB_TOKEN` only has `contents:write` on
+the upstream repo, never on contributor forks — and GitHub forbids `GITHUB_TOKEN`
+pushes to forks regardless of `maintainerCanModify`.
+
+Historically `verify_push_remote_url` returned the head repo URL (works for
+translation PRs that live on upstream as `ydbdoc-review/pr-N`). For fork-head PRs
+the push always rejects.
+
+**Decision:** detect `is_fork_head(ctx)` up front. When True:
+
+1. Reset a fresh branch `ydbdoc-review/verify-{source_pr or pr_number}` off
+   upstream `ctx.base_ref` via `prepare_translation_branch_on_base` — same helper
+   `doc_translate` uses.
+2. Commit critic fixes and push that branch to upstream (`GITHUB_TOKEN` has
+   `contents:write` there).
+3. Open a fixup PR via `gh.create_pull` targeting `ctx.base_ref` (typically
+   `main`). Title: `Critic fixes for #{pr_number}`. Body: explains the fork
+   constraint and points back at the source PR (`build_verify_fixup_pr_body`).
+4. Post a short link comment on the source PR
+   (`build_verify_fixup_source_comment`) — through `_safe_post_issue_comment`
+   because fork source PRs sometimes return HTTP 401 (§6.48).
+
+Non-fork case (translation PR on upstream) keeps the current direct-push path.
+No critic fixes (`touched` empty) → no fixup PR, only the QA report comment.
+
+Branch is reused across multiple `doc_verify` runs:
+`prepare_translation_branch_on_base` resets it from base each time, and
+`gh.create_pull` returns the existing PR when one matches `head:base`.
+
+**Config:** `cfg.paths.verify_fixup_branch_prefix = "ydbdoc-review/verify-"`.
+
+**Implementation:** `src/ydbdoc_review/github/workflow.py:run_doc_verify`,
+`src/ydbdoc_review/github/pr.py:verify_fixup_branch`,
+`src/ydbdoc_review/reporting/builder.py:build_verify_fixup_pr_body`,
+`build_verify_fixup_source_comment`. Tests:
+`tests/unit/test_github_workflow.py:test_run_doc_verify_fork_head_opens_fixup_pr`.
+
 ### 6.49. GitHub Action: local Docker build + GHCR fallback
 
 **Problem (Jun 2026):** `action.yml` with `image: Dockerfile` made every `doc_translate`

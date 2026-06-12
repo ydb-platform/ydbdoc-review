@@ -116,10 +116,17 @@ def translation_pr_base(ctx: PullRequestContext) -> str:
 
 
 def verify_push_remote_url(ctx: PullRequestContext) -> str:
-    """HTTPS remote for ``doc_verify`` repair push (PR head repo, including forks)."""
-    if is_fork_head(ctx):
-        return ctx.head_repo_https_url
+    """HTTPS remote for ``doc_verify`` repair push when head is pushable.
+
+    Only valid when ``is_fork_head(ctx)`` is False. Callers must take the
+    fork-fallback path (``verify_fixup_branch`` + new upstream PR) otherwise.
+    """
     return repo_https_clone_url(ctx.owner, ctx.repo)
+
+
+def verify_fixup_branch(prefix: str, source_pr: int) -> str:
+    """Upstream branch name for a ``doc_verify`` fixup PR (fork head fallback)."""
+    return f"{prefix}{source_pr}"
 
 
 def list_pr_file_changes_api(

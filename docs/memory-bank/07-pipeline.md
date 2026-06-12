@@ -251,6 +251,10 @@ next to untrusted PR content.
 Therefore `run_doc_translate` must not exit 1 after push when only the source-PR
 comment fails — see §6.48 (`_safe_post_issue_comment`).
 
+`doc_verify` on **contributor fork PRs** cannot push the repair commit to the head
+ref (GITHUB_TOKEN has no rights on forks). Instead it opens a separate fixup PR on
+upstream and posts a link comment on the source PR — see §6.50.
+
 Do **not** set `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` in env unless `git push` returns 403
 (org policy blocking default `GITHUB_TOKEN`).
 

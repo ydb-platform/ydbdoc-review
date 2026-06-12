@@ -22,6 +22,7 @@ from ydbdoc_review.github.git_ops import (
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    is_fork_head,
     list_pr_file_changes_api,
     list_pr_file_changes_git,
     load_pair_contents,
@@ -34,6 +35,7 @@ from ydbdoc_review.github.pr import (
     source_pr_number_from_branch,
     translation_branch_base,
     translation_pr_base,
+    verify_fixup_branch,
     verify_push_remote_url,
 )
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -58,6 +60,8 @@ from ydbdoc_review.reporting.builder import (
     build_full_report,
     build_source_pr_comment,
     build_translation_pr_body,
+    build_verify_fixup_pr_body,
+    build_verify_fixup_source_comment,
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
@@ -452,7 +456,7 @@ def run_doc_verify(
     gh = GitHubClient(api_token)
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
-    push_remote_url = verify_push_remote_url(ctx)
+    fork_fallback = is_fork_head(ctx)
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
@@ -463,6 +467,15 @@ def run_doc_verify(
         source_pr = parse_source_pr_from_text(
             f"{ctx.title}\n{pull_body}"
         )
+    upstream_url = repo_https_clone_url(owner, repo)
+    fixup_source_pr = source_pr or pr_number
+    fixup_branch = (
+        verify_fixup_branch(
+            cfg.paths.verify_fixup_branch_prefix, fixup_source_pr
+        )
+        if fork_fallback
+        else None
+    )
 
     changes = list_pr_file_changes_git(repo_path, merge_base_with)
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
@@ -549,13 +562,26 @@ def run_doc_verify(
     touched = _apply_results_to_disk(repo_path, pr_result, dry_run=dry_run)
 
     committed = pushed = False
+    fixup_pr_number: int | None = None
+    fixup_pr_url: str | None = None
     if touched and not dry_run and not no_commit:
         msg = build_commit_message(
-            source_pr or pr_number,
+            fixup_source_pr,
             pr_result,
             config=cfg,
             verify=True,
         )
+        if fork_fallback:
+            assert fixup_branch is not None
+            prepare_translation_branch_on_base(
+                repo_path,
+                translation_branch=fixup_branch,
+                base_remote_url=upstream_url,
+                base_remote_name="ydbdoc-review-upstream",
+                base_branch=ctx.base_ref,
+                paths=touched.written,
+                deleted_paths=touched.deleted,
+            )
         committed = git_commit_paths(
             repo_path,
             touched.written,
@@ -565,18 +591,34 @@ def run_doc_verify(
             deleted_paths=touched.deleted,
         )
         if committed:
-            logger.info(
-                "Pushing doc_verify repair to %s (head %s)",
-                push_remote_url,
-                ctx.head_repo_full_name,
-            )
-            push_branch(
-                repo_path,
-                "ydbdoc-review-push",
-                ctx.head_ref,
-                push_token,
-                push_remote_url,
-            )
+            if fork_fallback:
+                assert fixup_branch is not None
+                logger.info(
+                    "Pushing doc_verify fixup branch %s to upstream (source PR head: %s)",
+                    fixup_branch,
+                    ctx.head_repo_full_name,
+                )
+                push_branch(
+                    repo_path,
+                    "ydbdoc-review-push",
+                    fixup_branch,
+                    push_token,
+                    upstream_url,
+                )
+            else:
+                push_remote_url = verify_push_remote_url(ctx)
+                logger.info(
+                    "Pushing doc_verify repair to %s (head %s)",
+                    push_remote_url,
+                    ctx.head_repo_full_name,
+                )
+                push_branch(
+                    repo_path,
+                    "ydbdoc-review-push",
+                    ctx.head_ref,
+                    push_token,
+                    push_remote_url,
+                )
             pushed = True
     job.committed = committed
     job.pushed = pushed
@@ -584,6 +626,33 @@ def run_doc_verify(
     elapsed = time.monotonic() - started
     if dry_run:
         return job
+
+    if fork_fallback and pushed and fixup_branch is not None:
+        title = f"Critic fixes for #{pr_number}"
+        body = build_verify_fixup_pr_body(pr_number, github_repo, fixup_branch)
+        opened = gh.create_pull(
+            owner,
+            repo,
+            title=title,
+            head=fixup_branch,
+            base=ctx.base_ref,
+            body=body,
+        )
+        if opened:
+            fixup_pr_url, fixup_pr_number, created = opened
+            job.translation_pr_url = fixup_pr_url
+            job.translation_pr_number = fixup_pr_number
+            if created:
+                try:
+                    gh.add_issue_labels(
+                        owner, repo, fixup_pr_number, ["documentation"]
+                    )
+                except GitHubAPIError as exc:
+                    logger.warning(
+                        "Could not add documentation label to PR #%s: %s",
+                        fixup_pr_number,
+                        exc,
+                    )
 
     report_num = _next_report_number(gh, owner, repo, pr_number)
     meta = ReportMeta(
@@ -607,4 +676,13 @@ def run_doc_verify(
         ),
         label="doc_verify QA report",
     )
+    if fixup_pr_number is not None:
+        job.source_comment_url = _safe_post_issue_comment(
+            gh,
+            owner,
+            repo,
+            pr_number,
+            build_verify_fixup_source_comment(fixup_pr_number),
+            label="doc_verify fixup link",
+        )
     return job

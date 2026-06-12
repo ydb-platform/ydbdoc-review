@@ -86,6 +86,7 @@ class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     docs_root: str = "ydb/docs"
     translation_branch_prefix: str = "ydbdoc-review/pr-"
+    verify_fixup_branch_prefix: str = "ydbdoc-review/verify-"
 
 
 class ReportingConfig(BaseModel):
