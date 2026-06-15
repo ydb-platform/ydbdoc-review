@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -21,6 +22,12 @@ from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, Cr
 from ydbdoc_review.translation.translator import validate_segment_translation
 
 logger = logging.getLogger(__name__)
+
+_MISSING_CONTENT_ISSUE = re.compile(
+    r"missing|omit|omits|drops?\s+the|не\s+перевед|пропущ",
+    re.IGNORECASE,
+)
+_TRUNCATED_SUGGESTION = re.compile(r"(?:…|\.\.\.)$")
 
 _MAX_CRITIC_ATTEMPTS = 3
 _VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
@@ -216,6 +223,22 @@ def _run_critic_batches(
     return merge_critic_responses(responses)
 
 
+def _critic_fix_would_regress(
+    current: str,
+    suggested: str,
+    issue: CriticIssueOut,
+) -> str | None:
+    """Return a skip reason when auto-apply would likely remove good translation."""
+    if not current.strip() or not suggested.strip():
+        return None
+    haystack = f"{issue.category} {issue.comment}"
+    if _MISSING_CONTENT_ISSUE.search(haystack) and len(suggested) < len(current):
+        return "missing-content fix is shorter than current translation"
+    if _TRUNCATED_SUGGESTION.search(suggested.rstrip()):
+        return "truncated suggested_text"
+    return None
+
+
 def apply_critic_fixes(
     translations: dict[str, str],
     segments: list[Segment],
@@ -241,6 +264,17 @@ def apply_critic_fixes(
         seg = by_id.get(issue.segment_id)
         if seg is None:
             logger.warning("Unknown segment_id %r in critic issue", issue.segment_id)
+            skipped.append(issue)
+            continue
+        current = updated.get(issue.segment_id, seg.text)
+        regress = _critic_fix_would_regress(current, issue.suggested_text, issue)
+        if regress:
+            logger.warning(
+                "Skipping critic fix for %s: %s (%s)",
+                issue.segment_id,
+                regress,
+                issue.comment[:120],
+            )
             skipped.append(issue)
             continue
         try:

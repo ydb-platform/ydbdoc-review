@@ -120,6 +120,52 @@ def test_apply_critic_fixes_skips_broken_placeholder():
     assert len(skipped) == 1
 
 
+def test_apply_critic_fixes_skips_missing_content_that_shortens():
+    """Regression: doc_verify #41206 — critic removed Kafka sentence that was present."""
+    seg = _segment("s1", "RU paragraph with Kafka and PostgreSQL limitation.")
+    current = (
+        "Streaming queries read from topics. Data may arrive from external systems, "
+        "but the streaming query only works with YDB entities. "
+        "Direct reads from Apache Kafka, or writes to PostgreSQL, are not supported."
+    )
+    shorter = (
+        "Streaming queries read from topics. Data may arrive from external systems, "
+        "but the streaming query only works with YDB entities."
+    )
+    issues = [
+        _issue(
+            segment_id="s1",
+            severity="blocked",
+            category="missing content",
+            comment=(
+                "The translation omits the final sentence about Kafka and PostgreSQL."
+            ),
+            suggested_text=shorter,
+        )
+    ]
+    updated, applied, skipped = apply_critic_fixes({"s1": current}, [seg], issues)
+    assert updated["s1"] == current
+    assert applied == []
+    assert len(skipped) == 1
+
+
+def test_apply_critic_fixes_skips_truncated_suggestion():
+    seg = _segment("s1", "Длинный абзац про потоковые запросы.")
+    current = "Long paragraph about streaming queries and Kafka limits."
+    issues = [
+        _issue(
+            segment_id="s1",
+            category="missing content",
+            comment="Add the Kafka limitation sentence.",
+            suggested_text="Long paragraph about streaming queries and…",
+        )
+    ]
+    updated, applied, skipped = apply_critic_fixes({"s1": current}, [seg], issues)
+    assert updated["s1"] == current
+    assert applied == []
+    assert len(skipped) == 1
+
+
 def test_apply_critic_fixes_skips_null_suggestion():
     seg = _segment("s1", "text")
     issues = [_issue(segment_id="s1", suggested_text=None)]

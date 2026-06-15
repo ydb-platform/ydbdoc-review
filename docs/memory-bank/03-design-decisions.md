@@ -937,6 +937,44 @@ branch, before `push_branch`).
 **Tag note:** `v0.1.0` was force-moved to the fix commit; no schema or CLI
 change.
 
+### 6.53. Critic auto-fix regression guard + mermaid `fence_body_copy` ([ydb #41206](https://github.com/ydb-platform/ydb/pull/41206))
+
+**Problem (Jun 2026, second `doc_verify` on #41206):** after §6.51 fixed EN fence
+preservation, two issues remained:
+
+1. **False 🔴 + harmful auto-fix:** critic flagged `streaming-query.md` segment
+   `s0023` as «missing content» (Kafka/PostgreSQL sentence) even though the
+   contributor's EN already contained it. The truncated `suggested_text` was
+   auto-applied in fixup PR [#43438](https://github.com/ydb-platform/ydb/pull/43438)
+   and **removed** the correct sentence from the committed output.
+2. **False 🟡 `fence_body_copy`:** `checkpoints.md` Mermaid blocks with English
+   `participant Topic` / `Query v1` were reported as «differs from RU» because
+   the heuristic required byte-identical fence bodies. Label translation is
+   expected in Mermaid diagrams.
+
+**Decision:**
+
+1. **`apply_critic_fixes` regression guard** (`translation/critic.py`):
+   skip auto-apply when the issue reads like a missing-content complaint
+   (`missing`, `omit`, `пропущ`, …) but `suggested_text` is **shorter** than the
+   current segment translation, or when `suggested_text` ends with `…` / `...`
+   (truncated LLM output). The issue stays in the report for human review; it is
+   not written to disk.
+2. **Mermaid-aware fence compare** (`validation/fence_integrity.py`):
+   `_fence_diff_is_mermaid_label_translation` — same line count and structural
+   skeleton (`participant *`, `*->>*`, `Note over *`, …) with Cyrillic/Latin
+   labels allowed to differ. Wired into `fence_content_matches_source` so
+   `check_fence_body_copy` stays quiet for translated diagrams.
+
+**Tests:** `test_apply_critic_fixes_skips_missing_content_that_shortens`,
+`test_apply_critic_fixes_skips_truncated_suggestion`,
+`test_fence_content_allows_mermaid_label_translation`,
+`test_fence_content_rejects_mermaid_structure_change`.
+
+**Complements §6.51:** §6.51 stops RU fence bodies from replacing EN on re-render;
+§6.53 stops critic auto-fix from deleting good prose and stops false fence warnings
+on legitimately translated Mermaid.
+
 ---
 
 ---

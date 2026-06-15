@@ -102,6 +102,41 @@ def test_fence_content_rejects_code_line_change_beside_comments():
     assert not fence_content_matches_source(ru, en)
 
 
+def test_fence_content_allows_mermaid_label_translation():
+    ru = (
+        "sequenceDiagram\n"
+        "    participant Топик\n"
+        "    participant Запрос v1\n"
+        "    Топик->>Запрос v1: События A..D\n"
+    )
+    en = (
+        "sequenceDiagram\n"
+        "    participant Topic\n"
+        "    participant Query v1\n"
+        "    Topic->>Query v1: Events A..D\n"
+    )
+    assert fence_content_matches_source(ru, en)
+    assert not check_fence_body_copy(
+        f"```mermaid\n{ru}```",
+        f"```mermaid\n{en}```",
+        source_lang="ru",
+    )
+
+
+def test_fence_content_rejects_mermaid_structure_change():
+    ru = (
+        "sequenceDiagram\n"
+        "    participant Топик\n"
+        "    Топик->>Приемник: событие\n"
+    )
+    en = (
+        "sequenceDiagram\n"
+        "    participant Topic\n"
+        "    Topic->Sink: event\n"
+    )
+    assert not fence_content_matches_source(ru, en)
+
+
 def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
     """Regression: postprocess must run after enforce, not before."""
     raw_ru = (

@@ -40,6 +40,41 @@ def _normalize_fence_content_for_compare(text: str) -> str:
     return fix_cyrillic_homoglyphs_in_en(inner)
 
 
+_MERMAID_START = re.compile(
+    r"^(?:sequenceDiagram|graph\s|flowchart\s|classDiagram|stateDiagram|erDiagram|gantt|pie\s)",
+    re.IGNORECASE,
+)
+# Collapse label tokens; keep arrows, punctuation, and mermaid keywords.
+_MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")
+
+
+def _is_mermaid_fence(content: str) -> bool:
+    first = content.strip().splitlines()[0].strip() if content.strip() else ""
+    return bool(_MERMAID_START.match(first))
+
+
+def _mermaid_structure_line(line: str) -> str:
+    """Normalize a mermaid line for structural compare (labels → ``*``)."""
+    return _MERMAID_LABEL.sub("*", line.rstrip())
+
+
+def _fence_diff_is_mermaid_label_translation(
+    source_content: str,
+    target_content: str,
+) -> bool:
+    """True when EN mermaid differs from RU only in participant/label text."""
+    if not _is_mermaid_fence(source_content):
+        return False
+    src_lines = source_content.strip().splitlines()
+    tgt_lines = target_content.strip().splitlines()
+    if len(src_lines) != len(tgt_lines) or not src_lines:
+        return False
+    return all(
+        _mermaid_structure_line(sl) == _mermaid_structure_line(tl)
+        for sl, tl in zip(src_lines, tgt_lines, strict=True)
+    )
+
+
 def _fence_diff_is_comment_translation_only(
     source_content: str,
     target_content: str,
@@ -73,6 +108,8 @@ def fence_content_matches_source(source_content: str, target_content: str) -> bo
     if _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
         target_content
     ):
+        return True
+    if _fence_diff_is_mermaid_label_translation(source_content, target_content):
         return True
     return _fence_diff_is_comment_translation_only(source_content, target_content)
 

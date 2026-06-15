@@ -47,7 +47,7 @@ src/ydbdoc_review/
 │   ├── translator.py              per-batch translation + repair-pass trigger (D.3)
 │   ├── repair.py                  focused LLM repair after validation failure
 │   ├── manual.py                  ManualAction for fail-soft table cells
-│   └── critic.py                  batched critic/verify + verdict alias normalize (D.4)
+│   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
 ├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
 │   ├── toc.py                     parse, diff scope, merge, validate
 │   ├── redirects.py               Diplodoc redirect list — same pattern
@@ -58,7 +58,7 @@ src/ydbdoc_review/
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
-│   ├── fence_integrity.py         copy fences from source; detect pipeline drift
+│   ├── fence_integrity.py         copy fences from source; detect pipeline drift; mermaid label translation (§6.53)
 │   ├── fence_comments.py          Cyrillic ``//``/``#`` comment translate + QA (§6.39)
 │   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
