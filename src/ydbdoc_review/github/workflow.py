@@ -593,6 +593,11 @@ def run_doc_verify(
         if committed:
             if fork_fallback:
                 assert fixup_branch is not None
+                if gh.delete_branch(owner, repo, fixup_branch):
+                    logger.info(
+                        "Deleted stale doc_verify fixup branch %s before push",
+                        fixup_branch,
+                    )
                 logger.info(
                     "Pushing doc_verify fixup branch %s to upstream (source PR head: %s)",
                     fixup_branch,

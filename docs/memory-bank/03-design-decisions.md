@@ -760,9 +760,13 @@ the push always rejects.
 Non-fork case (translation PR on upstream) keeps the current direct-push path.
 No critic fixes (`touched` empty) → no fixup PR, only the QA report comment.
 
-Branch is reused across multiple `doc_verify` runs:
-`prepare_translation_branch_on_base` resets it from base each time, and
-`gh.create_pull` returns the existing PR when one matches `head:base`.
+Multiple `doc_verify` runs on the same source PR: the local branch is reset off
+base by `prepare_translation_branch_on_base`, but the **remote** ref still carries
+the previous run's commits, so a plain `git push HEAD:refs/heads/<branch>` is
+rejected as non-fast-forward. Before pushing, `run_doc_verify` calls
+`gh.delete_branch(owner, repo, fixup_branch)` to drop the stale ref (and let
+GitHub auto-close the old fixup PR). The push then creates the ref fresh and
+`gh.create_pull` opens a new fixup PR — see §6.52.
 
 **Config:** `cfg.paths.verify_fixup_branch_prefix = "ydbdoc-review/verify-"`.
 
@@ -881,6 +885,54 @@ doesn't exist yet, so there's nothing to preserve).
 reproduces the original mermaid `participant Topic` corruption and proves the
 fix preserves the EN fence body while still applying critic-suggested prose
 fixes outside the fence.
+
+**Tag note:** `v0.1.0` was force-moved to the fix commit; no schema or CLI
+change.
+
+### 6.52. `doc_verify` fork fallback: reset stale fixup branch before push
+
+**Problem:** running `doc_verify` a second time on a contributor PR (fork head,
+e.g. `YDBDOCS-XXX-...`) crashed at `git push`:
+
+```
+! [rejected] HEAD -> ydbdoc-review/verify-<N> (non-fast-forward)
+```
+
+The first run pushed the fixup branch and opened a fixup PR. The second run reset
+the **local** branch off `ctx.base_ref` via `prepare_translation_branch_on_base`
+and committed fresh critic fixes, but the **remote** ref still carried the
+previous commit. A plain `git push HEAD:refs/heads/<branch>` is non-fast-forward
+in that state, so the action failed before posting the QA report.
+
+§6.50's earlier "branch is reused" claim was wrong — `prepare_translation_branch_on_base`
+only resets locally; the remote ref still needed handling.
+
+**Decision:** before the fixup push, drop the stale remote ref via
+`gh.delete_branch(owner, repo, fixup_branch)`. The push then creates the ref
+fresh. GitHub auto-closes any open PR whose head was the deleted ref, so
+`gh.create_pull` opens a new fixup PR rather than reusing the old one — a small
+amount of fixup-PR churn in exchange for an idempotent re-run path.
+
+`delete_branch` returns False on 404/422 (ref already absent), so the first run
+on a PR is a no-op delete and the code path is uniform.
+
+Token use: `delete_branch` runs through the API client (`api_token` =
+`GITHUB_TOKEN`), which in the production workflow grants `contents: write` on the
+upstream repo — the same scope the push needs.
+
+**Implementation:** `src/ydbdoc_review/github/client.py:GitHubClient.delete_branch`,
+call site in `src/ydbdoc_review/github/workflow.py:run_doc_verify` (fork-fallback
+branch, before `push_branch`).
+
+**Tests:**
+
+- `tests/unit/test_github_client.py::test_delete_branch_success` /
+  `::test_delete_branch_missing` — 204 vs 422 contract.
+- `tests/unit/test_github_workflow.py::test_run_doc_verify_fork_head_opens_fixup_pr` —
+  asserts `delete_branch` is called with the fixup branch name on every run.
+- `tests/unit/test_github_workflow.py::test_run_doc_verify_fork_head_resets_existing_fixup_branch` —
+  simulates a stale remote ref (`delete_branch` returns True) and confirms the
+  push then proceeds and a fresh fixup PR is opened.
 
 **Tag note:** `v0.1.0` was force-moved to the fix commit; no schema or CLI
 change.

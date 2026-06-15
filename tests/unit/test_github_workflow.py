@@ -403,6 +403,9 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     prep.assert_called_once()
     assert prep.call_args.kwargs["translation_branch"] == "ydbdoc-review/verify-11"
     assert prep.call_args.kwargs["base_branch"] == "main"
+    mock_gh.return_value.delete_branch.assert_called_once_with(
+        "o", "r", "ydbdoc-review/verify-11"
+    )
     mock_gh.return_value.create_pull.assert_called_once()
     create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
     assert create_kwargs["head"] == "ydbdoc-review/verify-11"
@@ -414,6 +417,65 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
         c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list
     ]
     assert any("#99" in body for body in posted_bodies)
+
+
+def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
+    """Second run on a fork PR: stale remote fixup branch is deleted before push."""
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+
+    pull = {
+        "title": "YDBDOCS-943: ...",
+        "body": "",
+        "head": {
+            "ref": "YDBDOCS-943-feature-branch",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/contrib/ydb.git",
+                "full_name": "contrib/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ):
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.return_value = pull
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        # Existing fixup branch from a previous run.
+                        mock_gh.return_value.delete_branch.return_value = True
+                        mock_gh.return_value.create_pull.return_value = (
+                            "https://github.com/o/r/pull/100",
+                            100,
+                            True,
+                        )
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/en/a.md", "modified")],
+                        ):
+                            result = run_doc_verify(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=11,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
+
+    mock_gh.return_value.delete_branch.assert_called_once_with(
+        "o", "r", "ydbdoc-review/verify-11"
+    )
+    push.assert_called_once()
+    assert push.call_args.args[2] == "ydbdoc-review/verify-11"
+    assert result.translation_pr_number == 100
 
 
 def test_run_doc_verify_pushes_upstream_for_same_repo(git_repo: str):

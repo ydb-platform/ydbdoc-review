@@ -110,6 +110,23 @@ def test_request_raises_api_error(mock_request):
 
 
 @patch("ydbdoc_review.github.client.requests.request")
+def test_delete_branch_success(mock_request):
+    mock_request.return_value = MagicMock(status_code=204, content=b"")
+    client = GitHubClient("tok")
+    assert client.delete_branch("o", "r", "ydbdoc-review/verify-11") is True
+    method, url = mock_request.call_args[0][0], mock_request.call_args[0][1]
+    assert method == "DELETE"
+    assert url.endswith("/git/refs/heads/ydbdoc-review%2Fverify-11")
+
+
+@patch("ydbdoc_review.github.client.requests.request")
+def test_delete_branch_missing(mock_request):
+    mock_request.return_value = MagicMock(status_code=422, text="not found", content=b"")
+    client = GitHubClient("tok")
+    assert client.delete_branch("o", "r", "missing") is False
+
+
+@patch("ydbdoc_review.github.client.requests.request")
 def test_iter_issue_comments(mock_request):
     mock_request.return_value = MagicMock(
         status_code=200,

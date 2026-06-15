@@ -138,6 +138,20 @@ class GitHubClient:
         num = int(item.get("number", 0))
         return (html, num) if html and num else None
 
+    def delete_branch(self, owner: str, repo: str, branch: str) -> bool:
+        """Delete ``refs/heads/{branch}``. Return True if removed, False if absent."""
+        enc_branch = quote(branch, safe="")
+        url = (
+            f"https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{enc_branch}"
+        )
+        try:
+            self._request("DELETE", url)
+        except GitHubAPIError as exc:
+            if exc.status_code in (404, 422):
+                return False
+            raise
+        return True
+
     def add_issue_labels(
         self,
         owner: str,
