@@ -240,6 +240,75 @@ def test_translate_file_critic_only_mode():
     assert result.critic_initial is not None
 
 
+def test_translate_file_verify_preserves_en_fence_bodies():
+    """Regression for the doc_verify bug where critic fixes caused EN fence
+    contents (mermaid `participant Topic`, etc.) to be overwritten by RU
+    fence bodies. See PR ydb-platform/ydb#43399 fixup. The EN AST must be
+    the render base in verify mode so its fenced code blocks survive.
+    """
+    source = (
+        "Введение.\n\n"
+        "```mermaid\n"
+        "sequenceDiagram\n"
+        "    participant Топик\n"
+        "    participant Запрос v1\n"
+        "```\n\n"
+        "Заключение.\n"
+    )
+    target = (
+        "Intro.\n\n"
+        "```mermaid\n"
+        "sequenceDiagram\n"
+        "    participant Topic\n"
+        "    participant Query v1\n"
+        "```\n\n"
+        "Conclusion.\n"
+    )
+    ru_segs = extract_segments(parse_markdown(source))
+    en_segs = extract_segments(parse_markdown(target))
+    # Critic fixes the second paragraph but leaves the first alone.
+    fixed_id = ru_segs[1].id
+    critic_raw = json.dumps(
+        {
+            "verdict": "warnings",
+            "issues": [
+                {
+                    "segment_id": fixed_id,
+                    "severity": "warning",
+                    "category": "style",
+                    "comment": "tighten",
+                    "suggested_text": "Wrap-up.",
+                }
+            ],
+        }
+    )
+    # Verify pass: no further issues, and the residual-prose helper is also
+    # called after re-render for EN targets.
+    prose_raw_after = json.dumps({"spans": []})
+    verify_raw = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client([critic_raw, prose_raw_after, verify_raw])
+
+    result = translate_file(
+        source,
+        client,
+        load_glossary(),
+        target_lang="en",
+        enable_translate=False,
+        existing_target_text=target,
+    )
+
+    # Fence body must remain English.
+    assert "participant Topic" in result.final_text
+    assert "participant Query v1" in result.final_text
+    assert "Топик" not in result.final_text
+    assert "Запрос" not in result.final_text
+    # Critic fix to the closing paragraph must have been applied.
+    assert "Wrap-up." in result.final_text
+    assert "Conclusion." not in result.final_text
+    # And the untouched paragraph keeps its EN text.
+    assert "Intro." in result.final_text
+
+
 def test_translate_file_heuristics_bump_verdict_to_warnings():
     source = "Текст для перевода.\n"
     segments = extract_segments(parse_markdown(source))

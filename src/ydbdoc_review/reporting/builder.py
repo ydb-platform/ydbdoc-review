@@ -251,8 +251,11 @@ def _format_reviewer_item(
     location: str,
     problem: str,
     suggestion: str | None = None,
+    search_excerpt: str | None = None,
 ) -> str:
     lines = [f"{index}. **{location}** — {problem}"]
+    if search_excerpt:
+        lines.append(f"   - 📍 Искать: «{search_excerpt}»")
     if suggestion:
         preview = suggestion.replace("\n", " ")
         if len(preview) > 240:
@@ -268,6 +271,7 @@ def _format_critic_item(
     index: int,
     file_path: str,
     segment_lines: dict[str, tuple[int, int]],
+    segment_excerpts: dict[str, str],
     link: ReportLinkContext | None,
 ) -> str:
     path_label = None
@@ -288,11 +292,15 @@ def _format_critic_item(
         location = _location_label(issue, segment_locations)
     category = issue.category.replace("_", " ")
     problem = f"({category}) {issue.comment}"
+    search_excerpt = (
+        segment_excerpts.get(issue.segment_id) if issue.segment_id else None
+    )
     return _format_reviewer_item(
         index=index,
         location=location,
         problem=problem,
         suggestion=issue.suggested_text,
+        search_excerpt=search_excerpt,
     )
 
 
@@ -379,6 +387,7 @@ def _file_reviewer_section(
             index=item_index,
             location=location,
             problem=action.message,
+            search_excerpt=fr.segment_excerpts.get(action.segment_id),
         ) + "\n\n"
         item_index += 1
     for issue in critic_items:
@@ -389,6 +398,7 @@ def _file_reviewer_section(
                 index=item_index,
                 file_path=file_path,
                 segment_lines=fr.segment_lines,
+                segment_excerpts=fr.segment_excerpts,
                 link=link,
             )
             + "\n\n"

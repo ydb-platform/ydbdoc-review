@@ -78,6 +78,10 @@ def _sample_result(*, new_file: bool = False) -> PRTranslationResult:
         ],
         segment_locations={"s0042": "Overview", "s0124": "table:row1:col2"},
         segment_lines={"s0124": (355, 358)},
+        segment_excerpts={
+            "s0042": "Overview paragraph text",
+            "s0124": "Cell text to search",
+        },
     )
     return PRTranslationResult(
         pair_results=[
@@ -113,7 +117,8 @@ def test_build_full_report_reviewer_focused():
     assert "Overview" in body and "`s0042`" in body
     assert "string table" in body
     assert "💡 Совет: row table" in body
-    assert "table:row1:col2" in body
+    assert "📍 Искать:" in body
+    assert "таблица, строка 1, столбец 2" in body
     assert "Таблица не переведена автоматически" in body
     assert "355" in body
     assert "Переведите вручную" in body

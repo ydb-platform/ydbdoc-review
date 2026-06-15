@@ -823,6 +823,68 @@ final EN text, including list-indented fences.
 `detect_ru_source_bugs` message states «исправьте в RU PR». `_strip_fenced_blocks` in
 cyrillic check allows leading whitespace before `` ``` `` (indented fences).
 
+### 6.51. `doc_verify` render base = EN AST (preserve EN fence bodies, PR #43399)
+
+**Problem ([ydb #41206](https://github.com/ydb-platform/ydb/pull/41206) → fixup
+[ydb #43399](https://github.com/ydb-platform/ydb/pull/43399)):** `doc_verify` on
+`streaming-query/checkpoints.md` produced English text where Mermaid fenced blocks
+had Russian participant names:
+
+```
+participant Топик
+participant Запрос v1
+participant Запрос v2
+```
+
+The EN file already had correct `participant Topic` / `Query v1` / `Query v2`; the
+critic should never touch fence bodies.
+
+**Root cause:** `translate_file` in critic-only mode (`enable_translate=False`)
+parsed the **RU** source into `source_doc`, ran the critic against the existing EN
+text via `gate_round_trip`, applied critic fixes, then re-rendered using
+`copy.deepcopy(source_doc)`. The RU AST carries the **RU** fenced code blocks
+verbatim (RU author of `checkpoints.md` had written `participant Топик` in his
+Mermaid). `reinsert_segments` only updates inline-bearing segments — fence blocks
+pass through untouched, so RU fence bodies ended up in the EN output. Then
+`_finalize_en_target` made it worse by calling
+`enforce_source_fenced_blocks(text, normalized_source_text=RU)`, which **explicitly**
+copies fence content from the RU source. The bug only fired when the critic
+returned at least one issue (otherwise `translated_text` stayed equal to
+`existing_target_text`).
+
+**Decision:** in `enable_translate=False` mode, the **EN existing text** is the
+render base.
+
+1. Parse `existing_target_text` once at the top of the verify branch →
+   `render_base_doc` + `render_base_segments`.
+2. `_render_with_translations(render_base_doc, render_base_segments, …)` —
+   deepcopying the EN AST means fenced code blocks remain English.
+3. Translations are still keyed by RU segment ids during the critic pass (the
+   prompt sees RU `source_text` / EN `translated_text`); just before render they
+   are re-keyed to EN segment ids by zipped position
+   (`_remap_translations_by_position`). This is safe because `gate_round_trip`
+   has already enforced `len(ru_segments) == len(en_segments)`.
+4. Pass `existing_target_text` as the `normalized_source_text` argument to
+   `_finalize_en_target` so `enforce_source_fenced_blocks` becomes effectively a
+   no-op for fence bodies (EN fences match EN fences). Cyrillic-fence-comment
+   translation and Cyrillic-prose translation still run — they're still useful
+   in verify mode for catching residual RU text the original translation may
+   have left behind.
+5. If parsing the existing EN target fails or segment counts disagree, fall back
+   to the source (RU) base — the verdict will be `blocked` on alignment error
+   anyway, so the regression risk is bounded.
+
+`doc_translate` is unchanged: render base stays the RU `source_doc` (target
+doesn't exist yet, so there's nothing to preserve).
+
+**Tests:** `tests/unit/test_translate_file.py::test_translate_file_verify_preserves_en_fence_bodies`
+reproduces the original mermaid `participant Topic` corruption and proves the
+fix preserves the EN fence body while still applying critic-suggested prose
+fixes outside the fence.
+
+**Tag note:** `v0.1.0` was force-moved to the fix commit; no schema or CLI
+change.
+
 ---
 
 ---

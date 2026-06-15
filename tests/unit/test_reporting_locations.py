@@ -5,13 +5,16 @@ from __future__ import annotations
 from ydbdoc_review.pipeline.types import ManualAction
 from ydbdoc_review.reporting.locations import (
     ReportLinkContext,
+    build_segment_excerpts,
     build_segment_line_map,
     consolidate_heuristic_warnings,
     filter_critic_for_report,
     format_location_label,
+    humanize_path_label,
     manual_action_segment_ids,
 )
-from ydbdoc_review.segmentation.types import Segment, SegmentKind
+from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
+from ydbdoc_review.parsing.ast_types import InlineCode
 from ydbdoc_review.translation.schemas import CriticIssueOut
 
 
@@ -62,9 +65,14 @@ def test_format_location_label_with_github_link():
         line_range=(355, 355),
         link=ReportLinkContext(github_repo="org/repo", ref="main"),
     )
-    assert "table:row1:col2" in label
+    assert "таблица, строка 1, столбец 2" in label
     assert "github.com/org/repo/blob/main" in label
     assert "355" in label
+
+
+def test_humanize_tab_path_label():
+    assert humanize_path_label("tab:C++") == "вкладка «C++»"
+    assert humanize_path_label("Overview › tab:Go") == "Overview › вкладка «Go»"
 
 
 def test_build_segment_line_map():
@@ -81,3 +89,51 @@ def test_build_segment_line_map():
         final, [seg], {"s1": "Use `--input-batch` for batches."}
     )
     assert lines["s1"] == (3, 3)
+
+
+def test_build_segment_line_map_with_placeholders_and_duplicate_cli_tokens():
+    """Regression: prose needles must not match an earlier tab intro line."""
+    seg_intro = Segment(
+        id="s1",
+        kind=SegmentKind.PARAGRAPH,
+        path=["tab:C++"],
+        text="Подключите `MetricRegistry` в `TDriverConfig`.",
+        placeholders=[
+            ProtectedInline(placeholder="⟦C1⟧", node=InlineCode(content="MetricRegistry")),
+            ProtectedInline(placeholder="⟦C2⟧", node=InlineCode(content="TDriverConfig")),
+        ],
+        ast_path=[0],
+    )
+    seg_tip = Segment(
+        id="s2",
+        kind=SegmentKind.PARAGRAPH,
+        path=["tab:C++"],
+        text=(
+            "Метрики и трассировку можно подключить вместе, зарегистрировав "
+            "в `TDriverConfig` одновременно `MetricRegistry` и `TraceProvider`."
+        ),
+        placeholders=[
+            ProtectedInline(placeholder="⟦C1⟧", node=InlineCode(content="TDriverConfig")),
+            ProtectedInline(placeholder="⟦C2⟧", node=InlineCode(content="MetricRegistry")),
+            ProtectedInline(placeholder="⟦C3⟧", node=InlineCode(content="TraceProvider")),
+        ],
+        ast_path=[1],
+    )
+    final = (
+        "- C++\n\n"
+        "  Register `MetricRegistry` in `TDriverConfig`:\n\n"
+        "  You can connect metrics and tracing together by registering both "
+        "`TDriverConfig` and `MetricRegistry` in `TraceProvider` simultaneously.\n"
+    )
+    translations = {
+        "s1": "Register ⟦C1⟧ in ⟦C2⟧:",
+        "s2": (
+            "You can connect metrics and tracing together by registering both "
+            "⟦C1⟧ and ⟦C2⟧ in ⟦C3⟧ simultaneously."
+        ),
+    }
+    lines = build_segment_line_map(final, [seg_intro, seg_tip], translations)
+    assert lines["s1"] == (3, 3)
+    assert lines["s2"] == (5, 5)
+    excerpts = build_segment_excerpts(final, [seg_intro, seg_tip], translations, lines)
+    assert "connect metrics and tracing" in excerpts["s2"]

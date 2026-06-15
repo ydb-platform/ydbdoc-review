@@ -26,7 +26,7 @@ from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
 from ydbdoc_review.pipeline.qa import compose_file_verdict, gate_round_trip
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.translation.manual import ManualAction
-from ydbdoc_review.reporting.locations import build_segment_line_map
+from ydbdoc_review.reporting.locations import build_segment_excerpts, build_segment_line_map
 from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_fence_comments_with_client,
 )
@@ -48,14 +48,32 @@ def _normalize_source_text(raw: str, *, source_lang: str) -> str:
     return raw
 
 
+def _remap_translations_by_position(
+    source_segments: list[Segment],
+    target_segments: list[Segment],
+    translations: dict[str, str],
+) -> dict[str, str]:
+    """Re-key a translations dict from source-segment ids to target-segment ids.
+
+    Used in doc_verify mode where critic returns fixes keyed by RU segment id
+    but rendering happens on the EN AST. Mapping is by zipped position; the
+    caller must ensure segment counts match.
+    """
+    return {
+        tgt.id: translations[src.id]
+        for src, tgt in zip(source_segments, target_segments, strict=True)
+        if src.id in translations
+    }
+
+
 def _render_with_translations(
-    source_doc: Document,
+    base_doc: Document,
     segments: list[Segment],
     translations: dict[str, str],
     *,
     target_lang: str = "en",
 ) -> str:
-    doc = copy.deepcopy(source_doc)
+    doc = copy.deepcopy(base_doc)
     reinsert_segments(doc, segments, translations)
     localize_links_in_document(doc, target_lang=target_lang)
     return render_markdown(doc)
@@ -72,7 +90,8 @@ def _finalize_en_target(
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
 ) -> str:
-    """Copy fenced bodies from RU, translate residual Cyrillic, EN postprocess."""
+    """Copy fenced bodies from the fence reference (RU in doc_translate, EN in
+    doc_verify), translate residual Cyrillic, EN postprocess."""
     text = enforce_source_fenced_blocks(text, normalized_source_text)
     if client is not None and glossary is not None:
         text = translate_cyrillic_fence_comments_with_client(
@@ -174,6 +193,12 @@ def translate_file(
     segment_alignment_error: str | None = None
     translations: dict[str, str] = {}
 
+    # Render base: doc_translate uses the source (RU) AST; doc_verify uses the
+    # existing target (EN) AST so its fenced code blocks survive untouched.
+    render_base_doc: Document = source_doc
+    render_base_segments: list[Segment] = segments
+    fence_reference_text: str = source_text
+
     if enable_translate:
         # Full render from source AST — never merge or patch existing target text.
         translations = translate_segments(
@@ -207,6 +232,18 @@ def translate_file(
         if existing_target_text is None:
             raise ValueError("existing_target_text is required when enable_translate=False")
         translated_text = existing_target_text
+        # doc_verify: derive the render base from the existing EN target so
+        # fenced code blocks (mermaid, sql, …) are taken from EN, not RU.
+        try:
+            target_doc = parse_markdown(existing_target_text)
+            target_segments = extract_segments(target_doc)
+        except Exception:  # parse failure → fall back to source-based render
+            target_doc = source_doc
+            target_segments = segments
+        if len(target_segments) == len(segments):
+            render_base_doc = target_doc
+            render_base_segments = target_segments
+            fence_reference_text = existing_target_text
 
     translations, segment_alignment_error = gate_round_trip(segments, translated_text)
 
@@ -231,13 +268,23 @@ def translate_file(
             translations, segments, critic_initial.issues
         )
         if critic_initial.issues:
+            render_translations = (
+                translations
+                if render_base_segments is segments
+                else _remap_translations_by_position(
+                    segments, render_base_segments, translations
+                )
+            )
             translated_text = _render_with_translations(
-                source_doc, segments, translations, target_lang=tgt_lang
+                render_base_doc,
+                render_base_segments,
+                render_translations,
+                target_lang=tgt_lang,
             )
             if tgt_lang.lower() in {"en", "english"}:
                 translated_text = _finalize_en_target(
                     translated_text,
-                    source_text,
+                    fence_reference_text,
                     client=client,
                     glossary=glossary,
                     file_path=file_path,
@@ -285,6 +332,9 @@ def translate_file(
     segment_lines = build_segment_line_map(
         translated_text, segments, translations
     )
+    segment_excerpts = build_segment_excerpts(
+        translated_text, segments, translations, segment_lines
+    )
 
     return FileTranslationResult.from_usage(
         tracker=client.usage_tracker,
@@ -304,5 +354,6 @@ def translate_file(
         manual_actions=manual_actions,
         segment_locations=segment_locations,
         segment_lines=segment_lines,
+        segment_excerpts=segment_excerpts,
         segment_alignment_error=segment_alignment_error,
     )
