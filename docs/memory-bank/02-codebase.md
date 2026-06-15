@@ -53,7 +53,8 @@ src/ydbdoc_review/
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
-│   ├── markers.py                 placeholder order + realign by index
+│   ├── markers.py                 placeholder order + realign by index; ⟦V⟧ drift tolerance (§6.54)
+│   ├── placeholder_drift.py       drop spurious critic placeholder issues (§6.54)
 │   ├── placeholder_roles.py       semantic V/U placement (link dest vs prose)
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031

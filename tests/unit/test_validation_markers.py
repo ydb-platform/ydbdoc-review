@@ -10,6 +10,7 @@ from ydbdoc_review.validation.markers import (
     extract_placeholders,
     placeholders_match,
     realign_placeholders,
+    variable_placeholder_drift_only,
 )
 
 
@@ -46,3 +47,8 @@ def test_realign_placeholders_renumbers():
 
 def test_realign_placeholders_count_mismatch_returns_none():
     assert realign_placeholders("⟦C1⟧ ⟦L1⟧", "⟦C1⟧") is None
+
+
+def test_variable_placeholder_drift_only():
+    assert variable_placeholder_drift_only("⟦V1⟧ a ⟦V2⟧", "⟦V1⟧ a")
+    assert not variable_placeholder_drift_only("⟦V1⟧ a ⟦C1⟧", "⟦V1⟧ a")

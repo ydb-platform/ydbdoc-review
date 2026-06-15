@@ -44,6 +44,7 @@ _MERMAID_START = re.compile(
     r"^(?:sequenceDiagram|graph\s|flowchart\s|classDiagram|stateDiagram|erDiagram|gantt|pie\s)",
     re.IGNORECASE,
 )
+_MERMAID_ARROW = re.compile(r"(--x|->>|->|--)")
 # Collapse label tokens; keep arrows, punctuation, and mermaid keywords.
 _MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")
 
@@ -55,7 +56,25 @@ def _is_mermaid_fence(content: str) -> bool:
 
 def _mermaid_structure_line(line: str) -> str:
     """Normalize a mermaid line for structural compare (labels → ``*``)."""
-    return _MERMAID_LABEL.sub("*", line.rstrip())
+    stripped = line.strip()
+    if not stripped:
+        return ""
+    if _MERMAID_START.match(stripped):
+        return stripped.split()[0].lower()
+    if stripped.startswith("participant "):
+        rest = stripped[len("participant ") :]
+        if " as " in rest:
+            return "participant * as *"
+        return "participant *"
+    if stripped.startswith("Note over "):
+        colon = stripped.find(": ")
+        if colon >= 0:
+            header = _MERMAID_LABEL.sub("*", stripped[:colon])
+            return f"{header}: *"
+    if ": " in stripped and _MERMAID_ARROW.search(stripped):
+        prefix = stripped.split(": ", 1)[0]
+        return _MERMAID_LABEL.sub("*", prefix) + ": *"
+    return _MERMAID_LABEL.sub("*", stripped)
 
 
 def _fence_diff_is_mermaid_label_translation(

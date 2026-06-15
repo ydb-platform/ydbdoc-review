@@ -1,7 +1,7 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
-> Last updated: §6.53 critic regression guard + mermaid fence compare (#41206); §6.52 doc_verify fork fallback resets stale fixup branch before push; §6.51 doc_verify EN render base preserves EN fence bodies (#43399); §6.50 doc_verify fork fallback (#41451); §6.49 action Docker build + GHCR fallback; §6.48 translation report before source comment; §16.7 YDBOT_TOKEN CI split (#43126); §6.47 RU ``-rub`` asset paths; §6.46 YQL ``--`` fence comments; §6.45 prose Cyrillic cleanup; §6.44 fork nav EN baseline; §6.41 locale _includes; §6.39 fence comment Cyrillic; §6.38 cost reporting (₽/1K); §6.37 Wikipedia langlinks; §6.36 TOC indent;
+> Last updated: §6.54 mermaid Note/arrow + ⟦V⟧ drift filter (#41206); §6.53 critic regression guard + mermaid fence compare; §6.52 doc_verify fork fallback resets stale fixup branch before push; §6.51 doc_verify EN render base preserves EN fence bodies (#43399); §6.50 doc_verify fork fallback (#41451); §6.49 action Docker build + GHCR fallback; §6.48 translation report before source comment; §16.7 YDBOT_TOKEN CI split (#43126); §6.47 RU ``-rub`` asset paths; §6.46 YQL ``--`` fence comments; §6.45 prose Cyrillic cleanup; §6.44 fork nav EN baseline; §6.41 locale _includes; §6.39 fence comment Cyrillic; §6.38 cost reporting (₽/1K); §6.37 Wikipedia langlinks; §6.36 TOC indent;
 > §6.35 doc_verify nav; §6.34 link_locale; §6.31 verify RU ref;
 > §6.30 full re-translate;
 > §6.29 unified QA;

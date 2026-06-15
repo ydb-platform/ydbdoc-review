@@ -24,6 +24,10 @@ from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.pipeline.types import FileTranslationResult, FileVerdict
 from ydbdoc_review.pipeline.qa import compose_file_verdict, gate_round_trip
+from ydbdoc_review.validation.placeholder_drift import (
+    drop_spurious_placeholder_issues,
+    filter_critic_response,
+)
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.reporting.locations import build_segment_excerpts, build_segment_line_map
@@ -264,10 +268,13 @@ def translate_file(
             prompt_version=version,
             max_chars=batch_chars,
         )
-        translations, critic_applied, critic_skipped = apply_critic_fixes(
-            translations, segments, critic_initial.issues
+        actionable_issues = drop_spurious_placeholder_issues(
+            critic_initial.issues, segments, translations
         )
-        if critic_initial.issues:
+        translations, critic_applied, critic_skipped = apply_critic_fixes(
+            translations, segments, actionable_issues
+        )
+        if actionable_issues:
             render_translations = (
                 translations
                 if render_base_segments is segments
@@ -300,13 +307,16 @@ def translate_file(
                     client,
                     segments=segments,
                     translations=translations,
-                    prior_issues=critic_initial.issues,
+                    prior_issues=actionable_issues,
                     glossary=glossary,
                     file_path=file_path,
                     source_lang=src_lang,
                     target_lang=tgt_lang,
                     prompt_version=version,
                     max_chars=batch_chars,
+                )
+                critic_unresolved = filter_critic_response(
+                    critic_unresolved, segments, translations
                 )
 
     critic_verdict = _compute_critic_verdict(

@@ -123,6 +123,38 @@ def test_fence_content_allows_mermaid_label_translation():
     )
 
 
+def test_fence_content_allows_mermaid_note_and_message_translation():
+    """Regression #41206: Note/arrow message text may be shorter in EN."""
+    ru = (
+        "sequenceDiagram\n"
+        "    participant Топик\n"
+        "    participant Запрос v1\n"
+        "    participant Запрос v2\n"
+        "    Топик->>Запрос v1: События A..D\n"
+        "    Note over Запрос v1: Чекпоинт: смещение = 4\n"
+        "    Note over Топик: События E, F поступают в топик\n"
+        "    Топик--xЗапрос v2: E, F (не прочитаны)\n"
+        "    Топик->>Запрос v2: G (новое)\n"
+    )
+    en = (
+        "sequenceDiagram\n"
+        "    participant Topic\n"
+        "    participant Query v1\n"
+        "    participant Query v2\n"
+        "    Topic->>Query v1: Events A..D\n"
+        "    Note over Query v1: Checkpoint: offset = 4\n"
+        "    Note over Topic: Events E, F arrive\n"
+        "    Topic--xQuery v2: E, F (not read)\n"
+        "    Topic->>Query v2: G (new)\n"
+    )
+    assert fence_content_matches_source(ru, en)
+    assert not check_fence_body_copy(
+        f"```mermaid\n{ru}```",
+        f"```mermaid\n{en}```",
+        source_lang="ru",
+    )
+
+
 def test_fence_content_rejects_mermaid_structure_change():
     ru = (
         "sequenceDiagram\n"

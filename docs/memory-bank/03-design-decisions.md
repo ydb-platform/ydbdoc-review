@@ -975,6 +975,33 @@ preservation, two issues remained:
 §6.53 stops critic auto-fix from deleting good prose and stops false fence warnings
 on legitimately translated Mermaid.
 
+### 6.54. Mermaid message/Note lines + ``⟦V⟧`` drift filter ([#41206](https://github.com/ydb-platform/ydb/pull/41206))
+
+**Problem (third `doc_verify` on #41206, Jun 15):** report stayed 🟡 with:
+
+1. **``fence_body_copy`` block 2** in `checkpoints.md` — §6.53 skeleton compare
+   required identical token count in `Note over …:` / arrow message lines; EN
+   `Events E, F arrive` vs RU `События E, F поступают в топик` failed.
+2. **Critic ``placeholder corruption``** on `streaming-query.md` — human EN used
+   `{{ ydb-short-name }}` 3× where RU segment model has 4× ``⟦V⟧``; meaning OK,
+   segment gate flagged drift.
+
+**Decision:**
+
+1. **Mermaid line kinds** (`fence_integrity._mermaid_structure_line`):
+   - `participant` / `participant * as *` — label only;
+   - `Note over *:` — header structure only, prose after `:` ignored;
+   - arrow lines (`->>`, `--x`, …) — compare prefix before message colon only.
+2. **`variable_placeholder_drift_only`** (`validation/markers.py`) — non-``⟦V⟧``
+   placeholders must match; ``⟦V⟧`` count may differ by ≤1.
+3. **`drop_spurious_placeholder_issues`** (`validation/placeholder_drift.py`) —
+   before `apply_critic_fixes` and after `run_verify`, drop critic issues whose
+   only complaint is ``⟦V⟧`` drift; recompute verify verdict.
+
+**Tests:** `test_fence_content_allows_mermaid_note_and_message_translation`,
+`test_drop_spurious_placeholder_issues_streaming_query_style`,
+`test_filter_critic_response_clears_verdict`.
+
 ---
 
 ---

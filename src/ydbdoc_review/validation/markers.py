@@ -19,6 +19,29 @@ def placeholders_match(source: str, translated: str) -> bool:
     return extract_placeholders(source) == extract_placeholders(translated)
 
 
+def non_variable_placeholders(text: str) -> list[str]:
+    """Placeholders other than ``⟦V{n}⟧`` (code, URLs, images, …)."""
+    return [p for p in extract_placeholders(text) if p[1] != "V"]
+
+
+def variable_placeholder_count(text: str) -> int:
+    return sum(1 for p in extract_placeholders(text) if p[1] == "V")
+
+
+def variable_placeholder_drift_only(
+    source: str,
+    translated: str,
+    *,
+    max_v_delta: int = 1,
+) -> bool:
+    """True when RU/EN differ only in ``⟦V⟧`` count (human ``{{ var }}`` placement)."""
+    if placeholders_match(source, translated):
+        return False
+    if non_variable_placeholders(source) != non_variable_placeholders(translated):
+        return False
+    return abs(variable_placeholder_count(source) - variable_placeholder_count(translated)) <= max_v_delta
+
+
 def realign_placeholders(source: str, translated: str) -> str | None:
     """Fix renumbered placeholders in *translated* using *source* sequence.
 
