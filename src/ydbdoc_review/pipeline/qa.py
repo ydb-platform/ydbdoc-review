@@ -6,6 +6,9 @@ from typing import Literal
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.segmentation.placeholder_align import (
+    normalize_target_segments_to_source,
+)
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.validation.heuristics import (
@@ -20,13 +23,23 @@ def align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
 ) -> dict[str, str]:
-    """Map source segment ids → texts from a rendered EN file (round-trip gate)."""
-    target_segments = extract_segments(parse_markdown(target_text))
-    if len(target_segments) != len(source_segments):
+    """Map source segment ids → texts from a rendered EN file (round-trip gate).
+
+    Target segments are renumbered so each shared inline atom uses the source
+    placeholder name. The critic and apply path then see consistent ``⟦Xn⟧``
+    semantics across RU/EN — same name = same atom — instead of independent
+    left-to-right numbering, which causes spurious "placeholder order
+    mismatch" reports when word order shifts in translation.
+    """
+    target_segments_raw = extract_segments(parse_markdown(target_text))
+    if len(target_segments_raw) != len(source_segments):
         raise TranslationValidationError(
             f"segment count mismatch: source {len(source_segments)} vs "
-            f"target {len(target_segments)}"
+            f"target {len(target_segments_raw)}"
         )
+    target_segments = normalize_target_segments_to_source(
+        source_segments, target_segments_raw
+    )
     return {
         src.id: tgt.text
         for src, tgt in zip(source_segments, target_segments, strict=True)

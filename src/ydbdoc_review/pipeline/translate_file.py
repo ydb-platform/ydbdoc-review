@@ -10,6 +10,9 @@ from ydbdoc_review.parsing.ast_types import Document
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.segmentation.placeholder_align import (
+    normalize_target_segments_to_source,
+)
 from ydbdoc_review.segmentation.reinsert import reinsert_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.critic import (
@@ -245,6 +248,13 @@ def translate_file(
             target_doc = source_doc
             target_segments = segments
         if len(target_segments) == len(segments):
+            # Renumber EN placeholders to share names with RU for atoms that
+            # appear in both. The critic and apply path see one consistent
+            # numbering instead of two independent left-to-right schemes, and
+            # re-insertion through the EN AST resolves the right atoms.
+            target_segments = normalize_target_segments_to_source(
+                segments, target_segments
+            )
             render_base_doc = target_doc
             render_base_segments = target_segments
             fence_reference_text = existing_target_text
