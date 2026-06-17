@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -19,6 +20,46 @@ from ydbdoc_review.validation.heuristics import (
 FileVerdict = Literal["ok", "warnings", "blocked"]
 
 
+def describe_segment_alignment_mismatch(
+    source_segments: list[Segment],
+    target_segments: list[Segment],
+) -> str:
+    """Human-readable segment alignment error with first divergence hint."""
+    n_src = len(source_segments)
+    n_tgt = len(target_segments)
+    base = f"segment count mismatch: source {n_src} vs target {n_tgt}"
+
+    for idx, (src, tgt) in enumerate(zip(source_segments, target_segments, strict=False)):
+        if src.kind != tgt.kind or src.path != tgt.path:
+            src_loc = " › ".join(src.path) if src.path else "(начало документа)"
+            tgt_loc = " › ".join(tgt.path) if tgt.path else "(начало документа)"
+            return (
+                f"{base}; first structural diff at pair index {idx}: "
+                f"RU `{src.id}` ({src.kind.value}, {src_loc}) vs "
+                f"EN `{tgt.id}` ({tgt.kind.value}, {tgt_loc})"
+            )
+
+    if n_src > n_tgt:
+        extra = source_segments[n_tgt]
+        loc = " › ".join(extra.path) if extra.path else "(начало документа)"
+        preview = re.sub(r"\s+", " ", extra.text)[:80]
+        return (
+            f"{base}; first extra RU segment `{extra.id}` "
+            f"({extra.kind.value}, {loc}): «{preview}…»"
+        )
+
+    if n_tgt > n_src:
+        extra = target_segments[n_src]
+        loc = " › ".join(extra.path) if extra.path else "(начало документа)"
+        preview = re.sub(r"\s+", " ", extra.text)[:80]
+        return (
+            f"{base}; first extra EN segment `{extra.id}` "
+            f"({extra.kind.value}, {loc}): «{preview}…»"
+        )
+
+    return base
+
+
 def align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
@@ -34,8 +75,7 @@ def align_translations_from_target(
     target_segments_raw = extract_segments(parse_markdown(target_text))
     if len(target_segments_raw) != len(source_segments):
         raise TranslationValidationError(
-            f"segment count mismatch: source {len(source_segments)} vs "
-            f"target {len(target_segments_raw)}"
+            describe_segment_alignment_mismatch(source_segments, target_segments_raw)
         )
     target_segments = normalize_target_segments_to_source(
         source_segments, target_segments_raw

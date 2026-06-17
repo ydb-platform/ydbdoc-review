@@ -228,21 +228,15 @@ def _location_label(
 
 
 def _remaining_critic_issues(fr) -> list[CriticIssueOut]:
-    """Issues the reviewer still needs to look at (not auto-applied)."""
-    remaining: list[CriticIssueOut] = []
-    seen: set[tuple[str | None, str, str]] = set()
-    if fr.critic_unresolved:
-        for issue in fr.critic_unresolved.issues:
-            key = (issue.segment_id, issue.category, issue.comment)
-            if key not in seen:
-                seen.add(key)
-                remaining.append(issue)
-    for issue in fr.critic_skipped:
-        key = (issue.segment_id, issue.category, issue.comment)
-        if key not in seen:
-            seen.add(key)
-            remaining.append(issue)
-    return remaining
+    """Issues the reviewer still needs to look at (unresolved after apply)."""
+    if not fr.critic_unresolved:
+        return []
+    return list(fr.critic_unresolved.issues)
+
+
+def _skipped_critic_issues(fr) -> list[CriticIssueOut]:
+    """Critic suggestions that were not auto-applied (safety / validation)."""
+    return list(fr.critic_skipped)
 
 
 def _format_reviewer_item(
@@ -368,8 +362,33 @@ def _file_reviewer_section(
         return out, item_index + 1
 
     if not critic_items and not heuristics and not manual_actions:
+        skipped = _skipped_critic_issues(fr)
         if fr.verdict == "ok":
-            return f"### 🟢 `{run.plan.target_path}`\n\nЗамечаний нет.\n\n", item_index
+            file_path = run.plan.target_path
+            out = f"### 🟢 `{file_path}`\n\n"
+            if skipped and config.reporting.include_skipped_critic:
+                out += (
+                    "<details>\n<summary>Автоисправление не применено "
+                    f"({len(skipped)} — отклонено защитой pipeline)</summary>\n\n"
+                )
+                for issue in skipped:
+                    out += (
+                        _format_critic_item(
+                            issue,
+                            fr.segment_locations,
+                            index=item_index,
+                            file_path=file_path,
+                            segment_lines=fr.segment_lines,
+                            segment_excerpts=fr.segment_excerpts,
+                            link=link,
+                        )
+                        + "\n\n"
+                    )
+                    item_index += 1
+                out += "</details>\n\n"
+            else:
+                out += "Замечаний нет.\n\n"
+            return out, item_index
         return "", item_index
 
     file_path = run.plan.target_path
@@ -404,6 +423,27 @@ def _file_reviewer_section(
             + "\n\n"
         )
         item_index += 1
+    skipped = _skipped_critic_issues(fr)
+    if skipped and config.reporting.include_skipped_critic:
+        out += (
+            "<details>\n<summary>Автоисправление не применено "
+            f"({len(skipped)} — отклонено защитой pipeline)</summary>\n\n"
+        )
+        for issue in skipped:
+            out += (
+                _format_critic_item(
+                    issue,
+                    fr.segment_locations,
+                    index=item_index,
+                    file_path=file_path,
+                    segment_lines=fr.segment_lines,
+                    segment_excerpts=fr.segment_excerpts,
+                    link=link,
+                )
+                + "\n\n"
+            )
+            item_index += 1
+        out += "</details>\n\n"
     for warning in heuristics:
         out += _format_reviewer_item(
             index=item_index,
@@ -613,8 +653,20 @@ def build_full_report(
     body = header
     if not problem_runs and not nav_problems:
         body += "По всем файлам открытых замечаний нет.\n\n"
+        item_index = 1
         for run in ok_runs:
-            body += f"- 🟢 `{run.plan.target_path}`\n"
+            fr = run.file_result
+            if (
+                fr
+                and _skipped_critic_issues(fr)
+                and config.reporting.include_skipped_critic
+            ):
+                section, item_index = _file_reviewer_section(
+                    run, config=config, item_index=item_index, link=link
+                )
+                body += section
+            else:
+                body += f"- 🟢 `{run.plan.target_path}`\n"
         for nav in nav_ok:
             body += f"- 🟢 `{nav.en_path}` (навигация)\n"
         body += "\n"

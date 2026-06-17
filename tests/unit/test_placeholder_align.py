@@ -88,6 +88,71 @@ def test_url_locale_prefix_is_normalized():
     assert {p.placeholder for p in normalized.placeholders} == {"⟦U1⟧"}
 
 
+def test_relative_doc_paths_match_by_basename():
+    """Mirror RU/EN links with different ``../`` depth and anchors."""
+    src = _seg(
+        "s1", "[LSM](⟦U1⟧)",
+        [
+            _ph(
+                "⟦U1⟧",
+                InlineLink(
+                    href="../../query_execution/mvcc.md#organizaciya-hraneniya",
+                    children=[],
+                ),
+            )
+        ],
+    )
+    tgt = _seg(
+        "s1", "[LSM](⟦U1⟧)",
+        [
+            _ph(
+                "⟦U1⟧",
+                InlineLink(
+                    href="../../../concepts/query_execution/mvcc.md#how-ydb-stores",
+                    children=[],
+                ),
+            )
+        ],
+    )
+    [normalized] = normalize_target_segments_to_source([src], [tgt])
+    assert normalized.placeholders[0].placeholder == "⟦U1⟧"
+
+
+def test_null_code_matches_case_insensitive():
+    src = _seg(
+        "s1", "allow NULL values",
+        [],
+    )
+    tgt = _seg(
+        "s1", "allow ⟦C1⟧ values",
+        [_ph("⟦C1⟧", InlineCode(content="NULL"))],
+    )
+    # NULL in prose on src side — no placeholder; tgt-only C1 stays.
+    [normalized] = normalize_target_segments_to_source([src], [tgt])
+    assert normalized is tgt
+
+    src2 = _seg(
+        "s2", "allow ⟦C1⟧ values",
+        [_ph("⟦C1⟧", InlineCode(content="NULL"))],
+    )
+    tgt2 = _seg(
+        "s2", "allow ⟦C1⟧ values",
+        [_ph("⟦C1⟧", InlineCode(content="null"))],
+    )
+    [normalized2] = normalize_target_segments_to_source([src2], [tgt2])
+    assert normalized2.placeholders[0].placeholder == "⟦C1⟧"
+
+
+def test_segment_atom_legend():
+    from ydbdoc_review.segmentation.placeholder_align import segment_atom_legend
+
+    seg = _seg(
+        "s1", "⟦C1⟧",
+        [_ph("⟦C1⟧", InlineCode(content="episodes"))],
+    )
+    assert segment_atom_legend(seg) == {"⟦C1⟧": "code:episodes"}
+
+
 def test_yfm_variable_matches_by_name():
     src = _seg(
         "s1", "Backend is ⟦V1⟧",

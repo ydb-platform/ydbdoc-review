@@ -94,6 +94,7 @@ class ReportingConfig(BaseModel):
     include_cost: bool = True
     include_token_usage: bool = True
     include_heuristics: bool = True
+    include_skipped_critic: bool = True
 
 
 class Secrets(BaseModel):

@@ -64,14 +64,20 @@ def humanize_path_label(path_label: str) -> str:
     return " › ".join(humanize_path_part(p) for p in path_label.split(" › "))
 
 
-def rendered_segment_text(seg: Segment, translations: dict[str, str]) -> str:
+def rendered_segment_text(
+    seg: Segment,
+    translations: dict[str, str],
+    *,
+    placeholder_seg: Segment | None = None,
+) -> str:
     """Best-effort markdown preview of a segment translation for search/excerpt."""
     translated = translations.get(seg.id, seg.text)
-    if not seg.placeholders:
+    ph_seg = placeholder_seg or seg
+    if not ph_seg.placeholders:
         return translated
     from ydbdoc_review.segmentation.inline_protector import restore_inline_text
 
-    return restore_inline_text(translated, seg.placeholders)
+    return restore_inline_text(translated, ph_seg.placeholders)
 
 
 def excerpt_for_line_search(text: str) -> str | None:
@@ -139,6 +145,7 @@ def segment_display_excerpt(
     final_text: str = "",
     line_range: tuple[int, int] | None = None,
     max_len: int = 100,
+    placeholder_seg: Segment | None = None,
 ) -> str | None:
     """Short EN/RU snippet reviewers can search for in the file."""
     if line_range and final_text:
@@ -148,7 +155,9 @@ def segment_display_excerpt(
             chunk = " ".join(lines[start - 1 : end]).strip()
             if chunk:
                 return _truncate_excerpt(chunk, max_len=max_len)
-    rendered = rendered_segment_text(seg, translations)
+    rendered = rendered_segment_text(
+        seg, translations, placeholder_seg=placeholder_seg
+    )
     needle = excerpt_for_line_search(rendered) or excerpt_for_line_search(seg.text)
     if needle:
         return _truncate_excerpt(needle, max_len=max_len)
@@ -157,16 +166,41 @@ def segment_display_excerpt(
     return None
 
 
+def excerpt_found_in_file(excerpt: str, final_text: str) -> bool:
+    """True when a report search excerpt plausibly occurs in the rendered file."""
+    if not excerpt or not final_text:
+        return True
+    if excerpt in final_text:
+        return True
+    collapsed_hay = re.sub(r"\s+", " ", final_text)
+    collapsed_excerpt = re.sub(r"\s+", " ", excerpt).strip()
+    if collapsed_excerpt and collapsed_excerpt in collapsed_hay:
+        return True
+    # Require a substantive backtick span from the excerpt itself.
+    cli = _CLI_TOKEN.search(excerpt)
+    if cli:
+        return cli.group(0) in final_text
+    # Broken previews from wrong placeholder restore (missing inline code).
+    if "(e.g.," in excerpt and "`" not in excerpt:
+        return False
+    if re.search(r"\(\s*\)|\[\w*\]\(\s*\)", excerpt):
+        return False
+    return len(collapsed_excerpt) < 12
+
+
 def build_segment_line_map(
     final_text: str,
     segments: list[Segment],
     translations: dict[str, str],
+    *,
+    placeholder_segments: list[Segment] | None = None,
 ) -> dict[str, tuple[int, int]]:
     """Map segment id → (start_line, end_line) in rendered markdown."""
+    ph_segs = placeholder_segments or segments
     lines: dict[str, tuple[int, int]] = {}
     search_from = 1
-    for seg in segments:
-        rendered = rendered_segment_text(seg, translations)
+    for seg, ph_seg in zip(segments, ph_segs, strict=False):
+        rendered = rendered_segment_text(seg, translations, placeholder_seg=ph_seg)
         needle = excerpt_for_line_search(rendered) or excerpt_for_line_search(seg.text)
         if needle is None:
             continue
@@ -184,18 +218,21 @@ def build_segment_excerpts(
     segment_lines: dict[str, tuple[int, int]],
     *,
     max_len: int = 100,
+    placeholder_segments: list[Segment] | None = None,
 ) -> dict[str, str]:
     """Map segment id → short searchable preview for PR reports."""
+    ph_segs = placeholder_segments or segments
     excerpts: dict[str, str] = {}
-    for seg in segments:
+    for seg, ph_seg in zip(segments, ph_segs, strict=False):
         excerpt = segment_display_excerpt(
             seg,
             translations,
             final_text=final_text,
             line_range=segment_lines.get(seg.id),
             max_len=max_len,
+            placeholder_seg=ph_seg,
         )
-        if excerpt:
+        if excerpt and excerpt_found_in_file(excerpt, final_text):
             excerpts[seg.id] = excerpt
     return excerpts
 

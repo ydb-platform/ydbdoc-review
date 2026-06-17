@@ -11,8 +11,10 @@ from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.pipeline.qa import (
     align_translations_from_target,
     compose_file_verdict,
+    describe_segment_alignment_mismatch,
     gate_round_trip,
 )
+from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.pipeline.translate_file import _compute_critic_verdict, translate_file
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
@@ -23,6 +25,41 @@ from ydbdoc_review.validation.heuristics import (
     run_file_heuristics_classified,
 )
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
+
+
+def test_describe_segment_alignment_extra_ru_segment():
+    src = [
+        Segment(
+            id="s1",
+            kind=SegmentKind.PARAGRAPH,
+            path=[],
+            text="One.",
+            placeholders=[],
+            ast_path=[0],
+        ),
+        Segment(
+            id="s2",
+            kind=SegmentKind.PARAGRAPH,
+            path=[],
+            text="Two.",
+            placeholders=[],
+            ast_path=[1],
+        ),
+    ]
+    tgt = [
+        Segment(
+            id="s1",
+            kind=SegmentKind.PARAGRAPH,
+            path=[],
+            text="One.",
+            placeholders=[],
+            ast_path=[0],
+        ),
+    ]
+    msg = describe_segment_alignment_mismatch(src, tgt)
+    assert "source 2 vs target 1" in msg
+    assert "extra RU segment" in msg
+    assert "s2" in msg
 
 
 def test_gate_round_trip_ok():

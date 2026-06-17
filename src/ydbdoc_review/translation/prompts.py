@@ -9,6 +9,7 @@ from typing import Any
 from openai.types.chat import ChatCompletionMessageParam
 
 from ydbdoc_review.segmentation.chunker import Batch
+from ydbdoc_review.segmentation.placeholder_align import segment_atom_legend
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.glossary import Glossary
 
@@ -158,20 +159,23 @@ def build_repair_messages(
 def segments_to_critic_batch_json(
     segments: list[Segment],
     translations: dict[str, str],
+    *,
+    include_atom_map: bool = True,
 ) -> str:
     """Segment source/target pairs for batched critic or verify."""
-    payload = {
-        "segments": [
-            {
-                "id": seg.id,
-                "kind": seg.kind.value,
-                "path": seg.path,
-                "source_text": seg.text,
-                "translated_text": translations.get(seg.id, seg.text),
-            }
-            for seg in segments
-        ]
-    }
+    items: list[dict[str, object]] = []
+    for seg in segments:
+        entry: dict[str, object] = {
+            "id": seg.id,
+            "kind": seg.kind.value,
+            "path": seg.path,
+            "source_text": seg.text,
+            "translated_text": translations.get(seg.id, seg.text),
+        }
+        if include_atom_map and seg.placeholders:
+            entry["atom_map"] = segment_atom_legend(seg)
+        items.append(entry)
+    payload = {"segments": items}
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 

@@ -1,14 +1,24 @@
-"""Filter spurious critic issues about ``⟦V⟧`` / ``{{ ydb-short-name }}`` drift."""
+"""Filter spurious critic issues about placeholder drift across RU/EN."""
 
 from __future__ import annotations
 
 import logging
+import re
 
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, CriticVerdict
-from ydbdoc_review.validation.markers import variable_placeholder_drift_only
+from ydbdoc_review.validation.markers import (
+    cross_lang_placeholder_drift_only,
+    variable_placeholder_drift_only,
+)
 
 logger = logging.getLogger(__name__)
+
+_PLACEHOLDER_ISSUE = re.compile(r"placeholder", re.IGNORECASE)
+_REORDER_ISSUE = re.compile(
+    r"order|reorder|renumber|changed to ⟦|mapping",
+    re.IGNORECASE,
+)
 
 
 def is_spurious_variable_placeholder_issue(
@@ -19,10 +29,25 @@ def is_spurious_variable_placeholder_issue(
     """Drop critic noise when only ``{{ ydb-short-name }}`` placement/count drifts."""
     if segment is None or translation is None or not issue.segment_id:
         return False
-    cat = issue.category.lower().replace("_", " ")
-    if "placeholder" not in cat:
+    if not _PLACEHOLDER_ISSUE.search(issue.category):
         return False
     return variable_placeholder_drift_only(segment.text, translation)
+
+
+def is_spurious_cross_lang_placeholder_issue(
+    issue: CriticIssueOut,
+    segment: Segment | None,
+    translation: str | None,
+) -> bool:
+    """Drop reorder/renumber noise when RU/EN share the same non-``⟦V⟧`` multiset."""
+    if segment is None or translation is None or not issue.segment_id:
+        return False
+    if not _PLACEHOLDER_ISSUE.search(issue.category):
+        return False
+    if not cross_lang_placeholder_drift_only(segment.text, translation):
+        return False
+    haystack = f"{issue.category} {issue.comment}"
+    return bool(_REORDER_ISSUE.search(haystack))
 
 
 def drop_spurious_placeholder_issues(
@@ -37,7 +62,13 @@ def drop_spurious_placeholder_issues(
         trans = translations.get(issue.segment_id) if issue.segment_id else None
         if is_spurious_variable_placeholder_issue(issue, seg, trans):
             logger.info(
-                "Ignoring spurious placeholder critic issue for %s",
+                "Ignoring spurious V-placeholder critic issue for %s",
+                issue.segment_id,
+            )
+            continue
+        if is_spurious_cross_lang_placeholder_issue(issue, seg, trans):
+            logger.info(
+                "Ignoring spurious cross-lang placeholder critic issue for %s",
                 issue.segment_id,
             )
             continue

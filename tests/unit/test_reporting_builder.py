@@ -394,3 +394,54 @@ def test_build_commit_message():
     assert "PR #12" in msg
     verify_msg = build_commit_message(12, _sample_result(), config=cfg, verify=True)
     assert "doc_verify" in verify_msg
+
+
+def test_full_report_skipped_critic_in_collapsed_section():
+    """Skipped apply-safe fixes must not inflate the main issue list."""
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    skipped = CriticIssueOut(
+        segment_id="s0013",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="order change rejected by pipeline",
+        suggested_text="would break EN",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="Hello",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+        critic_skipped=[skipped],
+        critic_unresolved=CriticResponse(verdict="ok", issues=[]),
+    )
+    body = build_full_report(
+        PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "можно мержить" in body or "открытых замечаний нет" in body
+    assert "Автоисправление не применено" in body
+    assert "order change rejected" in body
+    assert body.index("Автоисправление") > body.find("Без замечаний") or "можно мержить" in body
+
+
+def test_excerpt_found_in_file_rejects_broken_preview():
+    from ydbdoc_review.reporting.locations import excerpt_found_in_file
+
+    final = "when a query (e.g., `SELECT a FROM t`) is executed"
+    assert not excerpt_found_in_file("when a query (e.g., ) is executed", final)
+    assert excerpt_found_in_file("when a query (e.g., `SELECT a FROM t`)", final)

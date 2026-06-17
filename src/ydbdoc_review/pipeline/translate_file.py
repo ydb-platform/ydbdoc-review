@@ -353,10 +353,17 @@ def translate_file(
     )
 
     segment_lines = build_segment_line_map(
-        translated_text, segments, translations
+        translated_text,
+        segments,
+        translations,
+        placeholder_segments=render_base_segments,
     )
     segment_excerpts = build_segment_excerpts(
-        translated_text, segments, translations, segment_lines
+        translated_text,
+        segments,
+        translations,
+        segment_lines,
+        placeholder_segments=render_base_segments,
     )
 
     return FileTranslationResult.from_usage(

@@ -5,7 +5,7 @@ Batch: {batch_index} of {batch_count} (segment ids in this batch only)
 
 ## Segment pairs
 
-Each item has `source_text` ({source_lang}) and `translated_text` ({target_lang}) for the same structural segment.
+Each item has `source_text` ({source_lang}) and `translated_text` ({target_lang}) for the same structural segment. When present, `atom_map` lists what each `⟦…⟧` marker stands for (e.g. `code:episodes`, `url:mvcc.md`) — **the same marker name refers to the same atom in both languages**.
 
 ```json
 {batch_json}
@@ -14,6 +14,8 @@ Each item has `source_text` ({source_lang}) and `translated_text` ({target_lang}
 ## Task
 
 Find translation issues **only in the segments listed above**: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), placeholder corruption, CLI flag damage, **residual Cyrillic in {target_lang} prose or inline `` `…` `` terms** (severity `blocked` when present).
+
+**Do not** flag placeholder issues when `atom_map` shows the same atoms are present under the same marker names but **word order** differs in {target_lang} prose (e.g. RU "к таблице ⟦C1⟧ колонку ⟦C2⟧" vs EN "column ⟦C2⟧ to ⟦C1⟧ table" after alignment). Flag placeholder corruption only when an atom is **wrong, missing, or substituted** (e.g. `Uint64` where `views` should be).
 
 Return **only** JSON:
 

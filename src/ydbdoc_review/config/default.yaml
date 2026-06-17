@@ -56,4 +56,5 @@ reporting:
   include_cost: true
   include_token_usage: true
   include_heuristics: true
+  include_skipped_critic: true
 

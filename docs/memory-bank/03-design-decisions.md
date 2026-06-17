@@ -1088,6 +1088,44 @@ critic that hallucinates a reorder shouldn't be auto-applied in the verify
 path — apply still runs through the EN AST and the cost of a bad apply is a
 corrupted file. The cost of a skipped good fix is a noisy report.
 
+### 6.56. doc_verify noise reduction ([ydb #40466](https://github.com/ydb-platform/ydb/pull/40466))
+
+**Problem (Jun 17):** even with §6.55, `doc_verify` on #40466 still reported
+~18 issues per run; most were pipeline noise (placeholder reorder after
+correct translation, mirror URLs with different relative paths, broken
+``📍 Искать`` excerpts, skipped critic fixes counted as open blockers).
+
+**Decision:**
+
+1. **URL mirror matching** (`placeholder_align._normalize_doc_href`) — pair
+   RU/EN doc links by **basename** (strip ``../`` depth and fragment). Fixes
+   false ``⟦U1⟧→⟦U2⟧`` when paths differ but target the same file
+   (``mvcc.md``, ``create_table/index.md``).
+2. **NULL atom equivalence** — ``InlineCode("NULL")`` matches ``null``
+   case-insensitively for align keys.
+3. **Cross-lang spurious filter** (`validation/placeholder_drift.py`,
+   ``cross_lang_placeholder_drift_only`` in ``markers.py``) — drop critic
+   placeholder issues when non-``⟦V⟧`` multiset matches and the comment is
+   about order/reorder/mapping (extends §6.54 ``⟦V⟧``-only filter).
+4. **Atom legend in critic batch** — ``segments_to_critic_batch_json`` adds
+   ``atom_map`` per segment; ``critic_batch.md`` instructs the model not to
+   flag word-order shifts when ``atom_map`` shows the same atoms under the
+   same marker names.
+5. **Segment mismatch diagnostics** (`pipeline/qa.describe_segment_alignment_mismatch`)
+   — alignment errors name the first extra/mismatched segment instead of only
+   ``437 vs 436``.
+6. **Excerpt sanity** (`reporting/locations.excerpt_found_in_file`) — omit
+   ``📍 Искать`` when the preview is broken (e.g. ``(e.g., )`` from wrong
+   placeholder restore). ``doc_verify`` builds line maps/excerpts from
+   ``render_base_segments`` (EN placeholders), not RU source placeholders.
+7. **Report tiers** — ``critic_skipped`` no longer inflates the main issue
+   list or 🔴 verdict; shown in a collapsed
+   «Автоисправление не применено» block
+   (``reporting.include_skipped_critic``, default ``true``).
+
+**Tests:** extended ``test_placeholder_align.py``, ``test_placeholder_drift.py``,
+``test_qa.py``, ``test_reporting_builder.py``.
+
 ---
 
 ---

@@ -18,6 +18,7 @@ target AST without scrambling content.
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 
 from ydbdoc_review.parsing.ast_types import (
     InlineCode,
@@ -38,6 +39,33 @@ def _strip_locale_prefix(href: str) -> str:
     return _LOCALE_PREFIX_RE.sub(r"/", href, count=1)
 
 
+def _normalize_doc_href(href: str) -> str:
+    """Canonical key for mirrored RU/EN doc links (basename, no fragment).
+
+    Relative paths differ between locales (``../../query_execution/mvcc.md`` vs
+    ``../../../concepts/query_execution/mvcc.md``); anchors differ too
+    (``#parametry-zaprosa`` vs ``#request-parameters``). Matching by basename
+    pairs mirror links inside the same doc pair.
+    """
+    path_part = href.split("#", 1)[0]
+    path_part = _strip_locale_prefix(path_part.replace("\\", "/"))
+    normalized = PurePosixPath(path_part).as_posix()
+    parts = [p for p in normalized.split("/") if p and p not in {".", ".."}]
+    if parts:
+        return parts[-1].lower()
+    return normalized.lower() or href.lower()
+
+
+_SQL_KEYWORD_ATOMS = frozenset({"null", "not null"})
+
+
+def _code_atom_key(content: str) -> tuple:
+    lowered = content.strip().lower()
+    if lowered in _SQL_KEYWORD_ATOMS:
+        return ("code", lowered)
+    return ("code", content)
+
+
 def _atom_key(node: InlineNode) -> tuple:
     """Language-neutral identity for an inline atom.
 
@@ -46,15 +74,15 @@ def _atom_key(node: InlineNode) -> tuple:
     back to ``(kind, raw)`` and rarely match across languages.
     """
     if isinstance(node, InlineCode):
-        return ("code", node.content)
+        return _code_atom_key(node.content)
     if isinstance(node, InlineVariable):
         return ("var", node.name)
     if isinstance(node, InlineHTML):
         return ("html", node.content)
     if isinstance(node, InlineLink):
-        if not node.children and node.href:
-            return ("url", _strip_locale_prefix(node.href))
-        return ("link", _strip_locale_prefix(node.href))
+        if node.href:
+            return ("url", _normalize_doc_href(node.href))
+        return ("link", node.href or "")
     if isinstance(node, InlineImage):
         return ("img", node.src)
     return ("other", node.kind, getattr(node, "content", ""))
@@ -166,3 +194,25 @@ def _rename_in_text(text: str, rename: dict[str, str]) -> str:
         return rename.get(m.group(0), m.group(0))
 
     return _PLACEHOLDER_NAME_RE.sub(repl, text)
+
+
+def describe_atom(node: InlineNode) -> str:
+    """Short legend entry for critic prompts (``code:episodes``, ``url:mvcc.md``)."""
+    if isinstance(node, InlineCode):
+        return f"code:{node.content}"
+    if isinstance(node, InlineVariable):
+        return f"var:{node.name}"
+    if isinstance(node, InlineLink):
+        if node.href:
+            return f"url:{_normalize_doc_href(node.href)}"
+        return "url:"
+    if isinstance(node, InlineImage):
+        return f"img:{node.src}"
+    if isinstance(node, InlineHTML):
+        return f"html:{node.content[:40]}"
+    return node.kind
+
+
+def segment_atom_legend(seg: Segment) -> dict[str, str]:
+    """Map placeholder markers → atom description for critic batch JSON."""
+    return {p.placeholder: describe_atom(p.node) for p in seg.placeholders}

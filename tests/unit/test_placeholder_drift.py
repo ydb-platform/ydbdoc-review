@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
-from ydbdoc_review.validation.markers import variable_placeholder_drift_only
+from ydbdoc_review.validation.markers import variable_placeholder_drift_only, cross_lang_placeholder_drift_only
 from ydbdoc_review.validation.placeholder_drift import (
     drop_spurious_placeholder_issues,
     filter_critic_response,
+    is_spurious_cross_lang_placeholder_issue,
 )
 
 
@@ -80,3 +81,37 @@ def test_filter_critic_response_clears_verdict():
     assert out is not None
     assert out.issues == []
     assert out.verdict == "ok"
+
+
+def test_cross_lang_reorder_issue_dropped():
+    """§6.56: same atom multiset, reorder comment — spurious after align."""
+    ru = "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧"
+    en = "column ⟦C2⟧ with type ⟦C3⟧ to ⟦C1⟧ table"
+    assert cross_lang_placeholder_drift_only(ru, en)
+    seg = _segment("s0013", ru)
+    issue = CriticIssueOut(
+        segment_id="s0013",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="Placeholder order changed: source C1,C2,C3; translation C2,C3,C1",
+        suggested_text="broken",
+    )
+    assert is_spurious_cross_lang_placeholder_issue(issue, seg, en)
+    filtered = drop_spurious_placeholder_issues([issue], [seg], {"s0013": en})
+    assert filtered == []
+
+
+def test_cross_lang_real_mismatch_not_dropped():
+    ru = "Use ⟦C1⟧ and ⟦C2⟧"
+    en = "Use ⟦C1⟧ only"
+    seg = _segment("s1", ru)
+    issue = CriticIssueOut(
+        segment_id="s1",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="Missing ⟦C2⟧",
+        suggested_text=None,
+    )
+    assert not is_spurious_cross_lang_placeholder_issue(issue, seg, en)
+    filtered = drop_spurious_placeholder_issues([issue], [seg], {"s1": en})
+    assert filtered == [issue]

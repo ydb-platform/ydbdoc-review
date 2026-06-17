@@ -49,6 +49,20 @@ def variable_placeholder_drift_only(
     return abs(variable_placeholder_count(source) - variable_placeholder_count(translated)) <= max_v_delta
 
 
+def cross_lang_placeholder_drift_only(source: str, translated: str) -> bool:
+    """True when non-``⟦V⟧`` placeholders match as a multiset but order/ids differ.
+
+    After ``normalize_target_segments_to_source`` (§6.55) the critic should not
+    treat renumberings or word-order shifts as corruption when the atom multiset
+    is unchanged.
+    """
+    if extract_placeholders(source) == extract_placeholders(translated):
+        return False
+    return sorted(non_variable_placeholders(source)) == sorted(
+        non_variable_placeholders(translated)
+    )
+
+
 def realign_placeholders(source: str, translated: str) -> str | None:
     """Fix renumbered placeholders in *translated* using *source* sequence.
 
