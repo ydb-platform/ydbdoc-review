@@ -15,8 +15,13 @@ def extract_placeholders(text: str) -> list[str]:
 
 
 def placeholders_match(source: str, translated: str) -> bool:
-    """True when translated text has the same placeholder sequence as source."""
-    return extract_placeholders(source) == extract_placeholders(translated)
+    """True when source and translated share the same placeholder multiset.
+
+    Order-insensitive: legitimate translation may reorder inline atoms
+    (e.g. RU "к таблице ⟦C1⟧ колонку ⟦C2⟧" → EN "column ⟦C2⟧ to ⟦C1⟧ table").
+    Still catches lost, duplicated, or substituted blocks via count parity.
+    """
+    return sorted(extract_placeholders(source)) == sorted(extract_placeholders(translated))
 
 
 def non_variable_placeholders(text: str) -> list[str]:
@@ -37,7 +42,9 @@ def variable_placeholder_drift_only(
     """True when RU/EN differ only in ``⟦V⟧`` count (human ``{{ var }}`` placement)."""
     if placeholders_match(source, translated):
         return False
-    if non_variable_placeholders(source) != non_variable_placeholders(translated):
+    if sorted(non_variable_placeholders(source)) != sorted(
+        non_variable_placeholders(translated)
+    ):
         return False
     return abs(variable_placeholder_count(source) - variable_placeholder_count(translated)) <= max_v_delta
 
@@ -53,6 +60,10 @@ def realign_placeholders(source: str, translated: str) -> str | None:
     src_ph = extract_placeholders(source)
     tgt_ph = extract_placeholders(translated)
     if src_ph == tgt_ph:
+        return translated
+    if sorted(src_ph) == sorted(tgt_ph):
+        # Same multiset, different order — legitimate translation reorder.
+        # Renumbering by source order would re-attach markers to the wrong words.
         return translated
     if len(src_ph) != len(tgt_ph):
         return None

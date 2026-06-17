@@ -19,10 +19,31 @@ def test_extract_placeholders_order():
     assert extract_placeholders(text) == ["⟦C1⟧", "⟦L1⟧"]
 
 
-def test_placeholders_must_match_order():
+def test_placeholders_must_match_multiset():
     assert placeholders_match("⟦C1⟧ x", "⟦C1⟧ y")
     assert not placeholders_match("⟦C1⟧", "⟦C2⟧")
-    assert not placeholders_match("⟦C1⟧ ⟦L1⟧", "⟦L1⟧ ⟦C1⟧")
+    # Reordering is legitimate translation behavior — multiset compare.
+    assert placeholders_match("⟦C1⟧ ⟦L1⟧", "⟦L1⟧ ⟦C1⟧")
+
+
+def test_placeholders_tolerate_legitimate_reorder():
+    # RU: "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧"
+    # EN: "column ⟦C2⟧ with data type ⟦C3⟧ to the ⟦C1⟧ table"
+    src = "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧"
+    tgt = "column ⟦C2⟧ with data type ⟦C3⟧ to the ⟦C1⟧ table"
+    assert placeholders_match(src, tgt)
+
+
+def test_placeholders_detect_lost_block():
+    assert not placeholders_match("⟦C1⟧ ⟦C2⟧ ⟦C3⟧", "⟦C1⟧ ⟦C2⟧")
+
+
+def test_placeholders_detect_substitution():
+    assert not placeholders_match("⟦C1⟧ ⟦C2⟧", "⟦C1⟧ ⟦L2⟧")
+
+
+def test_placeholders_detect_duplicated_block():
+    assert not placeholders_match("⟦C1⟧ ⟦C2⟧", "⟦C1⟧ ⟦C1⟧")
 
 
 def test_extract_cli_flags():
@@ -47,6 +68,14 @@ def test_realign_placeholders_renumbers():
 
 def test_realign_placeholders_count_mismatch_returns_none():
     assert realign_placeholders("⟦C1⟧ ⟦L1⟧", "⟦C1⟧") is None
+
+
+def test_realign_placeholders_passthrough_on_permutation():
+    # Permuted markers (same multiset) must NOT be renumbered: that would
+    # re-attach markers to the wrong words.
+    source = "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧"
+    translated = "column ⟦C2⟧ with data type ⟦C3⟧ to the ⟦C1⟧ table"
+    assert realign_placeholders(source, translated) == translated
 
 
 def test_variable_placeholder_drift_only():
