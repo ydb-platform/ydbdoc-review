@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.parsing.ast_types import FencedCode
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.translation.glossary import Glossary
@@ -297,6 +298,145 @@ def translate_cyrillic_fence_comments_with_client(
         )
         if new_line != lines[item.line_index]:
             lines[item.line_index] = new_line
+            block.content = "\n".join(lines)
+            changed = True
+    return render_markdown(doc) if changed else text
+
+
+def _text_fence_lang(info: str) -> str:
+    parts = (info or "").strip().split()
+    return parts[0].lower() if parts else ""
+
+
+def collect_cyrillic_text_fence_lines(text: str) -> list[FenceCommentLine]:
+    """Cyrillic lines inside `` ```text `` fenced diagram blocks."""
+    blocks = collect_code_blocks(parse_markdown(text))
+    found: list[FenceCommentLine] = []
+    for block_index, block in enumerate(blocks, start=1):
+        if not isinstance(block, FencedCode):
+            continue
+        if _text_fence_lang(block.info) != "text":
+            continue
+        for line_index, line in enumerate(block.content.splitlines()):
+            if _CYRILLIC.search(line):
+                found.append(
+                    FenceCommentLine(
+                        block_index=block_index,
+                        line_index=line_index,
+                        line=line,
+                        body=line.strip(),
+                    )
+                )
+    return found
+
+
+def check_cyrillic_in_en_text_fences(target_text: str, *, target_lang: str) -> list[str]:
+    """Residual Cyrillic inside `` ```text `` diagram fences."""
+    if target_lang.lower() != "en":
+        return []
+    items = collect_cyrillic_text_fence_lines(target_text)
+    if not items:
+        return []
+    warnings: list[str] = []
+    for item in items[:8]:
+        preview = item.body.replace("\n", " ")[:120]
+        warnings.append(f"cyrillic_in_text_fence: «{preview}»")
+    if len(items) > 8:
+        warnings.append(f"… and {len(items) - 8} more cyrillic_in_text_fence lines")
+    return warnings
+
+
+def translate_cyrillic_text_fences_with_client(
+    text: str,
+    client: YandexLLMClient,
+    glossary: Glossary,
+    *,
+    file_path: str = "",
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+) -> str:
+    """LLM-translate Cyrillic labels inside `` ```text `` diagram fences."""
+    del prompt_version
+    items = collect_cyrillic_text_fence_lines(text)
+    if not items:
+        return text
+
+    payload = {
+        "lines": [
+            {
+                "id": f"b{item.block_index}-l{item.line_index}",
+                "text": item.body,
+            }
+            for item in items
+        ]
+    }
+    expected_ids = {entry["id"] for entry in payload["lines"]}
+    system = (
+        "You translate Russian diagram labels inside ASCII tree diagrams to English. "
+        "Return JSON only: {\"lines\": [{\"id\": \"...\", \"text\": \"...\"}]}. "
+        "Preserve tree characters (│, ├, └, →), identifiers, and English tokens. "
+        "Translate only natural-language words and phrases."
+    )
+    user = (
+        f"File: {file_path or '(unknown)'}\n"
+        f"Direction: {source_lang} → {target_lang}\n"
+        f"Glossary (YAML):\n{glossary.to_prompt_yaml()}\n\n"
+        f"Lines JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+    model_chain = client.model_chain_for_role("translate")
+    last_exc: Exception | None = None
+    mapping: dict[str, str] = {}
+    for model in model_chain:
+        try:
+            result = client.chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                model=model,
+                role="translate",
+            )
+            data = json.loads(result.content.strip())
+            for item in data.get("lines", []):
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    body = item.get("text")
+                    if isinstance(body, str):
+                        mapping[item["id"]] = body.strip()
+            missing = expected_ids - set(mapping)
+            if missing:
+                raise LLMParseError(
+                    f"text fence translate: missing ids {sorted(missing)}"
+                )
+            break
+        except (LLMParseError, json.JSONDecodeError, Exception) as exc:  # noqa: BLE001
+            last_exc = exc
+            logger.warning(
+                "Text fence translate failed (model=%s): %s",
+                model,
+                exc,
+            )
+    else:
+        logger.warning(
+            "Text fence translate skipped after model chain: %s",
+            last_exc,
+        )
+        return text
+
+    doc = parse_markdown(text)
+    blocks = collect_code_blocks(doc)
+    changed = False
+    for item in items:
+        block = blocks[item.block_index - 1]
+        lines = block.content.splitlines()
+        if item.line_index >= len(lines):
+            continue
+        key = f"b{item.block_index}-l{item.line_index}"
+        translated = mapping.get(key, item.body)
+        if _CYRILLIC.search(translated):
+            continue
+        if translated != lines[item.line_index]:
+            lines[item.line_index] = translated
             block.content = "\n".join(lines)
             changed = True
     return render_markdown(doc) if changed else text

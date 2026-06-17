@@ -33,6 +33,7 @@ src/ydbdoc_review/
 │   ├── inline_protector.py        protect inline atoms with ⟦C1⟧/⟦U1⟧/...
 │   ├── extractor.py               AST → list[Segment] (incl. front matter)
 │   ├── reinsert.py                translations → updated AST
+│   ├── placeholder_align.py       RU/EN placeholder renumbering + atom legend (§6.55)
 │   └── chunker.py                 segments → batches (char budget)
 ├── llm/                           ✅ COMPLETE
 │   ├── client.py                  YandexLLMClient — OpenAI SDK, retry, fallback
@@ -53,14 +54,14 @@ src/ydbdoc_review/
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
-│   ├── markers.py                 placeholder order + realign by index; ⟦V⟧ drift tolerance (§6.54)
-│   ├── placeholder_drift.py       drop spurious critic placeholder issues (§6.54)
+│   ├── markers.py                 placeholder multiset + cross-lang drift checks (§6.54–§6.57)
+│   ├── placeholder_drift.py       drop spurious critic issues; skipped dedupe (§6.54–§6.57)
 │   ├── placeholder_roles.py       semantic V/U placement (link dest vs prose)
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
 │   ├── fence_integrity.py         copy fences from source; detect pipeline drift; mermaid label translation (§6.53)
-│   ├── fence_comments.py          Cyrillic ``//``/``#`` comment translate + QA (§6.39)
+│   ├── fence_comments.py          fence ``//``/``#`` comments + ``text`` fence Cyrillic (§6.39, §6.59)
 │   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
 │   ├── link_locale.py             URL locale mirror + link_locale QA (§6.34, §6.37)
@@ -83,9 +84,9 @@ src/ydbdoc_review/
 │   ├── workflow.py                run_doc_translate, run_doc_verify; _safe_post_issue_comment (§6.48)
 │   └── errors.py                  typed GitHub errors
 ├── reporting/                     ✅ COMPLETE (Phase H)
-│   ├── builder.py                 markdown reports (§17 format)
+│   ├── builder.py                 markdown reports; skipped tier + dedupe (§6.56–§6.57)
 │   ├── heuristic_messages.py      Russian labels for heuristic warnings (§6.40)
-│   └── locations.py               segment line links, heuristic dedup
+│   └── locations.py               segment line links, excerpt sanity, heuristic dedup (§6.56)
 ├── version.py                     action_release_label() for report footer
 ├── config/                        ✅ COMPLETE
 │   ├── default.yaml               packaged defaults

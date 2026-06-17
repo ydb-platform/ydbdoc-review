@@ -190,15 +190,19 @@ def _merge_toc_tree_nodes(
     en_by_href: dict[str, TocNode],
     translate_hrefs: set[str],
     translate_name: Callable[[str], str],
+    ru_base_hrefs: set[str] | None = None,
 ) -> list[TocNode]:
     merged: list[TocNode] = []
+    base_hrefs = ru_base_hrefs or set()
     for idx, ru_node in enumerate(ru_nodes):
         en_node = en_nodes[idx] if idx < len(en_nodes) else None
         if ru_node.href:
             href = ru_node.href
             if href in en_by_href and href not in translate_hrefs:
                 merged.append(en_by_href[href])
-            elif href in translate_hrefs:
+            elif href in translate_hrefs or (
+                href not in en_by_href and href in base_hrefs
+            ):
                 en_name = translate_name(ru_node.name).strip()
                 list_indent = 0
                 if en_node and en_node.block:
@@ -228,6 +232,7 @@ def _merge_toc_tree_nodes(
             en_by_href=en_by_href,
             translate_hrefs=translate_hrefs,
             translate_name=translate_name,
+            ru_base_hrefs=base_hrefs,
         )
         if not merged_children:
             continue
@@ -243,6 +248,7 @@ def _merge_en_toc_yaml_nested(
     *,
     translate_hrefs: set[str],
     translate_name: Callable[[str], str],
+    ru_base_hrefs: set[str] | None = None,
 ) -> str:
     en_tree = _parse_toc_tree_block(en_main_yaml)
     ru_tree = _parse_toc_tree_block(ru_pr_yaml)
@@ -254,6 +260,7 @@ def _merge_en_toc_yaml_nested(
         en_by_href=en_by_href,
         translate_hrefs=translate_hrefs,
         translate_name=translate_name,
+        ru_base_hrefs=ru_base_hrefs,
     )
     seen = _collect_toc_hrefs(merged)
     for node in en_tree:
@@ -377,12 +384,15 @@ def merge_en_toc_yaml(
     *,
     translate_hrefs: set[str],
     translate_name: Callable[[str], str],
+    ru_base_hrefs: set[str] | None = None,
 ) -> str:
     """Build EN toc from RU PR order with strict scope.
 
     - Existing ``href``: keep EN block unless ``href`` ∈ ``translate_hrefs``
       → translate ``name`` from RU only.
     - New ``href`` in RU PR: add **only** if ``href`` ∈ ``translate_hrefs``.
+    - RU ``href`` in merge-base but missing from EN main: add with translated
+      ``name`` (§6.59 — closes EN nav gaps like ``debug-logs-otel.md``).
     - RU removed ``href``: omit from output (mirror RU structure).
     - EN-only ``href`` not in RU PR: append unchanged at end (legacy entries).
     """
@@ -392,12 +402,14 @@ def merge_en_toc_yaml(
             ru_pr_yaml,
             translate_hrefs=translate_hrefs,
             translate_name=translate_name,
+            ru_base_hrefs=ru_base_hrefs,
         )
 
     line_prefix = _inline_list_line_prefix(en_main_yaml)
     en_by_href = {it["href"]: it for it in parse_toc_items(en_main_yaml)}
     ru_items = parse_toc_items(ru_pr_yaml)
     ru_hrefs = {it["href"] for it in ru_items}
+    base_hrefs = ru_base_hrefs or set()
     merged: list[dict[str, str]] = []
     seen: set[str] = set()
 
@@ -408,7 +420,9 @@ def merge_en_toc_yaml(
         seen.add(href)
         if href in en_by_href and href not in translate_hrefs:
             merged.append(en_by_href[href])
-        elif href in translate_hrefs:
+        elif href in translate_hrefs or (
+            href not in en_by_href and href in base_hrefs
+        ):
             en_name = translate_name(rit["name"]).strip()
             block = _replace_item_name(rit["block"], en_name)
             if line_prefix is not None:
@@ -420,7 +434,7 @@ def merge_en_toc_yaml(
                     "block": block,
                 }
             )
-        # else: RU-only href outside scope — skip (do not invent EN menu items)
+        # else: new RU-only href outside scope — skip
 
     for it in parse_toc_items(en_main_yaml):
         if it["href"] not in seen and it["href"] not in ru_hrefs:

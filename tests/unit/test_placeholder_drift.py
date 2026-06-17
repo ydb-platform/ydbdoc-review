@@ -128,9 +128,9 @@ def test_cross_lang_real_mismatch_not_dropped():
 
 
 def test_atom_map_marker_id_noise_dropped():
-    """§6.57: multiset matches but critic flags wrong marker id via atom_map."""
-    ru = "See [Index](⟦U1⟧) and ⟦C1⟧ size ⟦C2⟧"
-    en_aligned = "See [Index](⟦U1⟧) and ⟦C1⟧ size ⟦C2⟧"
+    """§6.57: multiset matches with reorder — atom_map marker-id noise dropped."""
+    ru = "Use ⟦C1⟧ then ⟦C2⟧ size"
+    en = "Use ⟦C2⟧ size then ⟦C1⟧"
     seg = _segment("s0002", ru)
     issue = CriticIssueOut(
         segment_id="s0002",
@@ -139,8 +139,25 @@ def test_atom_map_marker_id_noise_dropped():
         comment="⟦U2⟧ not in atom_map",
         suggested_text=None,
     )
-    assert is_spurious_cross_lang_placeholder_issue(issue, seg, en_aligned)
-    assert drop_spurious_placeholder_issues([issue], [seg], {"s0002": en_aligned}) == []
+    assert is_spurious_cross_lang_placeholder_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0002": en}) == []
+
+
+def test_identical_placeholder_sequence_mapping_not_dropped():
+    """§6.59 #43365: same marker ids, wrong prose roles — keep for critic apply."""
+    ru = "register in ⟦C1⟧ both ⟦C2⟧ and ⟦C3⟧"
+    en = "register both ⟦C1⟧ and ⟦C2⟧ in ⟦C3⟧"
+    seg = _segment("s0109", ru)
+    issue = CriticIssueOut(
+        segment_id="s0109",
+        severity="blocked",
+        category="placeholder order",
+        comment="Placeholder order swapped: source C2,C3 in C1",
+        suggested_text="register both ⟦C2⟧ and ⟦C3⟧ in ⟦C1⟧",
+    )
+    assert not is_spurious_cross_lang_placeholder_issue(issue, seg, en)
+    filtered = drop_spurious_placeholder_issues([issue], [seg], {"s0109": en})
+    assert filtered == [issue]
 
 
 def test_locale_wikipedia_noise_dropped():

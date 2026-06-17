@@ -11,6 +11,7 @@ from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, CriticVerdict
 from ydbdoc_review.validation.markers import (
     cross_lang_placeholder_drift_only,
+    extract_placeholders,
     placeholders_match,
     variable_placeholder_drift_only,
 )
@@ -79,6 +80,10 @@ def is_spurious_cross_lang_placeholder_issue(
     if segment is None or translation is None or not issue.segment_id:
         return False
     if not _PLACEHOLDER_ISSUE.search(issue.category):
+        return False
+    # Identical placeholder sequence — critic may flag wrong prose roles (§6.59);
+    # keep the issue so ``apply_critic_fixes`` can apply ``suggested_text``.
+    if extract_placeholders(segment.text) == extract_placeholders(translation):
         return False
     if not _atom_multiset_matches(segment, translation):
         return False

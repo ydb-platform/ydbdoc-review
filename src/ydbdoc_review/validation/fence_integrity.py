@@ -162,8 +162,20 @@ def check_fence_body_copy(
     return warnings
 
 
+def _fence_lang(info: str) -> str:
+    parts = (info or "").strip().split()
+    return parts[0].lower() if parts else ""
+
+
+def _copy_fence_body_from_source(src: FencedCode | IndentedCode, tgt: FencedCode | IndentedCode) -> bool:
+    """Return False for ``text`` diagram fences — keep EN translation (§6.59)."""
+    if isinstance(src, FencedCode):
+        return _fence_lang(src.info) != "text"
+    return True
+
+
 def enforce_source_fenced_blocks(target_text: str, source_text: str) -> str:
-    """Re-render EN with every code block body copied verbatim from source."""
+    """Re-render EN with code block bodies copied verbatim from source."""
     src_doc = parse_markdown(source_text)
     tgt_doc = parse_markdown(target_text)
     src_blocks = collect_code_blocks(src_doc)
@@ -171,6 +183,8 @@ def enforce_source_fenced_blocks(target_text: str, source_text: str) -> str:
     if len(src_blocks) != len(tgt_blocks):
         return target_text
     for src, tgt in zip(src_blocks, tgt_blocks, strict=True):
+        if not _copy_fence_body_from_source(src, tgt):
+            continue
         tgt.content = src.content
         if isinstance(src, FencedCode) and isinstance(tgt, FencedCode):
             tgt.info = src.info

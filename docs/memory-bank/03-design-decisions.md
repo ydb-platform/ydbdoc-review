@@ -1158,6 +1158,95 @@ ping-pong in YFM tabs, critic hallucinations (``AUTO_PARTITIONING_*`` →
 **Tests:** ``test_placeholder_drift.py`` (§6.57 regressions),
 ``test_reporting_builder.py`` (skipped dedupe in main list).
 
+**Release:** tag ``v0.1.0`` @ commit ``5293a77`` (Jun 17, 2026).
+
+**Implementation notes:**
+
+- ``critic_issue_dedupe_key`` — ``(segment_id, category, comment, suggested_text)``.
+- ``filter_critic_response(..., skipped=critic_skipped)`` wired in
+  ``pipeline/translate_file.py`` after ``run_verify``.
+- ``reporting/builder._remaining_critic_issues`` also calls ``exclude_skipped_issues``
+  (defence in depth).
+- Skipped-only files (no open critic/heuristic/manual items) still render the
+  collapsed «Автоисправление не применено» block even when ``verdict != ok``.
+
+### 6.58. #40466 validation — human EN PR after §6.57 ([ydb #40466](https://github.com/ydb-platform/ydb/pull/40466))
+
+**Context:** fork PR ``ayakivosklznak/ydb`` branch
+``DOCSUP-129689-encoding-translation`` — five EN files translated by a human
+while RU lives on ``main``. Canonical ``doc_verify`` stress test for
+§6.55–§6.57.
+
+**Run timeline (Jun 17, 2026):**
+
+| Time (UTC) | Tag / commit | Open items | Notes |
+|---|---|---|---|
+| 12:40 | pre-§6.55 | many 🔴 | placeholder reorder noise on ``columns.md`` |
+| 14:17 | ``798969a`` (§6.56) | ~26 | mostly pipeline noise; broken excerpts |
+| 15:27 | ``5293a77`` (§6.57) | **1** | only real alignment blocker left |
+
+**Latest report** ([comment 4732251498](https://github.com/ydb-platform/ydb/pull/40466#issuecomment-4732251498)):
+checkout ``d8fa52d7a447`` (fixup branch ``ydbdoc-review/verify-40466``).
+
+| File | Verdict | Notes |
+|---|---|---|
+| ``store.md`` | 🟢 | was 🔴 (placeholder / excerpt noise) |
+| ``table.md`` | 🟢 | was 🔴 (Index link, AUTO_PARTITIONING hallucinations) |
+| ``columns.md`` | 🟢 | was 🔴 (§6.55 reorder false positives) |
+| ``create_table/index.md`` | 🟢 | was 🔴 (NULL ↔ placeholder ping-pong) |
+| ``glossary.md`` | 🔴 | **real author issue** — see below |
+
+**Remaining blocker (author, not pipeline):** ``glossary.md`` —
+``segment count mismatch: source 437 vs target 436``; first diff at pair
+index **30**: RU ``s0031`` (**paragraph**) vs EN ``s0031`` (**heading**).
+
+Root cause: EN is missing RU content in the **Storage group** block:
+
+1. **Paragraph** after the “Distributed storage typically manages…” sentence —
+   RU (``main``): static/dynamic groups are **physical** (data on
+   [VDisk](#vdisk)s). EN jumps straight to ``#### Static group``.
+2. **Section** ``#### Virtual storage group {#virtual-storage-groups}`` — present
+   in RU ``main``, absent in EN (heading + definition paragraph).
+
+Until EN structure matches RU here, round-trip alignment fails → critic is
+skipped for the whole file → 🔴 is correct.
+
+**Pipeline vs author classification (post-§6.57):**
+
+- **Fixed by pipeline:** duplicate skipped/unresolved in report; ``atom_map``
+  marker-id noise; Wikipedia locale false alarms; NULL literal ping-pong;
+  ``VACUUM`` vs ``⟦C{n}⟧``; critic ``AUTO_PARTITIONING_* → ⟦C1⟧`` hallucinations.
+- **Still author:** ``glossary.md`` structural gap (above). Optional stylistic
+  nits (e.g. ``e.g.,`` in ``store.md``) no longer block merge once glossary aligns.
+
+**Cost reference:** latest run ~145k / 63k critic tokens, ~₽98 (``deepseek-v32``).
+
+### 6.59. #43365 auto-translate fixes — OTel metrics docs ([ydb #43365](https://github.com/ydb-platform/ydb/pull/43365))
+
+**Context:** auto-translate from source PR [#41691](https://github.com/ydb-platform/ydb/pull/41691),
+branch ``ydbdoc-review/pr-41691``. Last ``doc_translate`` @ ``5293a77`` (§6.57) left
+🔴 on ``debug-otel-metrics.md`` (tab C++ ``s0109``) and 🟡 verify with critic fix not
+applied; navigation and diagram text also incomplete.
+
+**Root causes (pipeline, not author):**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| ``s0109`` placeholder issue skipped | §6.57 filter treated identical ⟦C⟧ sequence + “order/mapping” comment as spurious reorder noise | ``is_spurious_cross_lang_placeholder_issue``: if ``extract_placeholders(source) == extract_placeholders(translation)`` → **keep** issue for ``apply_critic_fixes`` |
+| Cyrillic in EN `` ```text `` diagrams | ``enforce_source_fenced_blocks`` copied RU fence bodies verbatim; fence-comment pass skipped ``text`` lang | Skip verbatim copy for ``text`` fences; ``translate_cyrillic_text_fences_with_client`` in finalize; blocking heuristic ``check_cyrillic_in_en_text_fences`` |
+| ``toc_i.yaml`` missing ``debug-logs-otel.md`` | ``merge_en_toc_yaml`` only added RU hrefs in ``translate_hrefs`` or already on EN main — ignored RU merge-base-only pages | ``ru_base_hrefs`` param: add RU-base hrefs absent from EN main even when not in current translate set |
+| ``index.md`` missing link | Same nav gap; not surfaced as 🔴 | Blocking heuristic ``check_md_link_parity`` — EN must include every RU ``.md`` link target |
+
+**Expected after re-run:** critic applies ``s0109`` fix; TOC/index pick up ``debug-logs-otel.md``;
+`` ```text `` diagram labels translated; link parity catches any remaining nav gaps.
+
+**Tests:** ``test_identical_placeholder_sequence_mapping_not_dropped`` (#43365),
+``test_enforce_source_fenced_blocks_preserves_text_fence_body``,
+``test_merge_adds_ru_base_href_missing_from_en_main``,
+``test_md_link_parity_flags_missing_en_link``.
+
+**Release:** tag ``v0.1.0`` moved to this commit (Jun 2, 2026).
+
 ---
 
 ---

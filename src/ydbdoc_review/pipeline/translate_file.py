@@ -36,6 +36,7 @@ from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.reporting.locations import build_segment_excerpts, build_segment_line_map
 from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_fence_comments_with_client,
+    translate_cyrillic_text_fences_with_client,
 )
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
@@ -102,6 +103,15 @@ def _finalize_en_target(
     text = enforce_source_fenced_blocks(text, normalized_source_text)
     if client is not None and glossary is not None:
         text = translate_cyrillic_fence_comments_with_client(
+            text,
+            client,
+            glossary,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+        )
+        text = translate_cyrillic_text_fences_with_client(
             text,
             client,
             glossary,

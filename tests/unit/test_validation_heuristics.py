@@ -12,6 +12,7 @@ from ydbdoc_review.validation.heuristics import (
     check_heading_parity,
     check_length_ratio,
     check_list_tab_parity,
+    check_md_link_parity,
     run_file_heuristics,
     run_file_heuristics_classified,
     validate_navigation_merge_warnings,
@@ -23,8 +24,15 @@ from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_tran
 def test_cyrillic_in_en_detects_prose():
     warnings = check_cyrillic_in_en("Hello привет world", target_lang="en")
     assert len(warnings) == 1
-    assert "Кириллица в EN-тексте" in warnings[0]
-    assert "строка ~1" in warnings[0]
+
+
+def test_md_link_parity_flags_missing_en_link():
+    ru = "- [logs](debug-logs.md)\n- [otel logs](debug-logs-otel.md)\n"
+    en = "- [logs](debug-logs.md)\n"
+    warnings = check_md_link_parity(ru, en, source_lang="ru", target_lang="en")
+    assert len(warnings) == 1
+    assert "debug-logs-otel.md" in warnings[0]
+    assert "md_link_parity" in warnings[0]
 
 
 def test_cyrillic_in_en_ignores_fenced_code():

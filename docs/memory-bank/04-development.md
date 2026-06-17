@@ -187,6 +187,17 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 - **`test_end_to_end.py`**: full `translate_file` on a fixture pair (local/nightly).
 - **Reporting coverage**: raise `reporting/locations.py` and `link_locale.py` toward 90%
   when editing report dedup or URL mirror logic.
+- **#40466 author follow-up**: translate missing ``glossary.md`` Storage group
+  paragraph + Virtual storage group section (§6.58) — not a pipeline task.
+
+**Resolved via §6.55–§6.57 (#40466):** doc_verify false positives on human EN
+PRs — placeholder reorder after align, skipped/unresolved report duplicates,
+``atom_map`` marker noise, Wikipedia locale, NULL/VACUUM equivalence, critic
+substitution hallucinations. Validated Jun 17 @ ``5293a77`` (§6.58).
+
+**Resolved via §6.59 (#43365):** auto-translate OTel docs — identical to re-run
+``doc_translate`` after tag move; fixes critic apply for identical-placeholder
+semantic swaps, ``text`` fence Cyrillic, TOC ``ru_base_hrefs``, ``md_link_parity``.
 
 ---
 

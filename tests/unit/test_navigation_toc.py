@@ -76,6 +76,41 @@ def test_merge_keeps_unchanged_en_labels():
     assert by_href["legacy.md"] == "EN legacy only"
 
 
+def test_merge_adds_ru_base_href_missing_from_en_main():
+    """§6.59 #43365: pre-existing RU toc entry missing from EN main is added."""
+    en_main = dedent("""
+        items:
+        - name: Troubleshooting
+          items:
+          - name: Enable logging
+            href: debug-logs.md
+          - name: Metrics with OpenTelemetry
+            href: debug-otel-metrics.md
+    """).strip()
+    ru_base = dedent("""
+        items:
+        - name: Диагностика
+          items:
+          - name: Логирование
+            href: debug-logs.md
+          - name: OTel logs
+            href: debug-logs-otel.md
+          - name: Метрики OTel
+            href: debug-otel-metrics.md
+    """).strip()
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_base,
+        translate_hrefs={"debug-otel-metrics.md"},
+        translate_name=lambda n: {
+            "OTel logs": "Export logs to OpenTelemetry",
+        }.get(n, n),
+        ru_base_hrefs={"debug-logs.md", "debug-logs-otel.md", "debug-otel-metrics.md"},
+    )
+    hrefs = {it["href"] for it in parse_toc_items(merged)}
+    assert "debug-logs-otel.md" in hrefs
+
+
 def test_merge_skips_ru_only_not_in_scope():
     """RU added new-page.md but it's not in translate_hrefs → not added to EN."""
     merged = merge_en_toc_yaml(
@@ -83,6 +118,7 @@ def test_merge_skips_ru_only_not_in_scope():
         RU_PR,
         translate_hrefs={"old.md"},
         translate_name=lambda n: "X",
+        ru_base_hrefs={"old.md"},
     )
     hrefs = {it["href"] for it in parse_toc_items(merged)}
     assert "new-page.md" not in hrefs

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Literal
 
 from ydbdoc_review.parsing.ast_types import FencedCode
@@ -20,6 +21,7 @@ _FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s", re.MULTILINE)
 _LIST_TABS = re.compile(r"\{%\s*list\s+tabs\b")
 _PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
+_MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 _LENGTH_RATIO_MIN = 0.55
 _LENGTH_RATIO_MAX = 1.85
@@ -77,7 +79,7 @@ def check_length_ratio(
 
 
 def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
-    """Cyrillic letters in English target outside fenced code."""
+    """Cyrillic letters in English target outside verbatim code fences."""
     if target_lang.lower() != "en":
         return []
     body = _strip_fenced_blocks(target_text)
@@ -103,6 +105,34 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
             f"(всего {len(matches)} символов)"
         )
     return warnings
+
+
+def _md_link_basenames(text: str) -> set[str]:
+    out: set[str] = set()
+    for match in _MD_LINK.finditer(text):
+        href = match.group(1).strip().split("#", 1)[0]
+        if href.endswith(".md"):
+            out.add(PurePosixPath(href).name)
+    return out
+
+
+def check_md_link_parity(
+    source_text: str,
+    target_text: str,
+    *,
+    source_lang: str,
+    target_lang: str,
+) -> list[str]:
+    """Blocking when EN is missing ``.md`` links present in RU (§6.59 index/toc gaps)."""
+    if source_lang.lower() not in {"ru", "russian"} or target_lang.lower() != "en":
+        return []
+    missing = sorted(_md_link_basenames(source_text) - _md_link_basenames(target_text))
+    if not missing:
+        return []
+    preview = ", ".join(missing[:6])
+    if len(missing) > 6:
+        preview += f", … (+{len(missing) - 6})"
+    return [f"md_link_parity: EN missing RU links: {preview}"]
 
 
 def count_fence_markers(text: str) -> int:
@@ -174,6 +204,10 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("cyrillic_in_fence:"):
         return "warnings"
+    if message.startswith("cyrillic_in_text_fence:"):
+        return "warnings"
+    if message.startswith("md_link_parity:"):
+        return "blocking"
     return "blocking"
 
 
@@ -187,6 +221,7 @@ def _collect_raw_heuristics(
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
+        check_cyrillic_in_en_text_fences,
     )
     from ydbdoc_review.validation.fence_integrity import (
         check_absolute_paths_in_fences,
@@ -209,6 +244,17 @@ def _collect_raw_heuristics(
     raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
     raw.extend(
         check_cyrillic_in_en_fence_comments(target_text, target_lang=target_lang)
+    )
+    raw.extend(
+        check_cyrillic_in_en_text_fences(target_text, target_lang=target_lang)
+    )
+    raw.extend(
+        check_md_link_parity(
+            source_text,
+            target_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
     )
     raw.extend(check_fence_parity(normalized_source_text, target_text))
     raw.extend(

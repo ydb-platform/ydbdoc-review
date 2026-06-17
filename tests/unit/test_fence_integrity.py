@@ -77,6 +77,15 @@ def test_check_fence_body_copy_ignores_homoglyph_only_diff():
     assert not check_fence_body_copy(raw_ru, en, source_lang="ru")
 
 
+def test_enforce_source_fenced_blocks_preserves_text_fence_body():
+    """§6.59: `` ```text `` diagrams keep EN translation, not RU copy."""
+    ru = "```text\n├─ попытка: ERROR\n```\n"
+    en = "```text\n├─ attempt: ERROR\n```\n"
+    out = enforce_source_fenced_blocks(en, ru)
+    assert "attempt" in out
+    assert "попытка" not in out
+
+
 def test_fence_content_allows_cyrillic_comment_translation_only():
     ru = (
         "package main\n\n"
