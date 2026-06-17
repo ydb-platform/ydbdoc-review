@@ -1004,6 +1004,92 @@ on legitimately translated Mermaid.
 
 ---
 
+### 6.55. Cross-language placeholder alignment ([ydb #40466](https://github.com/ydb-platform/ydb/pull/40466))
+
+**Problem (Jun 17):** `doc_verify` on `columns.md` spammed the same
+``placeholder mapping`` block on s0013 / s0014 every run, and the apply path
+corrupted a *correct* EN translation. Root cause is that RU and EN segments
+are parsed independently; each gets a fresh left-to-right placeholder
+numbering inside its own language. For
+
+- RU `…к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧` (C1=`episodes`, C2=`views`, C3=`Uint64`)
+- EN `column ⟦C1⟧ data type ⟦C2⟧ to ⟦C3⟧ table` (C1=`views`, C2=`Uint64`, C3=`episodes`)
+
+the same name means a *different* atom in each language. The critic LLM
+never sees the atoms; it assumes ``⟦C1⟧`` is shared and reports
+"placeholder order mismatch" on every legitimate word-order shift. It then
+suggests `column ⟦C2⟧ … ⟦C3⟧ … ⟦C1⟧ table` to "restore" source order —
+text which, when applied with the EN segment's placeholder map, substitutes
+the wrong atoms in the wrong slots (`column Uint64 … episodes … views table`).
+
+**Failed first attempt:** relaxing ``placeholders_match`` to compare a
+*multiset* of placeholders (commit `b2c3f2e`) cleared the false positive in
+`doc_translate` (LLM legitimately reorders, both sides share RU numbering,
+multiset is safe). In `doc_verify` it removed the inadvertent safeguard:
+critic reorders now passed validation and corrupted EN files via apply (fixup
+PR #43698, `columns.md` lost the correct mapping). Half-fix `47583c2` added
+``strict_placeholder_order`` in `apply_critic_fixes` for the verify path —
+files stop getting corrupted, but the critic still spams the report on every
+RU/EN word-order shift, which kills the system's usability as a gate.
+
+**Decision (commit `641b53b`):** renumber EN target segments so each atom
+that appears in both languages takes the source's name. New module
+`segmentation/placeholder_align.py` exposes
+``normalize_target_segments_to_source(source, target)`` and matches atoms by
+identity:
+
+| Atom kind        | Match key                                          |
+|------------------|----------------------------------------------------|
+| `InlineCode`     | `content` (code spans don't translate)             |
+| `InlineVariable` | `name` (`{{ backend_name }}` etc.)                 |
+| `InlineLink`/URL | `href` with `/ru/` or `/en/` prefix stripped       |
+| `InlineImage`    | `src`                                              |
+| `InlineHTML`     | `content`                                          |
+
+Duplicate atoms are paired left-to-right (1st `episodes` in target → 1st
+`episodes` in source). Target-only atoms (e.g., translator-added code) keep
+their name when it doesn't clash, otherwise get a fresh non-clashing index
+*per kind*. Renumbering uses a single regex pass so `⟦C1⟧↔⟦C2⟧` swaps don't
+double-apply.
+
+**Wired in:**
+
+1. `align_translations_from_target` (`pipeline/qa.py`) — every `translations`
+   dict returned to the critic and the apply path carries RU numbering.
+2. `doc_verify` render base in `pipeline/translate_file.py` —
+   `render_base_segments` are normalized before reinsertion, so
+   `seg.placeholders` and `translation_text` share names and substitution
+   finds the right atoms.
+
+`doc_translate` is a no-op: the LLM already emits markers in RU numbering, so
+`rename` is empty and the original target segment is returned unchanged.
+
+**Invariants this gives:**
+
+- Same ``⟦Xn⟧`` always refers to the same atom across RU and EN inside a
+  pair — critic stops reporting reorderings as bugs.
+- A *real* mistranslation (e.g., `Uint64` placed where `views` should be)
+  still shows up: atom matching pairs `Uint64`↔`Uint64`, but the position is
+  wrong relative to surrounding prose — the critic catches it honestly.
+- `apply_critic_fixes` validation (multiset) and the strict-order guard in
+  the verify path both keep working; with consistent numbering they rarely
+  fire because the critic stops suggesting reorders.
+
+**Tests:** new `tests/unit/test_placeholder_align.py` covers
+`columns.md` s0013 reorder, no-op when numbering already matches, URL locale
+normalization, YFM variable matching, duplicate-atom left-to-right pairing,
+unmatched target rename, image matching by `src`, count-mismatch passthrough,
+atomic swap renumbering. Existing critic regression
+`test_apply_critic_fixes_strict_order_rejects_reorder` (commit `47583c2`)
+remains as belt-and-suspenders.
+
+**Why earlier "strict order" guard stays:** even with correct numbering, a
+critic that hallucinates a reorder shouldn't be auto-applied in the verify
+path — apply still runs through the EN AST and the cost of a bad apply is a
+corrupted file. The cost of a skipped good fix is a noisy report.
+
+---
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)
