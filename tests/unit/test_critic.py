@@ -181,6 +181,51 @@ def test_apply_critic_fixes_skips_unknown_segment_id():
     assert len(skipped) == 1
 
 
+def test_apply_critic_fixes_strict_order_rejects_reorder():
+    """Regression: doc_verify must reject critic-proposed placeholder reorders.
+
+    In doc_verify, RU and EN segments use independent left-to-right
+    placeholder numbering. A critic that reorders ⟦C⟧ markers in EN would
+    cause re-render to substitute the wrong atoms (columns.md s0013/s0014:
+    `views ... Uint64 ... episodes` got corrupted to `Uint64 ... episodes
+    ... views` when the multiset-only validator accepted the reorder).
+    """
+    seg = _segment("s1", "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧")
+    # Current EN translation uses EN-local numbering for the same atoms.
+    current = "column named ⟦C1⟧ with data type ⟦C2⟧ to the ⟦C3⟧ table"
+    # Critic, confused by mismatched RU/EN numbering, suggests a reorder
+    # that would mis-render against EN placeholder map.
+    suggested = "column named ⟦C2⟧ with data type ⟦C3⟧ to the ⟦C1⟧ table"
+    issues = [
+        _issue(
+            segment_id="s1",
+            category="placeholder mapping",
+            comment="Placeholder order mismatch",
+            suggested_text=suggested,
+        )
+    ]
+    updated, applied, skipped = apply_critic_fixes(
+        {"s1": current}, [seg], issues, strict_placeholder_order=True
+    )
+    assert updated["s1"] == current
+    assert applied == []
+    assert len(skipped) == 1
+
+
+def test_apply_critic_fixes_strict_order_allows_non_placeholder_fix():
+    """Strict mode still applies prose-only fixes that keep placeholders intact."""
+    seg = _segment("s1", "Use ⟦C1⟧ flag")
+    current = "Use ⟦C1⟧ flag bad"
+    suggested = "Use ⟦C1⟧ flag properly"
+    issues = [_issue(segment_id="s1", suggested_text=suggested)]
+    updated, applied, skipped = apply_critic_fixes(
+        {"s1": current}, [seg], issues, strict_placeholder_order=True
+    )
+    assert updated["s1"] == suggested
+    assert len(applied) == 1
+    assert skipped == []
+
+
 def test_run_critic_calls_llm():
     raw = json.dumps({"verdict": "ok", "issues": []})
     client = _mock_client([raw])

@@ -20,6 +20,7 @@ from ydbdoc_review.translation.prompts import (
 )
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, CriticVerdict
 from ydbdoc_review.translation.translator import validate_segment_translation
+from ydbdoc_review.validation.markers import extract_placeholders
 
 logger = logging.getLogger(__name__)
 
@@ -243,8 +244,16 @@ def apply_critic_fixes(
     translations: dict[str, str],
     segments: list[Segment],
     issues: list[CriticIssueOut],
+    *,
+    strict_placeholder_order: bool = False,
 ) -> tuple[dict[str, str], list[CriticIssueOut], list[CriticIssueOut]]:
     """Apply ``suggested_text`` fixes that pass structural validation.
+
+    When ``strict_placeholder_order`` is True, reject suggestions whose
+    placeholder sequence differs from the current translation. Required in
+    doc_verify mode where RU and EN segments use independent left-to-right
+    placeholder numbering — accepting a critic-proposed reorder there would
+    substitute atoms by EN numbering and corrupt the rendered text.
 
     Returns ``(updated_translations, applied_issues, skipped_issues)``.
     """
@@ -277,6 +286,19 @@ def apply_critic_fixes(
             )
             skipped.append(issue)
             continue
+        if strict_placeholder_order:
+            current_ph = extract_placeholders(current)
+            suggested_ph = extract_placeholders(issue.suggested_text)
+            if current_ph != suggested_ph:
+                logger.warning(
+                    "Skipping critic fix for %s: placeholder order change in doc_verify "
+                    "(current=%s, suggested=%s) would mis-render EN atoms",
+                    issue.segment_id,
+                    current_ph,
+                    suggested_ph,
+                )
+                skipped.append(issue)
+                continue
         try:
             validate_segment_translation(seg, issue.suggested_text)
         except TranslationValidationError as exc:

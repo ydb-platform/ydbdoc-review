@@ -272,7 +272,10 @@ def translate_file(
             critic_initial.issues, segments, translations
         )
         translations, critic_applied, critic_skipped = apply_critic_fixes(
-            translations, segments, actionable_issues
+            translations,
+            segments,
+            actionable_issues,
+            strict_placeholder_order=not enable_translate,
         )
         if actionable_issues:
             render_translations = (
