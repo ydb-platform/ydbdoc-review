@@ -22,6 +22,7 @@ from ydbdoc_review.reporting.locations import (
 )
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
+from ydbdoc_review.validation.placeholder_drift import exclude_skipped_issues
 from ydbdoc_review.version import action_release_label
 
 
@@ -231,7 +232,10 @@ def _remaining_critic_issues(fr) -> list[CriticIssueOut]:
     """Issues the reviewer still needs to look at (unresolved after apply)."""
     if not fr.critic_unresolved:
         return []
-    return list(fr.critic_unresolved.issues)
+    return exclude_skipped_issues(
+        list(fr.critic_unresolved.issues),
+        list(fr.critic_skipped),
+    )
 
 
 def _skipped_critic_issues(fr) -> list[CriticIssueOut]:
@@ -363,31 +367,32 @@ def _file_reviewer_section(
 
     if not critic_items and not heuristics and not manual_actions:
         skipped = _skipped_critic_issues(fr)
-        if fr.verdict == "ok":
-            file_path = run.plan.target_path
-            out = f"### 🟢 `{file_path}`\n\n"
-            if skipped and config.reporting.include_skipped_critic:
+        file_path = run.plan.target_path
+        if skipped and config.reporting.include_skipped_critic:
+            out = f"### {_verdict_emoji(fr.verdict)} `{file_path}`\n\n"
+            out += (
+                "<details>\n<summary>Автоисправление не применено "
+                f"({len(skipped)} — отклонено защитой pipeline)</summary>\n\n"
+            )
+            for issue in skipped:
                 out += (
-                    "<details>\n<summary>Автоисправление не применено "
-                    f"({len(skipped)} — отклонено защитой pipeline)</summary>\n\n"
-                )
-                for issue in skipped:
-                    out += (
-                        _format_critic_item(
-                            issue,
-                            fr.segment_locations,
-                            index=item_index,
-                            file_path=file_path,
-                            segment_lines=fr.segment_lines,
-                            segment_excerpts=fr.segment_excerpts,
-                            link=link,
-                        )
-                        + "\n\n"
+                    _format_critic_item(
+                        issue,
+                        fr.segment_locations,
+                        index=item_index,
+                        file_path=file_path,
+                        segment_lines=fr.segment_lines,
+                        segment_excerpts=fr.segment_excerpts,
+                        link=link,
                     )
-                    item_index += 1
-                out += "</details>\n\n"
-            else:
-                out += "Замечаний нет.\n\n"
+                    + "\n\n"
+                )
+                item_index += 1
+            out += "</details>\n\n"
+            return out, item_index
+        if fr.verdict == "ok":
+            out = f"### 🟢 `{file_path}`\n\n"
+            out += "Замечаний нет.\n\n"
             return out, item_index
         return "", item_index
 

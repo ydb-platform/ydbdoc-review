@@ -329,7 +329,10 @@ def translate_file(
                     max_chars=batch_chars,
                 )
                 critic_unresolved = filter_critic_response(
-                    critic_unresolved, segments, translations
+                    critic_unresolved,
+                    segments,
+                    translations,
+                    skipped=critic_skipped,
                 )
 
     critic_verdict = _compute_critic_verdict(

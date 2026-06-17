@@ -1126,6 +1126,38 @@ correct translation, mirror URLs with different relative paths, broken
 **Tests:** extended ``test_placeholder_align.py``, ``test_placeholder_drift.py``,
 ``test_qa.py``, ``test_reporting_builder.py``.
 
+### 6.57. doc_verify false-positive filters round 2 (#40466)
+
+**Problem (Jun 17, post-§6.56):** rerun on #40466 still listed ~26 items;
+~half were pipeline bugs — verify echoed ``critic_skipped`` in the main list,
+``atom_map`` marker-id noise, Wikipedia locale false alarms, NULL literal
+ping-pong in YFM tabs, critic hallucinations (``AUTO_PARTITIONING_*`` →
+``⟦C1⟧``), and ``VACUUM`` vs ``⟦C1⟧`` equivalence.
+
+**Decision:**
+
+1. **Skipped ∩ unresolved dedupe** — ``exclude_skipped_issues`` in
+   ``filter_critic_response`` (verify pass) and ``_remaining_critic_issues``
+   (report builder) so the same apply-rejected item appears only in
+   «Автоисправление не применено», not twice.
+2. **Marker-id / atom_map noise** — extend cross-lang spurious filter to
+   drop placeholder issues when the non-``⟦V⟧`` multiset matches *and* the
+   comment is about order / atom_map / marker id (covers post-align ``⟦U2⟧
+   not in atom_map``).
+3. **Wikipedia locale** — drop locale complaints when multiset matches and
+   the segment carries a Wikipedia link placeholder (``en.wikipedia`` vs
+   ``ru.wikipedia`` is expected after ``localize_links``).
+4. **NULL literal ping-pong** — drop NULL ↔ ``⟦C{n}⟧`` issues when both RU
+   and EN segments reference NULL (literal or ``code:null`` atom).
+5. **Code literal equivalence** — drop when critic flags bare SQL identifier
+   vs ``⟦C{n}⟧`` but both sides carry the same code atom (e.g. ``VACUUM``).
+6. **Hallucinated substitution** — drop when critic claims
+   ``IDENTIFIER was replaced by ⟦C1⟧`` but EN text still contains the
+   identifier and not the claimed placeholder.
+
+**Tests:** ``test_placeholder_drift.py`` (§6.57 regressions),
+``test_reporting_builder.py`` (skipped dedupe in main list).
+
 ---
 
 ---

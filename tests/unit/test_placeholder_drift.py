@@ -2,23 +2,33 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.segmentation.types import Segment, SegmentKind
+from ydbdoc_review.parsing.ast_types import InlineCode, InlineLink, InlineText
+from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
-from ydbdoc_review.validation.markers import variable_placeholder_drift_only, cross_lang_placeholder_drift_only
+from ydbdoc_review.validation.markers import (
+    cross_lang_placeholder_drift_only,
+    variable_placeholder_drift_only,
+)
 from ydbdoc_review.validation.placeholder_drift import (
+    critic_issue_dedupe_key,
     drop_spurious_placeholder_issues,
+    exclude_skipped_issues,
     filter_critic_response,
+    is_spurious_code_literal_equivalent_issue,
     is_spurious_cross_lang_placeholder_issue,
+    is_spurious_hallucinated_substitution_issue,
+    is_spurious_locale_url_issue,
+    is_spurious_null_literal_issue,
 )
 
 
-def _segment(seg_id: str, text: str) -> Segment:
+def _segment(seg_id: str, text: str, *, placeholders: list | None = None) -> Segment:
     return Segment(
         id=seg_id,
         kind=SegmentKind.PARAGRAPH,
         path=[],
         text=text,
-        placeholders=[],
+        placeholders=placeholders or [],
         ast_path=[0],
     )
 
@@ -115,3 +125,148 @@ def test_cross_lang_real_mismatch_not_dropped():
     assert not is_spurious_cross_lang_placeholder_issue(issue, seg, en)
     filtered = drop_spurious_placeholder_issues([issue], [seg], {"s1": en})
     assert filtered == [issue]
+
+
+def test_atom_map_marker_id_noise_dropped():
+    """§6.57: multiset matches but critic flags wrong marker id via atom_map."""
+    ru = "See [Index](⟦U1⟧) and ⟦C1⟧ size ⟦C2⟧"
+    en_aligned = "See [Index](⟦U1⟧) and ⟦C1⟧ size ⟦C2⟧"
+    seg = _segment("s0002", ru)
+    issue = CriticIssueOut(
+        segment_id="s0002",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="⟦U2⟧ not in atom_map",
+        suggested_text=None,
+    )
+    assert is_spurious_cross_lang_placeholder_issue(issue, seg, en_aligned)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0002": en_aligned}) == []
+
+
+def test_locale_wikipedia_noise_dropped():
+    ru = "Read [Индекс](⟦U1⟧) for details"
+    en = "Read [Index](⟦U1⟧) for details"
+    seg = _segment(
+        "s0002",
+        ru,
+        placeholders=[
+            ProtectedInline(
+                placeholder="⟦U1⟧",
+                node=InlineLink(
+                    href="https://ru.wikipedia.org/wiki/Database_index",
+                    children=[InlineText(content="Индекс")],
+                ),
+            )
+        ],
+    )
+    issue = CriticIssueOut(
+        segment_id="s0002",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="Locale mismatch: atom_map shows ru.wikipedia but EN should use en.wikipedia",
+        suggested_text=None,
+    )
+    assert is_spurious_locale_url_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0002": en}) == []
+
+
+def test_null_literal_ping_pong_dropped():
+    ru = "Column may be NULL or ⟦C1⟧"
+    en = "Column may be `NULL` or ⟦C1⟧"
+    seg = _segment(
+        "s0010",
+        ru,
+        placeholders=[ProtectedInline(placeholder="⟦C1⟧", node=InlineCode(content="NOT NULL"))],
+    )
+    issue = CriticIssueOut(
+        segment_id="s0010",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="NULL should be ⟦C1⟧ placeholder, not literal",
+        suggested_text="broken",
+    )
+    assert is_spurious_null_literal_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0010": en}) == []
+
+
+def test_vacuum_code_literal_equivalent_dropped():
+    ru = "Run ⟦C1⟧ to reclaim space"
+    en = "Run VACUUM to reclaim space"
+    seg = _segment(
+        "s0013",
+        ru,
+        placeholders=[ProtectedInline(placeholder="⟦C1⟧", node=InlineCode(content="VACUUM"))],
+    )
+    issue = CriticIssueOut(
+        segment_id="s0013",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="VACUUM should use ⟦C1⟧ placeholder from source",
+        suggested_text="Run ⟦C1⟧ to reclaim space",
+    )
+    assert is_spurious_code_literal_equivalent_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0013": en}) == []
+
+
+def test_hallucinated_substitution_dropped():
+    ru = "Set ⟦C1⟧ parameter"
+    en = "Set AUTO_PARTITIONING_MIN_PARTITIONS_COUNT parameter"
+    seg = _segment("s0169", ru)
+    issue = CriticIssueOut(
+        segment_id="s0169",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="AUTO_PARTITIONING_MIN_PARTITIONS_COUNT was replaced by ⟦C1⟧",
+        suggested_text="Set ⟦C1⟧ parameter",
+    )
+    assert is_spurious_hallucinated_substitution_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0169": en}) == []
+
+
+def test_exclude_skipped_issues_dedupes_verify_echo():
+    skipped = CriticIssueOut(
+        segment_id="s0013",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="order change rejected",
+        suggested_text="broken",
+    )
+    echo = CriticIssueOut(
+        segment_id="s0013",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="order change rejected",
+        suggested_text="broken",
+    )
+    real = CriticIssueOut(
+        segment_id="s0015",
+        severity="warning",
+        category="terminology",
+        comment="missing link",
+        suggested_text=None,
+    )
+    out = exclude_skipped_issues([echo, real], [skipped])
+    assert out == [real]
+    assert critic_issue_dedupe_key(skipped) == critic_issue_dedupe_key(echo)
+
+
+def test_filter_critic_response_excludes_skipped():
+    ru = "⟦V1⟧ one ⟦V2⟧ two"
+    en = "⟦V1⟧ one two"
+    seg = _segment("s1", ru)
+    skipped = CriticIssueOut(
+        segment_id="s1",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="drift",
+        suggested_text="x",
+    )
+    response = CriticResponse(
+        verdict="blocked",
+        issues=[skipped],
+    )
+    out = filter_critic_response(response, [seg], {"s1": en}, skipped=[skipped])
+    assert out is not None
+    assert out.issues == []
+    assert out.verdict == "ok"
+
