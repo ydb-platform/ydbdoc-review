@@ -384,18 +384,23 @@ def _render_inline(nodes: list[InlineNode]) -> str:
     return "".join(_render_inline_node(n) for n in nodes)
 
 
+def _render_inline_code(marker_len: int, content: str) -> str:
+    """Render an inline code span with stable round-trip for backtick content."""
+    marker = "`" * marker_len
+    # Padded form when content contains backticks or the delimiter substring —
+    # otherwise `` + ` + `` collapses to five backticks and misparses (#43746).
+    if "`" in content or marker in content:
+        return f"{marker} {content} {marker}"
+    return f"{marker}{content}{marker}"
+
+
 def _render_inline_node(n: InlineNode) -> str:
     if isinstance(n, InlineVariable):
         return n.raw
     if isinstance(n, InlineText):
         return n.content
     if isinstance(n, InlineCode):
-        marker = "`" * n.marker_len
-        # If content contains the marker, we need to pad with spaces.
-        content = n.content
-        if marker in content:
-            return f"{marker} {content} {marker}"
-        return f"{marker}{content}{marker}"
+        return _render_inline_code(n.marker_len, n.content)
     if isinstance(n, InlineEmphasis):
         inner = _render_inline(n.children)
         return f"{n.marker}{inner}{n.marker}"

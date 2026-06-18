@@ -1247,6 +1247,27 @@ applied; navigation and diagram text also incomplete.
 
 **Release:** tag ``v0.1.0`` moved to this commit (Jun 2, 2026).
 
+### 6.60. #43746 inline-code backtick render — critic fix undone by round-trip ([ydb #43746](https://github.com/ydb-platform/ydb/pull/43746))
+
+**Context:** auto-translate from [#42856](https://github.com/ydb-platform/ydb/pull/42856) (MySQL import docs).
+``doc_translate`` @ ``v0.1.0`` (§6.59) left 🔴 on ``import-mysql.md`` table cell ``s0163``:
+critic flagged placeholder corruption (``⟦C3⟧`` → literal backticks) and proposed a fix, but
+the PR still shipped broken EN text.
+
+**Root cause (pipeline):** ``apply_critic_fixes`` succeeded, but ``render_markdown`` for
+``InlineCode`` with ``marker_len=2`` and content `` ` `` concatenated delimiters
+(`` + ` + `` → five backticks) instead of padded `` ` ``. ``gate_round_trip`` re-parsed
+the broken markdown and restored a corrupt segment — verify stayed 🔴.
+
+**Fix:** ``_render_inline_code`` in ``rendering/markdown_renderer.py`` — use padded
+``{marker} {content} {marker}`` when content contains `` ` `` **or** the delimiter
+substring (not only when the full marker string appears in content).
+
+**Tests:** ``test_table_cell_backtick_inline_code_round_trip``,
+``test_critic_fix_survives_table_cell_render_round_trip`` (#43746).
+
+**Release:** tag ``v0.1.0`` moved to this commit.
+
 ---
 
 ---

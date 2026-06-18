@@ -27,7 +27,7 @@ src/ydbdoc_review/
 │       ├── image_size.py          ✅ ![alt](src =WxH)
 │       └── link_with_variable.py  ✅ [text]({{ var }}) and ![alt]({{ var }})
 ├── rendering/                     ✅ COMPLETE
-│   └── markdown_renderer.py       IR → markdown (stable round-trip)
+│   └── markdown_renderer.py       IR → markdown (stable round-trip; §6.60 backtick padding)
 ├── segmentation/                  ✅ COMPLETE
 │   ├── types.py                   Segment, ProtectedInline, SegmentKind
 │   ├── inline_protector.py        protect inline atoms with ⟦C1⟧/⟦U1⟧/...
