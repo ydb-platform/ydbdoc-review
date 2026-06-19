@@ -1268,6 +1268,28 @@ substring (not only when the full marker string appears in content).
 
 **Release:** tag ``v0.1.0`` moved to this commit.
 
+### 6.61. #43860 doc_verify noise — plain index names + fence whitespace ([ydb #43860](https://github.com/ydb-platform/ydb/pull/43860))
+
+**Context:** human EN PR for secondary-indexes auto-index section (fork
+``SixOnMyface/YDBDOCS2241``). ``doc_verify`` @ ``v0.1.0`` left 🔴 with 7 skipped
+critic fixes + heuristics; many were pipeline false positives.
+
+**Root causes (pipeline):**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| s0046/s0050 «Introduced ⟦C{n}⟧; source had plain text Index12» | RU prose uses plain ``Index12``; EN wraps in `` `Index12` `` → extra ⟦C⟧ in segment IR; rendered EN is correct | ``is_spurious_plain_text_wrapping_issue`` — drop when ident plain in RU, absent plain in EN segment text, tgt has **more** placeholders |
+| s0069 «⟦U1⟧ replaced with ⟦U2⟧» | Critic hallucination; placeholder sequences identical | ``is_spurious_phantom_marker_swap_issue`` when ``extract_placeholders`` match + atom_map swap comment |
+| «Блок кода №1» differs | Extra blank line after ``DECLARE`` in EN fence — code identical | ``_fence_diff_is_whitespace_only`` in ``fence_content_matches_source`` |
+
+**Still author (not pipeline):** missing ``{% include not_allow_for_olap %}``,
+``primary-key/row-oriented.md`` link, intro wording (sorted→indexed, make→run) —
+``md_link_parity`` and meaning-drift items remain valid.
+
+**Tests:** ``test_plain_text_index_name_wrapping_dropped``,
+``test_phantom_marker_swap_dropped_when_sequences_match``,
+``test_fence_content_allows_whitespace_only_diff``.
+
 ---
 
 ---

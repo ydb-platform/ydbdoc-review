@@ -35,6 +35,15 @@ _SUBSTITUTION_CLAIM = re.compile(
 )
 _WIKIPEDIA_URL = re.compile(r"wikipedia\.org", re.IGNORECASE)
 _NULL_LITERAL = re.compile(r"\bnull\b", re.IGNORECASE)
+_PLAIN_TEXT_ATOM = re.compile(
+    r"source had plain text ['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_PHANTOM_MARKER_SWAP = re.compile(
+    r"⟦[CLIHVTUS]\d+⟧.*(?:replaced with|changed to|used in translated).*⟦[CLIHVTUS]\d+⟧|"
+    r"atom_map only defines",
+    re.IGNORECASE,
+)
 
 
 def critic_issue_dedupe_key(issue: CriticIssueOut) -> tuple:
@@ -188,6 +197,46 @@ def is_spurious_code_literal_equivalent_issue(
     return False
 
 
+def is_spurious_plain_text_wrapping_issue(
+    issue: CriticIssueOut,
+    segment: Segment | None,
+    translation: str | None,
+) -> bool:
+    """Drop when critic flags plain prose ids but EN wrapped them in inline code."""
+    if segment is None or translation is None or not issue.segment_id:
+        return False
+    if not _PLACEHOLDER_ISSUE.search(issue.category):
+        return False
+    haystack = f"{issue.category} {issue.comment}"
+    match = _PLAIN_TEXT_ATOM.search(haystack)
+    if match is None or "introduced placeholder" not in haystack.lower():
+        return False
+    ident = match.group(1)
+    if not re.search(rf"\b{re.escape(ident)}\b", segment.text):
+        return False
+    if re.search(rf"`{re.escape(ident)}`|\b{re.escape(ident)}\b", translation):
+        return False
+    src_ph = extract_placeholders(segment.text)
+    tgt_ph = extract_placeholders(translation)
+    return len(tgt_ph) > len(src_ph)
+
+
+def is_spurious_phantom_marker_swap_issue(
+    issue: CriticIssueOut,
+    segment: Segment | None,
+    translation: str | None,
+) -> bool:
+    """Drop atom_map marker-id noise when RU/EN share the same placeholder sequence."""
+    if segment is None or translation is None or not issue.segment_id:
+        return False
+    if not _PLACEHOLDER_ISSUE.search(issue.category):
+        return False
+    if extract_placeholders(segment.text) != extract_placeholders(translation):
+        return False
+    haystack = f"{issue.category} {issue.comment}"
+    return bool(_PHANTOM_MARKER_SWAP.search(haystack))
+
+
 def is_spurious_hallucinated_substitution_issue(
     issue: CriticIssueOut,
     segment: Segment | None,
@@ -254,6 +303,18 @@ def drop_spurious_placeholder_issues(
         if is_spurious_hallucinated_substitution_issue(issue, seg, trans):
             logger.info(
                 "Ignoring hallucinated substitution critic issue for %s",
+                issue.segment_id,
+            )
+            continue
+        if is_spurious_plain_text_wrapping_issue(issue, seg, trans):
+            logger.info(
+                "Ignoring plain-text wrapping critic issue for %s",
+                issue.segment_id,
+            )
+            continue
+        if is_spurious_phantom_marker_swap_issue(issue, seg, trans):
+            logger.info(
+                "Ignoring phantom marker swap critic issue for %s",
                 issue.segment_id,
             )
             continue

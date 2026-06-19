@@ -11,7 +11,13 @@ from ydbdoc_review.validation.fence_integrity import (
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 
-def test_fence_content_allows_angle_placeholder_only():
+def test_fence_content_allows_whitespace_only_diff():
+    """§6.61 #43860: extra blank line inside yql fence is not corruption."""
+    src = "DECLARE $customer_id AS Uint64;\nSELECT *\nFROM orders\n"
+    tgt = "DECLARE $customer_id AS Uint64;\n\nSELECT *\nFROM orders\n"
+    assert fence_content_matches_source(src, tgt)
+    assert not check_fence_body_copy(f"```yql\n{src}```\n", f"```yql\n{tgt}```\n")
+
     assert fence_content_matches_source(
         "bootstrap --uuid <строка>\n",
         "bootstrap --uuid <string>\n",

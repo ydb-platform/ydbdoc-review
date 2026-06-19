@@ -202,6 +202,9 @@ semantic swaps, ``text`` fence Cyrillic, TOC ``ru_base_hrefs``, ``md_link_parity
 **Resolved via §6.60 (#43746):** MySQL import table cell — padded inline-code render
 so critic fix survives ``gate_round_trip``; re-run ``doc_translate`` on #43746.
 
+**Resolved via §6.61 (#43860):** secondary-indexes verify noise — plain index name
+wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
+
 ---
 
 ---

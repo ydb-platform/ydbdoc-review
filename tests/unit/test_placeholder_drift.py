@@ -19,6 +19,8 @@ from ydbdoc_review.validation.placeholder_drift import (
     is_spurious_hallucinated_substitution_issue,
     is_spurious_locale_url_issue,
     is_spurious_null_literal_issue,
+    is_spurious_phantom_marker_swap_issue,
+    is_spurious_plain_text_wrapping_issue,
 )
 
 
@@ -286,4 +288,68 @@ def test_filter_critic_response_excludes_skipped():
     assert out is not None
     assert out.issues == []
     assert out.verdict == "ok"
+
+
+def test_plain_text_index_name_wrapping_dropped():
+    """§6.61 #43860: RU plain Index12, EN inline code — not placeholder corruption."""
+    ru = (
+        "⟦C1⟧ — должен быть выбран Index12, так как при его выборе "
+        "в получающемся диапазоне ⟦C2⟧ получится длина точечного префикса — 2."
+    )
+    en = (
+        "⟦C1⟧ — ⟦C2⟧ should be selected, because when it is selected, "
+        "the resulting range ⟦C3⟧ yields a point prefix length of 2."
+    )
+    seg = _segment("s0046", ru)
+    issue = CriticIssueOut(
+        segment_id="s0046",
+        severity="blocked",
+        category="placeholder corruption",
+        comment=(
+            "Introduced placeholder ⟦C3⟧ not present in atom_map; "
+            "source had plain text 'Index12'"
+        ),
+        suggested_text=None,
+    )
+    assert is_spurious_plain_text_wrapping_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0046": en}) == []
+
+
+def test_phantom_marker_swap_dropped_when_sequences_match():
+    """§6.61 #43860: critic claims U1→U2 but EN still has ⟦U1⟧."""
+    ru = (
+        "use [распределенных транзакций](⟦U1⟧) even for single partition"
+    )
+    en = (
+        "use [distributed transactions](⟦U1⟧) even for single partition"
+    )
+    seg = _segment("s0069", ru)
+    issue = CriticIssueOut(
+        segment_id="s0069",
+        severity="blocked",
+        category="placeholder corruption",
+        comment=(
+            "Placeholder ⟦U1⟧ in source text was replaced with ⟦U2⟧ in translation, "
+            "but atom_map only defines ⟦U1⟧"
+        ),
+        suggested_text=None,
+    )
+    assert is_spurious_phantom_marker_swap_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0069": en}) == []
+
+
+def test_plain_text_wrapping_not_dropped_when_identifier_missing():
+    """Keep issue when EN drops a plain identifier entirely."""
+    ru = "⟦C1⟧ — должен быть выбран Index12, так как ⟦C2⟧"
+    en = "⟦C1⟧ — should be selected, because ⟦C2⟧"
+    seg = _segment("s0046", ru)
+    issue = CriticIssueOut(
+        segment_id="s0046",
+        severity="blocked",
+        category="placeholder corruption",
+        comment="Introduced placeholder ⟦C3⟧; source had plain text 'Index12'",
+        suggested_text=None,
+    )
+    assert not is_spurious_plain_text_wrapping_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0046": en}) == [issue]
 

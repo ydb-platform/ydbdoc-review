@@ -55,7 +55,7 @@ src/ydbdoc_review/
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
 │   ├── markers.py                 placeholder multiset + cross-lang drift checks (§6.54–§6.57)
-│   ├── placeholder_drift.py       drop spurious critic issues; skipped dedupe (§6.54–§6.57)
+│   ├── placeholder_drift.py       drop spurious critic issues; skipped dedupe (§6.54–§6.61)
 │   ├── placeholder_roles.py       semantic V/U placement (link dest vs prose)
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031

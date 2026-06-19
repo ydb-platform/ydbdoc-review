@@ -122,11 +122,24 @@ def _fence_diff_is_comment_translation_only(
     return saw_diff
 
 
+def _fence_diff_is_whitespace_only(
+    source_content: str,
+    target_content: str,
+) -> bool:
+    """True when bodies differ only by blank lines or trailing spaces."""
+    def _lines(text: str) -> list[str]:
+        return [line.rstrip() for line in text.splitlines() if line.strip()]
+
+    return _lines(source_content) == _lines(target_content)
+
+
 def fence_content_matches_source(source_content: str, target_content: str) -> bool:
     """True when target fence body equals source, modulo allowed pipeline edits."""
     if _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
         target_content
     ):
+        return True
+    if _fence_diff_is_whitespace_only(source_content, target_content):
         return True
     if _fence_diff_is_mermaid_label_translation(source_content, target_content):
         return True
