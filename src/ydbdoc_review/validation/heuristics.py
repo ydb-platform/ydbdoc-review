@@ -331,6 +331,7 @@ def validate_toc_merge_warnings(
     *,
     translate_hrefs: set[str],
     en_main_yaml: str,
+    translate_include_paths: set[str] | None = None,
 ) -> list[str]:
     """Wrap ``validate_toc_merge`` for reporting."""
     return _issue_strings(
@@ -339,6 +340,7 @@ def validate_toc_merge_warnings(
             en_merged_yaml,
             translate_hrefs=translate_hrefs,
             en_main_yaml=en_main_yaml,
+            translate_include_paths=translate_include_paths,
         )
     )
 
@@ -368,6 +370,7 @@ def validate_navigation_merge_warnings(
     *,
     en_main_yaml: str,
     translate_scope: set[str],
+    translate_include_scope: set[str] | None = None,
 ) -> list[str]:
     """TOC or redirect merge validation based on ``path`` kind."""
     kind = navigation_yaml_kind(path)
@@ -377,6 +380,7 @@ def validate_navigation_merge_warnings(
             en_merged_yaml,
             translate_hrefs=translate_scope,
             en_main_yaml=en_main_yaml,
+            translate_include_paths=translate_include_scope,
         )
     if kind == "redirect":
         return validate_redirect_merge_warnings(

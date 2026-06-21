@@ -13,6 +13,7 @@ from ydbdoc_review.navigation.redirects import (
     validate_redirect_merge,
 )
 from ydbdoc_review.navigation.toc import (
+    TocTranslateScope,
     merge_en_toc_yaml,
     parse_toc_items,
     toc_translate_scope,
@@ -30,6 +31,7 @@ __all__ = [
     "parse_toc_items",
     "redirect_translate_scope",
     "toc_translate_scope",
+    "TocTranslateScope",
     "validate_redirect_merge",
     "validate_toc_merge",
 ]

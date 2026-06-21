@@ -122,6 +122,37 @@ def _fence_diff_is_comment_translation_only(
     return saw_diff
 
 
+_CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
+
+
+def _fence_diff_is_text_diagram_label_translation(
+    source_content: str,
+    target_content: str,
+) -> bool:
+    """True when EN `` ```text `` `` diagram differs from RU only in translated labels."""
+    src_lines = source_content.strip().splitlines()
+    tgt_lines = target_content.strip().splitlines()
+    if len(src_lines) != len(tgt_lines) or not src_lines:
+        return False
+    saw_diff = False
+    for src_line, tgt_line in zip(src_lines, tgt_lines, strict=True):
+        if src_line == tgt_line:
+            continue
+        saw_diff = True
+        if "←" in src_line or "←" in tgt_line:
+            if src_line.split("←", 1)[0].rstrip() != tgt_line.split("←", 1)[0].rstrip():
+                return False
+            ru_label = src_line.split("←", 1)[-1]
+            en_label = tgt_line.split("←", 1)[-1]
+            if _CYRILLIC.search(ru_label) and not _CYRILLIC.search(en_label):
+                continue
+            return False
+        if _CYRILLIC.search(src_line) and not _CYRILLIC.search(tgt_line):
+            continue
+        return False
+    return saw_diff
+
+
 def _fence_diff_is_whitespace_only(
     source_content: str,
     target_content: str,
@@ -133,13 +164,27 @@ def _fence_diff_is_whitespace_only(
     return _lines(source_content) == _lines(target_content)
 
 
-def fence_content_matches_source(source_content: str, target_content: str) -> bool:
+def _fence_lang(info: str) -> str:
+    parts = (info or "").strip().split()
+    return parts[0].lower() if parts else ""
+
+
+def fence_content_matches_source(
+    source_content: str,
+    target_content: str,
+    *,
+    fence_info: str = "",
+) -> bool:
     """True when target fence body equals source, modulo allowed pipeline edits."""
     if _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
         target_content
     ):
         return True
     if _fence_diff_is_whitespace_only(source_content, target_content):
+        return True
+    if _fence_lang(fence_info) == "text" and _fence_diff_is_text_diagram_label_translation(
+        source_content, target_content
+    ):
         return True
     if _fence_diff_is_mermaid_label_translation(source_content, target_content):
         return True
@@ -166,18 +211,14 @@ def check_fence_body_copy(
         ]
     warnings: list[str] = []
     for i, (src, tgt) in enumerate(zip(src_blocks, tgt_blocks, strict=True), start=1):
-        if fence_content_matches_source(src.content, tgt.content):
+        fence_info = src.info if isinstance(src, FencedCode) else ""
+        if fence_content_matches_source(src.content, tgt.content, fence_info=fence_info):
             continue
         preview = tgt.content.strip().splitlines()[0][:80] if tgt.content.strip() else "(empty)"
         warnings.append(
             f"fence_body_copy: block {i} body changed by pipeline (first line: «{preview}»)"
         )
     return warnings
-
-
-def _fence_lang(info: str) -> str:
-    parts = (info or "").strip().split()
-    return parts[0].lower() if parts else ""
 
 
 def _copy_fence_body_from_source(src: FencedCode | IndentedCode, tgt: FencedCode | IndentedCode) -> bool:

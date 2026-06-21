@@ -170,6 +170,38 @@ def test_fence_content_allows_mermaid_note_and_message_translation():
     )
 
 
+def test_fence_content_allows_text_diagram_label_translation():
+    """Regression #44103: `` ```text `` span tree labels may be translated (§6.59)."""
+    ru = (
+        "ydb.RunWithRetry  (Internal)\n"
+        "├─ ydb.Try        (Internal)   ← 1-я попытка: ERROR\n"
+        "│  ├─ ydb.ExecuteQuery (Client)\n"
+        "│  └─ ydb.Commit       (Client) ← ERROR: Transaction Lock Invalidated\n"
+        "└─ ydb.Try        (Internal)   ← 2-я попытка: SUCCESS, ydb.retry.backoff_ms=50\n"
+        "   └─ ydb.Commit       (Client)\n"
+    )
+    en = (
+        "ydb.RunWithRetry  (Internal)\n"
+        "├─ ydb.Try        (Internal)   ← 1st attempt: ERROR\n"
+        "│  ├─ ydb.ExecuteQuery (Client)\n"
+        "│  └─ ydb.Commit       (Client) ← ERROR: Transaction Lock Invalidated\n"
+        "└─ ydb.Try        (Internal)   ← 2nd attempt: SUCCESS, ydb.retry.backoff_ms=50\n"
+        "   └─ ydb.Commit       (Client)\n"
+    )
+    assert fence_content_matches_source(ru, en, fence_info="text")
+    assert not check_fence_body_copy(
+        f"```text\n{ru}```",
+        f"```text\n{en}```",
+        source_lang="ru",
+    )
+
+
+def test_fence_content_rejects_text_diagram_structure_change():
+    ru = "├─ ydb.Try        (Internal)   ← 1-я попытка: ERROR\n"
+    en = "├─ ydb.ExecuteQuery (Client)   ← 1st attempt: ERROR\n"
+    assert not fence_content_matches_source(ru, en, fence_info="text")
+
+
 def test_fence_content_rejects_mermaid_structure_change():
     ru = (
         "sequenceDiagram\n"

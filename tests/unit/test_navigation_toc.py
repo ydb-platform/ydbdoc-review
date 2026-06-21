@@ -49,8 +49,8 @@ def test_parse_toc_items():
 
 def test_toc_translate_scope_detects_new_and_renamed():
     scope = toc_translate_scope(RU_BASE, RU_PR)
-    assert scope == {"old.md", "new-page.md"}
-    assert "stable.md" not in scope
+    assert scope.hrefs == {"old.md", "new-page.md"}
+    assert "stable.md" not in scope.hrefs
 
 
 def test_merge_keeps_unchanged_en_labels():
@@ -64,7 +64,7 @@ def test_merge_keeps_unchanged_en_labels():
     merged = merge_en_toc_yaml(
         EN_MAIN,
         RU_PR,
-        translate_hrefs=scope,
+        translate_hrefs=set(scope.hrefs),
         translate_name=fake_translate,
     )
     items = parse_toc_items(merged)
@@ -154,12 +154,12 @@ def test_parse_toc_items_inline_ydb_format():
 
 def test_merge_inline_toc_adds_compact_preserves_en_blocks():
     scope = toc_translate_scope(ALTER_TABLE_RU_BASE, ALTER_TABLE_RU_PR)
-    assert scope == {"compact.md"}
+    assert scope.hrefs == {"compact.md"}
 
     merged = merge_en_toc_yaml(
         ALTER_TABLE_EN_MAIN,
         ALTER_TABLE_RU_PR,
-        translate_hrefs=scope,
+        translate_hrefs=set(scope.hrefs),
         translate_name=lambda n: "COMPACT" if n == "COMPACT" else n,
     )
     items = parse_toc_items(merged)
@@ -230,10 +230,12 @@ def test_validate_toc_merge_clean():
     merged = merge_en_toc_yaml(
         EN_MAIN,
         RU_PR,
-        translate_hrefs=scope,
+        translate_hrefs=set(scope.hrefs),
         translate_name=lambda n: "T",
     )
-    issues = validate_toc_merge(RU_PR, merged, translate_hrefs=scope, en_main_yaml=EN_MAIN)
+    issues = validate_toc_merge(
+        RU_PR, merged, translate_hrefs=set(scope.hrefs), en_main_yaml=EN_MAIN
+    )
     assert not issues
 
 
@@ -316,7 +318,7 @@ def test_parse_toc_items_nested_ydb_sdk_format():
 
 def test_toc_translate_scope_nested_detects_new_href():
     scope = toc_translate_scope(YDB_SDK_RU_BASE, YDB_SDK_RU_PR)
-    assert scope == {"debug-logs-otel.md"}
+    assert scope.hrefs == {"debug-logs-otel.md"}
 
 
 def test_merge_nested_toc_adds_otel_logs_preserves_structure():
@@ -330,7 +332,7 @@ def test_merge_nested_toc_adds_otel_logs_preserves_structure():
     merged = merge_en_toc_yaml(
         YDB_SDK_EN_MAIN,
         YDB_SDK_RU_PR,
-        translate_hrefs=scope,
+        translate_hrefs=set(scope.hrefs),
         translate_name=fake_translate,
     )
     items = parse_toc_items(merged)
@@ -353,7 +355,82 @@ def test_merge_nested_toc_adds_otel_logs_preserves_structure():
     issues = validate_toc_merge(
         YDB_SDK_RU_PR,
         merged,
-        translate_hrefs=scope,
+        translate_hrefs=set(scope.hrefs),
         en_main_yaml=YDB_SDK_EN_MAIN,
+    )
+    assert not issues
+
+
+OBSERVABILITY_RU_PR = dedent("""
+    items:
+    - name: Обзор
+      href: index.md
+    - name: Логирование
+      include:
+        mode: link
+        path: logging/toc_p.yaml
+    - name: Метрики
+      include:
+        mode: link
+        path: metrics/toc_p.yaml
+    - name: Трассировка
+      include:
+        mode: link
+        path: tracing/toc_p.yaml
+""").strip()
+
+
+def test_parse_toc_items_include_links():
+    """Regression #44103: ``include.path`` sidebar entries are parsed."""
+    items = parse_toc_items(OBSERVABILITY_RU_PR)
+    assert len(items) == 4
+    assert items[0]["href"] == "index.md"
+    assert items[1]["include_path"] == "logging/toc_p.yaml"
+    assert items[1]["name"] == "Логирование"
+
+
+def test_toc_translate_scope_detects_new_include_paths():
+    scope = toc_translate_scope("", OBSERVABILITY_RU_PR)
+    assert scope.hrefs == {"index.md"}
+    assert scope.include_paths == {
+        "logging/toc_p.yaml",
+        "metrics/toc_p.yaml",
+        "tracing/toc_p.yaml",
+    }
+
+
+def test_merge_toc_include_links_for_new_observability_section():
+    """Regression #44103: parent toc_p.yaml must mirror RU include links."""
+    scope = toc_translate_scope("", OBSERVABILITY_RU_PR)
+
+    def fake_translate(name: str) -> str:
+        return {
+            "Обзор": "Overview",
+            "Логирование": "Logging",
+            "Метрики": "Metrics",
+            "Трассировка": "Tracing",
+        }[name]
+
+    merged = merge_en_toc_yaml(
+        "",
+        OBSERVABILITY_RU_PR,
+        translate_hrefs=set(scope.hrefs),
+        translate_include_paths=set(scope.include_paths),
+        translate_name=fake_translate,
+    )
+    assert "include:" in merged
+    assert "logging/toc_p.yaml" in merged
+    assert "metrics/toc_p.yaml" in merged
+    assert "tracing/toc_p.yaml" in merged
+    assert "- name: Logging" in merged
+    assert "- name: Metrics" in merged
+    assert "- name: Tracing" in merged
+
+    issues = validate_toc_merge(
+        OBSERVABILITY_RU_PR,
+        merged,
+        translate_hrefs=set(scope.hrefs),
+        translate_include_paths=set(scope.include_paths),
+        en_main_yaml="",
     )
     assert not issues

@@ -187,18 +187,31 @@ def merge_navigation_pair(
 
     if kind == "toc":
         pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
-        scope = toc_translate_scope(ru_base, ru_pr) | pair_extra
-        en_main_hrefs = {it["href"] for it in parse_toc_items(en_main)}
-        ru_base_hrefs = {it["href"] for it in parse_toc_items(ru_base)}
+        scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
+        en_main_hrefs = {it["href"] for it in parse_toc_items(en_main) if it.get("href")}
+        ru_base_hrefs = {it["href"] for it in parse_toc_items(ru_base) if it.get("href")}
+        ru_base_include_paths = {
+            it["include_path"]
+            for it in parse_toc_items(ru_base)
+            if it.get("include_path")
+        }
         gap_hrefs = {
             it["href"]
             for it in parse_toc_items(ru_pr)
-            if it["href"] not in en_main_hrefs and it["href"] in ru_base_hrefs
+            if it.get("href")
+            and it["href"] not in en_main_hrefs
+            and it["href"] in ru_base_hrefs
         }
         labels = [
             it["name"]
             for it in parse_toc_items(ru_pr)
-            if it["href"] in scope or it["href"] in gap_hrefs
+            if (
+                (it.get("href") and (it["href"] in scope.hrefs or it["href"] in gap_hrefs))
+                or (
+                    it.get("include_path")
+                    and it["include_path"] in scope.include_paths
+                )
+            )
         ]
         name_map = _translate_menu_labels(
             client, labels, glossary, config=config
@@ -206,16 +219,19 @@ def merge_navigation_pair(
         merged = merge_en_toc_yaml(
             en_main,
             ru_pr,
-            translate_hrefs=scope,
+            translate_hrefs=set(scope.hrefs),
             translate_name=lambda n: name_map.get(n, n),
             ru_base_hrefs=ru_base_hrefs,
+            translate_include_paths=set(scope.include_paths),
+            ru_base_include_paths=ru_base_include_paths,
         )
         warnings = validate_navigation_merge_warnings(
             pair.ru_path,
             ru_pr,
             merged,
             en_main_yaml=en_main,
-            translate_scope=scope,
+            translate_scope=set(scope.hrefs),
+            translate_include_scope=set(scope.include_paths),
         )
     else:
         scope = redirect_translate_scope(ru_base, ru_pr)
@@ -273,17 +289,27 @@ def verify_navigation_pair(
 
     if kind == "toc":
         pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
-        scope = toc_translate_scope(ru_base, ru_pr) | pair_extra
+        scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
     else:
         scope = redirect_translate_scope(ru_base, ru_pr)
 
-    warnings = validate_navigation_merge_warnings(
-        pair.ru_path,
-        ru_pr,
-        en_text,
-        en_main_yaml=en_main,
-        translate_scope=scope,
-    )
+    if kind == "toc":
+        warnings = validate_navigation_merge_warnings(
+            pair.ru_path,
+            ru_pr,
+            en_text,
+            en_main_yaml=en_main,
+            translate_scope=set(scope.hrefs),
+            translate_include_scope=set(scope.include_paths),
+        )
+    else:
+        warnings = validate_navigation_merge_warnings(
+            pair.ru_path,
+            ru_pr,
+            en_text,
+            en_main_yaml=en_main,
+            translate_scope=scope,
+        )
     verdict = _navigation_verdict(warnings)
     return NavigationRunResult(
         ru_path=pair.ru_path,

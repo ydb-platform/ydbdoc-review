@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 _ITEM_SPLIT = re.compile(r"(?m)^- name: ")
 _HREF_LINE = re.compile(r"^  href: (.+)$", re.MULTILINE)
+_INCLUDE_PATH = re.compile(r"^\s+path: (.+)$", re.MULTILINE)
 # Diplodoc ydb docs often use one-line inline items:
 #   - { name: Overview, href: index.md, when: ... }
 _INLINE_ITEM = re.compile(
@@ -16,6 +17,17 @@ _INLINE_ITEM = re.compile(
 _NAME_LINE = re.compile(r"^(\s*)- name: (.+)$")
 _HREF_INDENTED = re.compile(r"^(\s*)href: (.+)$")
 _NESTED_ITEMS_LINE = re.compile(r"^(\s*)items:\s*$")
+
+
+@dataclass(frozen=True)
+class TocTranslateScope:
+    """Sidebar entries whose Russian ``name`` must be translated for this PR."""
+
+    hrefs: frozenset[str]
+    include_paths: frozenset[str]
+
+    def with_extra_hrefs(self, extra: set[str]) -> TocTranslateScope:
+        return TocTranslateScope(self.hrefs | frozenset(extra), self.include_paths)
 
 
 @dataclass
@@ -282,15 +294,25 @@ def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
         block = "- name: " + chunk
         m_name = re.match(r"- name: (.+)", block)
         m_href = _HREF_LINE.search(block)
-        if not m_name or not m_href:
+        m_include = _INCLUDE_PATH.search(block)
+        if not m_name:
             continue
-        items.append(
-            {
-                "name": m_name.group(1).strip(),
-                "href": m_href.group(1).strip(),
-                "block": block.rstrip() + "\n",
-            }
-        )
+        if m_href:
+            items.append(
+                {
+                    "name": m_name.group(1).strip(),
+                    "href": m_href.group(1).strip(),
+                    "block": block.rstrip() + "\n",
+                }
+            )
+        elif m_include:
+            items.append(
+                {
+                    "name": m_name.group(1).strip(),
+                    "include_path": m_include.group(1).strip(),
+                    "block": block.rstrip() + "\n",
+                }
+            )
     return items
 
 
@@ -362,20 +384,33 @@ def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
     return _parse_toc_items_block(text)
 
 
-def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> set[str]:
-    """``href`` values whose menu ``name`` must be translated for this PR.
+def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope:
+    """``href`` / ``include.path`` values whose menu ``name`` must be translated.
 
     Scope = newly added items or items whose Russian ``name`` changed
     between base and PR head. Unchanged items are **not** in scope.
     """
-    base_by_href = {it["href"]: it for it in parse_toc_items(ru_base_yaml)}
-    scope: set[str] = set()
+    base_by_href = {it["href"]: it for it in parse_toc_items(ru_base_yaml) if it.get("href")}
+    base_by_include = {
+        it["include_path"]: it
+        for it in parse_toc_items(ru_base_yaml)
+        if it.get("include_path")
+    }
+    hrefs: set[str] = set()
+    include_paths: set[str] = set()
     for it in parse_toc_items(ru_pr_yaml):
-        href = it["href"]
-        prev = base_by_href.get(href)
-        if prev is None or prev["name"] != it["name"]:
-            scope.add(href)
-    return scope
+        href = it.get("href")
+        if href:
+            prev = base_by_href.get(href)
+            if prev is None or prev["name"] != it["name"]:
+                hrefs.add(href)
+            continue
+        include_path = it.get("include_path")
+        if include_path:
+            prev = base_by_include.get(include_path)
+            if prev is None or prev["name"] != it["name"]:
+                include_paths.add(include_path)
+    return TocTranslateScope(frozenset(hrefs), frozenset(include_paths))
 
 
 def merge_en_toc_yaml(
@@ -385,6 +420,8 @@ def merge_en_toc_yaml(
     translate_hrefs: set[str],
     translate_name: Callable[[str], str],
     ru_base_hrefs: set[str] | None = None,
+    translate_include_paths: set[str] | None = None,
+    ru_base_include_paths: set[str] | None = None,
 ) -> str:
     """Build EN toc from RU PR order with strict scope.
 
@@ -393,9 +430,13 @@ def merge_en_toc_yaml(
     - New ``href`` in RU PR: add **only** if ``href`` ∈ ``translate_hrefs``.
     - RU ``href`` in merge-base but missing from EN main: add with translated
       ``name`` (§6.59 — closes EN nav gaps like ``debug-logs-otel.md``).
+    - ``include.path`` sidebar links: same scope rules via
+      ``translate_include_paths`` / ``ru_base_include_paths``.
     - RU removed ``href``: omit from output (mirror RU structure).
     - EN-only ``href`` not in RU PR: append unchanged at end (legacy entries).
     """
+    include_scope = translate_include_paths or set()
+    base_includes = ru_base_include_paths or set()
     if _has_nested_block_items(en_main_yaml) or _has_nested_block_items(ru_pr_yaml):
         return _merge_en_toc_yaml_nested(
             en_main_yaml,
@@ -406,38 +447,69 @@ def merge_en_toc_yaml(
         )
 
     line_prefix = _inline_list_line_prefix(en_main_yaml)
-    en_by_href = {it["href"]: it for it in parse_toc_items(en_main_yaml)}
+    en_items = parse_toc_items(en_main_yaml)
+    en_by_href = {it["href"]: it for it in en_items if it.get("href")}
+    en_by_include = {
+        it["include_path"]: it for it in en_items if it.get("include_path")
+    }
     ru_items = parse_toc_items(ru_pr_yaml)
-    ru_hrefs = {it["href"] for it in ru_items}
+    ru_hrefs = {it["href"] for it in ru_items if it.get("href")}
+    ru_includes = {it["include_path"] for it in ru_items if it.get("include_path")}
     base_hrefs = ru_base_hrefs or set()
     merged: list[dict[str, str]] = []
-    seen: set[str] = set()
+    seen_hrefs: set[str] = set()
+    seen_includes: set[str] = set()
 
     for rit in ru_items:
-        href = rit["href"]
-        if href in seen:
+        href = rit.get("href")
+        if href:
+            if href in seen_hrefs:
+                continue
+            seen_hrefs.add(href)
+            if href in en_by_href and href not in translate_hrefs:
+                merged.append(en_by_href[href])
+            elif href in translate_hrefs or (
+                href not in en_by_href and href in base_hrefs
+            ):
+                en_name = translate_name(rit["name"]).strip()
+                block = _replace_item_name(rit["block"], en_name)
+                if line_prefix is not None:
+                    block = _normalize_inline_block(block, line_prefix)
+                merged.append(
+                    {
+                        "name": en_name,
+                        "href": href,
+                        "block": block,
+                    }
+                )
             continue
-        seen.add(href)
-        if href in en_by_href and href not in translate_hrefs:
-            merged.append(en_by_href[href])
-        elif href in translate_hrefs or (
-            href not in en_by_href and href in base_hrefs
-        ):
-            en_name = translate_name(rit["name"]).strip()
-            block = _replace_item_name(rit["block"], en_name)
-            if line_prefix is not None:
-                block = _normalize_inline_block(block, line_prefix)
-            merged.append(
-                {
-                    "name": en_name,
-                    "href": href,
-                    "block": block,
-                }
-            )
-        # else: new RU-only href outside scope — skip
 
-    for it in parse_toc_items(en_main_yaml):
-        if it["href"] not in seen and it["href"] not in ru_hrefs:
+        include_path = rit.get("include_path")
+        if include_path:
+            if include_path in seen_includes:
+                continue
+            seen_includes.add(include_path)
+            if include_path in en_by_include and include_path not in include_scope:
+                merged.append(en_by_include[include_path])
+            elif include_path in include_scope or (
+                include_path not in en_by_include and include_path in base_includes
+            ):
+                en_name = translate_name(rit["name"]).strip()
+                block = _replace_item_name(rit["block"], en_name)
+                merged.append(
+                    {
+                        "name": en_name,
+                        "include_path": include_path,
+                        "block": block,
+                    }
+                )
+
+    for it in en_items:
+        href = it.get("href")
+        if href and href not in seen_hrefs and href not in ru_hrefs:
+            merged.append(it)
+        include_path = it.get("include_path")
+        if include_path and include_path not in seen_includes and include_path not in ru_includes:
             merged.append(it)
 
     return _serialize_toc(merged, line_prefix=line_prefix)
@@ -477,38 +549,69 @@ class TocValidationIssue:
     detail: str
 
 
+def _toc_entry_labels(items: list[dict[str, str]]) -> set[str]:
+    """Stable ids for toc entries (``href`` leaf or ``include.path`` link)."""
+    labels: set[str] = set()
+    for it in items:
+        href = it.get("href")
+        if href:
+            labels.add(f"href:{href}")
+        include_path = it.get("include_path")
+        if include_path:
+            labels.add(f"include:{include_path}")
+    return labels
+
+
 def validate_toc_merge(
     ru_pr_yaml: str,
     en_merged_yaml: str,
     *,
     translate_hrefs: set[str],
     en_main_yaml: str,
+    translate_include_paths: set[str] | None = None,
 ) -> list[TocValidationIssue]:
     """Heuristic checks after merge (Phase E hook)."""
     issues: list[TocValidationIssue] = []
-    ru_hrefs = {it["href"] for it in parse_toc_items(ru_pr_yaml)}
-    en_hrefs = {it["href"] for it in parse_toc_items(en_merged_yaml)}
-    en_main_hrefs = {it["href"] for it in parse_toc_items(en_main_yaml)}
+    ru_items = parse_toc_items(ru_pr_yaml)
+    en_items = parse_toc_items(en_merged_yaml)
+    ru_labels = _toc_entry_labels(ru_items)
+    en_labels = _toc_entry_labels(en_items)
+    en_main_items = parse_toc_items(en_main_yaml)
+    en_main_hrefs = {it["href"] for it in en_main_items if it.get("href")}
+    en_main_includes = {
+        it["include_path"] for it in en_main_items if it.get("include_path")
+    }
 
-    unexpected = en_hrefs - ru_hrefs - en_main_hrefs
+    en_merged_hrefs = {it["href"] for it in en_items if it.get("href")}
+    en_merged_includes = {
+        it["include_path"] for it in en_items if it.get("include_path")
+    }
+    ru_hrefs = {it["href"] for it in ru_items if it.get("href")}
+    ru_includes = {it["include_path"] for it in ru_items if it.get("include_path")}
+
+    unexpected_hrefs = en_merged_hrefs - ru_hrefs - en_main_hrefs
+    unexpected_includes = en_merged_includes - ru_includes - en_main_includes
+    unexpected = sorted(
+        f"href:{href}" for href in unexpected_hrefs
+    ) + sorted(f"include:{path}" for path in unexpected_includes)
     if unexpected:
         issues.append(
             TocValidationIssue(
                 kind="unexpected_href",
-                detail=f"EN toc has hrefs not in RU PR and not EN legacy: {sorted(unexpected)}",
+                detail=f"EN toc has hrefs not in RU PR and not EN legacy: {unexpected}",
             )
         )
 
-    missing_ru = ru_hrefs - en_hrefs
+    missing_ru = sorted(ru_labels - en_labels)
     if missing_ru:
         issues.append(
             TocValidationIssue(
                 kind="missing_href",
-                detail=f"RU PR hrefs missing from EN toc: {sorted(missing_ru)}",
+                detail=f"RU PR hrefs missing from EN toc: {missing_ru}",
             )
         )
 
-    if parse_toc_items(ru_pr_yaml) and not parse_toc_items(en_merged_yaml):
+    if ru_items and not en_items:
         issues.append(
             TocValidationIssue(
                 kind="empty_toc",
@@ -516,12 +619,24 @@ def validate_toc_merge(
             )
         )
 
+    include_scope = translate_include_paths or set()
     for href in translate_hrefs:
-        if href not in en_hrefs:
+        if f"href:{href}" not in en_labels:
             issues.append(
                 TocValidationIssue(
                     kind="scope_not_applied",
                     detail=f"href {href!r} was in translate scope but missing from EN toc",
+                )
+            )
+    for include_path in include_scope:
+        if f"include:{include_path}" not in en_labels:
+            issues.append(
+                TocValidationIssue(
+                    kind="scope_not_applied",
+                    detail=(
+                        f"include.path {include_path!r} was in translate scope "
+                        "but missing from EN toc"
+                    ),
                 )
             )
 
