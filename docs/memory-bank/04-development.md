@@ -205,6 +205,10 @@ so critic fix survives ``gate_round_trip``; re-run ``doc_translate`` on #43746.
 **Resolved via §6.61 (#43860):** secondary-indexes verify noise — plain index name
 wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
 
+**Resolved via §6.62 (#44103):** observability auto-translate — ``text`` fence
+``fence_body_copy`` false positive, parent ``toc_p.yaml`` ``include.path`` merge,
+``extra_toc_hrefs_for_pair`` ``KeyError`` on include-only toc items.
+
 ---
 
 ---

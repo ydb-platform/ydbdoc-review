@@ -210,3 +210,24 @@ def test_merge_fork_pr_toc_uses_upstream_en_main_fallback():
     assert "patterns.md" in result.target_text
     assert "checkpoints.md" in result.target_text
     assert "topics.md" not in result.target_text
+
+
+OBSERVABILITY_RU_TOC = dedent("""
+    items:
+    - name: Обзор
+      href: index.md
+    - name: Логирование
+      include:
+        mode: link
+        path: logging/toc_p.yaml
+    - name: Метрики
+      include:
+        mode: link
+        path: metrics/toc_p.yaml
+""").strip()
+
+
+def test_extra_toc_hrefs_for_pair_skips_include_only_entries():
+    """Regression #44103: include.path items must not raise KeyError on href."""
+    md_basenames = {"index.md", "logging.md", "opentelemetry.md"}
+    assert extra_toc_hrefs_for_pair(OBSERVABILITY_RU_TOC, md_basenames) == {"index.md"}

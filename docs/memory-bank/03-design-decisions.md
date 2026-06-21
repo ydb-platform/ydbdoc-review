@@ -1290,7 +1290,29 @@ critic fixes + heuristics; many were pipeline false positives.
 ``test_phantom_marker_swap_dropped_when_sequences_match``,
 ``test_fence_content_allows_whitespace_only_diff``.
 
----
+### 6.62. #44103 auto-translate — ``text`` fence QA + ``toc_p.yaml`` ``include:`` ([ydb #44103](https://github.com/ydb-platform/ydb/pull/44103))
+
+**Context:** auto-translate from [#43530](https://github.com/ydb-platform/ydb/pull/43530)
+(observability move to ``reference/ydb-sdk``). ``doc_translate`` @ ``v0.1.0`` (pre-§6.62)
+left 🟡 on ``tracing/opentelemetry.md`` and shipped incomplete
+``observability/toc_p.yaml`` (only ``Overview`` / ``index.md``).
+
+**Root causes (pipeline):**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| ``fence_body_copy`` block 1 in `` ```text `` `` span tree | §6.59 translates diagram labels (``← 1-я попытка`` → ``← 1st attempt``); ``check_fence_body_copy`` required byte-identical bodies | ``_fence_diff_is_text_diagram_label_translation`` in ``fence_integrity`` (same class as §6.53 mermaid) |
+| EN ``observability/toc_p.yaml`` missing Logging/Metrics/Tracing | ``parse_toc_items`` only parsed ``href:``; RU parent toc uses ``include.path`` links to child ``toc_p.yaml`` files | Parse ``include.path``; ``TocTranslateScope.include_paths``; merge + validate include entries |
+| ``doc_translate`` crash ``KeyError: 'href'`` in ``extra_toc_hrefs_for_pair`` | Set comprehension assumed every toc item has ``href`` after include support | ``if it.get("href")`` when building ``toc_hrefs`` |
+
+**Expected after re-run:** 🟢 on observability bundle; parent ``toc_p.yaml`` mirrors RU
+``include:`` structure with translated ``name`` labels.
+
+**Tests:** ``test_fence_content_allows_text_diagram_label_translation``,
+``test_merge_toc_include_links_for_new_observability_section``,
+``test_extra_toc_hrefs_for_pair_skips_include_only_entries``.
+
+**Release:** tag ``v0.1.0`` moved to this commit.
 
 ---
 

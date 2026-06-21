@@ -50,7 +50,7 @@ src/ydbdoc_review/
 │   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
 ├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
-│   ├── toc.py                     parse, diff scope, merge, validate
+│   ├── toc.py                     parse (href + include.path), diff scope, merge, validate (§6.62)
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
@@ -60,7 +60,7 @@ src/ydbdoc_review/
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
-│   ├── fence_integrity.py         copy fences from source; detect pipeline drift; mermaid label translation (§6.53)
+│   ├── fence_integrity.py         copy fences from source; detect pipeline drift; mermaid/text label translation (§6.53, §6.62)
 │   ├── fence_comments.py          fence ``//``/``#`` comments + ``text`` fence Cyrillic (§6.39, §6.59)
 │   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines

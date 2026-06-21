@@ -92,7 +92,7 @@ def extra_toc_hrefs_from_md_targets(
 
 def extra_toc_hrefs_for_pair(ru_pr_yaml: str, md_href_basenames: set[str]) -> set[str]:
     """Restrict translated-page hrefs to entries present in this toc (§6.44)."""
-    toc_hrefs = {it["href"] for it in parse_toc_items(ru_pr_yaml)}
+    toc_hrefs = {it["href"] for it in parse_toc_items(ru_pr_yaml) if it.get("href")}
     return md_href_basenames & toc_hrefs
 
 

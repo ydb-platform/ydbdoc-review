@@ -427,6 +427,11 @@ computed from filtered ``critic_unresolved`` only.
 — OTel metrics/tracing docs from [#41691](https://github.com/ydb-platform/ydb/pull/41691);
 §6.59 fixes critic apply, ``text`` fences, TOC/index parity (re-run ``doc_translate``).
 
+**Canonical auto-translate case (observability):** [ydb #44103](https://github.com/ydb-platform/ydb/pull/44103)
+from [#43530](https://github.com/ydb-platform/ydb/pull/43530); §6.62 fixes ``text`` fence
+QA noise and parent ``toc_p.yaml`` ``include.path`` merge (+ ``extra_toc_hrefs_for_pair``
+``KeyError``).
+
 ---
 
 ---
