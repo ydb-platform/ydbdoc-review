@@ -523,9 +523,8 @@ def build_verify_fixup_pr_body(source_pr: int, source_repo: str, branch: str) ->
     return (
         f"Auto-generated critic fixes for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
-        f"The source PR head is on a contributor fork that the workflow cannot push to. "
-        f"Fixes are delivered as this separate PR — merge after #{source_pr}, "
-        f"or cherry-pick the commits into the source branch.\n\n"
+        f"Critic fixes are always delivered as a separate branch/PR — the workflow "
+        f"never pushes commits onto the verified PR head.\n\n"
         f"Branch: `{branch}`\n"
     )
 
@@ -533,9 +532,8 @@ def build_verify_fixup_pr_body(source_pr: int, source_repo: str, branch: str) ->
 def build_verify_fixup_source_comment(fixup_pr_number: int) -> str:
     return (
         "🤖 **ydbdoc-review** — критик предложил правки\n\n"
-        f"Так как head этого PR живёт на форке, бот не может закоммитить правки сюда напрямую. "
         f"Правки оформлены отдельным PR: #{fixup_pr_number}.\n\n"
-        "Замёрджите его после этого PR или cherry-pick'ните коммиты в свою ветку."
+        "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
     )
 
 

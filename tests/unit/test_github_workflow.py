@@ -410,7 +410,6 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
     assert create_kwargs["head"] == "ydbdoc-review/verify-11"
     assert create_kwargs["base"] == "main"
-    assert create_kwargs["title"] == "Critic fixes for #11"
     assert result.translation_pr_number == 99
     assert result.source_comment_url == "url"
     posted_bodies = [
@@ -478,7 +477,8 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
     assert result.translation_pr_number == 100
 
 
-def test_run_doc_verify_pushes_upstream_for_same_repo(git_repo: str):
+def test_run_doc_verify_translation_pr_opens_fixup_pr(git_repo: str):
+    """Same-repo translation PR: critic fixes go to verify branch, not translation head."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
@@ -494,6 +494,73 @@ def test_run_doc_verify_pushes_upstream_for_same_repo(git_repo: str):
                 "full_name": "o/r",
             },
         },
+        "base": {"ref": "feature/docs"},
+    }
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ):
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prep:
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.return_value = pull
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        mock_gh.return_value.create_pull.return_value = (
+                            "https://github.com/o/r/pull/99",
+                            99,
+                            True,
+                        )
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/en/a.md", "modified")],
+                        ):
+                            result = run_doc_verify(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=11,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
+
+    prep.assert_called_once()
+    assert prep.call_args.kwargs["translation_branch"] == "ydbdoc-review/verify-3"
+    assert prep.call_args.kwargs["base_branch"] == "ydbdoc-review/pr-3"
+    push.assert_called_once()
+    assert push.call_args.args[2] == "ydbdoc-review/verify-3"
+    assert push.call_args.args[4] == "https://github.com/o/r.git"
+    mock_gh.return_value.delete_branch.assert_called_once_with(
+        "o", "r", "ydbdoc-review/verify-3"
+    )
+    create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
+    assert create_kwargs["head"] == "ydbdoc-review/verify-3"
+    assert create_kwargs["base"] == "ydbdoc-review/pr-3"
+    assert create_kwargs["title"] == "Critic fixes for #11"
+    assert result.translation_pr_number == 99
+    assert result.source_comment_url == "url"
+    assert push.call_args.args[2] != "ydbdoc-review/pr-3"
+
+
+def test_run_doc_verify_same_repo_author_pr_opens_fixup_pr(git_repo: str):
+    """Unmerged same-repo PR: never push critic fixes to the author's head branch."""
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+
+    pull = {
+        "title": "docs: feature",
+        "body": "",
+        "head": {
+            "ref": "feature/docs",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
+            },
+        },
         "base": {"ref": "main"},
     }
 
@@ -501,27 +568,37 @@ def test_run_doc_verify_pushes_upstream_for_same_repo(git_repo: str):
         "ydbdoc_review.github.workflow._run_verify_pairs",
         return_value=_fake_pr_result(),
     ):
-        with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
-            with patch("ydbdoc_review.github.workflow.push_branch") as push:
-                with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                    mock_gh.return_value.get_pull.return_value = pull
-                    mock_gh.return_value.iter_issue_comments.return_value = iter([])
-                    mock_gh.return_value.post_issue_comment.return_value = "url"
-                    with patch(
-                        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                        return_value=[("ydb/docs/en/a.md", "modified")],
-                    ):
-                        run_doc_verify(
-                            repo_path=git_repo,
-                            github_repo="o/r",
-                            pr_number=11,
-                            merge_base_with="HEAD",
-                            dry_run=False,
-                            config=load_config(env=_env()),
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prep:
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.return_value = pull
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        mock_gh.return_value.create_pull.return_value = (
+                            "https://github.com/o/r/pull/99",
+                            99,
+                            True,
                         )
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/en/a.md", "modified")],
+                        ):
+                            result = run_doc_verify(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=7,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
 
-    push.assert_called_once()
-    assert push.call_args.args[4] == "https://github.com/o/r.git"
+    assert push.call_args.args[2] == "ydbdoc-review/verify-7"
+    assert push.call_args.args[2] != "feature/docs"
+    assert prep.call_args.kwargs["base_branch"] == "feature/docs"
+    create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
+    assert create_kwargs["base"] == "main"
+    assert result.translation_pr_number == 99
 
 
 def test_run_doc_verify_posts_comment(git_repo: str):
@@ -544,27 +621,33 @@ def test_run_doc_verify_posts_comment(git_repo: str):
         "ydbdoc_review.github.workflow._run_verify_pairs",
         return_value=_fake_pr_result(),
     ):
-        with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
-            with patch("ydbdoc_review.github.workflow.push_branch"):
-                with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                    mock_gh.return_value.get_pull.return_value = pull
-                    mock_gh.return_value.iter_issue_comments.return_value = iter(
-                        [{"body": "ydbdoc-review — отчёт #1"}]
-                    )
-                    mock_gh.return_value.post_issue_comment.return_value = "url"
-                    with patch(
-                        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                        return_value=[("ydb/docs/en/a.md", "modified")],
-                    ):
-                        result = run_doc_verify(
-                            repo_path=git_repo,
-                            github_repo="o/r",
-                            pr_number=11,
-                            merge_base_with="HEAD",
-                            dry_run=False,
-                            config=load_config(env=_env()),
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
+                with patch("ydbdoc_review.github.workflow.push_branch"):
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.return_value = pull
+                        mock_gh.return_value.iter_issue_comments.return_value = iter(
+                            [{"body": "ydbdoc-review — отчёт #1"}]
                         )
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        mock_gh.return_value.create_pull.return_value = (
+                            "https://github.com/o/r/pull/99",
+                            99,
+                            True,
+                        )
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/en/a.md", "modified")],
+                        ):
+                            result = run_doc_verify(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=11,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
 
     assert result.translation_comment_url == "url"
-    mock_gh.return_value.post_issue_comment.assert_called_once()
+    assert mock_gh.return_value.post_issue_comment.call_count == 2
 

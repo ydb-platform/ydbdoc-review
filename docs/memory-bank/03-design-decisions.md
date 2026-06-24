@@ -760,6 +760,9 @@ the push always rejects.
 Non-fork case (translation PR on upstream) keeps the current direct-push path.
 No critic fixes (`touched` empty) → no fixup PR, only the QA report comment.
 
+> **Superseded (§6.64):** direct-push to ``ctx.head_ref`` for same-repo PRs is
+> removed — all critic fixes use the fixup branch/PR path above.
+
 Multiple `doc_verify` runs on the same source PR: the local branch is reset off
 base by `prepare_translation_branch_on_base`, but the **remote** ref still carries
 the previous run's commits, so a plain `git push HEAD:refs/heads/<branch>` is
@@ -1337,6 +1340,38 @@ manually restored the EN sidebar.
 ``test_merge_indented_nested_toc_adds_observability_include``.
 
 **Release:** tag ``v0.1.0`` moved to this commit.
+
+### 6.64. `doc_verify` critic fixes — always separate fixup branch/PR
+
+**Problem:** §6.50 added a fork-only fixup path, but same-repo ``doc_verify`` still
+pushed critic commits directly onto the verified PR head — including unmerged
+author branches and translation branches ``ydbdoc-review/pr-N``. Authors object to
+bot commits landing on their feature branches without an explicit review PR.
+
+**Decision:** **never** push critic fixes onto ``ctx.head_ref``. Every ``doc_verify``
+run with applied fixes:
+
+1. Resets ``ydbdoc-review/verify-{source_pr or pr_number}`` off
+   ``translation_branch_base(ctx)`` (translation head for same-repo open PRs;
+   ``base_ref`` for fork/merged — same helper as ``doc_translate``).
+2. Commits critic fixes and pushes that branch to upstream.
+3. Opens a fixup PR via ``gh.create_pull``:
+   - **translation PR** on upstream → base ``ctx.head_ref`` (merge fixes into the
+     translation branch, not the author's feature branch).
+   - **all other PRs** → base ``ctx.base_ref``.
+4. Posts QA report on the verified PR + link comment to the fixup PR.
+
+§6.52 stale-branch ``delete_branch`` before push applies to **all** fixup runs, not
+only fork heads. Direct-push via ``verify_push_remote_url`` → ``ctx.head_ref`` is
+removed.
+
+**Implementation:** ``run_doc_verify`` in ``workflow.py``,
+``verify_fixup_pr_base`` in ``pr.py``, updated ``build_verify_fixup_*`` messages in
+``reporting/builder.py``.
+
+**Tests:** ``test_run_doc_verify_translation_pr_opens_fixup_pr``,
+``test_run_doc_verify_same_repo_author_pr_opens_fixup_pr``,
+``test_verify_fixup_pr_base``; fork-head tests unchanged.
 
 ---
 

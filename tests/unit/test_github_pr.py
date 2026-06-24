@@ -20,6 +20,7 @@ from ydbdoc_review.github.pr import (
     source_pr_number_from_branch,
     translation_pr_base,
     translation_branch_base,
+    verify_fixup_pr_base,
 )
 
 
@@ -115,6 +116,36 @@ def test_translation_branch_base_merged_same_repo():
         "main",
     )
     assert translation_pr_base(merged) == "main"
+
+
+def test_verify_fixup_pr_base():
+    translation = PullRequestContext(
+        number=11,
+        title="t",
+        owner="o",
+        repo="r",
+        head_ref="ydbdoc-review/pr-3",
+        head_sha="abc",
+        head_repo_https_url="https://github.com/o/r.git",
+        head_repo_full_name="o/r",
+        base_ref="feature/docs",
+    )
+    author = PullRequestContext(
+        number=7,
+        title="t",
+        owner="o",
+        repo="r",
+        head_ref="feature/docs",
+        head_sha="abc",
+        head_repo_https_url="https://github.com/o/r.git",
+        head_repo_full_name="o/r",
+        base_ref="main",
+    )
+    prefix = "ydbdoc-review/pr-"
+    assert verify_fixup_pr_base(translation, translation_branch_prefix=prefix) == (
+        "ydbdoc-review/pr-3"
+    )
+    assert verify_fixup_pr_base(author, translation_branch_prefix=prefix) == "main"
 
 
 def test_parse_repo_invalid():

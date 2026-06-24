@@ -213,6 +213,9 @@ wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
 ``_parse_toc_tree_block`` list-indent detection, nested merge serialization,
 ``collapsed_toc`` validation guard.
 
+**Resolved via §6.64:** ``doc_verify`` critic fixes always land on
+``ydbdoc-review/verify-{N}`` + separate fixup PR — never on the author's PR head.
+
 ---
 
 ---
