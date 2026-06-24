@@ -1314,6 +1314,30 @@ left 🟡 on ``tracing/opentelemetry.md`` and shipped incomplete
 
 **Release:** tag ``v0.1.0`` moved to this commit.
 
+### 6.63. #44117 nested indented TOC — parse/merge regression ([ydb #44117](https://github.com/ydb-platform/ydb/pull/44117))
+
+**Context:** auto-translate [#44108](https://github.com/ydb-platform/ydb/pull/44108) (re-run after §6.62)
+reported 🟢 while shipping ``reference/ydb-sdk/toc_i.yaml`` as literally ``items:\n\n``.
+After merge to ``main``: 44+ YFM003 ``unreachable-link`` for SDK topics; [#44117](https://github.com/ydb-platform/ydb/pull/44117)
+manually restored the EN sidebar.
+
+**Root causes (pipeline):**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| ``_parse_toc_tree_block`` returns 0 nodes for ydb-sdk toc | Top-level ``- name:`` lines are indented 2 spaces; parser used ``list_indent=0`` | ``_top_level_list_indent`` + pass detected indent into ``_parse_toc_nodes_at_level`` |
+| Nested merge drops gRPC children / wrong YAML shape | ``_serialize_toc_tree`` always used ``list_indent=0`` | Preserve EN main list indent when serializing merged tree |
+| 🟢 false negative after empty merge | ``validate_toc_merge`` only checked flat href sets | ``collapsed_toc`` when merged entries &lt; half of EN main (≥3 entries); blocking in ``navigation_merge`` |
+
+**Also:** ``include.path`` merge in nested tree path; ``_replace_item_name`` respects leading whitespace on ``- name:`` lines.
+
+**Expected after re-run:** EN ``toc_i.yaml`` keeps all SDK hrefs + Observability ``include:`` link; no ``collapsed_toc`` warning.
+
+**Tests:** ``test_parse_indented_nested_ydb_sdk_reference_toc``,
+``test_merge_indented_nested_toc_adds_observability_include``.
+
+**Release:** tag ``v0.1.0`` moved to this commit.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -432,6 +432,10 @@ from [#43530](https://github.com/ydb-platform/ydb/pull/43530); §6.62 fixes ``te
 QA noise and parent ``toc_p.yaml`` ``include.path`` merge (+ ``extra_toc_hrefs_for_pair``
 ``KeyError``).
 
+**Canonical auto-translate case (ydb-sdk toc):** [ydb #44108](https://github.com/ydb-platform/ydb/pull/44108)
+→ [#44117](https://github.com/ydb-platform/ydb/pull/44117) manual fix; §6.63 fixes nested
+indented ``toc_i.yaml`` parse/merge and adds ``collapsed_toc`` validation.
+
 ---
 
 ---

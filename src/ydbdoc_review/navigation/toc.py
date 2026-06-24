@@ -34,8 +34,27 @@ class TocTranslateScope:
 class TocNode:
     name: str
     href: str | None = None
+    include_path: str | None = None
     children: list[TocNode] = field(default_factory=list)
     block: str = ""
+
+
+def _attach_include_path(node: TocNode) -> None:
+    """Set ``include_path`` from block body when entry is an ``include:`` link."""
+    if node.href or node.children:
+        return
+    match = _INCLUDE_PATH.search(node.block)
+    if match:
+        node.include_path = match.group(1).strip()
+
+
+def _top_level_list_indent(lines: list[str], start: int) -> int:
+    """Indent of the first ``- name:`` after root ``items:`` (0 or 2 spaces)."""
+    for i in range(start, len(lines)):
+        match = _NAME_LINE.match(lines[i])
+        if match:
+            return len(match.group(1))
+    return 0
 
 
 def _has_nested_block_items(yaml_text: str) -> bool:
@@ -60,7 +79,8 @@ def _parse_toc_tree_block(yaml_text: str) -> list[TocNode]:
         if line.strip() == "items:":
             start = i + 1
             break
-    nodes, _ = _parse_toc_nodes_at_level(lines, start, list_indent=0)
+    list_indent = _top_level_list_indent(lines, start)
+    nodes, _ = _parse_toc_nodes_at_level(lines, start, list_indent=list_indent)
     return nodes
 
 
@@ -124,6 +144,7 @@ def _parse_toc_nodes_at_level(
             i += 1
 
         node.block = "\n".join(block_lines).rstrip() + "\n"
+        _attach_include_path(node)
         nodes.append(node)
     return nodes, i
 
@@ -136,6 +157,14 @@ def _flatten_toc_nodes(nodes: list[TocNode]) -> list[dict[str, str]]:
                 {
                     "name": node.name,
                     "href": node.href,
+                    "block": node.block,
+                }
+            )
+        elif node.include_path:
+            items.append(
+                {
+                    "name": node.name,
+                    "include_path": node.include_path,
                     "block": node.block,
                 }
             )
@@ -153,8 +182,8 @@ def _leaf_block(name: str, href: str, *, list_indent: int) -> str:
     )
 
 
-def _serialize_toc_tree(nodes: list[TocNode]) -> str:
-    body = "".join(_serialize_toc_node(node, list_indent=0) for node in nodes)
+def _serialize_toc_tree(nodes: list[TocNode], *, list_indent: int = 0) -> str:
+    body = "".join(_serialize_toc_node(node, list_indent=list_indent) for node in nodes)
     if not body.endswith("\n"):
         body += "\n"
     return "items:\n" + body
@@ -195,17 +224,48 @@ def _collect_toc_hrefs(nodes: list[TocNode]) -> set[str]:
     return hrefs
 
 
+def _index_toc_includes(nodes: list[TocNode]) -> dict[str, TocNode]:
+    by_path: dict[str, TocNode] = {}
+    for node in nodes:
+        if node.include_path:
+            by_path[node.include_path] = node
+        if node.children:
+            by_path.update(_index_toc_includes(node.children))
+    return by_path
+
+
+def _collect_toc_include_paths(nodes: list[TocNode]) -> set[str]:
+    paths: set[str] = set()
+    for node in nodes:
+        if node.include_path:
+            paths.add(node.include_path)
+        if node.children:
+            paths.update(_collect_toc_include_paths(node.children))
+    return paths
+
+
+def _walk_toc_nodes(nodes: list[TocNode]):
+    for node in nodes:
+        yield node
+        if node.children:
+            yield from _walk_toc_nodes(node.children)
+
+
 def _merge_toc_tree_nodes(
     en_nodes: list[TocNode],
     ru_nodes: list[TocNode],
     *,
     en_by_href: dict[str, TocNode],
+    en_by_include: dict[str, TocNode],
     translate_hrefs: set[str],
+    translate_include_paths: set[str],
     translate_name: Callable[[str], str],
     ru_base_hrefs: set[str] | None = None,
+    ru_base_include_paths: set[str] | None = None,
 ) -> list[TocNode]:
     merged: list[TocNode] = []
     base_hrefs = ru_base_hrefs or set()
+    base_includes = ru_base_include_paths or set()
     for idx, ru_node in enumerate(ru_nodes):
         en_node = en_nodes[idx] if idx < len(en_nodes) else None
         if ru_node.href:
@@ -234,6 +294,20 @@ def _merge_toc_tree_nodes(
                 )
             continue
 
+        if ru_node.include_path:
+            path = ru_node.include_path
+            if path in en_by_include and path not in translate_include_paths:
+                merged.append(en_by_include[path])
+            elif path in translate_include_paths or (
+                path not in en_by_include and path in base_includes
+            ):
+                en_name = translate_name(ru_node.name).strip()
+                block = _replace_item_name(ru_node.block, en_name)
+                merged.append(
+                    TocNode(name=en_name, include_path=path, block=block)
+                )
+            continue
+
         if not ru_node.children:
             continue
 
@@ -242,9 +316,12 @@ def _merge_toc_tree_nodes(
             en_children,
             ru_node.children,
             en_by_href=en_by_href,
+            en_by_include=en_by_include,
             translate_hrefs=translate_hrefs,
+            translate_include_paths=translate_include_paths,
             translate_name=translate_name,
             ru_base_hrefs=base_hrefs,
+            ru_base_include_paths=base_includes,
         )
         if not merged_children:
             continue
@@ -261,25 +338,50 @@ def _merge_en_toc_yaml_nested(
     translate_hrefs: set[str],
     translate_name: Callable[[str], str],
     ru_base_hrefs: set[str] | None = None,
+    translate_include_paths: set[str] | None = None,
+    ru_base_include_paths: set[str] | None = None,
 ) -> str:
+    include_scope = translate_include_paths or set()
+    base_includes = ru_base_include_paths or set()
+    en_text = en_main_yaml.replace("\r\n", "\n")
+    en_lines = en_text.splitlines()
+    items_start = 0
+    for i, line in enumerate(en_lines):
+        if line.strip() == "items:":
+            items_start = i + 1
+            break
+    list_indent = _top_level_list_indent(en_lines, items_start)
     en_tree = _parse_toc_tree_block(en_main_yaml)
     ru_tree = _parse_toc_tree_block(ru_pr_yaml)
     en_by_href = _index_toc_leaves(en_tree)
+    en_by_include = _index_toc_includes(en_tree)
     ru_hrefs = _collect_toc_hrefs(ru_tree)
+    ru_includes = _collect_toc_include_paths(ru_tree)
     merged = _merge_toc_tree_nodes(
         en_tree,
         ru_tree,
         en_by_href=en_by_href,
+        en_by_include=en_by_include,
         translate_hrefs=translate_hrefs,
+        translate_include_paths=include_scope,
         translate_name=translate_name,
         ru_base_hrefs=ru_base_hrefs,
+        ru_base_include_paths=base_includes,
     )
-    seen = _collect_toc_hrefs(merged)
-    for node in en_tree:
-        if node.href and node.href not in seen and node.href not in ru_hrefs:
+    seen_hrefs = _collect_toc_hrefs(merged)
+    seen_includes = _collect_toc_include_paths(merged)
+    for node in _walk_toc_nodes(en_tree):
+        if node.href and node.href not in seen_hrefs and node.href not in ru_hrefs:
             merged.append(node)
-            seen.add(node.href)
-    return _serialize_toc_tree(merged)
+            seen_hrefs.add(node.href)
+        if (
+            node.include_path
+            and node.include_path not in seen_includes
+            and node.include_path not in ru_includes
+        ):
+            merged.append(node)
+            seen_includes.add(node.include_path)
+    return _serialize_toc_tree(merged, list_indent=list_indent)
 
 
 def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
@@ -444,6 +546,8 @@ def merge_en_toc_yaml(
             translate_hrefs=translate_hrefs,
             translate_name=translate_name,
             ru_base_hrefs=ru_base_hrefs,
+            translate_include_paths=include_scope,
+            ru_base_include_paths=base_includes,
         )
 
     line_prefix = _inline_list_line_prefix(en_main_yaml)
@@ -523,7 +627,7 @@ def _replace_item_name(block: str, new_name: str) -> str:
             block,
             count=1,
         )
-    return re.sub(r"(?m)^- name: .+$", f"- name: {new_name}", block, count=1)
+    return re.sub(r"(?m)^(\s*)- name: .+$", rf"\1- name: {new_name}", block, count=1)
 
 
 def _serialize_toc(
@@ -581,6 +685,22 @@ def validate_toc_merge(
     en_main_includes = {
         it["include_path"] for it in en_main_items if it.get("include_path")
     }
+
+    en_main_labels = _toc_entry_labels(en_main_items)
+
+    if (
+        len(en_main_labels) >= 3
+        and len(en_labels) < max(1, len(en_main_labels) // 2)
+    ):
+        issues.append(
+            TocValidationIssue(
+                kind="collapsed_toc",
+                detail=(
+                    f"EN merged toc has {len(en_labels)} entries vs "
+                    f"{len(en_main_labels)} in EN main — possible navigation regression"
+                ),
+            )
+        )
 
     en_merged_hrefs = {it["href"] for it in en_items if it.get("href")}
     en_merged_includes = {

@@ -32,6 +32,7 @@ _NAV_BLOCKING_WARNING_KINDS = frozenset(
         "missing_href",
         "unexpected_href",
         "empty_toc",
+        "collapsed_toc",
         "inconsistent_indent",
     }
 )

@@ -50,7 +50,7 @@ src/ydbdoc_review/
 │   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
 ├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
-│   ├── toc.py                     parse (href + include.path), diff scope, merge, validate (§6.62)
+│   ├── toc.py                     parse (href + include.path), nested indent, merge, validate (§6.62–§6.63)
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)

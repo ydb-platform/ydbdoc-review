@@ -209,6 +209,10 @@ wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
 ``fence_body_copy`` false positive, parent ``toc_p.yaml`` ``include.path`` merge,
 ``extra_toc_hrefs_for_pair`` ``KeyError`` on include-only toc items.
 
+**Resolved via §6.63 (#44117):** nested indented ``toc_i.yaml`` (ydb-sdk reference) —
+``_parse_toc_tree_block`` list-indent detection, nested merge serialization,
+``collapsed_toc`` validation guard.
+
 ---
 
 ---

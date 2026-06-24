@@ -434,3 +434,114 @@ def test_merge_toc_include_links_for_new_observability_section():
         en_main_yaml="",
     )
     assert not issues
+
+
+YDB_SDK_REF_EN_MAIN = dedent("""
+    items:
+      - name: Overview
+        href: index.md
+      - name: Installation
+        href: install.md
+      - name: Working with topics
+        href: topic.md
+      - name: Handling errors in the API
+        href: error_handling.md
+      - name: gRPC API
+        items:
+        - name: Overview
+          href: overview-grpc-api.md
+        - name: gRPC headers
+          href: grpc-headers.md
+      - name: Comparison of SDK features
+        href: feature-parity.md
+""").strip()
+
+YDB_SDK_REF_RU_BASE = dedent("""
+    items:
+      - name: Обзор
+        href: index.md
+      - name: Установка SDK
+        href: install.md
+      - name: Работа с топиками
+        href: topic.md
+      - name: Обработка ошибок в API
+        href: error_handling.md
+      - name: gRPC API
+        items:
+        - name: Обзор
+          href: overview-grpc-api.md
+        - name: Заголовки gRPC
+          href: grpc-headers.md
+      - name: Сравнение возможностей SDK
+        href: feature-parity.md
+""").strip()
+
+YDB_SDK_REF_RU_PR = dedent("""
+    items:
+      - name: Обзор
+        href: index.md
+      - name: Установка SDK
+        href: install.md
+      - name: Работа с топиками
+        href: topic.md
+      - name: Обработка ошибок в API
+        href: error_handling.md
+      - name: gRPC API
+        items:
+        - name: Обзор
+          href: overview-grpc-api.md
+        - name: Заголовки gRPC
+          href: grpc-headers.md
+      - name: Наблюдаемость
+        include:
+          mode: link
+          path: observability/toc_p.yaml
+      - name: Сравнение возможностей SDK
+        href: feature-parity.md
+""").strip()
+
+
+def test_parse_indented_nested_ydb_sdk_reference_toc():
+    """Regression #44117: 2-space top-level items under nested gRPC section."""
+    items = parse_toc_items(YDB_SDK_REF_EN_MAIN)
+    assert len(items) >= 7
+    assert {it["href"] for it in items if it.get("href")} >= {
+        "index.md",
+        "topic.md",
+        "error_handling.md",
+        "overview-grpc-api.md",
+    }
+
+
+def test_merge_indented_nested_toc_adds_observability_include():
+    """Regression #44117: nested indented toc must not collapse to empty items."""
+    scope = toc_translate_scope(YDB_SDK_REF_RU_BASE, YDB_SDK_REF_RU_PR)
+    assert scope.include_paths == {"observability/toc_p.yaml"}
+
+    merged = merge_en_toc_yaml(
+        YDB_SDK_REF_EN_MAIN,
+        YDB_SDK_REF_RU_PR,
+        translate_hrefs=set(scope.hrefs),
+        translate_include_paths=set(scope.include_paths),
+        translate_name=lambda n: {"Наблюдаемость": "Observability"}.get(n, n),
+    )
+    merged_items = parse_toc_items(merged)
+    merged_hrefs = {it["href"] for it in merged_items if it.get("href")}
+    assert "topic.md" in merged_hrefs
+    assert "error_handling.md" in merged_hrefs
+    assert "overview-grpc-api.md" in merged_hrefs
+    assert "observability/toc_p.yaml" in {
+        it["include_path"] for it in merged_items if it.get("include_path")
+    }
+    assert "- name: Observability" in merged
+    assert len(merged_items) >= len(parse_toc_items(YDB_SDK_REF_EN_MAIN))
+
+    issues = validate_toc_merge(
+        YDB_SDK_REF_RU_PR,
+        merged,
+        translate_hrefs=set(scope.hrefs),
+        translate_include_paths=set(scope.include_paths),
+        en_main_yaml=YDB_SDK_REF_EN_MAIN,
+    )
+    assert not any(issue.kind == "collapsed_toc" for issue in issues)
+    assert not any(issue.kind == "empty_toc" for issue in issues)
