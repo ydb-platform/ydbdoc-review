@@ -9,3 +9,4 @@
 - Hyphen in compound adjectives before a noun: read-only field.
 - Yandex Cloud links for EN: `https://yandex.cloud/en/docs/`, not `/ru/docs/`.
 - Wikipedia for EN: `en.wikipedia.org` with English slugs.
+- Never wrap external link URLs in `{% if lang == 'ru' %}` / `{% if lang == 'en' %}` — use one plain `[label](https://…)`; the pipeline localizes Wikipedia and locale hosts.

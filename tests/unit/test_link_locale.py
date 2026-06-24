@@ -15,6 +15,7 @@ from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
     mirror_link_href,
+    strip_lang_conditionals_around_external_links,
 )
 from ydbdoc_review.validation import wikipedia_links
 
@@ -136,3 +137,57 @@ def test_localize_links_in_document_table_cell():
     out = render_markdown(doc)
     assert "en.wikipedia.org" in out
     assert "ru.wikipedia.org" not in out
+
+
+def test_strip_lang_conditionals_after_link_label_43882(monkeypatch):
+    """PR #43882 — LLM wrapped Wikipedia URL in {% if lang %} branches."""
+    resolver = MagicMock()
+    resolver.resolve_title.return_value = "Database_index"
+    monkeypatch.setattr(wikipedia_links, "get_wikipedia_resolver", lambda: resolver)
+    md = (
+        "[Indexes]{% if lang == \"ru\" %}"
+        "(https://en.wikipedia.org/wiki/index_(database_data))"
+        "{% endif %}{% if lang == \"en\" %}"
+        "(https://en.wikipedia.org/wiki/Database_index)"
+        "{% endif %} are auxiliary structures.\n"
+    )
+    out = strip_lang_conditionals_around_external_links(md)
+    assert out.startswith("[Indexes](https://en.wikipedia.org/wiki/Database_index)")
+    assert "{% if lang" not in out
+    assert check_link_locale_in_en(out) == []
+
+
+def test_strip_lang_conditionals_wrapped_whole_link():
+    md = (
+        "{% if lang == 'ru' %}"
+        "[Docs](https://ru.wikipedia.org/wiki/Foo)"
+        "{% endif %}{% if lang == 'en' %}"
+        "[Docs](https://en.wikipedia.org/wiki/Foo)"
+        "{% endif %}\n"
+    )
+    out = strip_lang_conditionals_around_external_links(md)
+    assert out == "[Docs](https://en.wikipedia.org/wiki/Foo)\n"
+    assert check_link_locale_in_en(out) == []
+
+
+def test_check_link_locale_flags_lang_conditional_external_link():
+    md = (
+        "[Indexes]{% if lang == 'en' %}"
+        "(https://en.wikipedia.org/wiki/Database_index)"
+        "{% endif %}\n"
+    )
+    issues = check_link_locale_in_en(md)
+    assert len(issues) == 1
+    assert "{% if lang %}" in issues[0]
+
+
+def test_localize_links_in_text_strips_lang_branches_before_wiki_resolve(monkeypatch):
+    resolver = MagicMock()
+    resolver.resolve_title.return_value = None
+    monkeypatch.setattr(wikipedia_links, "get_wikipedia_resolver", lambda: resolver)
+    md = (
+        "[X]{% if lang == 'ru' %}(https://ru.wikipedia.org/wiki/Foo){% endif %}"
+        "{% if lang == 'en' %}(https://en.wikipedia.org/wiki/Foo){% endif %}\n"
+    )
+    out = localize_links_in_text(md)
+    assert out == "[X](https://en.wikipedia.org/wiki/Foo)\n"

@@ -129,7 +129,7 @@ def _finalize_en_target(
             target_lang=target_lang,
             prompt_version=prompt_version,
         )
-    text = localize_links_in_text(text, target_lang="en")
+    text = localize_links_in_text(text, target_lang=target_lang)
     return postprocess_en_target_markdown(text)
 
 

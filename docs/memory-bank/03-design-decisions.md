@@ -1338,6 +1338,30 @@ manually restored the EN sidebar.
 
 **Release:** tag ``v0.1.0`` moved to this commit.
 
+### 6.64. #43882 auto-translate — strip ``{% if lang %}`` around external links ([ydb #43882](https://github.com/ydb-platform/ydb/pull/43882))
+
+**Context:** auto-translate from [#3131](https://github.com/ydb-platform/ydb/pull/3131) on
+``secondary-indexes.md``. RU source has a plain ``[Индексы](https://ru.wikipedia.org/…)``;
+the LLM emitted malformed EN:
+
+``[Indexes]{% if lang == "ru" %}(…){% endif %}{% if lang == "en" %}(…){% endif %}``.
+
+YFM ``lang`` branches are for Diplodoc build-time locale — not for per-link Wikipedia
+editions. §6.37 already resolves Wikipedia langlinks deterministically.
+
+**Decision:**
+
+- ``strip_lang_conditionals_around_external_links`` in ``link_locale.py`` — collapse
+  ``{% if lang == 'ru'|'en' %}(https://…){% endif %}`` after ``[label]`` or around a full
+  markdown link; pick the branch for ``target_lang`` and run ``mirror_link_href``.
+- Wired inside ``localize_links_in_text`` (``_finalize_en_target``, §6.28).
+- ``check_link_locale_in_en`` flags surviving ``{% if lang %}`` + external URL (blocking).
+- EN style guide: one plain markdown link for external URLs.
+
+**Tests:** ``test_strip_lang_conditionals_after_link_label_43882``,
+``test_strip_lang_conditionals_wrapped_whole_link``,
+``test_check_link_locale_flags_lang_conditional_external_link``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

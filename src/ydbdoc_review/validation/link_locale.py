@@ -228,8 +228,13 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
         return []
     from ydbdoc_review.parsing.markdown_parser import parse_markdown
 
-    doc = parse_markdown(target_text)
     issues: list[str] = []
+    if _has_lang_conditional_external_link(target_text):
+        issues.append(
+            "link_locale: {% if lang %} conditional around external link URL "
+            "(use a single markdown link; locale is fixed by localize_links)"
+        )
+    doc = parse_markdown(target_text)
     seen: set[str] = set()
     for href in collect_link_hrefs(doc):
         if href in seen:
@@ -269,9 +274,117 @@ _WIKI_HREF_IN_TEXT = re.compile(
     re.IGNORECASE,
 )
 
+# LLM sometimes emits ``[label]{% if lang == "ru" %}(url){% endif %}{% if lang == "en" %}…``
+# instead of a plain markdown link. External URLs are localized by §6.37 — no YFM branches.
+_LANG_LINK_BRANCH = re.compile(
+    r"\{%\s*if\s+lang\s*==\s*['\"](?P<lang>ru|en)['\"]\s*%\}"
+    r"\((?P<url>https?://.+?)\)"
+    r"\{%\s*endif\s*%\}",
+    re.IGNORECASE,
+)
+_LANG_CONDITIONAL_AFTER_LINK_LABEL = re.compile(
+    r"(?P<label>!?\[[^\]]+\])"
+    r"(?P<branches>(?:\{%\s*if\s+lang\s*==\s*['\"](?:ru|en)['\"]\s*%\}"
+    r"\(https?://.+?\)\{%\s*endif\s*%\})+)",
+    re.IGNORECASE,
+)
+_LANG_CONDITIONAL_WRAP_LINK = re.compile(
+    r"(?:\{%\s*if\s+lang\s*==\s*['\"](?P<lang>ru|en)['\"]\s*%\}"
+    r"(?P<link>!?\[[^\]]+\]\([^)]+\))"
+    r"\{%\s*endif\s*%\})+",
+    re.IGNORECASE,
+)
+_LANG_LINK_BRANCH_WRAPPED = re.compile(
+    r"\{%\s*if\s+lang\s*==\s*['\"](?P<lang>ru|en)['\"]\s*%\}"
+    r"(?P<link>!?\[[^\]]+\]\([^)]+\))"
+    r"\{%\s*endif\s*%\}",
+    re.IGNORECASE,
+)
+_INLINE_HTTP_LINK = re.compile(
+    r"(!?\[[^\]]+\])\((?P<url>https?://[^)]+)\)",
+    re.IGNORECASE,
+)
+
+
+def _wiki_lang_key(target_lang: str) -> str:
+    wiki = wiki_lang_for_target(target_lang)
+    return wiki if wiki is not None else target_lang.strip().lower()
+
+
+def _pick_url_from_lang_branches(branches_text: str, *, target_lang: str) -> str | None:
+    urls: dict[str, str] = {}
+    for match in _LANG_LINK_BRANCH.finditer(branches_text):
+        urls[match.group("lang").lower()] = match.group("url")
+    if not urls:
+        return None
+
+    tgt = _wiki_lang_key(target_lang)
+    if tgt in urls:
+        chosen = urls[tgt]
+    elif tgt == "en" and "ru" in urls:
+        chosen = urls["ru"]
+    elif tgt == "ru" and "en" in urls:
+        chosen = urls["en"]
+    else:
+        chosen = next(iter(urls.values()))
+    return mirror_link_href(chosen, target_lang=target_lang)
+
+
+def strip_lang_conditionals_around_external_links(
+    text: str, *, target_lang: str = "en"
+) -> str:
+    """Collapse ``{% if lang %}`` branches around external link URLs (§6.64)."""
+
+    def _after_label(match: re.Match[str]) -> str:
+        url = _pick_url_from_lang_branches(
+            match.group("branches"), target_lang=target_lang
+        )
+        if url is None:
+            return match.group(0)
+        return f"{match.group('label')}({url})"
+
+    text = _LANG_CONDITIONAL_AFTER_LINK_LABEL.sub(_after_label, text)
+
+    def _wrapped(match: re.Match[str]) -> str:
+        block = match.group(0)
+        links_by_lang: dict[str, str] = {}
+        for part in _LANG_LINK_BRANCH_WRAPPED.finditer(block):
+            links_by_lang[part.group("lang").lower()] = part.group("link")
+
+        if not links_by_lang:
+            return block
+
+        tgt = _wiki_lang_key(target_lang)
+        link_md = links_by_lang.get(tgt)
+        if link_md is None:
+            if tgt == "en" and "ru" in links_by_lang:
+                link_md = links_by_lang["ru"]
+            elif tgt == "ru" and "en" in links_by_lang:
+                link_md = links_by_lang["en"]
+            else:
+                link_md = next(iter(links_by_lang.values()))
+
+        inline = _INLINE_HTTP_LINK.match(link_md)
+        if inline is None:
+            return link_md
+        url = mirror_link_href(inline.group("url"), target_lang=target_lang)
+        return f"{inline.group(1)}({url})"
+
+    return _LANG_CONDITIONAL_WRAP_LINK.sub(_wrapped, text)
+
+
+def _has_lang_conditional_external_link(text: str) -> bool:
+    return bool(
+        _LANG_CONDITIONAL_AFTER_LINK_LABEL.search(text)
+        or _LANG_CONDITIONAL_WRAP_LINK.search(text)
+    )
+
 
 def localize_links_in_text(text: str, *, target_lang: str = "en") -> str:
     """Fix Wikipedia (and other locale) URLs in raw markdown after render."""
+    text = strip_lang_conditionals_around_external_links(
+        text, target_lang=target_lang
+    )
 
     def _replace(match: re.Match[str]) -> str:
         return mirror_link_href(match.group(0), target_lang=target_lang)
