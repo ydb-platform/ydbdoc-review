@@ -142,9 +142,26 @@ def _renumber_segment(src: Segment, tgt: Segment) -> Segment:
         if match != tp.placeholder:
             rename[tp.placeholder] = match
 
-    # Pass 2: tgt-only atoms keep their name when it's free, otherwise get a
-    # fresh non-clashing one. "Free" = not used by src and not already chosen
-    # as a tgt new-name in pass 1.
+    unmatched_src = [
+        p for p in src.placeholders if p.placeholder not in used_src
+    ]
+
+    # Pass 2: single unmatched src/tgt pair — translated code text differs by
+    # language but occupies the same segment slot (#44268 formula case).
+    still_unmatched: list[ProtectedInline] = list(unmatched)
+    if (
+        len(unmatched) == len(unmatched_src) == 1
+        and len(src.placeholders) == len(tgt.placeholders) == 1
+    ):
+        tp, sp = unmatched[0], unmatched_src[0]
+        if sp.placeholder not in used_src and sp.placeholder not in new_names_in_tgt:
+            used_src.add(sp.placeholder)
+            new_names_in_tgt.add(sp.placeholder)
+            if sp.placeholder != tp.placeholder:
+                rename[tp.placeholder] = sp.placeholder
+            still_unmatched = []
+
+    # Pass 3: tgt-only atoms keep their name when free, else allocate fresh.
     next_idx_by_kind: dict[str, int] = {}
     for p in src.placeholders:
         k = _placeholder_kind(p.placeholder)
@@ -152,7 +169,7 @@ def _renumber_segment(src: Segment, tgt: Segment) -> Segment:
             next_idx_by_kind.get(k, 0), _placeholder_index(p.placeholder)
         )
 
-    for tp in unmatched:
+    for tp in still_unmatched:
         if tp.placeholder not in src_names and tp.placeholder not in new_names_in_tgt:
             new_names_in_tgt.add(tp.placeholder)
             continue

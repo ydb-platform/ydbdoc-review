@@ -263,3 +263,20 @@ def test_swap_renumbering_is_atomic():
     assert normalized.text == "⟦C2⟧ then ⟦C1⟧"
     new_map = {p.placeholder: p.node.content for p in normalized.placeholders}
     assert new_map == {"⟦C2⟧": "b", "⟦C1⟧": "a"}
+
+
+def test_translated_code_formula_keeps_source_marker():
+    """Regression #44268: RU/EN formula text differs but shares one code slot."""
+    src = _seg(
+        "s0064",
+        "формулу ⟦C1⟧. Это позволит",
+        [_ph("⟦C1⟧", InlineCode(content="(количество узлов * 4)"))],
+    )
+    tgt = _seg(
+        "s0064",
+        "formula ⟦C1⟧. This will",
+        [_ph("⟦C1⟧", InlineCode(content="(number of nodes * 4)"))],
+    )
+    [normalized] = normalize_target_segments_to_source([src], [tgt])
+    assert "⟦C1⟧" in normalized.text
+    assert "⟦C2⟧" not in normalized.text

@@ -338,6 +338,33 @@ def test_phantom_marker_swap_dropped_when_sequences_match():
     assert drop_spurious_placeholder_issues([issue], [seg], {"s0069": en}) == []
 
 
+def test_phantom_marker_swap_dropped_for_translated_formula_slot():
+    """Regression #44268: aligned EN keeps ⟦C1⟧ after gate_round_trip."""
+    ru = (
+        "Начальное количество партиций: для базовой оценки числа партиций "
+        "можно использовать формулу ⟦C1⟧. Это позволит максимально утилизировать "
+        "ресурсы кластера при выполнении параллельных запросов."
+    )
+    en = (
+        "Initial number of partitions: for a basic estimate of the number of "
+        "partitions, you can use the formula ⟦C1⟧. This will maximize cluster "
+        "resource utilization when executing parallel queries."
+    )
+    seg = _segment("s0064", ru)
+    issue = CriticIssueOut(
+        segment_id="s0064",
+        severity="warning",
+        category="placeholder corruption",
+        comment=(
+            "Placeholder ⟦C1⟧ in source was incorrectly changed to ⟦C2⟧ in "
+            "translation. The atom_map defines only ⟦C1⟧ for this segment."
+        ),
+        suggested_text=en,
+    )
+    assert is_spurious_phantom_marker_swap_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0064": en}) == []
+
+
 def test_plain_text_wrapping_not_dropped_when_identifier_missing():
     """Keep issue when EN drops a plain identifier entirely."""
     ru = "⟦C1⟧ — должен быть выбран Index12, так как ⟦C2⟧"

@@ -344,6 +344,8 @@ def translate_file(
                     translations,
                     skipped=critic_skipped,
                 )
+        else:
+            critic_unresolved = CriticResponse(verdict="ok", issues=[])
 
     critic_verdict = _compute_critic_verdict(
         initial=critic_initial,

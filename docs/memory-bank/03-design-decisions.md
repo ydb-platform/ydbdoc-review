@@ -1373,6 +1373,21 @@ removed.
 ``test_run_doc_verify_same_repo_author_pr_opens_fixup_pr``,
 ``test_verify_fixup_pr_base``; fork-head tests unchanged.
 
+### 6.65. #44268 translated formula — placeholder align false C1→C2 ([ydb #44268](https://github.com/ydb-platform/ydb/pull/44268))
+
+**Problem:** ``doc_translate`` reported 🟡 ``placeholder corruption`` (⟦C1⟧→⟦C2⟧) in
+``limitations.md`` s0064 while the EN formula ``(number of nodes * 4)`` was correct.
+
+**Root cause:** ``normalize_target_segments_to_source`` matched code atoms by exact
+string. RU ``(количество узлов * 4)`` ≠ EN ``(number of nodes * 4)`` → pass 2 allocated
+``⟦C2⟧`` for the EN slot. Critic/verify then saw RU ``⟦C1⟧`` vs EN ``⟦C2⟧``.
+
+**Fix:** positional pairing in pass 2 when the segment has exactly one placeholder on
+both sides; ``critic_unresolved = ok`` when all initial critic issues were spurious.
+
+**Tests:** ``test_translated_code_formula_keeps_source_marker``,
+``test_phantom_marker_swap_dropped_for_translated_formula_slot``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

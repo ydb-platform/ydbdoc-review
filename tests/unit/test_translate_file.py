@@ -101,7 +101,7 @@ def test_translate_file_end_to_end_no_critic_issues():
     assert "Hello, world." in result.final_text
     assert result.verdict == "ok"
     assert result.critic_initial is not None
-    assert result.critic_unresolved is None
+    assert result.critic_unresolved is None or result.critic_unresolved.issues == []
     assert result.input_tokens > 0
 
 
