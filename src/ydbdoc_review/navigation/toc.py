@@ -681,6 +681,34 @@ def _toc_entry_labels(items: list[dict[str, str]]) -> set[str]:
     return labels
 
 
+def _en_covers_ru_href(
+    ru_item: dict[str, str],
+    en_items: list[dict[str, str]],
+    *,
+    en_main_hrefs: set[str],
+) -> bool:
+    """True when EN toc mirrors a scoped RU ``href`` (exact or legacy alias).
+
+    Legacy alias: same Diplodoc ``name``, different ``href`` basename, and the
+    EN ``href`` already exists on EN main (e.g. RU ``hive_config.md`` vs EN
+    ``hive.md`` — §6.74 / #44942).
+    """
+    href = ru_item.get("href")
+    if not href:
+        return True
+    en_hrefs = {it["href"] for it in en_items if it.get("href")}
+    if href in en_hrefs:
+        return True
+    name = ru_item.get("name")
+    if not name:
+        return False
+    for en_it in en_items:
+        en_href = en_it.get("href")
+        if en_it.get("name") == name and en_href and en_href in en_main_hrefs:
+            return True
+    return False
+
+
 def validate_toc_merge(
     ru_pr_yaml: str,
     en_merged_yaml: str,
@@ -737,15 +765,6 @@ def validate_toc_merge(
             )
         )
 
-    missing_ru = sorted(ru_labels - en_labels)
-    if missing_ru:
-        issues.append(
-            TocValidationIssue(
-                kind="missing_href",
-                detail=f"RU PR hrefs missing from EN toc: {missing_ru}",
-            )
-        )
-
     if ru_items and not en_items:
         issues.append(
             TocValidationIssue(
@@ -755,12 +774,30 @@ def validate_toc_merge(
         )
 
     include_scope = translate_include_paths or set()
+    ru_by_href = {it["href"]: it for it in ru_items if it.get("href")}
     for href in translate_hrefs:
-        if f"href:{href}" not in en_labels:
+        ru_item = ru_by_href.get(href)
+        if ru_item is None:
+            if f"href:{href}" not in en_labels:
+                issues.append(
+                    TocValidationIssue(
+                        kind="scope_not_applied",
+                        detail=(
+                            f"href {href!r} was in translate scope but missing "
+                            "from EN toc"
+                        ),
+                    )
+                )
+            continue
+        if not _en_covers_ru_href(
+            ru_item, en_items, en_main_hrefs=en_main_hrefs
+        ):
             issues.append(
                 TocValidationIssue(
                     kind="scope_not_applied",
-                    detail=f"href {href!r} was in translate scope but missing from EN toc",
+                    detail=(
+                        f"href {href!r} was in translate scope but missing from EN toc"
+                    ),
                 )
             )
     for include_path in include_scope:

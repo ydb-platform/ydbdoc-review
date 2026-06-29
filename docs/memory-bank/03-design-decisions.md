@@ -282,7 +282,7 @@ Wired in `run_file_heuristics_classified` for `target_lang=en`.
 wrote `items:` only and ydbdoc-review still reported 🟢.
 
 **Decision:** `navigation/toc.py` detects inline `- { name:, href: }` lines;
-`validate_toc_merge` adds `empty_toc`; `scope_not_applied`, `missing_href`,
+`validate_toc_merge` adds `empty_toc`; `scope_not_applied` (alias-aware, §6.74),
 `unexpected_href`, `empty_toc` → `NavigationRunResult.verdict = blocked`;
 `_merge_recommendation` treats nav `warnings` as 🟡 and nav `blocked` as 🔴.
 
@@ -1594,5 +1594,30 @@ source PR.
 
 **Tests:** ``test_run_doc_translate_posts_comments`` (inline verify mocked);
 ``test_build_source_pr_comment_new_and_updated``.
+
+### 6.74. ``validate_toc_merge`` legacy href alias + scoped missing check (#44942)
+
+**Problem:** [PR #44942](https://github.com/ydb-platform/ydb/pull/44942) — supplement
+merge for ``configuration/toc_p.yaml`` was correct (``system_tablet_backup_config.md``
+added, EN legacy ``hive.md`` / ``kafka.md`` preserved per §6.72), but ``doc_verify``
+blocked on ``missing_href``: ``hive_config.md``, ``kafka_proxy_config.md``,
+``monitoring_config.md``. RU and EN sidebars share ``name`` but divergent ``href``
+basenames on EN ``main``; ``monitoring_config`` is a pre-existing RU-only gap outside
+translate scope.
+
+**Decision:**
+
+1. **Legacy alias:** scoped RU ``href`` is covered when EN merged has the same
+   ``name`` and an ``href`` that exists on EN ``main`` (legacy basename).
+2. **Scoped parity only:** drop repo-wide ``ru_labels - en_labels`` ``missing_href``
+   check; require mirror only for ``translate_hrefs`` / ``translate_include_paths``
+   (already passed from ``toc_translate_scope`` + ``extra_toc_hrefs``).
+
+**Implementation:** ``_en_covers_ru_href`` in ``navigation/toc.py``;
+``validate_toc_merge`` ``scope_not_applied`` uses alias-aware coverage.
+
+**Tests:** ``test_validate_toc_merge_accepts_legacy_href_alias_supplement``,
+``test_validate_toc_merge_flags_scoped_href_missing_from_en``,
+``test_validate_toc_merge_legacy_alias_covers_scoped_ru_rename``.
 
 ---

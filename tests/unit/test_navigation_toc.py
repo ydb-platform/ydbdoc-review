@@ -159,6 +159,102 @@ def test_merge_supplement_only_adds_translated_href_not_full_ru_gap():
     assert hrefs.count("kafka.md") == 1
 
 
+def test_validate_toc_merge_accepts_legacy_href_alias_supplement():
+    """Regression #44942: EN legacy hive.md/kafka.md must not block supplement merge."""
+    en_main = dedent("""
+        items:
+        - name: actor_system_config
+          href: actor_system_config.md
+        - name: hive_config
+          href: hive.md
+        - name: kafka_proxy_config
+          href: kafka.md
+        - name: tls
+          href: tls.md
+    """).strip()
+    ru_toc = dedent("""
+        items:
+        - name: actor_system_config
+          href: actor_system_config.md
+        - name: hive_config
+          href: hive_config.md
+        - name: kafka_proxy_config
+          href: kafka_proxy_config.md
+        - name: monitoring_config
+          href: monitoring_config.md
+        - name: system_tablet_backup_config
+          href: system_tablet_backup_config.md
+        - name: tls
+          href: tls.md
+    """).strip()
+    base_hrefs = {
+        it["href"] for it in parse_toc_items(ru_toc) if it.get("href")
+    }
+    scope = {"system_tablet_backup_config.md"}
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_toc,
+        translate_hrefs=scope,
+        translate_name=lambda n: n,
+        ru_base_hrefs=base_hrefs,
+        restrict_gap_fill_to_scope=True,
+    )
+    issues = validate_toc_merge(
+        ru_toc,
+        merged,
+        translate_hrefs=scope,
+        en_main_yaml=en_main,
+    )
+    assert issues == []
+
+
+def test_validate_toc_merge_flags_scoped_href_missing_from_en():
+    en_main = dedent("""
+        items:
+        - name: tls
+          href: tls.md
+    """).strip()
+    ru_toc = dedent("""
+        items:
+        - name: system_tablet_backup_config
+          href: system_tablet_backup_config.md
+        - name: tls
+          href: tls.md
+    """).strip()
+    merged = en_main
+    scope = {"system_tablet_backup_config.md"}
+    issues = validate_toc_merge(
+        ru_toc,
+        merged,
+        translate_hrefs=scope,
+        en_main_yaml=en_main,
+    )
+    assert any(i.kind == "scope_not_applied" for i in issues)
+
+
+def test_validate_toc_merge_legacy_alias_covers_scoped_ru_rename():
+    """Scoped RU href rename satisfied when EN keeps legacy basename on main."""
+    en_main = dedent("""
+        items:
+        - name: hive_config
+          href: hive.md
+    """).strip()
+    ru_toc = dedent("""
+        items:
+        - name: hive_config
+          href: hive_config.md
+    """).strip()
+    merged = en_main
+    scope = {"hive_config.md"}
+    issues = validate_toc_merge(
+        ru_toc,
+        merged,
+        translate_hrefs=scope,
+        en_main_yaml=en_main,
+    )
+    assert not any(i.kind == "scope_not_applied" for i in issues)
+
+
 def test_merge_skips_ru_only_not_in_scope():
     """RU added new-page.md but it's not in translate_hrefs → not added to EN."""
     merged = merge_en_toc_yaml(
