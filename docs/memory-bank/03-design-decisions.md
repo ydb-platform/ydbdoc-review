@@ -1520,4 +1520,20 @@ After ``doc_translate`` opens/pushes the translation PR:
 ``test_run_doc_translate_posts_comments`` (``doc_verify`` label),
 ``test_build_source_pr_comment_new_and_updated``.
 
+### 6.70. ``doc_verify`` RU fallback when EN matches checkout (merged source PR, #44872)
+
+**Problem:** [PR #44872](https://github.com/ydb-platform/ydb/pull/44872) after manual EN
+fixes: ``concepts/backup.md`` and ``devops/.../index.md`` failed segment alignment
+(46 vs 62). §6.31 loaded RU from **source PR #38700 head**; EN on the translation
+branch was aligned to **checkout RU** (``main``, 62 segments) after the source PR
+merged and contributors expanded system-tablet sections.
+
+**Decision:** ``pick_verify_ru_text`` in ``github/pr.py`` — still prefer source PR
+head when segment counts match EN; otherwise use **local checkout RU** when only it
+matches EN segment count. Preserves §6.31 (90 vs 90) and fixes post-merge manual
+alignment (62 vs 62).
+
+**Tests:** ``test_pick_verify_ru_text_*``, ``test_load_verify_pair_contents_uses_local_when_api_segments_differ``,
+regression with real ``backup.md`` from ``ydbdoc-review/pr-38700``.
+
 ---

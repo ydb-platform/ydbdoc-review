@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from ydbdoc_review.github.pr import (
     load_verify_navigation_ru_texts,
     load_verify_pair_contents,
+    pick_verify_ru_text,
     source_pr_content_ref,
 )
 from ydbdoc_review.pipeline.pairs import DocPair, NavigationPair
@@ -64,6 +67,73 @@ def test_load_verify_pair_contents_ru_from_api(tmp_path):
     gh.get_file_text.assert_called_once_with(
         "o", "r", "ydb/docs/ru/a.md", "src-sha"
     )
+
+
+def test_pick_verify_ru_text_prefers_api_when_counts_match():
+    ru_api = "# Title\n\nPara.\n"
+    ru_local = "# Title\n\nPara.\n\nExtra.\n"
+    en = "# Title\n\nPara EN.\n"
+    assert pick_verify_ru_text(en_text=en, ru_api=ru_api, ru_local=ru_local) == ru_api
+
+
+def test_pick_verify_ru_text_uses_local_when_api_mismatch(tmp_path):
+    """Regression #44872: EN aligned to checkout RU after source PR merged."""
+    ydb = "/Users/iuriisintiaev/projects/ydb"
+    import subprocess
+    try:
+        en = subprocess.check_output(
+            ["git", "-C", ydb, "show", "origin/ydbdoc-review/pr-38700:ydb/docs/en/core/concepts/backup.md"],
+            text=True,
+        )
+        ru_api = subprocess.check_output(
+            ["git", "-C", ydb, "show", "pr-38700:ydb/docs/ru/core/concepts/backup.md"],
+            text=True,
+        )
+        ru_local = subprocess.check_output(
+            ["git", "-C", ydb, "show", "origin/ydbdoc-review/pr-38700:ydb/docs/ru/core/concepts/backup.md"],
+            text=True,
+        )
+    except Exception:
+        pytest.skip("ydb checkout with PR branches not available")
+    picked = pick_verify_ru_text(en_text=en, ru_api=ru_api, ru_local=ru_local)
+    assert picked == ru_local
+
+
+def test_load_verify_pair_contents_uses_local_when_api_segments_differ(tmp_path):
+    repo = tmp_path / "repo"
+    ru_dir = repo / "ydb" / "docs" / "ru"
+    en_dir = repo / "ydb" / "docs" / "en"
+    ru_dir.mkdir(parents=True)
+    en_dir.mkdir(parents=True)
+    ru_local = "# T\n\n" + "Para.\n\n" * 30
+    en_body = "# T\n\n" + "Para EN.\n\n" * 30
+    (ru_dir / "a.md").write_text(ru_local, encoding="utf-8")
+    (en_dir / "a.md").write_text(en_body, encoding="utf-8")
+
+    gh = MagicMock()
+    gh.get_pull.return_value = {
+        "head": {
+            "sha": "src-sha",
+            "repo": {"owner": {"login": "o"}, "name": "r"},
+        }
+    }
+    gh.get_file_text.return_value = "# T\n\nPara.\n"
+
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        en_changed=False,
+    )
+    contents = load_verify_pair_contents(
+        str(repo),
+        [pair],
+        merge_base_with="HEAD",
+        gh=gh,
+        owner="o",
+        repo="r",
+        source_pr=38700,
+    )
+    assert contents[0].ru_text == ru_local
 
 
 def test_load_verify_navigation_ru_texts():

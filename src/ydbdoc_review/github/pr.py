@@ -12,6 +12,7 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
 )
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
@@ -19,6 +20,8 @@ from ydbdoc_review.pipeline.pairs import (
     NavigationPair,
     build_doc_pairs,
 )
+from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 _STATUS_TO_KIND: dict[str, ChangeKind] = {
     "added": "added",
@@ -187,6 +190,44 @@ def source_pr_content_ref(
     return ru_owner, ru_repo, sha
 
 
+def _markdown_segment_count(text: str | None) -> int | None:
+    if not isinstance(text, str):
+        return None
+    normalized = normalize_ru_source_for_translation(text)
+    return len(extract_segments(parse_markdown(normalized)))
+
+
+def pick_verify_ru_text(
+    *,
+    en_text: str | None,
+    ru_api: str | None,
+    ru_local: str | None,
+) -> str | None:
+    """Choose RU authority for ``doc_verify`` segment alignment (§6.70).
+
+  Prefer source PR head (§6.31). When EN was fixed on the translation branch to
+  match newer RU on checkout (e.g. source PR merged, manual alignment to
+  ``main``), use local RU if only it matches EN segment count.
+    """
+    if ru_api is None and ru_local is None:
+        return None
+    if en_text is None:
+        return ru_api if ru_api is not None else ru_local
+
+    en_n = _markdown_segment_count(en_text)
+    if en_n is None:
+        return ru_api if ru_api is not None else ru_local
+
+    api_n = _markdown_segment_count(ru_api)
+    local_n = _markdown_segment_count(ru_local)
+
+    if api_n == en_n and ru_api is not None:
+        return ru_api
+    if local_n == en_n and ru_local is not None:
+        return ru_local
+    return ru_api if ru_api is not None else ru_local
+
+
 def load_verify_pair_contents(
     repo_path: str,
     pairs: list[DocPair],
@@ -197,11 +238,12 @@ def load_verify_pair_contents(
     repo: str,
     source_pr: int,
 ) -> list[PairContent]:
-    """Load EN from translation PR checkout; RU from source PR head (not ``main``).
+    """Load EN from translation PR checkout; RU from source PR head or checkout.
 
-    Translation branches only commit EN paths — RU on disk is the branch base
-    (often newer ``main``). QA must compare against the same RU ``doc_translate``
-    translated from.
+    Translation branches commit EN only; checkout RU is often the branch base
+    (``main``). Default RU is source PR head (§6.31). When EN on the translation
+    branch was aligned to checkout RU after the source PR merged, §6.70 picks
+    checkout RU when only it matches EN segment count.
     """
     ru_owner, ru_repo, ru_ref = source_pr_content_ref(gh, owner, repo, source_pr)
     contents: list[PairContent] = []
@@ -210,9 +252,19 @@ def load_verify_pair_contents(
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
 
-        ru_text: str | None = None
+        ru_api: str | None = None
         if not pair.ru_deleted:
-            ru_text = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
+            ru_api = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
+
+        ru_local: str | None = None
+        if not pair.ru_deleted:
+            ru_local = read_text(repo_path, pair.ru_path)
+            if ru_local is None:
+                ru_local = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
+
+        ru_text = pick_verify_ru_text(
+            en_text=en_text, ru_api=ru_api, ru_local=ru_local
+        )
 
         ru_diff = (
             file_diff_range(repo_path, merge_base_with, pair.ru_path)
