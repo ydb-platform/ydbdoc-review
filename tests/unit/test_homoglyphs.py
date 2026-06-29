@@ -64,9 +64,19 @@ def test_postprocess_fixes_indented_fence_stroka():
     assert "<строка>" not in fixed
 
 
-def test_postprocess_leaves_prose_cyrillic():
-    text = "Простой текст с <строка> вне fence.\n"
-    assert postprocess_en_target_markdown(text) == text
+def test_postprocess_fixes_angle_placeholder_in_prose_backticks():
+    text = "   - `Restore from '<путь>' completed successfully`\n"
+    fixed = postprocess_en_target_markdown(text)
+    assert "<path>" in fixed
+    assert "путь" not in fixed
+
+
+def test_postprocess_fixes_multiline_error_placeholder():
+    text = "   - `Restore from '<путь>' failed: <описание ошибки>`\n"
+    fixed = postprocess_en_target_markdown(text)
+    assert "<path>" in fixed
+    assert "<error description>" in fixed
+    assert "путь" not in fixed
 
 
 def test_postprocess_inserts_blank_after_fence():

@@ -1536,4 +1536,23 @@ alignment (62 vs 62).
 **Tests:** ``test_pick_verify_ru_text_*``, ``test_load_verify_pair_contents_uses_local_when_api_segments_differ``,
 regression with real ``backup.md`` from ``ydbdoc-review/pr-38700``.
 
+### 6.71. Parent toc supplementation + prose angle placeholders (#44889)
+
+**Problem:** [PR #44889](https://github.com/ydb-platform/ydb/pull/44889) translated
+``system_tablet_backup_config.md`` but ``build-docs`` failed: page not in EN
+``configuration/toc_p.yaml``. RU toc already on ``main`` (earlier PR); source
+PR #43672 only added the ``.md``. ``doc_translate`` scope is PR-diff navigation
+only. ``recovery.md`` kept ``<путь>`` in inline backticks — angle-placeholder
+fix ran only inside fences (§6.39).
+
+**Decision:**
+
+1. ``supplement_navigation_pairs()`` — after markdown translate, for each new EN
+   page walk ancestor ``toc_*.yaml``; if RU lists ``href`` and EN ``main`` lacks
+   it, queue parent toc merge with ``extra_toc_hrefs`` (same as §6.17).
+2. ``fix_russian_angle_placeholders_in_en()`` — apply ``<путь>`` → ``<path>`` map
+   in prose/backticks too; add ``описание ошибки`` → ``error description``.
+
+**Tests:** ``test_navigation_supplement.py``, ``test_homoglyphs`` prose backtick cases.
+
 ---

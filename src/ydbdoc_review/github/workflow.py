@@ -49,6 +49,7 @@ from ydbdoc_review.pipeline.navigation_merge import (
     run_navigation_merges,
     run_navigation_verifies,
 )
+from ydbdoc_review.pipeline.navigation_supplement import supplement_navigation_pairs
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import (
     build_navigation_pairs,
@@ -252,12 +253,21 @@ def run_doc_translate(
     else:
         pr_result = PRTranslationResult()
 
+    md_en_paths = {
+        r.plan.target_path
+        for r in pr_result.pair_results
+        if r.target_text is not None and not r.error
+    }
+    if md_en_paths:
+        nav_pairs = supplement_navigation_pairs(
+            nav_pairs,
+            md_en_paths,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            docs_root=cfg.paths.docs_root,
+        )
+
     if nav_pairs:
-        md_en_paths = {
-            r.plan.target_path
-            for r in pr_result.pair_results
-            if r.target_text is not None and not r.error
-        }
         pr_result.navigation_results = run_navigation_merges(
             nav_pairs,
             repo_path=repo_path,
@@ -497,6 +507,16 @@ def run_doc_verify(
     else:
         pr_result = PRTranslationResult()
 
+    md_en_paths = {p.en_path for p in pairs if not p.en_deleted}
+    if md_en_paths:
+        nav_pairs = supplement_navigation_pairs(
+            nav_pairs,
+            md_en_paths,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            docs_root=cfg.paths.docs_root,
+        )
+
     if nav_pairs:
         if source_pr is not None:
             ru_nav_texts = load_verify_navigation_ru_texts(
@@ -518,7 +538,6 @@ def run_doc_verify(
                 if text is not None:
                     ru_nav_texts[nav.ru_path] = text
 
-        md_en_paths = {p.en_path for p in pairs if p.en_changed}
         pr_result.navigation_results = run_navigation_verifies(
             nav_pairs,
             repo_path=repo_path,

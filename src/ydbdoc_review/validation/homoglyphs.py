@@ -75,6 +75,7 @@ _ANGLE_PLACEHOLDER_EN: dict[str, str] = {
     "имя": "name",
     "путь": "path",
     "адрес": "address",
+    "описание ошибки": "error description",
     "uuid": "uuid",
 }
 
@@ -92,8 +93,8 @@ def _fix_angle_placeholders_on_line(line: str) -> str:
     return re.sub(r"<([^<>]+)>", repl, line)
 
 
-def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
-    """Inside fenced code blocks, map RU ``<строка>``-style placeholders to EN."""
+def fix_russian_angle_placeholders_in_en(text: str) -> str:
+    """Map RU ``<путь>``-style placeholders to EN in fences and prose/backticks."""
     lines = text.splitlines(keepends=True)
     out: list[str] = []
     in_fence = False
@@ -109,13 +110,15 @@ def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
                 in_fence = False
             out.append(line)
             continue
-        if in_fence:
-            body = line.rstrip("\n\r")
-            suffix = line[len(body) :]
-            out.append(_fix_angle_placeholders_on_line(body) + suffix)
-        else:
-            out.append(line)
+        body = line.rstrip("\n\r")
+        suffix = line[len(body) :]
+        out.append(_fix_angle_placeholders_on_line(body) + suffix)
     return "".join(out)
+
+
+def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
+    """Backward-compatible alias — placeholders are fixed in prose too (§6.71)."""
+    return fix_russian_angle_placeholders_in_en(text)
 
 
 def postprocess_en_target_markdown(text: str) -> str:
@@ -123,5 +126,5 @@ def postprocess_en_target_markdown(text: str) -> str:
     from ydbdoc_review.validation.markdown_layout import fix_blanks_around_fences
 
     text = fix_cyrillic_homoglyphs_in_en(text)
-    text = fix_russian_angle_placeholders_in_en_fences(text)
+    text = fix_russian_angle_placeholders_in_en(text)
     return fix_blanks_around_fences(text)
