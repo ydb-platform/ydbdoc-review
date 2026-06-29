@@ -111,6 +111,54 @@ def test_merge_adds_ru_base_href_missing_from_en_main():
     assert "debug-logs-otel.md" in hrefs
 
 
+def test_merge_supplement_only_adds_translated_href_not_full_ru_gap():
+    """Regression #44916: parent toc supplement must not pull unrelated RU renames."""
+    en_main = dedent("""
+        items:
+        - name: actor_system_config
+          href: actor_system_config.md
+        - name: hive_config
+          href: hive.md
+        - name: kafka_proxy_config
+          href: kafka.md
+        - name: tls
+          href: tls.md
+    """).strip()
+    ru_toc = dedent("""
+        items:
+        - name: actor_system_config
+          href: actor_system_config.md
+        - name: hive_config
+          href: hive_config.md
+        - name: kafka_proxy_config
+          href: kafka_proxy_config.md
+        - name: monitoring_config
+          href: monitoring_config.md
+        - name: system_tablet_backup_config
+          href: system_tablet_backup_config.md
+        - name: tls
+          href: tls.md
+    """).strip()
+    base_hrefs = {
+        it["href"] for it in parse_toc_items(ru_toc) if it.get("href")
+    }
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_toc,
+        translate_hrefs={"system_tablet_backup_config.md"},
+        translate_name=lambda n: n,
+        ru_base_hrefs=base_hrefs,
+        restrict_gap_fill_to_scope=True,
+    )
+    hrefs = [it["href"] for it in parse_toc_items(merged) if it.get("href")]
+    assert "system_tablet_backup_config.md" in hrefs
+    assert "hive_config.md" not in hrefs
+    assert "kafka_proxy_config.md" not in hrefs
+    assert "monitoring_config.md" not in hrefs
+    assert hrefs.count("hive.md") == 1
+    assert hrefs.count("kafka.md") == 1
+
+
 def test_merge_skips_ru_only_not_in_scope():
     """RU added new-page.md but it's not in translate_hrefs → not added to EN."""
     merged = merge_en_toc_yaml(

@@ -1555,4 +1555,19 @@ fix ran only inside fences (§6.39).
 
 **Tests:** ``test_navigation_supplement.py``, ``test_homoglyphs`` prose backtick cases.
 
+### 6.72. Parent toc supplement: no full §6.59 gap fill (#44916)
+
+**Problem:** [PR #44916](https://github.com/ydb-platform/ydb/pull/44916) — §6.71
+``supplement_navigation_pairs`` triggered ``configuration/toc_p.yaml`` merge for
+``system_tablet_backup_config.md``, but ``merge_en_toc_yaml`` §6.59 gap-fill also
+added RU-only renames ``hive_config.md``, ``kafka_proxy_config.md``,
+``monitoring_config.md`` (files absent on EN ``main``) while keeping legacy
+``hive.md`` / ``kafka.md`` → ``build-docs`` ENOENT.
+
+**Decision:** ``NavigationPair.supplement_only``; supplemented merges pass
+``restrict_gap_fill_to_scope=True`` to ``merge_en_toc_yaml`` — only
+``translate_hrefs`` / ``extra_toc_hrefs`` are added, not every RU-base gap.
+
+**Tests:** ``test_merge_supplement_only_adds_translated_href_not_full_ru_gap``.
+
 ---

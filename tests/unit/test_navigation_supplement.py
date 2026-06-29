@@ -66,6 +66,7 @@ def test_supplement_adds_parent_toc_when_ru_main_has_href_en_main_lacks():
         ru_path=RU_TOC,
         en_path=EN_TOC,
         ru_changed=True,
+        supplement_only=True,
     )
 
 

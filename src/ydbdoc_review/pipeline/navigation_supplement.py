@@ -91,6 +91,7 @@ def supplement_navigation_pairs(
                     ru_path=ru_toc,
                     en_path=en_toc,
                     ru_changed=True,
+                    supplement_only=True,
                 )
             )
             existing.add(key)

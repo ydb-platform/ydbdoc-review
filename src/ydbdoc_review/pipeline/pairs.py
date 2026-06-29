@@ -158,6 +158,7 @@ class NavigationPair:
     ru_changed: bool = False
     en_changed: bool = False
     ru_deleted: bool = False
+    supplement_only: bool = False
 
 
 def build_navigation_pairs(

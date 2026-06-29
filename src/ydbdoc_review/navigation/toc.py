@@ -262,6 +262,7 @@ def _merge_toc_tree_nodes(
     translate_name: Callable[[str], str],
     ru_base_hrefs: set[str] | None = None,
     ru_base_include_paths: set[str] | None = None,
+    restrict_gap_fill_to_scope: bool = False,
 ) -> list[TocNode]:
     merged: list[TocNode] = []
     base_hrefs = ru_base_hrefs or set()
@@ -273,7 +274,9 @@ def _merge_toc_tree_nodes(
             if href in en_by_href and href not in translate_hrefs:
                 merged.append(en_by_href[href])
             elif href in translate_hrefs or (
-                href not in en_by_href and href in base_hrefs
+                not restrict_gap_fill_to_scope
+                and href not in en_by_href
+                and href in base_hrefs
             ):
                 en_name = translate_name(ru_node.name).strip()
                 list_indent = 0
@@ -299,7 +302,9 @@ def _merge_toc_tree_nodes(
             if path in en_by_include and path not in translate_include_paths:
                 merged.append(en_by_include[path])
             elif path in translate_include_paths or (
-                path not in en_by_include and path in base_includes
+                not restrict_gap_fill_to_scope
+                and path not in en_by_include
+                and path in base_includes
             ):
                 en_name = translate_name(ru_node.name).strip()
                 block = _replace_item_name(ru_node.block, en_name)
@@ -322,6 +327,7 @@ def _merge_toc_tree_nodes(
             translate_name=translate_name,
             ru_base_hrefs=base_hrefs,
             ru_base_include_paths=base_includes,
+            restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
         )
         if not merged_children:
             continue
@@ -340,6 +346,7 @@ def _merge_en_toc_yaml_nested(
     ru_base_hrefs: set[str] | None = None,
     translate_include_paths: set[str] | None = None,
     ru_base_include_paths: set[str] | None = None,
+    restrict_gap_fill_to_scope: bool = False,
 ) -> str:
     include_scope = translate_include_paths or set()
     base_includes = ru_base_include_paths or set()
@@ -367,6 +374,7 @@ def _merge_en_toc_yaml_nested(
         translate_name=translate_name,
         ru_base_hrefs=ru_base_hrefs,
         ru_base_include_paths=base_includes,
+        restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
     )
     seen_hrefs = _collect_toc_hrefs(merged)
     seen_includes = _collect_toc_include_paths(merged)
@@ -524,6 +532,7 @@ def merge_en_toc_yaml(
     ru_base_hrefs: set[str] | None = None,
     translate_include_paths: set[str] | None = None,
     ru_base_include_paths: set[str] | None = None,
+    restrict_gap_fill_to_scope: bool = False,
 ) -> str:
     """Build EN toc from RU PR order with strict scope.
 
@@ -531,7 +540,8 @@ def merge_en_toc_yaml(
       → translate ``name`` from RU only.
     - New ``href`` in RU PR: add **only** if ``href`` ∈ ``translate_hrefs``.
     - RU ``href`` in merge-base but missing from EN main: add with translated
-      ``name`` (§6.59 — closes EN nav gaps like ``debug-logs-otel.md``).
+      ``name`` (§6.59 — closes EN nav gaps like ``debug-logs-otel.md``),
+      unless ``restrict_gap_fill_to_scope`` (§6.72 parent toc supplement).
     - ``include.path`` sidebar links: same scope rules via
       ``translate_include_paths`` / ``ru_base_include_paths``.
     - RU removed ``href``: omit from output (mirror RU structure).
@@ -548,6 +558,7 @@ def merge_en_toc_yaml(
             ru_base_hrefs=ru_base_hrefs,
             translate_include_paths=include_scope,
             ru_base_include_paths=base_includes,
+            restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
         )
 
     line_prefix = _inline_list_line_prefix(en_main_yaml)
@@ -573,7 +584,9 @@ def merge_en_toc_yaml(
             if href in en_by_href and href not in translate_hrefs:
                 merged.append(en_by_href[href])
             elif href in translate_hrefs or (
-                href not in en_by_href and href in base_hrefs
+                not restrict_gap_fill_to_scope
+                and href not in en_by_href
+                and href in base_hrefs
             ):
                 en_name = translate_name(rit["name"]).strip()
                 block = _replace_item_name(rit["block"], en_name)
@@ -596,7 +609,9 @@ def merge_en_toc_yaml(
             if include_path in en_by_include and include_path not in include_scope:
                 merged.append(en_by_include[include_path])
             elif include_path in include_scope or (
-                include_path not in en_by_include and include_path in base_includes
+                not restrict_gap_fill_to_scope
+                and include_path not in en_by_include
+                and include_path in base_includes
             ):
                 en_name = translate_name(rit["name"]).strip()
                 block = _replace_item_name(rit["block"], en_name)
