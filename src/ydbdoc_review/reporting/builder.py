@@ -515,7 +515,66 @@ def build_translation_pr_body(source_pr: int, source_repo: str) -> str:
     return (
         f"Auto-generated translation for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
-        f"Branch: `ydbdoc-review/pr-{source_pr}`\n"
+        f"Branch: `ydbdoc-review/pr-{source_pr}`\n\n"
+        "Quality check runs separately via the **`doc_verify`** label on this PR."
+    )
+
+
+def build_translate_handoff_comment(
+    result: PRTranslationResult,
+    *,
+    source_pr: int,
+    source_repo: str,
+    meta: ReportMeta,
+    config: Config,
+    usage: UsageTracker | None = None,
+) -> str:
+    """Short comment after ``doc_translate`` — QA is deferred to ``doc_verify``."""
+    total, new_count, updated_count = _file_translation_counts(result)
+    if total:
+        if new_count and updated_count:
+            files_label = f"{total} ({new_count} новых, {updated_count} обновлено)"
+        elif new_count:
+            files_label = f"{total} ({new_count} новых)"
+        elif updated_count:
+            files_label = f"{total} ({updated_count} обновлено)"
+        else:
+            files_label = str(total)
+    else:
+        files_label = "0"
+
+    cost_line = ""
+    if config.reporting.include_cost:
+        cost = (
+            usage.estimate_cost_usd()
+            if usage
+            else float(_aggregate_file_usage(result)["estimated_cost_usd"])
+        )
+        has_tokens = bool(
+            usage
+            and (usage.total_input_tokens or usage.total_output_tokens)
+        ) or bool(_aggregate_file_usage(result)["input_tokens"])
+        if has_tokens or cost > 0:
+            cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
+
+    checkout_line = ""
+    if meta.checkout_ref:
+        checkout_line = f"Checkout: `{meta.checkout_ref[:12]}`\n\n"
+
+    source_url = f"https://github.com/{source_repo}/pull/{source_pr}"
+    return (
+        f"🤖 **ydbdoc-review** — перевод выполнен "
+        f"(отчёт #{meta.report_number}, {meta.ts_label})\n\n"
+        f"{checkout_line}"
+        f"Исходный PR: [#{source_pr}]({source_url})\n\n"
+        "| | |\n"
+        "|---|---|\n"
+        f"| Файлов | {files_label} |\n"
+        f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+        f"{cost_line}\n"
+        "**Следующий шаг:** проверка **`doc_verify`** (critic + эвристики + вердикт). "
+        "Лейбл `doc_verify` будет добавлен на этот PR автоматически, либо повесьте вручную.\n\n"
+        "Полный QA-отчёт появится в комментарии после `doc_verify`."
     )
 
 
@@ -545,8 +604,7 @@ def build_source_pr_comment(
     config: Config,
     usage: UsageTracker | None = None,
 ) -> str:
-    """Short summary comment for the source PR."""
-    rec_emoji, rec_label = _merge_recommendation(result)
+    """Short summary comment for the source PR after ``doc_translate``."""
     total, new_count, updated_count = _file_translation_counts(result)
 
     if total:
@@ -574,21 +632,29 @@ def build_source_pr_comment(
             and (usage.total_input_tokens or usage.total_output_tokens)
         ) or bool(_aggregate_file_usage(result)["input_tokens"])
         if has_tokens or cost > 0:
-            cost_line = f"| Стоимость | {_format_cost_rub(cost)} |\n"
+            cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
+
+    qa_line = (
+        "| Статус QA | ожидается `doc_verify` на translation PR |\n"
+        if translation_pr_number
+        else ""
+    )
 
     body = (
         "🤖 **ydbdoc-review** — перевод готов\n\n"
-        f"**Рекомендация:** {rec_emoji} {rec_label}\n\n"
         "| | |\n"
         "|---|---|\n"
         f"| Translation PR | {tr_line} |\n"
         f"| Файлов | {files_label} |\n"
         f"| Время | {_format_duration(meta.elapsed_s)} |\n"
-        f"{cost_line}\n"
+        f"{cost_line}"
+        f"{qa_line}\n"
     )
     if translation_pr_number:
         body += (
-            f"Список оставшихся проблем — в комментарии к translation PR #{translation_pr_number}.\n"
+            f"На translation PR #{translation_pr_number} автоматически запустится "
+            "**`doc_verify`** (critic + эвристики). Итоговый вердикт — в комментарии "
+            "к translation PR после проверки.\n"
         )
     return body
 

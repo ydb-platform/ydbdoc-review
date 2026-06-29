@@ -1495,4 +1495,29 @@ issues while the PR was being fixed.
 **Report UX:** ``humanize_heuristic`` now labels ``md_link_parity`` and clarifies
 ``unexpected_href`` (not in RU PR diff and not EN main legacy).
 
+### 6.69. Split ``doc_translate`` and ``doc_verify`` pipelines
+
+**Problem:** ``doc_translate`` ran the full critic/heuristics/verdict tail inline
+(``TRANSLATE_PROFILE`` = parse → translate → QA). Operators wanted translate-only
+on the source PR label, then a separate ``doc_verify`` pass on the translation PR.
+
+**Decision:**
+
+| Stage | Profile | Steps |
+|---|---|---|
+| ``doc_translate`` | ``TRANSLATE_PROFILE`` | ``parse → translate`` |
+| ``doc_verify`` | ``VERIFY_PROFILE`` | ``parse → load_target → round_trip → critic → heuristics → verdict`` |
+| Local ``translate-file --with-critic`` | ``TRANSLATE_WITH_QA_PROFILE`` | legacy single-step QA (optional) |
+
+After ``doc_translate`` opens/pushes the translation PR:
+
+1. Short **handoff** comment on translation PR (not full QA report).
+2. ``doc_verify`` label added via API (best-effort; may need ``YDBOT_TOKEN`` in
+   ``trigger-translation-ci`` — §16.7 — because ``GITHUB_TOKEN`` label events do
+   not cascade).
+
+**Tests:** ``test_profiles_translate_only_verify_has_qa``,
+``test_run_doc_translate_posts_comments`` (``doc_verify`` label),
+``test_build_source_pr_comment_new_and_updated``.
+
 ---

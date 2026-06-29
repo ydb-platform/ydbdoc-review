@@ -100,7 +100,7 @@ def test_build_source_pr_comment_new_and_updated():
     )
     assert "1 (1 новых)" in body
     assert "Translation PR | #99" in body
-    assert "требует правок" in body
+    assert "doc_verify" in body
     assert "Сегментов" not in body
 
 

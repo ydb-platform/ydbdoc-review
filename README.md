@@ -2,7 +2,7 @@
 
 GitHub Action и CLI для автоматического перевода документации YDB (**RU ↔ EN**) с QA-критиком.
 
-Релиз: **`v0.1.0`** на ветке `main` — AST-пайплайн: parse → segment → translate → critic → render.
+Релиз: **`v0.1.0`** на ветке `main` — AST-пайплайн: parse → segment → translate (`doc_translate`) → critic (`doc_verify`) → render.
 
 ## Архитектура
 
@@ -28,12 +28,12 @@ GitHub Action и CLI для автоматического перевода до
 1. Находит изменённые пары `ydb/docs/ru/…` ↔ `ydb/docs/en/…` (включая locale `_includes/*.md`).
 2. Переводит `.md` через Yandex AI Studio; мержит изменённые `toc*.yaml` / redirect YAML.
 3. Дочищает остатки кириллицы в EN prose, inline `` `…` `` и комментарии ``//`` / ``#`` / ``--`` в fenced code.
-4. Запускает **critic** + эвристики; применяет безопасные правки по `segment_id`.
-5. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**, комментирует оба PR.
+4. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**, вешает лейбл **`doc_verify`**.
 
 ### `doc_verify` (лейбл на translation PR)
 
-Повторный QA без перевода: critic + heuristics + nav validation; при необходимости commit fix-ов и новый отчёт.
+Critic + эвристики + nav validation + вердикт; при необходимости — fixup PR с правками критика.
+Запускается **отдельно** после `doc_translate` (автоматически по лейблу или вручную).
 
 Исходная ветка PR **не меняется**. Мерж translation PR — за человеком.
 
@@ -97,8 +97,8 @@ ydbdoc-review verify \
 
 | Команда | Назначение |
 |---------|------------|
-| `run` | `doc_translate` — перевод + ветка + PR + комментарии |
-| `verify` | `doc_verify` — critic-only QA на translation PR |
+| `run` | `doc_translate` — перевод + ветка + PR; QA через `doc_verify` |
+| `verify` | `doc_verify` — critic QA на translation PR |
 | `list-models` | Цепочки моделей из config; `--live` — GET `/v1/models` |
 | `translate-file` | Один `.md` локально, без GitHub |
 | `extract` | Сегменты файла (debug), `--format json\|text` |

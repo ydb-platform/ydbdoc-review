@@ -1,8 +1,10 @@
 # Пример для репозитория ydb: .github/workflows/ydbdoc-review.yml
 # Запуск по лейблу doc_translate на PR с изменениями ydb/docs/**
 #
-# Токены: только secrets.GITHUB_TOKEN (job permissions ниже).
-# YDBDOC_PUSH_PAT не нужен, если push и лейблы не дают 403.
+# doc_translate — только анализ + перевод + translation PR.
+# doc_verify — отдельный workflow (лейбл на translation PR), critic + эвристики.
+#
+# YDBOT_TOKEN нужен во втором job: события от GITHUB_TOKEN не запускают другие workflows.
 
 name: ydbdoc-review (doc_translate label)
 
@@ -35,7 +37,7 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
-      - name: Documentation translation review
+      - name: Documentation translation
         uses: ydb-platform/ydbdoc-review@v0.1.0
         with:
           repo: ${{ github.repository }}
@@ -47,14 +49,17 @@ jobs:
           YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
           YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
           GITHUB_TOKEN: ${{ github.token }}
-          # GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}  # только при 403 push
           YDBDOC_REPO_PATH: ${{ github.workspace }}
 
-      - name: Trigger docs rebuild for translation PR
-        if: ${{ !cancelled() }}
+  trigger-translation-ci:
+    needs: ydbdoc-review
+    if: needs.ydbdoc-review.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label translation PR (doc_verify, rebuild_docs, ok-to-test)
         uses: actions/github-script@v8
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.YDBOT_TOKEN }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -84,15 +89,18 @@ jobs:
 
             if (!translationPr) {
               core.warning(
-                `Open translation PR not found for head ${head}. rebuild_docs was not added; rebuild can be triggered manually.`
+                `Open translation PR not found for head ${head}. Labels were not added.`
               );
               return;
             }
+
             await github.rest.issues.addLabels({
               owner,
               repo,
               issue_number: translationPr.number,
-              labels: ['rebuild_docs'],
+              labels: ['doc_verify', 'rebuild_docs', 'ok-to-test'],
             });
 
-            core.info(`Added rebuild_docs to PR #${translationPr.number}`);
+            core.info(
+              `Added doc_verify, rebuild_docs, ok-to-test to PR #${translationPr.number}`
+            );

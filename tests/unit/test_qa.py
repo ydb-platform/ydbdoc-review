@@ -152,7 +152,7 @@ def _mock_client(responses: list[str]) -> YandexLLMClient:
 
 
 def test_translate_and_verify_same_verdict_on_identical_en():
-    """doc_translate final text and doc_verify on same EN must share QA outcome."""
+    """EN from translate-only is what doc_verify QA runs on."""
     source = "Привет мир.\n"
     segments = extract_segments(parse_markdown(normalize_ru_source_for_translation(source)))
     seg_id = segments[0].id
@@ -160,7 +160,7 @@ def test_translate_and_verify_same_verdict_on_identical_en():
         {"segments": [{"id": seg_id, "text": "Hello world."}]}
     )
     critic_raw = json.dumps({"verdict": "ok", "issues": []})
-    client = _mock_client([translate_raw, critic_raw])
+    client = _mock_client([translate_raw])
 
     translated = translate_file(
         source,
@@ -168,7 +168,7 @@ def test_translate_and_verify_same_verdict_on_identical_en():
         load_glossary(),
         file_path="docs/ru/a.md",
         enable_translate=True,
-        enable_critic=True,
+        enable_critic=False,
     )
     final_en = translated.final_text
 
@@ -185,7 +185,8 @@ def test_translate_and_verify_same_verdict_on_identical_en():
 
     assert translated.segment_alignment_error is None
     assert verified.segment_alignment_error is None
-    assert translated.verdict == verified.verdict
+    assert translated.verdict == "ok"
+    assert verified.verdict == "ok"
     assert translated.heuristic_blocking == verified.heuristic_blocking
     assert translated.heuristic_warnings == verified.heuristic_warnings
 

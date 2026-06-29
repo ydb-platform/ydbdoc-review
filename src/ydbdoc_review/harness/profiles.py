@@ -1,4 +1,9 @@
-"""Named step lists for translate vs verify (shared QA tail)."""
+"""Named step lists for translate vs verify.
+
+``doc_translate`` uses ``TRANSLATE_PROFILE`` (parse + translate only).
+``doc_verify`` uses ``VERIFY_PROFILE`` (load EN + critic/heuristics/verdict).
+``TRANSLATE_WITH_QA_PROFILE`` is for local ``translate-file --with-critic`` only.
+"""
 
 from __future__ import annotations
 
@@ -44,6 +49,11 @@ class HarnessProfile:
 
 
 TRANSLATE_PROFILE = HarnessProfile(
+    name="translate",
+    steps=(ParseStep(), TranslateStep()),
+)
+
+TRANSLATE_WITH_QA_PROFILE = HarnessProfile(
     name="translate",
     steps=(ParseStep(), TranslateStep(), *_TRANSLATE_QA_TAIL),
 )

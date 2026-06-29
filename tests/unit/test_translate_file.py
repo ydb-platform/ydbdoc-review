@@ -107,6 +107,7 @@ def test_translate_file_end_to_end_no_critic_issues():
         load_glossary(),
         file_path="docs/ru/hello.md",
         config=_unit_cfg(),
+        enable_critic=True,
     )
 
     assert result.segments_count == 1
@@ -146,6 +147,7 @@ def test_translate_file_applies_critic_fix():
         load_glossary(),
         file_path="docs/ru/terms.md",
         config=_unit_cfg(),
+        enable_critic=True,
     )
 
     assert "Correct term translation." in result.final_text
@@ -214,6 +216,7 @@ def test_translate_file_verdict_blocked_on_unresolved():
         load_glossary(),
         file_path="docs/ru/bad.md",
         config=_unit_cfg(),
+        enable_critic=True,
     )
 
     assert result.verdict == "blocked"
@@ -346,6 +349,7 @@ def test_translate_file_heuristics_bump_verdict_to_warnings():
         file_path="docs/ru/heuristics.md",
         target_lang="en",
         config=_unit_cfg(),
+        enable_critic=True,
     )
 
     assert result.verdict == "blocked"
@@ -406,6 +410,7 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
         file_path="docs/ru/blocked.md",
         target_lang="en",
         config=_unit_cfg(),
+        enable_critic=True,
     )
 
     assert result.verdict == "blocked"
@@ -425,6 +430,7 @@ def test_translate_file_survives_empty_critic_response():
         load_glossary(),
         file_path="docs/ru/hello.md",
         config=_unit_cfg(),
+        enable_critic=True,
     )
 
     assert "Hello." in result.final_text

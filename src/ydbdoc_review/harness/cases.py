@@ -12,7 +12,12 @@ import yaml
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.harness.context import HarnessContext
-from ydbdoc_review.harness.profiles import TRANSLATE_PROFILE, VERIFY_PROFILE
+from ydbdoc_review.harness.profiles import (
+    HarnessProfile,
+    TRANSLATE_PROFILE,
+    TRANSLATE_WITH_QA_PROFILE,
+    VERIFY_PROFILE,
+)
 from ydbdoc_review.harness.runner import FileHarness
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -25,6 +30,12 @@ _PROFILES = {
     "translate": TRANSLATE_PROFILE,
     "verify": VERIFY_PROFILE,
 }
+
+
+def _profile_for_case(name: HarnessProfileName, *, enable_critic: bool) -> HarnessProfile:
+    if name == "translate" and enable_critic:
+        return TRANSLATE_WITH_QA_PROFILE
+    return _PROFILES[name]
 
 
 @dataclass(frozen=True)
@@ -177,7 +188,7 @@ def discover_harness_cases(cases_root: Path) -> list[Path]:
 
 def run_harness_case(case: HarnessCase) -> HarnessCaseResult:
     """Execute a fixture through ``FileHarness`` with optional mocked LLM."""
-    profile = _PROFILES[case.profile]
+    profile = _profile_for_case(case.profile, enable_critic=case.enable_critic)
     state = FileRunState(
         mode=case.profile,
         file_path=case.file_path,

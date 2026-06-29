@@ -8,6 +8,7 @@ from ydbdoc_review.harness import (
     FileRunState,
     HarnessContext,
     TRANSLATE_PROFILE,
+    TRANSLATE_WITH_QA_PROFILE,
     VERIFY_PROFILE,
 )
 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
@@ -37,11 +38,16 @@ def translate_file(
     prompt_version: str | None = None,
     cache: dict[str, str] | None = None,
     max_parallel_batches: int | None = None,
-    enable_critic: bool = True,
+    enable_critic: bool = False,
     enable_translate: bool = True,
     existing_target_text: str | None = None,
 ) -> FileTranslationResult:
-    """Run the per-file harness; QA after render is identical for translate and verify."""
+    """Run the per-file harness.
+
+    ``doc_translate`` uses translate-only; ``doc_verify`` uses critic QA on disk.
+    Pass ``enable_critic=True`` for local ``translate-file --with-critic``.
+    """
+    critic_on = True if not enable_translate else enable_critic
     ctx = HarnessContext.from_options(
         client,
         glossary=glossary,
@@ -52,9 +58,12 @@ def translate_file(
         prompt_version=prompt_version,
         cache=cache,
         max_parallel_batches=max_parallel_batches,
-        enable_critic=enable_critic,
+        enable_critic=critic_on,
     )
-    profile = TRANSLATE_PROFILE if enable_translate else VERIFY_PROFILE
+    if enable_translate:
+        profile = TRANSLATE_WITH_QA_PROFILE if enable_critic else TRANSLATE_PROFILE
+    else:
+        profile = VERIFY_PROFILE
     state = FileRunState(
         mode=profile.name,  # type: ignore[arg-type]
         file_path=file_path,

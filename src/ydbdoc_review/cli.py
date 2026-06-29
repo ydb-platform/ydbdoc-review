@@ -211,7 +211,14 @@ def translate_file_cmd(
     target_lang: Annotated[str, typer.Option()] = "en",
     no_critic: Annotated[
         bool,
-        typer.Option(help="Skip critic / verify passes."),
+        typer.Option(help="Skip critic / verify passes (default for translate-only)."),
+    ] = True,
+    with_critic: Annotated[
+        bool,
+        typer.Option(
+            "--with-critic",
+            help="Run critic + heuristics after translate (legacy single-step QA).",
+        ),
     ] = False,
     config: Annotated[Path | None, typer.Option("--config")] = None,
 ) -> None:
@@ -234,7 +241,7 @@ def translate_file_cmd(
             config=cfg,
             source_lang=source_lang,
             target_lang=target_lang,
-            enable_critic=not no_critic,
+            enable_critic=with_critic and not no_critic,
         )
     except (LLMError, ValueError) as exc:
         console.print(f"[red]Translation failed:[/red] {exc}")

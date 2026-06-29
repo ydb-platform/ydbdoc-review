@@ -60,6 +60,7 @@ from ydbdoc_review.reporting.builder import (
     build_commit_message,
     build_full_report,
     build_source_pr_comment,
+    build_translate_handoff_comment,
     build_translation_pr_body,
     build_verify_fixup_pr_body,
     build_verify_fixup_source_comment,
@@ -348,9 +349,23 @@ def run_doc_translate(
                         tr_pr_number,
                         exc,
                     )
+            if pushed:
+                try:
+                    gh.add_issue_labels(
+                        owner, repo, tr_pr_number, ["doc_verify"]
+                    )
+                    logger.info(
+                        "Added doc_verify label to translation PR #%s",
+                        tr_pr_number,
+                    )
+                except GitHubAPIError as exc:
+                    logger.warning(
+                        "Could not add doc_verify label to PR #%s: %s "
+                        "(add manually or use trigger-verify-ci with YDBOT_TOKEN)",
+                        tr_pr_number,
+                        exc,
+                    )
 
-    # Translation QA report first: reviewers need it on the translation PR even when
-    # the short source-PR summary cannot be posted (fork PRs may return HTTP 401).
     if tr_pr_number is not None:
         report_num = _next_report_number(gh, owner, repo, tr_pr_number)
         report_meta = ReportMeta(
@@ -364,15 +379,15 @@ def run_doc_translate(
             owner,
             repo,
             tr_pr_number,
-            build_full_report(
+            build_translate_handoff_comment(
                 pr_result,
+                source_pr=pr_number,
+                source_repo=github_repo,
                 meta=report_meta,
                 config=cfg,
                 usage=client.usage_tracker,
-                glossary=glossary,
-                link=ReportLinkContext(github_repo=github_repo, ref=branch),
             ),
-            label="translation QA report",
+            label="translation handoff",
         )
 
     job.source_comment_url = _safe_post_issue_comment(

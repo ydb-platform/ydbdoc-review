@@ -12,6 +12,7 @@ from ydbdoc_review.harness import (
     FileRunState,
     HarnessContext,
     TRANSLATE_PROFILE,
+    TRANSLATE_WITH_QA_PROFILE,
     VERIFY_PROFILE,
 )
 from ydbdoc_review.harness.steps import ParseStep, TranslateStep
@@ -53,23 +54,17 @@ def _translate_json(segments, mapping: dict[str, str]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def test_profiles_share_qa_tail():
+def test_profiles_translate_only_verify_has_qa():
     translate_names = [s.name for s in TRANSLATE_PROFILE.steps]
     verify_names = [s.name for s in VERIFY_PROFILE.steps]
-    assert translate_names[0] == "parse"
+    assert translate_names == ["parse", "translate"]
     assert verify_names[0] == "parse"
-    assert translate_names[1] == "translate"
     assert verify_names[1] == "load_target"
-    assert "critic_feedback_retry" in translate_names
-    assert "critic_feedback_retry" not in verify_names
-    shared_qa = ["round_trip", "critic_loop"]
-    assert translate_names[2:4] == shared_qa
-    assert verify_names[2:4] == shared_qa
-    assert translate_names[-3:] == verify_names[-3:] == [
-        "heuristics",
-        "verdict",
-        "report_artifacts",
-    ]
+    shared_qa = ["round_trip", "critic_loop", "heuristics", "verdict", "report_artifacts"]
+    assert verify_names[2:] == shared_qa
+    with_qa_names = [s.name for s in TRANSLATE_WITH_QA_PROFILE.steps]
+    assert with_qa_names[:2] == ["parse", "translate"]
+    assert "critic_feedback_retry" in with_qa_names
 
 
 def test_parse_step_empty_file_stops_early():
@@ -94,7 +89,6 @@ def test_harness_translate_matches_translate_file():
     seg_id = segments[0].id
     responses = [
         _translate_json(segments, {seg_id: "Hello.\n"}),
-        json.dumps({"verdict": "ok", "issues": []}),
     ]
     glossary = load_glossary()
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})

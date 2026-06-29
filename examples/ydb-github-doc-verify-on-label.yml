@@ -1,6 +1,5 @@
 # doc_verify на translation PR (head в upstream или fork).
-# QA = тот же пайплайн, что после doc_translate (@v0.1.0).
-# Опционально — repair-коммит в head-ветку PR.
+# QA = critic + эвристики + вердикт (отдельный шаг после doc_translate).
 
 name: ydbdoc-review (doc_verify label)
 

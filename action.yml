@@ -22,7 +22,7 @@ inputs:
     description: 'If "true", pass --no-commit (run: no translation commit; verify: no repair commit/push).'
     default: "false"
   mode:
-    description: '"run" — doc_translate. "verify" — doc_verify (critic QA + optional repair commit).'
+    description: '"run" — doc_translate (translate only). "verify" — doc_verify (critic QA).'
     default: "run"
 
 runs:

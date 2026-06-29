@@ -155,6 +155,7 @@ def test_translate_file_critic_feedback_retry_end_to_end():
         load_glossary(),
         file_path="docs/ru/a.md",
         config=cfg,
+        enable_critic=True,
     )
 
     assert "Correct translation." in result.final_text
