@@ -1,10 +1,11 @@
 # Пример для репозитория ydb: .github/workflows/ydbdoc-review.yml
 # Запуск по лейблу doc_translate на PR с изменениями ydb/docs/**
 #
-# doc_translate — только анализ + перевод + translation PR.
-# doc_verify — отдельный workflow (лейбл на translation PR), critic + эвристики.
+# doc_translate — анализ + перевод + translation PR.
+# doc_verify — job ydbdoc-verify-auto сразу после перевода (mode: verify).
+# Лейбл doc_verify на translation PR — только для ручного перезапуска (ydbdoc-verify.yml).
 #
-# YDBOT_TOKEN нужен во втором job: события от GITHUB_TOKEN не запускают другие workflows.
+# YDBOT_TOKEN — только в trigger-translation-ci (без checkout): ok-to-test + rebuild_docs.
 
 name: ydbdoc-review (doc_translate label)
 
@@ -51,15 +52,20 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           YDBDOC_REPO_PATH: ${{ github.workspace }}
 
-  trigger-translation-ci:
+  resolve-translation-pr:
     needs: ydbdoc-review
-    if: needs.ydbdoc-review.result == 'success'
+    if: ${{ !cancelled() && needs.ydbdoc-review.result == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      translation_pr: ${{ steps.find.outputs.number }}
+      translation_head_sha: ${{ steps.find.outputs.head_sha }}
+      translation_base_ref: ${{ steps.find.outputs.base_ref }}
     steps:
-      - name: Label translation PR (doc_verify, rebuild_docs, ok-to-test)
+      - name: Find open translation PR
         uses: actions/github-script@v8
+        id: find
         with:
-          github-token: ${{ secrets.YDBOT_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -88,19 +94,63 @@ jobs:
             }
 
             if (!translationPr) {
-              core.warning(
-                `Open translation PR not found for head ${head}. Labels were not added.`
-              );
+              core.setFailed(`Open translation PR not found for head ${head}`);
               return;
             }
 
-            await github.rest.issues.addLabels({
-              owner,
-              repo,
-              issue_number: translationPr.number,
-              labels: ['doc_verify', 'rebuild_docs', 'ok-to-test'],
-            });
+            core.setOutput('number', String(translationPr.number));
+            core.setOutput('head_sha', translationPr.head.sha);
+            core.setOutput('base_ref', translationPr.base.ref);
+            core.info(`Found translation PR #${translationPr.number}`);
 
+  ydbdoc-verify-auto:
+    needs: [ydbdoc-review, resolve-translation-pr]
+    if: ${{ !cancelled() && needs.ydbdoc-review.result == 'success' && needs.resolve-translation-pr.result == 'success' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ydbdoc-verify-${{ needs.resolve-translation-pr.outputs.translation_pr }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout translation PR head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve-translation-pr.outputs.translation_head_sha }}
+          fetch-depth: 0
+
+      - name: Fetch merge base ref
+        run: |
+          git fetch origin ${{ needs.resolve-translation-pr.outputs.translation_base_ref }}:refs/remotes/origin/${{ needs.resolve-translation-pr.outputs.translation_base_ref }}
+
+      - name: Verify translation PR
+        uses: ydb-platform/ydbdoc-review@v0.1.0
+        with:
+          mode: verify
+          repo: ${{ github.repository }}
+          pr: ${{ needs.resolve-translation-pr.outputs.translation_pr }}
+          merge_base_with: origin/${{ needs.resolve-translation-pr.outputs.translation_base_ref }}
+        env:
+          YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
+          YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
+          GITHUB_TOKEN: ${{ github.token }}
+          YDBDOC_REPO_PATH: ${{ github.workspace }}
+
+  trigger-translation-ci:
+    needs: [ydbdoc-review, resolve-translation-pr]
+    if: ${{ !cancelled() && needs.ydbdoc-review.result == 'success' && needs.resolve-translation-pr.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PR-check and docs rebuild on translation PR
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.YDBOT_TOKEN }}
+          script: |
+            const prNumber = Number('${{ needs.resolve-translation-pr.outputs.translation_pr }}');
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['rebuild_docs', 'ok-to-test'],
+            });
             core.info(
-              `Added doc_verify, rebuild_docs, ok-to-test to PR #${translationPr.number}`
+              `Added rebuild_docs and ok-to-test to translation PR #${prNumber}`
             );

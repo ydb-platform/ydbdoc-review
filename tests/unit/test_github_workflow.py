@@ -238,11 +238,8 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     assert comment_calls[0][0][2] == 99
     assert comment_calls[1][0][2] == 7
     mock_gh.return_value.create_pull.assert_called_once()
-    mock_gh.return_value.add_issue_labels.assert_any_call(
+    mock_gh.return_value.add_issue_labels.assert_called_once_with(
         "o", "r", 99, ["documentation"]
-    )
-    mock_gh.return_value.add_issue_labels.assert_any_call(
-        "o", "r", 99, ["doc_verify"]
     )
     _, kwargs = mock_gh.return_value.create_pull.call_args
     assert kwargs["head"] == "ydbdoc-review/pr-7"

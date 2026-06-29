@@ -28,12 +28,14 @@ GitHub Action и CLI для автоматического перевода до
 1. Находит изменённые пары `ydb/docs/ru/…` ↔ `ydb/docs/en/…` (включая locale `_includes/*.md`).
 2. Переводит `.md` через Yandex AI Studio; мержит изменённые `toc*.yaml` / redirect YAML.
 3. Дочищает остатки кириллицы в EN prose, inline `` `…` `` и комментарии ``//`` / ``#`` / ``--`` в fenced code.
-4. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**, вешает лейбл **`doc_verify`**.
+4. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**.
 
-### `doc_verify` (лейбл на translation PR)
+### `doc_verify` (авто + лейбл на translation PR)
 
 Critic + эвристики + nav validation + вердикт; при необходимости — fixup PR с правками критика.
-Запускается **отдельно** после `doc_translate` (автоматически по лейблу или вручную).
+
+- **Авто:** job `ydbdoc-verify-auto` в том же workflow, что `doc_translate` (§6.73).
+- **Повтор:** лейбл **`doc_verify`** → `ydbdoc-verify.yml`.
 
 Исходная ветка PR **не меняется**. Мерж translation PR — за человеком.
 

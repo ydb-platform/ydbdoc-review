@@ -359,23 +359,6 @@ def run_doc_translate(
                         tr_pr_number,
                         exc,
                     )
-            if pushed:
-                try:
-                    gh.add_issue_labels(
-                        owner, repo, tr_pr_number, ["doc_verify"]
-                    )
-                    logger.info(
-                        "Added doc_verify label to translation PR #%s",
-                        tr_pr_number,
-                    )
-                except GitHubAPIError as exc:
-                    logger.warning(
-                        "Could not add doc_verify label to PR #%s: %s "
-                        "(add manually or use trigger-verify-ci with YDBOT_TOKEN)",
-                        tr_pr_number,
-                        exc,
-                    )
-
     if tr_pr_number is not None:
         report_num = _next_report_number(gh, owner, repo, tr_pr_number)
         report_meta = ReportMeta(

@@ -1514,7 +1514,7 @@ After ``doc_translate`` opens/pushes the translation PR:
 1. Short **handoff** comment on translation PR (not full QA report).
 2. ``doc_verify`` label added via API (best-effort; may need ``YDBOT_TOKEN`` in
    ``trigger-translation-ci`` — §16.7 — because ``GITHUB_TOKEN`` label events do
-   not cascade).
+   not cascade). **Superseded by §6.73** — auto verify job instead of label.
 
 **Tests:** ``test_profiles_translate_only_verify_has_qa``,
 ``test_run_doc_translate_posts_comments`` (``doc_verify`` label),
@@ -1569,5 +1569,29 @@ added RU-only renames ``hive_config.md``, ``kafka_proxy_config.md``,
 ``translate_hrefs`` / ``extra_toc_hrefs`` are added, not every RU-base gap.
 
 **Tests:** ``test_merge_supplement_only_adds_translated_href_not_full_ru_gap``.
+
+### 6.73. Auto ``doc_verify`` job after ``doc_translate`` (#44912)
+
+**Problem:** [PR #44912](https://github.com/ydb-platform/ydb/pull/44912) had label
+``doc_verify`` but no QA report. ``run_doc_translate`` added the label via
+``GITHUB_TOKEN`` — GitHub does **not** cascade label events into other workflows
+(§16.7). ``trigger-translation-ci`` used ``YDBOT_TOKEN`` only for ``ok-to-test`` /
+``rebuild_docs``, not for verify.
+
+**Decision:**
+
+1. **Do not** add ``doc_verify`` label from ``run_doc_translate`` (action).
+2. **``ydbdoc-verify-auto``** job in ``ydbdoc-review.yml`` (after
+   ``resolve-translation-pr``): checkout translation PR head, ``mode: verify``,
+   post full report — no label cascade needed.
+3. **`doc_verify` label** + ``ydbdoc-verify.yml`` — manual re-run only.
+4. **`trigger-translation-ci`** — ``rebuild_docs`` + ``ok-to-test`` only (parallel
+   with verify-auto).
+
+Workflow chain: ``ydbdoc-review`` → ``resolve-translation-pr`` →
+``ydbdoc-verify-auto`` ∥ ``trigger-translation-ci``.
+
+**Tests:** ``test_run_doc_translate_posts_comments`` (no ``doc_verify`` label);
+example ``ydb-github-doc-translate-on-label.yml``.
 
 ---

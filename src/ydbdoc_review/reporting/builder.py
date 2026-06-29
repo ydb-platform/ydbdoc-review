@@ -516,7 +516,8 @@ def build_translation_pr_body(source_pr: int, source_repo: str) -> str:
         f"Auto-generated translation for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
         f"Branch: `ydbdoc-review/pr-{source_pr}`\n\n"
-        "Quality check runs separately via the **`doc_verify`** label on this PR."
+        "QA (`doc_verify`) runs automatically in CI after `doc_translate`; "
+        "re-run manually via the **`doc_verify`** label (`ydbdoc-verify.yml`)."
     )
 
 
@@ -572,9 +573,10 @@ def build_translate_handoff_comment(
         f"| Файлов | {files_label} |\n"
         f"| Время | {_format_duration(meta.elapsed_s)} |\n"
         f"{cost_line}\n"
-        "**Следующий шаг:** проверка **`doc_verify`** (critic + эвристики + вердикт). "
-        "Лейбл `doc_verify` будет добавлен на этот PR автоматически, либо повесьте вручную.\n\n"
-        "Полный QA-отчёт появится в комментарии после `doc_verify`."
+        "**Следующий шаг:** job **`ydbdoc-verify-auto`** в том же workflow запустит "
+        "**`doc_verify`** (critic + эвристики + вердикт). Полный QA-отчёт появится "
+        "в комментарии ниже. Повторная проверка — лейбл **`doc_verify`** "
+        "(`ydbdoc-verify.yml`)."
     )
 
 
@@ -635,7 +637,7 @@ def build_source_pr_comment(
             cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
 
     qa_line = (
-        "| Статус QA | ожидается `doc_verify` на translation PR |\n"
+        "| Статус QA | `ydbdoc-verify-auto` на translation PR |\n"
         if translation_pr_number
         else ""
     )
@@ -652,9 +654,8 @@ def build_source_pr_comment(
     )
     if translation_pr_number:
         body += (
-            f"На translation PR #{translation_pr_number} автоматически запустится "
-            "**`doc_verify`** (critic + эвристики). Итоговый вердикт — в комментарии "
-            "к translation PR после проверки.\n"
+            f"На translation PR #{translation_pr_number} job **`ydbdoc-verify-auto`** "
+            "запустит **`doc_verify`**. Итоговый вердикт — в комментарии к translation PR.\n"
         )
     return body
 
