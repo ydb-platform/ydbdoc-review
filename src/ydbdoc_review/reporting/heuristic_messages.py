@@ -27,6 +27,7 @@ _FENCE_PATH = re.compile(
     r"^fence_path_stripped: block (\d+) line (\d+): (.+)$"
 )
 _LINK_LOCALE = re.compile(r"^link_locale: (.+)$")
+_MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
     r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent): (.+)$"
 )
@@ -40,7 +41,7 @@ def heuristic_location_label(message: str) -> str:
         return "блок кода"
     if message.startswith("fence_parity:"):
         return "блоки кода"
-    if message.startswith("link_locale:"):
+    if message.startswith("link_locale:") or message.startswith("md_link_parity:"):
         return "ссылки"
     if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
         return "текст"
@@ -139,6 +140,13 @@ def humanize_heuristic(message: str) -> str:
     if m:
         return f"Ссылка не подходит для EN-локали: {m.group(1)}"
 
+    m = _MD_LINK_PARITY.match(message)
+    if m:
+        return (
+            f"В EN нет ссылок на страницы, которые есть в RU: {m.group(1)}. "
+            "Добавьте те же ``.md``-ссылки или обновите путь, если RU переехал."
+        )
+
     m = _NAV_KIND.match(message)
     if m:
         kind, detail = m.group(1), m.group(2)
@@ -147,7 +155,9 @@ def humanize_heuristic(message: str) -> str:
         if kind == "missing_href":
             return f"В EN toc нет href из RU PR: {detail}"
         if kind == "unexpected_href":
-            return f"В EN toc лишний href: {detail}"
+            return (
+                f"В EN toc лишний href (нет в diff RU PR и нет в EN main): {detail}"
+            )
         if kind == "empty_toc":
             return f"EN toc пустой: {detail}"
         if kind == "collapsed_toc":

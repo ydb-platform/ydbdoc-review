@@ -27,3 +27,21 @@ def test_humanize_cyrillic_in_fence():
 def test_humanize_prose_cyrillic_unchanged():
     raw = "Кириллица в EN-тексте (строка ~5): «привет»"
     assert humanize_heuristic(raw) == raw
+
+
+def test_humanize_md_link_parity():
+    raw = "md_link_parity: EN missing RU links: backup.md, system-tablet-backup.md"
+    text = humanize_heuristic(raw)
+    assert heuristic_location_label(raw) == "ссылки"
+    assert "backup.md" in text
+    assert "md_link_parity" not in text
+
+
+def test_humanize_unexpected_href():
+    raw = (
+        "unexpected_href: EN toc has hrefs not in RU PR and not EN legacy: "
+        "['href:recipes/system-tablet-backup/index.md']"
+    )
+    text = humanize_heuristic(raw)
+    assert "diff RU PR" in text
+    assert "system-tablet-backup" in text

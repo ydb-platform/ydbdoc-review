@@ -1472,4 +1472,27 @@ match ``<…>=<…>`` KV template pattern (or single-slot segment per #44268).
 
 **Tests:** ``test_translated_format_template_*``, ``tests/harness/cases/44872_format_template/``.
 
+### 6.68. #44872 manual EN fixes — segment alignment + toc scope ([ydb #44872](https://github.com/ydb-platform/ydb/pull/44872))
+
+**Context:** NFS export/import auto-translate from [#38700](https://github.com/ydb-platform/ydb/pull/38700)
+(32 EN files). ``doc_verify`` @ ``v0.1.0`` (with §6.67) still surfaced contributor-side
+issues while the PR was being fixed.
+
+**Pipeline fix:** §6.67 KV format template placeholder align (``--item STRING`` paragraphs).
+
+**Contributor pitfalls (not pipeline bugs):**
+
+| Symptom | Cause | Remediation |
+|---|---|---|
+| ``segment count mismatch`` on ``concepts/backup.md``, ``devops/.../index.md`` | Manual EN edits added/removed YFM blocks (``{% note %}``, See also bullets) without preserving 1:1 segment structure vs RU | Mirror RU block boundaries in EN; do not delete notes or reorder structural elements independently |
+| ``unexpected_href`` in ``en/recipes/toc_p.yaml`` | EN-only toc entry (``system-tablet-backup/index.md``) with no matching RU PR toc change | Remove EN-only href or add the equivalent RU toc entry in the same PR |
+| ``md_link_parity`` for ``system-tablet-backup.md`` | RU link target moved to ``concepts/backup.md`` but EN still pointed at the old path | Update EN ``.md`` links to match RU href targets |
+| Recipe pages without toc entry | Allowed — cross-link targets do not require toc | Keep recipe ``.md`` files for link parity; omit from toc when RU PR did not add them |
+
+**Operational:** after segment-structure fixes on the PR branch, round-trip gate passed
+(concepts 62=62, devops 36=36). Re-run ``doc_verify`` on the updated head.
+
+**Report UX:** ``humanize_heuristic`` now labels ``md_link_parity`` and clarifies
+``unexpected_href`` (not in RU PR diff and not EN main legacy).
+
 ---
