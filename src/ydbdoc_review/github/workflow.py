@@ -38,8 +38,11 @@ from ydbdoc_review.github.pr import (
     verify_fixup_pr_base,
 )
 from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.llm.errors import LLMError
-from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
+from ydbdoc_review.harness.pr_context import PRHarnessContext
+from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
+from ydbdoc_review.harness.pr_runner import PRHarness
+from ydbdoc_review.harness.pr_state import PRRunState
+from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.completeness import completeness_gaps
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
@@ -51,8 +54,7 @@ from ydbdoc_review.pipeline.pairs import (
     build_navigation_pairs,
     build_verify_navigation_pairs,
 )
-from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
+from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
@@ -190,55 +192,9 @@ def _run_verify_pairs(
     config: Config,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
-    results: list[PairRunResult] = []
-    for content in contents:
-        pair = content.pair
-        if not content.ru_text or not content.en_text:
-            plan = PairPlan(
-                pair=pair,
-                action="skip",
-                source_path=pair.ru_path,
-                target_path=pair.en_path,
-                source_lang="ru",
-                target_lang="en",
-                summary="verify skip — missing RU or EN text",
-            )
-            results.append(PairRunResult(plan=plan, skipped=True))
-            continue
-        plan = PairPlan(
-            pair=pair,
-            action="critic_only",
-            source_path=pair.ru_path,
-            target_path=pair.en_path,
-            source_lang="ru",
-            target_lang="en",
-            summary="doc_verify critic pass",
-        )
-        try:
-            file_result = translate_file(
-                content.ru_text,
-                client,
-                glossary,
-                file_path=pair.ru_path,
-                config=config,
-                source_lang="ru",
-                target_lang="en",
-                enable_translate=False,
-                existing_target_text=content.en_text,
-                enable_critic=True,
-            )
-        except LLMError as exc:
-            logger.exception("Verify failed for %s", pair.en_path)
-            results.append(PairRunResult(plan=plan, error=str(exc)))
-            continue
-        results.append(
-            PairRunResult(
-                plan=plan,
-                target_text=file_result.final_text,
-                file_result=file_result,
-            )
-        )
-    return PRTranslationResult(pair_results=results)
+    state = PRRunState(contents=contents)
+    ctx = PRHarnessContext.from_options(client, glossary=glossary, config=config)
+    return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
 
 def run_doc_translate(

@@ -121,6 +121,7 @@ llm:
 
 translation:
   segments_per_batch_chars: 4000
+  critic_feedback_retries: 2
   source_lang: ru
   target_lang: en
 
@@ -158,6 +159,7 @@ Examples:
 - `YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY=deepseek-v4` → `llm.models.translate.primary`
 - `YDBDOC_LLM_MODELS_TRANSLATE_FALLBACKS=gpt-oss-120b, deepseek-v32` → CSV list
 - `YDBDOC_TRANSLATION_SEGMENTS_PER_BATCH_CHARS=2000` → `translation.segments_per_batch_chars`
+- `YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES=0` → disable critic-guided retranslate (default `2`)
 - `YDBDOC_FOO_BAR=baz` → ignored (no such path in default YAML)
 
 ### 13.4. Secrets (env only, never in YAML)

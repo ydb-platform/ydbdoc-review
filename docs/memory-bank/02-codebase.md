@@ -47,6 +47,7 @@ src/ydbdoc_review/
 │   ├── schemas.py                 translator/critic JSON pydantic models (D.3–D.4)
 │   ├── translator.py              per-batch translation + repair-pass trigger (D.3)
 │   ├── repair.py                  focused LLM repair after validation failure
+│   ├── critic_retranslate.py      critic-feedback segment retranslate (§6.66)
 │   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
 ├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
@@ -68,14 +69,29 @@ src/ydbdoc_review/
 │   ├── wikipedia_links.py         MediaWiki langlinks API (RU↔EN slugs, §6.37)
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   └── heuristics.py              length ratio, cyrillic (+ fence comments), parity, anchors
+├── harness/                       ✅ per-file + PR step runners (§6.66)
+│   ├── state.py                   FileRunState — mutable per-file artifacts
+│   ├── context.py                 HarnessContext — LLM, glossary, config
+│   ├── steps.py                   Parse, Translate, LoadTarget, CriticFeedbackRetry, QA
+│   ├── profiles.py                TRANSLATE_PROFILE / VERIFY_PROFILE
+│   ├── runner.py                  FileHarness.run()
+│   ├── pr_state.py                PRRunState — pair plans + results
+│   ├── pr_context.py              PRHarnessContext
+│   ├── pr_steps.py                PlanTranslate/VerifyPairs, ExecutePairPlans
+│   ├── pr_profiles.py             TRANSLATE_PR_PROFILE / VERIFY_PR_PROFILE
+│   ├── pr_runner.py               PRHarness.run()
+│   ├── pair.py                    run_pair_plan → FileHarness
+│   ├── cases.py                   YAML regression loader/runner
+│   ├── render.py                  reinsert, finalize EN
+│   └── critic_verdict.py          compute_critic_verdict
 ├── pipeline/                      ✅ COMPLETE (Phase F)
-│   ├── translate_file.py          per-file pipeline (translate + unified QA)
+│   ├── translate_file.py          thin wrapper → harness (translate + verify)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
 │   ├── pairs.py                   RU/EN md/includes + nav YAML pairing (§6.41)
 │   ├── navigation_merge.py        scoped toc/redirect merge; EN-main indent (§6.36)
 │   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)
-│   ├── orchestrator.py            run_pr_translation (F)
+│   ├── orchestrator.py            thin wrapper → PRHarness (TRANSLATE_PR_PROFILE)
 │   └── types.py                   result dataclasses
 ├── github/                        ✅ COMPLETE (Phase G)
 │   ├── client.py                  GitHub REST (requests)

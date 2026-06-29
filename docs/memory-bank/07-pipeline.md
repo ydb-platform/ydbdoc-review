@@ -132,6 +132,12 @@ INPUT: pr_number, source_repo, target_branch_base
            reports.append(failed_report(pair, e))
            continue  # don't fail the whole PR
 
+   **Harness (§6.66):** per-file — ``translate_file`` → ``FileHarness``
+   (``TRANSLATE_PROFILE`` or ``VERIFY_PROFILE``). Translate profile adds
+   ``critic_feedback_retry`` (default 2 passes) after the first critic loop.
+   PR-level — ``run_pr_translation`` / ``doc_verify`` → ``PRHarness``, which calls
+   ``run_pair_plan`` → ``FileHarness`` per pair.
+
 4. GIT
    branch = f"ydbdoc-review/pr-{pr_number}"
    upstream_url = repo_https_clone_url(owner, repo)

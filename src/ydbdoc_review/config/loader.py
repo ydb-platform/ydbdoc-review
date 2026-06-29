@@ -74,6 +74,7 @@ class TranslationConfig(BaseModel):
     source_lang: str = "ru"
     target_lang: str = "en"
     segments_per_batch_chars: int = 4000
+    critic_feedback_retries: int = 2
 
 
 class PromptsConfig(BaseModel):

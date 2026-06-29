@@ -1388,6 +1388,78 @@ both sides; ``critic_unresolved = ok`` when all initial critic issues were spuri
 **Tests:** ``test_translated_code_formula_keeps_source_marker``,
 ``test_phantom_marker_swap_dropped_for_translated_formula_slot``.
 
+### 6.66. Per-file harness — explicit steps, shared QA (translate + verify)
+
+**Problem:** ``translate_file.py`` grew into a monolith (~400 lines) mixing parse,
+translate, critic loop, heuristics, and verdict. ``doc_translate`` and ``doc_verify``
+already shared logic via ``enable_translate``, but the boundary was implicit.
+
+**Decision:** introduce ``ydbdoc_review.harness``:
+
+| Piece | Role |
+|---|---|
+| ``FileRunState`` | Mutable per-file artifacts (segments, translations, critic, verdict) |
+| ``HarnessContext`` | LLM client, glossary, config, batch sizes |
+| ``HarnessStep`` | One stage: ``parse``, ``translate``, ``load_target``, ``round_trip``, ``critic_loop``, … |
+| ``HarnessProfile`` | Ordered step list |
+| ``TRANSLATE_PROFILE`` | ``parse → translate → QA tail`` (+ ``critic_feedback_retry``) |
+| ``VERIFY_PROFILE`` | ``parse → load_target → QA tail`` (shared critic/heuristics tail) |
+| ``FileHarness.run()`` | Execute profile; return ``FileTranslationResult`` |
+
+**QA tail (shared):** ``round_trip → critic_loop → heuristics → verdict → report_artifacts``.
+
+**Translate-only extra step:** ``critic_feedback_retry`` after ``critic_loop`` (see below).
+
+``pipeline/translate_file.py`` is a thin wrapper: picks profile from
+``enable_translate``, delegates to ``FileHarness``. GitHub ``workflow.py`` unchanged
+(adapters stay outside harness).
+
+**Not in scope (yet):** nothing critical — optional more YAML regression cases.
+
+**Critic-feedback retranslate (translate profile only):**
+
+After the first critic loop, if ``critic_unresolved`` still has segment-scoped issues and
+``translation.critic_feedback_retries > 0``, ``CriticFeedbackRetryStep`` re-translates
+those segments via ``critic_feedback_repair`` prompt, re-runs round-trip + critic loop
+(up to N times). Default ``critic_feedback_retries: 2``; override via
+``YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES`` (set ``0`` to disable). Verify profile
+unchanged.
+
+**YAML regression fixtures** (``tests/harness/cases/*/case.yaml``):
+
+| Piece | Role |
+|---|---|
+| ``HarnessCase`` | Parsed fixture: RU/EN markdown, profile, mocked LLM responses |
+| ``load_harness_case`` / ``run_harness_case`` | Load sibling ``.md`` files, run ``FileHarness`` |
+| ``assert_harness_case`` | Check verdict, critic state, per-segment placeholders |
+
+Add a case = new directory with ``case.yaml`` + ``source.ru.md`` (+ ``target.en.md`` for
+verify). No network; LLM mocked via ``llm.responses`` list. ``tests/harness/test_regression_cases.py``
+parametrizes over all cases.
+
+**PR-level harness (same §6.66):**
+
+| Piece | Role |
+|---|---|
+| ``PRRunState`` | Pair contents, per-pair plans, accumulated ``pair_results`` |
+| ``PRHarnessContext`` | Shared LLM client, glossary, config, analyze flag |
+| ``run_pair_plan()`` | Dispatches one ``FileHarness`` run per pair plan |
+| ``TRANSLATE_PR_PROFILE`` | ``plan_translate_pairs → execute_pair_plans`` |
+| ``VERIFY_PR_PROFILE`` | ``plan_verify_pairs → execute_pair_plans`` |
+| ``PRHarness.run()`` | Execute PR profile; return ``PRTranslationResult`` |
+
+``pipeline/orchestrator.py`` and ``github/workflow._run_verify_pairs`` are thin wrappers
+delegating to ``PRHarness`` with the appropriate profile. GitHub adapters (git push,
+PR comments) stay outside harness.
+
+**Tests:** ``tests/unit/test_harness.py``, ``tests/unit/test_harness_pr.py``,
+``tests/unit/test_critic_retranslate.py``, ``tests/harness/test_regression_cases.py``;
+existing ``test_translate_file.py`` / orchestrator tests use explicit env when retries
+must be disabled.
+
+**Migration:** render/finalize helpers moved to ``harness/render.py``; re-exported from
+``translate_file`` for backward compatibility.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

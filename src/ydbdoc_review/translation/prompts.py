@@ -26,6 +26,7 @@ _TEMPLATE_NAMES = frozenset(
         "analyze",
         "en_style_guide",
         "repair",
+        "critic_feedback_repair",
     }
 )
 
@@ -145,6 +146,49 @@ def build_repair_messages(
             "validation_error": validation_error,
             "source_text": segment.text,
             "failed_attempt": failed_attempt or "(none)",
+            "style_guide_block": _style_guide_block(
+                target_lang=target_lang, version=version
+            ),
+        },
+    )
+    return [
+        {"role": "system", "content": _system_message(glossary, version=version)},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_critic_feedback_repair_messages(
+    segment: Segment,
+    glossary: Glossary,
+    *,
+    current_translation: str,
+    critic_issues: list,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    version: str = DEFAULT_PROMPT_VERSION,
+) -> list[ChatCompletionMessageParam]:
+    """Chat messages for critic-guided segment re-translation."""
+    user_template = load_template("critic_feedback_repair", version=version)
+    path_label = " › ".join(segment.path) if segment.path else "(document root)"
+    issues_payload = [
+        issue.model_dump() if hasattr(issue, "model_dump") else issue
+        for issue in critic_issues
+    ]
+    user_content = render_template(
+        user_template,
+        {
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "file_path": file_path,
+            "segment_id": segment.id,
+            "segment_kind": segment.kind.value,
+            "segment_path": path_label,
+            "source_text": segment.text,
+            "current_translation": current_translation,
+            "critic_issues_json": json.dumps(
+                issues_payload, ensure_ascii=False, indent=2
+            ),
             "style_guide_block": _style_guide_block(
                 target_lang=target_lang, version=version
             ),

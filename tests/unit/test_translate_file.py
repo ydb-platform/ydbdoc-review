@@ -14,6 +14,16 @@ from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.pipeline.translate_file import translate_file
 
 
+def _unit_cfg(**extra: str):
+    env = {
+        "YDBDOC_YC_FOLDER_ID": "b1x",
+        "YDBDOC_YC_API_KEY": "k",
+        "YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES": "0",
+    }
+    env.update(extra)
+    return load_config(env=env)
+
+
 def _completion(content: str):
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
@@ -74,6 +84,7 @@ def test_translate_file_no_segments():
         load_glossary(),
         file_path="docs/ru/code.md",
         enable_critic=False,
+        config=_unit_cfg(),
     )
     assert result.segments_count == 0
     assert result.final_text == source
@@ -95,6 +106,7 @@ def test_translate_file_end_to_end_no_critic_issues():
         client,
         load_glossary(),
         file_path="docs/ru/hello.md",
+        config=_unit_cfg(),
     )
 
     assert result.segments_count == 1
@@ -133,6 +145,7 @@ def test_translate_file_applies_critic_fix():
         client,
         load_glossary(),
         file_path="docs/ru/terms.md",
+        config=_unit_cfg(),
     )
 
     assert "Correct term translation." in result.final_text
@@ -152,6 +165,7 @@ def test_translate_file_skips_critic_when_disabled():
         client,
         load_glossary(),
         enable_critic=False,
+        config=_unit_cfg(),
     )
 
     assert result.critic_initial is None
@@ -199,6 +213,7 @@ def test_translate_file_verdict_blocked_on_unresolved():
         client,
         load_glossary(),
         file_path="docs/ru/bad.md",
+        config=_unit_cfg(),
     )
 
     assert result.verdict == "blocked"
@@ -215,6 +230,7 @@ def test_translate_file_critic_only_alignment_mismatch_blocks():
         load_glossary(),
         enable_translate=False,
         existing_target_text=target,
+        config=_unit_cfg(),
     )
     assert result.verdict == "blocked"
     assert result.segment_alignment_error
@@ -235,6 +251,7 @@ def test_translate_file_critic_only_mode():
         load_glossary(),
         enable_translate=False,
         existing_target_text=target,
+        config=_unit_cfg(),
     )
     assert result.final_text == target
     assert result.critic_initial is not None
@@ -295,6 +312,7 @@ def test_translate_file_verify_preserves_en_fence_bodies():
         target_lang="en",
         enable_translate=False,
         existing_target_text=target,
+        config=_unit_cfg(),
     )
 
     # Fence body must remain English.
@@ -327,6 +345,7 @@ def test_translate_file_heuristics_bump_verdict_to_warnings():
         load_glossary(),
         file_path="docs/ru/heuristics.md",
         target_lang="en",
+        config=_unit_cfg(),
     )
 
     assert result.verdict == "blocked"
@@ -386,6 +405,7 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
         load_glossary(),
         file_path="docs/ru/blocked.md",
         target_lang="en",
+        config=_unit_cfg(),
     )
 
     assert result.verdict == "blocked"
@@ -404,6 +424,7 @@ def test_translate_file_survives_empty_critic_response():
         client,
         load_glossary(),
         file_path="docs/ru/hello.md",
+        config=_unit_cfg(),
     )
 
     assert "Hello." in result.final_text

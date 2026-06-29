@@ -43,6 +43,7 @@ translation:
   source_lang: ru
   target_lang: en
   segments_per_batch_chars: 4000
+  critic_feedback_retries: 2
 
 prompts:
   version: v1

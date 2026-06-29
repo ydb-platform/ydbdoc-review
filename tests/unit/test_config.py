@@ -153,6 +153,16 @@ def test_override_translation_chars():
     assert cfg.translation.segments_per_batch_chars == 2000
 
 
+def test_override_critic_feedback_retries():
+    cfg = load_config(env={"YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES": "2"})
+    assert cfg.translation.critic_feedback_retries == 2
+
+
+def test_default_critic_feedback_retries():
+    cfg = load_config(env={})
+    assert cfg.translation.critic_feedback_retries == 2
+
+
 def test_secret_vars_not_treated_as_overrides():
     """YDBDOC_YC_* must populate secrets, not crash on validation."""
     cfg = load_config(env={

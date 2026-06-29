@@ -32,6 +32,7 @@ tests/
 │   ├── test_segment_fence_validation.py segment fence count
 │   ├── test_placeholder_roles.py          V in link URL role check
 │   ├── test_critic.py
+│   ├── test_critic_retranslate.py         critic-feedback retry step (§6.66)
 │   ├── test_translate_file.py             incl. heuristic verdict bump
 │   ├── test_validation_heuristics.py      Phase E (+ list_tab, redirect nav)
 │   ├── test_navigation_toc.py
@@ -46,6 +47,11 @@ tests/
 │   ├── test_github_workflow.py
 │   ├── test_reporting_builder.py
 │   └── test_cli.py                        run, verify, translate-file, extract
+├── harness/                               YAML regression cases (no LLM network)
+│   ├── test_regression_cases.py           parametrizes over cases/*/case.yaml
+│   └── cases/
+│       ├── 44268_formula_align/           verify + spurious critic drop
+│       └── simple_translate/              minimal translate profile
 ├── integration/
 │   ├── test_real_files_round_trip.py      33 files × 2 tests = 66 cases
 │   └── test_llm_smoke.py                  live API (local only, @pytest.mark.llm)
@@ -215,6 +221,9 @@ wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
 
 **Resolved via §6.64:** ``doc_verify`` critic fixes always land on
 ``ydbdoc-review/verify-{N}`` + separate fixup PR — never on the author's PR head.
+
+**Done — §6.66 harness:** per-file + PR-level step runners; YAML regression fixtures
+in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env override).
 
 ---
 
