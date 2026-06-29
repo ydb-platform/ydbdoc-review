@@ -280,3 +280,61 @@ def test_translated_code_formula_keeps_source_marker():
     [normalized] = normalize_target_segments_to_source([src], [tgt])
     assert "⟦C1⟧" in normalized.text
     assert "⟦C2⟧" not in normalized.text
+
+
+def test_translated_format_template_keeps_source_marker():
+    """Regression #44872: --item STRING format spec differs by language."""
+    src = _seg(
+        "s0011",
+        "⟦C1⟧: text ⟦C2⟧ more ⟦C3⟧ format ⟦C4⟧",
+        [
+            _ph("⟦C1⟧", InlineCode(content="--item STRING")),
+            _ph("⟦C2⟧", InlineCode(content="--item")),
+            _ph("⟦C3⟧", InlineCode(content="STRING")),
+            _ph("⟦C4⟧", InlineCode(content="<свойство>=<значение>,...")),
+        ],
+    )
+    tgt = _seg(
+        "s0011",
+        "⟦C1⟧: text ⟦C2⟧ more ⟦C3⟧ format ⟦C4⟧",
+        [
+            _ph("⟦C1⟧", InlineCode(content="--item STRING")),
+            _ph("⟦C2⟧", InlineCode(content="--item")),
+            _ph("⟦C3⟧", InlineCode(content="STRING")),
+            _ph("⟦C4⟧", InlineCode(content="<property>=<value>,...")),
+        ],
+    )
+    [normalized] = normalize_target_segments_to_source([src], [tgt])
+    assert "⟦C4⟧" in normalized.text
+    assert "⟦C5⟧" not in normalized.text
+
+
+def test_translated_format_template_renumbers_en_only_marker():
+    """#44872 import-alt: EN used ⟦C7⟧ for the format slot; align to ⟦C6⟧."""
+    src = _seg(
+        "s0002",
+        "⟦C1⟧ ⟦C2⟧ ⟦C3⟧ ⟦C4⟧ ⟦C5⟧ ⟦C6⟧",
+        [
+            _ph("⟦C1⟧", InlineCode(content="--item STRING")),
+            _ph("⟦C2⟧", InlineCode(content="--item")),
+            _ph("⟦C3⟧", InlineCode(content="--item")),
+            _ph("⟦C4⟧", InlineCode(content="--include")),
+            _ph("⟦C5⟧", InlineCode(content="STRING")),
+            _ph("⟦C6⟧", InlineCode(content="<свойство>=<значение>,...")),
+        ],
+    )
+    tgt = _seg(
+        "s0002",
+        "⟦C1⟧ ⟦C2⟧ ⟦C3⟧ ⟦C4⟧ ⟦C5⟧ ⟦C7⟧",
+        [
+            _ph("⟦C1⟧", InlineCode(content="--item STRING")),
+            _ph("⟦C2⟧", InlineCode(content="--item")),
+            _ph("⟦C3⟧", InlineCode(content="--item")),
+            _ph("⟦C4⟧", InlineCode(content="--include")),
+            _ph("⟦C5⟧", InlineCode(content="STRING")),
+            _ph("⟦C7⟧", InlineCode(content="<property>=<value>,...")),
+        ],
+    )
+    [normalized] = normalize_target_segments_to_source([src], [tgt])
+    assert "⟦C6⟧" in normalized.text
+    assert "⟦C7⟧" not in normalized.text

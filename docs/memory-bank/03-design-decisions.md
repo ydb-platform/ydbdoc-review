@@ -1460,6 +1460,16 @@ must be disabled.
 **Migration:** render/finalize helpers moved to ``harness/render.py``; re-exported from
 ``translate_file`` for backward compatibility.
 
----
+### 6.67. #44872 KV format template placeholder align ([ydb #44872](https://github.com/ydb-platform/ydb/pull/44872))
 
-[← Memory Bank index](../../MEMORY_BANK.md)
+**Problem:** ``--item STRING`` paragraphs use a translated KV format spec
+(``<свойство>=<значение>,...`` → ``<property>=<value>,...``). Pass 1 atom match
+fails; pass 3 allocated ``⟦C5⟧``/``⟦C7⟧`` → critic blocked export-s3, import-alt,
+export-nfs on [PR #44872](https://github.com/ydb-platform/ydb/pull/44872).
+
+**Fix:** pass 2 in ``placeholder_align`` pairs unmatched code slots when both sides
+match ``<…>=<…>`` KV template pattern (or single-slot segment per #44268).
+
+**Tests:** ``test_translated_format_template_*``, ``tests/harness/cases/44872_format_template/``.
+
+---

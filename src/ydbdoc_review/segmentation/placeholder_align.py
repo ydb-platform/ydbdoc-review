@@ -32,6 +32,7 @@ from ydbdoc_review.segmentation.types import ProtectedInline, Segment
 
 _LOCALE_PREFIX_RE = re.compile(r"^(/(?:ru|en))(/|$)")
 _PLACEHOLDER_NAME_RE = re.compile(r"⟦[CLIHVTUS]\d+⟧")
+_KV_TEMPLATE_RE = re.compile(r"^<[^>]*>=<[^>]*>")
 
 
 def _strip_locale_prefix(href: str) -> str:
@@ -96,6 +97,46 @@ def _placeholder_index(name: str) -> int:
     return int(name[2:-1])
 
 
+def _is_kv_template(node: InlineNode) -> bool:
+    """``<property>=<value>,...`` CLI format specs (#44872)."""
+    if not isinstance(node, InlineCode):
+        return False
+    return bool(_KV_TEMPLATE_RE.match(node.content.strip()))
+
+
+def _pair_unmatched_code_slots(
+    unmatched: list[ProtectedInline],
+    unmatched_src: list[ProtectedInline],
+    *,
+    src: Segment,
+    tgt: Segment,
+    used_src: set[str],
+    new_names_in_tgt: set[str],
+    rename: dict[str, str],
+) -> list[ProtectedInline]:
+    """Pair translated code slots that pass 1 could not match by exact text."""
+    if not unmatched or len(unmatched) != len(unmatched_src):
+        return list(unmatched)
+    if not all(isinstance(p.node, InlineCode) for p in unmatched + unmatched_src):
+        return list(unmatched)
+
+    single_segment = len(src.placeholders) == len(tgt.placeholders) == 1
+    still: list[ProtectedInline] = []
+    for tp, sp in zip(unmatched, unmatched_src, strict=True):
+        kv_template = _is_kv_template(sp.node) and _is_kv_template(tp.node)
+        if not (single_segment or kv_template):
+            still.append(tp)
+            continue
+        if sp.placeholder in used_src or sp.placeholder in new_names_in_tgt:
+            still.append(tp)
+            continue
+        used_src.add(sp.placeholder)
+        new_names_in_tgt.add(sp.placeholder)
+        if sp.placeholder != tp.placeholder:
+            rename[tp.placeholder] = sp.placeholder
+    return still
+
+
 def normalize_target_segments_to_source(
     source_segments: list[Segment],
     target_segments: list[Segment],
@@ -146,20 +187,17 @@ def _renumber_segment(src: Segment, tgt: Segment) -> Segment:
         p for p in src.placeholders if p.placeholder not in used_src
     ]
 
-    # Pass 2: single unmatched src/tgt pair — translated code text differs by
-    # language but occupies the same segment slot (#44268 formula case).
-    still_unmatched: list[ProtectedInline] = list(unmatched)
-    if (
-        len(unmatched) == len(unmatched_src) == 1
-        and len(src.placeholders) == len(tgt.placeholders) == 1
-    ):
-        tp, sp = unmatched[0], unmatched_src[0]
-        if sp.placeholder not in used_src and sp.placeholder not in new_names_in_tgt:
-            used_src.add(sp.placeholder)
-            new_names_in_tgt.add(sp.placeholder)
-            if sp.placeholder != tp.placeholder:
-                rename[tp.placeholder] = sp.placeholder
-            still_unmatched = []
+    # Pass 2: unmatched code atoms with different translated text but the same
+    # slot — pair when single-slot (#44268) or KV format template (#44872).
+    still_unmatched = _pair_unmatched_code_slots(
+        unmatched,
+        unmatched_src,
+        src=src,
+        tgt=tgt,
+        used_src=used_src,
+        new_names_in_tgt=new_names_in_tgt,
+        rename=rename,
+    )
 
     # Pass 3: tgt-only atoms keep their name when free, else allocate fresh.
     next_idx_by_kind: dict[str, int] = {}

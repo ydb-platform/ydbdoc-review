@@ -1,0 +1,21 @@
+id: "44872_format_template"
+description: >-
+  --item STRING format template differs by language (#44872). Critic phantom
+  C4→C5 swap must be dropped after align; verdict ok.
+profile: verify
+file_path: ydb/docs/en/core/reference/ydb-cli/export-import/_includes/export-s3.md
+source: source.ru.md
+target: target.en.md
+enable_critic: true
+llm:
+  responses:
+    - |
+      {"verdict":"warnings","issues":[{"segment_id":"s0001","severity":"warning","category":"placeholder corruption","comment":"Placeholder ⟦C4⟧ in source was replaced with ⟦C5⟧ in translation. The atom_map defines only ⟦C4⟧ for this segment.","suggested_text":null}]}
+expect:
+  verdict: ok
+  critic_unresolved_verdict: ok
+  critic_unresolved_issues: 0
+  segments:
+    s0001:
+      placeholders: ["⟦C1⟧", "⟦C2⟧", "⟦C3⟧", "⟦C4⟧"]
+      text_excludes: ["⟦C5⟧"]
