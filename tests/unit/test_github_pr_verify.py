@@ -152,6 +152,7 @@ def test_load_verify_navigation_ru_texts():
     )
     texts = load_verify_navigation_ru_texts(
         [pair],
+        repo_path="/tmp",
         gh=gh,
         owner="o",
         repo="r",

@@ -20,6 +20,7 @@ from ydbdoc_review.pipeline.pairs import (
     NavigationPair,
     build_doc_pairs,
 )
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
@@ -228,6 +229,43 @@ def pick_verify_ru_text(
     return ru_api if ru_api is not None else ru_local
 
 
+def _toc_labels(yaml_text: str) -> set[str]:
+    items = parse_toc_items(yaml_text)
+    labels: set[str] = set()
+    for it in items:
+        if it.get("href"):
+            labels.add(f"href:{it['href']}")
+        if it.get("include_path"):
+            labels.add(f"include:{it['include_path']}")
+    return labels
+
+
+def pick_verify_nav_ru_text(
+    *,
+    en_text: str | None,
+    ru_api: str | None,
+    ru_local: str | None,
+) -> str | None:
+    """Prefer checkout RU nav when EN entries match main RU but not source PR (§6.70)."""
+    if ru_api is None and ru_local is None:
+        return None
+    if not isinstance(en_text, str):
+        return ru_api if isinstance(ru_api, str) else ru_local
+
+    en_labels = _toc_labels(en_text)
+    if isinstance(ru_api, str) and isinstance(ru_local, str):
+        api_labels = _toc_labels(ru_api)
+        local_labels = _toc_labels(ru_local)
+        extra_needed = en_labels - api_labels
+        if extra_needed and extra_needed <= local_labels:
+            return ru_local
+    if isinstance(ru_api, str):
+        return ru_api
+    if isinstance(ru_local, str):
+        return ru_local
+    return None
+
+
 def load_verify_pair_contents(
     repo_path: str,
     pairs: list[DocPair],
@@ -335,20 +373,30 @@ def build_pairs_from_changes(
 def load_verify_navigation_ru_texts(
     pairs: list[NavigationPair],
     *,
+    repo_path: str,
     gh: GitHubClient,
     owner: str,
     repo: str,
     source_pr: int,
 ) -> dict[str, str]:
-    """Load RU navigation YAML from source PR head (§6.31)."""
+    """Load RU navigation YAML for ``doc_verify`` (source PR head or checkout)."""
     ru_owner, ru_repo, ru_ref = source_pr_content_ref(gh, owner, repo, source_pr)
     texts: dict[str, str] = {}
     for pair in pairs:
         if pair.ru_deleted:
             continue
-        text = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
-        if text is not None:
-            texts[pair.ru_path] = text
+        ru_api = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
+        ru_local = read_text(repo_path, pair.ru_path)
+        if ru_local is None:
+            ru_local = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
+        en_text = read_text(repo_path, pair.en_path)
+        if en_text is None:
+            en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+        picked = pick_verify_nav_ru_text(
+            en_text=en_text, ru_api=ru_api, ru_local=ru_local
+        )
+        if picked is not None:
+            texts[pair.ru_path] = picked
     return texts
 
 

@@ -501,6 +501,7 @@ def run_doc_verify(
         if source_pr is not None:
             ru_nav_texts = load_verify_navigation_ru_texts(
                 nav_pairs,
+                repo_path=repo_path,
                 gh=gh,
                 owner=owner,
                 repo=repo,
