@@ -516,7 +516,7 @@ def build_translation_pr_body(source_pr: int, source_repo: str) -> str:
         f"Auto-generated translation for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
         f"Branch: `ydbdoc-review/pr-{source_pr}`\n\n"
-        "QA (`doc_verify`) runs automatically in CI after `doc_translate`; "
+        "QA (`doc_verify`) runs inline in the same `doc_translate` CI job; "
         "re-run manually via the **`doc_verify`** label (`ydbdoc-verify.yml`)."
     )
 
@@ -530,7 +530,7 @@ def build_translate_handoff_comment(
     config: Config,
     usage: UsageTracker | None = None,
 ) -> str:
-    """Short comment after ``doc_translate`` — QA is deferred to ``doc_verify``."""
+    """Legacy short comment — superseded by inline ``doc_verify`` (§6.73)."""
     total, new_count, updated_count = _file_translation_counts(result)
     if total:
         if new_count and updated_count:
@@ -605,6 +605,7 @@ def build_source_pr_comment(
     meta: ReportMeta,
     config: Config,
     usage: UsageTracker | None = None,
+    verify_result: PRTranslationResult | None = None,
 ) -> str:
     """Short summary comment for the source PR after ``doc_translate``."""
     total, new_count, updated_count = _file_translation_counts(result)
@@ -636,11 +637,10 @@ def build_source_pr_comment(
         if has_tokens or cost > 0:
             cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
 
-    qa_line = (
-        "| Статус QA | `ydbdoc-verify-auto` на translation PR |\n"
-        if translation_pr_number
-        else ""
-    )
+    qa_line = ""
+    if translation_pr_number and verify_result is not None:
+        qa_emoji, qa_label = _merge_recommendation(verify_result)
+        qa_line = f"| Статус QA | {qa_emoji} {qa_label} |\n"
 
     body = (
         "🤖 **ydbdoc-review** — перевод готов\n\n"
@@ -654,8 +654,8 @@ def build_source_pr_comment(
     )
     if translation_pr_number:
         body += (
-            f"На translation PR #{translation_pr_number} job **`ydbdoc-verify-auto`** "
-            "запустит **`doc_verify`**. Итоговый вердикт — в комментарии к translation PR.\n"
+            f"Полный QA-отчёт — в комментарии к translation PR #{translation_pr_number}. "
+            "Повторная проверка — лейбл **`doc_verify`** (`ydbdoc-verify.yml`).\n"
         )
     return body
 

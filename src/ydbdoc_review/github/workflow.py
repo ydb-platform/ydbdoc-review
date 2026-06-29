@@ -61,7 +61,6 @@ from ydbdoc_review.reporting.builder import (
     build_commit_message,
     build_full_report,
     build_source_pr_comment,
-    build_translate_handoff_comment,
     build_translation_pr_body,
     build_verify_fixup_pr_body,
     build_verify_fixup_source_comment,
@@ -325,14 +324,12 @@ def run_doc_translate(
     job.committed = committed
     job.pushed = pushed
 
-    elapsed = time.monotonic() - started
-    meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
-
     if dry_run:
         return job
 
     tr_pr_number: int | None = None
     tr_pr_url: str | None = None
+    verify_result: PRTranslationResult | None = None
     if pushed:
         title = f"Auto-translate docs from PR #{pr_number}"
         body = build_translation_pr_body(pr_number, github_repo)
@@ -359,29 +356,28 @@ def run_doc_translate(
                         tr_pr_number,
                         exc,
                     )
-    if tr_pr_number is not None:
-        report_num = _next_report_number(gh, owner, repo, tr_pr_number)
-        report_meta = ReportMeta(
-            mode="doc_translate",
-            report_number=report_num,
-            elapsed_s=elapsed,
-            checkout_ref=git_head_sha(repo_path),
-        )
-        job.translation_comment_url = _safe_post_issue_comment(
-            gh,
-            owner,
-            repo,
+
+    if tr_pr_number is not None and pushed:
+        verify_merge = f"origin/{translation_pr_base(ctx)}"
+        logger.info(
+            "Running inline doc_verify on translation PR #%s (merge_base=%s)",
             tr_pr_number,
-            build_translate_handoff_comment(
-                pr_result,
-                source_pr=pr_number,
-                source_repo=github_repo,
-                meta=report_meta,
-                config=cfg,
-                usage=client.usage_tracker,
-            ),
-            label="translation handoff",
+            verify_merge,
         )
+        verify_job = run_doc_verify(
+            repo_path=repo_path,
+            github_repo=github_repo,
+            pr_number=tr_pr_number,
+            merge_base_with=verify_merge,
+            dry_run=False,
+            no_commit=no_commit,
+            config=cfg,
+        )
+        job.translation_comment_url = verify_job.translation_comment_url
+        verify_result = verify_job.pr_result
+
+    elapsed = time.monotonic() - started
+    meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
 
     job.source_comment_url = _safe_post_issue_comment(
         gh,
@@ -394,6 +390,7 @@ def run_doc_translate(
             meta=meta,
             config=cfg,
             usage=client.usage_tracker,
+            verify_result=verify_result,
         ),
         label="source PR summary",
     )

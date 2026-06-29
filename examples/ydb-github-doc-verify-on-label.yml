@@ -1,4 +1,4 @@
-# doc_verify на translation PR — ручной перезапуск (первый прогон = ydbdoc-verify-auto в ydbdoc-review.yml).
+# doc_verify на translation PR — ручной перезапуск (первый прогон inline в doc_translate job).
 # QA = critic + эвристики + вердикт (отдельный шаг после doc_translate).
 
 name: ydbdoc-review (doc_verify label)

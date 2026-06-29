@@ -1570,28 +1570,29 @@ added RU-only renames ``hive_config.md``, ``kafka_proxy_config.md``,
 
 **Tests:** ``test_merge_supplement_only_adds_translated_href_not_full_ru_gap``.
 
-### 6.73. Auto ``doc_verify`` job after ``doc_translate`` (#44912)
+### 6.73. Inline ``doc_verify`` after ``doc_translate`` (#44912)
 
 **Problem:** [PR #44912](https://github.com/ydb-platform/ydb/pull/44912) had label
 ``doc_verify`` but no QA report. ``run_doc_translate`` added the label via
 ``GITHUB_TOKEN`` — GitHub does **not** cascade label events into other workflows
-(§16.7). ``trigger-translation-ci`` used ``YDBOT_TOKEN`` only for ``ok-to-test`` /
-``rebuild_docs``, not for verify.
+(§16.7). A separate CI job (``ydbdoc-verify-auto``) would fix this but requires
+merging workflow changes in ``ydb-platform/ydb``.
 
 **Decision:**
 
 1. **Do not** add ``doc_verify`` label from ``run_doc_translate`` (action).
-2. **``ydbdoc-verify-auto``** job in ``ydbdoc-review.yml`` (after
-   ``resolve-translation-pr``): checkout translation PR head, ``mode: verify``,
-   post full report — no label cascade needed.
+2. After push + translation PR open, **call ``run_doc_verify`` inline** in the
+   same action process (same CI job) — full QA report on translation PR, no
+   workflow changes in ``ydb``.
 3. **`doc_verify` label** + ``ydbdoc-verify.yml`` — manual re-run only.
-4. **`trigger-translation-ci`** — ``rebuild_docs`` + ``ok-to-test`` only (parallel
-   with verify-auto).
+4. **`trigger-translation-ci`** (existing ydb workflow) — ``rebuild_docs`` +
+   ``ok-to-test`` only via ``YDBOT_TOKEN``.
 
-Workflow chain: ``ydbdoc-review`` → ``resolve-translation-pr`` →
-``ydbdoc-verify-auto`` ∥ ``trigger-translation-ci``.
+**Implementation:** ``run_doc_translate`` → ``run_doc_verify`` when translation
+PR exists; ``build_source_pr_comment(..., verify_result=...)`` for QA line on
+source PR.
 
-**Tests:** ``test_run_doc_translate_posts_comments`` (no ``doc_verify`` label);
-example ``ydb-github-doc-translate-on-label.yml``.
+**Tests:** ``test_run_doc_translate_posts_comments`` (inline verify mocked);
+``test_build_source_pr_comment_new_and_updated``.
 
 ---

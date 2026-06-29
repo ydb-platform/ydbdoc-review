@@ -258,10 +258,10 @@ in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env o
 ### 11.2. CI
 
 - GitHub Actions in `ydb-platform/ydb` repo, two workflows (see **07-pipeline** §16.7, §6.73):
-  - `ydbdoc-review (doc_translate label)` → translate + **`ydbdoc-verify-auto`** + `trigger-translation-ci`.
+  - `ydbdoc-review (doc_translate label)` → translate + inline verify in one job + `trigger-translation-ci`.
   - `ydbdoc-verify (doc_verify label)` → manual re-run, `mode: verify`.
-- **`ydbdoc-review.yml` jobs:** `ydbdoc-review` → `resolve-translation-pr` →
-  `ydbdoc-verify-auto` ∥ `trigger-translation-ci` (`YDBOT_TOKEN`, no checkout).
+- **`ydbdoc-review.yml` jobs:** `ydbdoc-review` (action runs translate then verify) →
+  `trigger-translation-ci` (`YDBOT_TOKEN`, no checkout).
 - Action is **composite** (`action-docker.sh`): builds `Dockerfile` on the runner
   per ref; GHCR fallback optional — **08-operations** §19.4, **03** §6.49.
 - Secrets in the `ydb` repo:

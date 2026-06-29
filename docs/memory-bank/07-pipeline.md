@@ -251,7 +251,7 @@ next to untrusted PR content.
 | Action: API (PR, comments, `documentation` label) | `GITHUB_TOKEN` | `pull-requests: write`, `issues: write` |
 | Action: `git push` branch `ydbdoc-review/pr-N` | same (`GITHUB_PUSH_TOKEN` unset → falls back to `GITHUB_TOKEN`) | `contents: write` |
 | `trigger-translation-ci`: `rebuild_docs` + `ok-to-test` | `YDBOT_TOKEN` in `github-script` | (job has no checkout) |
-| `ydbdoc-verify-auto`: `mode: verify` on translation PR | `GITHUB_TOKEN` | same as translate job |
+| Inline `doc_verify` in `run_doc_translate` (same CI job) | `GITHUB_TOKEN` | same as translate step |
 | `ydbdoc-verify.yml`: manual re-run via `doc_verify` label | `GITHUB_TOKEN` | label workflow |
 
 `trigger-translation-ci` runs only when `needs.ydbdoc-review.result == 'success'`.
@@ -319,20 +319,20 @@ Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-
 
 ## 17. Reporting format
 
-### 17.0. Comment posting order (`doc_translate` → `doc_verify`)
+### 17.0. Comment posting order (`doc_translate` → inline `doc_verify`)
 
 After push and translation PR open (`doc_translate`):
 
-1. **Translation PR** — short handoff comment (`build_translate_handoff_comment`).
-2. **Source PR** — short summary (`build_source_pr_comment`).
-3. **`ydbdoc-verify-auto`** job (same workflow file, §6.73) — checkout translation PR,
-   `mode: verify`, posts full QA report on translation PR.
+1. **Inline `doc_verify`** — same action / CI job calls `run_doc_verify`; posts
+   full QA report on translation PR (and fixup PR link if critic applied fixes).
+2. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
+   `verify_result=`).
 
 Label **`doc_verify`** on the translation PR (`ydbdoc-verify.yml`) is for **manual
 re-runs** only — not required for the first QA pass.
 
-`trigger-translation-ci` (`YDBOT_TOKEN`, §16.7) adds `rebuild_docs` + `ok-to-test` in
-parallel with verify-auto (no `doc_verify` label).
+`trigger-translation-ci` (`YDBOT_TOKEN`, §16.7) adds `rebuild_docs` + `ok-to-test`
+after the translate job succeeds (no workflow changes needed for inline verify).
 
 ### 17.1. Short comment in source PR (after `doc_translate`)
 

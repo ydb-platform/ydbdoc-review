@@ -30,11 +30,11 @@ GitHub Action и CLI для автоматического перевода до
 3. Дочищает остатки кириллицы в EN prose, inline `` `…` `` и комментарии ``//`` / ``#`` / ``--`` в fenced code.
 4. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**.
 
-### `doc_verify` (авто + лейбл на translation PR)
+### `doc_verify` (inline + лейбл на translation PR)
 
 Critic + эвристики + nav validation + вердикт; при необходимости — fixup PR с правками критика.
 
-- **Авто:** job `ydbdoc-verify-auto` в том же workflow, что `doc_translate` (§6.73).
+- **Авто:** inline в том же job, что `doc_translate` (§6.73) — без правок workflow в ydb.
 - **Повтор:** лейбл **`doc_verify`** → `ydbdoc-verify.yml`.
 
 Исходная ветка PR **не меняется**. Мерж translation PR — за человеком.
