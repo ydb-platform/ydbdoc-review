@@ -276,13 +276,21 @@ Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-
 
 ### 16.4. Verify mode commits
 
-- When critic proposes fixes:
+When critic proposes fixes that pass the pipeline guard:
+
+| PR kind | Branch | Follow-up |
+|---------|--------|-----------|
+| Translation PR `ydbdoc-review/pr-{N}` | same branch, 2nd commit (§6.75) | comment «правки в этой ветке» |
+| Author / fork / manual | `ydbdoc-review/verify-{N}` + fixup PR (§6.64) | comment with fixup PR link |
+
+Commit message template:
+
   ```
   Apply critic fixes from doc_verify run on <timestamp>
 
   Critic: <model>
   Fixed segments: K
-  ydbdoc-review v0.2.0
+  ydbdoc-review @ v0.1.0
   ```
 
 ### 16.5. Repair-pass and EN postprocess
@@ -324,9 +332,12 @@ Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-
 
 After push and translation PR open (`doc_translate`):
 
-1. **Inline `doc_verify`** — same action / CI job calls `run_doc_verify`; posts
-   full QA report on translation PR (inline critic commit on same branch if fixes applied — §6.75).
-2. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
+1. **Inline `doc_verify`** — same action / CI job calls `run_doc_verify`; pushes
+   safe critic fixes onto the translation branch (§6.75), then posts the full QA
+   report (`Checkout:` = commit **with** those fixes).
+2. **Translation PR** — if fixes were applied: short note
+   (`build_verify_translation_inline_comment`) — no separate fixup PR.
+3. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
    `verify_result=`).
 
 Label **`doc_verify`** on the translation PR (`ydbdoc-verify.yml`) is for **manual
@@ -405,6 +416,14 @@ list-entry prefix from EN ``main`` (§6.36); ``inconsistent_indent`` is blocking
 To fix a bad ``toc_i.yaml`` already on the translation branch, re-run
 ``doc_translate`` or edit the file manually, then ``doc_verify``.
 `Checkout: \`<sha>\``. Previous comments remain visible for history.
+
+**§6.75 checkout semantics (translation PR):** report is posted **after** the
+inline critic push. ``Checkout:`` is the translation-branch HEAD that **includes**
+applied fixes — 🟢 «можно мержить» matches what merge of this PR brings (except
+skipped critic items in green ``<details>`` blocks, which were never auto-applied).
+
+**Legacy (pre-§6.75):** report could precede a separate fixup PR; merging translation
+PR without merging fixup dropped applied critic fixes — see §6.75 problem statement.
 
 **Not a diff against the prior report:** each run re-parses RU + current EN,
 re-runs critic (with verdict alias normalization), heuristics, and optional repair

@@ -61,8 +61,8 @@ with GitHub Actions:
   files, push to a separate branch `ydbdoc-review/pr-N`, open a separate
   translation PR.
 - Label `doc_verify` on a translation PR → re-run QA (critic + heuristics) on
-  the files as they currently exist on that branch, apply critic fixes, commit,
-  comment with a fresh report.
+  the files on that branch; safe critic fixes are committed **on the same
+  translation branch** (§6.75). Author/fork PRs still get a separate fixup PR (§6.64).
 
 The reviewer should be able to see a clear verdict per file and merge the
 translation PR with minimal manual fixes.

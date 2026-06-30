@@ -757,11 +757,12 @@ the push always rejects.
    (`build_verify_fixup_source_comment`) — through `_safe_post_issue_comment`
    because fork source PRs sometimes return HTTP 401 (§6.48).
 
-Non-fork case (translation PR on upstream) keeps the current direct-push path.
-No critic fixes (`touched` empty) → no fixup PR, only the QA report comment.
+Non-fork case (translation PR on upstream) originally used direct-push; see §6.75.
+No critic fixes (`touched` empty) → no extra commit / fixup PR, only the QA report.
 
-> **Superseded (§6.64):** direct-push to ``ctx.head_ref`` for same-repo PRs is
-> removed — all critic fixes use the fixup branch/PR path above.
+> **Superseded:** §6.64 — author/fork/manual PRs use fixup branch/PR only.
+> §6.75 — translation PR ``ydbdoc-review/pr-{N}`` pushes critic fixes inline on
+> ``ctx.head_ref`` (no ``ydbdoc-review/verify-*``).
 
 Multiple `doc_verify` runs on the same source PR: the local branch is reset off
 base by `prepare_translation_branch_on_base`, but the **remote** ref still carries
