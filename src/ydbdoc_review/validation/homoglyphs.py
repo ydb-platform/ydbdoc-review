@@ -28,6 +28,11 @@ _CYRILLIC_TO_LATIN: dict[int, str] = {
 }
 
 
+def normalize_confusable_cyrillic(text: str) -> str:
+    """Map Cyrillic look-alikes to Latin (tab titles, identifiers)."""
+    return text.translate(str.maketrans(_CYRILLIC_TO_LATIN))
+
+
 def _ascii_ratio(text: str) -> float:
     if not text:
         return 1.0

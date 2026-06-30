@@ -33,6 +33,7 @@ from ydbdoc_review.parsing.ast_types import (
 from ydbdoc_review.parsing.front_matter import translatable_front_matter_fields
 from ydbdoc_review.segmentation.inline_protector import protect_inline
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
+from ydbdoc_review.validation.homoglyphs import normalize_confusable_cyrillic
 
 
 # Tab titles that are language/format identifiers — left untranslated.
@@ -248,4 +249,5 @@ def _short_inline_preview(children: Iterable) -> str:
 
 
 def _is_whitelisted_tab_title(title: str, whitelist: frozenset[str]) -> bool:
-    return title.strip().lower() in whitelist
+    normalized = normalize_confusable_cyrillic(title.strip()).lower()
+    return normalized in whitelist

@@ -36,7 +36,7 @@ def render_with_translations(
     doc = copy.deepcopy(base_doc)
     reinsert_segments(doc, segments, translations)
     localize_links_in_document(doc, target_lang=target_lang)
-    return render_markdown(doc)
+    return render_markdown(doc, target_lang=target_lang)
 
 
 def remap_translations_by_position(

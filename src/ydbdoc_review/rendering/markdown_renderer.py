@@ -5,6 +5,8 @@ Designed for stable round-trip: render(parse(render(parse(x)))) == render(parse(
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 from ydbdoc_review.parsing.ast_types import (
     BlockNode,
     BlockQuote,
@@ -43,6 +45,8 @@ from ydbdoc_review.parsing.ast_types import (
     YfmTabs,   
 )
 
+_render_target_lang: ContextVar[str] = ContextVar("render_target_lang", default="en")
+
 _FENCE_BLOCK_KINDS = frozenset({"fenced_code", "indented_code"})
 
 
@@ -68,8 +72,16 @@ def _list_items_need_blank_gap(prev: ListItem, curr: ListItem) -> bool:
     return _blocks_need_blank_gap(prev.children[-1], curr.children[0])
 
 
-def render_markdown(doc: Document) -> str:
+def render_markdown(doc: Document, *, target_lang: str = "en") -> str:
     """Render a Document back to markdown text."""
+    token = _render_target_lang.set(target_lang)
+    try:
+        return _render_document(doc)
+    finally:
+        _render_target_lang.reset(token)
+
+
+def _render_document(doc: Document) -> str:
     parts: list[str] = []
     if doc.front_matter is not None:
         parts.append(f"---\n{doc.front_matter}---\n")
@@ -213,9 +225,14 @@ def _render_paragraph(p: Paragraph, indent: str) -> str:
 
 
 def _render_heading(h: Heading, indent: str) -> str:
+    from ydbdoc_review.validation.yfm_anchor import english_yfm_anchor
+
     prefix = "#" * h.level
     text = _render_inline(h.children)
-    anchor = f" {{#{h.anchor}}}" if h.anchor else ""
+    anchor_id = h.anchor
+    if anchor_id and _render_target_lang.get() == "en":
+        anchor_id = english_yfm_anchor(anchor_id, text) or anchor_id
+    anchor = f" {{#{anchor_id}}}" if anchor_id else ""
     return f"{indent}{prefix} {text}{anchor}\n"
 
 

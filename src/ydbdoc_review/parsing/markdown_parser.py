@@ -201,7 +201,7 @@ def _parse_heading(stream: _TokenStream) -> Heading:
         # Match " {#anchor-id}" at the end.
         import re
 
-        m = re.search(r"\s*\{#([A-Za-z0-9_\-]+)\}\s*$", text)
+        m = re.search(r"\s*\{#([^}]+)\}\s*$", text)
         if m:
             anchor = m.group(1)
             new_text = text[: m.start()].rstrip()

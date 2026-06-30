@@ -44,6 +44,11 @@ _PHANTOM_MARKER_SWAP = re.compile(
     r"atom_map only defines",
     re.IGNORECASE,
 )
+_HALLUCINATED_LINK_ISSUE = re.compile(
+    r"not present in the source|extra placeholder|introduces an extra|"
+    r"added a link|content change",
+    re.IGNORECASE,
+)
 
 
 def critic_issue_dedupe_key(issue: CriticIssueOut) -> tuple:
@@ -237,6 +242,24 @@ def is_spurious_phantom_marker_swap_issue(
     return bool(_PHANTOM_MARKER_SWAP.search(haystack))
 
 
+def is_spurious_hallucinated_link_issue(
+    issue: CriticIssueOut,
+    segment: Segment | None,
+    translation: str | None,
+) -> bool:
+    """Drop when critic flags a new ``[text](⟦U⟧)`` but the source had no URL atom."""
+    if segment is None or translation is None or not issue.segment_id:
+        return False
+    if any(p.placeholder[1] == "U" for p in segment.placeholders):
+        return False
+    if not re.search(r"\]\(⟦U\d+⟧\)", translation):
+        return False
+    haystack = f"{issue.category} {issue.comment}"
+    return bool(_HALLUCINATED_LINK_ISSUE.search(haystack)) or bool(
+        _PLACEHOLDER_ISSUE.search(issue.category)
+    )
+
+
 def is_spurious_hallucinated_substitution_issue(
     issue: CriticIssueOut,
     segment: Segment | None,
@@ -303,6 +326,12 @@ def drop_spurious_placeholder_issues(
         if is_spurious_hallucinated_substitution_issue(issue, seg, trans):
             logger.info(
                 "Ignoring hallucinated substitution critic issue for %s",
+                issue.segment_id,
+            )
+            continue
+        if is_spurious_hallucinated_link_issue(issue, seg, trans):
+            logger.info(
+                "Ignoring hallucinated link critic issue for %s",
                 issue.segment_id,
             )
             continue

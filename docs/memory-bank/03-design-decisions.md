@@ -1672,4 +1672,56 @@ RU (§6.30), overwriting the author's manual EN edits (+807/−258 on ``basic.md
 ``test_completeness_ok_when_bilingual_skip``,
 ``test_build_source_pr_comment_bilingual_skip``.
 
+### 6.77. Translation PR ``doc_verify`` scope (#45053)
+
+**Problem:** Inline ``doc_verify`` on translation PRs checked EN files and parent
+``toc_*.yaml`` outside the translation commit (e.g. ``spilling.md``,
+``export-import/toc_i.yaml`` from supplement / stale fixup), producing false 🔴.
+
+**Decision:**
+
+1. On translation PR (``ydbdoc-review/pr-{N}``): verify **only** markdown pairs
+   whose **EN** path is in the PR diff vs base.
+2. Navigation: only EN toc/redirect files in the PR diff; **no**
+   ``supplement_navigation_pairs`` on translation PR verify.
+3. ``supplement_only`` ancestor tocs are excluded from verify.
+
+**Implementation:** ``filter_translation_pr_verify_scope`` in ``pipeline/pairs.py``;
+``run_doc_verify`` in ``workflow.py``.
+
+**Tests:** ``test_filter_translation_pr_verify_scope_keeps_en_diff_only``.
+
+### 6.78. English YFM heading anchors + hallucinated link repair (#45053)
+
+**Problem:** RU headings like ``{#fields-Описание}`` stayed in segment text (parser
+only split ASCII anchors); LLM translated to ``{#fields-Description}``. List items
+gained spurious ``[Grace Hash Join](⟦U1⟧)`` with no source URL atom.
+
+**Decision:**
+
+1. Parse any ``{#…}`` suffix into ``Heading.anchor`` (Cyrillic allowed).
+2. On EN render: ``english_yfm_anchor`` maps ``fields-Описание`` →
+   ``fields-Description`` from translated heading text.
+3. Strip model-copied ``{#…}`` from heading segment translations.
+4. ``_strip_hallucinated_url_links`` removes ``[text](⟦U⟧)`` when source has no
+   URL placeholder; critic filter ``is_spurious_hallucinated_link_issue``.
+
+**Implementation:** ``validation/yfm_anchor.py``, ``markdown_parser.py``,
+``markdown_renderer.py``, ``placeholder_repair.py``, ``placeholder_drift.py``.
+
+**Tests:** ``test_yfm_anchor.py``, ``test_strip_hallucinated_url_link_*``,
+``test_hallucinated_link_dropped_*``.
+
+### 6.79. Cyrillic homoglyphs in tab title whitelist (#45053)
+
+**Problem:** RU docs use ``С++`` (Cyrillic U+0421) as a tab title. Whitelist
+knows ``c++`` (Latin) only → RU emits ``TAB_TITLE`` segment, EN does not →
+``gate_round_trip`` 🔴 on ``balancing-prefer-*.md`` ([#45053](https://github.com/ydb-platform/ydb/pull/45053)).
+
+**Decision:** ``normalize_confusable_cyrillic`` (``homoglyphs.py``) before tab
+whitelist lookup in ``extractor._is_whitelisted_tab_title``.
+
+**Tests:** ``test_extract_cyrillic_cpp_tab_title_whitelisted``,
+``test_extract_nested_tabs_ru_en_same_segment_count_with_cyrillic_cpp``.
+
 ---

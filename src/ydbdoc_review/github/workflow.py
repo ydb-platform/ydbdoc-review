@@ -55,6 +55,7 @@ from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import (
     build_navigation_pairs,
     build_verify_navigation_pairs,
+    filter_translation_pr_verify_scope,
 )
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.reporting.builder import (
@@ -465,6 +466,20 @@ def run_doc_verify(
         logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
         return job
 
+    if translation_pr:
+        pairs, nav_pairs = filter_translation_pr_verify_scope(
+            pairs,
+            nav_pairs,
+            changes,
+            docs_root=cfg.paths.docs_root,
+        )
+        if not pairs and not nav_pairs:
+            logger.info(
+                "No scoped doc/navigation pairs for translation PR verify on #%s",
+                pr_number,
+            )
+            return job
+
     cfg.secrets.require_yandex()
     client = YandexLLMClient.from_config(cfg)
     glossary = load_glossary()
@@ -493,7 +508,7 @@ def run_doc_verify(
         pr_result = PRTranslationResult()
 
     md_en_paths = {p.en_path for p in pairs if not p.en_deleted}
-    if md_en_paths:
+    if md_en_paths and not translation_pr:
         nav_pairs = supplement_navigation_pairs(
             nav_pairs,
             md_en_paths,

@@ -16,6 +16,7 @@ from ydbdoc_review.validation.placeholder_drift import (
     filter_critic_response,
     is_spurious_code_literal_equivalent_issue,
     is_spurious_cross_lang_placeholder_issue,
+    is_spurious_hallucinated_link_issue,
     is_spurious_hallucinated_substitution_issue,
     is_spurious_locale_url_issue,
     is_spurious_null_literal_issue,
@@ -240,6 +241,21 @@ def test_hallucinated_substitution_dropped():
     )
     assert is_spurious_hallucinated_substitution_issue(issue, seg, en)
     assert drop_spurious_placeholder_issues([issue], [seg], {"s0169": en}) == []
+
+
+def test_hallucinated_link_dropped_when_source_has_no_url_atom():
+    ru = "**Join operations** — algorithm is used."
+    en = "**Join operations** — the [Grace Hash Join](⟦U1⟧) algorithm is used."
+    seg = _segment("s0028", ru)
+    issue = CriticIssueOut(
+        segment_id="s0028",
+        severity="warning",
+        category="content change",
+        comment="Added a link '[Grace Hash Join](⟦U1⟧)' that was not present in the source.",
+        suggested_text=ru,
+    )
+    assert is_spurious_hallucinated_link_issue(issue, seg, en)
+    assert drop_spurious_placeholder_issues([issue], [seg], {"s0028": en}) == []
 
 
 def test_exclude_skipped_issues_dedupes_verify_echo():

@@ -295,3 +295,29 @@ def build_verify_navigation_pairs(
         )
         for (ru_path, en_path), state in sorted(flags.items())
     ]
+
+
+def filter_translation_pr_verify_scope(
+    pairs: list[DocPair],
+    nav_pairs: list[NavigationPair],
+    changes: list[tuple[str, ChangeKind]],
+    *,
+    docs_root: str = "ydb/docs",
+) -> tuple[list[DocPair], list[NavigationPair]]:
+    """Narrow ``doc_verify`` on a translation PR to this run's EN commit scope (§6.77).
+
+    Markdown: only pairs whose EN mirror is in the PR diff vs base.
+    Navigation: only EN toc/redirect files present in the PR diff (merged nav),
+    excluding ``supplement_only`` ancestor tocs that were not committed.
+    """
+    root = docs_root.strip("/")
+    changed = {_norm(path) for path, _ in changes}
+    en_in_diff = {path for path in changed if path.startswith(f"{root}/en/")}
+
+    scoped_pairs = [pair for pair in pairs if pair.en_path in en_in_diff]
+    scoped_nav = [
+        nav
+        for nav in nav_pairs
+        if nav.en_path in changed and not nav.supplement_only
+    ]
+    return scoped_pairs, scoped_nav

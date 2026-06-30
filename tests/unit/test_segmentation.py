@@ -222,6 +222,46 @@ def test_extract_inside_tabs_with_whitelist():
     assert len(body_segments) == 2
 
 
+def test_extract_cyrillic_cpp_tab_title_whitelisted():
+    """Cyrillic ``С++`` must whitelist like Latin ``c++`` (§6.79, #45053)."""
+    doc = parse_markdown(
+        "{% list tabs %}\n"
+        "\n"
+        "- С++\n"
+        "\n"
+        "  SDK body.\n"
+        "\n"
+        "{% endlist %}\n"
+    )
+    segments = extract_segments(doc)
+    assert SegmentKind.TAB_TITLE not in [s.kind for s in segments]
+    assert len([s for s in segments if s.kind == SegmentKind.PARAGRAPH]) == 1
+
+
+def test_extract_nested_tabs_ru_en_same_segment_count_with_cyrillic_cpp():
+    """RU ``С++`` / EN ``C++`` outer tabs must yield the same segment structure."""
+    nested_ru = (
+        "{% list tabs %}\n"
+        "\n"
+        "- С++\n"
+        "\n"
+        "  {% list tabs %}\n"
+        "\n"
+        "  - Native SDK\n"
+        "\n"
+        "    Body.\n"
+        "\n"
+        "  {% endlist %}\n"
+        "\n"
+        "{% endlist %}\n"
+    )
+    nested_en = nested_ru.replace("- С++", "- C++", 1)
+    ru_segs = extract_segments(parse_markdown(nested_ru))
+    en_segs = extract_segments(parse_markdown(nested_en))
+    assert len(ru_segs) == len(en_segs)
+    assert [s.kind for s in ru_segs] == [s.kind for s in en_segs]
+
+
 def test_extract_tab_title_non_whitelisted():
     """A non-whitelisted tab title is translatable."""
     doc = parse_markdown(

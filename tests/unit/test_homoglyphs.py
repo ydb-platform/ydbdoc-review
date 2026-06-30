@@ -5,8 +5,13 @@ from __future__ import annotations
 from ydbdoc_review.validation.homoglyphs import (
     fix_cyrillic_homoglyphs_in_en,
     fix_russian_angle_placeholders_in_en_fences,
+    normalize_confusable_cyrillic,
     postprocess_en_target_markdown,
 )
+
+
+def test_normalize_confusable_cyrillic_cpp_tab():
+    assert normalize_confusable_cyrillic("С++") == "C++"
 
 
 def test_fix_fqdn_vm_comment():

@@ -10,13 +10,14 @@ from ydbdoc_review.parsing.ast_types import (
     InlineNode,
     InlineVariable,
 )
-from ydbdoc_review.segmentation.types import ProtectedInline, Segment
+from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 from ydbdoc_review.validation.markers import (
     extract_placeholders,
     placeholders_match,
     realign_placeholders,
 )
 from ydbdoc_review.validation.placeholder_roles import placeholder_roles_valid
+from ydbdoc_review.validation.yfm_anchor import split_heading_anchor_suffix
 
 # Markdown link destinations that are not already placeholders.
 _LINK_DEST_RE = re.compile(r"\]\((?!⟦)([^)]+)\)")
@@ -275,9 +276,31 @@ def _try_realign(segment: Segment, text: str) -> str:
     return aligned if aligned is not None else text
 
 
+def _strip_trailing_heading_anchor(segment: Segment, text: str) -> str:
+    """Drop ``{#…}`` suffix the model copied into a heading segment."""
+    if segment.kind != SegmentKind.HEADING:
+        return text
+    body, _ = split_heading_anchor_suffix(text)
+    return body
+
+
+def _strip_hallucinated_url_links(segment: Segment, text: str) -> str:
+    """Remove ``[text](⟦U⟧)`` when the source segment has no URL placeholders."""
+    src_u = [p for p in segment.placeholders if p.placeholder[1] == "U"]
+    if src_u:
+        return text
+
+    def _plain(match: re.Match[str]) -> str:
+        return match.group(1)
+
+    return re.sub(r"\[([^\]]+)\]\(⟦U\d+⟧\)", _plain, text)
+
+
 def _repair_core(segment: Segment, translated: str) -> str:
     """Single pass of structural fixes + atom restoration."""
     text = _repair_legacy_whole_link_marker(segment, translated)
+    text = _strip_trailing_heading_anchor(segment, text)
+    text = _strip_hallucinated_url_links(segment, text)
     text = _strip_stray_leading_variable(segment, text)
     text = _prepend_missing_leading_variable(segment, text)
     text = _dedupe_markers_before_first_link(text)

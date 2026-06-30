@@ -177,3 +177,24 @@ def test_repair_s0124_all_literals():
             )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
+
+
+def test_strip_hallucinated_url_link_without_source_atom():
+    from ydbdoc_review.segmentation.types import Segment, SegmentKind
+
+    seg = Segment(
+        id="s0028",
+        kind=SegmentKind.LIST_ITEM,
+        path=["list"],
+        text="**Join operations** — when joining large tables, the Grace Hash Join algorithm is used.",
+        placeholders=[],
+        ast_path=[0],
+    )
+    translated = (
+        "**Join operations** — when joining large tables, the "
+        "[Grace Hash Join](⟦U1⟧) algorithm is used."
+    )
+    fixed = repair_translation_placeholders(seg, translated)
+    assert "⟦U1⟧" not in fixed
+    assert "[Grace Hash Join]" not in fixed
+    assert placeholders_match(seg.text, fixed)
