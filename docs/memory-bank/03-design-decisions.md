@@ -1763,4 +1763,8 @@ EN include targets.
 **Tests:** ``test_include_paths.py``, ``test_include_supplement.py``,
 ``test_include_targets.py``, ``test_merge_pr_changes.py``.
 
+**Follow-up (§6.80.1):** ``collect_yfm_includes`` uses line regex, not full
+``parse_markdown`` — bare bullet-list include fragments (``*-additional-params.md``)
+crash mdit with spurious ``front_matter`` inside nested list items.
+
 ---

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 
 from ydbdoc_review.parsing.ast_types import (
@@ -15,10 +16,14 @@ from ydbdoc_review.parsing.ast_types import (
     YfmNote,
     YfmTabs,
 )
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.pairs import (
     is_docs_markdown,
     is_language_neutral_docs_path,
+)
+
+# Same single-line pattern as ``yfm_plugins/includes.py`` (block rule).
+_YFM_INCLUDE_LINE_RE = re.compile(
+    r"^\{%\s*include\s+(?:(notitle)\s+)?\[([^\]]*)\]\(([^)]+)\)\s*%\}\s*$"
 )
 
 
@@ -92,6 +97,23 @@ def iter_yfm_includes_in_blocks(blocks: list[BlockNode]) -> list[YfmInclude]:
 
 
 def collect_yfm_includes(text: str) -> list[YfmInclude]:
-    """Parse markdown and return all ``{% include %}`` directives."""
-    doc = parse_markdown(text)
-    return iter_yfm_includes_in_blocks(doc.children)
+    """Return all ``{% include %}`` directives (line scan, no full AST).
+
+    Include directives are single-line YFM blocks. Line scan avoids parser
+    failures on include fragments that are bare bullet lists (e.g.
+    ``export-additional-params.md``) where mdit emits spurious ``front_matter``
+    tokens inside nested list items.
+    """
+    out: list[YfmInclude] = []
+    for line in text.splitlines():
+        m = _YFM_INCLUDE_LINE_RE.match(line.strip())
+        if not m:
+            continue
+        out.append(
+            YfmInclude(
+                text=m.group(2),
+                path=m.group(3),
+                notitle=bool(m.group(1)),
+            )
+        )
+    return out

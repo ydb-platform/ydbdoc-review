@@ -50,3 +50,13 @@ def test_collect_yfm_includes_from_markdown():
     includes = collect_yfm_includes(text)
     assert len(includes) == 1
     assert includes[0].path == "child.md"
+
+
+def test_collect_yfm_includes_on_bare_bullet_list_fragment():
+    """Include-only fragments must not require full markdown parse (§6.80)."""
+    text = (
+        "- `--description STRING`: desc.\n"
+        "    - `zstd` — level default.\n"
+        "    - `zstd-N` — custom level.\n"
+    )
+    assert collect_yfm_includes(text) == []
