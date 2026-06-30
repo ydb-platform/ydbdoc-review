@@ -142,6 +142,14 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
         return None
 
     t = tok.type
+    # End-of-container markers when called from nested list/blockquote parsers.
+    if t in (
+        "list_item_close",
+        "bullet_list_close",
+        "ordered_list_close",
+        "blockquote_close",
+    ):
+        return None
     if t == "paragraph_open":
         return _parse_paragraph(stream)
     if t == "heading_open":
@@ -174,7 +182,11 @@ def _parse_block(stream: _TokenStream) -> BlockNode | None:
         return _parse_yfm_cut(stream)
     if t == "term_definition_open":
         return _parse_term_definition(stream)
-    
+    if t == "front_matter":
+        # mdit may emit spurious empty front_matter inside nested lists (§6.80.2).
+        stream.advance()
+        return _parse_block(stream)
+
     # Unknown token — skip with a warning later. For now, advance to avoid infinite loop.
     raise ValueError(f"Unsupported block token: {t} (content={tok.content!r})")
 

@@ -101,7 +101,7 @@ INPUT: pr_number, source_repo, target_branch_base
 1. SCOPE (§6.80)
    changes = merge_pr_file_changes(git diff, GitHub PR files API)
    pairs = build_doc_pairs(changes)
-   pairs, include_changes = supplement_include_pairs(pairs)
+   pairs, include_changes = supplement_include_pairs(pairs)  # EN-missing only §6.80.3
    changes = merge(include_changes)  # for completeness
 
 2. PLAN (deterministic — §6.30)

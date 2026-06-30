@@ -1767,4 +1767,16 @@ EN include targets.
 ``parse_markdown`` — bare bullet-list include fragments (``*-additional-params.md``)
 crash mdit with spurious ``front_matter`` inside nested list items.
 
+**Follow-up (§6.80.2):** ``_parse_block`` skips spurious ``front_matter`` tokens
+(re-parse next block) so ``doc_translate`` can parse/translate bullet-list include
+fragments. Fixtures: ``tests/fixtures/44880/*.ru.md`` from PR #44880.
+
+**Follow-up (§6.80.3):** ``supplement_include_pairs`` adds transitive locale includes
+only when EN mirror is **absent** at merge-base (or RU path is in source PR diff
+seed). Skips existing EN snippets already on ``main`` — avoids translating 20+
+unchanged includes from ``export-s3.md``.
+
+**Follow-up (§6.80.4):** Source PR comment when push blocked: «translation PR не
+создан», completeness gap list, pipeline errors — not misleading «перевод готов».
+
 ---

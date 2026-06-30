@@ -644,6 +644,35 @@ def build_source_pr_comment(
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
         )
 
+    if result.completeness_gaps and translation_pr_number is None:
+        body = (
+            "🤖 **ydbdoc-review** — translation PR **не создан**\n\n"
+            "Push заблокирован: не все EN-зеркала source PR переведены "
+            "(§6.80 completeness gate).\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            f"| Translation PR | — |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            "| Статус | 🔴 не мержить — completeness gaps |\n\n"
+            "**Не переведены:**\n\n"
+        )
+        for path in result.completeness_gaps:
+            body += f"- {gap_label(path)}\n"
+        errors = [r for r in result.pair_results if r.error]
+        if errors:
+            body += "\n**Ошибки pipeline:**\n\n"
+            for run in errors:
+                body += f"- `{run.plan.target_path}`: {run.error}\n"
+        if config.reporting.include_cost:
+            cost = (
+                usage.estimate_cost_usd()
+                if usage
+                else float(_aggregate_file_usage(result)["estimated_cost_usd"])
+            )
+            if cost > 0:
+                body += f"\n| Стоимость перевода | {_format_cost_rub(cost)} |\n"
+        return body
+
     if total:
         if new_count and updated_count:
             files_label = f"{total} ({new_count} новых, {updated_count} обновлено)"

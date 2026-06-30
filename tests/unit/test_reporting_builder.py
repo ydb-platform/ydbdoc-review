@@ -138,6 +138,25 @@ def test_build_source_pr_comment_bilingual_skip():
     assert "Translation PR не создаётся" in body
 
 
+def test_build_source_pr_comment_completeness_gaps_no_translation_pr():
+    cfg = _cfg()
+    result = _sample_result(new_file=True)
+    result.completeness_gaps = [
+        "ydb/docs/en/core/reference/ydb-cli/export-import/_includes/export-additional-params.md",
+    ]
+    body = build_source_pr_comment(
+        result,
+        translation_pr_number=None,
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=384),
+        config=cfg,
+    )
+    assert "translation PR **не создан**" in body
+    assert "completeness gate" in body
+    assert "export-additional-params.md" in body
+    assert "перевод готов" not in body
+    assert "Translation PR | — |" in body
+
+
 def test_build_full_report_reviewer_focused():
     cfg = _cfg()
     body = build_full_report(

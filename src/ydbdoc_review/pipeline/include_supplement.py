@@ -24,6 +24,12 @@ def _read_ru_markdown(
     return read_text_at_ref(repo_path, "HEAD", ru_path)
 
 
+def _en_mirror_on_base(
+    repo_path: str, merge_base_with: str, en_path: str
+) -> bool:
+    return read_text_at_ref(repo_path, merge_base_with, en_path) is not None
+
+
 def _ru_include_targets(
     ru_md_path: str,
     ru_text: str,
@@ -48,14 +54,21 @@ def supplement_include_pairs(
     repo_path: str,
     merge_base_with: str,
     docs_root: str = "ydb/docs",
+    seed_ru_paths: set[str] | None = None,
 ) -> tuple[list[DocPair], list[tuple[str, ChangeKind]]]:
-    """Close transitive locale-include dependencies for pairs already in scope.
+    """Close locale-include dependencies for pairs already in scope.
+
+    Only adds targets whose EN mirror is **absent** at ``merge_base_with`` (§6.80.3),
+    or whose RU path is in ``seed_ru_paths`` (source PR diff) but not yet paired.
+    Skips transitive includes that already exist on EN main — avoids re-translating
+    the whole ``export-s3.md`` include tree on every PR.
 
     Returns updated pairs and synthetic RU change entries for ``completeness_gaps``.
     """
     if not pairs:
         return pairs, []
 
+    seed = seed_ru_paths if seed_ru_paths is not None else {p.ru_path for p in pairs}
     by_ru = {pair.ru_path: pair for pair in pairs}
     queue = sorted(by_ru)
     extra_changes: list[tuple[str, ChangeKind]] = []
@@ -75,6 +88,10 @@ def supplement_include_pairs(
             if en_path is None:
                 continue
             if target_ru in by_ru:
+                continue
+
+            en_on_base = _en_mirror_on_base(repo_path, merge_base_with, en_path)
+            if en_on_base and target_ru not in seed:
                 continue
 
             by_ru[target_ru] = DocPair(

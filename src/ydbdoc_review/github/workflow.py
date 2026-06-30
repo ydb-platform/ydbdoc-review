@@ -231,11 +231,13 @@ def run_doc_translate(
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
+    seed_ru_paths = {p.ru_path for p in pairs}
     pairs, include_changes = supplement_include_pairs(
         pairs,
         repo_path=repo_path,
         merge_base_with=merge_base_with,
         docs_root=cfg.paths.docs_root,
+        seed_ru_paths=seed_ru_paths,
     )
     if include_changes:
         changes = merge_pr_file_changes(changes, include_changes)
