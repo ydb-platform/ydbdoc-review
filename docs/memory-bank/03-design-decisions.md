@@ -670,16 +670,15 @@ full render from the source AST.
    checkout, parse → translate all segments → render target from the **source AST**.
    Commit overwrites the mirror file; existing target text is never merged or patched.
 2. **Source language** = the side authors edited in the PR (merge-base diff):
-   - RU changed (with or without EN changed) → `translate_to_en` from RU when RU
-     text exists (default YDB path).
+   - RU changed, EN unchanged → `translate_to_en` from RU when RU text exists.
    - EN changed, RU unchanged → `translate_to_ru` from EN.
-   - Both changed, RU missing → `translate_to_ru` from EN.
+   - **Both changed** → `skip` (§6.76) — bilingual PR; do not overwrite author's EN.
 3. **No LLM analyze for action selection** in CI (`plan_pairs`, `use_analyze_llm=False`).
    `critic_only` remains only for **`doc_verify`** (`enable_translate=False`).
 4. Pair with **`gate_round_trip`** (§6.29) blocks merge when render does not preserve
    segment parity.
 
-**Tests:** `tests/unit/test_pipeline_analyze.py` (both-changed → RU→EN);
+**Tests:** `tests/unit/test_pipeline_analyze.py` (both-changed → skip §6.76);
 orchestrator + workflow pass `use_analyze_llm=False`.
 
 ### 6.29. Unified QA (doc_translate ≡ doc_verify)
@@ -1645,5 +1644,32 @@ without fixup and lose applied fixes.
 
 **Tests:** ``test_run_doc_verify_translation_pr_pushes_fixes_inline``;
 fork/author fixup tests unchanged.
+
+### 6.76. Skip ``doc_translate`` when both RU and EN changed (bilingual PR, #44191)
+
+**Problem:** [PR #44191](https://github.com/ydb-platform/ydb/pull/44191) updated
+both RU and EN mirrors in one author PR. Auto-translate
+[#45043](https://github.com/ydb-platform/ydb/pull/45043) full re-rendered EN from
+RU (§6.30), overwriting the author's manual EN edits (+807/−258 on ``basic.md``).
+
+**Decision:**
+
+1. **Markdown pairs:** if merge-base diff shows **both** ``ru_changed`` and
+   ``en_changed`` → ``plan_pair_heuristic`` returns ``skip`` (no LLM, no commit).
+2. **Navigation YAML:** ``build_navigation_pairs`` tracks ``en_changed``; skip
+   ``run_navigation_merges`` when both sides changed in the source PR.
+3. **Completeness:** ``bilingual_en_mirrors`` excludes those EN paths from
+   ``completeness_gaps`` — no false «не переведён» on bilingual PRs.
+4. **Reporting:** ``build_source_pr_comment`` — «перевод не требуется», no
+   translation PR when all pairs are bilingual skip.
+
+**Implementation:** ``pipeline/analyze.py`` (``BILINGUAL_SKIP_SUMMARY``),
+``pipeline/pairs.py``, ``navigation_merge.py``, ``completeness.py``,
+``reporting/builder.py``.
+
+**Tests:** ``test_heuristic_both_changed_skip_bilingual``,
+``test_build_navigation_pairs_tracks_en_side_changed``,
+``test_completeness_ok_when_bilingual_skip``,
+``test_build_source_pr_comment_bilingual_skip``.
 
 ---

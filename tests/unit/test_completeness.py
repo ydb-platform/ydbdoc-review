@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.pipeline.analyze import PairPlan
-from ydbdoc_review.pipeline.completeness import completeness_gaps, expected_en_mirrors
+from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_SUMMARY, PairPlan
+from ydbdoc_review.pipeline.completeness import (
+    bilingual_en_mirrors,
+    completeness_gaps,
+    expected_en_mirrors,
+)
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
@@ -84,5 +88,35 @@ def test_completeness_ok_when_navigation_merged():
                 target_text="items:\n",
             )
         ],
+    )
+    assert completeness_gaps(changes, result) == []
+
+
+def test_bilingual_en_mirrors_detects_both_sides():
+    changes = [
+        ("ydb/docs/ru/a/compact.md", "modified"),
+        ("ydb/docs/en/a/compact.md", "modified"),
+        ("ydb/docs/ru/b/only.md", "modified"),
+    ]
+    assert bilingual_en_mirrors(changes) == {"ydb/docs/en/a/compact.md"}
+
+
+def test_completeness_ok_when_bilingual_skip():
+    changes = [
+        ("ydb/docs/ru/a/compact.md", "modified"),
+        ("ydb/docs/en/a/compact.md", "modified"),
+    ]
+    pair = DocPair(ru_path="ydb/docs/ru/a/compact.md", en_path="ydb/docs/en/a/compact.md")
+    plan = PairPlan(
+        pair=pair,
+        action="skip",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary=BILINGUAL_SKIP_SUMMARY,
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, skipped=True)],
     )
     assert completeness_gaps(changes, result) == []

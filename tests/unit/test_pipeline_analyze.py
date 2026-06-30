@@ -40,7 +40,7 @@ def test_heuristic_delete_en():
     assert plan.action == "delete_en"
 
 
-def test_heuristic_both_changed_full_retranslate_from_ru():
+def test_heuristic_both_changed_skip_bilingual():
     plan = plan_pair_heuristic(
         _content(
             ru_text="RU",
@@ -48,8 +48,8 @@ def test_heuristic_both_changed_full_retranslate_from_ru():
             pair=_pair(ru_changed=True, en_changed=True),
         )
     )
-    assert plan.action == "translate_to_en"
-    assert "full re-translate" in plan.summary
+    assert plan.action == "skip"
+    assert "§6.76" in plan.summary
 
 
 def test_plan_from_analyze_critic_only():
@@ -66,7 +66,7 @@ def test_plan_from_analyze_critic_only():
     assert plan.action == "critic_only"
 
 
-def test_plan_pairs_always_heuristic_ru_to_en_when_both_changed():
+def test_plan_pairs_skip_when_both_changed():
     content = _content(
         ru_text="RU body",
         en_text="EN body",
@@ -74,7 +74,7 @@ def test_plan_pairs_always_heuristic_ru_to_en_when_both_changed():
     )
     plans = plan_pairs([content])
     assert len(plans) == 1
-    assert plans[0].action == "translate_to_en"
+    assert plans[0].action == "skip"
 
 
 def test_plan_pairs_rejects_analyze_llm():
@@ -116,7 +116,8 @@ def test_heuristic_both_changed_en_only_text():
             pair=_pair(ru_changed=True, en_changed=True),
         )
     )
-    assert plan.action == "translate_to_ru"
+    assert plan.action == "skip"
+    assert "§6.76" in plan.summary
 
 
 def test_heuristic_skip_when_unchanged():

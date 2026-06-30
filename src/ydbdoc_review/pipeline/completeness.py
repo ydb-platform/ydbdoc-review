@@ -13,6 +13,33 @@ def _norm(path: str) -> str:
     return path.replace("\\", "/")
 
 
+def bilingual_en_mirrors(
+    changes: list[tuple[str, ChangeKind]],
+    *,
+    docs_root: str = "ydb/docs",
+) -> set[str]:
+    """EN paths where both RU and EN mirrors changed in the source PR (§6.76)."""
+    ru_touched: set[str] = set()
+    en_touched: set[str] = set()
+    root = docs_root.strip("/")
+
+    for raw_path, kind in changes:
+        if kind == "deleted":
+            continue
+        path = _norm(raw_path)
+        if path.startswith(f"{root}/ru/"):
+            if not is_docs_markdown(path, docs_root) and not is_navigation_yaml(path):
+                continue
+            en_path = counterpart(path, docs_root)
+            if en_path is not None:
+                ru_touched.add(en_path)
+        elif path.startswith(f"{root}/en/"):
+            if not is_docs_markdown(path, docs_root) and not is_navigation_yaml(path):
+                continue
+            en_touched.add(path)
+    return ru_touched & en_touched
+
+
 def expected_en_mirrors(
     changes: list[tuple[str, ChangeKind]],
     *,
@@ -60,6 +87,7 @@ def completeness_gaps(
 ) -> list[str]:
     """Sorted EN mirror paths missing from the translation run."""
     expected = expected_en_mirrors(changes, docs_root=docs_root)
+    expected -= bilingual_en_mirrors(changes, docs_root=docs_root)
     committed = committed_en_paths(result)
     return sorted(expected - committed)
 

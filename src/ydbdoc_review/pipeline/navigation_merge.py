@@ -412,6 +412,8 @@ def run_navigation_merges(
     for pair in pairs:
         if not pair.ru_changed:
             continue
+        if pair.en_changed:
+            continue
         results.append(
             merge_navigation_pair(
                 pair,

@@ -166,30 +166,40 @@ def build_navigation_pairs(
     *,
     docs_root: str = "ydb/docs",
 ) -> list[NavigationPair]:
-    """Build navigation YAML pairs from PR file changes (RU side only)."""
+    """Build navigation YAML pairs from PR file changes (RU and EN sides)."""
     flags: dict[tuple[str, str], dict[str, bool]] = {}
 
     for raw_path, kind in changes:
         path = _norm(raw_path)
-        if not is_docs_ru_navigation(path, docs_root):
-            continue
-        en_path = counterpart(path, docs_root)
-        if en_path is None:
-            continue
-        key = (path, en_path)
-        state = flags.setdefault(
-            key,
-            {"ru_changed": False, "ru_deleted": False},
-        )
-        state["ru_changed"] = True
-        if kind == "deleted":
-            state["ru_deleted"] = True
+        if is_docs_ru_navigation(path, docs_root):
+            en_path = counterpart(path, docs_root)
+            if en_path is None:
+                continue
+            key = (path, en_path)
+            state = flags.setdefault(
+                key,
+                {"ru_changed": False, "en_changed": False, "ru_deleted": False},
+            )
+            state["ru_changed"] = True
+            if kind == "deleted":
+                state["ru_deleted"] = True
+        elif is_docs_en_navigation(path, docs_root):
+            ru_path = counterpart(path, docs_root)
+            if ru_path is None:
+                continue
+            key = (ru_path, path)
+            state = flags.setdefault(
+                key,
+                {"ru_changed": False, "en_changed": False, "ru_deleted": False},
+            )
+            state["en_changed"] = True
 
     return [
         NavigationPair(
             ru_path=ru_path,
             en_path=en_path,
             ru_changed=state["ru_changed"],
+            en_changed=state["en_changed"],
             ru_deleted=state["ru_deleted"],
         )
         for (ru_path, en_path), state in sorted(flags.items())

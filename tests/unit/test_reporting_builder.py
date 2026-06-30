@@ -104,6 +104,40 @@ def test_build_source_pr_comment_new_and_updated():
     assert "Статус QA" not in body
 
 
+def test_build_source_pr_comment_bilingual_skip():
+    from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_SUMMARY, PairPlan
+    from ydbdoc_review.pipeline.pairs import DocPair
+
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+        en_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="skip",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary=BILINGUAL_SKIP_SUMMARY,
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, skipped=True)],
+    )
+    body = build_source_pr_comment(
+        result,
+        translation_pr_number=None,
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=5),
+        config=cfg,
+    )
+    assert "перевод не требуется" in body
+    assert "§6.76" in body
+    assert "Translation PR не создаётся" in body
+
+
 def test_build_full_report_reviewer_focused():
     cfg = _cfg()
     body = build_full_report(

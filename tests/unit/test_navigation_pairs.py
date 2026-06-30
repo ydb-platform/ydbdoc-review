@@ -26,6 +26,23 @@ def test_build_navigation_pairs_from_toc_yaml():
     assert pairs[0].ru_changed is True
 
 
+def test_build_navigation_pairs_tracks_en_side_changed():
+    changes = [
+        (
+            "ydb/docs/ru/core/yql/reference/syntax/alter_table/toc_i.yaml",
+            "modified",
+        ),
+        (
+            "ydb/docs/en/core/yql/reference/syntax/alter_table/toc_i.yaml",
+            "modified",
+        ),
+    ]
+    pairs = build_navigation_pairs(changes)
+    assert len(pairs) == 1
+    assert pairs[0].ru_changed is True
+    assert pairs[0].en_changed is True
+
+
 def test_build_verify_navigation_pairs_from_en_toc_yaml():
     changes = [
         (

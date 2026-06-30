@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
+from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import gap_label
 from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
 from ydbdoc_review.reporting.heuristic_messages import (
@@ -94,6 +95,14 @@ def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
 def _is_new_file(run: PairRunResult) -> bool:
     summary = run.plan.summary.lower()
     return "missing" in summary or "generate from" in summary
+
+
+def _bilingual_skip_count(result: PRTranslationResult) -> int:
+    return sum(
+        1
+        for run in result.pair_results
+        if run.skipped and BILINGUAL_SKIP_MARKER in run.plan.summary
+    )
 
 
 def _file_translation_counts(result: PRTranslationResult) -> tuple[int, int, int]:
@@ -619,6 +628,21 @@ def build_source_pr_comment(
 ) -> str:
     """Short summary comment for the source PR after ``doc_translate``."""
     total, new_count, updated_count = _file_translation_counts(result)
+    bilingual_skip = _bilingual_skip_count(result)
+
+    if total == 0 and bilingual_skip and translation_pr_number is None:
+        pairs_label = (
+            "1 bilingual-пара"
+            if bilingual_skip == 1
+            else f"{bilingual_skip} bilingual-пар"
+        )
+        return (
+            "🤖 **ydbdoc-review** — перевод не требуется\n\n"
+            f"В source PR обновлены обе стороны ({pairs_label}); "
+            f"автоперевод пропущен ({BILINGUAL_SKIP_MARKER}). "
+            "Translation PR не создаётся.\n\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+        )
 
     if total:
         if new_count and updated_count:
@@ -666,6 +690,11 @@ def build_source_pr_comment(
         body += (
             f"Полный QA-отчёт — в комментарии к translation PR #{translation_pr_number}. "
             "Повторная проверка — лейбл **`doc_verify`** (`ydbdoc-verify.yml`).\n"
+        )
+    elif bilingual_skip:
+        body += (
+            f"\n{bilingual_skip} пар(ы) пропущены — bilingual update в source PR "
+            f"({BILINGUAL_SKIP_MARKER}).\n"
         )
     return body
 

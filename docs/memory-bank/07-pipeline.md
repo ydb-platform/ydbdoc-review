@@ -107,7 +107,7 @@ INPUT: pr_number, source_repo, target_branch_base
    plans = plan_pairs(contents)   # no LLM analyze in CI
    # RU changed → translate_to_en (full render, overwrite EN)
    # EN changed only → translate_to_ru
-   # both changed → translate_to_en from RU when RU text exists
+   # both changed → skip (§6.76); RU-only → translate_to_en from RU
 
 3. NAVIGATION (when PR touches RU ``toc*.yaml`` / redirect YAML — §6.17)
    nav_pairs = build_navigation_pairs(changes)
@@ -196,11 +196,11 @@ For each changed `.md` under `ydb/docs/`:
   language-neutral (images, shared assets); not translated.
 - Non-`.md` under `_includes/` (png, svg, …) — never sent to the translator.
 
-If RU changed (EN changed or not) → **full** translate RU→EN; commit replaces EN
+If RU changed (EN unchanged) → **full** translate RU→EN; commit replaces EN
 entirely (render from RU AST — §6.30). Existing EN on `main` is ignored.
 If EN changed and RU did not → full translate EN→RU (overwrite RU).
-If both changed and RU text exists → full RU→EN (RU is default source).
-If both changed and RU missing → full EN→RU.
+If **both** changed in the source PR → **skip** auto-translate (§6.76); authors
+updated the bilingual pair — no translation PR, no EN overwrite.
 If RU exists but EN doesn't → create EN from RU.
 If EN exists but RU doesn't → create RU from EN.
 `critic_only` is **not** used in `doc_translate` (verify mode only).

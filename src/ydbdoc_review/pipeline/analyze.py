@@ -20,6 +20,12 @@ PairAction = Literal[
     "delete_en",
 ]
 
+BILINGUAL_SKIP_MARKER = "§6.76"
+BILINGUAL_SKIP_SUMMARY = (
+    "Both RU and EN changed in source PR — bilingual update, "
+    f"skip auto-translate ({BILINGUAL_SKIP_MARKER})"
+)
+
 _ANALYZE_TEXT_LIMIT = 8000
 
 
@@ -58,9 +64,9 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     with ``enable_translate=True``), replacing any existing mirror text. The
     analyze LLM is not used for action selection.
 
-    Source language: whichever side the PR authors edited. RU→EN is the common
-    case; EN→RU when only EN changed. When both sides changed, RU is the default
-    source (YDB docs are RU-first); EN wins only when RU text is missing.
+    Source language: whichever side the PR authors edited. RU→EN when only RU
+    changed; EN→RU when only EN changed. When **both** sides changed in the
+    source PR, skip auto-translate (§6.76) — authors updated the bilingual pair.
     """
     pair = content.pair
     ru_ok = _non_trivial(content.ru_text)
@@ -75,6 +81,17 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             source_lang="ru",
             target_lang="en",
             summary="RU file deleted in PR — remove EN mirror",
+        )
+
+    if pair.ru_changed and pair.en_changed:
+        return PairPlan(
+            pair=pair,
+            action="skip",
+            source_path=pair.ru_path,
+            target_path=pair.en_path,
+            source_lang="ru",
+            target_lang="en",
+            summary=BILINGUAL_SKIP_SUMMARY,
         )
 
     if not ru_ok and not en_ok:
@@ -138,11 +155,7 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             target_path=pair.en_path,
             source_lang="ru",
             target_lang="en",
-            summary=(
-                "RU changed — full re-translate to EN (ignore existing EN)"
-                if pair.en_changed
-                else "RU changed — full re-translate to EN"
-            ),
+            summary="RU changed — full re-translate to EN",
         )
 
     if en_ok:
