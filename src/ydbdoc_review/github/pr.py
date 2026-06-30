@@ -162,6 +162,26 @@ def list_pr_file_changes_git(
     return list_local_changes(repo_path, merge_base_with)
 
 
+_KIND_PRIORITY: dict[ChangeKind, int] = {
+    "added": 3,
+    "deleted": 2,
+    "modified": 1,
+}
+
+
+def merge_pr_file_changes(
+    *change_lists: list[tuple[str, ChangeKind]],
+) -> list[tuple[str, ChangeKind]]:
+    """Union PR file change lists; prefer stronger kinds on duplicate paths (§6.80)."""
+    merged: dict[str, ChangeKind] = {}
+    for changes in change_lists:
+        for raw_path, kind in changes:
+            path = raw_path.replace("\\", "/")
+            if path not in merged or _KIND_PRIORITY[kind] > _KIND_PRIORITY[merged[path]]:
+                merged[path] = kind
+    return sorted(merged.items())
+
+
 def source_pr_number_from_branch(branch: str, *, prefix: str) -> int | None:
     """Extract source PR number from ``ydbdoc-review/pr-<N>``."""
     if not branch.startswith(prefix):

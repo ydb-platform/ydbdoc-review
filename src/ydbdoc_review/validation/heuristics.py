@@ -208,6 +208,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("md_link_parity:"):
         return "blocking"
+    if message.startswith("include_target:"):
+        return "blocking"
     return "blocking"
 
 

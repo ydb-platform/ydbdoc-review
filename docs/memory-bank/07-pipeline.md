@@ -98,10 +98,11 @@ OUTPUT: final_text, file_report = {
 ```
 INPUT: pr_number, source_repo, target_branch_base
 
-1. ENUMERATE
-   changed_md = github.list_changed_md_files(pr_number, target_branch_base)
-   pairs = pair_ru_en(changed_md)
-   # pairs: [{ru_path, en_path, ru_exists, en_exists, ru_changed, en_changed}]
+1. SCOPE (§6.80)
+   changes = merge_pr_file_changes(git diff, GitHub PR files API)
+   pairs = build_doc_pairs(changes)
+   pairs, include_changes = supplement_include_pairs(pairs)
+   changes = merge(include_changes)  # for completeness
 
 2. PLAN (deterministic — §6.30)
    plans = plan_pairs(contents)   # no LLM analyze in CI
@@ -113,8 +114,9 @@ INPUT: pr_number, source_repo, target_branch_base
    nav_pairs = build_navigation_pairs(changes)
    scope = toc_translate_scope(ru_base, ru_pr) ∪ new_md_hrefs
    merge_en_toc_yaml / merge_en_redirects_yaml → write EN mirror
-4. COMPLETENESS (§6.32)
+4. COMPLETENESS (§6.32, §6.80)
    completeness_gaps = expected_en_mirrors(diff) − committed_en_paths
+   if gaps → skip commit/push; 🔴 in source comment
 
 5. PER-FILE TRANSLATION (sequential)
    per_pr_cache = {}

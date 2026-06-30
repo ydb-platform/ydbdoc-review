@@ -27,6 +27,7 @@ from ydbdoc_review.github.pr import (
     load_pair_contents,
     load_verify_navigation_ru_texts,
     load_verify_pair_contents,
+    merge_pr_file_changes,
     parse_repo,
     parse_source_pr_from_text,
     pull_request_context,
@@ -45,6 +46,7 @@ from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.completeness import completeness_gaps
+from ydbdoc_review.pipeline.include_supplement import supplement_include_pairs
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
@@ -70,6 +72,7 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.include_targets import apply_include_target_checks
 
 logger = logging.getLogger(__name__)
 
@@ -223,8 +226,19 @@ def run_doc_translate(
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
-    changes = list_pr_file_changes_git(repo_path, merge_base_with)
+    changes = merge_pr_file_changes(
+        list_pr_file_changes_git(repo_path, merge_base_with),
+        list_pr_file_changes_api(gh, owner, repo, pr_number),
+    )
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
+    pairs, include_changes = supplement_include_pairs(
+        pairs,
+        repo_path=repo_path,
+        merge_base_with=merge_base_with,
+        docs_root=cfg.paths.docs_root,
+    )
+    if include_changes:
+        changes = merge_pr_file_changes(changes, include_changes)
     nav_pairs = build_navigation_pairs(changes, docs_root=cfg.paths.docs_root)
     job = DocJobResult(
         mode="doc_translate",
@@ -285,7 +299,15 @@ def run_doc_translate(
     )
     job.pr_result = pr_result
 
-    touched = _apply_results_to_disk(repo_path, pr_result, dry_run=dry_run)
+    if pr_result.completeness_gaps:
+        logger.error(
+            "Completeness gaps — skip commit/push for PR #%s: %s",
+            pr_number,
+            pr_result.completeness_gaps,
+        )
+        touched = TouchedPaths([], [])
+    else:
+        touched = _apply_results_to_disk(repo_path, pr_result, dry_run=dry_run)
 
     committed = pushed = False
     if touched and not dry_run and not no_commit:
@@ -375,6 +397,7 @@ def run_doc_translate(
             dry_run=False,
             no_commit=no_commit,
             config=cfg,
+            inherited_completeness_gaps=pr_result.completeness_gaps,
         )
         job.translation_comment_url = verify_job.translation_comment_url
         verify_result = verify_job.pr_result
@@ -410,6 +433,7 @@ def run_doc_verify(
     dry_run: bool = False,
     no_commit: bool = False,
     config: Config | None = None,
+    inherited_completeness_gaps: list[str] | None = None,
 ) -> DocJobResult:
     """``doc_verify`` workflow on a translation PR."""
     started = time.monotonic()
@@ -545,6 +569,17 @@ def run_doc_verify(
             ru_pr_by_path=ru_nav_texts,
             extra_toc_hrefs=extra_toc_hrefs_from_md_targets(md_en_paths),
         )
+
+    apply_include_target_checks(
+        pr_result,
+        repo_path=repo_path,
+        docs_root=cfg.paths.docs_root,
+    )
+    if inherited_completeness_gaps:
+        merged_gaps = list(
+            dict.fromkeys([*inherited_completeness_gaps, *pr_result.completeness_gaps])
+        )
+        pr_result.completeness_gaps = merged_gaps
 
     job.pr_result = pr_result
 

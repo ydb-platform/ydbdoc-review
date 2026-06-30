@@ -672,9 +672,12 @@ def build_source_pr_comment(
             cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
 
     qa_line = ""
-    if translation_pr_number and verify_result is not None:
-        qa_emoji, qa_label = _merge_recommendation(verify_result)
-        qa_line = f"| Статус QA | {qa_emoji} {qa_label} |\n"
+    if translation_pr_number:
+        if result.completeness_gaps:
+            qa_line = "| Статус QA | 🔴 не мержить — не все файлы source PR переведены |\n"
+        elif verify_result is not None:
+            qa_emoji, qa_label = _merge_recommendation(verify_result)
+            qa_line = f"| Статус QA | {qa_emoji} {qa_label} |\n"
 
     body = (
         "🤖 **ydbdoc-review** — перевод готов\n\n"

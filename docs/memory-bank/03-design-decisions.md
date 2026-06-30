@@ -1724,4 +1724,43 @@ whitelist lookup in ``extractor._is_whitelisted_tab_title``.
 **Tests:** ``test_extract_cyrillic_cpp_tab_title_whitelisted``,
 ``test_extract_nested_tabs_ru_en_same_segment_count_with_cyrillic_cpp``.
 
+### 6.80. Locale include dependency closure (#44880 / #45056)
+
+**Problem:** Source PR #44880 extracted «additional parameters» into new locale
+includes ``export-additional-params.md`` / ``import-additional-params.md``.
+``doc_translate`` translated parent ``export-s3.md`` / ``import-s3.md`` / ``nfs``
+(preserving ``{% include … %}``) but omitted the new child include files.
+Translation PR #45056 passed ``doc_verify`` 🟢; Diplodoc build failed on missing
+EN include targets.
+
+**Root cause:**
+
+1. ``doc_translate`` scope = flat git merge-base diff only — no transitive
+   closure over ``{% include %}`` references from changed RU ``.md``.
+2. Git diff can miss paths that GitHub PR Files API still lists (post-merge /
+   squash edge cases).
+3. ``doc_verify`` (§6.77) checks only EN files in the translation PR diff; no
+   validation that locale-relative include targets exist on disk.
+4. ``completeness_gaps`` blocked merge in reports but did not block push; inline
+   ``doc_verify`` ignored translate-time gaps.
+
+**Decision:**
+
+1. **`supplement_include_pairs()`** — after ``build_doc_pairs``, BFS RU markdown
+   in scope; parse ``YfmInclude``; resolve paths under ``docs/ru/…/_includes/``;
+   add missing RU/EN pairs + synthetic change entries for ``completeness_gaps``.
+2. **Scope union** — ``merge_pr_file_changes(git diff, GitHub PR files API)`` in
+   ``run_doc_translate``.
+3. **`check_missing_locale_include_targets()`** — blocking ``include_target:`` in
+   ``doc_verify`` (and inline verify after translate).
+4. **Push gate** — skip commit/push when ``completeness_gaps`` non-empty; propagate
+   gaps into inline verify report; source PR short comment shows 🔴 when gaps.
+
+**Implementation:** ``parsing/include_paths.py``, ``pipeline/include_supplement.py``,
+``validation/include_targets.py``, ``github/pr.merge_pr_file_changes``,
+``github/workflow.py``.
+
+**Tests:** ``test_include_paths.py``, ``test_include_supplement.py``,
+``test_include_targets.py``, ``test_merge_pr_changes.py``.
+
 ---
