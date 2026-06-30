@@ -911,7 +911,8 @@ in that state, so the action failed before posting the QA report.
 §6.50's earlier "branch is reused" claim was wrong — `prepare_translation_branch_on_base`
 only resets locally; the remote ref still needed handling.
 
-**Decision:** before the fixup push, drop the stale remote ref via
+**Decision:** before the fixup push (§6.64 author/fork path only — not §6.75
+translation inline push), drop the stale remote ref via
 `gh.delete_branch(owner, repo, fixup_branch)`. The push then creates the ref
 fresh. GitHub auto-closes any open PR whose head was the deleted ref, so
 `gh.create_pull` opens a new fixup PR rather than reusing the old one — a small
