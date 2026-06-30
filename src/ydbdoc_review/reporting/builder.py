@@ -584,8 +584,9 @@ def build_verify_fixup_pr_body(source_pr: int, source_repo: str, branch: str) ->
     return (
         f"Auto-generated critic fixes for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
-        f"Critic fixes are always delivered as a separate branch/PR — the workflow "
-        f"never pushes commits onto the verified PR head.\n\n"
+        f"For author/fork PRs critic fixes use a separate branch/PR — the workflow "
+        f"never pushes commits onto the verified PR head (see §6.64). "
+        f"Translation PRs use inline push (§6.75).\n\n"
         f"Branch: `{branch}`\n"
     )
 
@@ -595,6 +596,15 @@ def build_verify_fixup_source_comment(fixup_pr_number: int) -> str:
         "🤖 **ydbdoc-review** — критик предложил правки\n\n"
         f"Правки оформлены отдельным PR: #{fixup_pr_number}.\n\n"
         "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
+    )
+
+
+def build_verify_translation_inline_comment() -> str:
+    """Short note when critic fixes were committed on the translation branch (§6.75)."""
+    return (
+        "🤖 **ydbdoc-review** — правки критика\n\n"
+        "Безопасные автоисправления добавлены **коммитом в эту ветку** перевода. "
+        "Отдельный fixup PR не создаётся — merge этого PR уже включает правки критика."
     )
 
 

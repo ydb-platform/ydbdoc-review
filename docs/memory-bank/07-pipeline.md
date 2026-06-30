@@ -258,9 +258,10 @@ next to untrusted PR content.
 Therefore `run_doc_translate` must not exit 1 after push when only the source-PR
 comment fails — see §6.48 (`_safe_post_issue_comment`).
 
-`doc_verify` **never** pushes critic fixes onto the verified PR head. It always
-opens a separate fixup PR on branch `ydbdoc-review/verify-{N}` and posts a link
-comment — see §6.64 (fork constraint from §6.50; extended to all PRs).
+`doc_verify` critic fixes:
+
+- **Translation PR** (`ydbdoc-review/pr-{N}`): second commit on the same branch (§6.75) — no fixup PR.
+- **Author/fork/manual PR:** separate fixup PR on `ydbdoc-review/verify-{N}` + link comment (§6.64).
 
 Do **not** set `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` in env unless `git push` returns 403
 (org policy blocking default `GITHUB_TOKEN`).
@@ -324,7 +325,7 @@ Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-
 After push and translation PR open (`doc_translate`):
 
 1. **Inline `doc_verify`** — same action / CI job calls `run_doc_verify`; posts
-   full QA report on translation PR (and fixup PR link if critic applied fixes).
+   full QA report on translation PR (inline critic commit on same branch if fixes applied — §6.75).
 2. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
    `verify_result=`).
 

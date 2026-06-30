@@ -32,7 +32,7 @@ GitHub Action и CLI для автоматического перевода до
 
 ### `doc_verify` (inline + лейбл на translation PR)
 
-Critic + эвристики + nav validation + вердикт; при необходимости — fixup PR с правками критика.
+Critic + эвристики + nav validation + вердикт; на translation PR — правки критика вторым коммитом в той же ветке (§6.75); на author/fork PR — fixup PR (§6.64).
 
 - **Авто:** inline в том же job, что `doc_translate` (§6.73) — без правок workflow в ydb.
 - **Повтор:** лейбл **`doc_verify`** → `ydbdoc-verify.yml`.

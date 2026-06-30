@@ -172,6 +172,11 @@ def source_pr_number_from_branch(branch: str, *, prefix: str) -> int | None:
     return None
 
 
+def is_translation_pr_branch(branch: str, *, translation_branch_prefix: str) -> bool:
+    """True when ``doc_verify`` runs on an auto-translation PR head branch."""
+    return source_pr_number_from_branch(branch, prefix=translation_branch_prefix) is not None
+
+
 def source_pr_content_ref(
     gh: GitHubClient, owner: str, repo: str, source_pr: int
 ) -> tuple[str, str, str]:

@@ -1341,36 +1341,34 @@ manually restored the EN sidebar.
 
 **Release:** tag ``v0.1.0`` moved to this commit.
 
-### 6.64. `doc_verify` critic fixes — always separate fixup branch/PR
+### 6.64. `doc_verify` critic fixes — separate fixup branch/PR (non-translation PRs)
 
 **Problem:** §6.50 added a fork-only fixup path, but same-repo ``doc_verify`` still
 pushed critic commits directly onto the verified PR head — including unmerged
-author branches and translation branches ``ydbdoc-review/pr-N``. Authors object to
-bot commits landing on their feature branches without an explicit review PR.
+author branches. Authors object to bot commits landing on their feature branches
+without an explicit review PR.
 
-**Decision:** **never** push critic fixes onto ``ctx.head_ref``. Every ``doc_verify``
-run with applied fixes:
+**Decision:** **never** push critic fixes onto ``ctx.head_ref`` for **author/fork/manual**
+PRs. Every such ``doc_verify`` run with applied fixes:
 
 1. Resets ``ydbdoc-review/verify-{source_pr or pr_number}`` off
-   ``translation_branch_base(ctx)`` (translation head for same-repo open PRs;
-   ``base_ref`` for fork/merged — same helper as ``doc_translate``).
+   ``translation_branch_base(ctx)``.
 2. Commits critic fixes and pushes that branch to upstream.
-3. Opens a fixup PR via ``gh.create_pull``:
-   - **translation PR** on upstream → base ``ctx.head_ref`` (merge fixes into the
-     translation branch, not the author's feature branch).
-   - **all other PRs** → base ``ctx.base_ref``.
+3. Opens a fixup PR via ``gh.create_pull`` (base ``ctx.base_ref`` or translation branch
+   per ``verify_fixup_pr_base`` — only when verifying a non-translation PR that
+   targets a translation branch).
 4. Posts QA report on the verified PR + link comment to the fixup PR.
 
-§6.52 stale-branch ``delete_branch`` before push applies to **all** fixup runs, not
-only fork heads. Direct-push via ``verify_push_remote_url`` → ``ctx.head_ref`` is
-removed.
+**Translation PRs** use inline push instead — §6.75 (no fixup PR).
+
+§6.52 stale-branch ``delete_branch`` before push applies to fixup runs only.
 
 **Implementation:** ``run_doc_verify`` in ``workflow.py``,
 ``verify_fixup_pr_base`` in ``pr.py``, updated ``build_verify_fixup_*`` messages in
 ``reporting/builder.py``.
 
-**Tests:** ``test_run_doc_verify_translation_pr_opens_fixup_pr``,
-``test_run_doc_verify_same_repo_author_pr_opens_fixup_pr``,
+**Tests:** ``test_run_doc_verify_translation_pr_pushes_fixes_inline``;
+``test_run_doc_verify_same_repo_author_pr_opens_fixup_pr``;
 ``test_verify_fixup_pr_base``; fork-head tests unchanged.
 
 ### 6.65. #44268 translated formula — placeholder align false C1→C2 ([ydb #44268](https://github.com/ydb-platform/ydb/pull/44268))
@@ -1619,5 +1617,31 @@ translate scope.
 **Tests:** ``test_validate_toc_merge_accepts_legacy_href_alias_supplement``,
 ``test_validate_toc_merge_flags_scoped_href_missing_from_en``,
 ``test_validate_toc_merge_legacy_alias_covers_scoped_ru_rename``.
+
+### 6.75. Translation PR: inline critic fixes (no fixup PR)
+
+**Problem:** §6.64 opened ``ydbdoc-review/verify-{N}`` + fixup PR for every
+``doc_verify``, including auto-translation PRs on ``ydbdoc-review/pr-{N}``. Reviewers
+saw 🟢 on the translation PR while safe critic fixes lived in a second PR ([#45047](https://github.com/ydb-platform/ydb/pull/45047)
+for [#45042](https://github.com/ydb-platform/ydb/pull/45042)) — easy to merge translation
+without fixup and lose applied fixes.
+
+**Decision:**
+
+1. **Translation PR** (head ``ydbdoc-review/pr-{source}``): commit safe critic fixes
+   **on the translation branch** (second bot commit), push ``ctx.head_ref``. **No**
+   ``ydbdoc-review/verify-*`` branch, **no** fixup PR.
+2. **Author / fork / manual verify PRs:** keep §6.64 fixup branch + separate PR —
+   never push onto the verified head.
+3. QA report is posted **after** the inline push; ``Checkout:`` in the report is the
+   commit that **includes** applied critic fixes.
+4. Comment on translation PR: ``build_verify_translation_inline_comment`` — fixes are
+   already in this branch.
+
+**Implementation:** ``is_translation_pr_branch`` in ``pr.py``;
+``run_doc_verify`` branch selection in ``workflow.py``.
+
+**Tests:** ``test_run_doc_verify_translation_pr_pushes_fixes_inline``;
+fork/author fixup tests unchanged.
 
 ---

@@ -31,6 +31,7 @@ from ydbdoc_review.github.pr import (
     parse_source_pr_from_text,
     pull_request_context,
     repo_https_clone_url,
+    is_translation_pr_branch,
     source_pr_number_from_branch,
     translation_branch_base,
     translation_pr_base,
@@ -64,6 +65,7 @@ from ydbdoc_review.reporting.builder import (
     build_translation_pr_body,
     build_verify_fixup_pr_body,
     build_verify_fixup_source_comment,
+    build_verify_translation_inline_comment,
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
@@ -435,6 +437,9 @@ def run_doc_verify(
     fixup_pr_base = verify_fixup_pr_base(
         ctx, translation_branch_prefix=cfg.paths.translation_branch_prefix
     )
+    translation_pr = is_translation_pr_branch(
+        ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
+    )
 
     changes = list_pr_file_changes_git(repo_path, merge_base_with)
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
@@ -540,12 +545,18 @@ def run_doc_verify(
             config=cfg,
             verify=True,
         )
+        if translation_pr:
+            push_branch_name = ctx.head_ref
+            prep_base_branch = ctx.head_ref
+        else:
+            push_branch_name = fixup_branch
+            prep_base_branch = fixup_base_branch
         prepare_translation_branch_on_base(
             repo_path,
-            translation_branch=fixup_branch,
+            translation_branch=push_branch_name,
             base_remote_url=fixup_base_ref,
             base_remote_name="ydbdoc-review-upstream",
-            base_branch=fixup_base_branch,
+            base_branch=prep_base_branch,
             paths=touched.written,
             deleted_paths=touched.deleted,
         )
@@ -558,21 +569,28 @@ def run_doc_verify(
             deleted_paths=touched.deleted,
         )
         if committed:
-            if gh.delete_branch(owner, repo, fixup_branch):
+            if not translation_pr and gh.delete_branch(owner, repo, fixup_branch):
                 logger.info(
                     "Deleted stale doc_verify fixup branch %s before push",
                     fixup_branch,
                 )
-            logger.info(
-                "Pushing doc_verify fixup branch %s to upstream (verified PR #%s head: %s)",
-                fixup_branch,
-                pr_number,
-                ctx.head_repo_full_name,
-            )
+            if translation_pr:
+                logger.info(
+                    "Pushing critic fixes onto translation branch %s (PR #%s)",
+                    push_branch_name,
+                    pr_number,
+                )
+            else:
+                logger.info(
+                    "Pushing doc_verify fixup branch %s to upstream (verified PR #%s head: %s)",
+                    fixup_branch,
+                    pr_number,
+                    ctx.head_repo_full_name,
+                )
             push_branch(
                 repo_path,
                 "ydbdoc-review-push",
-                fixup_branch,
+                push_branch_name,
                 push_token,
                 upstream_url,
             )
@@ -584,7 +602,7 @@ def run_doc_verify(
     if dry_run:
         return job
 
-    if pushed and fixup_branch is not None:
+    if pushed and not translation_pr:
         title = f"Critic fixes for #{pr_number}"
         body = build_verify_fixup_pr_body(pr_number, github_repo, fixup_branch)
         opened = gh.create_pull(
@@ -633,7 +651,16 @@ def run_doc_verify(
         ),
         label="doc_verify QA report",
     )
-    if fixup_pr_number is not None:
+    if pushed and translation_pr:
+        job.source_comment_url = _safe_post_issue_comment(
+            gh,
+            owner,
+            repo,
+            pr_number,
+            build_verify_translation_inline_comment(),
+            label="doc_verify inline critic fixes",
+        )
+    elif fixup_pr_number is not None:
         job.source_comment_url = _safe_post_issue_comment(
             gh,
             owner,

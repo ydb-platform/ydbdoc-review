@@ -219,8 +219,9 @@ wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
 ``_parse_toc_tree_block`` list-indent detection, nested merge serialization,
 ``collapsed_toc`` validation guard.
 
-**Resolved via §6.64:** ``doc_verify`` critic fixes always land on
-``ydbdoc-review/verify-{N}`` + separate fixup PR — never on the author's PR head.
+**Resolved via §6.64 / §6.75:** ``doc_verify`` critic fixes on author/fork PRs →
+``ydbdoc-review/verify-{N}`` + fixup PR; on translation PR ``ydbdoc-review/pr-{N}`` →
+inline second commit (no fixup PR).
 
 **Done — §6.66 harness:** per-file + PR-level step runners; YAML regression fixtures
 in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env override).
