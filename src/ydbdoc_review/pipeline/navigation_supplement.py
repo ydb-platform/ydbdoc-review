@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+import os
+from pathlib import Path, PurePosixPath
 
 from ydbdoc_review.github.git_ops import merge_base, read_text, read_text_at_ref
 from ydbdoc_review.navigation.paths import is_toc_yaml
@@ -20,12 +21,37 @@ def _toc_hrefs(yaml_text: str) -> set[str]:
     return {it["href"] for it in parse_toc_items(yaml_text) if it.get("href")}
 
 
-def _ancestor_toc_pairs(ru_md_path: str, *, docs_root: str) -> list[tuple[str, str]]:
-    """``(ru_toc, en_toc)`` for each ``toc_*.yaml`` in ancestors of a RU page."""
+def _nested_toc_pairs_in_dir(
+    ru_dir: str,
+    *,
+    repo_path: str,
+    docs_root: str,
+) -> list[tuple[str, str]]:
+    """``toc-*.yaml`` sidebars in the same directory as a translated page."""
+    fs_dir = Path(repo_path) / ru_dir.replace("/", os.sep)
+    if not fs_dir.is_dir():
+        return []
+    out: list[tuple[str, str]] = []
+    for path in sorted(fs_dir.glob("toc-*.yaml")):
+        ru_toc = _norm(f"{ru_dir}/{path.name}")
+        en_toc = counterpart(ru_toc, docs_root)
+        if en_toc is not None:
+            out.append((ru_toc, en_toc))
+    return out
+
+
+def _ancestor_toc_pairs(
+    ru_md_path: str,
+    *,
+    repo_path: str,
+    docs_root: str,
+) -> list[tuple[str, str]]:
+    """``(ru_toc, en_toc)`` for each sidebar toc in ancestors of a RU page."""
     root = docs_root.strip("/")
     ru_root = PurePosixPath(root) / "ru"
     dir_path = PurePosixPath(_norm(ru_md_path)).parent
     out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     while dir_path >= ru_root:
         for name in _TOC_FILENAMES:
             ru_toc = _norm(str(dir_path / name))
@@ -33,7 +59,17 @@ def _ancestor_toc_pairs(ru_md_path: str, *, docs_root: str) -> list[tuple[str, s
                 continue
             en_toc = counterpart(ru_toc, docs_root)
             if en_toc is not None:
-                out.append((ru_toc, en_toc))
+                pair = (ru_toc, en_toc)
+                if pair not in seen:
+                    out.append(pair)
+                    seen.add(pair)
+        ru_dir = _norm(str(dir_path))
+        for pair in _nested_toc_pairs_in_dir(
+            ru_dir, repo_path=repo_path, docs_root=docs_root
+        ):
+            if pair not in seen:
+                out.append(pair)
+                seen.add(pair)
         if dir_path == ru_root:
             break
         dir_path = dir_path.parent
@@ -69,7 +105,9 @@ def supplement_navigation_pairs(
             continue
         basename = PurePosixPath(ru_md).name
 
-        for ru_toc, en_toc in _ancestor_toc_pairs(ru_md, docs_root=docs_root):
+        for ru_toc, en_toc in _ancestor_toc_pairs(
+            ru_md, repo_path=repo_path, docs_root=docs_root
+        ):
             key = (ru_toc, en_toc)
             if key in existing:
                 continue

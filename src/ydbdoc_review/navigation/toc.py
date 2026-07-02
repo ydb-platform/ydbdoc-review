@@ -378,8 +378,11 @@ def _merge_en_toc_yaml_nested(
     )
     seen_hrefs = _collect_toc_hrefs(merged)
     seen_includes = _collect_toc_include_paths(merged)
+    base_hrefs = ru_base_hrefs or set()
     for node in _walk_toc_nodes(en_tree):
         if node.href and node.href not in seen_hrefs and node.href not in ru_hrefs:
+            if node.href in base_hrefs:
+                continue
             merged.append(node)
             seen_hrefs.add(node.href)
         if (
@@ -387,6 +390,8 @@ def _merge_en_toc_yaml_nested(
             and node.include_path not in seen_includes
             and node.include_path not in ru_includes
         ):
+            if node.include_path in base_includes:
+                continue
             merged.append(node)
             seen_includes.add(node.include_path)
     return _serialize_toc_tree(merged, list_indent=list_indent)
@@ -626,9 +631,17 @@ def merge_en_toc_yaml(
     for it in en_items:
         href = it.get("href")
         if href and href not in seen_hrefs and href not in ru_hrefs:
+            if href in base_hrefs:
+                continue
             merged.append(it)
         include_path = it.get("include_path")
-        if include_path and include_path not in seen_includes and include_path not in ru_includes:
+        if (
+            include_path
+            and include_path not in seen_includes
+            and include_path not in ru_includes
+        ):
+            if include_path in base_includes:
+                continue
             merged.append(it)
 
     return _serialize_toc(merged, line_prefix=line_prefix)

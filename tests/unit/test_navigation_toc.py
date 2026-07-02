@@ -689,3 +689,30 @@ def test_merge_indented_nested_toc_adds_observability_include():
     )
     assert not any(issue.kind == "collapsed_toc" for issue in issues)
     assert not any(issue.kind == "empty_toc" for issue in issues)
+
+
+def test_merge_en_toc_drops_en_legacy_href_removed_from_ru_pr():
+    en_main = dedent("""
+        items:
+        - name: Old page
+          href: sql-dialect-converter.md
+        - name: Section
+          href: sql-translation/index.md
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: Section
+          href: sql-translation/index.md
+          include:
+            mode: link
+            path: sql-translation/toc-sql-translation.yaml
+    """).strip()
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=set(),
+        translate_name=lambda n: n,
+        ru_base_hrefs={"sql-dialect-converter.md", "sql-translation/index.md"},
+    )
+    assert "sql-dialect-converter.md" not in merged
+    assert "sql-translation/index.md" in merged

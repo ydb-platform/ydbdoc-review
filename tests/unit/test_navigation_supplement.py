@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -148,3 +149,61 @@ def test_supplement_does_not_duplicate_existing_pair():
         )
 
     assert out == existing
+
+
+GUI_RU_TOC = dedent("""
+    items:
+    - name: DBeaver Plugin
+      href: dbeaver-plugin.md
+    - name: VS Code
+      href: vscode-plugin.md
+""").strip()
+
+EN_VSCODE = "ydb/docs/en/core/integrations/gui/vscode-plugin.md"
+RU_GUI_TOC = "ydb/docs/ru/core/integrations/gui/toc-ide.yaml"
+EN_GUI_TOC = "ydb/docs/en/core/integrations/gui/toc-ide.yaml"
+
+
+def test_supplement_adds_nested_toc_ide_when_ru_lists_page(tmp_path: Path):
+    repo = tmp_path / "repo"
+    gui_ru = repo / "ydb/docs/ru/core/integrations/gui"
+    gui_en = repo / "ydb/docs/en/core/integrations/gui"
+    gui_ru.mkdir(parents=True)
+    gui_en.mkdir(parents=True)
+    (gui_ru / "toc-ide.yaml").write_text(GUI_RU_TOC, encoding="utf-8")
+    (gui_en / "toc-ide.yaml").write_text(
+        "items:\n- name: DBeaver Plugin\n  href: dbeaver-plugin.md\n",
+        encoding="utf-8",
+    )
+
+    def _read_ref(repo_path: str, ref: str, path: str) -> str | None:
+        if path == EN_GUI_TOC:
+            return (gui_en / "toc-ide.yaml").read_text(encoding="utf-8")
+        return None
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_supplement.merge_base",
+            return_value="abc123",
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_supplement.read_text",
+            side_effect=lambda _repo, path: (
+                GUI_RU_TOC if path == RU_GUI_TOC else None
+            ),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_supplement.read_text_at_ref",
+            side_effect=_read_ref,
+        ),
+    ):
+        out = supplement_navigation_pairs(
+            [],
+            {EN_VSCODE},
+            repo_path=str(repo),
+            merge_base_with="origin/main",
+        )
+
+    assert len(out) == 1
+    assert out[0].ru_path == RU_GUI_TOC
+    assert out[0].en_path == EN_GUI_TOC

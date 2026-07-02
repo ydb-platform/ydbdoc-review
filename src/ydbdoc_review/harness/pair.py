@@ -12,6 +12,7 @@ from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.types import PairRunResult
 from ydbdoc_review.translation.errors import TranslationError
+from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +78,12 @@ def run_pair_plan(
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))
 
+    target_text = file_result.final_text
+    if plan.action == "translate_to_ru" and target_text and content.ru_text:
+        target_text = restore_autotitle_hrefs(target_text, content.ru_text)
+
     return PairRunResult(
         plan=plan,
-        target_text=file_result.final_text,
+        target_text=target_text,
         file_result=file_result,
     )
