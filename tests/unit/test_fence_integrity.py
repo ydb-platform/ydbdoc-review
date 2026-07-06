@@ -111,6 +111,13 @@ def test_fence_content_allows_cyrillic_comment_translation_only():
     assert not check_fence_body_copy(f"```go\n{ru}```", f"```go\n{en}```")
 
 
+def test_fence_content_allows_trailing_slash_comment_translation():
+    ru = "    panic(err) // аварийный выход при ошибке\n"
+    en = "    panic(err) // Abort on connection error\n"
+    assert fence_content_matches_source(ru, en)
+    assert not check_fence_body_copy(f"```go\n{ru}```", f"```go\n{en}```")
+
+
 def test_fence_content_rejects_code_line_change_beside_comments():
     ru = "x := 1 // значение\n"
     en = "y := 1 // value\n"

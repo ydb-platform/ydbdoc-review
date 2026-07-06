@@ -29,6 +29,8 @@ _SQL_LINE_COMMENT = re.compile(
     r"^(?P<indent>\s*)--(?P<spacing>\s+)(?P<body>.*)$"
 )
 _SQL_TRAILING_COMMENT = re.compile(r"(?P<prefix>.*?)(?P<marker>\s--\s+)(?P<body>[^\n]*)$")
+# Trailing ``//`` on a code line (``panic(err) // comment``), not ``://`` in URLs.
+_SLASH_TRAILING_COMMENT = re.compile(r"(?P<prefix>.*?)(?P<marker>\s//\s*)(?P<body>[^\n]*)$")
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,20 @@ class FenceCommentLine:
     body: str
 
 
+def _trailing_comment_match(line: str) -> re.Match[str] | None:
+    for trail_re in (_SQL_TRAILING_COMMENT, _SLASH_TRAILING_COMMENT):
+        m = trail_re.match(line)
+        if m is not None:
+            return m
+    return None
+
+
+def trailing_comment_code_prefix(line: str) -> str | None:
+    """Source code before a trailing ``//`` or ``--`` comment; ``None`` otherwise."""
+    m = _trailing_comment_match(line)
+    return m.group("prefix") if m is not None else None
+
+
 def _comment_body_if_cyrillic(line: str) -> str | None:
     for matcher in (_COMMENT_LINE.match, _SQL_LINE_COMMENT.match):
         m = matcher(line)
@@ -47,7 +63,7 @@ def _comment_body_if_cyrillic(line: str) -> str | None:
         body = m.group("body")
         if body.strip() and _CYRILLIC.search(body):
             return body
-    trail = _SQL_TRAILING_COMMENT.match(line)
+    trail = _trailing_comment_match(line)
     if trail is not None:
         body = trail.group("body")
         if body.strip() and _CYRILLIC.search(body):
@@ -66,7 +82,7 @@ def _replace_comment_body(line: str, new_body: str, *, old_body: str | None = No
     if m:
         spacing = m.group("spacing") or " "
         return f"{m.group('indent')}--{spacing}{new_body.lstrip()}"
-    trail = _SQL_TRAILING_COMMENT.match(line)
+    trail = _trailing_comment_match(line)
     if trail is not None:
         body = trail.group("body")
         if old_body is not None and body.strip() != old_body.strip():

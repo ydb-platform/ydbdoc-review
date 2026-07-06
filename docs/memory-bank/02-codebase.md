@@ -62,7 +62,7 @@ src/ydbdoc_review/
 │   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
 │   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
 │   ├── fence_integrity.py         copy fences from source; detect pipeline drift; mermaid/text label translation (§6.53, §6.62)
-│   ├── fence_comments.py          fence ``//``/``#`` comments + ``text`` fence Cyrillic (§6.39, §6.59)
+│   ├── fence_comments.py          fence ``//``/``#``/``--`` comments (line + trailing ``//``) + ``text`` fence Cyrillic (§6.39, §6.46, §6.81)
 │   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
 │   ├── link_locale.py             URL locale mirror + link_locale QA (§6.34, §6.37)

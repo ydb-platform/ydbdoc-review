@@ -86,7 +86,7 @@ See `ydbdoc_review.llm` package.
 - [x] Placeholder count check (`validation/markers.py` — wired in translator)
 - [x] CLI-token preservation (`validation/cli_tokens.py` — wired in translator)
 - [x] `validation/heuristics.py` — length ratio, cyrillic-in-EN, fence/heading/list-tab parity
-- [x] `validation/fence_comments.py` — translate Cyrillic ``//``/``#`` fence comments; `cyrillic_in_fence` QA (§6.39)
+- [x] `validation/fence_comments.py` — translate Cyrillic ``//``/``#``/``--`` fence comments (line-start + trailing ``//``); `cyrillic_in_fence` QA (§6.39, §6.46, §6.81)
 - [x] `validation/prose_cyrillic.py` — translate residual Cyrillic in EN prose/backticks (§6.45)
 - [x] `pipeline/pairs.py` — locale ``ru|en/…/_includes/*.md`` in doc_translate scope (§6.41)
 - [x] TOC / redirect merge validation wrappers (`validate_toc_merge`, `validate_redirect_merge`)

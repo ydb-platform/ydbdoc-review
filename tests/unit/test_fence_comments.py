@@ -13,11 +13,13 @@ from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.pipeline.translate_file import translate_file
+from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
 from ydbdoc_review.validation.fence_comments import (
     check_cyrillic_in_en_fence_comments,
     collect_cyrillic_fence_comment_lines,
     translate_cyrillic_fence_comments,
 )
+from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
     run_file_heuristics_classified,
@@ -46,6 +48,26 @@ GO_SAMPLE = dedent("""
     func main() {
         // 1. Настраиваем провайдер логов OTel с OTLP-экспортёром.
         // ... используйте db ...
+    }
+    ```
+""").strip()
+
+
+# auth-static-style Go snippet: prose outside fence + several ``//`` comments inside.
+MULTI_COMMENT_GO_SOURCE = dedent("""
+    Аутентификация по логину и паролю в native SDK Go. \
+Описание достаточной длины для эвристик длины текста.
+
+    ```go
+    func connect() {
+        // Создаём контекст и открываем соединение
+        ctx := context.Background()
+        // Используем статические учётные данные
+        db, err := ydb.Open(ctx, ydb.WithStaticCredentials("user", "password"))
+        if err != nil {
+            // Аварийный выход при ошибке подключения
+            panic(err)
+        }
     }
     ```
 """).strip()
@@ -99,6 +121,39 @@ def test_check_cyrillic_in_en_fence_comments_warns():
 def test_check_cyrillic_in_en_fence_comments_skips_prose_outside_fence():
     text = "Hello привет.\n"
     assert check_cyrillic_in_en_fence_comments(text, target_lang="en") == []
+
+
+TRAILING_SLASH_GO_SAMPLE = dedent("""
+    Intro paragraph with enough English words for length checks here.
+
+    ```go
+    db, err := ydb.Open(ctx, conn)
+    if err != nil {
+        panic(err) // аварийный выход при ошибке подключения
+    }
+    url := "grpcs://login:password@localhost:2135/local"
+    ```
+""").strip()
+
+
+def test_collect_trailing_slash_comment_on_code_line():
+    items = collect_cyrillic_fence_comment_lines(TRAILING_SLASH_GO_SAMPLE)
+    assert len(items) == 1
+    assert items[0].line_index == 2
+    assert "аварийный выход" in items[0].body
+
+
+def test_translate_trailing_slash_comment_preserves_code():
+    def _fake_translate(body: str) -> str:
+        return "Abort on connection error"
+
+    translated = translate_cyrillic_fence_comments(
+        TRAILING_SLASH_GO_SAMPLE, _fake_translate
+    )
+    assert "panic(err) // Abort on connection error" in translated
+    assert "аварийный" not in translated
+    assert 'grpcs://login:password@localhost:2135/local' in translated
+    assert check_cyrillic_in_en_fence_comments(translated, target_lang="en") == []
 
 
 def test_translate_cyrillic_fence_comments_with_mock_fn():
@@ -202,3 +257,114 @@ def test_translate_file_finalizes_fence_comments_via_llm():
     assert "Set up the log provider" in result.final_text
     assert "Настраиваем" not in result.final_text
     assert not any(w.startswith("cyrillic_in_fence:") for w in result.heuristic_warnings)
+
+
+def test_fenced_code_excluded_from_segments_only_prose_translated():
+    """Code blocks are not segmented; LLM sees prose with inline placeholders only."""
+    doc = parse_markdown(MULTI_COMMENT_GO_SOURCE)
+    segments = extract_segments(doc)
+    assert len(segments) == 1
+    assert "Создаём контекст" not in segments[0].text
+    assert "ydb.WithStaticCredentials" not in segments[0].text
+    assert "Аутентификация" in segments[0].text
+
+
+def test_translate_pipeline_prose_then_multiple_fence_comments():
+    """§6.39: translate prose → copy fenced code from RU → batch-translate comments."""
+    doc = parse_markdown(MULTI_COMMENT_GO_SOURCE)
+    segments = extract_segments(doc)
+    seg_id = segments[0].id
+
+    comment_items = collect_cyrillic_fence_comment_lines(MULTI_COMMENT_GO_SOURCE)
+    assert len(comment_items) == 3
+
+    translate_raw = _translate_json(
+        segments,
+        {
+            seg_id: (
+                "Username and password authentication in the Go native SDK. "
+                "Long enough description for length heuristics."
+            ),
+        },
+    )
+    comment_raw = json.dumps(
+        {
+            "comments": [
+                {
+                    "id": "b1-l1",
+                    "text": "Create a context and open a connection",
+                },
+                {
+                    "id": "b1-l3",
+                    "text": "Use static credentials",
+                },
+                {
+                    "id": "b1-l6",
+                    "text": "Abort on connection error",
+                },
+            ]
+        },
+        ensure_ascii=False,
+    )
+
+    client = _mock_client([translate_raw, comment_raw])
+    result = translate_file(
+        MULTI_COMMENT_GO_SOURCE,
+        client,
+        load_glossary(),
+        file_path="ydb/docs/ru/core/recipes/ydb-sdk/auth-static.md",
+        enable_critic=False,
+    )
+
+    assert "Username and password authentication" in result.final_text
+    assert "Create a context and open a connection" in result.final_text
+    assert "Use static credentials" in result.final_text
+    assert "Abort on connection error" in result.final_text
+    assert "ydb.WithStaticCredentials(\"user\", \"password\")" in result.final_text
+    assert "Создаём" not in result.final_text
+    assert "Аварийный" not in result.final_text
+    assert check_cyrillic_in_en_fence_comments(result.final_text, target_lang="en") == []
+    assert check_fence_body_copy(MULTI_COMMENT_GO_SOURCE, result.final_text) == []
+
+
+def test_finalize_en_copies_code_then_translates_each_comment_line():
+    """After render, fenced bodies still match RU; finalize translates every comment."""
+    doc = parse_markdown(MULTI_COMMENT_GO_SOURCE)
+    segments = extract_segments(doc)
+    rendered = render_with_translations(
+        doc,
+        segments,
+        {
+            segments[0].id: (
+                "Username and password authentication in the Go native SDK. "
+                "Long enough description."
+            ),
+        },
+        target_lang="en",
+    )
+    assert "Создаём контекст" in rendered
+    assert check_fence_body_copy(MULTI_COMMENT_GO_SOURCE, rendered) == []
+
+    def _translate_comment(body: str) -> str:
+        return {
+            "Создаём контекст и открываем соединение": (
+                "Create a context and open a connection"
+            ),
+            "Используем статические учётные данные": "Use static credentials",
+            "Аварийный выход при ошибке подключения": "Abort on connection error",
+        }[body.strip()]
+
+    finalized = finalize_en_target(
+        rendered,
+        MULTI_COMMENT_GO_SOURCE,
+        client=None,
+        glossary=None,
+    )
+    finalized = translate_cyrillic_fence_comments(finalized, _translate_comment)
+
+    assert "Create a context and open a connection" in finalized
+    assert "Use static credentials" in finalized
+    assert "Abort on connection error" in finalized
+    assert "ydb.WithStaticCredentials" in finalized
+    assert "Создаём" not in finalized
+    assert check_fence_body_copy(MULTI_COMMENT_GO_SOURCE, finalized) == []

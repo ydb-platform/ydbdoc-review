@@ -102,6 +102,7 @@ def _fence_diff_is_comment_translation_only(
     from ydbdoc_review.validation.fence_comments import (
         _CYRILLIC,
         _comment_body_if_cyrillic,
+        trailing_comment_code_prefix,
     )
 
     src_lines = source_content.splitlines()
@@ -115,6 +116,10 @@ def _fence_diff_is_comment_translation_only(
         saw_diff = True
         if _comment_body_if_cyrillic(src_line) is None:
             return False
+        src_prefix = trailing_comment_code_prefix(src_line)
+        if src_prefix is not None:
+            if trailing_comment_code_prefix(tgt_line) != src_prefix:
+                return False
         if _comment_body_if_cyrillic(tgt_line) is not None and _CYRILLIC.search(
             tgt_line
         ):

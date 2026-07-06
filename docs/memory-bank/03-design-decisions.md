@@ -1779,4 +1779,32 @@ unchanged includes from ``export-s3.md``.
 **Follow-up (§6.80.4):** Source PR comment when push blocked: «translation PR не
 создан», completeness gap list, pipeline errors — not misleading «перевод готов».
 
+### 6.81. Trailing ``//`` fence comments + multi-comment pipeline tests (#44758)
+
+**Problem:** §6.39/§6.46 translated only line-start ``//`` / ``#`` / ``--`` comments.
+Go/C++/Java style ``panic(err) // комментарий`` on the same line was copied verbatim
+from RU with Cyrillic; ``cyrillic_in_fence`` did not fire (no line-start marker).
+
+**Decision:**
+
+1. **`_SLASH_TRAILING_COMMENT`** in ``validation/fence_comments.py`` — match
+   ``\s//\s*`` after code on the same line (whitespace before ``//`` avoids
+   ``grpcs://`` URLs in strings).
+2. Shared **`_trailing_comment_match``** / **`trailing_comment_code_prefix``** for
+   SQL ``--`` and slash ``//`` trailing forms.
+3. **`_fence_diff_is_comment_translation_only`** — when diff is on a trailing
+   comment line, require **identical code prefix** before ``//``/``--`` so
+   ``x := 1 // ru`` vs ``y := 1 // en`` is not treated as comment-only translation.
+
+**Pipeline invariant (unchanged, now tested):** fenced blocks are **not** segmented;
+prose is translated via segment LLM; ``finalize_en_target`` copies fence bodies from
+RU, then **one JSON batch** translates all Cyrillic comment lines (line-start and
+trailing) per file.
+
+**Tests:** ``test_collect_trailing_slash_comment_on_code_line``,
+``test_translate_trailing_slash_comment_preserves_code``,
+``test_fence_content_allows_trailing_slash_comment_translation``,
+``test_translate_pipeline_prose_then_multiple_fence_comments``,
+``test_fenced_code_excluded_from_segments_only_prose_translated``.
+
 ---
