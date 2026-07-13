@@ -631,6 +631,19 @@ def test_toc_translate_scope_detects_new_include_paths():
     }
 
 
+def test_toc_translate_scope_handles_include_only_items_without_name():
+    """Regression #46378/#46380: include-only lines have no name and must not crash."""
+    ru = dedent(
+        """
+        items:
+        - include: { mode: link, path: toc_i.yaml }
+        """
+    ).strip()
+    scope = toc_translate_scope("", ru)
+    assert scope.hrefs == frozenset()
+    assert scope.include_paths == {"toc_i.yaml"}
+
+
 def test_merge_toc_include_links_for_new_observability_section():
     """Regression #44103: parent toc_p.yaml must mirror RU include links."""
     scope = toc_translate_scope("", OBSERVABILITY_RU_PR)

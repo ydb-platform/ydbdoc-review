@@ -640,7 +640,9 @@ def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope
     Scope = newly added items or items whose Russian ``name`` changed
     between base and PR head. Unchanged items are **not** in scope.
     """
-    base_by_href = {it["href"]: it for it in parse_toc_items(ru_base_yaml) if it.get("href")}
+    base_by_href = {
+        it["href"]: it for it in parse_toc_items(ru_base_yaml) if it.get("href")
+    }
     base_by_include = {
         it["include_path"]: it
         for it in parse_toc_items(ru_base_yaml)
@@ -652,13 +654,13 @@ def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope
         href = it.get("href")
         if href:
             prev = base_by_href.get(href)
-            if prev is None or prev["name"] != it["name"]:
+            if prev is None or prev.get("name", "") != it.get("name", ""):
                 hrefs.add(href)
             continue
         include_path = it.get("include_path")
         if include_path:
             prev = base_by_include.get(include_path)
-            if prev is None or prev["name"] != it["name"]:
+            if prev is None or prev.get("name", "") != it.get("name", ""):
                 include_paths.add(include_path)
     return TocTranslateScope(frozenset(hrefs), frozenset(include_paths))
 

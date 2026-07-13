@@ -1972,4 +1972,20 @@ files use list indent + deeper ``href:`` (four spaces). ``parse_toc_items`` retu
 ``test_merge_en_toc_mirrors_indented_absent_en_toc_i``,
 ``test_validate_toc_merge_empty_en_blocks_when_ru_has_indented_hrefs``.
 
+### 6.87. ``toc_translate_scope`` tolerates include-only items (#46378 / #46380)
+
+**Problem:** [PR #46378](https://github.com/ydb-platform/ydb/pull/46378) and
+[#46380](https://github.com/ydb-platform/ydb/pull/46380) — translation PRs were
+created, but the `doc_translate` job failed **before posting** the inline
+`doc_verify` report. Root cause: `toc_translate_scope()` assumed every
+`include_path` item has a `name` field; include-only lines
+(`- include: { ... path: ... }`) have no `name` → `KeyError: 'name'` during
+navigation verify inside inline `doc_verify`.
+
+**Decision:** treat missing `name` as empty string for scope-diff comparisons:
+use `prev.get("name","") != it.get("name","")` for both href and include paths.
+This keeps scope detection semantics while never crashing.
+
+**Tests:** ``test_toc_translate_scope_handles_include_only_items_without_name``.
+
 ---
