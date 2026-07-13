@@ -225,7 +225,7 @@ def merge_navigation_pair(
             ru_base_hrefs=ru_base_hrefs,
             translate_include_paths=set(scope.include_paths),
             ru_base_include_paths=ru_base_include_paths,
-            restrict_gap_fill_to_scope=pair.supplement_only,
+            restrict_gap_fill_to_scope=True,
         )
         warnings = validate_navigation_merge_warnings(
             pair.ru_path,

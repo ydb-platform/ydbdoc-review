@@ -716,3 +716,62 @@ def test_merge_en_toc_drops_en_legacy_href_removed_from_ru_pr():
     )
     assert "sql-dialect-converter.md" not in merged
     assert "sql-translation/index.md" in merged
+
+
+def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
+    """Regression #46258: Spring-only toc edit must not pull sql-translation include."""
+    en_main = dedent("""
+        items:
+        - name: Vector search
+          href: vector-search.md
+        - name: SQL dialect converter
+          href: sql-dialect-converter.md
+    """).strip()
+    ru_base = dedent("""
+        items:
+        - name: Vector search
+          href: vector-search.md
+        - name: SQL translation
+          href: sql-translation/index.md
+          include:
+            mode: link
+            path: sql-translation/toc-sql-translation.yaml
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: Vector search
+          href: vector-search.md
+        - name: SQL translation
+          href: sql-translation/index.md
+          include:
+            mode: link
+            path: sql-translation/toc-sql-translation.yaml
+        - name: Spring
+          href: spring/index.md
+          include:
+            mode: link
+            path: spring/toc-spring.yaml
+    """).strip()
+    scope = toc_translate_scope(ru_base, ru_pr)
+    assert scope.hrefs == {"spring/index.md"}
+    assert scope.include_paths == frozenset()
+
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=set(scope.hrefs),
+        translate_include_paths=set(scope.include_paths),
+        translate_name=lambda n: n,
+        ru_base_hrefs={
+            it["href"] for it in parse_toc_items(ru_base) if it.get("href")
+        },
+        ru_base_include_paths={
+            it["include_path"]
+            for it in parse_toc_items(ru_base)
+            if it.get("include_path")
+        },
+        restrict_gap_fill_to_scope=True,
+    )
+    assert "spring/toc-spring.yaml" in merged
+    assert "sql-translation/toc-sql-translation.yaml" not in merged
+    assert "sql-dialect-converter.md" in merged

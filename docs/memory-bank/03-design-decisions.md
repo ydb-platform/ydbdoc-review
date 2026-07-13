@@ -1569,6 +1569,25 @@ added RU-only renames ``hive_config.md``, ``kafka_proxy_config.md``,
 
 **Tests:** ``test_merge_supplement_only_adds_translated_href_not_full_ru_gap``.
 
+### 6.82. Restrict §6.59 gap fill for all toc merges (#46258)
+
+**Problem:** [PR #46258](https://github.com/ydb-platform/ydb/pull/46258) (translation
+for [#43010](https://github.com/ydb-platform/ydb/pull/43010)) — source PR added only
+**Spring** to ``integrations/toc_i.yaml``. ``merge_navigation_pair`` passed
+``restrict_gap_fill_to_scope`` only when ``NavigationPair.supplement_only`` (§6.72).
+Direct toc edits use ``supplement_only=False``, so §6.59 gap-fill copied every RU-base
+``include.path`` missing from EN ``main`` — including
+``sql-translation/toc-sql-translation.yaml`` — without creating EN files →
+``build-docs`` ENOENT.
+
+**Decision:** always pass ``restrict_gap_fill_to_scope=True`` from
+``merge_navigation_pair``. Scoped adds come only from ``toc_translate_scope`` (PR
+diff) plus ``extra_toc_hrefs`` / ``gap_hrefs`` for hrefs already on RU base; include
+paths follow ``translate_include_paths`` only. §6.72 supplement behavior is unchanged,
+just no longer the sole caller of the flag.
+
+**Tests:** ``test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes``.
+
 ### 6.73. Inline ``doc_verify`` after ``doc_translate`` (#44912)
 
 **Problem:** [PR #44912](https://github.com/ydb-platform/ydb/pull/44912) had label
