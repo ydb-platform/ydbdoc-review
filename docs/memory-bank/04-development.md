@@ -219,10 +219,10 @@ wrapping filter, phantom U1→U2 swap filter, fence whitespace-only parity.
 ``_parse_toc_tree_block`` list-indent detection, nested merge serialization,
 ``collapsed_toc`` validation guard.
 
-**Resolved via §6.83–§6.85 (SQS API / #46338, #46349):** EN toc ``ENOENT`` and
-``empty_toc`` — ``check_missing_toc_targets`` (inline ``include.path`` parse),
-child toc ``supplement_included_child_tocs``, absent-EN full RU mirror via
-``_resolve_toc_merge_scope`` / ``en_toc_is_absent``.
+**Resolved via §6.83–§6.86 (SQS API / #46338, #46349, #46346):** EN toc ``ENOENT``,
+``empty_toc``, ``YFM003 unreachable-link`` — ``check_missing_toc_targets``,
+child toc ``supplement_included_child_tocs``, absent-EN full RU mirror (§6.85),
+indented block ``href`` parse + raw-yaml ``empty_toc`` guard (§6.86).
 
 **Resolved via §6.64 / §6.75:** ``doc_verify`` critic fixes on author/fork PRs →
 ``ydbdoc-review/verify-{N}`` + fixup PR; on translation PR ``ydbdoc-review/pr-{N}`` →

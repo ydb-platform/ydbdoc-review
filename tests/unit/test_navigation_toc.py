@@ -111,7 +111,51 @@ def test_merge_adds_ru_base_href_missing_from_en_main():
     assert "debug-logs-otel.md" in hrefs
 
 
-def test_parse_toc_items_reads_include_only_entry():
+def test_parse_toc_items_reads_indented_list_href():
+    """Regression #46346: items indented under ``items:`` with 4-space ``href:``."""
+    toc = dedent("""
+        items:
+          - name: Auth
+            href: auth.md
+          - name: Examples
+            href: examples.md
+    """).strip()
+    items = parse_toc_items(toc)
+    assert [it.get("href") for it in items] == ["auth.md", "examples.md"]
+
+
+def test_merge_en_toc_mirrors_indented_absent_en_toc_i():
+    """Regression #46346: sqs-api toc_i full mirror when EN absent."""
+    ru = dedent("""
+        items:
+          - name: Аутентификация
+            href: auth.md
+          - name: Примеры
+            href: examples.md
+    """).strip()
+    merged = merge_en_toc_yaml(
+        "",
+        ru,
+        translate_hrefs={"auth.md", "examples.md"},
+        translate_name=lambda n: {"Аутентификация": "Auth", "Примеры": "Examples"}.get(n, n),
+        restrict_gap_fill_to_scope=False,
+    )
+    assert "auth.md" in merged
+    assert "examples.md" in merged
+    issues = validate_toc_merge(ru, merged, translate_hrefs={"auth.md", "examples.md"}, en_main_yaml="")
+    assert not any(issue.kind == "empty_toc" for issue in issues)
+
+
+def test_validate_toc_merge_empty_en_blocks_when_ru_has_indented_hrefs():
+    ru = dedent("""
+        items:
+          - name: Auth
+            href: auth.md
+    """).strip()
+    issues = validate_toc_merge(ru, "items:\n", translate_hrefs=set(), en_main_yaml="")
+    assert any(issue.kind == "empty_toc" for issue in issues)
+
+
     toc = dedent("""
         items:
         - name: Overview

@@ -483,6 +483,8 @@ indented ``toc_i.yaml`` parse/merge and adds ``collapsed_toc`` validation.
 from [#45181](https://github.com/ydb-platform/ydb/pull/45181); §6.84 child
 ``toc_i.yaml`` supplementation + inline ``include: { path: … }`` parse;
 §6.85 full mirror when EN ``sqs-api/toc_p.yaml`` absent (no more empty ``items:``).
+[#46346](https://github.com/ydb-platform/ydb/pull/46346): §6.86 indented
+``toc_i.yaml`` ``href:`` parse — fixes ``YFM003`` on ``auth.md`` / ``examples.md``.
 
 ---
 

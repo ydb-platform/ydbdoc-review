@@ -445,6 +445,36 @@ def _merge_en_toc_yaml_nested(
     return _serialize_toc_tree(merged, list_indent=list_indent)
 
 
+def _first_href_in_block(block: str) -> str | None:
+    for line in block.splitlines():
+        match = _HREF_INDENTED.match(line)
+        if match:
+            return match.group(2).strip()
+    return None
+
+
+def _first_include_in_block(block: str) -> str | None:
+    for pattern in (_INCLUDE_PATH, _INCLUDE_PATH_INLINE):
+        match = pattern.search(block)
+        if match:
+            return match.group(1).strip().strip("'\"")
+    return None
+
+
+def _toc_nav_paths_from_text(yaml_text: str) -> tuple[set[str], set[str]]:
+    """``(hrefs, include_paths)`` with raw-yaml fallback when block parse misses."""
+    hrefs, includes = toc_entry_paths(yaml_text)
+    if hrefs or includes:
+        return hrefs, includes
+    text = yaml_text.replace("\r\n", "\n")
+    raw_hrefs = {
+        match.group(2).strip()
+        for line in text.splitlines()
+        if (match := _HREF_INDENTED.match(line))
+    }
+    return raw_hrefs, set(_iter_toc_include_paths(text))
+
+
 def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
     if _has_nested_block_items(text):
         return _flatten_toc_nodes(_parse_toc_tree_block(text))
@@ -464,22 +494,22 @@ def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
                 block_lines.append(nxt)
                 i += 1
             block = "\n".join(block_lines).rstrip() + "\n"
-            m_href = _HREF_LINE.search(block)
-            m_include = _INCLUDE_PATH.search(block)
+            href = _first_href_in_block(block)
+            include_path = _first_include_in_block(block)
             name = name_match.group(2).strip()
-            if m_href:
+            if href:
                 items.append(
                     {
                         "name": name,
-                        "href": m_href.group(1).strip(),
+                        "href": href,
                         "block": block,
                     }
                 )
-            elif m_include:
+            elif include_path:
                 items.append(
                     {
                         "name": name,
-                        "include_path": m_include.group(1).strip(),
+                        "include_path": include_path,
                         "block": block,
                     }
                 )
@@ -899,6 +929,16 @@ def validate_toc_merge(
                 detail="EN toc has no items but RU PR does",
             )
         )
+    else:
+        ru_hrefs, ru_includes = _toc_nav_paths_from_text(ru_pr_yaml)
+        en_hrefs, en_includes = _toc_nav_paths_from_text(en_merged_yaml)
+        if (ru_hrefs or ru_includes) and not (en_hrefs or en_includes):
+            issues.append(
+                TocValidationIssue(
+                    kind="empty_toc",
+                    detail="EN toc has no items but RU PR does",
+                )
+            )
 
     include_scope = translate_include_paths or set()
     ru_by_href = {it["href"]: it for it in ru_items if it.get("href")}

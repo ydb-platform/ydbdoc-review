@@ -191,7 +191,8 @@ Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 **Inline TOC format (§6.33):** ydb `toc*.yaml` uses one-line items
 `- { name: …, href: …, when: … }`. `parse_toc_items` must handle both this
 and block `- name:` / `href:` layout. Also supports include-only lines
-`- include: { mode: link, path: … }` (§6.84–§6.85). Empty merge (parser miss
+`- include: { mode: link, path: … }` (§6.84–§6.85) and indented list entries
+under ``items:`` with deeper ``href:`` indent (§6.86). Empty merge (parser miss
 or absent-EN scoped merge bug) is flagged `empty_toc` + `scope_not_applied` →
 navigation verdict **blocked** → report 🔴.
 
@@ -1941,5 +1942,34 @@ emitted no entries.
 **Canonical case:** SQS API docs — ``ydb/docs/ru/core/reference/sqs-api/toc_p.yaml``
 on ``main``, no EN mirror; translation from [#45181](https://github.com/ydb-platform/ydb/pull/45181)
 → [#46349](https://github.com/ydb-platform/ydb/pull/46349).
+
+### 6.86. Indented block toc ``href`` parse (#46346)
+
+**Problem:** [PR #46346](https://github.com/ydb-platform/ydb/pull/46346) —
+``doc_verify`` 🟢, ``build-docs`` 🔴 ``YFM003 unreachable-link`` on
+``sqs-api/index.md`` → ``auth.md`` / ``examples.md``. EN ``toc_i.yaml`` merged
+as empty ``items:`` while RU on ``main`` has:
+
+```yaml
+items:
+  - name: Аутентификация
+    href: auth.md
+```
+
+Block parser matched ``href:`` only at exactly two spaces (``^  href:``); real
+files use list indent + deeper ``href:`` (four spaces). ``parse_toc_items`` returned
+``[]`` for RU → merge empty → ``empty_toc`` check skipped (``ru_items`` also empty).
+
+**Decision:**
+
+1. ``_first_href_in_block`` uses ``_HREF_INDENTED`` (any indent) in
+   ``_parse_toc_items_block``.
+2. ``_toc_nav_paths_from_text`` — raw-yaml href/include fallback for validation.
+3. ``validate_toc_merge`` flags ``empty_toc`` when raw RU has nav paths but EN
+   merged does not (even if block parse returns no items).
+
+**Tests:** ``test_parse_toc_items_reads_indented_list_href``,
+``test_merge_en_toc_mirrors_indented_absent_en_toc_i``,
+``test_validate_toc_merge_empty_en_blocks_when_ru_has_indented_hrefs``.
 
 ---
