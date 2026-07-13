@@ -1988,4 +1988,38 @@ This keeps scope detection semantics while never crashing.
 
 **Tests:** ``test_toc_translate_scope_handles_include_only_items_without_name``.
 
+### 6.88. Eliza internal route + env-only OAuth (v0.2.0)
+
+**Problem:** First Eliza integration used OpenAI-compat URL
+``{root}/raw/openai/v1`` with ``model`` in the request body. Internal models
+(``deepseek-v4-flash``, ``gpt-oss-120b``) reject that vendor with
+``model … is not available for vendor "openai"``. OpenAI SDK also sends
+``Authorization: Bearer …`` by default.
+
+**Decision:**
+
+1. **Route:** ``POST {ELIZA_API_ROOT}/raw/internal/{model_id}/v1/chat/completions`` —
+   one base URL per role; **no** ``model`` in JSON body.
+2. **Auth:** ``Authorization: OAuth <token>`` only; token read strictly from env
+   ``ELIZA_OAUTH_TOKEN`` via ``Secrets`` — never CLI argv, never YAML, never URL,
+   never logs/reports.
+3. **Transport:** ``ElizaLLMClient`` uses ``requests.post`` (not OpenAI SDK) for
+   Eliza calls to avoid Bearer injection.
+4. **Defaults** when ``YDBDOC_MODEL_PROVIDER=eliza``:
+   ``YDBDOC_MODEL_TRANSLATE=deepseek-v4-flash``,
+   ``YDBDOC_MODEL_CHECK=gpt-oss-120b`` (overridable via env).
+5. **Retries:** same ``llm.retries`` backoff on 429/5xx and network errors.
+6. **Compatibility:** default provider remains ``yandex_cloud``; ``ydb`` Actions
+   unchanged.
+
+**External integration (Reactor/Nirvana):** parent passes all secrets in
+``subprocess.run(..., env=…)`` — see **06-llm-config** §13.6.3. Entrypoint:
+``python -m ydbdoc_review job --mode translate|verify``.
+
+**Implementation:** ``llm/client.py`` (``ElizaLLMClient``), ``config/loader.py``
+(``require_eliza_api_root``, ``ELIZA_OAUTH_TOKEN``).
+
+**Tests:** ``tests/unit/test_llm_eliza_internal.py`` (URL path, OAuth header,
+no ``model`` in body, retry on 503).
+
 ---

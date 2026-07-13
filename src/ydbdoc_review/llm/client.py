@@ -15,10 +15,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from openai import OpenAI
+import requests
 from openai.types.chat import ChatCompletionMessageParam
 
 from ydbdoc_review.config.loader import Config, LLMConfig, ModelChoice
-from ydbdoc_review.llm.errors import LLMConfigError, LLMRetryExhaustedError
+from ydbdoc_review.llm.errors import LLMConfigError, LLMRequestError, LLMRetryExhaustedError
 from ydbdoc_review.llm.retry import (
     classify_api_error,
     compute_backoff_s,
@@ -285,49 +286,187 @@ class ElizaLLMClient(YandexLLMClient):
     def __init__(
         self,
         *,
-        base_url: str,
+        api_root: str,
         oauth_token: str,
         llm: LLMConfig,
-        client: OpenAI | None = None,
         usage_tracker: UsageTracker | None = None,
+        translate_default: str = "deepseek-v4-flash",
+        critic_default: str = "gpt-oss-120b",
     ) -> None:
-        if not base_url or not oauth_token:
-            raise LLMConfigError("base_url and oauth_token are required")
-        # OpenAI client: avoid leaking token; never log it.
-        # The official SDK uses Bearer by default; Eliza expects OAuth.
-        if client is None:
-            try:
-                client = OpenAI(
-                    api_key="unused",
-                    base_url=base_url,
-                    timeout=float(llm.timeout_s),
-                    default_headers={"Authorization": f"OAuth {oauth_token}"},
-                )
-            except TypeError:
-                # Older SDK versions may not support default_headers. Fall back to api_key.
-                # Some Eliza deployments accept Bearer; if not, this will error clearly.
-                client = OpenAI(
-                    api_key=oauth_token,
-                    base_url=base_url,
-                    timeout=float(llm.timeout_s),
-                )
-        # Reuse parent retry/usage logic; folder id is not used for Eliza.
-        super().__init__(
-            folder_id="eliza",
-            api_key="unused",
-            llm=llm,
-            client=client,
-            usage_tracker=usage_tracker,
-        )
-        self._base_url = base_url
+        if not api_root or not oauth_token:
+            raise LLMConfigError("api_root and oauth_token are required")
+        # Use a standalone OpenAI client per request (base_url depends on model).
+        # IMPORTANT: force OAuth header; do not send Bearer.
+        self._api_root = api_root.rstrip("/")
+        self._oauth_token = oauth_token
+        self._llm = llm
+        self._usage = usage_tracker or UsageTracker()
+        self._translate_default = translate_default
+        self._critic_default = critic_default
 
     @classmethod
     def from_config(cls, config: Config) -> ElizaLLMClient:
-        base_url, token = config.secrets.require_eliza()
-        return cls(base_url=base_url, oauth_token=token, llm=config.llm)
+        root, token = config.secrets.require_eliza_api_root()
+        return cls(api_root=root, oauth_token=token, llm=config.llm)
 
     def model_uri(self, model_slug: str) -> str:
         return model_slug
+
+    def _internal_base_url(self, model_id: str) -> str:
+        root = self._api_root
+        model = model_id.strip()
+        if not model:
+            raise LLMConfigError("Empty Eliza model id")
+        # Required route:
+        # {ELIZA_API_ROOT}/raw/internal/{model_id}/v1/chat/completions
+        # OpenAI client uses base_url + "/chat/completions".
+        return f"{root}/raw/internal/{model}/v1"
+
+    def _model_chain_for_role(self, role: LLMRole) -> list[str]:
+        # Prefer explicit env vars for migration.
+        if role == "translate":
+            env = (os.environ.get("YDBDOC_MODEL_TRANSLATE") or "").strip()
+            if env:
+                return [env]
+            # If config left at default deepseek-v32, override to confirmed internal id.
+            primary = self._llm.models.translate.primary
+            if primary == "deepseek-v32":
+                return [self._translate_default]
+            return [primary, *self._llm.models.translate.fallbacks]
+        if role == "critic":
+            env = (os.environ.get("YDBDOC_MODEL_CHECK") or "").strip()
+            if env:
+                return [env]
+            primary = self._llm.models.critic.primary
+            if primary == "deepseek-v32":
+                return [self._critic_default]
+            return [primary, *self._llm.models.critic.fallbacks]
+        return super().model_chain_for_role(role)
+
+    def chat(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        *,
+        role: LLMRole | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResult:
+        """Call internal Eliza chat completions with retries.
+
+        IMPORTANT: model id is encoded in the URL path; request body MUST NOT
+        include `model`.
+        """
+        if model is not None:
+            chain = [model]
+        elif role is not None:
+            chain = self._model_chain_for_role(role)
+        else:
+            raise LLMConfigError("Either role= or model= is required")
+
+        temp = self._llm.temperature if temperature is None else temperature
+        tokens = self._llm.max_tokens if max_tokens is None else max_tokens
+
+        last_error: BaseException | None = None
+        session_retries = 0
+
+        for slug in chain:
+            url = f"{self._internal_base_url(slug)}/chat/completions"
+            headers = {
+                "authorization": f"OAuth {self._oauth_token}",
+                "content-type": "application/json",
+            }
+            payload = {
+                "messages": messages,
+                "temperature": temp,
+                "max_tokens": tokens,
+            }
+            for attempt in range(1, self._llm.retries.max_attempts + 1):
+                started = time.perf_counter()
+                try:
+                    logger.debug(
+                        "Eliza request: role=%s model=%s url=%s auth=OAuth",
+                        role,
+                        slug,
+                        url,
+                    )
+                    resp = requests.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=float(self._llm.timeout_s),
+                    )
+                    latency_ms = (time.perf_counter() - started) * 1000
+
+                    # Retryable HTTP statuses.
+                    if resp.status_code in (408, 429, 500, 502, 503, 504):
+                        raise LLMRequestError(
+                            f"Eliza HTTP {resp.status_code}: {resp.text[:200]}"
+                        )
+                    if resp.status_code >= 400:
+                        raise LLMRequestError(
+                            f"Eliza HTTP {resp.status_code}: {resp.text[:200]}"
+                        )
+
+                    data = resp.json()
+                    choices = data.get("choices") or []
+                    msg = (choices[0] or {}).get("message") or {}
+                    content = str(msg.get("content") or "")
+                    usage_obj = data.get("usage") or {}
+                    input_tokens = int(usage_obj.get("prompt_tokens") or 0)
+                    output_tokens = int(usage_obj.get("completion_tokens") or 0)
+                    usage = LLMUsage(
+                        model_slug=slug,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        latency_ms=latency_ms,
+                        retries=session_retries,
+                        success=True,
+                        role=role,
+                    )
+                    self._usage.add(usage)
+                    return ChatResult(
+                        content=content,
+                        model_slug=slug,
+                        model_uri=url,
+                        usage=usage,
+                    )
+                except (requests.Timeout, requests.ConnectionError) as exc:
+                    last_error = exc
+                except (ValueError, LLMRequestError) as exc:
+                    last_error = exc
+
+                latency_ms = (time.perf_counter() - started) * 1000
+                self._usage.add(
+                    LLMUsage(
+                        model_slug=slug,
+                        input_tokens=0,
+                        output_tokens=0,
+                        latency_ms=latency_ms,
+                        retries=session_retries,
+                        success=False,
+                        role=role,
+                    )
+                )
+                if attempt < self._llm.retries.max_attempts:
+                    session_retries += 1
+                    delay = compute_backoff_s(attempt, self._llm.retries)
+                    logger.warning(
+                        "Eliza call failed (attempt %s/%s, model=%s): %s; retry in %.1fs",
+                        attempt,
+                        self._llm.retries.max_attempts,
+                        slug,
+                        last_error,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+
+        models = ", ".join(chain)
+        raise LLMRetryExhaustedError(
+            f"All models exhausted ({models}): {last_error}"
+        ) from last_error
 
 
 def create_llm_client(config: Config) -> YandexLLMClient:

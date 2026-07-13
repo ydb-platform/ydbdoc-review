@@ -49,7 +49,7 @@ Critic + эвристики + nav validation + вердикт; на translation 
 - Python **3.11+** (локально) или Docker (GitHub Action).
 - **LLM provider**:
   - **Yandex AI Studio (по умолчанию):** folder id + API key.
-  - **Eliza (опционально):** `ELIZA_BASE_URL` + `ELIZA_OAUTH_TOKEN`.
+  - **Eliza (опционально):** `ELIZA_API_ROOT` + `ELIZA_OAUTH_TOKEN` (OAuth only).
 - **GitHub:** `GITHUB_TOKEN` (в CI — job token с `permissions` в workflow; локально — PAT в `.env`).
 
 ## Быстрый старт (локально)
@@ -119,10 +119,10 @@ python -m ydbdoc_review job \
 
 ```bash
 export YDBDOC_MODEL_PROVIDER=eliza
-export ELIZA_BASE_URL="https://api.eliza.yandex.net/raw/openai/v1"
+export ELIZA_API_ROOT="https://api.eliza.yandex.net"
 export ELIZA_OAUTH_TOKEN="..."
-export YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY="<eliza_model_id>"
-export YDBDOC_LLM_MODELS_CRITIC_PRIMARY="<eliza_model_id>"
+export YDBDOC_MODEL_TRANSLATE="deepseek-v4-flash"
+export YDBDOC_MODEL_CHECK="gpt-oss-120b"
 ```
 
 ## CLI

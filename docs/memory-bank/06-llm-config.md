@@ -204,27 +204,114 @@ During migration, `ydbdoc-review` supports two model providers behind the same
 pipeline behavior. Switching provider changes **only** transport/auth/model id;
 prompts, merge-base diff logic, file writes, commit/push, and reports stay the same.
 
+Default remains **`YDBDOC_MODEL_PROVIDER=yandex_cloud`** — GitHub Actions workflows
+in `ydb` need no changes. Eliza is enabled only by setting env on the child process.
+
 ### 13.6.1. Provider selector
 
 - Env: `YDBDOC_MODEL_PROVIDER`
-  - `yandex_cloud` — default, current behavior (Yandex AI Studio)
-  - `eliza` — internal Eliza OpenAI-compatible endpoint
+  - `yandex_cloud` — default, Yandex AI Studio (`gpt://<folder>/<slug>`)
+  - `eliza` — internal Eliza HTTP transport (§13.6.2)
 
-### 13.6.2. Endpoint + auth
+Factory: `create_llm_client(config)` in `llm/client.py`.
 
-- Env:
-  - `ELIZA_BASE_URL` (e.g. `https://api.eliza.yandex.net/raw/openai/v1`)
-  - `ELIZA_OAUTH_TOKEN`
-- Header: `Authorization: OAuth <token>`
+### 13.6.2. Endpoint route (model in URL path)
 
-### 13.6.3. Model ids
+Internal models **must not** use the legacy OpenAI-compat route
+`{root}/raw/openai/v1` with `model` in the JSON body — that fails with
+`model … is not available for vendor "openai"`.
 
-Eliza uses raw `model` identifiers. Configure via the existing model env overrides:
+Correct route (prefix `/raw` is mandatory):
 
-- `YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY=<eliza_model_id>`
-- `YDBDOC_LLM_MODELS_CRITIC_PRIMARY=<eliza_model_id>`
+```
+POST {ELIZA_API_ROOT}/raw/internal/{model_id}/v1/chat/completions
+```
 
-(`YDBDOC_LLM_MODELS_*_FALLBACKS` work as usual.)
+- `ELIZA_API_ROOT` — env, default `https://api.eliza.yandex.net`
+- `model_id` — one URL per role:
+  - translate → `YDBDOC_MODEL_TRANSLATE` (default `deepseek-v4-flash`)
+  - critic → `YDBDOC_MODEL_CHECK` (default `gpt-oss-120b`)
+- Request body: **only** documented OpenAI fields (`messages`, `temperature`,
+  `max_tokens`). **No `model` field** — model is encoded in the path.
+- Response: flat OpenAI JSON (`choices[0].message.content`), no `response` wrapper.
+
+Implementation: `ElizaLLMClient.chat()` uses `requests.post` directly (not OpenAI
+SDK) so Bearer is never sent and `model` is never injected into the body.
+
+Back-compat: if only legacy `ELIZA_BASE_URL` is set (e.g.
+`https://api.eliza.yandex.net/raw/openai/v1`), `require_eliza_api_root()` extracts
+`scheme://host` as `ELIZA_API_ROOT`.
+
+### 13.6.3. Auth — env only, OAuth only
+
+| Rule | Detail |
+|------|--------|
+| **Read token from** | `ELIZA_OAUTH_TOKEN` only (`config/loader.py` → `Secrets.eliza_oauth_token`) |
+| **Never via** | CLI flags, config YAML, URL query/path segments, log messages, report files |
+| **Header** | `Authorization: OAuth <token>` (lowercase `authorization` in HTTP) |
+| **Forbidden** | `Authorization: Bearer …` (OpenAI SDK default — not used for Eliza) |
+
+Debug log line (safe): `Eliza request: role=… model=… url=… auth=OAuth` — token
+value is **not** logged.
+
+External schedulers (Reactor/Nirvana) must pass secrets **only** through the child
+process environment, e.g.:
+
+```python
+env = dict(
+    os.environ,
+    YDBDOC_MODEL_PROVIDER="eliza",
+    ELIZA_API_ROOT="https://api.eliza.yandex.net",
+    ELIZA_OAUTH_TOKEN=token2,  # from Secret option — never argv
+    YDBDOC_MODEL_TRANSLATE="deepseek-v4-flash",
+    YDBDOC_MODEL_CHECK="gpt-oss-120b",
+    GITHUB_TOKEN=token1,
+    YDBDOC_REPO_PATH=repo_path,
+)
+subprocess.run(
+    ["python", "-m", "ydbdoc_review", "job", "--mode", "translate", ...],
+    env=env,
+    check=True,
+)
+```
+
+There is **no** CLI option for Eliza OAuth token (`cli.py` has no `--eliza-*` flags).
+
+### 13.6.4. Model ids and role chains
+
+Priority for Eliza roles:
+
+1. `YDBDOC_MODEL_TRANSLATE` / `YDBDOC_MODEL_CHECK` if set (single model per role)
+2. Else if YAML primary is legacy `deepseek-v32` → Eliza defaults above
+3. Else `YDBDOC_LLM_MODELS_*_PRIMARY` + fallbacks from config
+
+Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
+`gpt-oss-120b` (critic).
+
+### 13.6.5. Retries and timeout
+
+`ElizaLLMClient` reuses `llm.retries` and `llm.timeout_s` from config:
+
+- Retries on: HTTP 408/429/5xx, `requests.Timeout`, `requests.ConnectionError`
+- Backoff: `compute_backoff_s()` (`llm/retry.py`)
+- Warning log on retry: attempt number + model slug (no token)
+
+Yandex Cloud path unchanged — still uses OpenAI SDK + existing retry classification.
+
+### 13.6.6. Unified CLI entry for external schedulers
+
+```bash
+python -m ydbdoc_review job \
+  --mode translate|verify \
+  --repo ydb-platform/ydb \
+  --pr <N> \
+  --repo-path <checkout> \
+  --merge-base-with origin/main
+```
+
+Same pipeline as `run` / `verify`; only invocation surface differs. Tag **`v0.2.0`**
+for Reactor/Nirvana during provider migration; **`v0.1.0`** stays on bugfix line for
+`ydb` GitHub Actions (§01-overview).
 
 ## 14. Glossary
 

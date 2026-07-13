@@ -66,6 +66,35 @@ git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
 ydb workflow checks out action at `@v0.1.0`; runner builds fresh image from that
 commit's `Dockerfile`.
 
+**External scheduler loop (Reactor/Nirvana, Eliza — tag `v0.2.0`):**
+
+```bash
+git tag -f v0.2.0 HEAD && git push -f origin v0.2.0
+```
+
+Parent reaction builds `env` for the child — **secrets only via env**, not CLI:
+
+| Env var | Purpose |
+|---------|---------|
+| `YDBDOC_MODEL_PROVIDER=eliza` | Switch LLM transport |
+| `ELIZA_API_ROOT` | API host (default `https://api.eliza.yandex.net`) |
+| `ELIZA_OAUTH_TOKEN` | OAuth token (Secret option → child env only) |
+| `YDBDOC_MODEL_TRANSLATE` | Internal model id for translate |
+| `YDBDOC_MODEL_CHECK` | Internal model id for critic |
+| `GITHUB_TOKEN` | GitHub API for PR/branch/comments |
+| `YDBDOC_REPO_PATH` | Checkout path inside container |
+
+Smoke curl (local, token from env):
+
+```bash
+curl -s "$ELIZA_API_ROOT/raw/internal/deepseek-v4-flash/v1/chat/completions" \
+  -H "authorization: OAuth $ELIZA_OAUTH_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Translate to English: Привет!"}]}'
+```
+
+See **06-llm-config** §13.6 for full contract.
+
 **Troubleshooting:**
 
 | Symptom | Likely cause | Mitigation |

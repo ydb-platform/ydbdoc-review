@@ -106,6 +106,7 @@ class Secrets(BaseModel):
     yc_api_key: str | None = None
     eliza_base_url: str | None = None
     eliza_oauth_token: str | None = None
+    eliza_api_root: str | None = None
     github_token: str | None = None
     github_push_token: str | None = None
 
@@ -150,6 +151,28 @@ class Secrets(BaseModel):
             )
         return self.eliza_base_url, self.eliza_oauth_token
 
+    def require_eliza_api_root(self) -> tuple[str, str]:
+        """Return (api_root, oauth_token) or raise if missing."""
+        root = (self.eliza_api_root or "").rstrip("/")
+        if not root and self.eliza_base_url:
+            # Back-compat: ELIZA_BASE_URL like https://api.eliza.yandex.net/raw/openai/v1
+            # should be treated as api_root https://api.eliza.yandex.net
+            try:
+                from urllib.parse import urlparse
+
+                p = urlparse(self.eliza_base_url)
+                if p.scheme and p.netloc:
+                    root = f"{p.scheme}://{p.netloc}"
+            except Exception:
+                root = ""
+        if not root:
+            root = "https://api.eliza.yandex.net"
+        if not self.eliza_oauth_token:
+            raise RuntimeError(
+                "Eliza OAuth token not configured. Set ELIZA_OAUTH_TOKEN."
+            )
+        return root, self.eliza_oauth_token
+
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -186,6 +209,7 @@ _GITHUB_PUSH_TOKEN_ALIASES: tuple[str, ...] = (
 )
 _ELIZA_BASE_URL_ALIASES: tuple[str, ...] = ("ELIZA_BASE_URL",)
 _ELIZA_OAUTH_TOKEN_ALIASES: tuple[str, ...] = ("ELIZA_OAUTH_TOKEN",)
+_ELIZA_API_ROOT_ALIASES: tuple[str, ...] = ("ELIZA_API_ROOT",)
 
 
 def _first_env(aliases: tuple[str, ...], env: dict[str, str]) -> str | None:
@@ -202,6 +226,7 @@ def _resolve_secrets(env: dict[str, str]) -> Secrets:
         yc_api_key=_first_env(_API_KEY_ENV_ALIASES, env),
         eliza_base_url=_first_env(_ELIZA_BASE_URL_ALIASES, env),
         eliza_oauth_token=_first_env(_ELIZA_OAUTH_TOKEN_ALIASES, env),
+        eliza_api_root=_first_env(_ELIZA_API_ROOT_ALIASES, env),
         github_token=_first_env(_GITHUB_TOKEN_ALIASES, env),
         github_push_token=_first_env(_GITHUB_PUSH_TOKEN_ALIASES, env),
     )
