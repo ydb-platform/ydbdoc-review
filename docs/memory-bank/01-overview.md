@@ -39,11 +39,10 @@
 ```
 
 Important branch: **`doc-translate-ng`** — the v2 rewrite. To be merged into
-`main` only after end-to-end tests pass on real PRs. Tag `v0.1.0` will be moved
-(forward) to the merge commit at release time — the GitHub Action in the `ydb`
-repo references this tag and the user (project owner) has limited ability to
-change CI config in `ydb`. **Do not bump to `v0.2.0`** unless explicitly
-decided otherwise.
+`main` only after end-to-end tests pass on real PRs. Tag `v0.1.0` is used by the
+`ydb` repo CI and is routinely moved forward with bug fixes (to avoid frequent
+CI config edits). A separate tag (`v0.2.0`) can be used by external schedulers
+Reactor/Nirvana during provider migration (§13.6).
 
 ---
 

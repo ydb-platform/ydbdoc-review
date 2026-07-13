@@ -198,6 +198,34 @@ User copies to `.env` and fills in. `.env` is gitignored.
 
 ---
 
+## 13.6. Alternate provider: Eliza (internal, OpenAI-compatible)
+
+During migration, `ydbdoc-review` supports two model providers behind the same
+pipeline behavior. Switching provider changes **only** transport/auth/model id;
+prompts, merge-base diff logic, file writes, commit/push, and reports stay the same.
+
+### 13.6.1. Provider selector
+
+- Env: `YDBDOC_MODEL_PROVIDER`
+  - `yandex_cloud` — default, current behavior (Yandex AI Studio)
+  - `eliza` — internal Eliza OpenAI-compatible endpoint
+
+### 13.6.2. Endpoint + auth
+
+- Env:
+  - `ELIZA_BASE_URL` (e.g. `https://api.eliza.yandex.net/raw/openai/v1`)
+  - `ELIZA_OAUTH_TOKEN`
+- Header: `Authorization: OAuth <token>`
+
+### 13.6.3. Model ids
+
+Eliza uses raw `model` identifiers. Configure via the existing model env overrides:
+
+- `YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY=<eliza_model_id>`
+- `YDBDOC_LLM_MODELS_CRITIC_PRIMARY=<eliza_model_id>`
+
+(`YDBDOC_LLM_MODELS_*_FALLBACKS` work as usual.)
+
 ## 14. Glossary
 
 ### 14.1. Source of truth

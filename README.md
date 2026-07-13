@@ -2,7 +2,12 @@
 
 GitHub Action и CLI для автоматического перевода документации YDB (**RU ↔ EN**) с QA-критиком.
 
-Релиз: **`v0.1.0`** на ветке `main` — AST-пайплайн: parse → segment → translate (`doc_translate`) → critic (`doc_verify`) → render.
+Релиз: **`v0.1.0`** (backwards-compatible тег для CI в `ydb`) — AST-пайплайн:
+parse → segment → translate (`doc_translate`) → critic (`doc_verify`) → render.
+
+Дополнительно: **`v0.2.0`** — вводит переключаемый LLM-провайдер
+`YDBDOC_MODEL_PROVIDER` (`yandex_cloud` по умолчанию, `eliza` для внутренней Eliza)
+и единый CLI-вход `job` для внешних шедулеров (Reactor/Nirvana).
 
 ## Архитектура
 
@@ -17,7 +22,7 @@ GitHub Action и CLI для автоматического перевода до
 | Навигация | `pipeline/navigation_merge.py` | Scoped merge `toc*.yaml` и redirect YAML |
 | QA | `validation/`, `translation/critic.py` | Эвристики, fence integrity, дочистка кириллицы в prose (§6.45), nav gates |
 | Отчёты | `reporting/builder.py` | 🟢/🟡/🔴, токены, оценка стоимости |
-| LLM | `llm/client.py` | Yandex AI Studio (OpenAI-compatible API) |
+| LLM | `llm/client.py` | OpenAI-compatible транспорт: Yandex Cloud или Eliza |
 
 Подробнее: [ARCHITECTURE.md](ARCHITECTURE.md) · [Memory Bank](MEMORY_BANK.md) · [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -42,7 +47,9 @@ Critic + эвристики + nav validation + вердикт; на translation 
 ## Требования
 
 - Python **3.11+** (локально) или Docker (GitHub Action).
-- **Yandex AI Studio:** folder id + API key.
+- **LLM provider**:
+  - **Yandex AI Studio (по умолчанию):** folder id + API key.
+  - **Eliza (опционально):** `ELIZA_BASE_URL` + `ELIZA_OAUTH_TOKEN`.
 - **GitHub:** `GITHUB_TOKEN` (в CI — job token с `permissions` в workflow; локально — PAT в `.env`).
 
 ## Быстрый старт (локально)
@@ -95,12 +102,37 @@ ydbdoc-review verify \
   --merge-base-with origin/main
 ```
 
+## Миграция: Eliza + внешний триггер (Reactor/Nirvana)
+
+Единый вход для внешнего вызова (без привязки к лейблам GitHub) — команда `job`:
+
+```bash
+python -m ydbdoc_review job \
+  --mode translate \
+  --repo ydb-platform/ydb \
+  --pr <N> \
+  --repo-path /path/to/ydb \
+  --merge-base-with origin/main
+```
+
+Переключение провайдера модели (только транспорт/авторизация; поведение пайплайна то же):
+
+```bash
+export YDBDOC_MODEL_PROVIDER=eliza
+export ELIZA_BASE_URL="https://api.eliza.yandex.net/raw/openai/v1"
+export ELIZA_OAUTH_TOKEN="..."
+export YDBDOC_LLM_MODELS_TRANSLATE_PRIMARY="<eliza_model_id>"
+export YDBDOC_LLM_MODELS_CRITIC_PRIMARY="<eliza_model_id>"
+```
+
+## CLI
 ## CLI
 
 | Команда | Назначение |
 |---------|------------|
 | `run` | `doc_translate` — перевод + ветка + PR; QA через `doc_verify` |
 | `verify` | `doc_verify` — critic QA на translation PR |
+| `job` | Единый вход: `--mode translate|verify` (для Reactor/Nirvana) |
 | `list-models` | Цепочки моделей из config; `--live` — GET `/v1/models` |
 | `translate-file` | Один `.md` локально, без GitHub |
 | `extract` | Сегменты файла (debug), `--format json\|text` |
