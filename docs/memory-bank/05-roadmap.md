@@ -102,6 +102,9 @@ See `ydbdoc_review.llm` package.
 - [x] Unit tests: `test_pipeline_pairs`, `test_pipeline_analyze`, `test_pipeline_orchestrator`
 - [x] `navigation/paths.py` — used by navigation merge validation (Phase E)
 - [x] `pipeline/navigation_merge.py` + `completeness.py` wired in `workflow.py` (§6.17, §6.32)
+- [x] `pipeline/navigation_supplement.py` — parent + child toc pairs (§6.71, §6.84)
+- [x] `validation/toc_targets.py` — EN toc link target existence (§6.83–§6.84)
+- [x] Absent-EN toc full mirror + include-only parse (§6.85)
 
 ### Phase G — GitHub integration ✅ COMPLETE
 - [x] `github/client.py` — REST API (PR, files, comments, open PR)
@@ -110,7 +113,7 @@ See `ydbdoc_review.llm` package.
 - [x] `github/workflow.py` — `run_doc_translate`, `run_doc_verify`
 - [x] `Secrets.require_github()` in config loader
 - [x] Unit tests: `test_github_client`, `test_github_git_ops`, `test_github_pr`, `test_github_workflow`, `test_reporting_builder`
-- [ ] Navigation YAML scoped merge in `workflow.py` / orchestrator (API + validation ✅; glue TBD)
+- [x] Navigation YAML scoped merge in `workflow.py` (§6.17; supplement §6.71, §6.84; mirror §6.85)
 
 Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 

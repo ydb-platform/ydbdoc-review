@@ -190,8 +190,10 @@ Tests: `tests/unit/test_navigation_toc.py`, `test_navigation_redirects.py`,
 
 **Inline TOC format (§6.33):** ydb `toc*.yaml` uses one-line items
 `- { name: …, href: …, when: … }`. `parse_toc_items` must handle both this
-and block `- name:` / `href:` layout. Empty merge (parser miss) is flagged
-`empty_toc` + `scope_not_applied` → navigation verdict **blocked** → report 🔴.
+and block `- name:` / `href:` layout. Also supports include-only lines
+`- include: { mode: link, path: … }` (§6.84–§6.85). Empty merge (parser miss
+or absent-EN scoped merge bug) is flagged `empty_toc` + `scope_not_applied` →
+navigation verdict **blocked** → report 🔴.
 
 ### 6.38. Token usage and cost reporting (₽ per 1K tokens)
 
@@ -1552,6 +1554,9 @@ fix ran only inside fences (§6.39).
 2. ``fix_russian_angle_placeholders_in_en()`` — apply ``<путь>`` → ``<path>`` map
    in prose/backticks too; add ``описание ошибки`` → ``error description``.
 
+**Follow-up (§6.84):** also queue **child** toc yaml referenced via
+``include.path`` from ancestor sidebars (e.g. ``sqs-api/toc_i.yaml``).
+
 **Tests:** ``test_navigation_supplement.py``, ``test_homoglyphs`` prose backtick cases.
 
 ### 6.72. Parent toc supplement: no full §6.59 gap fill (#44916)
@@ -1566,6 +1571,10 @@ added RU-only renames ``hive_config.md``, ``kafka_proxy_config.md``,
 **Decision:** ``NavigationPair.supplement_only``; supplemented merges pass
 ``restrict_gap_fill_to_scope=True`` to ``merge_en_toc_yaml`` — only
 ``translate_hrefs`` / ``extra_toc_hrefs`` are added, not every RU-base gap.
+
+**Follow-up (§6.85):** when the EN toc file is **entirely absent**, merge uses
+**full RU mirror** (``restrict_gap_fill=False``). §6.72 still applies when EN
+exists but is only partially aligned (legacy ``hive.md`` vs ``hive_config.md``).
 
 **Tests:** ``test_merge_supplement_only_adds_translated_href_not_full_ru_gap``.
 
@@ -1587,6 +1596,11 @@ paths follow ``translate_include_paths`` only. §6.72 supplement behavior is unc
 just no longer the sole caller of the flag.
 
 **Tests:** ``test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes``.
+
+**Follow-up (§6.84–§6.85):** gap-fill restriction must not block **creating** EN
+toc files that have no EN ``main`` mirror. ``_resolve_toc_merge_scope`` in
+``navigation_merge.py`` disables ``restrict_gap_fill`` for absent EN sidebars
+(§6.85 table).
 
 ### 6.73. Inline ``doc_verify`` after ``doc_translate`` (#44912)
 
@@ -1875,12 +1889,18 @@ Two gaps in §6.83:
 
 **Decision:**
 
-1. ``_iter_toc_include_paths`` in ``navigation/toc.py`` — regex for inline and
-   include-only ``include.path``; ``collect_toc_link_targets`` scans full yaml text.
+1. ``iter_toc_include_paths`` / ``_iter_toc_include_paths`` in ``navigation/toc.py``
+   — regex for inline and include-only ``include.path``;
+   ``collect_toc_link_targets`` scans full yaml text (not only parsed ``- name:``
+   items).
 2. ``_supplement_included_child_tocs`` in ``navigation_supplement.py`` — after
-   href-based parent supplement, scan ancestor tocs (and nested includes) for child
-   ``*.yaml`` includes; queue ``NavigationPair`` when RU child exists and EN child
-   is absent at merge-base.
+   href-based parent supplement (§6.71), scan **all ancestor tocs** of translated
+   pages for child ``*.yaml`` includes; queue ``NavigationPair`` when RU child
+   exists and EN child is absent at merge-base. Iterates for nested includes.
+
+**Implementation:** ``navigation/toc.py`` (``iter_toc_include_paths``,
+``toc_entry_paths``), ``validation/toc_targets.py`` (uses ``collect_toc_link_targets``),
+``pipeline/navigation_supplement.py``.
 
 **Tests:** ``test_collect_toc_link_targets_reads_inline_include_only_item``,
 ``test_check_missing_toc_targets_detects_inline_include_child``,
@@ -1895,17 +1915,31 @@ Two gaps in §6.83:
 scope** (``ru_base == ru_pr``) and ``restrict_gap_fill_to_scope=True`` → merge
 emitted no entries.
 
+**Operational rule (authoritative):**
+
+| EN ``main`` state | Merge behaviour |
+|-------------------|-----------------|
+| File absent / empty ``items:`` | **Full mirror** of RU sidebar: all ``href`` + ``include.path``, translate labels, ``restrict_gap_fill=False`` |
+| Partial EN (§6.71 ``supplement_only``) | Add only RU entries **missing** from EN (href or include); do **not** rename legacy EN href aliases (§6.72) |
+| PR diff on toc (direct edit) | Scoped merge + ``restrict_gap_fill=True`` (§6.82); only PR-scope hrefs/includes added |
+
 **Decision:**
 
-1. **`en_toc_is_absent`** — when EN sidebar yaml is missing/empty, **full mirror**
-   from RU: all ``href`` / ``include.path`` in scope, ``restrict_gap_fill=False``.
-2. **`supplement_only``** with partial EN: add only RU entries missing from EN
-   (href or include), still without renaming legacy EN href aliases (§6.72).
-3. **Parser:** block toc parser treats ``- include: { … }`` as its own item
-   (not glued to the previous ``- name:`` block).
+1. ``en_toc_is_absent`` + ``_resolve_toc_merge_scope`` in ``navigation_merge.py``.
+2. Block toc parser: ``- include: { … }`` is a **separate** list item (§6.84 parser);
+   include-only items copy without ``name`` translation.
+3. Public helpers: ``en_toc_is_absent``, ``toc_entry_paths``, ``iter_toc_include_paths``.
+
+**Implementation:** ``navigation/toc.py`` (``_parse_toc_items_block`` rewrite,
+``en_toc_is_absent``), ``pipeline/navigation_merge.py`` (``_resolve_toc_merge_scope``,
+``_toc_label_names``).
 
 **Tests:** ``test_merge_navigation_pair_mirrors_absent_en_toc_from_ru``,
 ``test_parse_toc_items_reads_include_only_entry``,
 ``test_merge_en_toc_mirrors_absent_en_from_ru_with_inline_include``.
+
+**Canonical case:** SQS API docs — ``ydb/docs/ru/core/reference/sqs-api/toc_p.yaml``
+on ``main``, no EN mirror; translation from [#45181](https://github.com/ydb-platform/ydb/pull/45181)
+→ [#46349](https://github.com/ydb-platform/ydb/pull/46349).
 
 ---

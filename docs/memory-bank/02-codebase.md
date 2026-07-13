@@ -51,7 +51,7 @@ src/ydbdoc_review/
 │   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
 ├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
-│   ├── toc.py                     parse (href + include.path), nested indent, merge, validate (§6.62–§6.63)
+│   ├── toc.py                     parse (href + include.path, include-only lines), nested indent, merge, validate (§6.62–§6.63, §6.84–§6.85)
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
@@ -68,6 +68,7 @@ src/ydbdoc_review/
 │   ├── link_locale.py             URL locale mirror + link_locale QA (§6.34, §6.37)
 │   ├── wikipedia_links.py         MediaWiki langlinks API (RU↔EN slugs, §6.37)
 │   ├── cli_tokens.py              CLI token preservation (D.3)
+│   ├── toc_targets.py             EN toc href/include.path file existence (§6.83–§6.84)
 │   └── heuristics.py              length ratio, cyrillic (+ fence comments), parity, anchors
 ├── harness/                       ✅ per-file + PR step runners (§6.66)
 │   ├── state.py                   FileRunState — mutable per-file artifacts
@@ -89,7 +90,8 @@ src/ydbdoc_review/
 │   ├── qa.py                      round-trip gate, compose_file_verdict
 │   ├── pairs.py                   RU/EN md/includes + nav YAML pairing (§6.41)
 │   ├── include_supplement.py      transitive locale {% include %} pairs (§6.80)
-│   ├── navigation_merge.py        scoped toc/redirect merge; EN-main indent (§6.36)
+│   ├── navigation_supplement.py   parent + child toc pairs for translated pages (§6.71, §6.84)
+│   ├── navigation_merge.py        scoped toc/redirect merge; absent-EN full mirror (§6.36, §6.85)
 │   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)
 │   ├── orchestrator.py            thin wrapper → PRHarness (TRANSLATE_PR_PROFILE)

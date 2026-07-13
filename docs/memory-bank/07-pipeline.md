@@ -110,10 +110,17 @@ INPUT: pr_number, source_repo, target_branch_base
    # EN changed only → translate_to_ru
    # both changed → skip (§6.76); RU-only → translate_to_en from RU
 
-3. NAVIGATION (when PR touches RU ``toc*.yaml`` / redirect YAML — §6.17)
+3. NAVIGATION (§6.17, §6.71, §6.84–§6.85)
    nav_pairs = build_navigation_pairs(changes)
-   scope = toc_translate_scope(ru_base, ru_pr) ∪ new_md_hrefs
-   merge_en_toc_yaml / merge_en_redirects_yaml → write EN mirror
+   nav_pairs = supplement_navigation_pairs(translated_en_md)   # parent href gaps
+   nav_pairs = supplement child tocs via include.path scan    # §6.84
+   for each nav pair:
+     scope = _resolve_toc_merge_scope(ru_base, ru_pr, en_main, supplement_only)
+       # absent EN → full RU mirror (§6.85)
+       # partial EN supplement_only → missing href/include only (§6.72)
+       # PR toc diff → scoped merge + restrict gap-fill (§6.82)
+     merge_en_toc_yaml / merge_en_redirects_yaml → write EN mirror
+   apply_toc_target_checks — block if href/include points at missing EN file (§6.83)
 4. COMPLETENESS (§6.32, §6.80)
    completeness_gaps = expected_en_mirrors(diff) − committed_en_paths
    if gaps → skip commit/push; 🔴 in source comment
@@ -471,6 +478,11 @@ QA noise and parent ``toc_p.yaml`` ``include.path`` merge (+ ``extra_toc_hrefs_f
 **Canonical auto-translate case (ydb-sdk toc):** [ydb #44108](https://github.com/ydb-platform/ydb/pull/44108)
 → [#44117](https://github.com/ydb-platform/ydb/pull/44117) manual fix; §6.63 fixes nested
 indented ``toc_i.yaml`` parse/merge and adds ``collapsed_toc`` validation.
+
+**Canonical auto-translate case (SQS API toc):** [ydb #46349](https://github.com/ydb-platform/ydb/pull/46349)
+from [#45181](https://github.com/ydb-platform/ydb/pull/45181); §6.84 child
+``toc_i.yaml`` supplementation + inline ``include: { path: … }`` parse;
+§6.85 full mirror when EN ``sqs-api/toc_p.yaml`` absent (no more empty ``items:``).
 
 ---
 
