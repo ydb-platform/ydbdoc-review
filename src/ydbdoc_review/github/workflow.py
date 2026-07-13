@@ -55,10 +55,12 @@ from ydbdoc_review.pipeline.navigation_merge import (
 from ydbdoc_review.pipeline.navigation_supplement import supplement_navigation_pairs
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import (
+    DocPair,
     build_navigation_pairs,
     build_verify_navigation_pairs,
     filter_translation_pr_verify_scope,
 )
+from ydbdoc_review.pipeline.toc_href_supplement import supplement_toc_href_pairs
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
@@ -158,6 +160,37 @@ def _safe_post_issue_comment(
             exc,
         )
         return None
+
+
+def _translate_additional_pairs(
+    pr_result: PRTranslationResult,
+    new_pairs: list[DocPair],
+    *,
+    repo_path: str,
+    merge_base_with: str,
+    client,
+    glossary: Glossary,
+    cfg: Config,
+) -> set[str]:
+    """Run translation for pairs added after the initial markdown pass."""
+    if not new_pairs:
+        return set()
+    contents = load_pair_contents(
+        repo_path, new_pairs, merge_base_with=merge_base_with
+    )
+    extra = run_pr_translation(
+        contents,
+        client,
+        glossary,
+        config=cfg,
+        use_analyze_llm=False,
+    )
+    pr_result.pair_results.extend(extra.pair_results)
+    return {
+        r.plan.target_path
+        for r in extra.pair_results
+        if r.target_text is not None and not r.error
+    }
 
 
 def _apply_results_to_disk(
@@ -283,6 +316,28 @@ def run_doc_translate(
             repo_path=repo_path,
             merge_base_with=merge_base_with,
             docs_root=cfg.paths.docs_root,
+        )
+
+    if nav_pairs:
+        paired_ru = {p.ru_path for p in pairs}
+        pairs, toc_href_changes = supplement_toc_href_pairs(
+            pairs,
+            nav_pairs,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            docs_root=cfg.paths.docs_root,
+        )
+        if toc_href_changes:
+            changes = merge_pr_file_changes(changes, toc_href_changes)
+        new_toc_pairs = [p for p in pairs if p.ru_path not in paired_ru]
+        md_en_paths |= _translate_additional_pairs(
+            pr_result,
+            new_toc_pairs,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            client=client,
+            glossary=glossary,
+            cfg=cfg,
         )
 
     if nav_pairs:

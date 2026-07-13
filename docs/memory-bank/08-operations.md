@@ -101,7 +101,7 @@ See **06-llm-config** §13.6 for full contract.
 |---------|----------------|------------|
 | `build-docs` ENOENT on `toc_i.yaml` / child toc | Child include not queued for merge (§6.84) | Update `@v0.1.0`; re-run `doc_translate` |
 | `doc_verify` `empty_toc` on new EN sidebar | Absent EN file + empty scoped merge (§6.85) | Same — full RU mirror fix in `navigation_merge` |
-| `doc_verify` `missing_toc_target` | EN toc links to file not in commit (§6.83) | Ensure child toc supplemented; check `toc_targets` |
+| `doc_verify` `missing_toc_target` | EN toc lists page not translated (§6.83, §6.89) | Update `@v0.1.0`; re-run `doc_translate` — toc href supplementation translates RU-only pages |
 | `build-docs` `YFM003 unreachable-link` | Page linked but not in toc (§6.86) | Indented `href:` parse + re-run `doc_translate` |
 | `python:3.12-slim` / ECR timeout on build | Registry unreachable from runner | Retry; or run `docker-publish` and rely on GHCR fallback |
 | Action exits 0 but no report on translation PR | Fixed in §6.48 — update `@v0.1.0` | Tag must include `_safe_post_issue_comment` + report-first order |

@@ -2022,4 +2022,28 @@ This keeps scope detection semantics while never crashing.
 **Tests:** ``tests/unit/test_llm_eliza_internal.py`` (URL path, OAuth header,
 no ``model`` in body, retry on 503).
 
+### 6.89. Supplement translate queue from sidebar ``href`` targets (#46386)
+
+**Problem:** [PR #46386](https://github.com/ydb-platform/ydb/pull/46386) (translation
+for [#45181](https://github.com/ydb-platform/ydb/pull/45181)) — only ``topic.md`` and
+``diagnostics.md`` changed in the source PR, but §6.84–§6.85 queued ``sqs-api``
+``toc_p.yaml`` / ``toc_i.yaml`` (full RU mirror via ancestor ``include.path`` from
+``reference/toc_p.yaml``). EN sidebars list ``index.md``, ``auth.md``, ``examples.md``,
+yet those RU pages were never in the PR diff → ``missing_toc_target`` 🔴.
+
+**Root cause:** ``doc_translate`` only translates ``.md`` from the source PR file list
+(+ locale ``{% include %}`` deps via §6.80). Mirroring navigation does **not** imply
+translating every ``href`` the sidebar will expose.
+
+**Decision:** after ``supplement_navigation_pairs``, scan all queued RU toc YAML
+(including child ``include.path`` sidebars) for ``href: *.md`` targets. When RU page
+exists and EN mirror is absent at ``merge_base_with``, add ``DocPair`` and run a
+second markdown translation pass before ``run_navigation_merges``. Same contract as
+§6.80 include supplementation.
+
+**Implementation:** ``pipeline/toc_href_supplement.py`` (``supplement_toc_href_pairs``),
+``github/workflow.py`` (``_translate_additional_pairs``).
+
+**Tests:** ``tests/unit/test_toc_href_supplement.py``.
+
 ---

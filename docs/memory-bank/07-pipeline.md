@@ -110,10 +110,12 @@ INPUT: pr_number, source_repo, target_branch_base
    # EN changed only → translate_to_ru
    # both changed → skip (§6.76); RU-only → translate_to_en from RU
 
-3. NAVIGATION (§6.17, §6.71, §6.84–§6.85)
+3. NAVIGATION (§6.17, §6.71, §6.84–§6.85, §6.89)
    nav_pairs = build_navigation_pairs(changes)
    nav_pairs = supplement_navigation_pairs(translated_en_md)   # parent href gaps
    nav_pairs = supplement child tocs via include.path scan    # §6.84
+   pairs += supplement_toc_href_pairs(nav_pairs)              # §6.89: translate RU pages listed in sidebar hrefs when EN absent
+   translate additional markdown pairs (second pass)
    for each nav pair:
      scope = _resolve_toc_merge_scope(ru_base, ru_pr, en_main, supplement_only)
        # absent EN → full RU mirror (§6.85)
@@ -485,6 +487,8 @@ from [#45181](https://github.com/ydb-platform/ydb/pull/45181); §6.84 child
 §6.85 full mirror when EN ``sqs-api/toc_p.yaml`` absent (no more empty ``items:``).
 [#46346](https://github.com/ydb-platform/ydb/pull/46346): §6.86 indented
 ``toc_i.yaml`` ``href:`` parse — fixes ``YFM003`` on ``auth.md`` / ``examples.md``.
+[#46386](https://github.com/ydb-platform/ydb/pull/46386): §6.89 translates
+``index.md`` / ``auth.md`` / ``examples.md`` when sidebars mirror RU-only pages.
 
 ---
 
