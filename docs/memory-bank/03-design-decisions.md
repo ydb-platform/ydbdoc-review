@@ -1826,4 +1826,33 @@ trailing) per file.
 ``test_translate_pipeline_prose_then_multiple_fence_comments``,
 ``test_fenced_code_excluded_from_segments_only_prose_translated``.
 
+### 6.83. EN toc target existence + ``rebuild_docs`` checkout (#45157 / #46258)
+
+**Problem:** [PR #45157](https://github.com/ydb-platform/ydb/pull/45157) (translation
+for [#31195](https://github.com/ydb-platform/ydb/pull/31195)) — ``doc_verify`` 🟢,
+``rebuild_docs`` 🔴. Two gaps:
+
+1. **CI:** ``docs_build_rebuild.yaml`` ran ``diplodoc-platform/docs-build-action``
+   without ``actions/checkout`` and with a step that never set ``id: sha`` — revision
+   ``pr-{N}-`` and local ``./ydb/docs`` missing → ``ENOENT …/ydb/docs`` in 14 ms.
+   Inline ``doc_verify`` cannot see this; merge happened without a real docs build.
+2. **Pipeline:** §6.82 stops gap-filling phantom ``include.path`` entries, but
+   ``doc_verify`` still did not assert that EN toc ``href`` / ``include.path`` targets
+   exist — same class as ``build-docs`` ENOENT on
+   ``sql-translation/toc-sql-translation.yaml`` ([#46258](https://github.com/ydb-platform/ydb/pull/46258)).
+
+**Decision:**
+
+1. **`check_missing_toc_targets``** in ``validation/toc_targets.py`` — for changed EN
+   toc YAML, resolve every ``href`` and ``include.path`` (including on ``href`` items)
+   relative to the toc file; block when the EN mirror file is absent. Same-batch
+   outputs count via ``pending_paths`` (e.g. new ``diagnostics.md`` before push).
+2. Hook in ``run_doc_verify`` after navigation verify (with ``apply_include_target_checks``).
+3. **ydb fix (separate PR):** add PR-head ``checkout`` + ``id: sha`` to
+   ``docs_build_rebuild.yaml`` before ``docs-build-action`` — same pattern as
+   ``docs_build.yaml``.
+
+**Tests:** ``test_toc_targets.py``; §6.82 regression
+``test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes``.
+
 ---

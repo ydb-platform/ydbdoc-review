@@ -73,6 +73,7 @@ from ydbdoc_review.reporting.builder import (
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.include_targets import apply_include_target_checks
+from ydbdoc_review.validation.toc_targets import apply_toc_target_checks
 
 logger = logging.getLogger(__name__)
 
@@ -576,6 +577,20 @@ def run_doc_verify(
         pr_result,
         repo_path=repo_path,
         docs_root=cfg.paths.docs_root,
+    )
+    apply_toc_target_checks(
+        pr_result,
+        repo_path=repo_path,
+        pending_paths={
+            r.plan.target_path
+            for r in pr_result.pair_results
+            if r.plan.target_lang == "en" and r.target_text is not None
+        }
+        | {
+            n.en_path
+            for n in pr_result.navigation_results
+            if n.target_text is not None
+        },
     )
     if inherited_completeness_gaps:
         merged_gaps = list(

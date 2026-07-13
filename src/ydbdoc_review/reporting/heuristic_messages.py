@@ -29,7 +29,7 @@ _FENCE_PATH = re.compile(
 _LINK_LOCALE = re.compile(r"^link_locale: (.+)$")
 _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
-    r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent): (.+)$"
+    r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent|missing_toc_target): (.+)$"
 )
 
 
@@ -52,7 +52,7 @@ def heuristic_location_label(message: str) -> str:
     if message.startswith("length_ratio:"):
         return "объём перевода"
     if message.startswith(
-        ("scope_not_applied:", "missing_href:", "unexpected_href:", "empty_toc:", "collapsed_toc:")
+        ("scope_not_applied:", "missing_href:", "unexpected_href:", "empty_toc:", "collapsed_toc:", "missing_toc_target:")
     ):
         return "навигация (toc/redirect)"
     if message.startswith("ru_source"):
@@ -164,6 +164,8 @@ def humanize_heuristic(message: str) -> str:
             return f"EN toc сильно урезан относительно EN main: {detail}"
         if kind == "inconsistent_indent":
             return f"Смешанные отступы в inline toc: {detail}"
+        if kind == "missing_toc_target":
+            return f"В EN toc ссылка на отсутствующий файл: {detail}"
 
     if message.startswith("ru_source"):
         return message.replace("ru_source", "Исходник RU", 1)

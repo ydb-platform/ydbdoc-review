@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 
 _ITEM_SPLIT = re.compile(r"(?m)^- name: ")
 _HREF_LINE = re.compile(r"^  href: (.+)$", re.MULTILINE)
@@ -497,6 +498,47 @@ def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
     if inline:
         return inline
     return _parse_toc_items_block(text)
+
+
+def collect_toc_link_targets(yaml_text: str) -> list[tuple[str, str]]:
+    """Return ordered ``(kind, path)`` pairs for sidebar ``href`` and ``include.path``."""
+    text = yaml_text.replace("\r\n", "\n")
+    if not text.strip():
+        return []
+    if _has_nested_block_items(text):
+        items = _flatten_toc_nodes(_parse_toc_tree_block(text))
+    else:
+        items = parse_toc_items(text)
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        href = item.get("href")
+        if href and not href.startswith(("http://", "https://", "mailto:")):
+            key = ("href", href)
+            if key not in seen:
+                seen.add(key)
+                targets.append(key)
+        block = item.get("block", "")
+        for match in _INCLUDE_PATH.finditer(block):
+            path = match.group(1).strip()
+            key = ("include", path)
+            if key not in seen:
+                seen.add(key)
+                targets.append(key)
+    return targets
+
+
+def resolve_toc_target_path(en_toc_path: str, rel_path: str) -> str:
+    """Resolve toc ``href`` / ``include.path`` relative to the EN yaml file."""
+    base = PurePosixPath(en_toc_path).parent
+    parts: list[str] = []
+    for part in (base / rel_path).parts:
+        if part == "..":
+            if parts:
+                parts.pop()
+        elif part != ".":
+            parts.append(part)
+    return "/".join(parts)
 
 
 def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope:
