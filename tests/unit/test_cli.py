@@ -123,17 +123,17 @@ def test_cli_verify_dry_run(mock_verify, git_repo: Path):
 
 
 @patch("ydbdoc_review.cli.translate_file")
-@patch("ydbdoc_review.cli.YandexLLMClient.from_config")
+@patch("ydbdoc_review.cli.create_llm_client")
 @patch("ydbdoc_review.cli.load_config")
 def test_cli_translate_file_stdout(
     mock_load_config,
-    mock_from_config,
+    mock_create_client,
     mock_translate_file,
     tmp_path: Path,
 ):
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
     mock_load_config.return_value = cfg
-    mock_from_config.return_value = MagicMock()
+    mock_create_client.return_value = MagicMock()
     mock_translate_file.return_value = FileTranslationResult(
         file_path="sample.md",
         final_text="Translated.\n",
@@ -152,17 +152,17 @@ def test_cli_translate_file_stdout(
 
 
 @patch("ydbdoc_review.cli.translate_file")
-@patch("ydbdoc_review.cli.YandexLLMClient.from_config")
+@patch("ydbdoc_review.cli.create_llm_client")
 @patch("ydbdoc_review.cli.load_config")
 def test_cli_translate_file_writes_output(
     mock_load_config,
-    mock_from_config,
+    mock_create_client,
     mock_translate_file,
     tmp_path: Path,
 ):
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
     mock_load_config.return_value = cfg
-    mock_from_config.return_value = MagicMock()
+    mock_create_client.return_value = MagicMock()
     mock_translate_file.return_value = FileTranslationResult(
         file_path="sample.md",
         final_text="Out.\n",
@@ -188,8 +188,8 @@ def test_cli_translate_file_writes_output(
 def test_cli_translate_file_missing_credentials(mock_load_config):
     cfg = load_config(env={})
     mock_load_config.return_value = cfg
-    with patch("ydbdoc_review.cli.YandexLLMClient.from_config") as mock_from:
-        mock_from.side_effect = RuntimeError("missing Yandex credentials")
+    with patch("ydbdoc_review.cli.create_llm_client") as mock_create:
+        mock_create.side_effect = RuntimeError("missing credentials")
         result = runner.invoke(app, ["translate-file", "missing.md"])
     assert result.exit_code == 1
     assert "Error" in result.stdout or "missing" in result.stdout.lower()

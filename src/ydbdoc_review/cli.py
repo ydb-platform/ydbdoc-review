@@ -18,7 +18,7 @@ from rich.table import Table
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubConfigError, GitHubError
 from ydbdoc_review.github.workflow import run_doc_translate, run_doc_verify
-from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
@@ -153,6 +153,65 @@ def verify(
     _print_job_summary(result.mode, result)
 
 
+@app.command()
+def job(
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help="translate (doc_translate) or verify (doc_verify).",
+        ),
+    ],
+    repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
+    pr: Annotated[int, typer.Option(help="PR number (source for translate; translation for verify).")],
+    repo_path: Annotated[
+        Path | None,
+        typer.Option(help="Local git checkout of the PR head."),
+    ] = None,
+    merge_base_with: Annotated[
+        str,
+        typer.Option(help="Second ref for git merge-base."),
+    ] = "origin/main",
+    dry_run: Annotated[
+        bool,
+        typer.Option(help="No disk writes, commit, push, or PR comments."),
+    ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option(help="Run pipeline but skip git commit/push/comments."),
+    ] = False,
+) -> None:
+    """Unified entry point for external schedulers (Reactor/Nirvana)."""
+    path = _resolve_repo_path(repo_path)
+    m = mode.strip().lower()
+    try:
+        if m in ("translate", "doc_translate", "run"):
+            result = run_doc_translate(
+                repo_path=str(path),
+                github_repo=repo,
+                pr_number=pr,
+                merge_base_with=merge_base_with,
+                dry_run=dry_run,
+                no_commit=no_commit,
+            )
+        elif m in ("verify", "doc_verify"):
+            result = run_doc_verify(
+                repo_path=str(path),
+                github_repo=repo,
+                pr_number=pr,
+                merge_base_with=merge_base_with,
+                dry_run=dry_run,
+                no_commit=no_commit,
+            )
+        else:
+            raise typer.BadParameter("mode must be translate or verify")
+    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_job_summary(getattr(result, "mode", m), result)
+
+
 @app.command("list-models")
 def list_models(
     config: Annotated[
@@ -225,8 +284,7 @@ def translate_file_cmd(
     """Translate one markdown file locally (no GitHub)."""
     cfg = load_config(yaml_path=config)
     try:
-        cfg.secrets.require_yandex()
-        client = YandexLLMClient.from_config(cfg)
+        client = create_llm_client(cfg)
     except (RuntimeError, LLMConfigError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc

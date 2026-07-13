@@ -104,6 +104,8 @@ class Secrets(BaseModel):
     model_config = ConfigDict(extra="forbid")
     yc_folder_id: str | None = None
     yc_api_key: str | None = None
+    eliza_base_url: str | None = None
+    eliza_oauth_token: str | None = None
     github_token: str | None = None
     github_push_token: str | None = None
 
@@ -135,6 +137,18 @@ class Secrets(BaseModel):
                 "Set GITHUB_PUSH_TOKEN or GITHUB_TOKEN."
             )
         return api, push
+
+    def require_eliza(self) -> tuple[str, str]:
+        """Return (base_url, oauth_token) or raise if missing."""
+        if not self.eliza_base_url:
+            raise RuntimeError(
+                "Eliza base URL not configured. Set ELIZA_BASE_URL."
+            )
+        if not self.eliza_oauth_token:
+            raise RuntimeError(
+                "Eliza OAuth token not configured. Set ELIZA_OAUTH_TOKEN."
+            )
+        return self.eliza_base_url, self.eliza_oauth_token
 
 
 class Config(BaseModel):
@@ -170,6 +184,8 @@ _GITHUB_PUSH_TOKEN_ALIASES: tuple[str, ...] = (
     "GITHUB_PUSH_TOKEN",
     "YDBDOC_PUSH_PAT",
 )
+_ELIZA_BASE_URL_ALIASES: tuple[str, ...] = ("ELIZA_BASE_URL",)
+_ELIZA_OAUTH_TOKEN_ALIASES: tuple[str, ...] = ("ELIZA_OAUTH_TOKEN",)
 
 
 def _first_env(aliases: tuple[str, ...], env: dict[str, str]) -> str | None:
@@ -184,6 +200,8 @@ def _resolve_secrets(env: dict[str, str]) -> Secrets:
     return Secrets(
         yc_folder_id=_first_env(_FOLDER_ID_ENV_ALIASES, env),
         yc_api_key=_first_env(_API_KEY_ENV_ALIASES, env),
+        eliza_base_url=_first_env(_ELIZA_BASE_URL_ALIASES, env),
+        eliza_oauth_token=_first_env(_ELIZA_OAUTH_TOKEN_ALIASES, env),
         github_token=_first_env(_GITHUB_TOKEN_ALIASES, env),
         github_push_token=_first_env(_GITHUB_PUSH_TOKEN_ALIASES, env),
     )

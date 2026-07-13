@@ -1,8 +1,15 @@
-"""Yandex AI Studio client (OpenAI-compatible)."""
+"""LLM clients (OpenAI-compatible transports).
+
+Supports two providers behind the same `chat()` interface:
+
+- **Yandex Cloud FM** (default): `YandexLLMClient` (`gpt://<folder>/<model>` URIs)
+- **Eliza** (OpenAI-compatible): `ElizaLLMClient` (raw model id, OAuth header)
+"""
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Literal
@@ -265,3 +272,76 @@ class YandexLLMClient:
             model_uri=uri,
             usage=usage,
         )
+
+
+class ElizaLLMClient(YandexLLMClient):
+    """OpenAI-compatible client for internal Eliza.
+
+    Differences vs Yandex Cloud:
+    - `model_uri(model_slug)` returns the raw model id (no `gpt://...` prefix)
+    - Uses `Authorization: OAuth <token>` header (token from env via `Secrets`)
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        oauth_token: str,
+        llm: LLMConfig,
+        client: OpenAI | None = None,
+        usage_tracker: UsageTracker | None = None,
+    ) -> None:
+        if not base_url or not oauth_token:
+            raise LLMConfigError("base_url and oauth_token are required")
+        # OpenAI client: avoid leaking token; never log it.
+        # The official SDK uses Bearer by default; Eliza expects OAuth.
+        if client is None:
+            try:
+                client = OpenAI(
+                    api_key="unused",
+                    base_url=base_url,
+                    timeout=float(llm.timeout_s),
+                    default_headers={"Authorization": f"OAuth {oauth_token}"},
+                )
+            except TypeError:
+                # Older SDK versions may not support default_headers. Fall back to api_key.
+                # Some Eliza deployments accept Bearer; if not, this will error clearly.
+                client = OpenAI(
+                    api_key=oauth_token,
+                    base_url=base_url,
+                    timeout=float(llm.timeout_s),
+                )
+        # Reuse parent retry/usage logic; folder id is not used for Eliza.
+        super().__init__(
+            folder_id="eliza",
+            api_key="unused",
+            llm=llm,
+            client=client,
+            usage_tracker=usage_tracker,
+        )
+        self._base_url = base_url
+
+    @classmethod
+    def from_config(cls, config: Config) -> ElizaLLMClient:
+        base_url, token = config.secrets.require_eliza()
+        return cls(base_url=base_url, oauth_token=token, llm=config.llm)
+
+    def model_uri(self, model_slug: str) -> str:
+        return model_slug
+
+
+def create_llm_client(config: Config) -> YandexLLMClient:
+    """Factory for model provider selection.
+
+    Controlled via env `YDBDOC_MODEL_PROVIDER`:
+    - `yandex_cloud` (default): Yandex AI Studio via existing secrets
+    - `eliza`: Eliza OpenAI-compatible transport
+    """
+    provider = (os.environ.get("YDBDOC_MODEL_PROVIDER") or "yandex_cloud").strip()
+    if provider == "yandex_cloud":
+        return YandexLLMClient.from_config(config)
+    if provider == "eliza":
+        return ElizaLLMClient.from_config(config)
+    raise LLMConfigError(
+        "Unknown YDBDOC_MODEL_PROVIDER. Expected 'yandex_cloud' or 'eliza'."
+    )

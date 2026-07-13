@@ -39,7 +39,7 @@ from ydbdoc_review.github.pr import (
     verify_fixup_branch,
     verify_fixup_pr_base,
 )
-from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
@@ -254,8 +254,7 @@ def run_doc_translate(
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
         return job
 
-    cfg.secrets.require_yandex()
-    client = YandexLLMClient.from_config(cfg)
+    client = create_llm_client(cfg)
     glossary = load_glossary()
 
     if pairs:
@@ -507,8 +506,7 @@ def run_doc_verify(
             )
             return job
 
-    cfg.secrets.require_yandex()
-    client = YandexLLMClient.from_config(cfg)
+    client = create_llm_client(cfg)
     glossary = load_glossary()
 
     if pairs:
