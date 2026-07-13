@@ -231,3 +231,56 @@ def test_extra_toc_hrefs_for_pair_skips_include_only_entries():
     """Regression #44103: include.path items must not raise KeyError on href."""
     md_basenames = {"index.md", "logging.md", "opentelemetry.md"}
     assert extra_toc_hrefs_for_pair(OBSERVABILITY_RU_TOC, md_basenames) == {"index.md"}
+
+
+SQS_RU_TOC_P = dedent("""
+    items:
+    - name: Обзор
+      href: index.md
+    - include: { mode: link, path: toc_i.yaml }
+""").strip()
+
+
+def test_merge_navigation_pair_mirrors_absent_en_toc_from_ru():
+    """Regression #46349: absent EN toc must mirror RU, not emit empty items."""
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/reference/sqs-api/toc_p.yaml",
+        en_path="ydb/docs/en/core/reference/sqs-api/toc_p.yaml",
+        ru_changed=True,
+        supplement_only=True,
+    )
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=SQS_RU_TOC_P,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(SQS_RU_TOC_P, ""),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={"Обзор": "Overview"},
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+            extra_toc_hrefs={"index.md"},
+        )
+
+    assert result.verdict == "ok"
+    assert result.target_text is not None
+    assert "index.md" in result.target_text
+    assert "toc_i.yaml" in result.target_text
+    assert "Overview" in result.target_text
+    assert result.target_text.strip() != "items:"
+

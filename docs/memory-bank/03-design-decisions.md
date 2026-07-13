@@ -1886,4 +1886,26 @@ Two gaps in §6.83:
 ``test_check_missing_toc_targets_detects_inline_include_child``,
 ``test_supplement_adds_included_child_toc_when_parent_lists_page``.
 
+### 6.85. Mirror absent EN toc from RU (#46349)
+
+**Problem:** [PR #46349](https://github.com/ydb-platform/ydb/pull/46349) — after §6.84
+``toc_i.yaml`` was created, but ``toc_p.yaml`` merged as empty ``items:`` and
+``doc_verify`` blocked with ``empty_toc``. RU ``sqs-api/toc_p.yaml`` exists on
+``main``; EN mirror is absent. ``supplement_only`` pair had **empty translate
+scope** (``ru_base == ru_pr``) and ``restrict_gap_fill_to_scope=True`` → merge
+emitted no entries.
+
+**Decision:**
+
+1. **`en_toc_is_absent`** — when EN sidebar yaml is missing/empty, **full mirror**
+   from RU: all ``href`` / ``include.path`` in scope, ``restrict_gap_fill=False``.
+2. **`supplement_only``** with partial EN: add only RU entries missing from EN
+   (href or include), still without renaming legacy EN href aliases (§6.72).
+3. **Parser:** block toc parser treats ``- include: { … }`` as its own item
+   (not glued to the previous ``- name:`` block).
+
+**Tests:** ``test_merge_navigation_pair_mirrors_absent_en_toc_from_ru``,
+``test_parse_toc_items_reads_include_only_entry``,
+``test_merge_en_toc_mirrors_absent_en_from_ru_with_inline_include``.
+
 ---

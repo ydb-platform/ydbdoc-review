@@ -111,6 +111,50 @@ def test_merge_adds_ru_base_href_missing_from_en_main():
     assert "debug-logs-otel.md" in hrefs
 
 
+def test_parse_toc_items_reads_include_only_entry():
+    toc = dedent("""
+        items:
+        - name: Overview
+          href: index.md
+        - include: { mode: link, path: toc_i.yaml }
+    """).strip()
+    items = parse_toc_items(toc)
+    assert len(items) == 2
+    assert items[0]["href"] == "index.md"
+    assert items[1]["include_path"] == "toc_i.yaml"
+
+
+def test_merge_en_toc_mirrors_absent_en_from_ru_with_inline_include():
+    """Regression #46349: empty EN main mirrors full RU sidebar structure."""
+    ru = dedent("""
+        items:
+        - name: Обзор
+          href: index.md
+        - include: { mode: link, path: toc_i.yaml }
+    """).strip()
+    merged = merge_en_toc_yaml(
+        "",
+        ru,
+        translate_hrefs={"index.md"},
+        translate_include_paths={"toc_i.yaml"},
+        translate_name=lambda n: "Overview",
+        ru_base_hrefs={"index.md"},
+        ru_base_include_paths={"toc_i.yaml"},
+        restrict_gap_fill_to_scope=False,
+    )
+    assert "index.md" in merged
+    assert "toc_i.yaml" in merged
+    assert "Overview" in merged
+    issues = validate_toc_merge(
+        ru,
+        merged,
+        translate_hrefs={"index.md"},
+        translate_include_paths={"toc_i.yaml"},
+        en_main_yaml="",
+    )
+    assert not any(issue.kind == "empty_toc" for issue in issues)
+
+
 def test_merge_supplement_only_adds_translated_href_not_full_ru_gap():
     """Regression #44916: parent toc supplement must not pull unrelated RU renames."""
     en_main = dedent("""

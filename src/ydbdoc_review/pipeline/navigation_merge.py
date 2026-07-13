@@ -15,8 +15,11 @@ from ydbdoc_review.navigation.redirects import (
     redirect_translate_scope,
 )
 from ydbdoc_review.navigation.toc import (
+    TocTranslateScope,
+    en_toc_is_absent,
     merge_en_toc_yaml,
     parse_toc_items,
+    toc_entry_paths,
     toc_translate_scope,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
@@ -96,6 +99,63 @@ def extra_toc_hrefs_for_pair(ru_pr_yaml: str, md_href_basenames: set[str]) -> se
     """Restrict translated-page hrefs to entries present in this toc (§6.44)."""
     toc_hrefs = {it["href"] for it in parse_toc_items(ru_pr_yaml) if it.get("href")}
     return md_href_basenames & toc_hrefs
+
+
+def _resolve_toc_merge_scope(
+    pair: NavigationPair,
+    *,
+    ru_base: str,
+    ru_pr: str,
+    en_main: str,
+    pair_extra: set[str],
+) -> tuple[TocTranslateScope, bool]:
+    """Return merge scope and whether gap-fill is restricted to that scope.
+
+    When EN sidebar yaml is absent, mirror the full RU structure (§6.85).
+    ``supplement_only`` pairs add only RU entries missing from EN main, without
+    renaming legacy EN href aliases (§6.72).
+    """
+    ru_hrefs, ru_includes = toc_entry_paths(ru_pr)
+    if en_toc_is_absent(en_main):
+        return (
+            TocTranslateScope(
+                frozenset(ru_hrefs),
+                frozenset(ru_includes),
+            ).with_extra_hrefs(pair_extra),
+            False,
+        )
+
+    scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
+    if not pair.supplement_only:
+        return scope, True
+
+    en_hrefs, en_includes = toc_entry_paths(en_main)
+    missing_hrefs = ru_hrefs - en_hrefs
+    missing_includes = ru_includes - en_includes
+    return (
+        scope.with_extra_hrefs(missing_hrefs).with_extra_include_paths(
+            missing_includes
+        ),
+        True,
+    )
+
+
+def _toc_label_names(
+    ru_pr: str,
+    scope: TocTranslateScope,
+    *,
+    gap_hrefs: set[str],
+) -> list[str]:
+    labels: list[str] = []
+    for it in parse_toc_items(ru_pr):
+        href = it.get("href")
+        include_path = it.get("include_path")
+        if href and (href in scope.hrefs or href in gap_hrefs):
+            labels.append(it["name"])
+        elif include_path and include_path in scope.include_paths:
+            if it.get("name"):
+                labels.append(it["name"])
+    return labels
 
 
 def _translate_menu_labels(
@@ -189,7 +249,13 @@ def merge_navigation_pair(
 
     if kind == "toc":
         pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
-        scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
+        scope, restrict_gap_fill = _resolve_toc_merge_scope(
+            pair,
+            ru_base=ru_base,
+            ru_pr=ru_pr,
+            en_main=en_main,
+            pair_extra=pair_extra,
+        )
         en_main_hrefs = {it["href"] for it in parse_toc_items(en_main) if it.get("href")}
         ru_base_hrefs = {it["href"] for it in parse_toc_items(ru_base) if it.get("href")}
         ru_base_include_paths = {
@@ -204,17 +270,9 @@ def merge_navigation_pair(
             and it["href"] not in en_main_hrefs
             and it["href"] in ru_base_hrefs
         }
-        labels = [
-            it["name"]
-            for it in parse_toc_items(ru_pr)
-            if (
-                (it.get("href") and (it["href"] in scope.hrefs or it["href"] in gap_hrefs))
-                or (
-                    it.get("include_path")
-                    and it["include_path"] in scope.include_paths
-                )
-            )
-        ]
+        labels = _toc_label_names(ru_pr, scope, gap_hrefs=gap_hrefs)
+        if en_toc_is_absent(en_main):
+            labels = [it["name"] for it in parse_toc_items(ru_pr) if it.get("name")]
         name_map = _translate_menu_labels(
             client, labels, glossary, config=config
         )
@@ -226,7 +284,7 @@ def merge_navigation_pair(
             ru_base_hrefs=ru_base_hrefs,
             translate_include_paths=set(scope.include_paths),
             ru_base_include_paths=ru_base_include_paths,
-            restrict_gap_fill_to_scope=True,
+            restrict_gap_fill_to_scope=restrict_gap_fill,
         )
         warnings = validate_navigation_merge_warnings(
             pair.ru_path,

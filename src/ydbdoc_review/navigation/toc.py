@@ -37,6 +37,9 @@ class TocTranslateScope:
     def with_extra_hrefs(self, extra: set[str]) -> TocTranslateScope:
         return TocTranslateScope(self.hrefs | frozenset(extra), self.include_paths)
 
+    def with_extra_include_paths(self, extra: set[str]) -> TocTranslateScope:
+        return TocTranslateScope(self.hrefs, self.include_paths | frozenset(extra))
+
 
 @dataclass
 class TocNode:
@@ -56,6 +59,27 @@ def _attach_include_path(node: TocNode) -> None:
         if match:
             node.include_path = match.group(1).strip().strip("'\"")
             return
+
+
+def iter_toc_include_paths(yaml_text: str) -> list[str]:
+    """All ``include.path`` values in toc YAML (block, inline, include-only items)."""
+    return _iter_toc_include_paths(yaml_text)
+
+
+def toc_entry_paths(yaml_text: str) -> tuple[set[str], set[str]]:
+    """Return ``(hrefs, include_paths)`` referenced by a toc file."""
+    hrefs = {it["href"] for it in parse_toc_items(yaml_text) if it.get("href")}
+    includes = set(iter_toc_include_paths(yaml_text))
+    return hrefs, includes
+
+
+def en_toc_is_absent(en_main_yaml: str) -> bool:
+    """True when EN sidebar yaml is missing or has no navigable entries."""
+    text = en_main_yaml.replace("\r\n", "\n").strip()
+    if not text:
+        return True
+    hrefs, includes = toc_entry_paths(en_main_yaml)
+    return not hrefs and not includes
 
 
 def _iter_toc_include_paths(yaml_text: str) -> list[str]:
@@ -424,34 +448,52 @@ def _merge_en_toc_yaml_nested(
 def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
     if _has_nested_block_items(text):
         return _flatten_toc_nodes(_parse_toc_tree_block(text))
-    parts = _ITEM_SPLIT.split(text)
+    lines = text.replace("\r\n", "\n").split("\n")
     items: list[dict[str, str]] = []
-    for part in parts:
-        chunk = part.strip()
-        if not chunk:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        name_match = re.match(r"^(\s*)- name:\s*(.+)", line)
+        if name_match:
+            block_lines = [line]
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                if re.match(r"^\s*-\s+(name:|include:)", nxt):
+                    break
+                block_lines.append(nxt)
+                i += 1
+            block = "\n".join(block_lines).rstrip() + "\n"
+            m_href = _HREF_LINE.search(block)
+            m_include = _INCLUDE_PATH.search(block)
+            name = name_match.group(2).strip()
+            if m_href:
+                items.append(
+                    {
+                        "name": name,
+                        "href": m_href.group(1).strip(),
+                        "block": block,
+                    }
+                )
+            elif m_include:
+                items.append(
+                    {
+                        "name": name,
+                        "include_path": m_include.group(1).strip(),
+                        "block": block,
+                    }
+                )
             continue
-        block = "- name: " + chunk
-        m_name = re.match(r"- name: (.+)", block)
-        m_href = _HREF_LINE.search(block)
-        m_include = _INCLUDE_PATH.search(block)
-        if not m_name:
-            continue
-        if m_href:
+        include_match = _INCLUDE_ONLY_ITEM.match(line)
+        if include_match:
+            path = include_match.group(1).strip().strip("'\"")
             items.append(
                 {
-                    "name": m_name.group(1).strip(),
-                    "href": m_href.group(1).strip(),
-                    "block": block.rstrip() + "\n",
+                    "include_path": path,
+                    "block": line.rstrip() + "\n",
                 }
             )
-        elif m_include:
-            items.append(
-                {
-                    "name": m_name.group(1).strip(),
-                    "include_path": m_include.group(1).strip(),
-                    "block": block.rstrip() + "\n",
-                }
-            )
+        i += 1
     return items
 
 
@@ -681,15 +723,24 @@ def merge_en_toc_yaml(
                 and include_path not in en_by_include
                 and include_path in base_includes
             ):
-                en_name = translate_name(rit["name"]).strip()
-                block = _replace_item_name(rit["block"], en_name)
-                merged.append(
-                    {
-                        "name": en_name,
-                        "include_path": include_path,
-                        "block": block,
-                    }
-                )
+                block = rit["block"]
+                if rit.get("name"):
+                    en_name = translate_name(rit["name"]).strip()
+                    block = _replace_item_name(block, en_name)
+                    merged.append(
+                        {
+                            "name": en_name,
+                            "include_path": include_path,
+                            "block": block,
+                        }
+                    )
+                else:
+                    merged.append(
+                        {
+                            "include_path": include_path,
+                            "block": block,
+                        }
+                    )
 
     for it in en_items:
         href = it.get("href")
