@@ -1848,9 +1848,9 @@ for [#31195](https://github.com/ydb-platform/ydb/pull/31195)) — ``doc_verify``
    relative to the toc file; block when the EN mirror file is absent. Same-batch
    outputs count via ``pending_paths`` (e.g. new ``diagnostics.md`` before push).
 2. Hook in ``run_doc_verify`` after navigation verify (with ``apply_include_target_checks``).
-3. **ydb fix (separate PR):** add PR-head ``checkout`` + ``id: sha`` to
-   ``docs_build_rebuild.yaml`` before ``docs-build-action`` — same pattern as
-   ``docs_build.yaml``.
+3. **ydb fix (separate PR):** restore #43222 design for ``docs_build_rebuild.yaml`` —
+   dispatch-only (no checkout / inline build in ``pull_request_target``); preview
+   via ``docs_preview.yaml`` on ``Build documentation`` only ([#46330](https://github.com/ydb-platform/ydb/pull/46330)).
 
 **Tests:** ``test_toc_targets.py``; §6.82 regression
 ``test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes``.
