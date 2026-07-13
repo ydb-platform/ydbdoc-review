@@ -1855,4 +1855,35 @@ for [#31195](https://github.com/ydb-platform/ydb/pull/31195)) — ``doc_verify``
 **Tests:** ``test_toc_targets.py``; §6.82 regression
 ``test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes``.
 
+### 6.84. Inline toc ``include`` + child toc supplementation (#46338)
+
+**Problem:** [PR #46338](https://github.com/ydb-platform/ydb/pull/46338) (SQS docs for
+[#44820](https://github.com/ydb-platform/ydb/pull/44820)) — ``doc_verify`` 🟢,
+``build-docs`` 🔴 ``ENOENT: en/reference/sqs-api/toc_i.yaml``. RU ``toc_p.yaml``
+lists ``- include: { mode: link, path: toc_i.yaml }``; EN ``toc_p`` was merged
+with that include, but ``toc_i.yaml`` never landed in EN.
+
+Two gaps in §6.83:
+
+1. **Parse:** ``collect_toc_link_targets`` only matched block-style ``path:`` under
+   ``include:``; inline ``include: { … path: toc_i.yaml }`` and include-only items
+   (no ``name:``) were invisible — ``doc_verify`` did not block the broken toc.
+2. **Supplement:** ``supplement_navigation_pairs`` only queued parent tocs when a
+   translated page ``href`` was missing on EN ``main``. When EN ``toc_p`` already
+   had ``index.md`` but lacked the child include target, ``toc_i.yaml`` was never
+   queued for merge.
+
+**Decision:**
+
+1. ``_iter_toc_include_paths`` in ``navigation/toc.py`` — regex for inline and
+   include-only ``include.path``; ``collect_toc_link_targets`` scans full yaml text.
+2. ``_supplement_included_child_tocs`` in ``navigation_supplement.py`` — after
+   href-based parent supplement, scan ancestor tocs (and nested includes) for child
+   ``*.yaml`` includes; queue ``NavigationPair`` when RU child exists and EN child
+   is absent at merge-base.
+
+**Tests:** ``test_collect_toc_link_targets_reads_inline_include_only_item``,
+``test_check_missing_toc_targets_detects_inline_include_child``,
+``test_supplement_adds_included_child_toc_when_parent_lists_page``.
+
 ---

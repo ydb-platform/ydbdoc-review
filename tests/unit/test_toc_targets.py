@@ -44,7 +44,33 @@ def test_collect_toc_link_targets_reads_include_on_href_item():
     ]
 
 
-def test_resolve_toc_target_path_handles_parent_segments():
+def test_collect_toc_link_targets_reads_inline_include_only_item():
+    toc = dedent("""
+        items:
+        - name: Overview
+          href: index.md
+        - include: { mode: link, path: toc_i.yaml }
+    """).strip()
+    assert collect_toc_link_targets(toc) == [
+        ("href", "index.md"),
+        ("include", "toc_i.yaml"),
+    ]
+
+
+def test_check_missing_toc_targets_detects_inline_include_child(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    en_toc = "ydb/docs/en/core/reference/sqs-api/toc_p.yaml"
+    toc = dedent("""
+        items:
+        - name: Overview
+          href: index.md
+        - include: { mode: link, path: toc_i.yaml }
+    """).strip()
+    msgs = check_missing_toc_targets(en_toc, toc, repo_path=repo)
+    assert len(msgs) == 2
+    assert any("toc_i.yaml" in m for m in msgs)
+
+
     en_toc = "ydb/docs/en/core/devops/observability/toc_p.yaml"
     assert (
         resolve_toc_target_path(en_toc, "../../reference/observability/tracing/setup.md")

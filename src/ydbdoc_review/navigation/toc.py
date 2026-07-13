@@ -10,6 +10,13 @@ from pathlib import PurePosixPath
 _ITEM_SPLIT = re.compile(r"(?m)^- name: ")
 _HREF_LINE = re.compile(r"^  href: (.+)$", re.MULTILINE)
 _INCLUDE_PATH = re.compile(r"^\s+path: (.+)$", re.MULTILINE)
+_INCLUDE_PATH_INLINE = re.compile(
+    r"include:\s*\{[^}]*\bpath:\s*([^,}\s]+)",
+    re.MULTILINE,
+)
+_INCLUDE_ONLY_ITEM = re.compile(
+    r"(?m)^\s*-\s+include:\s*\{[^}]*\bpath:\s*([^,}\s]+)",
+)
 # Diplodoc ydb docs often use one-line inline items:
 #   - { name: Overview, href: index.md, when: ... }
 _INLINE_ITEM = re.compile(
@@ -42,11 +49,27 @@ class TocNode:
 
 def _attach_include_path(node: TocNode) -> None:
     """Set ``include_path`` from block body when entry is an ``include:`` link."""
-    if node.href or node.children:
+    if node.children:
         return
-    match = _INCLUDE_PATH.search(node.block)
-    if match:
-        node.include_path = match.group(1).strip()
+    for pattern in (_INCLUDE_PATH, _INCLUDE_PATH_INLINE):
+        match = pattern.search(node.block)
+        if match:
+            node.include_path = match.group(1).strip().strip("'\"")
+            return
+
+
+def _iter_toc_include_paths(yaml_text: str) -> list[str]:
+    """All ``include.path`` values in toc YAML (block, inline, include-only items)."""
+    text = yaml_text.replace("\r\n", "\n")
+    paths: list[str] = []
+    seen: set[str] = set()
+    for pattern in (_INCLUDE_PATH, _INCLUDE_PATH_INLINE, _INCLUDE_ONLY_ITEM):
+        for match in pattern.finditer(text):
+            path = match.group(1).strip().strip("'\"")
+            if path and path not in seen:
+                seen.add(path)
+                paths.append(path)
+    return paths
 
 
 def _top_level_list_indent(lines: list[str], start: int) -> int:
@@ -518,13 +541,11 @@ def collect_toc_link_targets(yaml_text: str) -> list[tuple[str, str]]:
             if key not in seen:
                 seen.add(key)
                 targets.append(key)
-        block = item.get("block", "")
-        for match in _INCLUDE_PATH.finditer(block):
-            path = match.group(1).strip()
-            key = ("include", path)
-            if key not in seen:
-                seen.add(key)
-                targets.append(key)
+    for path in _iter_toc_include_paths(text):
+        key = ("include", path)
+        if key not in seen:
+            seen.add(key)
+            targets.append(key)
     return targets
 
 

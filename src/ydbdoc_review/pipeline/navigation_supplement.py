@@ -7,7 +7,11 @@ from pathlib import Path, PurePosixPath
 
 from ydbdoc_review.github.git_ops import merge_base, read_text, read_text_at_ref
 from ydbdoc_review.navigation.paths import is_toc_yaml
-from ydbdoc_review.navigation.toc import parse_toc_items
+from ydbdoc_review.navigation.toc import (
+    collect_toc_link_targets,
+    parse_toc_items,
+    resolve_toc_target_path,
+)
 from ydbdoc_review.pipeline.pairs import NavigationPair, counterpart
 
 _TOC_FILENAMES = ("toc_p.yaml", "toc_i.yaml")
@@ -76,6 +80,119 @@ def _ancestor_toc_pairs(
     return out
 
 
+def _included_child_toc_pairs(
+    ru_toc: str,
+    ru_toc_text: str,
+    *,
+    docs_root: str,
+) -> list[tuple[str, str]]:
+    """Child toc YAML files referenced via ``include.path`` from a parent toc."""
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for kind, rel in collect_toc_link_targets(ru_toc_text):
+        if kind != "include" or not rel.endswith((".yaml", ".yml")):
+            continue
+        ru_child = resolve_toc_target_path(ru_toc, rel)
+        en_child = counterpart(ru_child, docs_root)
+        if en_child is None:
+            continue
+        pair = (ru_child, en_child)
+        if pair not in seen:
+            out.append(pair)
+            seen.add(pair)
+    return out
+
+
+def _en_toc_missing_on_main(
+    repo_path: str,
+    en_toc: str,
+    *,
+    merge_base_ref: str,
+    merge_base_with: str,
+) -> bool:
+    en_base = read_text_at_ref(repo_path, merge_base_ref, en_toc)
+    if en_base is None:
+        en_base = read_text_at_ref(repo_path, merge_base_with, en_toc)
+    return en_base is None
+
+
+def _supplement_included_child_tocs(
+    pairs: list[NavigationPair],
+    translated_en_md_paths: set[str],
+    *,
+    repo_path: str,
+    merge_base_ref: str,
+    merge_base_with: str,
+    docs_root: str,
+) -> list[NavigationPair]:
+    """Queue child toc merges when a parent toc ``include.path`` points at RU-only yaml."""
+    existing = {(p.ru_path, p.en_path) for p in pairs}
+    out = list(pairs)
+    scan: list[tuple[str, str]] = []
+    scan_seen: set[tuple[str, str]] = set()
+
+    def _queue_scan(ru_toc: str, en_toc: str) -> None:
+        key = (ru_toc, en_toc)
+        if key not in scan_seen:
+            scan_seen.add(key)
+            scan.append(key)
+
+    for pair in out:
+        _queue_scan(pair.ru_path, pair.en_path)
+
+    for en_md in sorted(translated_en_md_paths):
+        en_md = _norm(en_md)
+        if "/_includes/" in en_md or not en_md.endswith(".md"):
+            continue
+        ru_md = counterpart(en_md, docs_root)
+        if ru_md is None:
+            continue
+        for ru_toc, en_toc in _ancestor_toc_pairs(
+            ru_md, repo_path=repo_path, docs_root=docs_root
+        ):
+            _queue_scan(ru_toc, en_toc)
+
+    changed = True
+    while changed:
+        changed = False
+        for ru_toc, en_toc in list(scan):
+            ru_toc_text = read_text(repo_path, ru_toc)
+            if ru_toc_text is None:
+                ru_toc_text = read_text_at_ref(repo_path, "HEAD", ru_toc)
+            if not ru_toc_text:
+                continue
+            for ru_child, en_child in _included_child_toc_pairs(
+                ru_toc, ru_toc_text, docs_root=docs_root
+            ):
+                key = (ru_child, en_child)
+                if key in existing:
+                    continue
+                ru_child_text = read_text(repo_path, ru_child)
+                if ru_child_text is None:
+                    ru_child_text = read_text_at_ref(repo_path, "HEAD", ru_child)
+                if not ru_child_text:
+                    continue
+                if not _en_toc_missing_on_main(
+                    repo_path,
+                    en_child,
+                    merge_base_ref=merge_base_ref,
+                    merge_base_with=merge_base_with,
+                ):
+                    continue
+                out.append(
+                    NavigationPair(
+                        ru_path=ru_child,
+                        en_path=en_child,
+                        ru_changed=True,
+                        supplement_only=True,
+                    )
+                )
+                existing.add(key)
+                _queue_scan(ru_child, en_child)
+                changed = True
+    return out
+
+
 def supplement_navigation_pairs(
     pairs: list[NavigationPair],
     translated_en_md_paths: set[str],
@@ -134,4 +251,11 @@ def supplement_navigation_pairs(
             )
             existing.add(key)
 
-    return out
+    return _supplement_included_child_tocs(
+        out,
+        translated_en_md_paths,
+        repo_path=repo_path,
+        merge_base_ref=mb,
+        merge_base_with=merge_base_with,
+        docs_root=docs_root,
+    )

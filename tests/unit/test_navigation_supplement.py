@@ -207,3 +207,74 @@ def test_supplement_adds_nested_toc_ide_when_ru_lists_page(tmp_path: Path):
     assert len(out) == 1
     assert out[0].ru_path == RU_GUI_TOC
     assert out[0].en_path == EN_GUI_TOC
+
+
+SQS_RU_TOC_P = dedent("""
+    items:
+    - name: Overview
+      href: index.md
+    - include: { mode: link, path: toc_i.yaml }
+""").strip()
+
+SQS_RU_TOC_I = dedent("""
+    items:
+    - name: Auth
+      href: auth.md
+    - name: Examples
+      href: examples.md
+""").strip()
+
+EN_SQS_INDEX = "ydb/docs/en/core/reference/sqs-api/index.md"
+RU_SQS_TOC_P = "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml"
+EN_SQS_TOC_P = "ydb/docs/en/core/reference/sqs-api/toc_p.yaml"
+RU_SQS_TOC_I = "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml"
+EN_SQS_TOC_I = "ydb/docs/en/core/reference/sqs-api/toc_i.yaml"
+
+
+def test_supplement_adds_included_child_toc_when_parent_lists_page():
+    en_toc_p_main = dedent("""
+        items:
+        - name: Overview
+          href: index.md
+    """).strip()
+
+    def _read(repo: str, path: str) -> str | None:
+        if path == RU_SQS_TOC_P:
+            return SQS_RU_TOC_P
+        if path == RU_SQS_TOC_I:
+            return SQS_RU_TOC_I
+        return None
+
+    def _read_ref(repo: str, ref: str, path: str) -> str | None:
+        if path == EN_SQS_TOC_P and ref in ("abc123", "origin/main"):
+            return en_toc_p_main
+        return None
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_supplement.merge_base",
+            return_value="abc123",
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_supplement.read_text",
+            side_effect=_read,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_supplement.read_text_at_ref",
+            side_effect=_read_ref,
+        ),
+    ):
+        out = supplement_navigation_pairs(
+            [],
+            {EN_SQS_INDEX},
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+        )
+
+    assert len(out) == 1
+    assert out[0] == NavigationPair(
+        ru_path=RU_SQS_TOC_I,
+        en_path=EN_SQS_TOC_I,
+        ru_changed=True,
+        supplement_only=True,
+    )
