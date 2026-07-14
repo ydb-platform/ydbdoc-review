@@ -42,6 +42,22 @@ def _posix_join(base_dir: str, rel: str) -> str:
     return "/".join(parts)
 
 
+def _locale_root_shared_include_resolved(resolved: str, *, docs_root: str) -> bool:
+    """True when ``docs/{ru|en}/_includes/…`` is a mis-resolved repo-root snippet.
+
+    Recipe pages often reference shared SDK snippets as
+    ``../../../_includes/go/foo.md`` (three ``..`` from ``…/ydb-sdk/``), which
+    lands on ``docs/ru/_includes/…`` instead of language-neutral
+    ``docs/_includes/…``. Those files are not mirrored RU↔EN.
+    """
+    root = docs_root.strip("/")
+    p = _norm(resolved)
+    for locale in ("ru", "en"):
+        if p.startswith(f"{root}/{locale}/_includes/"):
+            return True
+    return False
+
+
 def resolve_locale_md_path(
     base_md_path: str,
     include_ref: str,
@@ -62,6 +78,8 @@ def resolve_locale_md_path(
         resolved = _posix_join(str(PurePosixPath(base).parent), ref)
 
     if is_language_neutral_docs_path(resolved, docs_root):
+        return None
+    if _locale_root_shared_include_resolved(resolved, docs_root=docs_root):
         return None
     if not is_docs_markdown(resolved, docs_root):
         return None

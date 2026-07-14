@@ -41,6 +41,27 @@ def test_skip_repo_root_neutral_include():
     assert resolved is None
 
 
+def test_skip_misresolved_locale_root_shared_go_include():
+    """PR #43997 — ``../../../_includes/go/`` from ydb-sdk recipes → neutral tree."""
+    base = "ydb/docs/ru/core/recipes/ydb-sdk/auth-static.md"
+    resolved = resolve_locale_md_path(
+        base,
+        "../../../_includes/go/auth-static-with-native.md",
+        docs_root="ydb/docs",
+    )
+    assert resolved is None
+
+
+def test_four_level_include_still_neutral():
+    base = "ydb/docs/ru/core/recipes/ydb-sdk/auth-static.md"
+    resolved = resolve_locale_md_path(
+        base,
+        "../../../../_includes/go/auth-static-with-native.md",
+        docs_root="ydb/docs",
+    )
+    assert resolved is None
+
+
 def test_collect_yfm_includes_from_markdown():
     text = (
         "Intro.\n\n"
