@@ -38,13 +38,13 @@
 └── README.md                  # user-oriented overview (v2)
 ```
 
-Important branch: **`doc-translate-ng`** — the v2 rewrite. To be merged into
-`main` only after end-to-end tests pass on real PRs. Tag `v0.1.0` is used by the
-`ydb` repo CI and is routinely moved forward with bug fixes (to avoid frequent
+Important branch: **`main`** carries v2 (`doc-translate-ng` merged). Tag `v0.1.0`
+is used by the `ydb` repo CI and is moved forward with bug fixes (to avoid frequent
 CI config edits). A separate tag (`v0.2.0`) can be used by external schedulers
 Reactor/Nirvana during provider migration (§13.6).
 
----
+As of 2026-07-14, §22 navigation planner is on `main` but tags may still point at
+pre-§22 commits until deliberately bumped — see **09-navigation-scope** §22.8.
 
 ---
 
@@ -76,8 +76,6 @@ translation PR with minimal manual fixes.
   PNGs etc. stay untouched.
 - **Translating `{% include %}`'d content**: includes are pointers; if the
   included file is in the PR, it gets its own translation.
-
----
 
 ---
 
@@ -115,8 +113,6 @@ architecture level**:
 5. **Validation is structural** (placeholder counts, CLI-token sets, JSON
    schema) plus heuristic (length, Cyrillic-in-EN, fence parity), and is
    automatic.
-
----
 
 ---
 
@@ -180,8 +176,6 @@ ydbdoc-review CLI (mode=run)
 7. **Job is green by default.** Errors at infrastructure level (no creds, push
    denied, code bug) fail. Translation quality issues don't fail the job;
    they are surfaced in the report. The user decides whether to merge.
-
----
 
 ---
 

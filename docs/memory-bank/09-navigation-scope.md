@@ -7,24 +7,20 @@
 
 ## 22. Unified navigation scope (TOC redesign)
 
-> **Status:** Phase 2 complete — translate + verify share `TranslationScopePlan` (J.7).  
-> **Replaces incrementally:** §6.71–§6.90 patchwork (`navigation_supplement`,  
-> `toc_href_supplement`, dual supplementation passes in `workflow.py`).
+> **Status:** Phase J complete (2026-07-14, `d68812f`).  
+> **Supersedes:** §6.71–§6.90 supplement chain (historical detail in **03-design-decisions** §6).
 
 ### 22.1. Problem statement
 
-Current TOC handling grew as reactive fixes (#43365, #44103, #46338, #46349,
-#46386, #46393). Logic is split across:
+TOC handling grew as reactive fixes (#43365, #44103, #46338, #46349, #46386,
+#46393). Logic was split across three supplement modules plus overlapping axes in
+`navigation_merge.py` (`extra_toc_hrefs`, ordering between passes). That caused
+translate/verify scope drift and ordering bugs.
 
-- `navigation_supplement.py` — MD → parent toc
-- `toc_href_supplement.py` — toc → MD pages
-- `include_supplement.py` — MD → locale `{% include %}`
-- `navigation_merge.py` — scope + merge + three overlapping axes (`diff scope`,
-  `extra_toc_hrefs`, `supplement_only`, absent-EN mirror)
+**Removed modules (Phase J):** `navigation_supplement.py`, `toc_href_supplement.py`,
+`include_supplement.py`.
 
-Ordering bugs are inevitable; `doc_translate` and `doc_verify` disagree on scope.
-
-### 22.2. Target model (user requirement)
+### 22.2. Target model
 
 For each **source PR**:
 
@@ -38,7 +34,7 @@ For each **source PR**:
    - **From main:** RU paths required by the tree but absent in EN at merge-base
      → read RU from `main`/HEAD and translate (full section mirror).
 4. **Close dependencies:** locale `{% include %}` for every queued `.md`.
-5. **Merge navigation** once, from the same plan (no second-guessing scope).
+5. **Merge / verify navigation** from the same plan object — no second-guessing scope.
 
 ### 22.3. Core types (`navigation/scope_planner.py`)
 
@@ -56,7 +52,11 @@ class TranslationScopePlan:
 **Planner entrypoint:** `plan_translation_scope(changes, read_ru=…, read_en_base=…)`.
 
 Injected readers keep the planner pure (unit tests use fixture files, workflow
-uses `read_text` / `read_text_at_ref`).
+uses `read_text` / `read_text_at_ref` via `make_repo_scope_readers()`).
+
+**Workflow helpers:** `doc_pairs_from_plan`, `navigation_pairs_from_plan`,
+`merge_navigation_pair_lists`, `synthetic_changes_from_plan`,
+`planned_toc_extras_for_pair` (merge/verify extras per sidebar).
 
 ### 22.4. Discovery algorithm (v1)
 
@@ -68,11 +68,12 @@ uses `read_text` / `read_text_at_ref`).
 | 4 | BFS locale `{% include %}` on all `doc_ru` |
 | 5 | `_nav_needed` — queue toc merge if: in diff, EN toc absent, or EN missing href for a diff page |
 
-**Not in v1 planner (merge phase, step 2):**
+Merge phase (unchanged location: `navigation_merge.py`):
 
-- Label translation strategy (unchanged — still in `navigation_merge.py`)
-- Redirect yaml (parallel module; same planner pattern later)
-- `extra_toc_hrefs` as separate axis — folded into step 3–5
+- Label translation via LLM
+- `supplement_only` flag from `nav_from_main` provenance
+- Absent-EN full mirror (§6.85) and scoped gap-fill (§6.72) via `_resolve_toc_merge_scope`
+- `planned_toc_extras_for_pair` replaces `extra_toc_hrefs_from_md_targets` axis
 
 ### 22.5. Operational rules (authoritative)
 
@@ -88,7 +89,7 @@ Fetched by `scripts/fetch_nav_fixtures.py` into `tests/fixtures/nav_cases/`:
 
 | Case | Source PR | What it exercises |
 |------|-----------|-------------------|
-| `case_45181` | [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Diff = topic + diagnostics only; **sqs-api** entire subtree via `reference/toc_p.yaml` → `include.path`; includes (#46393) |
+| `case_45181` | [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Diff = topic + diagnostics only; **sqs-api** entire subtree via `reference/toc_p.yaml` → `include.path`; includes |
 | `case_44820` | [#44820](https://github.com/ydb-platform/ydb/pull/44820) | SQS pages + `reference/toc_p.yaml` **in diff** |
 | `case_43530` | [#43530](https://github.com/ydb-platform/ydb/pull/43530) | OTel observability — **explicit toc edits** in diff (#44103) |
 
@@ -100,41 +101,50 @@ Refresh fixtures after upstream doc moves:
 python scripts/fetch_nav_fixtures.py --all
 ```
 
-### 22.7. Implementation roadmap
+### 22.7. Implementation checklist (Phase J)
 
 | Step | Deliverable | Status |
 |------|-------------|--------|
-| **A** | `scope_planner.py` + golden tests on real PR fixtures | ✅ |
-| **B** | `workflow.py` calls planner once; single MD pass (J.5) | ✅ |
-| **C** | `navigation_merge.py` consumes plan; drop `extra_toc_hrefs` axis (J.6) | ✅ |
-| **D** | `doc_verify` uses same planner; delete legacy modules (J.7) | ✅ |
+| J.1 | Design doc + roadmap | ✅ |
+| J.2 | `scope_planner.py` | ✅ |
+| J.3 | Real PR fixtures + fetch script | ✅ |
+| J.4 | Golden tests (#45181, #44820, #43530) | ✅ |
+| J.5 | `doc_translate` calls planner once; single MD pass | ✅ |
+| J.6 | Merge reads plan; drop `extra_toc_hrefs` axis | ✅ |
+| J.7 | `doc_verify` uses same planner; delete legacy modules | ✅ |
 
-### 22.8. Suggested additions to user idea
+**Not started:** redirect yaml in planner (same pattern as toc); report provenance tags in UI.
 
-1. **Provenance tags** (`doc_from_diff` / `doc_from_main`) — audit trail in reports
-   and completeness checks; explains why a file outside diff was translated.
-2. **Single plan object** passed through translate → merge → verify — eliminates
-   translate/verify scope drift.
-3. **Fixture-first development** — every regression (#46386, #46393) becomes a
-   `nav_cases/` snapshot + planner assertion before touching workflow glue.
-4. **EN baseline reader** — explicit `read_en_base` simulates merge-base; fork PR
-   fallback (§6.44) stays in workflow adapter, not planner core.
-5. **Redirect yaml** — same planner pattern as toc (Phase 22 step F, not started).
-6. **No translate before plan** — workflow must not call LLM until
-   `TranslationScopePlan` is complete (fixes ordering class permanently).
+### 22.8. Rollout and validation (2026-07-14)
+
+| Item | Decision |
+|------|----------|
+| Code on `main` | `d68812f` — pushed |
+| Tags `v0.1.0` / `v0.2.0` | **Not moved** until deliberate release; ydb CI still on pre-§22 until then |
+| [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Translation PR is **green on old chain** — do **not** re-run for regression |
+| §22 validation | Run `doc_translate` on a **different** source PR after tag bump |
+
+**Re-trigger `doc_translate` (when needed):**
+
+1. Delete branch `ydbdoc-review/pr-{N}` in `ydb-platform/ydb` (closes old translation PR).
+2. On the **source PR**, remove and re-add label `doc_translate` (not on the translation PR).
+
+**Tag bump loop (when ready):**
+
+```bash
+git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
+# optional: v0.2.0 for Reactor/Nirvana schedulers
+```
 
 ### 22.9. Relationship to §6.84–§6.90
 
 | Old § | New home |
 |-------|----------|
 | §6.84 child toc via `include.path` | `_discover_ru_tocs` BFS |
-| §6.85 absent EN full mirror | `_nav_needed` + all hrefs when EN absent |
+| §6.85 absent EN full mirror | `_nav_needed` + merge scope |
 | §6.89 toc href → md pages | step 3 in §22.4 |
 | §6.90 include after toc-href | step 4 in §22.4 (same pass, no ordering bug) |
 
-Old modules remain until step B–E land; planner tests define the contract they
-must match.
-
 ---
 
-**End of §22.**
+[← Memory Bank index](../../MEMORY_BANK.md)

@@ -58,13 +58,16 @@ fallback hook when registry pulls fail.
 **Typical bugfix loop (no GHCR):**
 
 ```bash
-# ydbdoc-review repo
+# ydbdoc-review repo — move tag when ready to ship to ydb CI
 git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
-# ydb: re-add doc_translate on source PR
+# ydb: delete ydbdoc-review/pr-{N} branch, re-add doc_translate on source PR
 ```
 
-ydb workflow checks out action at `@v0.1.0`; runner builds fresh image from that
-commit's `Dockerfile`.
+As of 2026-07-14, §22 planner is on `main` (`d68812f`) but tags were **not** moved
+yet — ydb still runs pre-§22 until the tag bump. See **09-navigation-scope** §22.8.
+
+ydb workflow checks out the action at `@v0.1.0` (or `@v0.2.0` for schedulers);
+the runner builds a fresh image from that tag's `Dockerfile`.
 
 **External scheduler loop (Reactor/Nirvana, Eliza — tag `v0.2.0`):**
 
@@ -99,9 +102,9 @@ See **06-llm-config** §13.6 for full contract.
 
 | Symptom | Likely cause | Mitigation |
 |---------|----------------|------------|
-| `build-docs` ENOENT on `toc_i.yaml` / child toc | Child include not queued for merge (§6.84) | Update `@v0.1.0`; re-run `doc_translate` |
-| `doc_verify` `empty_toc` on new EN sidebar | Absent EN file + empty scoped merge (§6.85) | Same — full RU mirror fix in `navigation_merge` |
-| `doc_verify` `missing_toc_target` | EN toc lists page not translated (§6.83, §6.89) | Update `@v0.1.0`; re-run `doc_translate` — toc href supplementation translates RU-only pages |
+| `doc_verify` `missing_toc_target` | EN toc lists page outside translate scope | Pre-§22: tag bump + re-run `doc_translate`. §22+: planner should queue page in step 3 — if still failing, check `nav_cases/` fixture |
+| `build-docs` ENOENT on child toc | Child sidebar not merged | Pre-§22: §6.84 supplement. §22+: check planner BFS on `include.path`; tag bump when ready |
+| `doc_verify` `empty_toc` on new EN sidebar | Absent EN file + empty scoped merge (§6.85) | Tag bump + re-run `doc_translate` |
 | `build-docs` `YFM003 unreachable-link` | Page linked but not in toc (§6.86) | Indented `href:` parse + re-run `doc_translate` |
 | `python:3.12-slim` / ECR timeout on build | Registry unreachable from runner | Retry; or run `docker-publish` and rely on GHCR fallback |
 | Action exits 0 but no report on translation PR | Fixed in §6.48 — update `@v0.1.0` | Tag must include `_safe_post_issue_comment` + report-first order |
@@ -157,8 +160,6 @@ Formula: `(input_tokens / 1000) × in_price + (output_tokens / 1000) × out_pric
 
 `docs-internal/cost-log.md` (in `ydbdoc-review` repo) maintained by a script
 that appends one line per PR run. Not in MVP.
-
----
 
 ---
 

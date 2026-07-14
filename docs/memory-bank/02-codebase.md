@@ -50,8 +50,9 @@ src/ydbdoc_review/
 │   ├── critic_retranslate.py      critic-feedback segment retranslate (§6.66)
 │   ├── manual.py                  ManualAction for fail-soft table cells
 │   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
-├── navigation/                    ✅ scoped TOC + redirect merge (inline + block toc)
-│   ├── toc.py                     parse (href + include.path, include-only lines), nested indent, merge, validate (§6.62–§6.63, §6.84–§6.85)
+├── navigation/                    ✅ scoped TOC + redirect merge; scope planner (§22)
+│   ├── scope_planner.py           plan_translation_scope, TranslationScopePlan (§22)
+│   ├── toc.py                     parse (href + include.path), merge, validate (§6.62–§6.85)
 │   ├── redirects.py               Diplodoc redirect list — same pattern
 │   └── paths.py                   toc/redirect path detection
 ├── validation/                    ✅ COMPLETE (Phase E)
@@ -89,8 +90,7 @@ src/ydbdoc_review/
 │   ├── translate_file.py          thin wrapper → harness (translate + verify)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
 │   ├── pairs.py                   RU/EN md/includes + nav YAML pairing (§6.41)
-│   ├── navigation_merge.py        scoped toc/redirect merge + verify (§6.17+)
-│   ├── navigation_merge.py        scoped toc/redirect merge; absent-EN full mirror (§6.36, §6.85)
+│   ├── navigation_merge.py        scoped toc/redirect merge + verify (§6.17+, §22)
 │   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)
 │   ├── orchestrator.py            thin wrapper → PRHarness (TRANSLATE_PR_PROFILE)
@@ -116,7 +116,7 @@ src/ydbdoc_review/
 Legend: ✅ done · ⏳ pending · 🟡 partial.
 
 Navigation YAML merge runs in `github/workflow.py` after per-file markdown
-translation (`navigation_merge.run_navigation_merges`).
+translation, driven by `TranslationScopePlan` from `scope_planner.py` (§22).
 
 ### 4.2. Files outside the package
 
@@ -128,10 +128,8 @@ translation (`navigation_merge.run_navigation_merges`).
 - `tests/fixtures/markdown_files/` — **committed** real YDB docs (RU+EN), 33
   files total, ~600 KB. Used for unit and integration round-trip tests. They
   are NOT regenerated automatically; refresh via `scripts/fetch_fixtures.sh`.
-- `scripts/` — one-off utilities: `fetch_fixtures.sh`, `scan_yfm.py`,
-  `inspect_yfm.py`, `smoke_yandex.py`, `debug_auth_table.py`.
-
----
+- `scripts/` — one-off utilities: `fetch_fixtures.sh`, `fetch_nav_fixtures.py`,
+  `scan_yfm.py`, `inspect_yfm.py`, `smoke_yandex.py`, `debug_auth_table.py`.
 
 ---
 

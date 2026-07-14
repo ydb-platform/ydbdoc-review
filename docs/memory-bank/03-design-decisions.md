@@ -7,6 +7,9 @@
 
 ## 6. Key design decisions and trade-offs
 
+> **Navigation / TOC:** §6.71–§6.90 describe historical supplement-chain fixes.
+> Current behavior is **09-navigation-scope** §22 (Phase J, `d68812f`). See §6.91.
+
 ### 6.1. Custom IR, not `SyntaxTreeNode`
 markdown-it-py's `SyntaxTreeNode` doesn't guarantee round-trip stability and
 is hard to extend with custom YFM nodes. We use a flat-token → custom IR
@@ -2068,4 +2071,22 @@ again, merge synthetic changes, then translate all new pairs in one second pass.
 
 **Tests:** ``test_toc_href_then_include_supplement_closes_sqs_api_includes``.
 
+### 6.91. Unified navigation scope supersedes §6.71–§6.90 (Phase J, 2026-07-14)
+
+**Problem:** §6.71–§6.90 patched TOC scope incrementally (three supplement modules,
+multi-pass ordering in ``workflow.py``, ``extra_toc_hrefs`` axis). Each fix worked
+in isolation but the combination drifted between ``doc_translate`` and ``doc_verify``.
+
+**Decision:** **09-navigation-scope** §22 — ``plan_translation_scope()`` builds
+``TranslationScopePlan`` once; translate, merge, and verify consume the same object.
+Legacy supplement modules removed in commit ``d68812f``.
+
+**Historical §6.71–§6.90** entries below remain for regression context and PR links.
+For current behavior, read §22 first.
+
+**Tests:** ``tests/unit/test_nav_scope_planner.py``, ``test_navigation_merge_pipeline.py``
+(scope_plan merge), ``test_navigation_verify.py`` (scope_plan verify).
+
 ---
+
+[← Memory Bank index](../../MEMORY_BANK.md)

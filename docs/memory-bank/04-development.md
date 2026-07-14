@@ -161,15 +161,28 @@ python scripts/scan_yfm.py    # YFM-construct frequency report
 
 Fixtures are committed and not auto-updated, so older versions stay reproducible.
 
----
+### 7.5. Navigation scope fixtures (§22)
+
+```
+tests/fixtures/nav_cases/
+├── case_45181/   # sqs-api closure from topic-only diff
+├── case_44820/   # SQS in PR diff
+└── case_43530/   # explicit toc edits (OTel)
+```
+
+```bash
+python scripts/fetch_nav_fixtures.py --all   # refresh from ydb PR snapshots
+pytest tests/unit/test_nav_scope_planner.py -v
+```
+
+Golden tests define planner contract before touching `workflow.py`. See
+**09-navigation-scope** §22.6–§22.8 for rollout notes (tags not moved; #45181
+left green on old chain).
 
 ---
 
 ## 9. TODO / Backlog (not in main roadmap)
 
-- **Navigation YAML merge in workflow**: wire `merge_en_toc_yaml` /
-  `merge_en_redirects_yaml` into orchestrator / `github/workflow.py` when PR
-  touches `toc*.yaml` or redirect YAML. APIs + validation wrappers exist.
 - **Glossary YAML maintenance**: now seeded with ~30-50 terms manually.
   Future: script that parses https://ydb.tech/docs/ru/concepts/glossary into
   YAML and proposes a diff. Currently `prompts/glossary.yaml` is the source
@@ -228,10 +241,12 @@ indented block ``href`` parse + raw-yaml ``empty_toc`` guard (§6.86).
 ``ydbdoc-review/verify-{N}`` + fixup PR; on translation PR ``ydbdoc-review/pr-{N}`` →
 inline second commit (no fixup PR).
 
+**Done — §22 planner (Phase J, 2026-07-14):** unified `TranslationScopePlan`;
+single MD pass; merge/verify read same plan; supplement modules removed.
+Validate on a new source PR after tag bump — not #45181 (already green).
+
 **Done — §6.66 harness:** per-file + PR-level step runners; YAML regression fixtures
 in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env override).
-
----
 
 ---
 
@@ -246,8 +261,6 @@ in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env o
 - **Failed test output is shared in full** — never paraphrased. The AI needs
   to see actual diffs, tracebacks, and tool output to debug correctly.
 - **Memory Bank verbosity is intentional** — a different AI may take over.
-
----
 
 ---
 
@@ -295,8 +308,6 @@ ruff check src/ tests/
 ruff format src/ tests/
 mypy src/ydbdoc_review/
 ```
-
----
 
 ---
 

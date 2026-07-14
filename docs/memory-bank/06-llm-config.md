@@ -76,8 +76,6 @@ When DeepSeek V4 is available in AI Studio: switch translator primary to
 
 ---
 
----
-
 ## 13. Configuration
 
 ### 13.1. File location
@@ -193,8 +191,6 @@ YDBDOC_YC_API_KEY=
 ```
 
 User copies to `.env` and fills in. `.env` is gitignored.
-
----
 
 ---
 
@@ -365,8 +361,6 @@ Manual maintenance for now.
 
 ---
 
----
-
 ## 18. Prompts
 
 ### 18.1. Versioning
@@ -407,8 +401,6 @@ translate only prose between them; never expand to `{{ var }}`, URLs, or `` `cod
 User prompt `translate.md` repeats link shape `[anchor](⟦U{n}⟧)` and no reordering.
 Translator batch schema: `{"segments": [{"id", "kind", "path", "text"}, …]}` →
 response `{"segments": [{"id", "text"}, …]}`.
-
----
 
 ---
 
