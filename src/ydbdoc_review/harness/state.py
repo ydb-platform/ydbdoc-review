@@ -50,6 +50,7 @@ class FileRunState:
 
     segment_lines: dict[str, tuple[int, int]] = field(default_factory=dict)
     segment_excerpts: dict[str, str] = field(default_factory=dict)
+    segment_source_excerpts: dict[str, str] = field(default_factory=dict)
 
     stopped_early: bool = False
     translate_retry_count: int = 0

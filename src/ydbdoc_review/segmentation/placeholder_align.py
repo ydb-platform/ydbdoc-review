@@ -104,6 +104,45 @@ def _is_kv_template(node: InlineNode) -> bool:
     return bool(_KV_TEMPLATE_RE.match(node.content.strip()))
 
 
+def _pair_unmatched_by_kind(
+    still_unmatched: list[ProtectedInline],
+    unmatched_src: list[ProtectedInline],
+    *,
+    used_src: set[str],
+    new_names_in_tgt: set[str],
+    rename: dict[str, str],
+) -> list[ProtectedInline]:
+    """Pair leftover tgt/src placeholders by kind (U, C, …) in doc order.
+
+    Glossary segments often have multiple ``⟦U⟧`` links where atom keys differ
+    (locale path, anchor) but slot count matches — pass 1 misses them and pass 3
+    used to leave ``⟦U3⟧`` on EN while RU only defines ``⟦U1⟧``/``⟦U2⟧``, which
+    the critic flags as phantom corruption (PR #46435 / #46431).
+    """
+    src_by_kind: dict[str, list[ProtectedInline]] = {}
+    for sp in unmatched_src:
+        if sp.placeholder in used_src:
+            continue
+        src_by_kind.setdefault(_placeholder_kind(sp.placeholder), []).append(sp)
+
+    still: list[ProtectedInline] = []
+    for tp in still_unmatched:
+        kind = _placeholder_kind(tp.placeholder)
+        if kind not in {"U", "L"}:
+            still.append(tp)
+            continue
+        pool = src_by_kind.get(kind, [])
+        if not pool:
+            still.append(tp)
+            continue
+        sp = pool.pop(0)
+        used_src.add(sp.placeholder)
+        new_names_in_tgt.add(sp.placeholder)
+        if sp.placeholder != tp.placeholder:
+            rename[tp.placeholder] = sp.placeholder
+    return still
+
+
 def _pair_unmatched_code_slots(
     unmatched: list[ProtectedInline],
     unmatched_src: list[ProtectedInline],
@@ -199,7 +238,15 @@ def _renumber_segment(src: Segment, tgt: Segment) -> Segment:
         rename=rename,
     )
 
-    # Pass 3: tgt-only atoms keep their name when free, else allocate fresh.
+    still_unmatched = _pair_unmatched_by_kind(
+        still_unmatched,
+        unmatched_src,
+        used_src=used_src,
+        new_names_in_tgt=new_names_in_tgt,
+        rename=rename,
+    )
+
+    # Pass 4: tgt-only atoms keep their name when free, else allocate fresh.
     next_idx_by_kind: dict[str, int] = {}
     for p in src.placeholders:
         k = _placeholder_kind(p.placeholder)

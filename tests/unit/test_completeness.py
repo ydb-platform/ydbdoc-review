@@ -120,3 +120,22 @@ def test_completeness_ok_when_bilingual_skip():
         pair_results=[PairRunResult(plan=plan, skipped=True)],
     )
     assert completeness_gaps(changes, result) == []
+
+
+def test_completeness_ignores_misresolved_shared_include_mirror():
+    changes = [
+        (
+            "ydb/docs/ru/_includes/go/auth-static-with-native.md",
+            "added",
+        ),
+    ]
+    result = PRTranslationResult()
+    assert completeness_gaps(changes, result) == []
+
+
+def test_gap_label_shared_include_mirror():
+    from ydbdoc_review.pipeline.completeness import gap_label
+
+    label = gap_label("ydb/docs/en/_includes/go/auth-static-with-native.md")
+    assert "ложное EN-зеркало" in label
+    assert "docs/_includes" in label

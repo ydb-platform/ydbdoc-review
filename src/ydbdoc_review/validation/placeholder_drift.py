@@ -236,10 +236,14 @@ def is_spurious_phantom_marker_swap_issue(
         return False
     if not _PLACEHOLDER_ISSUE.search(issue.category):
         return False
-    if extract_placeholders(segment.text) != extract_placeholders(translation):
-        return False
     haystack = f"{issue.category} {issue.comment}"
-    return bool(_PHANTOM_MARKER_SWAP.search(haystack))
+    if not _PHANTOM_MARKER_SWAP.search(haystack):
+        return False
+    if extract_placeholders(segment.text) == extract_placeholders(translation):
+        return True
+    from ydbdoc_review.validation.markers import cross_lang_placeholder_drift_only
+
+    return cross_lang_placeholder_drift_only(segment.text, translation)
 
 
 def is_spurious_hallucinated_link_issue(

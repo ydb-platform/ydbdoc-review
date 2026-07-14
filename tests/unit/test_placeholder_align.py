@@ -12,6 +12,7 @@ from ydbdoc_review.segmentation.placeholder_align import (
     normalize_target_segments_to_source,
 )
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
+from ydbdoc_review.validation.markers import extract_placeholders
 
 
 def _seg(seg_id: str, text: str, placeholders: list[ProtectedInline]) -> Segment:
@@ -338,3 +339,36 @@ def test_translated_format_template_renumbers_en_only_marker():
     [normalized] = normalize_target_segments_to_source([src], [tgt])
     assert "⟦C6⟧" in normalized.text
     assert "⟦C7⟧" not in normalized.text
+
+
+def test_glossary_url_slots_renumber_by_kind_when_atom_keys_differ():
+    """Regression #46435: EN ⟦U3⟧ borrows unused src ⟦U2⟧ when URLs differ by locale."""
+    src = _seg(
+        "s0042",
+        "модель [акторов](⟦U1⟧) в ⟦V1⟧ с [MVCC](⟦U2⟧)",
+        [
+            _ph("⟦U1⟧", InlineLink(href="../../concepts/actor.md", children=[])),
+            _ph(
+                "⟦V1⟧",
+                InlineVariable(name="ydb-short-name", raw="{{ ydb-short-name }}"),
+            ),
+            _ph("⟦U2⟧", InlineLink(href="../../concepts/mvcc.md", children=[])),
+        ],
+    )
+    tgt = _seg(
+        "s0042",
+        "the [actor model](⟦U1⟧) in ⟦V1⟧ with [MVCC](⟦U3⟧)",
+        [
+            _ph("⟦U1⟧", InlineLink(href="../../concepts/actor.md", children=[])),
+            _ph(
+                "⟦V1⟧",
+                InlineVariable(name="ydb-short-name", raw="{{ ydb-short-name }}"),
+            ),
+            _ph(
+                "⟦U3⟧",
+                InlineLink(href="../../../en/core/concepts/mvcc.md", children=[]),
+            ),
+        ],
+    )
+    [normalized] = normalize_target_segments_to_source([src], [tgt])
+    assert extract_placeholders(normalized.text) == extract_placeholders(src.text)

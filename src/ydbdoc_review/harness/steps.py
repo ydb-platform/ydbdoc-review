@@ -347,3 +347,6 @@ class ReportArtifactsStep:
             state.segment_lines,
             placeholder_segments=state.render_base_segments,
         )
+        state.segment_source_excerpts = build_segment_source_excerpts(
+            state.segments,
+        )

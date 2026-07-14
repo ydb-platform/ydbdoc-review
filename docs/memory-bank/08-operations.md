@@ -75,7 +75,10 @@ the runner builds a fresh image from that tag's `Dockerfile`.
 git tag -f v0.2.0 HEAD && git push -f origin v0.2.0
 ```
 
-Parent reaction builds `env` for the child — **secrets only via env**, not CLI:
+Parent reaction builds `env` for the child — **secrets only via env**, not CLI.
+**TLS:** mount internal CA PEM in the container and set `YDBDOC_ELIZA_CA_BUNDLE`
+(or `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE`); without it Eliza calls fail with
+`SSLError` (see **06-llm-config** §13.6.4).
 
 | Env var | Purpose |
 |---------|---------|
@@ -84,6 +87,7 @@ Parent reaction builds `env` for the child — **secrets only via env**, not CLI
 | `ELIZA_OAUTH_TOKEN` | OAuth token (Secret option → child env only) |
 | `YDBDOC_MODEL_TRANSLATE` | Internal model id for translate |
 | `YDBDOC_MODEL_CHECK` | Internal model id for critic |
+| `YDBDOC_ELIZA_CA_BUNDLE` | PEM path for internal CA (Eliza TLS); or set `REQUESTS_CA_BUNDLE` |
 | `GITHUB_TOKEN` | GitHub API for PR/branch/comments |
 | `YDBDOC_REPO_PATH` | Checkout path inside container |
 
@@ -110,6 +114,10 @@ See **06-llm-config** §13.6 for full contract.
 | Action exits 0 but no report on translation PR | Fixed in §6.48 — update `@v0.1.0` | Tag must include `_safe_post_issue_comment` + report-first order |
 | `trigger-translation-ci` skipped | `ydbdoc-review` job failed (exit 1) | Same as above; see **07-pipeline** §16.7 |
 | GHCR pull 404 on fallback | Image never published for that ref | Run `docker-publish` workflow_dispatch for current tag |
+| Eliza `SSLError` / cert verify failed | Internal CA not in runtime | Mount PEM; set `YDBDOC_ELIZA_CA_BUNDLE` or `REQUESTS_CA_BUNDLE` (§13.6.4) |
+| Translation PR **не создан** on source PR; ``docs/en/_includes/go/…`` in gaps | Mis-resolved shared ``docs/_includes/`` snippet (§6.80.5, #43997) | Tag with ``include_paths`` fix; re-run ``doc_translate`` |
+| Translation PR exists but 🔴 on ``glossary.md`` placeholder | ``doc_verify`` critic ``atom_map`` noise on multi-link terms (#46435/#46431) | Tag with ``placeholder_align`` U-slot fix; or merge after manual glossary pass |
+| «Автоперевод не работает» | Often push blocked (completeness) or 🔴 QA, not missing job | Check source PR comment: «translation PR не создан» vs translation PR # with report |
 
 `action_release_label()` in reports: `GITHUB_ACTION_REF` + `YDBDOC_GIT_SHA` from
 image build (local) or last GHCR publish (fallback).

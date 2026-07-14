@@ -25,6 +25,20 @@ def test_estimate_cost_rub_unknown_model():
     tracker = UsageTracker()
     tracker.add(LLMUsage("unknown-model", 1_000, 1_000, 0.0, 0, True))
     assert tracker.estimate_cost_rub() == 0.0
+    assert tracker.is_cost_unknown()
+    assert tracker.unpriced_models() == ["unknown-model"]
+
+
+def test_estimate_cost_rub_eliza_models():
+    tracker = UsageTracker()
+    tracker.add(
+        LLMUsage("deepseek-v4-flash", 1_000, 1_000, 0.0, 0, True, role="translate")
+    )
+    tracker.add(
+        LLMUsage("gpt-oss-120b", 500, 200, 0.0, 0, True, role="critic")
+    )
+    assert tracker.estimate_cost_rub() == pytest.approx(0.94)
+    assert not tracker.is_cost_unknown()
 
 
 def test_estimate_cost_rub_null_output_tokens():

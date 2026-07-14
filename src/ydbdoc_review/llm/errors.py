@@ -15,6 +15,10 @@ class LLMRequestError(LLMError):
     """The upstream API rejected or failed to serve the request."""
 
 
+class LLMRetryableRequestError(LLMRequestError):
+    """Transient HTTP failure — safe to retry (408/429/5xx)."""
+
+
 class LLMModelUnavailableError(LLMRequestError):
     """Model slug is not available in the folder (``Failed to get model``)."""
 

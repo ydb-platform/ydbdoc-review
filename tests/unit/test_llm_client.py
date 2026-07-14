@@ -76,6 +76,17 @@ def test_from_config():
     assert client.model_uri("yandexgpt-5.1") == "gpt://b1x/yandexgpt-5.1"
 
 
+def test_from_config_uses_shared_usage_tracker():
+    from ydbdoc_review.llm.usage import UsageTracker
+
+    cfg = load_config(
+        env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "AQVN_x"}
+    )
+    shared = UsageTracker()
+    client = YandexLLMClient.from_config(cfg, usage_tracker=shared)
+    assert client.usage_tracker is shared
+
+
 def test_chat_success_records_usage():
     client, mock = _client_with_mock()
     mock.chat.completions.create.return_value = _completion("hello", prompt_tokens=12, completion_tokens=3)

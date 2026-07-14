@@ -48,5 +48,6 @@ class FileHarness:
             segment_locations=state.segment_locations,
             segment_lines=state.segment_lines,
             segment_excerpts=state.segment_excerpts,
+            segment_source_excerpts=state.segment_source_excerpts,
             segment_alignment_error=state.segment_alignment_error,
         )

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-
 from ydbdoc_review.navigation.paths import is_navigation_yaml
 from ydbdoc_review.pipeline.pairs import ChangeKind, counterpart, is_docs_markdown
 from ydbdoc_review.pipeline.types import PRTranslationResult
@@ -11,6 +9,27 @@ from ydbdoc_review.pipeline.types import PRTranslationResult
 
 def _norm(path: str) -> str:
     return path.replace("\\", "/")
+
+
+def is_misresolved_shared_include_mirror(
+    en_path: str,
+    *,
+    docs_root: str = "ydb/docs",
+) -> bool:
+    """True when ``en_path`` is a false RU↔EN mirror of ``docs/_includes/…``.
+
+    Recipe pages reference shared snippets as ``../../../_includes/go/…`` which
+    resolves to nonexistent ``docs/{ru,en}/_includes/…`` instead of language-
+    neutral ``docs/_includes/…`` (PR #43997).
+    """
+    ru_path = counterpart(en_path, docs_root)
+    if ru_path is None:
+        return False
+    root = docs_root.strip("/")
+    ru_norm = _norm(ru_path)
+    return ru_norm.startswith(f"{root}/ru/_includes/") or ru_norm.startswith(
+        f"{root}/en/_includes/"
+    )
 
 
 def bilingual_en_mirrors(
@@ -88,13 +107,22 @@ def completeness_gaps(
     """Sorted EN mirror paths missing from the translation run."""
     expected = expected_en_mirrors(changes, docs_root=docs_root)
     expected -= bilingual_en_mirrors(changes, docs_root=docs_root)
+    expected = {
+        path
+        for path in expected
+        if not is_misresolved_shared_include_mirror(path, docs_root=docs_root)
+    }
     committed = committed_en_paths(result)
     return sorted(expected - committed)
 
 
-def gap_label(en_path: str) -> str:
+def gap_label(en_path: str, *, docs_root: str = "ydb/docs") -> str:
     """Human-readable reason for a completeness gap."""
-    name = PurePosixPath(en_path).name.lower()
+    if is_misresolved_shared_include_mirror(en_path, docs_root=docs_root):
+        return (
+            f"{en_path} — ложное EN-зеркало общего snippet "
+            f"`{docs_root}/_includes/…` (не переводится; путь include в recipe)"
+        )
     if is_navigation_yaml(en_path):
         return f"{en_path} — navigation merge не выполнен"
     return f"{en_path} — не переведён"

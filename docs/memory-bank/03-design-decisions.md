@@ -1816,6 +1816,23 @@ unchanged includes from ``export-s3.md``.
 **Follow-up (§6.80.4):** Source PR comment when push blocked: «translation PR не
 создан», completeness gap list, pipeline errors — not misleading «перевод готов».
 
+**Follow-up (§6.80.5):** [ydb #43997](https://github.com/ydb-platform/ydb/pull/43997) —
+recipe pages reference shared Go snippets as ``../../../_includes/go/…`` which
+mis-resolves to ``docs/{ru,en}/_includes/…`` instead of language-neutral
+``docs/_includes/…``. Pipeline queued false RU↔EN pairs → ``Missing source text``
++ completeness gate blocked push (translation PR never created).
+
+Fix: ``include_paths._locale_root_shared_include_resolved()`` returns ``None``;
+``completeness.is_misresolved_shared_include_mirror()`` excludes false EN mirrors
+from §6.80 gaps. Re-trigger: move ``@v0.1.0`` tag + toggle ``doc_translate`` label.
+
+**Follow-up (§6.80.6):** [ydb #46435](https://github.com/ydb-platform/ydb/pull/46435),
+[#46431](https://github.com/ydb-platform/ydb/pull/46431) — auto-translate **did run**
+(translation PRs created, 14 / 4 files). 🔴 from ``glossary.md`` placeholder
+``atom_map`` noise after ``doc_verify`` + real issues in ``execution_process.md``
+(Wikipedia links on #46431). Fix: ``placeholder_align._pair_unmatched_by_kind`` for
+``⟦U⟧`` slots; report shows **Оригинал / Перевод / Почему 🔴** per segment (§17.2).
+
 ### 6.81. Trailing ``//`` fence comments + multi-comment pipeline tests (#44758)
 
 **Problem:** §6.39/§6.46 translated only line-start ``//`` / ``#`` / ``--`` comments.
@@ -2006,8 +2023,9 @@ This keeps scope detection semantics while never crashing.
 2. **Auth:** ``Authorization: OAuth <token>`` only; token read strictly from env
    ``ELIZA_OAUTH_TOKEN`` via ``Secrets`` — never CLI argv, never YAML, never URL,
    never logs/reports.
-3. **Transport:** ``ElizaLLMClient`` uses ``requests.post`` (not OpenAI SDK) for
-   Eliza calls to avoid Bearer injection.
+3. **Transport:** ``ElizaLLMClient`` uses one ``requests.Session`` per client
+   (``session.post``, TLS via ``YDBDOC_ELIZA_CA_BUNDLE`` / ``REQUESTS_CA_BUNDLE``;
+   never ``verify=False``) — not OpenAI SDK, to avoid Bearer injection.
 4. **Defaults** when ``YDBDOC_MODEL_PROVIDER=eliza``:
    ``YDBDOC_MODEL_TRANSLATE=deepseek-v4-flash``,
    ``YDBDOC_MODEL_CHECK=gpt-oss-120b`` (overridable via env).

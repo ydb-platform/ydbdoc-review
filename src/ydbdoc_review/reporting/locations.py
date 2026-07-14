@@ -211,6 +211,21 @@ def build_segment_line_map(
     return lines
 
 
+def build_segment_source_excerpts(
+    segments: list[Segment],
+    *,
+    max_len: int = 240,
+) -> dict[str, str]:
+    """Map segment id → readable source-language preview for PR reports."""
+    excerpts: dict[str, str] = {}
+    for seg in segments:
+        display = rendered_segment_text(seg, {}, placeholder_seg=seg)
+        excerpt = _truncate_excerpt(re.sub(r"\s+", " ", display).strip(), max_len=max_len)
+        if excerpt:
+            excerpts[seg.id] = excerpt
+    return excerpts
+
+
 def build_segment_excerpts(
     final_text: str,
     segments: list[Segment],

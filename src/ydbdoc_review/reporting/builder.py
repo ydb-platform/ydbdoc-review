@@ -131,6 +131,33 @@ def _format_cost_rub(cost: float) -> str:
     return f"~₽{cost:.2f}"
 
 
+def _format_cost_estimate(
+    *,
+    usage: UsageTracker | None,
+    file_usage: dict[str, float | int],
+) -> str | None:
+    """Return formatted cost, explicit n/a, or None when nothing to show."""
+    if usage and usage.records:
+        cost = usage.estimate_cost_usd()
+        has_tokens = usage.has_token_usage()
+    else:
+        cost = float(file_usage["estimated_cost_usd"])
+        has_tokens = bool(file_usage["input_tokens"] or file_usage["output_tokens"])
+
+    if not has_tokens and cost <= 0:
+        return None
+    if cost > 0:
+        return _format_cost_rub(cost)
+    if usage and usage.is_cost_unknown():
+        models = ", ".join(f"`{slug}`" for slug in usage.unpriced_models())
+        if models:
+            return f"n/a (модель не в прайсе: {models})"
+        return "n/a (модель не в прайсе)"
+    if has_tokens:
+        return "n/a (модель не в прайсе)"
+    return _format_cost_rub(cost)
+
+
 def _aggregate_file_usage(result: PRTranslationResult) -> dict[str, float | int]:
     inp = out = 0
     cost = 0.0
@@ -199,17 +226,9 @@ def _usage_lines(
             )
 
     if config.reporting.include_cost:
-        cost = (
-            usage.estimate_cost_usd()
-            if usage
-            else float(file_usage["estimated_cost_usd"])
-        )
-        has_tokens = bool(
-            usage
-            and (usage.total_input_tokens or usage.total_output_tokens)
-        ) or bool(file_usage["input_tokens"] or file_usage["output_tokens"])
-        if has_tokens or cost > 0:
-            lines.append(f"- Оценка стоимости: {_format_cost_rub(cost)}")
+        cost_label = _format_cost_estimate(usage=usage, file_usage=file_usage)
+        if cost_label:
+            lines.append(f"- Оценка стоимости: {cost_label}")
 
     if usage:
         tr_models = usage.models_for_role("translate")
@@ -252,17 +271,44 @@ def _skipped_critic_issues(fr) -> list[CriticIssueOut]:
     return list(fr.critic_skipped)
 
 
+def _lang_label(code: str) -> str:
+    lowered = code.lower()
+    if lowered in {"ru", "russian"}:
+        return "RU"
+    if lowered in {"en", "english"}:
+        return "EN"
+    return code.upper()
+
+
 def _format_reviewer_item(
     *,
     index: int,
     location: str,
     problem: str,
+    severity: str | None = None,
+    source_excerpt: str | None = None,
+    target_excerpt: str | None = None,
+    source_lang: str = "ru",
+    target_lang: str = "en",
     suggestion: str | None = None,
-    search_excerpt: str | None = None,
 ) -> str:
-    lines = [f"{index}. **{location}** — {problem}"]
-    if search_excerpt:
-        lines.append(f"   - 📍 Искать: «{search_excerpt}»")
+    lines = [f"{index}. **{location}**"]
+    if source_excerpt:
+        lines.append(
+            f"   - **Оригинал ({_lang_label(source_lang)}):** «{source_excerpt}»"
+        )
+    if target_excerpt:
+        lines.append(
+            f"   - **Перевод ({_lang_label(target_lang)}):** «{target_excerpt}»"
+        )
+    if severity == "blocked":
+        lines.append(f"   - **Почему 🔴:** {problem}")
+    elif severity == "warning":
+        lines.append(
+            f"   - **Почему 🟡:** {problem}"
+        )
+    else:
+        lines.append(f"   - {problem}")
     if suggestion:
         preview = suggestion.replace("\n", " ")
         if len(preview) > 240:
@@ -279,6 +325,9 @@ def _format_critic_item(
     file_path: str,
     segment_lines: dict[str, tuple[int, int]],
     segment_excerpts: dict[str, str],
+    segment_source_excerpts: dict[str, str],
+    source_lang: str,
+    target_lang: str,
     link: ReportLinkContext | None,
 ) -> str:
     path_label = None
@@ -299,15 +348,22 @@ def _format_critic_item(
         location = _location_label(issue, segment_locations)
     category = issue.category.replace("_", " ")
     problem = f"({category}) {issue.comment}"
-    search_excerpt = (
+    source_excerpt = (
+        segment_source_excerpts.get(issue.segment_id) if issue.segment_id else None
+    )
+    target_excerpt = (
         segment_excerpts.get(issue.segment_id) if issue.segment_id else None
     )
     return _format_reviewer_item(
         index=index,
         location=location,
         problem=problem,
+        severity=issue.severity,
+        source_excerpt=source_excerpt,
+        target_excerpt=target_excerpt,
+        source_lang=source_lang,
+        target_lang=target_lang,
         suggestion=issue.suggested_text,
-        search_excerpt=search_excerpt,
     )
 
 
@@ -361,8 +417,11 @@ def _file_reviewer_section(
         manual_line_ranges=manual_ranges,
     )
 
+    file_path = run.plan.target_path
+    source_lang = run.plan.source_lang
+    target_lang = run.plan.target_lang
+
     if fr.segment_alignment_error:
-        file_path = run.plan.target_path
         out = f"### 🔴 `{file_path}`\n\n"
         out += _format_reviewer_item(
             index=item_index,
@@ -371,12 +430,14 @@ def _file_reviewer_section(
                 f"(alignment) EN не совпадает со структурой RU: "
                 f"{fr.segment_alignment_error}"
             ),
+            severity="blocked",
+            source_lang=source_lang,
+            target_lang=target_lang,
         ) + "\n\n"
         return out, item_index + 1
 
     if not critic_items and not heuristics and not manual_actions:
         skipped = _skipped_critic_issues(fr)
-        file_path = run.plan.target_path
         if skipped and config.reporting.include_skipped_critic:
             out = f"### {_verdict_emoji(fr.verdict)} `{file_path}`\n\n"
             out += (
@@ -392,6 +453,9 @@ def _file_reviewer_section(
                         file_path=file_path,
                         segment_lines=fr.segment_lines,
                         segment_excerpts=fr.segment_excerpts,
+                        segment_source_excerpts=fr.segment_source_excerpts,
+                        source_lang=source_lang,
+                        target_lang=target_lang,
                         link=link,
                     )
                     + "\n\n"
@@ -405,7 +469,6 @@ def _file_reviewer_section(
             return out, item_index
         return "", item_index
 
-    file_path = run.plan.target_path
     out = f"### {_verdict_emoji(fr.verdict)} `{file_path}`\n\n"
     for action in manual_actions:
         line_range = fr.segment_lines.get(action.segment_id)
@@ -420,7 +483,11 @@ def _file_reviewer_section(
             index=item_index,
             location=location,
             problem=action.message,
-            search_excerpt=fr.segment_excerpts.get(action.segment_id),
+            severity="blocked",
+            source_excerpt=fr.segment_source_excerpts.get(action.segment_id),
+            target_excerpt=fr.segment_excerpts.get(action.segment_id),
+            source_lang=source_lang,
+            target_lang=target_lang,
         ) + "\n\n"
         item_index += 1
     for issue in critic_items:
@@ -432,6 +499,9 @@ def _file_reviewer_section(
                 file_path=file_path,
                 segment_lines=fr.segment_lines,
                 segment_excerpts=fr.segment_excerpts,
+                segment_source_excerpts=fr.segment_source_excerpts,
+                source_lang=source_lang,
+                target_lang=target_lang,
                 link=link,
             )
             + "\n\n"
@@ -452,6 +522,9 @@ def _file_reviewer_section(
                     file_path=file_path,
                     segment_lines=fr.segment_lines,
                     segment_excerpts=fr.segment_excerpts,
+                    segment_source_excerpts=fr.segment_source_excerpts,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
                     link=link,
                 )
                 + "\n\n"
@@ -459,10 +532,14 @@ def _file_reviewer_section(
             item_index += 1
         out += "</details>\n\n"
     for warning in heuristics:
+        blocking = warning in fr.heuristic_blocking
         out += _format_reviewer_item(
             index=item_index,
             location=heuristic_location_label(warning),
             problem=humanize_heuristic(warning),
+            severity="blocked" if blocking else "warning",
+            source_lang=source_lang,
+            target_lang=target_lang,
         ) + "\n\n"
         item_index += 1
     return out, item_index
@@ -555,17 +632,12 @@ def build_translate_handoff_comment(
 
     cost_line = ""
     if config.reporting.include_cost:
-        cost = (
-            usage.estimate_cost_usd()
-            if usage
-            else float(_aggregate_file_usage(result)["estimated_cost_usd"])
+        cost_label = _format_cost_estimate(
+            usage=usage,
+            file_usage=_aggregate_file_usage(result),
         )
-        has_tokens = bool(
-            usage
-            and (usage.total_input_tokens or usage.total_output_tokens)
-        ) or bool(_aggregate_file_usage(result)["input_tokens"])
-        if has_tokens or cost > 0:
-            cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
+        if cost_label:
+            cost_line = f"| Стоимость перевода | {cost_label} |\n"
 
     checkout_line = ""
     if meta.checkout_ref:
@@ -649,6 +721,8 @@ def build_source_pr_comment(
             "🤖 **ydbdoc-review** — translation PR **не создан**\n\n"
             "Push заблокирован: не все EN-зеркала source PR переведены "
             "(§6.80 completeness gate).\n\n"
+            "Автоперевод **работает** для обычных пар `docs/ru/…` ↔ `docs/en/…`. "
+            "Ниже — файлы, которые pipeline не смог довести до EN в этом прогоне.\n\n"
             "| | |\n"
             "|---|---|\n"
             f"| Translation PR | — |\n"
@@ -664,13 +738,12 @@ def build_source_pr_comment(
             for run in errors:
                 body += f"- `{run.plan.target_path}`: {run.error}\n"
         if config.reporting.include_cost:
-            cost = (
-                usage.estimate_cost_usd()
-                if usage
-                else float(_aggregate_file_usage(result)["estimated_cost_usd"])
+            cost_label = _format_cost_estimate(
+                usage=usage,
+                file_usage=_aggregate_file_usage(result),
             )
-            if cost > 0:
-                body += f"\n| Стоимость перевода | {_format_cost_rub(cost)} |\n"
+            if cost_label:
+                body += f"\n| Стоимость перевода | {cost_label} |\n"
         return body
 
     if total:
@@ -688,17 +761,12 @@ def build_source_pr_comment(
     tr_line = f"#{translation_pr_number}" if translation_pr_number else "—"
     cost_line = ""
     if config.reporting.include_cost:
-        cost = (
-            usage.estimate_cost_usd()
-            if usage
-            else float(_aggregate_file_usage(result)["estimated_cost_usd"])
+        cost_label = _format_cost_estimate(
+            usage=usage,
+            file_usage=_aggregate_file_usage(result),
         )
-        has_tokens = bool(
-            usage
-            and (usage.total_input_tokens or usage.total_output_tokens)
-        ) or bool(_aggregate_file_usage(result)["input_tokens"])
-        if has_tokens or cost > 0:
-            cost_line = f"| Стоимость перевода | {_format_cost_rub(cost)} |\n"
+        if cost_label:
+            cost_line = f"| Стоимость перевода | {cost_label} |\n"
 
     qa_line = ""
     if translation_pr_number:

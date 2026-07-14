@@ -41,6 +41,7 @@ class FileTranslationResult:
     segment_locations: dict[str, str] = field(default_factory=dict)
     segment_lines: dict[str, tuple[int, int]] = field(default_factory=dict)
     segment_excerpts: dict[str, str] = field(default_factory=dict)
+    segment_source_excerpts: dict[str, str] = field(default_factory=dict)
     segment_alignment_error: str | None = None
     models_used: list[str] = field(default_factory=list)
     input_tokens: int = 0

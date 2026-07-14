@@ -82,6 +82,10 @@ def _sample_result(*, new_file: bool = False) -> PRTranslationResult:
             "s0042": "Overview paragraph text",
             "s0124": "Cell text to search",
         },
+        segment_source_excerpts={
+            "s0042": "Обзорный абзац",
+            "s0124": "Текст ячейки",
+        },
     )
     return PRTranslationResult(
         pair_results=[
@@ -169,8 +173,12 @@ def test_build_full_report_reviewer_focused():
     assert "Что исправить" in body
     assert "Overview" in body and "`s0042`" in body
     assert "string table" in body
+    assert "Оригинал (RU):" in body
+    assert "Перевод (EN):" in body
+    assert "Почему 🔴:" in body
+    assert "Почему 🟡:" in body
+    assert "Обзорный абзац" in body
     assert "💡 Совет: row table" in body
-    assert "📍 Искать:" in body
     assert "таблица, строка 1, столбец 2" in body
     assert "Таблица не переведена автоматически" in body
     assert "355" in body
@@ -221,7 +229,71 @@ def test_build_full_report_includes_cost_section():
     )
     assert "Стоимость и токены" in body
     assert "Оценка стоимости" in body
-    assert "перевод=" in body
+    assert "перевод=`" in body
+
+
+def test_build_full_report_shows_na_for_unpriced_model():
+    from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
+
+    cfg = _cfg()
+    tracker = UsageTracker()
+    tracker.add(
+        LLMUsage(
+            "eliza-unknown-model",
+            10_000,
+            5_000,
+            100.0,
+            0,
+            True,
+            role="translate",
+        )
+    )
+    body = build_full_report(
+        _sample_result(),
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
+        config=cfg,
+        usage=tracker,
+    )
+    assert "Оценка стоимости: n/a (модель не в прайсе: `eliza-unknown-model`)" in body
+
+
+def test_build_full_report_shows_eliza_model_cost():
+    from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
+
+    cfg = _cfg()
+    tracker = UsageTracker()
+    tracker.add(
+        LLMUsage(
+            "deepseek-v4-flash",
+            10_000,
+            5_000,
+            100.0,
+            0,
+            True,
+            role="translate",
+        )
+    )
+    tracker.add(
+        LLMUsage(
+            "gpt-oss-120b",
+            2_000,
+            1_000,
+            100.0,
+            0,
+            True,
+            role="critic",
+        )
+    )
+    body = build_full_report(
+        _sample_result(),
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
+        config=cfg,
+        usage=tracker,
+    )
+    assert "Оценка стоимости: ~₽" in body
+    assert "Оценка стоимости: n/a" not in body
+    assert "перевод=`deepseek-v4-flash`" in body
+    assert "критик=`gpt-oss-120b`" in body
 
 
 def test_build_full_report_uses_ci_version_label(monkeypatch):

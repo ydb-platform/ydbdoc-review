@@ -9,8 +9,9 @@ if TYPE_CHECKING:
     from ydbdoc_review.llm.usage import UsageTracker
     from ydbdoc_review.translation.glossary import Glossary
 
-# RUB per 1K tokens (input, output), sync mode incl. VAT — Yandex AI Studio.
-# Updated manually; the API does not return prices in responses.
+# RUB per 1K tokens (input, output), sync mode incl. VAT — Yandex AI Studio
+# and internal Eliza ids (deepseek-v4-flash, gpt-oss-120b, …). Updated manually;
+# the API does not return prices in responses.
 MODEL_PRICE_RUB_PER_1K: dict[str, tuple[float, float]] = {
     "yandexgpt-5.1": (0.80, 0.80),
     "yandexgpt-5-pro": (0.80, 0.80),
@@ -75,6 +76,31 @@ class UsageTracker:
     def estimate_cost_usd(self, *, since: int = 0) -> float:
         """Deprecated alias — returns RUB estimate (kept for callers)."""
         return self.estimate_cost_rub(since=since)
+
+    def has_token_usage(self, *, since: int = 0) -> bool:
+        """True when successful calls recorded input or output tokens."""
+        return any(
+            record.success and (record.input_tokens or record.output_tokens)
+            for record in self.records[since:]
+        )
+
+    def unpriced_models(self, *, since: int = 0) -> list[str]:
+        """Model slugs used successfully but missing from ``MODEL_PRICE_RUB_PER_1K``."""
+        seen: set[str] = set()
+        for record in self.records[since:]:
+            if (
+                record.success
+                and record.model_slug not in MODEL_PRICE_RUB_PER_1K
+                and record.model_slug not in seen
+            ):
+                seen.add(record.model_slug)
+        return sorted(seen)
+
+    def is_cost_unknown(self, *, since: int = 0) -> bool:
+        """True when tokens were consumed but the price table yields zero."""
+        return self.has_token_usage(since=since) and self.estimate_cost_rub(
+            since=since
+        ) == 0.0
 
     def metrics_since(self, record_index: int = 0) -> dict[str, float | int | list[str]]:
         """Token/cost totals for records appended after ``record_index``."""

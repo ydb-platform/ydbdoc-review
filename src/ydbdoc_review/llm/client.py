@@ -19,7 +19,12 @@ import requests
 from openai.types.chat import ChatCompletionMessageParam
 
 from ydbdoc_review.config.loader import Config, LLMConfig, ModelChoice
-from ydbdoc_review.llm.errors import LLMConfigError, LLMRequestError, LLMRetryExhaustedError
+from ydbdoc_review.llm.errors import (
+    LLMConfigError,
+    LLMRequestError,
+    LLMRetryableRequestError,
+    LLMRetryExhaustedError,
+)
 from ydbdoc_review.llm.retry import (
     classify_api_error,
     compute_backoff_s,
@@ -31,6 +36,29 @@ from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 logger = logging.getLogger(__name__)
 
 LLMRole = Literal["analyze", "translate", "critic"]
+
+_ELIZA_RETRYABLE_HTTP = frozenset({408, 429, 500, 502, 503, 504})
+_ELIZA_CA_BUNDLE_ENV = "YDBDOC_ELIZA_CA_BUNDLE"
+
+
+def _resolve_eliza_tls_verify() -> bool | str:
+    """TLS verify target for Eliza ``requests.Session``.
+
+    Priority:
+    1. ``YDBDOC_ELIZA_CA_BUNDLE`` — explicit path to internal CA bundle (Eliza/Nirvana)
+    2. ``True`` — default; ``requests`` also honors ``REQUESTS_CA_BUNDLE`` /
+       ``CURL_CA_BUNDLE`` from the process environment
+
+    Never returns ``False`` (TLS verification must stay enabled).
+    """
+    explicit = (os.environ.get(_ELIZA_CA_BUNDLE_ENV) or "").strip()
+    if explicit:
+        if not os.path.isfile(explicit):
+            raise LLMConfigError(
+                f"{_ELIZA_CA_BUNDLE_ENV} points to missing file: {explicit!r}"
+            )
+        return explicit
+    return True
 
 
 def _message_char_count(messages: list[ChatCompletionMessageParam]) -> tuple[int, int]:
@@ -118,9 +146,19 @@ class YandexLLMClient:
         self._usage = usage_tracker or UsageTracker()
 
     @classmethod
-    def from_config(cls, config: Config) -> YandexLLMClient:
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        usage_tracker: UsageTracker | None = None,
+    ) -> YandexLLMClient:
         folder_id, api_key = config.secrets.require_yandex()
-        return cls(folder_id=folder_id, api_key=api_key, llm=config.llm)
+        return cls(
+            folder_id=folder_id,
+            api_key=api_key,
+            llm=config.llm,
+            usage_tracker=usage_tracker,
+        )
 
     @property
     def usage_tracker(self) -> UsageTracker:
@@ -276,11 +314,11 @@ class YandexLLMClient:
 
 
 class ElizaLLMClient(YandexLLMClient):
-    """OpenAI-compatible client for internal Eliza.
+    """Internal Eliza transport (``requests.Session``, OAuth header).
 
-    Differences vs Yandex Cloud:
-    - `model_uri(model_slug)` returns the raw model id (no `gpt://...` prefix)
-    - Uses `Authorization: OAuth <token>` header (token from env via `Secrets`)
+    Shares the ``chat()`` / ``usage_tracker`` surface with ``YandexLLMClient`` but
+    does **not** call ``super().__init__()`` — no OpenAI SDK client. Unsupported
+    roles (e.g. ``analyze``) fail fast instead of falling back to Yandex model slugs.
     """
 
     def __init__(
@@ -295,19 +333,29 @@ class ElizaLLMClient(YandexLLMClient):
     ) -> None:
         if not api_root or not oauth_token:
             raise LLMConfigError("api_root and oauth_token are required")
-        # Use a standalone OpenAI client per request (base_url depends on model).
-        # IMPORTANT: force OAuth header; do not send Bearer.
         self._api_root = api_root.rstrip("/")
         self._oauth_token = oauth_token
         self._llm = llm
         self._usage = usage_tracker or UsageTracker()
         self._translate_default = translate_default
         self._critic_default = critic_default
+        self._http = requests.Session()
+        self._http.verify = _resolve_eliza_tls_verify()
 
     @classmethod
-    def from_config(cls, config: Config) -> ElizaLLMClient:
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        usage_tracker: UsageTracker | None = None,
+    ) -> ElizaLLMClient:
         root, token = config.secrets.require_eliza_api_root()
-        return cls(api_root=root, oauth_token=token, llm=config.llm)
+        return cls(
+            api_root=root,
+            oauth_token=token,
+            llm=config.llm,
+            usage_tracker=usage_tracker,
+        )
 
     def model_uri(self, model_slug: str) -> str:
         return model_slug
@@ -317,12 +365,47 @@ class ElizaLLMClient(YandexLLMClient):
         model = model_id.strip()
         if not model:
             raise LLMConfigError("Empty Eliza model id")
-        # Required route:
         # {ELIZA_API_ROOT}/raw/internal/{model_id}/v1/chat/completions
-        # OpenAI client uses base_url + "/chat/completions".
         return f"{root}/raw/internal/{model}/v1"
 
+    @staticmethod
+    def _parse_eliza_completion_content(data: object) -> str:
+        """Extract assistant text from Eliza chat completion JSON."""
+        if not isinstance(data, dict):
+            raise LLMRetryableRequestError(
+                "Eliza HTTP 200: response is not a JSON object"
+            )
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise LLMRetryableRequestError("Eliza HTTP 200: empty choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise LLMRetryableRequestError(
+                "Eliza HTTP 200: invalid choice entry"
+            )
+        message = first.get("message")
+        if not isinstance(message, dict):
+            raise LLMRetryableRequestError(
+                "Eliza HTTP 200: missing message in choice"
+            )
+        if "content" not in message:
+            raise LLMRetryableRequestError(
+                "Eliza HTTP 200: missing content in message"
+            )
+        content = str(message.get("content") or "")
+        if not content.strip():
+            raise LLMRetryableRequestError(
+                "Eliza HTTP 200: empty content in message"
+            )
+        return content
+
     def _model_chain_for_role(self, role: LLMRole) -> list[str]:
+        if role == "analyze":
+            raise LLMConfigError(
+                f'role "analyze" has no internal Eliza model '
+                "(doc_translate uses deterministic planning — §6.30); "
+                "pass model= explicitly or use yandex_cloud provider"
+            )
         # Prefer explicit env vars for migration.
         if role == "translate":
             env = (os.environ.get("YDBDOC_MODEL_TRANSLATE") or "").strip()
@@ -341,7 +424,26 @@ class ElizaLLMClient(YandexLLMClient):
             if primary == "deepseek-v32":
                 return [self._critic_default]
             return [primary, *self._llm.models.critic.fallbacks]
-        return super().model_chain_for_role(role)
+        raise LLMConfigError(
+            f'role "{role}" has no internal Eliza model; '
+            "pass model= explicitly or use yandex_cloud provider"
+        )
+
+    def _call_once(
+        self,
+        *,
+        slug: str,
+        messages: list[ChatCompletionMessageParam],
+        temperature: float,
+        max_tokens: int,
+        retries: int,
+        started: float,
+        role: LLMRole | None,
+    ) -> ChatResult:
+        """Guard: Eliza never uses the OpenAI SDK path from ``YandexLLMClient``."""
+        raise LLMConfigError(
+            "ElizaLLMClient must use chat() over requests.Session, not _call_once()"
+        )
 
     def chat(
         self,
@@ -390,7 +492,7 @@ class ElizaLLMClient(YandexLLMClient):
                         slug,
                         url,
                     )
-                    resp = requests.post(
+                    resp = self._http.post(
                         url,
                         headers=headers,
                         json=payload,
@@ -398,9 +500,8 @@ class ElizaLLMClient(YandexLLMClient):
                     )
                     latency_ms = (time.perf_counter() - started) * 1000
 
-                    # Retryable HTTP statuses.
-                    if resp.status_code in (408, 429, 500, 502, 503, 504):
-                        raise LLMRequestError(
+                    if resp.status_code in _ELIZA_RETRYABLE_HTTP:
+                        raise LLMRetryableRequestError(
                             f"Eliza HTTP {resp.status_code}: {resp.text[:200]}"
                         )
                     if resp.status_code >= 400:
@@ -409,9 +510,7 @@ class ElizaLLMClient(YandexLLMClient):
                         )
 
                     data = resp.json()
-                    choices = data.get("choices") or []
-                    msg = (choices[0] or {}).get("message") or {}
-                    content = str(msg.get("content") or "")
+                    content = self._parse_eliza_completion_content(data)
                     usage_obj = data.get("usage") or {}
                     input_tokens = int(usage_obj.get("prompt_tokens") or 0)
                     output_tokens = int(usage_obj.get("completion_tokens") or 0)
@@ -431,10 +530,16 @@ class ElizaLLMClient(YandexLLMClient):
                         model_uri=url,
                         usage=usage,
                     )
+                except LLMRequestError as exc:
+                    if not isinstance(exc, LLMRetryableRequestError):
+                        raise
+                    last_error = exc
                 except (requests.Timeout, requests.ConnectionError) as exc:
                     last_error = exc
-                except (ValueError, LLMRequestError) as exc:
-                    last_error = exc
+                except ValueError as exc:
+                    raise LLMRequestError(
+                        f"Eliza response is not valid JSON: {exc}"
+                    ) from exc
 
                 latency_ms = (time.perf_counter() - started) * 1000
                 self._usage.add(
@@ -469,7 +574,11 @@ class ElizaLLMClient(YandexLLMClient):
         ) from last_error
 
 
-def create_llm_client(config: Config) -> YandexLLMClient:
+def create_llm_client(
+    config: Config,
+    *,
+    usage_tracker: UsageTracker | None = None,
+) -> YandexLLMClient:
     """Factory for model provider selection.
 
     Controlled via env `YDBDOC_MODEL_PROVIDER`:
@@ -478,9 +587,9 @@ def create_llm_client(config: Config) -> YandexLLMClient:
     """
     provider = (os.environ.get("YDBDOC_MODEL_PROVIDER") or "yandex_cloud").strip()
     if provider == "yandex_cloud":
-        return YandexLLMClient.from_config(config)
+        return YandexLLMClient.from_config(config, usage_tracker=usage_tracker)
     if provider == "eliza":
-        return ElizaLLMClient.from_config(config)
+        return ElizaLLMClient.from_config(config, usage_tracker=usage_tracker)
     raise LLMConfigError(
         "Unknown YDBDOC_MODEL_PROVIDER. Expected 'yandex_cloud' or 'eliza'."
     )

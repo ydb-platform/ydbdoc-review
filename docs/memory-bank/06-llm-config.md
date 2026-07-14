@@ -231,10 +231,11 @@ POST {ELIZA_API_ROOT}/raw/internal/{model_id}/v1/chat/completions
   `max_tokens`). **No `model` field** — model is encoded in the path.
 - Response: flat OpenAI JSON (`choices[0].message.content`), no `response` wrapper.
 
-Implementation: `ElizaLLMClient.chat()` uses `requests.post` directly (not OpenAI
-SDK) so Bearer is never sent and `model` is never injected into the body.
+Implementation: `ElizaLLMClient.chat()` uses one ``requests.Session`` per client
+(``session.post``) so TLS settings are explicit and reused. OAuth header only;
+OpenAI SDK is not used (would inject Bearer / ``model``).
 
-Back-compat: if only legacy `ELIZA_BASE_URL` is set (e.g.
+Back-compat: if only legacy ``ELIZA_BASE_URL`` is set (e.g.
 `https://api.eliza.yandex.net/raw/openai/v1`), `require_eliza_api_root()` extracts
 `scheme://host` as `ELIZA_API_ROOT`.
 
@@ -273,7 +274,22 @@ subprocess.run(
 
 There is **no** CLI option for Eliza OAuth token (`cli.py` has no `--eliza-*` flags).
 
-### 13.6.4. Model ids and role chains
+### 13.6.4. TLS / internal CA (Nirvana, Docker)
+
+``api.eliza.yandex.net`` is signed by Yandex internal CA — default certifi bundle
+is **not** enough. TLS verification must **never** be disabled (`verify=False`).
+
+| Source | Behavior |
+|--------|----------|
+| ``YDBDOC_ELIZA_CA_BUNDLE`` | Explicit path to PEM bundle; set on ``requests.Session.verify`` |
+| ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` | Honored by ``requests`` when ``Session.verify=True`` (default) |
+| Missing CA in runtime | ``SSLError`` at first Eliza call — fix env, not client code |
+
+**Runtime requirement:** Nirvana/Reactor child env and Docker image must ship the
+internal CA (mount PEM + set ``YDBDOC_ELIZA_CA_BUNDLE`` or ``REQUESTS_CA_BUNDLE``).
+See **08-operations** §19.4 Eliza scheduler loop.
+
+### 13.6.5. Model ids and role chains
 
 Priority for Eliza roles:
 
@@ -284,7 +300,7 @@ Priority for Eliza roles:
 Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
 `gpt-oss-120b` (critic).
 
-### 13.6.5. Retries and timeout
+### 13.6.6. Retries and timeout
 
 `ElizaLLMClient` reuses `llm.retries` and `llm.timeout_s` from config:
 
@@ -294,7 +310,7 @@ Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
 
 Yandex Cloud path unchanged — still uses OpenAI SDK + existing retry classification.
 
-### 13.6.6. Unified CLI entry for external schedulers
+### 13.6.7. Unified CLI entry for external schedulers
 
 ```bash
 python -m ydbdoc_review job \

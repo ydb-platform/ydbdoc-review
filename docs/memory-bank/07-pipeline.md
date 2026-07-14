@@ -444,7 +444,10 @@ computed from filtered ``critic_unresolved`` only.
 **Report tiers (§6.56–§6.57):**
 
 - **«Что исправить»** — unresolved critic (minus skipped duplicates), manual
-  actions, blocking heuristics, alignment errors.
+  actions, blocking heuristics, alignment errors. Each item shows:
+  - **Оригинал (RU)** / **Перевод (EN)** — segment excerpt as on disk (2026-07)
+  - **Почему 🔴/🟡** — blocking reason (critic category + comment, or heuristic)
+  - **💡 Совет** — critic ``suggested_text`` when present
 - **«Без замечаний»** — files with no open items (🟢).
 - **«Автоисправление не применено»** (collapsed) — ``critic_skipped`` only;
   does not inflate 🔴 or duplicate main-list numbering
