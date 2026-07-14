@@ -11,7 +11,11 @@ from ydbdoc_review.harness.render import remap_translations_by_position
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import compose_file_verdict, gate_round_trip
-from ydbdoc_review.reporting.locations import build_segment_excerpts, build_segment_line_map
+from ydbdoc_review.reporting.locations import (
+    build_segment_excerpts,
+    build_segment_line_map,
+    build_segment_source_excerpts,
+)
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.placeholder_align import normalize_target_segments_to_source
 from ydbdoc_review.translation.critic import (
