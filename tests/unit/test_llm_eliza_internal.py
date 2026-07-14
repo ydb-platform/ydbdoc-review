@@ -108,6 +108,63 @@ def test_eliza_internal_401_fails_fast_without_retry():
     assert token not in str(exc_info.value)
 
 
+def test_eliza_internal_ssl_error_fails_fast_without_retry():
+    import requests
+
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
+    cfg.llm.retries.max_attempts = 3
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
+    )
+
+    with (
+        patch.object(client._http, "post") as post,
+        patch("time.sleep") as sleep,
+    ):
+        post.side_effect = requests.exceptions.SSLError(
+            "certificate verify failed: self-signed certificate in certificate chain"
+        )
+        with pytest.raises(LLMRequestError, match="TLS verification failed") as exc_info:
+            client.chat(
+                [{"role": "user", "content": "x"}],
+                role="translate",
+                model="deepseek-v4-flash",
+            )
+
+    assert post.call_count == 1
+    sleep.assert_not_called()
+    assert "YDBDOC_ELIZA_CA_BUNDLE" in str(exc_info.value)
+
+
+def test_eliza_connection_error_wrapping_ssl_fails_fast_without_retry():
+    import requests
+
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
+    cfg.llm.retries.max_attempts = 3
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
+    )
+    ssl_exc = requests.exceptions.SSLError(
+        "certificate verify failed: self-signed certificate in certificate chain"
+    )
+    conn_exc = requests.exceptions.ConnectionError(ssl_exc)
+
+    with (
+        patch.object(client._http, "post") as post,
+        patch("time.sleep") as sleep,
+    ):
+        post.side_effect = conn_exc
+        with pytest.raises(LLMRequestError, match="TLS verification failed"):
+            client.chat(
+                [{"role": "user", "content": "x"}],
+                role="translate",
+                model="deepseek-v4-flash",
+            )
+
+    assert post.call_count == 1
+    sleep.assert_not_called()
+
+
 def test_eliza_internal_503_retries_until_exhausted():
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.max_attempts = 3

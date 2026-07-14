@@ -2029,7 +2029,8 @@ This keeps scope detection semantics while never crashing.
 4. **Defaults** when ``YDBDOC_MODEL_PROVIDER=eliza``:
    ``YDBDOC_MODEL_TRANSLATE=deepseek-v4-flash``,
    ``YDBDOC_MODEL_CHECK=gpt-oss-120b`` (overridable via env).
-5. **Retries:** same ``llm.retries`` backoff on 429/5xx and network errors.
+5. **Retries:** same ``llm.retries`` backoff on 429/5xx and transient network errors;
+   ``requests.SSLError`` (TLS/cert) is **fail-fast** — not retried.
 6. **Compatibility:** default provider remains ``yandex_cloud``; ``ydb`` Actions
    unchanged.
 

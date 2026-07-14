@@ -34,11 +34,20 @@ console = Console()
 
 
 def _setup_logging(verbose: bool) -> None:
+    """Configure root logging once per process (idempotent for Typer re-entry)."""
     level = logging.DEBUG if verbose else logging.INFO
+    root = logging.getLogger()
+    if getattr(_setup_logging, "_configured", False):
+        root.setLevel(level)
+        for handler in root.handlers:
+            handler.setLevel(level)
+        return
     logging.basicConfig(
         level=level,
         format="%(levelname)s %(name)s: %(message)s",
+        force=True,
     )
+    _setup_logging._configured = True  # type: ignore[attr-defined]
 
 
 def _resolve_repo_path(repo_path: Path | None) -> Path:

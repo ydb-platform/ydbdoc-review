@@ -29,6 +29,7 @@ from ydbdoc_review.llm.retry import (
     classify_api_error,
     compute_backoff_s,
     is_model_unavailable,
+    is_requests_ssl_error,
     is_retryable,
 )
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
@@ -534,7 +535,17 @@ class ElizaLLMClient(YandexLLMClient):
                     if not isinstance(exc, LLMRetryableRequestError):
                         raise
                     last_error = exc
+                except requests.exceptions.SSLError as exc:
+                    raise LLMRequestError(
+                        "Eliza TLS verification failed "
+                        f"(set {_ELIZA_CA_BUNDLE_ENV} or REQUESTS_CA_BUNDLE): {exc}"
+                    ) from exc
                 except (requests.Timeout, requests.ConnectionError) as exc:
+                    if is_requests_ssl_error(exc):
+                        raise LLMRequestError(
+                            "Eliza TLS verification failed "
+                            f"(set {_ELIZA_CA_BUNDLE_ENV} or REQUESTS_CA_BUNDLE): {exc}"
+                        ) from exc
                     last_error = exc
                 except ValueError as exc:
                     raise LLMRequestError(

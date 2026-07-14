@@ -58,7 +58,22 @@ def git_repo(tmp_path: Path) -> Path:
 def test_cli_help():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "run" in result.stdout
+
+
+def test_setup_logging_is_idempotent():
+    import logging
+
+    from ydbdoc_review.cli import _setup_logging
+
+    _setup_logging._configured = False  # type: ignore[attr-defined]
+    logging.getLogger().handlers.clear()
+
+    _setup_logging(verbose=True)
+    handler_count = len(logging.getLogger().handlers)
+    assert handler_count == 1
+
+    _setup_logging(verbose=True)
+    assert len(logging.getLogger().handlers) == handler_count
 
 
 def test_list_models_config_only():

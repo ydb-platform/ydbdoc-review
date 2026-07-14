@@ -11,6 +11,7 @@ from ydbdoc_review.llm.errors import LLMModelUnavailableError
 from ydbdoc_review.llm.retry import (
     compute_backoff_s,
     is_model_unavailable,
+    is_requests_ssl_error,
     is_retryable,
 )
 
@@ -49,6 +50,17 @@ def test_is_retryable_500():
 def test_is_retryable_400_not_retryable():
     err = APIStatusError("bad", response=_fake_response(400), body=None)
     assert not is_retryable(err)
+
+
+def test_is_requests_ssl_error_direct_and_wrapped():
+    import requests
+
+    ssl_exc = requests.exceptions.SSLError("cert verify failed")
+    assert is_requests_ssl_error(ssl_exc)
+
+    conn_exc = requests.exceptions.ConnectionError(ssl_exc)
+    assert is_requests_ssl_error(conn_exc)
+    assert not is_requests_ssl_error(requests.exceptions.Timeout("timed out"))
 
 
 def _fake_response(status_code: int) -> SimpleNamespace:

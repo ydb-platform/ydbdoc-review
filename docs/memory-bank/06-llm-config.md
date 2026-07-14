@@ -283,7 +283,7 @@ is **not** enough. TLS verification must **never** be disabled (`verify=False`).
 |--------|----------|
 | ``YDBDOC_ELIZA_CA_BUNDLE`` | Explicit path to PEM bundle; set on ``requests.Session.verify`` |
 | ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` | Honored by ``requests`` when ``Session.verify=True`` (default) |
-| Missing CA in runtime | ``SSLError`` at first Eliza call — fix env, not client code |
+| Missing CA in runtime | ``SSLError`` at first Eliza call — **fail-fast** (no retry); fix env, not client code |
 
 **Runtime requirement:** Nirvana/Reactor child env and Docker image must ship the
 internal CA (mount PEM + set ``YDBDOC_ELIZA_CA_BUNDLE`` or ``REQUESTS_CA_BUNDLE``).
@@ -305,6 +305,7 @@ Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
 `ElizaLLMClient` reuses `llm.retries` and `llm.timeout_s` from config:
 
 - Retries on: HTTP 408/429/5xx, `requests.Timeout`, `requests.ConnectionError`
+- **Fail-fast:** `requests.SSLError` (TLS/cert chain) — not retried; fix CA env instead
 - Backoff: `compute_backoff_s()` (`llm/retry.py`)
 - Warning log on retry: attempt number + model slug (no token)
 

@@ -32,6 +32,30 @@ def is_retryable(exc: BaseException) -> bool:
     return False
 
 
+def is_requests_ssl_error(exc: BaseException) -> bool:
+    """True for TLS/certificate failures that cannot succeed on retry."""
+    try:
+        import requests
+    except ImportError:
+        return False
+    ssl_error = requests.exceptions.SSLError
+    to_visit: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while to_visit:
+        current = to_visit.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, ssl_error):
+            return True
+        if current.__cause__ is not None:
+            to_visit.append(current.__cause__)
+        for arg in getattr(current, "args", ()):
+            if isinstance(arg, BaseException):
+                to_visit.append(arg)
+    return False
+
+
 def classify_api_error(exc: BaseException) -> BaseException:
     """Wrap raw OpenAI errors with model-unavailable detection."""
     if is_model_unavailable(exc):
