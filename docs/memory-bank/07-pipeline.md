@@ -474,6 +474,11 @@ from [#45181](https://github.com/ydb-platform/ydb/pull/45181) — fixed by §6.8
 supplement chain; **§22 planner** replaces that chain (`case_45181` golden test).
 Translation PR for #45181 is green on old chain — do not re-run (see §22.8).
 
+**Canonical auto-translate case (§22 rollout):** [ydb #44457](https://github.com/ydb-platform/ydb/pull/44457)
+→ [#46451](https://github.com/ydb-platform/ydb/pull/46451) (bad first run: 35 files,
+MD037 glossary); re-run after `v0.1.0` @ `55ba789` — scope (`case_44457`), harness
+import (§6.93), MD037 postprocess (§6.94). See **09-navigation-scope** §22.10.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

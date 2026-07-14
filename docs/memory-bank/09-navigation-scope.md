@@ -49,7 +49,10 @@ class TranslationScopePlan:
     nav_from_main: frozenset[str]
 ```
 
-**Planner entrypoint:** `plan_translation_scope(changes, read_ru=…, read_en_base=…)`.
+**Planner entrypoint:** `plan_translation_scope(changes, read_ru=…, read_en_base=…, read_ru_base=…)`.
+
+`read_ru_base` supplies RU toc/page text at merge-base so step 3 can diff **new**
+``href`` entries when a toc yaml is in the PR diff (§22.10).
 
 Injected readers keep the planner pure (unit tests use fixture files, workflow
 uses `read_text` / `read_text_at_ref` via `make_repo_scope_readers()`).
@@ -120,10 +123,14 @@ python scripts/fetch_nav_fixtures.py --all
 
 | Item | Decision |
 |------|----------|
-| Code on `main` | `d68812f` — pushed |
-| Tags `v0.1.0` / `v0.2.0` | **Not moved** until deliberate release; ydb CI still on pre-§22 until then |
+| Code on `main` | `d68812f` (Phase J planner) + follow-ups through `55ba789` |
+| Tag `v0.1.0` | **`55ba789`** (2026-07-14) — scope step-3 fix, harness import, Eliza hardening, MD037 postprocess |
+| Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
 | [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Translation PR is **green on old chain** — do **not** re-run for regression |
-| §22 validation | Run `doc_translate` on a **different** source PR after tag bump |
+| §22 validation | Step-by-step on source PRs after tag bump — start with [#44457](https://github.com/ydb-platform/ydb/pull/44457) |
+
+**First §22 rollout (2026-07-14):** three auto-translate PRs were created before the
+step-3 fix landed; see §22.10. Re-run source PRs one at a time after `v0.1.0` moves.
 
 **Re-trigger `doc_translate` (when needed):**
 
@@ -145,6 +152,33 @@ git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
 | §6.85 absent EN full mirror | `_nav_needed` + merge scope |
 | §6.89 toc href → md pages | step 3 in §22.4 |
 | §6.90 include after toc-href | step 4 in §22.4 (same pass, no ordering bug) |
+
+### 22.10. First §22 rollout incident (2026-07-14)
+
+Three source PRs were translated the same morning with label `doc_translate` while
+`v0.1.0` still pointed at pre-fix commits. Symptoms split into **scope** vs **runtime**
+vs **build-docs**.
+
+| Translation PR | Source PR | Files (bad run) | Primary failure |
+|----------------|-----------|-----------------|-----------------|
+| [#46451](https://github.com/ydb-platform/ydb/pull/46451) | [#44457](https://github.com/ydb-platform/ydb/pull/44457) | 35 | `build-docs`: MD037 in `glossary.md` (`** [` bold links) |
+| [#46454](https://github.com/ydb-platform/ydb/pull/46454) | [#43997](https://github.com/ydb-platform/ydb/pull/43997) | 49 | `build-docs`: MD051 RU fragment `#векторный-поиск` in `vector-search.md` |
+| [#46461](https://github.com/ydb-platform/ydb/pull/46461) | [#43010](https://github.com/ydb-platform/ydb/pull/43010) | 51 | `build-docs`: YFM003 unreachable links + MD037 glossary |
+
+**Scope (35/49/51 files):** step 3 treated every discovered ancestor toc as “queue all
+missing EN hrefs”, pulling postgresql, public-materials, secondary_indexes, etc.
+**Fix:** `caff954` — per-toc rules in §22.4 step 3 + `read_ru_base` for new-href diff.
+Golden: `case_44457` expects ~3 md + 1 toc, not 35.
+
+**Runtime (re-runs):** `NameError: build_segment_source_excerpts` in
+`ReportArtifactsStep` after `c2d713f`. **Fix:** `c32479a` import in `harness/steps.py`.
+
+**build-docs (glossary):** translator emits `** [term](url)**` instead of
+`**[term](url)**`. **Fix:** `55ba789` — `fix_no_space_in_emphasis()` in
+`validation/markdown_layout.py` (postprocess).
+
+**Operational rule:** debug one source PR at a time; do not batch-re-run all three until
+[#44457](https://github.com/ydb-platform/ydb/pull/44457) is green end-to-end.
 
 ---
 

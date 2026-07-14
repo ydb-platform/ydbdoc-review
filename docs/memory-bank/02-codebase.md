@@ -60,8 +60,8 @@ src/ydbdoc_review/
 │   ├── placeholder_drift.py       drop spurious critic issues; skipped dedupe (§6.54–§6.61)
 │   ├── placeholder_roles.py       semantic V/U placement (link dest vs prose)
 │   ├── placeholder_repair.py      restore ⟦X⟧; swap V↔U; clause reorder (s0077)
-│   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031
-│   ├── markdown_layout.py         `fix_blanks_around_fences` (markdownlint MD031)
+│   ├── homoglyphs.py              EN postprocess: homoglyphs, fence placeholders, MD031/MD037
+│   ├── markdown_layout.py         `fix_blanks_around_fences` (MD031), `fix_no_space_in_emphasis` (MD037)
 │   ├── fence_integrity.py         copy fences from source; detect pipeline drift; mermaid/text label translation (§6.53, §6.62)
 │   ├── fence_comments.py          fence ``//``/``#``/``--`` comments (line + trailing ``//``) + ``text`` fence Cyrillic (§6.39, §6.46, §6.81)
 │   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
@@ -214,7 +214,7 @@ After reinsert in `pipeline/translate_file.py`:
 2. `_finalize_en_target` (§6.28): `enforce_source_fenced_blocks` →
    `localize_links_in_text` (regex safety net for Wikipedia URLs in raw markdown) →
    `postprocess_en_target_markdown` — homoglyphs, `<строка>`→`<string>` in fences,
-   MD031 via `markdown_layout.py`.
+   MD031/MD037 via `markdown_layout.py`.
 3. **Renderer** (`markdown_renderer._join_blocks`) — `\n\n` between `fenced_code` and
    adjacent blocks; extra gap between tight list items when a fence precedes prose.
 

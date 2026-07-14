@@ -63,8 +63,9 @@ git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
 # ydb: delete ydbdoc-review/pr-{N} branch, re-add doc_translate on source PR
 ```
 
-As of 2026-07-14, §22 planner is on `main` (`d68812f`) but tags were **not** moved
-yet — ydb still runs pre-§22 until the tag bump. See **09-navigation-scope** §22.8.
+As of 2026-07-14, **`v0.1.0` → `55ba789`** — §22 planner + step-3 scope fix,
+harness import, Eliza hardening, glossary MD037 postprocess. First rollout incident
+and re-run playbook: **09-navigation-scope** §22.8, §22.10.
 
 ydb workflow checks out the action at `@v0.1.0` (or `@v0.2.0` for schedulers);
 the runner builds a fresh image from that tag's `Dockerfile`.

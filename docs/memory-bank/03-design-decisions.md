@@ -2109,6 +2109,74 @@ For current behavior, read §22 first.
 **Tests:** ``tests/unit/test_nav_scope_planner.py``, ``test_navigation_merge_pipeline.py``
 (scope_plan merge), ``test_navigation_verify.py`` (scope_plan verify).
 
+### 6.92. §22 step-3 scope overreach (#46451, #46454, #46461)
+
+**Problem:** First §22 rollout (2026-07-14) — translation PRs listed 35 / 49 / 51 files
+for source PRs that changed only a handful of RU paths. Spurious pages (postgresql,
+public-materials, hive_config, …) came from step 3: “for each discovered toc, queue
+every ``href`` missing on EN at merge-base.”
+
+**Decision:** step 3 applies **per sidebar** (§22.4, §22.5):
+
+- Absent EN toc → full mirror of that toc’s hrefs (unchanged §6.85).
+- Toc **in PR diff** → **new** hrefs only (RU base vs PR head via ``read_ru_base``).
+- Partial EN sidebar → missing EN mirrors for **diff pages listed in that toc** (§6.72).
+
+**Implementation:** ``navigation/scope_planner.py`` (``caff954``); workflow passes
+``read_ru_base`` from ``make_repo_scope_readers()``.
+
+**Tests:** ``case_44457`` in ``tests/fixtures/nav_cases/``,
+``test_case_44457_scoped_to_diff_not_whole_menu``.
+
+### 6.93. ReportArtifactsStep import regression (#44457 re-run)
+
+**Problem:** Re-run ``doc_translate`` on [#44457](https://github.com/ydb-platform/ydb/pull/44457)
+after ``c2d713f`` crashed with ``NameError: build_segment_source_excerpts`` in
+``ReportArtifactsStep.run`` — call added without import.
+
+**Decision:** import ``build_segment_source_excerpts`` from ``reporting.locations`` in
+``harness/steps.py``.
+
+**Implementation:** ``c32479a``.
+
+**Tests:** harness/report artifact tests (15 failures before fix).
+
+### 6.94. Glossary MD037 bold-link postprocess (#46451 build-docs)
+
+**Problem:** [#46451](https://github.com/ydb-platform/ydb/pull/46451) —
+``build-docs`` failed on six **MD037** warnings in ``glossary.md``. RU source uses
+``**[term](url)**``; translator often inserts a space: ``** [term](url)**``.
+
+**Decision:** deterministic postprocess in ``finalize_en_target`` →
+``postprocess_en_target_markdown`` → ``fix_no_space_in_emphasis()`` replaces
+``** [`` with ``**[`` (markdownlint MD037).
+
+**Implementation:** ``validation/markdown_layout.py``, ``validation/homoglyphs.py``
+(``55ba789``).
+
+**Tests:** ``test_postprocess_fixes_bold_link_md037`` in ``test_homoglyphs.py``.
+
+### 6.95. Eliza transport hardening + finalize skip warnings (2026-07-14)
+
+**Problem:** Eliza CI runs hit duplicate ``basicConfig`` logging, retried TLS/cert
+errors, opaque 429 backoff, and silent skips when fence/prose finalize could not call
+the LLM.
+
+**Decision:**
+
+1. **Logging:** configure CLI logging once (``cli.py``).
+2. **TLS:** ``requests.SSLError`` → immediate ``LLMRequestError`` (no retry); hint
+   ``YDBDOC_ELIZA_CA_BUNDLE`` / ``REQUESTS_CA_BUNDLE``.
+3. **429:** separate ``llm.retries.rate_limit`` budget; honor ``Retry-After`` header
+   (``llm/retry.py``).
+4. **4xx:** fail-fast on 400/401/403/404; sanitize token from error text.
+5. **Finalize skips:** ``validation/finalize_skips.py``; ``out_warnings`` from fence/prose
+   finalize → ``state.finalize_warnings`` → heuristics bucket in ``HeuristicsStep``.
+
+**Implementation:** ``c6cd916`` (logging, TLS), ``55ba789`` (429, 4xx, finalize warnings).
+
+**Tests:** ``test_llm_eliza_internal.py``, ``test_llm_retry.py``, ``test_fence_comments.py``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)
