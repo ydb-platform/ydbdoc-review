@@ -29,7 +29,10 @@ from ydbdoc_review.translation.critic_retranslate import (
     retranslate_segments_with_critic_feedback,
 )
 from ydbdoc_review.translation.translator import translate_segments
-from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
+from ydbdoc_review.validation.heuristics import (
+    _classify_heuristic,
+    run_file_heuristics_classified,
+)
 from ydbdoc_review.validation.placeholder_drift import (
     drop_spurious_placeholder_issues,
     filter_critic_response,
@@ -67,6 +70,7 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
             source_lang=ctx.source_lang,
             target_lang=ctx.target_lang,
             prompt_version=ctx.prompt_version,
+            out_warnings=state.finalize_warnings,
         )
 
 
@@ -136,6 +140,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
             source_lang=ctx.source_lang,
             target_lang=ctx.target_lang,
             prompt_version=ctx.prompt_version,
+            out_warnings=state.finalize_warnings,
         )
     state.translations, state.segment_alignment_error = gate_round_trip(
         state.segments, state.translated_text
@@ -311,6 +316,9 @@ class HeuristicsStep:
             source_lang=ctx.source_lang,
             target_lang=ctx.target_lang,
         )
+        for message in state.finalize_warnings:
+            bucket = _classify_heuristic(message)
+            getattr(state.heuristics, bucket).append(message)
 
 
 class VerdictStep:

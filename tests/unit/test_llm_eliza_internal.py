@@ -7,14 +7,26 @@ import pytest
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import ElizaLLMClient, create_llm_client
-from ydbdoc_review.llm.errors import LLMConfigError, LLMRequestError, LLMRetryExhaustedError
+from ydbdoc_review.llm.errors import (
+    LLMConfigError,
+    LLMRequestError,
+    LLMRetryableRequestError,
+    LLMRetryExhaustedError,
+)
 from ydbdoc_review.llm.usage import UsageTracker
 
 
-def _resp(status: int, payload: dict) -> SimpleNamespace:
+def _resp(
+    status: int,
+    payload: dict,
+    *,
+    headers: dict[str, str] | None = None,
+) -> SimpleNamespace:
+    hdrs = headers or {}
     return SimpleNamespace(
         status_code=status,
         text=str(payload),
+        headers=hdrs,
         json=lambda: payload,
     )
 
@@ -81,6 +93,35 @@ def test_eliza_internal_retries_on_503():
 
     assert out.content == "ok"
     assert post.call_count == 2
+
+
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404])
+def test_eliza_non_retryable_4xx_fail_fast(status_code: int):
+    token = "secret-oauth-token-xyz"
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": token})
+    cfg.llm.retries.max_attempts = 3
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token=token, llm=cfg.llm
+    )
+
+    with (
+        patch.object(client._http, "post") as post,
+        patch("time.sleep") as sleep,
+    ):
+        post.return_value = _resp(
+            status_code,
+            {"error": f"OAuth {token} rejected"},
+        )
+        with pytest.raises(LLMRequestError, match=str(status_code)) as exc_info:
+            client.chat(
+                [{"role": "user", "content": "x"}],
+                role="translate",
+                model="deepseek-v4-flash",
+            )
+
+    assert post.call_count == 1
+    sleep.assert_not_called()
+    assert token not in str(exc_info.value)
 
 
 def test_eliza_internal_401_fails_fast_without_retry():
@@ -165,6 +206,64 @@ def test_eliza_connection_error_wrapping_ssl_fails_fast_without_retry():
     sleep.assert_not_called()
 
 
+def test_eliza_429_honors_retry_after_header():
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
+    cfg.llm.retries.rate_limit.max_attempts = 3
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
+    )
+
+    with (
+        patch.object(client._http, "post") as post,
+        patch("time.sleep") as sleep,
+    ):
+        post.side_effect = [
+            _resp(429, {"error": "overloaded"}, headers={"Retry-After": "5"}),
+            _resp(200, {"choices": [{"message": {"content": "ok"}}]}),
+        ]
+        out = client.chat(
+            [{"role": "user", "content": "x"}],
+            role="translate",
+            model="deepseek-v4-flash",
+        )
+
+    assert out.content == "ok"
+    assert post.call_count == 2
+    sleep.assert_called_once_with(5.0)
+
+
+def test_eliza_429_rate_limit_retries_exhausted_with_clear_error():
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
+    cfg.llm.retries.rate_limit.max_attempts = 4
+    cfg.llm.retries.rate_limit.backoff_initial_s = 0.0
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
+    )
+
+    with (
+        patch.object(client._http, "post") as post,
+        patch("time.sleep"),
+    ):
+        post.return_value = _resp(
+            429, {"error": "overloaded"}, headers={"Retry-After": "1"}
+        )
+        with pytest.raises(LLMRetryExhaustedError, match="rate-limit \\(429\\)"):
+            client.chat(
+                [{"role": "user", "content": "x"}],
+                role="translate",
+                model="deepseek-v4-flash",
+            )
+
+    assert post.call_count == 4
+
+
+def test_eliza_translate_chain_ignores_yaml_fallbacks(monkeypatch):
+    monkeypatch.delenv("YDBDOC_MODEL_TRANSLATE", raising=False)
+    monkeypatch.delenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", raising=False)
+    client = _client()
+    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
+
+
 def test_eliza_internal_503_retries_until_exhausted():
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.max_attempts = 3
@@ -187,6 +286,34 @@ def test_eliza_internal_503_retries_until_exhausted():
             )
 
     assert post.call_count == 3
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"choices": []},
+        {},
+        {"choices": None},
+    ],
+)
+def test_parse_eliza_completion_content_empty_choices(payload):
+    with pytest.raises(LLMRetryableRequestError, match="empty choices"):
+        ElizaLLMClient._parse_eliza_completion_content(payload)
+
+
+@pytest.mark.parametrize(
+    "payload,match",
+    [
+        ({"choices": [{}]}, "missing message"),
+        ({"choices": [{"finish_reason": "stop"}]}, "missing message"),
+        ({"choices": [{"message": {}}]}, "missing content"),
+        ({"choices": [{"message": {"content": ""}}]}, "empty content"),
+        ({"choices": [{"message": {"content": "   "}}]}, "empty content"),
+    ],
+)
+def test_parse_eliza_completion_content_malformed_choice_retries(payload, match):
+    with pytest.raises(LLMRetryableRequestError, match=match):
+        ElizaLLMClient._parse_eliza_completion_content(payload)
 
 
 @pytest.mark.parametrize("response_body", [{"choices": []}, {}])

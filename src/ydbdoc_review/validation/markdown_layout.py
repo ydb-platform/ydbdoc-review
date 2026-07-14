@@ -1,10 +1,12 @@
-"""Markdown layout fixes for generated EN docs (markdownlint MD031)."""
+"""Markdown layout fixes for generated EN docs (markdownlint MD031, MD037)."""
 
 from __future__ import annotations
 
 import re
 
 _FENCE_LINE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
+# Glossary-style bold links: ``** [text](url)**`` → ``**[text](url)**`` (MD037).
+_BOLD_LINK_OPEN = re.compile(r"\*\* \[")
 
 
 def _is_closing_fence_line(line: str) -> bool:
@@ -38,3 +40,8 @@ def fix_blanks_around_fences(text: str) -> str:
             if nxt.strip() != "":
                 out.append("\n")
     return "".join(out)
+
+
+def fix_no_space_in_emphasis(text: str) -> str:
+    """Remove spurious space after ``**`` before a link opener (MD037)."""
+    return _BOLD_LINK_OPEN.sub("**[", text)

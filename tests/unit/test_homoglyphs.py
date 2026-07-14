@@ -84,6 +84,13 @@ def test_postprocess_fixes_multiline_error_placeholder():
     assert "путь" not in fixed
 
 
+def test_postprocess_fixes_bold_link_md037():
+    text = "** [Access right](../security/authorization.md#right)** or **access right**\n"
+    fixed = postprocess_en_target_markdown(text)
+    assert "** [Access right]" not in fixed
+    assert "**[Access right](../security/authorization.md#right)**" in fixed
+
+
 def test_postprocess_inserts_blank_after_fence():
     text = "  ```\n- item\n"
     fixed = postprocess_en_target_markdown(text)

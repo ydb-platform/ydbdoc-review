@@ -26,11 +26,14 @@ from ydbdoc_review.llm.errors import (
     LLMRetryExhaustedError,
 )
 from ydbdoc_review.llm.retry import (
+    HTTP_RATE_LIMIT,
     classify_api_error,
     compute_backoff_s,
     is_model_unavailable,
     is_requests_ssl_error,
     is_retryable,
+    parse_retry_after_s,
+    retry_delay_s,
 )
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 
@@ -38,7 +41,6 @@ logger = logging.getLogger(__name__)
 
 LLMRole = Literal["analyze", "translate", "critic"]
 
-_ELIZA_RETRYABLE_HTTP = frozenset({408, 429, 500, 502, 503, 504})
 _ELIZA_CA_BUNDLE_ENV = "YDBDOC_ELIZA_CA_BUNDLE"
 
 
@@ -407,28 +409,76 @@ class ElizaLLMClient(YandexLLMClient):
                 "(doc_translate uses deterministic planning — §6.30); "
                 "pass model= explicitly or use yandex_cloud provider"
             )
-        # Prefer explicit env vars for migration.
         if role == "translate":
             env = (os.environ.get("YDBDOC_MODEL_TRANSLATE") or "").strip()
             if env:
-                return [env]
-            # If config left at default deepseek-v32, override to confirmed internal id.
+                return self._dedupe_model_chain([env, *self._eliza_env_fallbacks("translate")])
             primary = self._llm.models.translate.primary
             if primary == "deepseek-v32":
-                return [self._translate_default]
-            return [primary, *self._llm.models.translate.fallbacks]
+                primary = self._translate_default
+            return self._dedupe_model_chain(
+                [primary, *self._eliza_env_fallbacks("translate")]
+            )
         if role == "critic":
             env = (os.environ.get("YDBDOC_MODEL_CHECK") or "").strip()
             if env:
-                return [env]
+                return self._dedupe_model_chain([env, *self._eliza_env_fallbacks("critic")])
             primary = self._llm.models.critic.primary
             if primary == "deepseek-v32":
-                return [self._critic_default]
-            return [primary, *self._llm.models.critic.fallbacks]
+                primary = self._critic_default
+            return self._dedupe_model_chain(
+                [primary, *self._eliza_env_fallbacks("critic")]
+            )
         raise LLMConfigError(
             f'role "{role}" has no internal Eliza model; '
             "pass model= explicitly or use yandex_cloud provider"
         )
+
+    @staticmethod
+    def _dedupe_model_chain(models: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for model in models:
+            slug = model.strip()
+            if slug and slug not in seen:
+                seen.add(slug)
+                out.append(slug)
+        return out
+
+    @staticmethod
+    def _eliza_env_fallbacks(role: LLMRole) -> list[str]:
+        """Optional confirmed internal fallbacks — never YAML defaults for Eliza."""
+        key = {
+            "translate": "YDBDOC_ELIZA_TRANSLATE_FALLBACKS",
+            "critic": "YDBDOC_ELIZA_CRITIC_FALLBACKS",
+        }.get(role)
+        if not key:
+            return []
+        raw = (os.environ.get(key) or "").strip()
+        if not raw:
+            return []
+        return [part.strip() for part in raw.split(",") if part.strip()]
+
+    @staticmethod
+    def _eliza_http_error(
+        resp: requests.Response,
+        *,
+        oauth_token: str,
+    ) -> LLMRetryableRequestError | LLMRequestError:
+        from ydbdoc_review.llm.retry import build_eliza_http_error
+
+        err = build_eliza_http_error(
+            resp.status_code,
+            resp.text,
+            redact=oauth_token,
+        )
+        if isinstance(err, LLMRetryableRequestError) and err.status_code is not None:
+            return LLMRetryableRequestError(
+                str(err),
+                status_code=err.status_code,
+                retry_after_s=parse_retry_after_s(resp.headers.get("Retry-After")),
+            )
+        return err
 
     def _call_once(
         self,
@@ -484,7 +534,9 @@ class ElizaLLMClient(YandexLLMClient):
                 "temperature": temp,
                 "max_tokens": tokens,
             }
-            for attempt in range(1, self._llm.retries.max_attempts + 1):
+            general_failures = 0
+            rate_limit_failures = 0
+            while True:
                 started = time.perf_counter()
                 try:
                     logger.debug(
@@ -501,14 +553,11 @@ class ElizaLLMClient(YandexLLMClient):
                     )
                     latency_ms = (time.perf_counter() - started) * 1000
 
-                    if resp.status_code in _ELIZA_RETRYABLE_HTTP:
-                        raise LLMRetryableRequestError(
-                            f"Eliza HTTP {resp.status_code}: {resp.text[:200]}"
-                        )
                     if resp.status_code >= 400:
-                        raise LLMRequestError(
-                            f"Eliza HTTP {resp.status_code}: {resp.text[:200]}"
+                        http_err = self._eliza_http_error(
+                            resp, oauth_token=self._oauth_token
                         )
+                        raise http_err
 
                     data = resp.json()
                     content = self._parse_eliza_completion_content(data)
@@ -540,7 +589,9 @@ class ElizaLLMClient(YandexLLMClient):
                         "Eliza TLS verification failed "
                         f"(set {_ELIZA_CA_BUNDLE_ENV} or REQUESTS_CA_BUNDLE): {exc}"
                     ) from exc
-                except (requests.Timeout, requests.ConnectionError) as exc:
+                except requests.exceptions.Timeout as exc:
+                    last_error = exc
+                except requests.exceptions.ConnectionError as exc:
                     if is_requests_ssl_error(exc):
                         raise LLMRequestError(
                             "Eliza TLS verification failed "
@@ -564,22 +615,69 @@ class ElizaLLMClient(YandexLLMClient):
                         role=role,
                     )
                 )
-                if attempt < self._llm.retries.max_attempts:
-                    session_retries += 1
-                    delay = compute_backoff_s(attempt, self._llm.retries)
-                    logger.warning(
-                        "Eliza call failed (attempt %s/%s, model=%s): %s; retry in %.1fs",
-                        attempt,
-                        self._llm.retries.max_attempts,
-                        slug,
-                        last_error,
-                        delay,
+
+                is_rate_limit = (
+                    isinstance(last_error, LLMRetryableRequestError)
+                    and last_error.status_code == HTTP_RATE_LIMIT
+                )
+                if is_rate_limit:
+                    rate_limit_failures += 1
+                    max_tries = self._llm.retries.rate_limit.max_attempts
+                    failure_no = rate_limit_failures
+                    retry_after_s = (
+                        last_error.retry_after_s
+                        if isinstance(last_error, LLMRetryableRequestError)
+                        else None
                     )
-                    time.sleep(delay)
-                    continue
-                break
+                else:
+                    general_failures += 1
+                    max_tries = self._llm.retries.max_attempts
+                    failure_no = general_failures
+                    retry_after_s = None
+                    status_code = (
+                        last_error.status_code
+                        if isinstance(last_error, LLMRetryableRequestError)
+                        else None
+                    )
+
+                if failure_no >= max_tries:
+                    break
+
+                session_retries += 1
+                if is_rate_limit:
+                    delay = retry_delay_s(
+                        attempt=failure_no,
+                        retries=self._llm.retries,
+                        status_code=HTTP_RATE_LIMIT,
+                        retry_after_s=retry_after_s,
+                    )
+                    retry_label = "rate-limit retry"
+                else:
+                    delay = retry_delay_s(
+                        attempt=failure_no,
+                        retries=self._llm.retries,
+                        status_code=status_code,
+                    )
+                    retry_label = "retry"
+                logger.warning(
+                    "Eliza call failed (%s %s/%s, model=%s): %s; sleep %.1fs",
+                    retry_label,
+                    failure_no,
+                    max_tries,
+                    slug,
+                    last_error,
+                    delay,
+                )
+                time.sleep(delay)
 
         models = ", ".join(chain)
+        if (
+            isinstance(last_error, LLMRetryableRequestError)
+            and last_error.status_code == HTTP_RATE_LIMIT
+        ):
+            raise LLMRetryExhaustedError(
+                f"Eliza rate-limit (429) retries exhausted ({models}): {last_error}"
+            ) from last_error
         raise LLMRetryExhaustedError(
             f"All models exhausted ({models}): {last_error}"
         ) from last_error

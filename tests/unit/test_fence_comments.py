@@ -172,6 +172,45 @@ def test_translate_cyrillic_fence_comments_with_mock_fn():
     assert check_cyrillic_in_en_fence_comments(translated, target_lang="en") == []
 
 
+def test_fence_comment_translate_skip_surfaces_rate_limit_warning():
+    from unittest.mock import MagicMock
+
+    from ydbdoc_review.llm.errors import LLMRetryExhaustedError
+    from ydbdoc_review.validation.fence_comments import (
+        translate_cyrillic_fence_comments_with_client,
+    )
+    from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
+
+    client = MagicMock()
+    client.model_chain_for_role.return_value = ["deepseek-v4-flash"]
+    client.chat.side_effect = LLMRetryExhaustedError(
+        "Eliza rate-limit (429) retries exhausted (deepseek-v4-flash): HTTP 429"
+    )
+
+    warnings: list[str] = []
+    out = translate_cyrillic_fence_comments_with_client(
+        GO_SAMPLE,
+        client,
+        load_glossary(),
+        out_warnings=warnings,
+    )
+    assert out == GO_SAMPLE
+    assert len(warnings) == 1
+    assert warnings[0].startswith("fence_comment_translate_skipped: rate-limit")
+
+    classified = run_file_heuristics_classified(
+        GO_SAMPLE,
+        out,
+        normalized_source_text=GO_SAMPLE,
+        source_lang="ru",
+        target_lang="en",
+    )
+    for warning in warnings:
+        classified.warnings.append(warning)
+    assert any("rate-limit" in w for w in classified.warnings)
+    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
+
+
 def test_run_file_heuristics_classified_fence_comment_is_warning_not_blocking():
     classified = run_file_heuristics_classified(
         GO_SAMPLE,

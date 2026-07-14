@@ -128,8 +128,12 @@ def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
 
 def postprocess_en_target_markdown(text: str) -> str:
     """Homoglyphs, fence placeholders, and markdownlint-friendly fence spacing."""
-    from ydbdoc_review.validation.markdown_layout import fix_blanks_around_fences
+    from ydbdoc_review.validation.markdown_layout import (
+        fix_blanks_around_fences,
+        fix_no_space_in_emphasis,
+    )
 
     text = fix_cyrillic_homoglyphs_in_en(text)
     text = fix_russian_angle_placeholders_in_en(text)
+    text = fix_no_space_in_emphasis(text)
     return fix_blanks_around_fences(text)

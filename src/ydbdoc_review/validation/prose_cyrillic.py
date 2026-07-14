@@ -12,6 +12,7 @@ from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
+from ydbdoc_review.validation.finalize_skips import finalize_translate_skip_warning
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,7 @@ def translate_cyrillic_prose_with_client(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    out_warnings: list[str] | None = None,
 ) -> str:
     """LLM batch translate for residual Cyrillic in EN prose/backticks."""
     del prompt_version  # reserved for future prompt templates
@@ -240,10 +242,12 @@ def translate_cyrillic_prose_with_client(
                 exc,
             )
     else:
-        logger.warning(
-            "Prose cyrillic translate skipped after model chain: %s",
-            last_exc,
+        warning = finalize_translate_skip_warning(
+            "prose_cyrillic", last_exc or RuntimeError("unknown")
         )
+        logger.warning("Prose cyrillic translate skipped: %s", warning)
+        if out_warnings is not None:
+            out_warnings.append(warning)
         return text
 
     mapping: dict[str, str] = {}

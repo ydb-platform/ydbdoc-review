@@ -18,6 +18,17 @@ class LLMRequestError(LLMError):
 class LLMRetryableRequestError(LLMRequestError):
     """Transient HTTP failure — safe to retry (408/429/5xx)."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after_s: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_s = retry_after_s
+
 
 class LLMModelUnavailableError(LLMRequestError):
     """Model slug is not available in the folder (``Failed to get model``)."""

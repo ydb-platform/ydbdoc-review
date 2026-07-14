@@ -19,6 +19,11 @@ llm:
     max_attempts: 3
     backoff_initial_s: 2.0
     backoff_factor: 2.0
+    rate_limit:
+      max_attempts: 6
+      backoff_initial_s: 5.0
+      backoff_factor: 2.0
+      max_backoff_s: 120.0
 
   concurrency:
     batches_per_file: 3

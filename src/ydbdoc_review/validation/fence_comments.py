@@ -16,6 +16,7 @@ from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.validation.fence_integrity import collect_code_blocks
+from ydbdoc_review.validation.finalize_skips import finalize_translate_skip_warning
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +238,7 @@ def translate_cyrillic_fence_comments_with_client(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    out_warnings: list[str] | None = None,
 ) -> str:
     """LLM batch translate for Cyrillic ``//`` / ``#`` / ``--`` lines inside fences."""
     items = collect_cyrillic_fence_comment_lines(text)
@@ -290,10 +292,10 @@ def translate_cyrillic_fence_comments_with_client(
                 exc,
             )
     else:
-        logger.warning(
-            "Fence comment translate skipped after model chain: %s",
-            last_exc,
-        )
+        warning = finalize_translate_skip_warning("fence_comment", last_exc or RuntimeError("unknown"))
+        logger.warning("Fence comment translate skipped: %s", warning)
+        if out_warnings is not None:
+            out_warnings.append(warning)
         return text
 
     def _lookup(body: str, item: FenceCommentLine) -> str:
@@ -371,6 +373,7 @@ def translate_cyrillic_text_fences_with_client(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    out_warnings: list[str] | None = None,
 ) -> str:
     """LLM-translate Cyrillic labels inside `` ```text `` diagram fences."""
     del prompt_version
@@ -433,10 +436,10 @@ def translate_cyrillic_text_fences_with_client(
                 exc,
             )
     else:
-        logger.warning(
-            "Text fence translate skipped after model chain: %s",
-            last_exc,
-        )
+        warning = finalize_translate_skip_warning("text_fence", last_exc or RuntimeError("unknown"))
+        logger.warning("Text fence translate skipped: %s", warning)
+        if out_warnings is not None:
+            out_warnings.append(warning)
         return text
 
     doc = parse_markdown(text)

@@ -206,6 +206,12 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("cyrillic_in_text_fence:"):
         return "warnings"
+    if message.startswith("fence_comment_translate_skipped:"):
+        return "warnings"
+    if message.startswith("text_fence_translate_skipped:"):
+        return "warnings"
+    if message.startswith("prose_cyrillic_translate_skipped:"):
+        return "warnings"
     if message.startswith("md_link_parity:"):
         return "blocking"
     if message.startswith("include_target:"):

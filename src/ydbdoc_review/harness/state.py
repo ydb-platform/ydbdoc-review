@@ -46,6 +46,7 @@ class FileRunState:
     critic_verdict: FileVerdict = "ok"
 
     heuristics: ClassifiedHeuristics | None = None
+    finalize_warnings: list[str] = field(default_factory=list)
     verdict: FileVerdict = "ok"
 
     segment_lines: dict[str, tuple[int, int]] = field(default_factory=dict)

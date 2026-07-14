@@ -304,9 +304,20 @@ Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
 
 `ElizaLLMClient` reuses `llm.retries` and `llm.timeout_s` from config:
 
-- Retries on: HTTP 408/429/5xx, `requests.Timeout`, `requests.ConnectionError`
-- **Fail-fast:** `requests.SSLError` (TLS/cert chain) — not retried; fix CA env instead
-- Backoff: `compute_backoff_s()` (`llm/retry.py`)
+- Retries on: HTTP **408/5xx**, `requests.Timeout`, transient `requests.ConnectionError`
+- **HTTP 429:** separate budget in `llm.retries.rate_limit` (default 6 attempts,
+  5s→10s→… backoff, cap 120s) — overridable via env:
+  `YDBDOC_LLM_RETRIES_RATE_LIMIT_MAX_ATTEMPTS`, `_BACKOFF_INITIAL_S`, etc.
+- **Retry-After:** when present on 429, sleep that many seconds (capped by
+  `rate_limit.max_backoff_s`) instead of calculated backoff
+- **Fail-fast (no retry):** HTTP **400/401/403/404** and other non-retryable 4xx;
+  `requests.SSLError` / cert verification errors (OAuth token never echoed in errors)
+- Eliza translate/critic chains use **one confirmed primary** per role; YAML
+  Yandex fallbacks are ignored. Optional confirmed fallbacks only via
+  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS` / `YDBDOC_ELIZA_CRITIC_FALLBACKS` (comma-separated)
+- Finalize fail-soft skips (fence comments / text fences / prose Cyrillic) emit
+  `*_translate_skipped: rate-limit — …` warnings in heuristics when LLM fails
+- Backoff: `compute_backoff_s()` / `retry_delay_s()` (`llm/retry.py`)
 - Warning log on retry: attempt number + model slug (no token)
 
 Yandex Cloud path unchanged — still uses OpenAI SDK + existing retry classification.

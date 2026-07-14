@@ -62,6 +62,7 @@ def finalize_en_target(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
+    out_warnings: list[str] | None = None,
 ) -> str:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
     text = enforce_source_fenced_blocks(text, normalized_source_text)
@@ -74,6 +75,7 @@ def finalize_en_target(
             source_lang=source_lang,
             target_lang=target_lang,
             prompt_version=prompt_version,
+            out_warnings=out_warnings,
         )
         text = translate_cyrillic_text_fences_with_client(
             text,
@@ -83,6 +85,7 @@ def finalize_en_target(
             source_lang=source_lang,
             target_lang=target_lang,
             prompt_version=prompt_version,
+            out_warnings=out_warnings,
         )
         text = translate_cyrillic_prose_with_client(
             text,
@@ -92,6 +95,7 @@ def finalize_en_target(
             source_lang=source_lang,
             target_lang=target_lang,
             prompt_version=prompt_version,
+            out_warnings=out_warnings,
         )
     text = localize_links_in_text(text, target_lang="en")
     return postprocess_en_target_markdown(text)

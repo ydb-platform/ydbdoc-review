@@ -2029,8 +2029,11 @@ This keeps scope detection semantics while never crashing.
 4. **Defaults** when ``YDBDOC_MODEL_PROVIDER=eliza``:
    ``YDBDOC_MODEL_TRANSLATE=deepseek-v4-flash``,
    ``YDBDOC_MODEL_CHECK=gpt-oss-120b`` (overridable via env).
-5. **Retries:** same ``llm.retries`` backoff on 429/5xx and transient network errors;
-   ``requests.SSLError`` (TLS/cert) is **fail-fast** — not retried.
+5. **Retries:** same ``llm.retries`` backoff on 408/5xx and transient network errors;
+   HTTP **429** uses ``llm.retries.rate_limit`` (separate budget) and honors
+   ``Retry-After``; ``requests.SSLError`` (TLS/cert) is **fail-fast**.
+   Eliza model chains do not inherit YAML Yandex fallbacks — only
+   ``YDBDOC_ELIZA_*_FALLBACKS`` when confirmed internal ids exist.
 6. **Compatibility:** default provider remains ``yandex_cloud``; ``ydb`` Actions
    unchanged.
 

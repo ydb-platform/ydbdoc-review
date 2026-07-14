@@ -33,11 +33,22 @@ class ModelChoice(BaseModel):
         return out
 
 
+class RateLimitRetriesConfig(BaseModel):
+    """Separate retry budget for HTTP 429 (overridable via env)."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_attempts: int = 6
+    backoff_initial_s: float = 5.0
+    backoff_factor: float = 2.0
+    max_backoff_s: float = 120.0
+
+
 class RetriesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     max_attempts: int = 3
     backoff_initial_s: float = 2.0
     backoff_factor: float = 2.0
+    rate_limit: RateLimitRetriesConfig = Field(default_factory=RateLimitRetriesConfig)
 
 
 class ConcurrencyConfig(BaseModel):
