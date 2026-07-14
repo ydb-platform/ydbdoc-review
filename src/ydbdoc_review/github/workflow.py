@@ -327,12 +327,21 @@ def run_doc_translate(
             merge_base_with=merge_base_with,
             docs_root=cfg.paths.docs_root,
         )
+        pairs, include_changes_after_toc = supplement_include_pairs(
+            pairs,
+            repo_path=repo_path,
+            merge_base_with=merge_base_with,
+            docs_root=cfg.paths.docs_root,
+            seed_ru_paths=seed_ru_paths,
+        )
         if toc_href_changes:
             changes = merge_pr_file_changes(changes, toc_href_changes)
-        new_toc_pairs = [p for p in pairs if p.ru_path not in paired_ru]
+        if include_changes_after_toc:
+            changes = merge_pr_file_changes(changes, include_changes_after_toc)
+        new_pairs = [p for p in pairs if p.ru_path not in paired_ru]
         md_en_paths |= _translate_additional_pairs(
             pr_result,
-            new_toc_pairs,
+            new_pairs,
             repo_path=repo_path,
             merge_base_with=merge_base_with,
             client=client,

@@ -143,3 +143,81 @@ def test_supplement_toc_href_pairs_skips_pages_already_on_en_main():
 
     assert changes == []
     assert all(p.en_path != EN_SQS_INDEX for p in pairs)
+
+
+def test_toc_href_then_include_supplement_closes_sqs_api_includes():
+    """Regression #46393: examples.md includes need translation after toc-href pass."""
+    from ydbdoc_review.pipeline.include_supplement import supplement_include_pairs
+
+    ru_files = {
+        RU_SQS_TOC_P: SQS_RU_TOC_P,
+        RU_SQS_TOC_I: SQS_RU_TOC_I,
+        RU_SQS_INDEX: "# Index\n\n{% include [lim](_includes/limitations.md) %}\n",
+        RU_SQS_EXAMPLES: (
+            "# Examples\n\n"
+            "{% include [pre](_includes/examples_prerequisites.md) %}\n"
+            "{% include [lim](_includes/limitations.md) %}\n"
+        ),
+        "ydb/docs/ru/core/reference/sqs-api/_includes/limitations.md": "Limits\n",
+        "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md": "Pre\n",
+    }
+    en_on_main: set[str] = set()
+
+    def _read(repo: str, path: str) -> str | None:
+        return ru_files.get(path)
+
+    def _read_ref(repo: str, ref: str, path: str) -> str | None:
+        if ref == "origin/main" and path in en_on_main:
+            return "existing"
+        if ref == "origin/main" and path in ru_files:
+            return ru_files[path]
+        return None
+
+    nav_pairs = [
+        NavigationPair(
+            ru_path=RU_SQS_TOC_P,
+            en_path=EN_SQS_TOC_P,
+            ru_changed=True,
+            supplement_only=True,
+        ),
+        NavigationPair(
+            ru_path=RU_SQS_TOC_I,
+            en_path=EN_SQS_TOC_I,
+            ru_changed=True,
+            supplement_only=True,
+        ),
+    ]
+
+    with (
+        patch("ydbdoc_review.pipeline.toc_href_supplement.read_text", side_effect=_read),
+        patch(
+            "ydbdoc_review.pipeline.toc_href_supplement.read_text_at_ref",
+            side_effect=_read_ref,
+        ),
+        patch("ydbdoc_review.pipeline.include_supplement.read_text", side_effect=_read),
+        patch(
+            "ydbdoc_review.pipeline.include_supplement.read_text_at_ref",
+            side_effect=_read_ref,
+        ),
+    ):
+        pairs, _ = supplement_toc_href_pairs(
+            [],
+            nav_pairs,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+        )
+        pairs, include_extra = supplement_include_pairs(
+            pairs,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+        )
+
+    en_paths = {p.en_path for p in pairs}
+    assert EN_SQS_INDEX in en_paths
+    assert EN_SQS_EXAMPLES in en_paths
+    assert "ydb/docs/en/core/reference/sqs-api/_includes/limitations.md" in en_paths
+    assert (
+        "ydb/docs/en/core/reference/sqs-api/_includes/examples_prerequisites.md"
+        in en_paths
+    )
+    assert len(include_extra) == 2

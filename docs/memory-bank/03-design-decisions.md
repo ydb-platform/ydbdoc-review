@@ -2046,4 +2046,26 @@ second markdown translation pass before ``run_navigation_merges``. Same contract
 
 **Tests:** ``tests/unit/test_toc_href_supplement.py``.
 
+**Follow-up (§6.90):** after toc-href pairs are added, run ``supplement_include_pairs``
+again before the second translation pass — otherwise locale ``{% include %}`` snippets
+referenced by mirrored pages (e.g. ``sqs-api/_includes/limitations.md`` in #46393)
+stay untranslated and ``include_target`` blocks verify.
+
+### 6.90. Include supplementation after toc-href pages (#46393)
+
+**Problem:** [PR #46393](https://github.com/ydb-platform/ydb/pull/46393) — §6.89
+translated ``sqs-api/index.md`` and ``examples.md``, but ``doc_verify`` 🔴 on
+``include_target``: missing ``_includes/limitations.md`` and
+``_includes/examples_prerequisites.md``.
+
+**Root cause:** ``supplement_include_pairs`` ran only on initial PR-diff pairs,
+before §6.89 added toc-href pages; the second markdown pass skipped include closure.
+
+**Decision:** after ``supplement_toc_href_pairs``, call ``supplement_include_pairs``
+again, merge synthetic changes, then translate all new pairs in one second pass.
+
+**Implementation:** ``github/workflow.py``.
+
+**Tests:** ``test_toc_href_then_include_supplement_closes_sqs_api_includes``.
+
 ---
