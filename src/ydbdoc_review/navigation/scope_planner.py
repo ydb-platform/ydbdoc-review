@@ -117,6 +117,100 @@ def _toc_lists_page(ru_toc: str, ru_toc_text: str, basename: str) -> bool:
     return False
 
 
+def _toc_md_hrefs(ru_toc_text: str) -> set[str]:
+    return {
+        rel
+        for kind, rel in collect_toc_link_targets(ru_toc_text)
+        if kind == "href" and rel.endswith(".md")
+    }
+
+
+def _new_toc_md_hrefs(
+    ru_toc: str,
+    ru_toc_text: str,
+    read_ru_base: ReadFn | None,
+) -> set[str]:
+    """Relative ``href`` paths added in RU toc since merge-base (PR head vs base)."""
+    head_hrefs = _toc_md_hrefs(ru_toc_text)
+    if read_ru_base is None:
+        return set()
+    base_text = read_ru_base(ru_toc)
+    if not base_text:
+        return head_hrefs
+    return head_hrefs - _toc_md_hrefs(base_text)
+
+
+def _add_doc_if_en_absent(
+    ru_md: str,
+    *,
+    doc_ru: set[str],
+    read_ru: ReadFn,
+    read_en_base: ReadFn,
+    docs_root: str,
+) -> None:
+    if ru_md in doc_ru:
+        return
+    if not read_ru(ru_md):
+        return
+    en_md = counterpart(ru_md, docs_root)
+    if en_md is None:
+        return
+    if read_en_base(en_md) is None:
+        doc_ru.add(ru_md)
+
+
+def _pages_from_discovered_toc(
+    ru_toc: str,
+    ru_toc_text: str,
+    *,
+    diff_ru_md: set[str],
+    diff_ru_nav: set[str],
+    doc_ru: set[str],
+    read_ru: ReadFn,
+    read_en_base: ReadFn,
+    read_ru_base: ReadFn | None,
+    docs_root: str,
+) -> None:
+    """Derive markdown scope from one sidebar (§22.5 / §6.72 / §6.85)."""
+    en_toc = counterpart(ru_toc, docs_root)
+    en_absent = en_toc is None or en_toc_is_absent(read_en_base(en_toc) or "")
+
+    if en_absent:
+        for rel in _toc_md_hrefs(ru_toc_text):
+            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
+            _add_doc_if_en_absent(
+                ru_md,
+                doc_ru=doc_ru,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+            )
+        return
+
+    if ru_toc in diff_ru_nav:
+        for rel in _new_toc_md_hrefs(ru_toc, ru_toc_text, read_ru_base):
+            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
+            _add_doc_if_en_absent(
+                ru_md,
+                doc_ru=doc_ru,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+            )
+        return
+
+    for ru_md in diff_ru_md:
+        basename = ru_md.rsplit("/", 1)[-1]
+        if _toc_lists_page(ru_toc, ru_toc_text, basename):
+            _add_doc_if_en_absent(
+                ru_md,
+                doc_ru=doc_ru,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+            )
+
+
 def _nav_needed(
     ru_toc: str,
     *,
@@ -151,6 +245,7 @@ def plan_translation_scope(
     *,
     read_ru: ReadFn,
     read_en_base: ReadFn,
+    read_ru_base: ReadFn | None = None,
     docs_root: str = "ydb/docs",
 ) -> TranslationScopePlan:
     """Plan markdown + navigation scope from a source PR change list.
@@ -158,8 +253,9 @@ def plan_translation_scope(
     Rules (§22):
     1. Seed from PR diff (RU ``.md`` + nav yaml).
     2. Discover related ``toc_p`` / ``toc_i`` via ancestors + ``include.path``.
-    3. Every sidebar ``href: *.md`` in discovered tocs → translate if RU exists
-       and EN mirror absent at base (or path is in PR diff).
+    3. Per discovered sidebar (§22.5): absent EN toc → full mirror of its
+       ``href`` pages; toc in PR diff → **new** ``href`` entries since base;
+       partial EN sidebar → missing EN mirrors for diff pages listed in toc.
     4. Close locale ``{% include %}`` dependencies for all queued pages.
     5. Queue nav yaml merge when toc is in diff, EN absent, or missing href for
        a changed page.
@@ -189,19 +285,17 @@ def plan_translation_scope(
         ru_toc_text = read_ru(ru_toc)
         if not ru_toc_text:
             continue
-        for kind, rel in collect_toc_link_targets(ru_toc_text):
-            if kind != "href" or not rel.endswith(".md"):
-                continue
-            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
-            if not read_ru(ru_md):
-                continue
-            en_md = counterpart(ru_md, docs_root)
-            if en_md is None:
-                continue
-            if ru_md in doc_ru:
-                continue
-            if read_en_base(en_md) is None:
-                doc_ru.add(ru_md)
+        _pages_from_discovered_toc(
+            ru_toc,
+            ru_toc_text,
+            diff_ru_md=diff_ru_md,
+            diff_ru_nav=diff_ru_nav,
+            doc_ru=doc_ru,
+            read_ru=read_ru,
+            read_en_base=read_en_base,
+            read_ru_base=read_ru_base,
+            docs_root=docs_root,
+        )
 
     queue = sorted(doc_ru)
     while queue:
@@ -262,8 +356,8 @@ def changes_from_manifest(
 def make_repo_scope_readers(
     repo_path: str,
     merge_base_with: str,
-) -> tuple[ReadFn, ReadFn]:
-    """Build ``read_ru`` / ``read_en_base`` for ``plan_translation_scope`` in CI."""
+) -> tuple[ReadFn, ReadFn, ReadFn]:
+    """Build scope readers for ``plan_translation_scope`` in CI."""
     from ydbdoc_review.github.git_ops import merge_base, read_text, read_text_at_ref
 
     mb = "HEAD"
@@ -287,7 +381,13 @@ def make_repo_scope_readers(
             return text
         return read_text_at_ref(repo_path, merge_base_with, path)
 
-    return read_ru, read_en_base
+    def read_ru_base(path: str) -> str | None:
+        text = read_text_at_ref(repo_path, mb, path)
+        if text is not None:
+            return text
+        return read_text_at_ref(repo_path, merge_base_with, path)
+
+    return read_ru, read_en_base, read_ru_base
 
 
 def doc_pairs_from_plan(

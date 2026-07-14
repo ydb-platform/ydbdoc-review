@@ -32,29 +32,41 @@ def _load_case(case_id: str):
             continue
         file_index[repo_path] = FIXTURES / meta["path"]
 
+    en_present = set(manifest.get("en_present_at_base") or [])
+    ru_base_files: dict[str, Path] = {}
+    for repo_path, meta in (manifest.get("ru_at_base") or {}).items():
+        if meta.get("missing"):
+            continue
+        ru_base_files[repo_path] = FIXTURES / meta["path"]
+
     def read_ru(repo_path: str) -> str | None:
         path = file_index.get(repo_path)
         if path is None or not path.is_file():
             return None
         return path.read_text(encoding="utf-8")
 
-    en_present = set(manifest.get("en_present_at_base") or [])
+    def read_ru_base(repo_path: str) -> str | None:
+        path = ru_base_files.get(repo_path)
+        if path is not None and path.is_file():
+            return path.read_text(encoding="utf-8")
+        return read_ru(repo_path)
 
     def read_en_base(repo_path: str) -> str | None:
         if repo_path in en_present:
             return "# stub EN exists\n"
         return None
 
-    return manifest, read_ru, read_en_base
+    return manifest, read_ru, read_en_base, read_ru_base
 
 
 def _plan(case_id: str):
-    manifest, read_ru, read_en_base = _load_case(case_id)
+    manifest, read_ru, read_en_base, read_ru_base = _load_case(case_id)
     changes = changes_from_manifest(manifest["pr_diff_ru"])
     return plan_translation_scope(
         changes,
         read_ru=read_ru,
         read_en_base=read_en_base,
+        read_ru_base=read_ru_base,
     )
 
 
@@ -125,12 +137,13 @@ def test_case_45181_plans_sqs_api_closure_from_topic_diff():
 
 def test_planned_toc_extras_for_pair_case_45181():
     """J.6: merge extras come from plan, not post-translate basename intersection."""
-    manifest, read_ru, read_en_base = _load_case("case_45181")
+    manifest, read_ru, read_en_base, read_ru_base = _load_case("case_45181")
     changes = changes_from_manifest(manifest["pr_diff_ru"])
     plan = plan_translation_scope(
         changes,
         read_ru=read_ru,
         read_en_base=read_en_base,
+        read_ru_base=read_ru_base,
     )
 
     sqs_toc_p = read_ru("ydb/docs/ru/core/reference/sqs-api/toc_p.yaml")
@@ -176,12 +189,13 @@ def test_case_44820_plans_sqs_from_direct_diff():
 
 def test_case_43530_plans_observability_tocs_from_diff():
     """PR #43530: explicit toc edits in diff."""
-    manifest, read_ru, read_en_base = _load_case("case_43530")
+    manifest, read_ru, read_en_base, read_ru_base = _load_case("case_43530")
     changes = changes_from_manifest(manifest["pr_diff_ru"])
     plan = plan_translation_scope(
         changes,
         read_ru=read_ru,
         read_en_base=read_en_base,
+        read_ru_base=read_ru_base,
     )
 
     observability_tocs = {
@@ -193,9 +207,32 @@ def test_case_43530_plans_observability_tocs_from_diff():
     assert observability_tocs <= plan.nav_from_diff
 
 
+def test_case_44457_scoped_to_diff_not_whole_menu():
+    """PR #44457: 4 RU files in source PR — not every missing EN href in ancestor tocs."""
+    plan = _plan("case_44457")
+
+    expected_docs = {
+        "ydb/docs/ru/core/concepts/glossary.md",
+        "ydb/docs/ru/core/concepts/query_execution/execution_process.md",
+        "ydb/docs/ru/core/concepts/query_execution/index.md",
+    }
+    assert expected_docs <= plan.doc_ru_paths
+    assert len(plan.doc_ru_paths) <= len(expected_docs) + 2
+
+    spurious = {
+        "ydb/docs/ru/core/postgresql/connect.md",
+        "ydb/docs/ru/core/concepts/secondary_indexes.md",
+        "ydb/docs/ru/core/public-materials/podcasts.md",
+        "ydb/docs/ru/core/reference/configuration/hive_config.md",
+    }
+    assert not (spurious & plan.doc_ru_paths)
+
+    assert "ydb/docs/ru/core/concepts/query_execution/toc_i.yaml" in plan.nav_from_diff
+
+
 @pytest.mark.parametrize(
     "case_id",
-    ["case_45181", "case_44820", "case_43530"],
+    ["case_45181", "case_44820", "case_43530", "case_44457"],
 )
 def test_planner_doc_and_nav_disjoint_kinds(case_id: str):
     plan = _plan(case_id)

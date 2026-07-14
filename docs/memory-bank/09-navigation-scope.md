@@ -64,7 +64,7 @@ uses `read_text` / `read_text_at_ref` via `make_repo_scope_readers()`).
 |------|--------|
 | 1 | Seed `diff_ru_md` / `diff_ru_nav` from PR file list |
 | 2 | `_discover_ru_tocs` — union of diff nav + ancestor tocs of each diff md + BFS on `include.path` |
-| 3 | For each discovered toc: every `href: *.md` where RU exists and EN absent (or in diff) → `doc_ru` |
+| 3 | Per discovered toc (§22.5): **absent EN toc** → all its ``href`` pages missing on EN; **toc in PR diff** → **new** ``href`` since merge-base only; **partial EN sidebar** → missing EN mirrors for diff pages listed in that toc |
 | 4 | BFS locale `{% include %}` on all `doc_ru` |
 | 5 | `_nav_needed` — queue toc merge if: in diff, EN toc absent, or EN missing href for a diff page |
 
@@ -92,6 +92,7 @@ Fetched by `scripts/fetch_nav_fixtures.py` into `tests/fixtures/nav_cases/`:
 | `case_45181` | [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Diff = topic + diagnostics only; **sqs-api** entire subtree via `reference/toc_p.yaml` → `include.path`; includes |
 | `case_44820` | [#44820](https://github.com/ydb-platform/ydb/pull/44820) | SQS pages + `reference/toc_p.yaml` **in diff** |
 | `case_43530` | [#43530](https://github.com/ydb-platform/ydb/pull/43530) | OTel observability — **explicit toc edits** in diff (#44103) |
+| `case_44457` | [#44457](https://github.com/ydb-platform/ydb/pull/44457) | Partial EN sidebar — diff + new toc href only; **not** all missing pages in ancestor menus |
 
 Tests: `tests/unit/test_nav_scope_planner.py`.
 

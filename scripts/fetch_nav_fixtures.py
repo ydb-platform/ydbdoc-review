@@ -110,6 +110,39 @@ CASES: dict[str, dict] = {
             ),
         ],
     },
+    "case_44457": {
+        "description": "Source PR #44457 — query_execution split; partial EN sidebar",
+        "source_pr": 44457,
+        "head_sha": "9aae21e0a72893f84fe9900771f12efa4b879d12",
+        "base_ref": "82821309d53c77f372ec99b5d35574881f92a375",
+        "pr_diff_ru": [
+            "ydb/docs/ru/core/concepts/glossary.md",
+            "ydb/docs/ru/core/concepts/query_execution/execution_process.md",
+            "ydb/docs/ru/core/concepts/query_execution/index.md",
+            "ydb/docs/ru/core/concepts/query_execution/toc_i.yaml",
+        ],
+        "en_present_at_base": [
+            "ydb/docs/en/core/concepts/glossary.md",
+            "ydb/docs/en/core/concepts/query_execution/index.md",
+            "ydb/docs/en/core/concepts/query_execution/toc_i.yaml",
+            "ydb/docs/en/core/concepts/toc_p.yaml",
+            "ydb/docs/en/core/toc_p.yaml",
+            "ydb/docs/en/core/postgresql/connect.md",
+            "ydb/docs/en/core/concepts/secondary_indexes.md",
+        ],
+        "files": [
+            ("ydb/docs/ru/core/concepts/glossary.md", "head"),
+            ("ydb/docs/ru/core/concepts/query_execution/execution_process.md", "head"),
+            ("ydb/docs/ru/core/concepts/query_execution/index.md", "head"),
+            ("ydb/docs/ru/core/concepts/query_execution/toc_i.yaml", "head"),
+            ("ydb/docs/ru/core/concepts/query_execution/toc_p.yaml", "base"),
+            ("ydb/docs/ru/core/concepts/toc_p.yaml", "base"),
+            ("ydb/docs/ru/core/toc_p.yaml", "base"),
+        ],
+        "ru_at_base": [
+            ("ydb/docs/ru/core/concepts/query_execution/toc_i.yaml", "base"),
+        ],
+    },
 }
 
 
@@ -153,7 +186,7 @@ def fetch_case(case_id: str, out_root: Path) -> None:
     }
 
     for repo_path, source in spec["files"]:
-        ref = head_sha if source == "head" else base_ref
+        ref = head_sha if source == "head" else (base_ref if source == "base" else source)
         text = _fetch(repo_path, ref)
         rel = repo_path.replace("ydb/docs/", "")
         dest = case_dir / rel
@@ -163,6 +196,24 @@ def fetch_case(case_id: str, out_root: Path) -> None:
             continue
         dest.write_text(text, encoding="utf-8")
         manifest["files"][repo_path] = {"ref": ref, "path": str(dest.relative_to(out_root))}
+
+    if spec.get("en_present_at_base"):
+        manifest["en_present_at_base"] = spec["en_present_at_base"]
+
+    ru_at_base: dict[str, dict] = {}
+    for repo_path, source in spec.get("ru_at_base") or []:
+        ref = base_ref if source == "base" else head_sha
+        text = _fetch(repo_path, ref)
+        rel = repo_path.replace("ydb/docs/", "")
+        dest = case_dir / "ru_base" / rel.replace("ru/", "", 1)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if text is None:
+            ru_at_base[repo_path] = {"ref": ref, "missing": True}
+            continue
+        dest.write_text(text, encoding="utf-8")
+        ru_at_base[repo_path] = {"ref": ref, "path": str(dest.relative_to(out_root))}
+    if ru_at_base:
+        manifest["ru_at_base"] = ru_at_base
 
     (case_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",

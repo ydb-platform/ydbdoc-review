@@ -1,0 +1,58 @@
+{
+  "case_id": "case_44457",
+  "description": "Source PR #44457 — query_execution split; partial EN sidebar",
+  "source_pr": 44457,
+  "head_sha": "9aae21e0a72893f84fe9900771f12efa4b879d12",
+  "base_ref": "82821309d53c77f372ec99b5d35574881f92a375",
+  "pr_diff_ru": [
+    "ydb/docs/ru/core/concepts/glossary.md",
+    "ydb/docs/ru/core/concepts/query_execution/execution_process.md",
+    "ydb/docs/ru/core/concepts/query_execution/index.md",
+    "ydb/docs/ru/core/concepts/query_execution/toc_i.yaml"
+  ],
+  "files": {
+    "ydb/docs/ru/core/concepts/glossary.md": {
+      "ref": "9aae21e0a72893f84fe9900771f12efa4b879d12",
+      "path": "case_44457/ru/core/concepts/glossary.md"
+    },
+    "ydb/docs/ru/core/concepts/query_execution/execution_process.md": {
+      "ref": "9aae21e0a72893f84fe9900771f12efa4b879d12",
+      "path": "case_44457/ru/core/concepts/query_execution/execution_process.md"
+    },
+    "ydb/docs/ru/core/concepts/query_execution/index.md": {
+      "ref": "9aae21e0a72893f84fe9900771f12efa4b879d12",
+      "path": "case_44457/ru/core/concepts/query_execution/index.md"
+    },
+    "ydb/docs/ru/core/concepts/query_execution/toc_i.yaml": {
+      "ref": "9aae21e0a72893f84fe9900771f12efa4b879d12",
+      "path": "case_44457/ru/core/concepts/query_execution/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/concepts/query_execution/toc_p.yaml": {
+      "ref": "82821309d53c77f372ec99b5d35574881f92a375",
+      "path": "case_44457/ru/core/concepts/query_execution/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/concepts/toc_p.yaml": {
+      "ref": "82821309d53c77f372ec99b5d35574881f92a375",
+      "path": "case_44457/ru/core/concepts/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/toc_p.yaml": {
+      "ref": "82821309d53c77f372ec99b5d35574881f92a375",
+      "path": "case_44457/ru/core/toc_p.yaml"
+    }
+  },
+  "en_present_at_base": [
+    "ydb/docs/en/core/concepts/glossary.md",
+    "ydb/docs/en/core/concepts/query_execution/index.md",
+    "ydb/docs/en/core/concepts/query_execution/toc_i.yaml",
+    "ydb/docs/en/core/concepts/toc_p.yaml",
+    "ydb/docs/en/core/toc_p.yaml",
+    "ydb/docs/en/core/postgresql/connect.md",
+    "ydb/docs/en/core/concepts/secondary_indexes.md"
+  ],
+  "ru_at_base": {
+    "ydb/docs/ru/core/concepts/query_execution/toc_i.yaml": {
+      "ref": "82821309d53c77f372ec99b5d35574881f92a375",
+      "path": "case_44457/ru_base/core/concepts/query_execution/toc_i.yaml"
+    }
+  }
+}

@@ -239,11 +239,12 @@ def run_doc_translate(
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
     docs_root = cfg.paths.docs_root
-    read_ru, read_en_base = make_repo_scope_readers(repo_path, merge_base_with)
+    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
     scope_plan = plan_translation_scope(
         changes,
         read_ru=read_ru,
         read_en_base=read_en_base,
+        read_ru_base=read_ru_base,
         docs_root=docs_root,
     )
     logger.info(
@@ -500,11 +501,12 @@ def run_doc_verify(
     )
     scope_plan = None
     if source_changes:
-        read_ru, read_en_base = make_repo_scope_readers(repo_path, merge_base_with)
+        read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
         scope_plan = plan_translation_scope(
             source_changes,
             read_ru=read_ru,
             read_en_base=read_en_base,
+            read_ru_base=read_ru_base,
             docs_root=cfg.paths.docs_root,
         )
         nav_pairs = merge_navigation_pair_lists(
