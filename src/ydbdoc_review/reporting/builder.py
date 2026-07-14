@@ -10,7 +10,13 @@ from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import gap_label
 from ydbdoc_review.pipeline.types import PRTranslationResult, PairRunResult
+from ydbdoc_review.reporting.heuristic_context import (
+    format_heuristic_location,
+    heuristic_context_for_message,
+)
 from ydbdoc_review.reporting.heuristic_messages import (
+    HeuristicReviewerDetail,
+    format_heuristic_reviewer_detail,
     heuristic_location_label,
     humanize_heuristic,
 )
@@ -298,22 +304,13 @@ def _format_reviewer_item(
             f"   - **Оригинал ({_lang_label(source_lang)}):** «{source_excerpt}»"
         )
     if target_excerpt:
-        lines.append(
-            f"   - **Перевод ({_lang_label(target_lang)}):** «{target_excerpt}»"
-        )
-    if severity == "blocked":
-        lines.append(f"   - **Почему 🔴:** {problem}")
-    elif severity == "warning":
-        lines.append(
-            f"   - **Почему 🟡:** {problem}"
-        )
-    else:
-        lines.append(f"   - {problem}")
+        lines.append(f"   - **Перевели:** «{target_excerpt}»")
+    lines.append(f"   - **Проблема:** {problem}")
     if suggestion:
         preview = suggestion.replace("\n", " ")
-        if len(preview) > 240:
-            preview = preview[:237] + "…"
-        lines.append(f"   - 💡 Совет: {preview}")
+        if len(preview) > 320:
+            preview = preview[:317] + "…"
+        lines.append(f"   - **Совет:** {preview}")
     return "\n".join(lines)
 
 
@@ -533,13 +530,38 @@ def _file_reviewer_section(
         out += "</details>\n\n"
     for warning in heuristics:
         blocking = warning in fr.heuristic_blocking
+        detail = format_heuristic_reviewer_detail(warning)
+        ctx = heuristic_context_for_message(
+            warning,
+            target_text=fr.final_text,
+            segment_source_excerpts=fr.segment_source_excerpts,
+        )
+        line_hint = ""
+        if ctx.line_range:
+            start = ctx.line_range[0]
+            line_hint = f"в `{file_path}` около строки {start}."
+            if detail.suggestion and line_hint not in detail.suggestion:
+                detail = HeuristicReviewerDetail(
+                    problem=detail.problem,
+                    suggestion=f"{detail.suggestion} Исправьте {line_hint}",
+                )
+        location = format_heuristic_location(
+            warning,
+            file_path=file_path,
+            link=link,
+            line_range=ctx.line_range,
+            default_label=heuristic_location_label(warning),
+        )
         out += _format_reviewer_item(
             index=item_index,
-            location=heuristic_location_label(warning),
-            problem=humanize_heuristic(warning),
+            location=location,
+            problem=detail.problem,
             severity="blocked" if blocking else "warning",
+            source_excerpt=ctx.source_excerpt,
+            target_excerpt=ctx.target_excerpt,
             source_lang=source_lang,
             target_lang=target_lang,
+            suggestion=detail.suggestion,
         ) + "\n\n"
         item_index += 1
     return out, item_index

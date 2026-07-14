@@ -174,11 +174,10 @@ def test_build_full_report_reviewer_focused():
     assert "Overview" in body and "`s0042`" in body
     assert "string table" in body
     assert "Оригинал (RU):" in body
-    assert "Перевод (EN):" in body
-    assert "Почему 🔴:" in body
-    assert "Почему 🟡:" in body
+    assert "Перевели:" in body
+    assert "Проблема:" in body
+    assert "**Совет:** row table" in body
     assert "Обзорный абзац" in body
-    assert "💡 Совет: row table" in body
     assert "таблица, строка 1, столбец 2" in body
     assert "Таблица не переведена автоматически" in body
     assert "355" in body

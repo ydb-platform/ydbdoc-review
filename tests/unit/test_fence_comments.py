@@ -16,8 +16,12 @@ from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
 from ydbdoc_review.validation.fence_comments import (
     check_cyrillic_in_en_fence_comments,
+    check_cyrillic_in_en_text_fences,
     collect_cyrillic_fence_comment_lines,
+    collect_cyrillic_text_fence_lines,
     translate_cyrillic_fence_comments,
+    translate_cyrillic_text_fences,
+    translate_cyrillic_text_fences_with_client,
 )
 from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
 from ydbdoc_review.validation.heuristics import (
@@ -53,6 +57,16 @@ GO_SAMPLE = dedent("""
 """).strip()
 
 
+TEXT_FENCE_INCREMENT_CHAIN = dedent("""
+    Описание цепочки резервных копий в документации. \
+Достаточно текста для сегментации и эвристик длины.
+
+    ```text
+    Полная копия → Инкремент₁ → Инкремент₂ → ... → Инкрементₙ
+    ```
+""").strip()
+
+
 # auth-static-style Go snippet: prose outside fence + several ``//`` comments inside.
 MULTI_COMMENT_GO_SOURCE = dedent("""
     Аутентификация по логину и паролю в native SDK Go. \
@@ -71,6 +85,96 @@ MULTI_COMMENT_GO_SOURCE = dedent("""
     }
     ```
 """).strip()
+
+
+def test_collect_cyrillic_text_fence_lines_increment_chain():
+    items = collect_cyrillic_text_fence_lines(TEXT_FENCE_INCREMENT_CHAIN)
+    assert len(items) == 1
+    assert "Полная копия" in items[0].body
+    assert "Инкремент₁" in items[0].body
+
+
+def test_check_cyrillic_in_en_text_fences_warns_on_increment_chain():
+    warnings = check_cyrillic_in_en_text_fences(TEXT_FENCE_INCREMENT_CHAIN, target_lang="en")
+    assert warnings
+    assert warnings[0].startswith("cyrillic_in_text_fence:")
+
+
+def test_translate_cyrillic_text_fences_increment_chain():
+    def _fake_translate(body: str) -> str:
+        return "Full copy → Increment₁ → Increment₂ → ... → Incrementₙ"
+
+    translated = translate_cyrillic_text_fences(TEXT_FENCE_INCREMENT_CHAIN, _fake_translate)
+    assert "Full copy" in translated
+    assert "Полная" not in translated
+    assert check_cyrillic_in_en_text_fences(translated, target_lang="en") == []
+
+
+def test_translate_cyrillic_text_fences_with_client_strips_json_fences():
+    payload = json.dumps(
+        {
+            "lines": [
+                {
+                    "id": "b1-l0",
+                    "text": "Full copy → Increment₁ → Increment₂ → ... → Incrementₙ",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    wrapped = f"```json\n{payload}\n```"
+    client = MagicMock()
+    client.model_chain_for_role.return_value = ["deepseek-v32"]
+    client.chat.return_value = SimpleNamespace(content=wrapped)
+
+    translated = translate_cyrillic_text_fences_with_client(
+        TEXT_FENCE_INCREMENT_CHAIN,
+        client,
+        load_glossary(),
+    )
+    assert "Full copy" in translated
+    assert "Полная" not in translated
+    assert check_cyrillic_in_en_text_fences(translated, target_lang="en") == []
+
+
+def test_finalize_en_target_translates_text_fence_increment_chain():
+    doc = parse_markdown(TEXT_FENCE_INCREMENT_CHAIN)
+    segments = extract_segments(doc)
+    rendered = render_with_translations(
+        doc,
+        segments,
+        {
+            segments[0].id: (
+                "Backup copy chain description in documentation. "
+                "Long enough text for length heuristics."
+            ),
+        },
+        target_lang="en",
+    )
+    assert "Полная копия" in rendered
+
+    text_payload = json.dumps(
+        {
+            "lines": [
+                {
+                    "id": "b1-l0",
+                    "text": "Full copy → Increment₁ → Increment₂ → ... → Incrementₙ",
+                }
+            ]
+        },
+        ensure_ascii=False,
+    )
+    client = _mock_client([f"```json\n{text_payload}\n```"])
+
+    finalized = finalize_en_target(
+        rendered,
+        TEXT_FENCE_INCREMENT_CHAIN,
+        client=client,
+        glossary=load_glossary(),
+    )
+    assert "Full copy" in finalized
+    assert "Полная" not in finalized
+    assert check_cyrillic_in_en_text_fences(finalized, target_lang="en") == []
 
 
 def test_collect_cyrillic_fence_comment_lines_yql_sql_dash():

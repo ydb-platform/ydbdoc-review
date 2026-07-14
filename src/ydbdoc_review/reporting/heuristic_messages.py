@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from urllib.parse import unquote
+
+from ydbdoc_review.validation.wikipedia_links import (
+    format_wikipedia_href,
+    parse_wikipedia_href,
+    resolve_wikipedia_href,
+)
 
 _FENCE_BODY_COPY = re.compile(
     r"^fence_body_copy: block (\d+) body changed by pipeline "
@@ -27,10 +35,26 @@ _FENCE_PATH = re.compile(
     r"^fence_path_stripped: block (\d+) line (\d+): (.+)$"
 )
 _LINK_LOCALE = re.compile(r"^link_locale: (.+)$")
+_LINK_LOCALE_WIKI_RU_SLUG = re.compile(
+    r"^link_locale: en\.wikipedia\.org uses Russian article slug "
+    r"\(use English title\): (https?://\S+)$"
+)
+_LINK_LOCALE_RU_HOST = re.compile(
+    r"^link_locale: RU-locale URL in EN document: (https?://\S+)$"
+)
+_LINK_LOCALE_CYRILLIC_PATH = re.compile(
+    r"^link_locale: Cyrillic path on EN-locale URL: (https?://\S+)$"
+)
 _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
     r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent|missing_toc_target): (.+)$"
 )
+
+
+@dataclass(frozen=True)
+class HeuristicReviewerDetail:
+    problem: str
+    suggestion: str | None = None
 
 
 def heuristic_location_label(message: str) -> str:
@@ -52,7 +76,14 @@ def heuristic_location_label(message: str) -> str:
     if message.startswith("length_ratio:"):
         return "объём перевода"
     if message.startswith(
-        ("scope_not_applied:", "missing_href:", "unexpected_href:", "empty_toc:", "collapsed_toc:", "missing_toc_target:")
+        (
+            "scope_not_applied:",
+            "missing_href:",
+            "unexpected_href:",
+            "empty_toc:",
+            "collapsed_toc:",
+            "missing_toc_target:",
+        )
     ):
         return "навигация (toc/redirect)"
     if message.startswith("ru_source"):
@@ -60,11 +91,78 @@ def heuristic_location_label(message: str) -> str:
     return "автопроверка"
 
 
+def _wikipedia_manual_suggestion(href: str, *, line_hint: str = "") -> str:
+    parsed = parse_wikipedia_href(href)
+    if parsed is None:
+        base = "Подберите EN-статью на en.wikipedia.org и замените URL в переводе."
+    else:
+        _wiki_lang, title, _fragment = parsed
+        ru_href = format_wikipedia_href("ru", title)
+        resolved = resolve_wikipedia_href(ru_href, target_lang="en")
+        if resolved and unquote(resolved) != unquote(href):
+            base = f"Замените ссылку на: {resolved}"
+        else:
+            base = (
+                f"Автоперевод Wikipedia не нашёл EN-статью для «{title}» "
+                f"(langlink на ru.wikipedia.org отсутствует). "
+                f"Найдите подходящую статью на en.wikipedia.org вручную "
+                f"(например, по теме «{title}») и пропишите "
+                f"https://en.wikipedia.org/wiki/English_title"
+            )
+    if line_hint:
+        return f"{base} {line_hint}"
+    return base
+
+
+def format_heuristic_reviewer_detail(message: str) -> HeuristicReviewerDetail:
+    """Turn internal heuristic codes into reviewer-facing problem + optional advice."""
+    if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
+        return HeuristicReviewerDetail(problem=message)
+
+    m = _LINK_LOCALE_WIKI_RU_SLUG.match(message.strip())
+    if m:
+        href = m.group(1)
+        parsed = parse_wikipedia_href(href)
+        title = parsed[1] if parsed else unquote(href.rsplit("/", 1)[-1])
+        return HeuristicReviewerDetail(
+            problem=(
+                f"Ссылка на Wikipedia не переведена на EN: в URL остался "
+                f"русский slug «{title}» на en.wikipedia.org."
+            ),
+            suggestion=_wikipedia_manual_suggestion(href),
+        )
+
+    m = _LINK_LOCALE_RU_HOST.match(message.strip())
+    if m:
+        href = m.group(1)
+        return HeuristicReviewerDetail(
+            problem=f"В EN-документе остался URL русской локали: {href}",
+            suggestion=(
+                "Замените домен/путь на EN-версию (например en.wikipedia.org "
+                "или /ydb/docs/en/…) в файле перевода."
+            ),
+        )
+
+    m = _LINK_LOCALE_CYRILLIC_PATH.match(message.strip())
+    if m:
+        href = m.group(1)
+        return HeuristicReviewerDetail(
+            problem=f"URL EN-локали содержит кириллицу в пути: {href}",
+            suggestion=(
+                "Исправьте slug/путь на латиницу или замените ссылку "
+                "на корректный EN-URL."
+            ),
+        )
+
+    return HeuristicReviewerDetail(problem=_humanize_heuristic_problem(message))
+
+
 def humanize_heuristic(message: str) -> str:
     """Turn internal heuristic codes into reviewer-facing Russian text."""
-    if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
-        return message
+    return format_heuristic_reviewer_detail(message).problem
 
+
+def _humanize_heuristic_problem(message: str) -> str:
     m = _FENCE_BODY_COPY.match(message)
     if m:
         block, preview = m.group(1), m.group(2)

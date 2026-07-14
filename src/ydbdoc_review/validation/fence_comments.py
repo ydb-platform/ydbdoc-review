@@ -197,36 +197,54 @@ def check_cyrillic_in_en_fence_comments(
     return warnings
 
 
+def _strip_json_code_fence(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text
+
+
+def _parse_batch_translate_response(
+    raw: str,
+    *,
+    array_key: str,
+    expected_ids: set[str],
+    error_label: str,
+) -> dict[str, str]:
+    text = _strip_json_code_fence(raw)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise LLMParseError(f"{error_label} JSON invalid: {exc}") from exc
+    entries = data.get(array_key)
+    if not isinstance(entries, list):
+        raise LLMParseError(f"{error_label}: missing {array_key}[]")
+    out: dict[str, str] = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        entry_id = item.get("id")
+        body = item.get("text")
+        if isinstance(entry_id, str) and isinstance(body, str):
+            out[entry_id] = body.strip()
+    missing = expected_ids - set(out)
+    if missing:
+        raise LLMParseError(f"{error_label}: missing ids {sorted(missing)}")
+    return out
+
+
 def _parse_comment_translate_response(
     raw: str,
     *,
     expected_ids: set[str],
 ) -> dict[str, str]:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise LLMParseError(f"fence comment translate JSON invalid: {exc}") from exc
-    comments = data.get("comments")
-    if not isinstance(comments, list):
-        raise LLMParseError("fence comment translate: missing comments[]")
-    out: dict[str, str] = {}
-    for item in comments:
-        if not isinstance(item, dict):
-            continue
-        cid = item.get("id")
-        body = item.get("text")
-        if isinstance(cid, str) and isinstance(body, str):
-            out[cid] = body.strip()
-    missing = expected_ids - set(out)
-    if missing:
-        raise LLMParseError(
-            f"fence comment translate: missing ids {sorted(missing)}"
-        )
-    return out
+    return _parse_batch_translate_response(
+        raw,
+        array_key="comments",
+        expected_ids=expected_ids,
+        error_label="fence comment translate",
+    )
 
 
 def translate_cyrillic_fence_comments_with_client(
@@ -326,6 +344,12 @@ def _text_fence_lang(info: str) -> str:
     return parts[0].lower() if parts else ""
 
 
+def _preserve_leading_indent(original_line: str, new_content: str) -> str:
+    m = re.match(r"^(\s*)", original_line)
+    prefix = m.group(1) if m else ""
+    return prefix + new_content.lstrip()
+
+
 def collect_cyrillic_text_fence_lines(text: str) -> list[FenceCommentLine]:
     """Cyrillic lines inside `` ```text `` fenced diagram blocks."""
     blocks = collect_code_blocks(parse_markdown(text))
@@ -346,6 +370,34 @@ def collect_cyrillic_text_fence_lines(text: str) -> list[FenceCommentLine]:
                     )
                 )
     return found
+
+
+def translate_cyrillic_text_fences(
+    text: str,
+    translate_fn: Callable[[str], str],
+) -> str:
+    """Replace Cyrillic lines inside `` ```text `` diagram fences."""
+    items = collect_cyrillic_text_fence_lines(text)
+    if not items:
+        return text
+
+    doc = parse_markdown(text)
+    blocks = collect_code_blocks(doc)
+    changed = False
+    for item in items:
+        block = blocks[item.block_index - 1]
+        lines = block.content.splitlines()
+        if item.line_index >= len(lines):
+            continue
+        translated = translate_fn(item.body.strip()).strip()
+        if not translated or _CYRILLIC.search(translated):
+            continue
+        new_line = _preserve_leading_indent(lines[item.line_index], translated)
+        if new_line != lines[item.line_index]:
+            lines[item.line_index] = new_line
+            block.content = "\n".join(lines)
+            changed = True
+    return render_markdown(doc) if changed else text
 
 
 def check_cyrillic_in_en_text_fences(target_text: str, *, target_lang: str) -> list[str]:
@@ -416,17 +468,12 @@ def translate_cyrillic_text_fences_with_client(
                 model=model,
                 role="translate",
             )
-            data = json.loads(result.content.strip())
-            for item in data.get("lines", []):
-                if isinstance(item, dict) and isinstance(item.get("id"), str):
-                    body = item.get("text")
-                    if isinstance(body, str):
-                        mapping[item["id"]] = body.strip()
-            missing = expected_ids - set(mapping)
-            if missing:
-                raise LLMParseError(
-                    f"text fence translate: missing ids {sorted(missing)}"
-                )
+            mapping = _parse_batch_translate_response(
+                result.content,
+                array_key="lines",
+                expected_ids=expected_ids,
+                error_label="text fence translate",
+            )
             break
         except (LLMParseError, json.JSONDecodeError, Exception) as exc:  # noqa: BLE001
             last_exc = exc
@@ -442,20 +489,11 @@ def translate_cyrillic_text_fences_with_client(
             out_warnings.append(warning)
         return text
 
-    doc = parse_markdown(text)
-    blocks = collect_code_blocks(doc)
-    changed = False
-    for item in items:
-        block = blocks[item.block_index - 1]
-        lines = block.content.splitlines()
-        if item.line_index >= len(lines):
-            continue
-        key = f"b{item.block_index}-l{item.line_index}"
-        translated = mapping.get(key, item.body)
-        if _CYRILLIC.search(translated):
-            continue
-        if translated != lines[item.line_index]:
-            lines[item.line_index] = translated
-            block.content = "\n".join(lines)
-            changed = True
-    return render_markdown(doc) if changed else text
+    def _lookup(body: str) -> str:
+        for item in items:
+            if item.body.strip() == body.strip():
+                key = f"b{item.block_index}-l{item.line_index}"
+                return mapping.get(key, body.strip())
+        return body.strip()
+
+    return translate_cyrillic_text_fences(text, _lookup)
