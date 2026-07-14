@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-14  
-**Current focus:** §22 unified navigation scope (Phase J complete on `main`, commit `d68812f`).
+**Current focus:** §22 rollout validation (#44457, #43010, #43997); local Eliza dry-run playbook.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,10 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-14 | **§6.101** — fix `format_heuristic_location` (`file_url` → `format_line_ref`); #46475 CI crash after translate OK |
+| 2026-07-14 | **§6.96–§6.100** — report UX; Eliza 429 fallback; TLS split; CLI shutdown; pytest conftest isolates provider |
+| 2026-07-14 | **`v0.1.0` tag moved** — includes §6.101 + Eliza/TLS hardening (after `203956a`) |
+| 2026-07-14 | **§22 rollout** — re-run [#44457](https://github.com/ydb-platform/ydb/pull/44457); local debug [#43010](https://github.com/ydb-platform/ydb/pull/43010) via Eliza (`job --dry-run`) |
 | 2026-07-14 | **§22 Phase J** — `scope_planner.py`; translate + verify share `TranslationScopePlan`; removed supplement modules (`d68812f` on `main`) |
 | 2026-07-13 | §6.90 include closure after toc-href pass (#46393) |
 | 2026-07-13 | §6.89 toc-href page supplementation (#46386) |
@@ -38,10 +42,12 @@ Older §6.x entries remain in [03-design-decisions](docs/memory-bank/03-design-d
 
 | Artifact | State |
 |----------|--------|
-| `main` | §22 planner (`d68812f`) |
-| Tags `v0.1.0` / `v0.2.0` | **Not moved yet** — still pre-§22 supplement chain |
-| ydb CI | Uses action ref from tag; needs deliberate tag bump to pick up §22 |
-| Validation | [#45181](https://github.com/ydb-platform/ydb/pull/45181) translation is green on old chain — **do not re-run**; test §22 on another PR after tag move |
+| `main` | §22 planner + §6.101 report fix + Eliza/TLS/shutdown (tagged `v0.1.0`) |
+| Tag `v0.1.0` | **moved** on 2026-07-14 — §6.101, §6.98–§6.100, prior `203956a` chain |
+| Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
+| ydb CI `doc_translate` | **Yandex Cloud** (`YANDEX_CLOUD_*` secrets); default `YDBDOC_MODEL_PROVIDER=yandex_cloud` — **not** Eliza |
+| Local `job` / Reactor | **Eliza** when `YDBDOC_MODEL_PROVIDER=eliza` + `ELIZA_OAUTH_TOKEN` (typically `~/.zshrc`) |
+| Validation | [#46475](https://github.com/ydb-platform/ydb/pull/46475): translate done — re-run via **`doc_verify`** label after tag |
 
 ## For AI assistants
 

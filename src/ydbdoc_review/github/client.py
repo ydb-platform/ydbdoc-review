@@ -9,6 +9,7 @@ from urllib.parse import quote
 import requests
 
 from ydbdoc_review.github.errors import GitHubAPIError
+from ydbdoc_review.llm.tls import public_ca_bundle
 
 _API_VERSION = "2022-11-28"
 _DEFAULT_TIMEOUT = 120.0
@@ -45,6 +46,7 @@ class GitHubClient:
             params=params,
             json=json_body,
             timeout=self._timeout,
+            verify=public_ca_bundle(),
         )
         if resp.status_code >= 400:
             raise GitHubAPIError(

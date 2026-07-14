@@ -25,43 +25,26 @@ from ydbdoc_review.llm.errors import (
     LLMRetryableRequestError,
     LLMRetryExhaustedError,
 )
+from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV
 from ydbdoc_review.llm.retry import (
     HTTP_RATE_LIMIT,
     classify_api_error,
     compute_backoff_s,
+    is_eliza_model_overloaded,
     is_model_unavailable,
     is_requests_ssl_error,
     is_retryable,
     parse_retry_after_s,
     retry_delay_s,
 )
+from ydbdoc_review.shutdown import interruptible_sleep
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 
 logger = logging.getLogger(__name__)
 
 LLMRole = Literal["analyze", "translate", "critic"]
 
-_ELIZA_CA_BUNDLE_ENV = "YDBDOC_ELIZA_CA_BUNDLE"
-
-
-def _resolve_eliza_tls_verify() -> bool | str:
-    """TLS verify target for Eliza ``requests.Session``.
-
-    Priority:
-    1. ``YDBDOC_ELIZA_CA_BUNDLE`` — explicit path to internal CA bundle (Eliza/Nirvana)
-    2. ``True`` — default; ``requests`` also honors ``REQUESTS_CA_BUNDLE`` /
-       ``CURL_CA_BUNDLE`` from the process environment
-
-    Never returns ``False`` (TLS verification must stay enabled).
-    """
-    explicit = (os.environ.get(_ELIZA_CA_BUNDLE_ENV) or "").strip()
-    if explicit:
-        if not os.path.isfile(explicit):
-            raise LLMConfigError(
-                f"{_ELIZA_CA_BUNDLE_ENV} points to missing file: {explicit!r}"
-            )
-        return explicit
-    return True
+from ydbdoc_review.llm.tls import eliza_tls_verify
 
 
 def _message_char_count(messages: list[ChatCompletionMessageParam]) -> tuple[int, int]:
@@ -244,7 +227,7 @@ class YandexLLMClient:
                             exc,
                             delay,
                         )
-                        time.sleep(delay)
+                        interruptible_sleep(delay)
                         continue
                     logger.warning(
                         "LLM call failed for model %s after %s attempt(s): %s",
@@ -343,7 +326,7 @@ class ElizaLLMClient(YandexLLMClient):
         self._translate_default = translate_default
         self._critic_default = critic_default
         self._http = requests.Session()
-        self._http.verify = _resolve_eliza_tls_verify()
+        self._http.verify = eliza_tls_verify()
 
     @classmethod
     def from_config(
@@ -587,7 +570,7 @@ class ElizaLLMClient(YandexLLMClient):
                 except requests.exceptions.SSLError as exc:
                     raise LLMRequestError(
                         "Eliza TLS verification failed "
-                        f"(set {_ELIZA_CA_BUNDLE_ENV} or REQUESTS_CA_BUNDLE): {exc}"
+                        f"(set {ELIZA_CA_BUNDLE_ENV}): {exc}"
                     ) from exc
                 except requests.exceptions.Timeout as exc:
                     last_error = exc
@@ -595,7 +578,7 @@ class ElizaLLMClient(YandexLLMClient):
                     if is_requests_ssl_error(exc):
                         raise LLMRequestError(
                             "Eliza TLS verification failed "
-                            f"(set {_ELIZA_CA_BUNDLE_ENV} or REQUESTS_CA_BUNDLE): {exc}"
+                            f"(set {ELIZA_CA_BUNDLE_ENV}): {exc}"
                         ) from exc
                     last_error = exc
                 except ValueError as exc:
@@ -623,6 +606,8 @@ class ElizaLLMClient(YandexLLMClient):
                 if is_rate_limit:
                     rate_limit_failures += 1
                     max_tries = self._llm.retries.rate_limit.max_attempts
+                    if is_eliza_model_overloaded(last_error):
+                        max_tries = 1
                     failure_no = rate_limit_failures
                     retry_after_s = (
                         last_error.retry_after_s
@@ -641,6 +626,16 @@ class ElizaLLMClient(YandexLLMClient):
                     )
 
                 if failure_no >= max_tries:
+                    if (
+                        is_rate_limit
+                        and is_eliza_model_overloaded(last_error)
+                        and len(chain) > 1
+                        and slug != chain[-1]
+                    ):
+                        logger.warning(
+                            "Eliza model %s overloaded (429), trying next model in chain",
+                            slug,
+                        )
                     break
 
                 session_retries += 1
@@ -668,7 +663,7 @@ class ElizaLLMClient(YandexLLMClient):
                     last_error,
                     delay,
                 )
-                time.sleep(delay)
+                interruptible_sleep(delay)
 
         models = ", ".join(chain)
         if (
@@ -690,12 +685,11 @@ def create_llm_client(
 ) -> YandexLLMClient:
     """Factory for model provider selection.
 
-    Controlled via env `YDBDOC_MODEL_PROVIDER`:
-    - `yandex_cloud` (default): Yandex AI Studio via existing secrets
-    - `eliza`: Eliza OpenAI-compatible transport
+    ``YDBDOC_MODEL_PROVIDER`` env overrides ``config.llm.provider`` when set.
     """
-    provider = (os.environ.get("YDBDOC_MODEL_PROVIDER") or "yandex_cloud").strip()
-    if provider == "yandex_cloud":
+    explicit = (os.environ.get("YDBDOC_MODEL_PROVIDER") or "").strip()
+    provider = explicit or (config.llm.provider or "yandex_cloud").strip()
+    if provider in ("yandex_cloud", "yandex"):
         return YandexLLMClient.from_config(config, usage_tracker=usage_tracker)
     if provider == "eliza":
         return ElizaLLMClient.from_config(config, usage_tracker=usage_tracker)

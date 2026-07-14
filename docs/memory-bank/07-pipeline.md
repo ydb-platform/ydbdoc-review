@@ -444,10 +444,10 @@ computed from filtered ``critic_unresolved`` only.
 **Report tiers (§6.56–§6.57):**
 
 - **«Что исправить»** — unresolved critic (minus skipped duplicates), manual
-  actions, blocking heuristics, alignment errors. Each item shows:
-  - **Оригинал (RU)** / **Перевод (EN)** — segment excerpt as on disk (2026-07)
-  - **Почему 🔴/🟡** — blocking reason (critic category + comment, or heuristic)
-  - **💡 Совет** — critic ``suggested_text`` when present
+  actions, blocking heuristics, alignment errors. Each item shows (§6.96):
+  - **Оригинал (RU)** / **Перевели (EN)** — segment or line excerpt from disk
+  - **Проблема** — blocking reason (critic category, heuristic, or wiki line link)
+  - **Совет** — critic ``suggested_text`` or heuristic hint (e.g. Wikipedia manual URL)
 - **«Без замечаний»** — files with no open items (🟢).
 - **«Автоисправление не применено»** (collapsed) — ``critic_skipped`` only;
   does not inflate 🔴 or duplicate main-list numbering
@@ -476,8 +476,13 @@ Translation PR for #45181 is green on old chain — do not re-run (see §22.8).
 
 **Canonical auto-translate case (§22 rollout):** [ydb #44457](https://github.com/ydb-platform/ydb/pull/44457)
 → [#46451](https://github.com/ydb-platform/ydb/pull/46451) (bad first run: 35 files,
-MD037 glossary); re-run after `v0.1.0` @ `55ba789` — scope (`case_44457`), harness
-import (§6.93), MD037 postprocess (§6.94). See **09-navigation-scope** §22.10.
+MD037 glossary); re-run after `v0.1.0` @ `203956a` — scope (`case_44457`), harness
+import (§6.93), MD037 (§6.94), report UX (§6.96). Remaining 🔴: Wikipedia DML/DDL links.
+See **09-navigation-scope** §22.10–§22.11.
+
+**Canonical local-debug case:** [ydb #43010](https://github.com/ydb-platform/ydb/pull/43010)
+— merged source PR; local ``job --dry-run`` with Eliza (§19.5); scope 13 doc paths.
+Bad first CI run [#46461](https://github.com/ydb-platform/ydb/pull/46461) had 51 files (pre-§22).
 
 ---
 

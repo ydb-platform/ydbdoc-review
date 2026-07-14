@@ -22,8 +22,9 @@ from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.shutdown import install_shutdown_handlers
 
 app = typer.Typer(
     name="ydbdoc-review",
@@ -76,6 +77,7 @@ def main(
 ) -> None:
     """Load ``.env`` and configure logging."""
     load_dotenv()
+    install_shutdown_handlers()
     _setup_logging(verbose)
 
 

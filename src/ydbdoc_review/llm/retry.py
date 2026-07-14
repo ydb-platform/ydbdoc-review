@@ -154,6 +154,13 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     return "429" in msg or "rate limit" in msg or "rate-limit" in msg
 
 
+def is_eliza_model_overloaded(exc: BaseException) -> bool:
+    """True when Eliza returns 429 because the model pool is saturated."""
+    if not is_rate_limit_error(exc):
+        return False
+    return "overloaded" in str(exc).lower()
+
+
 def is_requests_ssl_error(exc: BaseException) -> bool:
     """True for TLS/certificate failures that cannot succeed on retry."""
     try:

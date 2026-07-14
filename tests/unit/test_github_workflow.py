@@ -27,6 +27,7 @@ def _mock_inline_verify_job() -> DocJobResult:
 
 def _env() -> dict[str, str]:
     return {
+        "YDBDOC_MODEL_PROVIDER": "yandex_cloud",
         "YDBDOC_YC_FOLDER_ID": "b1",
         "YDBDOC_YC_API_KEY": "k",
         "GITHUB_TOKEN": "gh",

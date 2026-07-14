@@ -274,20 +274,38 @@ subprocess.run(
 
 There is **no** CLI option for Eliza OAuth token (`cli.py` has no `--eliza-*` flags).
 
-### 13.6.4. TLS / internal CA (Nirvana, Docker)
+### 13.6.4. TLS / internal CA (Nirvana, Docker, local Mac)
 
-``api.eliza.yandex.net`` is signed by Yandex internal CA — default certifi bundle
+``api.eliza.yandex.net`` is signed by Yandex internal CA — default certifi alone
 is **not** enough. TLS verification must **never** be disabled (`verify=False`).
 
-| Source | Behavior |
-|--------|----------|
-| ``YDBDOC_ELIZA_CA_BUNDLE`` | Explicit path to PEM bundle; set on ``requests.Session.verify`` |
-| ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` | Honored by ``requests`` when ``Session.verify=True`` (default) |
-| Missing CA in runtime | ``SSLError`` at first Eliza call — **fail-fast** (no retry); fix env, not client code |
+**Implementation (2026-07-14):** ``llm/tls.py`` (§6.99)
+
+| Client | CA bundle |
+|--------|-----------|
+| **Eliza** ``ElizaLLMClient`` | ``eliza_tls_verify()`` = **certifi + internal PEM** (merged, cached) |
+| **GitHub** ``GitHubClient`` | ``public_ca_bundle()`` = **certifi only** (ignores ``REQUESTS_CA_BUNDLE``) |
+| **Yandex Cloud** OpenAI SDK | system / certifi (unchanged) |
+
+| Env var | Behavior |
+|---------|----------|
+| ``YDBDOC_ELIZA_CA_BUNDLE`` | Path to internal PEM merged into Eliza bundle (preferred for local) |
+| ``/etc/ssl/certs/YandexInternalCA.pem`` | Auto-used on corp Mac when file exists |
+| ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` | **Do not** set to internal-only PEM globally — breaks ``api.github.com`` |
+| ``NODE_EXTRA_CA_CERTS`` | Ignored by Python ``requests``; use ``YDBDOC_ELIZA_CA_BUNDLE`` instead |
 
 **Runtime requirement:** Nirvana/Reactor child env and Docker image must ship the
-internal CA (mount PEM + set ``YDBDOC_ELIZA_CA_BUNDLE`` or ``REQUESTS_CA_BUNDLE``).
-See **08-operations** §19.4 Eliza scheduler loop.
+internal CA (mount PEM + set ``YDBDOC_ELIZA_CA_BUNDLE``).
+See **08-operations** §19.4–§19.5.
+
+**Local smoke:**
+
+```bash
+cd ydbdoc-review && source .venv/bin/activate
+python -c "from dotenv import load_dotenv; load_dotenv(); from ydbdoc_review.llm.client import create_llm_client; from ydbdoc_review.config.loader import load_config; c=create_llm_client(load_config()); print(type(c).__name__, c.chat([{'role':'user','content':'OK'}], role='translate').content[:20])"
+```
+
+Requires ``YDBDOC_MODEL_PROVIDER=eliza`` and ``ELIZA_OAUTH_TOKEN`` in env.
 
 ### 13.6.5. Model ids and role chains
 
@@ -308,13 +326,16 @@ Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
 - **HTTP 429:** separate budget in `llm.retries.rate_limit` (default 6 attempts,
   5s→10s→… backoff, cap 120s) — overridable via env:
   `YDBDOC_LLM_RETRIES_RATE_LIMIT_MAX_ATTEMPTS`, `_BACKOFF_INITIAL_S`, etc.
-- **Retry-After:** when present on 429, sleep that many seconds (capped by
+- **429 overloaded:** when response body contains ``overloaded``, **one** attempt
+  per model slug then advance chain (§6.98) — do not sleep 6× on saturated pool.
+- **Retry-After:** when present on 429 (non-overloaded), sleep that many seconds (capped by
   `rate_limit.max_backoff_s`) instead of calculated backoff
 - **Fail-fast (no retry):** HTTP **400/401/403/404** and other non-retryable 4xx;
   `requests.SSLError` / cert verification errors (OAuth token never echoed in errors)
-- Eliza translate/critic chains use **one confirmed primary** per role; YAML
-  Yandex fallbacks are ignored. Optional confirmed fallbacks only via
-  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS` / `YDBDOC_ELIZA_CRITIC_FALLBACKS` (comma-separated)
+- Eliza translate/critic chains: primary from env; optional fallbacks only via
+  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS` / `YDBDOC_ELIZA_CRITIC_FALLBACKS` (comma-separated).
+  **Translator** also tries fallback chain on rate-limit exhaustion (§6.98).
+  YAML Yandex fallbacks are **ignored** for Eliza provider.
 - Finalize fail-soft skips (fence comments / text fences / prose Cyrillic) emit
   `*_translate_skipped: rate-limit — …` warnings in heuristics when LLM fails
 - Backoff: `compute_backoff_s()` / `retry_delay_s()` (`llm/retry.py`)

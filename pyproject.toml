@@ -41,7 +41,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra -q --strict-markers --ignore=tests/integration/test_llm_smoke.py"
+addopts = "-ra -q --strict-markers -m 'not integration' --ignore=tests/integration/test_llm_smoke.py"
 markers = [
     "integration: integration tests (require network/API)",
     "slow: slow tests",

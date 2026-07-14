@@ -2173,9 +2173,107 @@ the LLM.
 5. **Finalize skips:** ``validation/finalize_skips.py``; ``out_warnings`` from fence/prose
    finalize → ``state.finalize_warnings`` → heuristics bucket in ``HeuristicsStep``.
 
-**Implementation:** ``c6cd916`` (logging, TLS), ``55ba789`` (429, 4xx, finalize warnings).
+**Implementation:** ``c6cd916`` (logging, TLS fail-fast), ``55ba789`` (429, 4xx, finalize warnings).
+Superseded for TLS routing by §6.99 (`llm/tls.py`); §6.98 adds overloaded failover.
 
 **Tests:** ``test_llm_eliza_internal.py``, ``test_llm_retry.py``, ``test_fence_comments.py``.
+
+### 6.96. Report UX: source + translation + problem + suggestion (2026-07-14)
+
+**Problem:** Translation PR reports showed «Почему 🔴/🟡» without RU/EN context; Wikipedia
+``link_locale`` heuristics did not deep-link to the offending line.
+
+**Decision:**
+
+1. **«Что исправить»** items use **Оригинал / Перевели / Проблема / Совет** (not «Почему 🔴»).
+2. ``reporting/heuristic_context.py`` — excerpt RU + EN from disk for ``link_locale``;
+   line number + GitHub blob URL in problem text for Wikipedia manual-fix hints.
+3. ``heuristic_messages.py`` — wiki-specific problem + suggestion strings.
+
+**Implementation:** ``203956a`` — ``builder.py``, ``heuristic_context.py``, tests
+``test_heuristic_context.py``, ``test_reporting_builder.py``.
+
+### 6.97. Text-fence batch JSON parsing (2026-07-14)
+
+**Problem:** ``translate_cyrillic_text_fences`` called ``json.loads()`` on raw LLM output
+still wrapped in `` ```json `` fences → batch skipped, Cyrillic left in `` ```text `` blocks.
+
+**Fix:** ``_strip_json_code_fence``, ``_parse_batch_translate_response`` in
+``validation/fence_comments.py``; sync ``translate_cyrillic_text_fences()``.
+
+**Implementation:** ``203956a``. Golden: ``test_fence_comments.py`` (Полная копия → Increment₁).
+
+### 6.98. Eliza 429 overloaded → model fallback (2026-07-14)
+
+**Problem:** Local Eliza runs hit ``HTTP 429: model … is overloaded``; translator pinned
+``model=primary`` so ``YDBDOC_ELIZA_TRANSLATE_FALLBACKS`` never ran; 6× retry on same
+saturated model wasted minutes.
+
+**Decision:**
+
+1. **Translator** (``translation/translator.py``): on ``LLMRetryExhaustedError`` with
+   rate-limit, try ``model_chain[1:]`` (same pattern as placeholder-mismatch fallback).
+2. **Eliza client** (``llm/client.py``): when 429 body contains ``overloaded``, **one**
+   attempt per model then advance chain (not 6× sleep on same slug).
+3. **Env:** ``YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b`` (comma-separated confirmed ids).
+
+**Tests:** ``test_translate_batch_rate_limit_tries_fallback_model``,
+``test_eliza_429_overloaded_*`` in ``test_llm_eliza_internal.py``.
+
+### 6.99. TLS: public GitHub vs internal Eliza CA (2026-07-14)
+
+**Problem:** Setting ``REQUESTS_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem`` globally
+(in ``~/.zshrc``) broke **``api.github.com``** (`unable to get local issuer certificate`).
+Using internal CA **only** for Eliza without certifi broke Eliza chains that need public roots.
+
+**Decision:**
+
+1. **`llm/tls.py`:** ``public_ca_bundle()`` → always **certifi** (ignores ``REQUESTS_CA_BUNDLE``).
+2. **`github/client.py`:** ``verify=public_ca_bundle()`` on every REST call.
+3. **`eliza_tls_verify()`:** merge **certifi + internal PEM** (``YDBDOC_ELIZA_CA_BUNDLE`` or
+   default ``/etc/ssl/certs/YandexInternalCA.pem``); cached under ``~/.cache/ydbdoc-review/``.
+4. **Do not** set ``REQUESTS_CA_BUNDLE`` to internal-only CA in shell profile.
+
+**Env (local):** ``YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem`` in
+``ydbdoc-review/.env``; Eliza OAuth in ``~/.zshrc`` (``ELIZA_OAUTH_TOKEN``).
+
+**Tests:** ``test_llm_tls.py``.
+
+### 6.100. CLI cooperative shutdown (2026-07-14)
+
+**Problem:** ``Ctrl+C`` did not stop long ``job`` runs — main blocked on
+``ThreadPoolExecutor`` / worker ``time.sleep()`` during 429 backoff.
+
+**Decision:** ``shutdown.py`` — ``SIGINT``/``SIGTERM`` → ``request_shutdown()``;
+``interruptible_sleep()`` in Eliza retry loop; cancel futures on ``KeyboardInterrupt`` in
+``translate_segments``; ``install_shutdown_handlers()`` in ``cli.py`` callback.
+
+**Kill fallback:** ``pkill -9 -f ydbdoc_review`` or ``pkill -9 -f 'python -m ydbdoc_review'``
+(from another terminal); patterns ``ydbdoc-review job`` do **not** match ``ydbdoc_review``.
+
+**Implementation:** ``shutdown.py``, ``cli.py``, ``llm/client.py``, ``translation/translator.py``.
+
+**Tests:** ``test_shutdown.py``.
+
+### 6.101. ``format_heuristic_location`` ``file_url`` crash (#46475, 2026-07-14)
+
+**Problem:** CI run [29336311628](https://github.com/ydb-platform/ydb/actions/runs/29336311628)
+on translation PR [#46475](https://github.com/ydb-platform/ydb/pull/46475) — translate +
+inline ``doc_verify`` completed (12 files pushed, critic fixes applied), then
+``build_full_report`` crashed:
+
+``AttributeError: 'ReportLinkContext' object has no attribute 'file_url'``
+
+Regression in ``203956a`` (§6.96): ``heuristic_context.format_heuristic_location`` called
+nonexistent ``link.file_url()`` instead of ``locations.format_line_ref()``.
+
+**Decision:** reuse ``format_line_ref()`` for GitHub blob deep links (same as critic items).
+
+**Mitigation without full re-translate:** after tag bump, label translation PR with
+**``doc_verify``** only — skips LLM translate, re-runs critic + heuristics + report
+(§6.73, ``ydbdoc-verify.yml``).
+
+**Tests:** ``test_format_heuristic_location_github_link`` in ``test_heuristic_context.py``.
 
 ---
 

@@ -8,7 +8,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
+from ydbdoc_review.llm.retry import is_rate_limit_error
+from ydbdoc_review.shutdown import check_shutdown
 from ydbdoc_review.llm.structured import parse_json_model
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
@@ -114,7 +116,7 @@ def _segment_location(seg: Segment) -> str:
     return " › ".join(seg.path) if seg.path else "(начало документа)"
 
 
-def _translate_batch_once(
+def _translate_batch_with_model(
     client: YandexLLMClient,
     batch: Batch,
     glossary: Glossary,
@@ -123,12 +125,12 @@ def _translate_batch_once(
     source_lang: str,
     target_lang: str,
     prompt_version: str,
+    model: str,
+    max_attempts: int,
     last_attempt: dict[str, str] | None = None,
 ) -> dict[str, str]:
     last_exc: LLMParseError | TranslationValidationError | None = None
-    model_chain = client.model_chain_for_role("translate")
-    primary_model = model_chain[0]
-    for attempt in range(1, _MAX_BATCH_ATTEMPTS + 1):
+    for attempt in range(1, max_attempts + 1):
         try:
             messages = build_translate_messages(
                 batch,
@@ -138,7 +140,7 @@ def _translate_batch_once(
                 target_lang=target_lang,
                 version=prompt_version,
             )
-            result = client.chat(messages, model=primary_model, role="translate")
+            result = client.chat(messages, model=model, role="translate")
             expected = {seg.id for seg in batch.segments}
             translations = parse_translate_response(
                 result.content, expected_ids=expected
@@ -151,57 +153,80 @@ def _translate_batch_once(
             return translations
         except (LLMParseError, TranslationValidationError) as exc:
             last_exc = exc
-            if attempt < _MAX_BATCH_ATTEMPTS:
+            if attempt < max_attempts:
                 logger.warning(
                     "Translate batch %s attempt %s/%s failed: %s",
                     batch.index,
                     attempt,
-                    _MAX_BATCH_ATTEMPTS,
-                    exc,
-                )
-    if (
-        len(model_chain) > 1
-        and isinstance(last_exc, TranslationValidationError)
-        and _PLACEHOLDER_MISMATCH_HINT in str(last_exc)
-    ):
-        for fallback_model in model_chain[1:]:
-            try:
-                logger.warning(
-                    "Translate batch %s retry with fallback model %s: %s",
-                    batch.index,
-                    fallback_model,
-                    last_exc,
-                )
-                messages = build_translate_messages(
-                    batch,
-                    glossary,
-                    file_path=file_path,
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    version=prompt_version,
-                )
-                result = client.chat(messages, model=fallback_model, role="translate")
-                expected = {seg.id for seg in batch.segments}
-                translations = parse_translate_response(
-                    result.content, expected_ids=expected
-                )
-                _apply_placeholder_realignment(batch, translations)
-                if last_attempt is not None:
-                    last_attempt.clear()
-                    last_attempt.update(translations)
-                validate_batch_translations(batch, translations)
-                return translations
-            except (LLMParseError, TranslationValidationError) as exc:
-                last_exc = exc
-            except Exception as exc:  # noqa: BLE001 - keep original validation error if fallback infra fails
-                logger.warning(
-                    "Translate batch %s fallback model %s failed: %s",
-                    batch.index,
-                    fallback_model,
+                    max_attempts,
                     exc,
                 )
     assert last_exc is not None
     raise last_exc
+
+
+def _translate_batch_once(
+    client: YandexLLMClient,
+    batch: Batch,
+    glossary: Glossary,
+    *,
+    file_path: str,
+    source_lang: str,
+    target_lang: str,
+    prompt_version: str,
+    last_attempt: dict[str, str] | None = None,
+) -> dict[str, str]:
+    model_chain = client.model_chain_for_role("translate")
+    last_validation_exc: LLMParseError | TranslationValidationError | None = None
+    last_infra_exc: LLMRetryExhaustedError | None = None
+
+    for model_idx, model in enumerate(model_chain):
+        max_attempts = _MAX_BATCH_ATTEMPTS if model_idx == 0 else 1
+        try:
+            return _translate_batch_with_model(
+                client,
+                batch,
+                glossary,
+                file_path=file_path,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                prompt_version=prompt_version,
+                model=model,
+                max_attempts=max_attempts,
+                last_attempt=last_attempt,
+            )
+        except LLMRetryExhaustedError as exc:
+            last_infra_exc = exc
+            if model_idx + 1 < len(model_chain) and is_rate_limit_error(exc):
+                logger.warning(
+                    "Translate batch %s model %s rate-limited, trying fallback %s: %s",
+                    batch.index,
+                    model,
+                    model_chain[model_idx + 1],
+                    exc,
+                )
+                continue
+            raise
+        except (LLMParseError, TranslationValidationError) as exc:
+            last_validation_exc = exc
+            if (
+                model_idx + 1 < len(model_chain)
+                and _PLACEHOLDER_MISMATCH_HINT in str(exc)
+            ):
+                logger.warning(
+                    "Translate batch %s retry with fallback model %s: %s",
+                    batch.index,
+                    model_chain[model_idx + 1],
+                    exc,
+                )
+                continue
+            raise
+
+    if last_validation_exc is not None:
+        raise last_validation_exc
+    if last_infra_exc is not None:
+        raise last_infra_exc
+    raise RuntimeError("translate batch finished without result or error")
 
 
 def _record_manual_action(
@@ -409,13 +434,22 @@ def translate_segments(
         )
 
     if max_parallel_batches == 1 or len(batches) == 1:
-        batch_results = [_run_batch(b) for b in batches]
+        batch_results = []
+        for b in batches:
+            check_shutdown()
+            batch_results.append(_run_batch(b))
     else:
         results_by_index: dict[int, dict[str, str]] = {}
         with ThreadPoolExecutor(max_workers=max_parallel_batches) as pool:
             futures = {pool.submit(_run_batch, b): i for i, b in enumerate(batches)}
-            for fut in as_completed(futures):
-                results_by_index[futures[fut]] = fut.result()
+            try:
+                for fut in as_completed(futures):
+                    results_by_index[futures[fut]] = fut.result()
+            except KeyboardInterrupt:
+                for fut in futures:
+                    fut.cancel()
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
         batch_results = [results_by_index[i] for i in range(len(batches))]
 
     for batch, batch_trans in zip(batches, batch_results, strict=True):

@@ -63,9 +63,10 @@ git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
 # ydb: delete ydbdoc-review/pr-{N} branch, re-add doc_translate on source PR
 ```
 
-As of 2026-07-14, **`v0.1.0` → `55ba789`** — §22 planner + step-3 scope fix,
-harness import, Eliza hardening, glossary MD037 postprocess. First rollout incident
-and re-run playbook: **09-navigation-scope** §22.8, §22.10.
+As of 2026-07-14, **`v0.1.0` → `203956a`** — §22 planner + step-3 scope fix,
+harness import, Eliza hardening, glossary MD037 postprocess, report UX (§6.96),
+text-fence JSON (§6.97). WIP (not yet tagged): §6.98–§6.100 (429 fallback, TLS split, shutdown).
+First rollout incident and re-run playbook: **09-navigation-scope** §22.8, §22.10–§22.11.
 
 ydb workflow checks out the action at `@v0.1.0` (or `@v0.2.0` for schedulers);
 the runner builds a fresh image from that tag's `Dockerfile`.
@@ -78,7 +79,7 @@ git tag -f v0.2.0 HEAD && git push -f origin v0.2.0
 
 Parent reaction builds `env` for the child — **secrets only via env**, not CLI.
 **TLS:** mount internal CA PEM in the container and set `YDBDOC_ELIZA_CA_BUNDLE`
-(or `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE`); without it Eliza calls fail with
+(merged with certifi in code — §6.99); without it Eliza calls fail with
 `SSLError` (see **06-llm-config** §13.6.4).
 
 | Env var | Purpose |
@@ -88,7 +89,7 @@ Parent reaction builds `env` for the child — **secrets only via env**, not CLI
 | `ELIZA_OAUTH_TOKEN` | OAuth token (Secret option → child env only) |
 | `YDBDOC_MODEL_TRANSLATE` | Internal model id for translate |
 | `YDBDOC_MODEL_CHECK` | Internal model id for critic |
-| `YDBDOC_ELIZA_CA_BUNDLE` | PEM path for internal CA (Eliza TLS); or set `REQUESTS_CA_BUNDLE` |
+| `YDBDOC_ELIZA_CA_BUNDLE` | Internal PEM **merged with certifi** for Eliza only (§6.99) — **not** `REQUESTS_CA_BUNDLE` globally |
 | `GITHUB_TOKEN` | GitHub API for PR/branch/comments |
 | `YDBDOC_REPO_PATH` | Checkout path inside container |
 
@@ -113,15 +114,75 @@ See **06-llm-config** §13.6 for full contract.
 | `build-docs` `YFM003 unreachable-link` | Page linked but not in toc (§6.86) | Indented `href:` parse + re-run `doc_translate` |
 | `python:3.12-slim` / ECR timeout on build | Registry unreachable from runner | Retry; or run `docker-publish` and rely on GHCR fallback |
 | Action exits 0 but no report on translation PR | Fixed in §6.48 — update `@v0.1.0` | Tag must include `_safe_post_issue_comment` + report-first order |
+| CI red after translate OK; log `AttributeError: file_url` | §6.101 regression in report builder | Tag bump; re-run **`doc_verify`** label on translation PR (no re-translate) |
 | `trigger-translation-ci` skipped | `ydbdoc-review` job failed (exit 1) | Same as above; see **07-pipeline** §16.7 |
 | GHCR pull 404 on fallback | Image never published for that ref | Run `docker-publish` workflow_dispatch for current tag |
-| Eliza `SSLError` / cert verify failed | Internal CA not in runtime | Mount PEM; set `YDBDOC_ELIZA_CA_BUNDLE` or `REQUESTS_CA_BUNDLE` (§13.6.4). Client fails fast — no 3× retry |
+| Eliza `SSLError` / cert verify failed | Internal CA not in Eliza merged bundle | Set `YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem` in `.env` (§6.99). Do **not** use `REQUESTS_CA_BUNDLE` globally |
+| GitHub `SSLError` on `api.github.com` after CA change | `REQUESTS_CA_BUNDLE` set to internal-only PEM | Remove from `~/.zshrc`; GitHub client uses certifi explicitly (§6.99) |
+| Eliza `HTTP 429 overloaded` | Model pool saturated | `YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b`; §6.98 fast failover; `YDBDOC_LLM_CONCURRENCY_BATCHES_PER_FILE=1` |
+| Local job used Yandex Cloud not Eliza | Agent/non-login shell skipped `~/.zshrc`; `.env` had no `YDBDOC_MODEL_PROVIDER=eliza` | `YDBDOC_MODEL_PROVIDER=eliza` in `.env` or `zsh -lic '…'`; tokens in `~/.zshrc` |
+| `Ctrl+C` / `pkill` does not stop `job` | Thread pool + long 429 sleep in workers | §6.100; `pkill -9 -f ydbdoc_review`; close terminal tab |
 | Translation PR **не создан** on source PR; ``docs/en/_includes/go/…`` in gaps | Mis-resolved shared ``docs/_includes/`` snippet (§6.80.5, #43997) | Tag with ``include_paths`` fix; re-run ``doc_translate`` |
 | Translation PR exists but 🔴 on ``glossary.md`` placeholder | ``doc_verify`` critic ``atom_map`` noise on multi-link terms (#46435/#46431) | Tag with ``placeholder_align`` U-slot fix; or merge after manual glossary pass |
 | «Автоперевод не работает» | Often push blocked (completeness) or 🔴 QA, not missing job | Check source PR comment: «translation PR не создан» vs translation PR # with report |
 
 `action_release_label()` in reports: `GITHUB_ACTION_REF` + `YDBDOC_GIT_SHA` from
 image build (local) or last GHCR publish (fallback).
+
+### 19.5. Local Eliza dry-run (`job --mode translate`)
+
+**Two providers — do not conflate:**
+
+| Where | LLM | Config source |
+|-------|-----|----------------|
+| **ydb GitHub Actions** `doc_translate` | Yandex Cloud FM | `YANDEX_CLOUD_*` secrets; default provider |
+| **Local / Reactor / Nirvana** | Eliza internal | `YDBDOC_MODEL_PROVIDER=eliza`, `ELIZA_OAUTH_TOKEN` |
+
+**Typical local setup:**
+
+- `~/.zshrc`: `ELIZA_OAUTH_TOKEN`, `YDBDOC_MODEL_PROVIDER=eliza`, `ELIZA_API_ROOT`,
+  `YDBDOC_MODEL_TRANSLATE=deepseek-v4-flash`, `YDBDOC_MODEL_CHECK=gpt-oss-120b`,
+  `GITHUB_TOKEN` (via `YDB_GH_TOKEN`).
+- `ydbdoc-review/.env`: `YDBDOC_MODEL_PROVIDER=eliza`,
+  `YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem`,
+  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b`,
+  `YDBDOC_LLM_CONCURRENCY_BATCHES_PER_FILE=1`.
+- **Do not** set `REQUESTS_CA_BUNDLE` to internal CA in zshrc (§6.99).
+
+**Checkout source PR in ydb clone:**
+
+```bash
+cd /path/to/ydb
+git fetch origin pull/{N}/head:pr-{N} && git checkout pr-{N}
+git fetch origin main
+```
+
+**Dry-run (no commit/push/comments):**
+
+```bash
+cd ydbdoc-review && source .venv/bin/activate
+python -m ydbdoc_review job \
+  --mode translate \
+  --repo ydb-platform/ydb \
+  --pr {N} \
+  --repo-path /path/to/ydb \
+  --merge-base-with origin/main \
+  --dry-run
+```
+
+**Agent / non-interactive shells** must load zshrc tokens:
+
+```bash
+zsh -lic 'cd ydbdoc-review && source .venv/bin/activate && python -m ydbdoc_review job ...'
+```
+
+**§22 validation PRs (2026-07-14):** one at a time — [#44457](https://github.com/ydb-platform/ydb/pull/44457)
+(re-trigger CI after tag bump), [#43010](https://github.com/ydb-platform/ydb/pull/43010)
+(local Eliza dry-run, scope ~13 doc paths), [#43997](https://github.com/ydb-platform/ydb/pull/43997) next.
+
+**Known manual QA on #44457 translation:** Wikipedia links in `execution_process.md`
+(DML/DDL ru-slug on `en.wikipedia.org`) — MediaWiki langlinks API cannot auto-fix;
+report shows line link (§6.96).
 
 ---
 

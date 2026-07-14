@@ -8,6 +8,7 @@ from urllib.parse import unquote
 
 from ydbdoc_review.reporting.locations import (
     ReportLinkContext,
+    format_line_ref,
     line_range_for_needle,
 )
 from ydbdoc_review.validation.link_locale import _WIKI_HREF_IN_TEXT
@@ -114,16 +115,10 @@ def format_heuristic_location(
     default_label: str,
 ) -> str:
     """Location column with optional deep link to the offending line."""
-    if line_range and link is not None:
-        start, end = line_range
-        if start == end:
-            line_ref = f"[строки {start}]({link.file_url(file_path, start)})"
-        else:
-            line_ref = (
-                f"[строки {start}–{end}]({link.file_url(file_path, start)})"
-            )
-        return f"{default_label} ({line_ref})"
     if line_range:
+        line_suffix = format_line_ref(line_range, file_path=file_path, link=link)
+        if line_suffix:
+            return f"{default_label}{line_suffix}"
         start, end = line_range
         if start == end:
             return f"{default_label} (строка {start})"

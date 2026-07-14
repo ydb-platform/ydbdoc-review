@@ -123,11 +123,11 @@ python scripts/fetch_nav_fixtures.py --all
 
 | Item | Decision |
 |------|----------|
-| Code on `main` | `d68812f` (Phase J planner) + follow-ups through `55ba789` |
-| Tag `v0.1.0` | **`55ba789`** (2026-07-14) — scope step-3 fix, harness import, Eliza hardening, MD037 postprocess |
+| Code on `main` | `d68812f` (Phase J planner) + follow-ups through `203956a` |
+| Tag `v0.1.0` | **`203956a`** (2026-07-14) — scope step-3 fix, harness import, Eliza hardening, MD037 postprocess, report UX (§6.96–§6.97); WIP §6.98–§6.100 pending tag |
 | Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
 | [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Translation PR is **green on old chain** — do **not** re-run for regression |
-| §22 validation | Step-by-step on source PRs after tag bump — start with [#44457](https://github.com/ydb-platform/ydb/pull/44457) |
+| §22 validation | Step-by-step: [#44457](https://github.com/ydb-platform/ydb/pull/44457) (CI re-run), [#43010](https://github.com/ydb-platform/ydb/pull/43010) (local Eliza), [#43997](https://github.com/ydb-platform/ydb/pull/43997) |
 
 **First §22 rollout (2026-07-14):** three auto-translate PRs were created before the
 step-3 fix landed; see §22.10. Re-run source PRs one at a time after `v0.1.0` moves.
@@ -179,6 +179,17 @@ Golden: `case_44457` expects ~3 md + 1 toc, not 35.
 
 **Operational rule:** debug one source PR at a time; do not batch-re-run all three until
 [#44457](https://github.com/ydb-platform/ydb/pull/44457) is green end-to-end.
+
+### 22.11. §22 validation progress (2026-07-14 afternoon)
+
+| Source PR | Mode | Scope (expected) | Status |
+|-----------|------|------------------|--------|
+| [#44457](https://github.com/ydb-platform/ydb/pull/44457) | ydb CI `doc_translate` re-run @ `203956a` | ~3 md + nav (`case_44457`) | Translation PR recreated after deleting `ydbdoc-review/pr-44457`; expect 🔴 only on Wikipedia links in `execution_process.md` |
+| [#43010](https://github.com/ydb-platform/ydb/pull/43010) | Local `job --dry-run` + Eliza | 13 doc + 8 nav | In progress — fix TLS (§6.99), then Eliza 429 (§6.98) |
+| [#43997](https://github.com/ydb-platform/ydb/pull/43997) | Pending | — | After #44457 + #43010 |
+
+**Wikipedia manual fix (#44457):** DML → `https://en.wikipedia.org/wiki/Data_manipulation_language`;
+DDL → `https://en.wikipedia.org/wiki/Data_definition_language`.
 
 ---
 

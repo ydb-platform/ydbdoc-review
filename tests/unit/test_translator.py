@@ -10,7 +10,7 @@ import pytest
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
 from ydbdoc_review.segmentation.chunker import Batch
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.errors import TranslationValidationError
@@ -212,3 +212,27 @@ def test_translate_batch_placeholder_mismatch_tries_fallback_model():
         client, batch, load_glossary(), file_path="docs/ru/x.md"
     )
     assert out == {"s1": "Use ⟦C1⟧ flag"}
+
+
+def test_translate_batch_rate_limit_tries_fallback_model():
+    seg = _segment("s1", "Привет")
+    batch = Batch(index=0, segments=[seg])
+    good = _json_response([{"id": "s1", "text": "Hello"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+
+    exhausted = LLMRetryExhaustedError(
+        "Eliza rate-limit (429) retries exhausted (primary): HTTP 429"
+    )
+
+    def chat_side_effect(*_args, **kwargs):
+        if kwargs.get("model") == "primary":
+            raise exhausted
+        return SimpleNamespace(content=good)
+
+    client.chat.side_effect = chat_side_effect
+    out = translate_batch(
+        client, batch, load_glossary(), file_path="docs/ru/x.md"
+    )
+    assert out == {"s1": "Hello"}
+    assert client.chat.call_count == 2

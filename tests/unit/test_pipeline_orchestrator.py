@@ -105,7 +105,7 @@ def test_run_pr_translation_isolates_validation_failure():
     content = PairContent(pair=pair, ru_text="⟦C1⟧ and ⟦L1⟧ here.\n")
     # Dropped placeholder — cannot realign (count mismatch).
     bad = _translate_json("s0001", "⟦C1⟧ only")
-    client = _mock_client([bad, bad, bad])
+    client = _mock_client([bad, bad, bad, bad, bad, bad])
     result = run_pr_translation(
         [content],
         client,

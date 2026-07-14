@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -79,7 +80,7 @@ def test_eliza_internal_retries_on_503():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
     ):
         post.side_effect = [
             _resp(503, {"error": "Service unavailable"}),
@@ -106,7 +107,7 @@ def test_eliza_non_retryable_4xx_fail_fast(status_code: int):
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
     ):
         post.return_value = _resp(
             status_code,
@@ -134,7 +135,7 @@ def test_eliza_internal_401_fails_fast_without_retry():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
     ):
         post.return_value = _resp(401, {"error": "Unauthorized"})
         with pytest.raises(LLMRequestError, match="401") as exc_info:
@@ -160,7 +161,7 @@ def test_eliza_internal_ssl_error_fails_fast_without_retry():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
     ):
         post.side_effect = requests.exceptions.SSLError(
             "certificate verify failed: self-signed certificate in certificate chain"
@@ -192,7 +193,7 @@ def test_eliza_connection_error_wrapping_ssl_fails_fast_without_retry():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
     ):
         post.side_effect = conn_exc
         with pytest.raises(LLMRequestError, match="TLS verification failed"):
@@ -215,10 +216,10 @@ def test_eliza_429_honors_retry_after_header():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
     ):
         post.side_effect = [
-            _resp(429, {"error": "overloaded"}, headers={"Retry-After": "5"}),
+            _resp(429, {"error": "rate limit exceeded"}, headers={"Retry-After": "5"}),
             _resp(200, {"choices": [{"message": {"content": "ok"}}]}),
         ]
         out = client.chat(
@@ -242,10 +243,10 @@ def test_eliza_429_rate_limit_retries_exhausted_with_clear_error():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep"),
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
     ):
         post.return_value = _resp(
-            429, {"error": "overloaded"}, headers={"Retry-After": "1"}
+            429, {"error": "rate limit exceeded"}, headers={"Retry-After": "1"}
         )
         with pytest.raises(LLMRetryExhaustedError, match="rate-limit \\(429\\)"):
             client.chat(
@@ -255,6 +256,53 @@ def test_eliza_429_rate_limit_retries_exhausted_with_clear_error():
             )
 
     assert post.call_count == 4
+
+
+def test_eliza_429_overloaded_fails_fast_on_single_model():
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
+    cfg.llm.retries.rate_limit.max_attempts = 6
+    cfg.llm.retries.rate_limit.backoff_initial_s = 0.0
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
+    )
+
+    with (
+        patch.object(client._http, "post") as post,
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
+    ):
+        post.return_value = _resp(
+            429, {"error": "model deepseek-v4-flash is overloaded"}
+        )
+        with pytest.raises(LLMRetryExhaustedError, match="rate-limit \\(429\\)"):
+            client.chat(
+                [{"role": "user", "content": "x"}],
+                role="translate",
+                model="deepseek-v4-flash",
+            )
+
+    assert post.call_count == 1
+
+
+def test_eliza_429_overloaded_switches_to_next_model_in_chain(monkeypatch):
+    monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
+    client = ElizaLLMClient(
+        api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
+    )
+
+    with patch.object(client._http, "post") as post:
+        post.side_effect = [
+            _resp(429, {"error": "model deepseek-v4-flash is overloaded"}),
+            _resp(200, {"choices": [{"message": {"content": "ok"}}]}),
+        ]
+        out = client.chat([{"role": "user", "content": "x"}], role="translate")
+
+    assert out.content == "ok"
+    assert post.call_count == 2
+    assert post.call_args_list[1][0][0].endswith(
+        "/raw/internal/gpt-oss-120b/v1/chat/completions"
+    )
 
 
 def test_eliza_translate_chain_ignores_yaml_fallbacks(monkeypatch):
@@ -275,7 +323,7 @@ def test_eliza_internal_503_retries_until_exhausted():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep"),
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
     ):
         post.return_value = _resp(503, {"error": "Service unavailable"})
         with pytest.raises(LLMRetryExhaustedError):
@@ -328,7 +376,7 @@ def test_eliza_internal_empty_choices_retries_without_index_error(response_body)
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep"),
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
     ):
         post.side_effect = [
             _resp(200, response_body),
@@ -354,7 +402,7 @@ def test_eliza_internal_missing_message_retries():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("time.sleep"),
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
     ):
         post.side_effect = [
             _resp(200, {"choices": [{"finish_reason": "stop"}]}),
@@ -377,46 +425,44 @@ def test_eliza_session_never_disables_tls_verification():
 
 def test_eliza_session_uses_ydbdoc_ca_bundle(tmp_path, monkeypatch):
     ca_path = tmp_path / "internal-ca.pem"
-    ca_path.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    ca_path.write_text(
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(ca_path))
 
     client = _client()
-    assert client._http.verify == str(ca_path)
-
-    with patch.object(client._http, "post") as post:
-        post.return_value = _resp(
-            200,
-            {"choices": [{"message": {"content": "ok"}}]},
-        )
-        client.chat(
-            [{"role": "user", "content": "x"}],
-            role="translate",
-            model="deepseek-v4-flash",
-        )
-
-    assert client._http.verify == str(ca_path)
-    assert post.call_args.kwargs.get("verify", client._http.verify) is not False
+    assert client._http.verify not in (True, False)
+    assert Path(str(client._http.verify)).is_file()
 
 
 def test_eliza_session_ydbdoc_ca_overrides_requests_env(tmp_path, monkeypatch):
     eliza_ca = tmp_path / "eliza-ca.pem"
-    eliza_ca.write_text("eliza", encoding="utf-8")
+    eliza_ca.write_text(
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        encoding="utf-8",
+    )
     other_ca = tmp_path / "other-ca.pem"
     other_ca.write_text("other", encoding="utf-8")
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(eliza_ca))
     monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(other_ca))
 
     client = _client()
-    assert client._http.verify == str(eliza_ca)
+    assert client._http.verify != str(other_ca)
+    assert client._http.verify != str(eliza_ca)
 
 
-def test_eliza_session_honors_requests_ca_bundle_via_default_verify(
+def test_eliza_session_ignores_requests_ca_bundle_for_eliza_only(
     tmp_path, monkeypatch
 ):
     ca_path = tmp_path / "requests-ca.pem"
     ca_path.write_text("bundle", encoding="utf-8")
     monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(ca_path))
     monkeypatch.delenv("YDBDOC_ELIZA_CA_BUNDLE", raising=False)
+    monkeypatch.setattr(
+        "ydbdoc_review.llm.tls._DEFAULT_INTERNAL_CA",
+        str(tmp_path / "missing-internal.pem"),
+    )
 
     client = _client()
     assert client._http.verify is True

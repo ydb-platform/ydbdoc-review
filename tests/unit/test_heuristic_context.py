@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.reporting.heuristic_context import heuristic_context_for_message
+from ydbdoc_review.reporting.heuristic_context import (
+    format_heuristic_location,
+    heuristic_context_for_message,
+)
+from ydbdoc_review.reporting.locations import ReportLinkContext
 
 
 def test_heuristic_context_finds_wikipedia_line_in_target():
@@ -28,3 +32,23 @@ def test_heuristic_context_finds_wikipedia_line_in_target():
     assert ctx.line_range == (3, 3)
     assert "DML" in (ctx.target_excerpt or "")
     assert "wikipedia" in (ctx.source_excerpt or "").lower()
+
+
+def test_format_heuristic_location_github_link():
+    link = ReportLinkContext(
+        github_repo="ydb-platform/ydb",
+        ref="ydbdoc-review/pr-44457",
+    )
+    loc = format_heuristic_location(
+        "link_locale: …",
+        file_path="ydb/docs/en/core/concepts/query_execution/execution_process.md",
+        link=link,
+        line_range=(42, 42),
+        default_label="Wikipedia slug",
+    )
+    assert loc.startswith("Wikipedia slug (")
+    assert "строки 42" in loc
+    assert (
+        "github.com/ydb-platform/ydb/blob/ydbdoc-review/pr-44457/"
+        "ydb/docs/en/core/concepts/query_execution/execution_process.md:42"
+    ) in loc

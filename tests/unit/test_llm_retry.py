@@ -10,10 +10,27 @@ from ydbdoc_review.config.loader import RetriesConfig
 from ydbdoc_review.llm.errors import LLMModelUnavailableError
 from ydbdoc_review.llm.retry import (
     compute_backoff_s,
+    is_eliza_model_overloaded,
     is_model_unavailable,
     is_requests_ssl_error,
     is_retryable,
 )
+
+
+def test_is_eliza_model_overloaded():
+    from ydbdoc_review.llm.errors import LLMRetryableRequestError
+
+    overloaded = LLMRetryableRequestError(
+        "Eliza HTTP 429: model deepseek-v4-flash is overloaded",
+        status_code=429,
+    )
+    generic = LLMRetryableRequestError(
+        "Eliza HTTP 429: rate limit exceeded",
+        status_code=429,
+    )
+    assert is_eliza_model_overloaded(overloaded)
+    assert not is_eliza_model_overloaded(generic)
+    assert not is_eliza_model_overloaded(RuntimeError("overloaded"))
 
 
 def test_compute_backoff_exponential():

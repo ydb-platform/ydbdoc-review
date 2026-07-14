@@ -289,8 +289,37 @@ in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env o
   - `GITHUB_TOKEN` in translate/verify job (`permissions`: `contents`,
     `pull-requests`, `issues` write). No `GITHUB_PUSH_TOKEN` unless push 403.
 - **Release tag:** `v0.1.0` is force-moved on `ydbdoc-review` `main` after fixes;
-  no need to wait for GHCR publish. Re-add `doc_translate` / `doc_verify` label in ydb.
+  no need to wait for GHCR publish. Re-add `doc_translate` on source PR **or**
+  **`doc_verify`** on translation PR when translate already landed (§6.101 #46475).
 - Optional: run **Publish action image** in `ydbdoc-review` when updating GHCR fallback.
+
+### 11.4. Local Eliza vs ydb CI (2026-07-14)
+
+| | **ydb CI** | **Local terminal / agent** |
+|---|------------|----------------------------|
+| Provider | `yandex_cloud` (default) | `eliza` when set in `.env` / `~/.zshrc` |
+| Secrets | `YANDEX_CLOUD_*` in ydb repo | `ELIZA_OAUTH_TOKEN`, `GITHUB_TOKEN` in shell |
+| TLS | Runner system CAs | `YDBDOC_ELIZA_CA_BUNDLE` → merged certifi+internal (§6.99) |
+| Entry | label `doc_translate` on source PR | `python -m ydbdoc_review job --mode translate …` |
+
+**`.env` (ydbdoc-review, gitignored)** — non-secret Eliza defaults:
+
+```bash
+YDBDOC_MODEL_PROVIDER=eliza
+ELIZA_API_ROOT=https://api.eliza.yandex.net
+YDBDOC_MODEL_TRANSLATE=deepseek-v4-flash
+YDBDOC_MODEL_CHECK=gpt-oss-120b
+YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem
+YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b
+YDBDOC_LLM_CONCURRENCY_BATCHES_PER_FILE=1
+```
+
+OAuth token and `GITHUB_TOKEN` stay in **`~/.zshrc`** (not committed). Interactive
+zsh loads them automatically; **Cursor agent** runs need `zsh -lic '…'` or tokens in `.env`.
+
+**Do not** set `REQUESTS_CA_BUNDLE` to internal CA only — breaks GitHub API (§6.99).
+
+Full playbook: **08-operations** §19.5.
 
 ### 11.3. Tooling
 
