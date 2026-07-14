@@ -137,6 +137,18 @@ Public API: `run_doc_translate`, `run_doc_verify` from `ydbdoc_review.github`.
 - [x] Example workflows updated for v2 env vars
 - [x] Unit tests: `test_cli.py` (run, verify, translate-file, extract, list-models)
 
+### Phase J — Unified navigation scope (TOC redesign) ✅ DONE
+
+See **09-navigation-scope** §22.
+
+- [x] **J.1** Design doc + roadmap (§22)
+- [x] **J.2** `navigation/scope_planner.py` — `plan_translation_scope`
+- [x] **J.3** Real PR fixtures (`scripts/fetch_nav_fixtures.py`, `tests/fixtures/nav_cases/`)
+- [x] **J.4** Golden tests: `test_nav_scope_planner.py` (cases #45181, #44820, #43530)
+- [x] **J.5** Wire planner into `workflow.py` (replace supplement chain)
+- [x] **J.6** Merge layer reads `TranslationScopePlan`; drop `extra_toc_hrefs` axis
+- [x] **J.7** `doc_verify` uses same planner; delete legacy supplement modules
+
 ---
 
 ---

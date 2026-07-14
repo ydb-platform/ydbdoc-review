@@ -89,8 +89,7 @@ src/ydbdoc_review/
 │   ├── translate_file.py          thin wrapper → harness (translate + verify)
 │   ├── qa.py                      round-trip gate, compose_file_verdict
 │   ├── pairs.py                   RU/EN md/includes + nav YAML pairing (§6.41)
-│   ├── include_supplement.py      transitive locale {% include %} pairs (§6.80)
-│   ├── navigation_supplement.py   parent + child toc pairs for translated pages (§6.71, §6.84)
+│   ├── navigation_merge.py        scoped toc/redirect merge + verify (§6.17+)
 │   ├── navigation_merge.py        scoped toc/redirect merge; absent-EN full mirror (§6.36, §6.85)
 │   ├── completeness.py            source PR mirror coverage gate (§6.32)
 │   ├── analyze.py                 pair plans — full re-translate (§6.30)

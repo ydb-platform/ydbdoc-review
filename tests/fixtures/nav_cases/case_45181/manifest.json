@@ -1,0 +1,65 @@
+{
+  "case_id": "case_45181",
+  "description": "Source PR #45181 — topic+d diagnostics; sqs-api via reference toc include",
+  "source_pr": 45181,
+  "head_sha": "f24ddcca8bf41942f2d7f390778545cc87ed63c1",
+  "base_ref": "main",
+  "pr_diff_ru": [
+    "ydb/docs/ru/core/devops/observability/diagnostics.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/topic.md"
+  ],
+  "files": {
+    "ydb/docs/ru/core/devops/observability/diagnostics.md": {
+      "ref": "f24ddcca8bf41942f2d7f390778545cc87ed63c1",
+      "path": "case_45181/ru/core/devops/observability/diagnostics.md"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/topic.md": {
+      "ref": "f24ddcca8bf41942f2d7f390778545cc87ed63c1",
+      "path": "case_45181/ru/core/reference/ydb-sdk/topic.md"
+    },
+    "ydb/docs/ru/core/devops/observability/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/devops/observability/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/ydb-sdk/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/ydb-sdk/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/reference/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/index.md": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/index.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/auth.md": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/auth.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/examples.md": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/examples.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/_includes/limitations.md": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/_includes/limitations.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/sqs-api/_includes/examples_prerequisites.md"
+    }
+  }
+}

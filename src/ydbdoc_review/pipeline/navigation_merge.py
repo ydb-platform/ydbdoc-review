@@ -22,6 +22,10 @@ from ydbdoc_review.navigation.toc import (
     toc_entry_paths,
     toc_translate_scope,
 )
+from ydbdoc_review.navigation.scope_planner import (
+    TranslationScopePlan,
+    planned_toc_extras_for_pair,
+)
 from ydbdoc_review.pipeline.pairs import NavigationPair
 from ydbdoc_review.pipeline.types import FileVerdict, NavigationRunResult
 from ydbdoc_review.translation.glossary import Glossary
@@ -107,7 +111,8 @@ def _resolve_toc_merge_scope(
     ru_base: str,
     ru_pr: str,
     en_main: str,
-    pair_extra: set[str],
+    pair_extra_hrefs: set[str],
+    pair_extra_includes: set[str] | None = None,
 ) -> tuple[TocTranslateScope, bool]:
     """Return merge scope and whether gap-fill is restricted to that scope.
 
@@ -116,22 +121,25 @@ def _resolve_toc_merge_scope(
     renaming legacy EN href aliases (§6.72).
     """
     ru_hrefs, ru_includes = toc_entry_paths(ru_pr)
+    planned_includes = pair_extra_includes or set()
     if en_toc_is_absent(en_main):
         return (
             TocTranslateScope(
                 frozenset(ru_hrefs),
                 frozenset(ru_includes),
-            ).with_extra_hrefs(pair_extra),
+            ).with_extra_hrefs(pair_extra_hrefs),
             False,
         )
 
-    scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
+    scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra_hrefs)
     if not pair.supplement_only:
+        if planned_includes:
+            scope = scope.with_extra_include_paths(planned_includes)
         return scope, True
 
     en_hrefs, en_includes = toc_entry_paths(en_main)
     missing_hrefs = ru_hrefs - en_hrefs
-    missing_includes = ru_includes - en_includes
+    missing_includes = (ru_includes - en_includes) | planned_includes
     return (
         scope.with_extra_hrefs(missing_hrefs).with_extra_include_paths(
             missing_includes
@@ -206,7 +214,8 @@ def merge_navigation_pair(
     client: YandexLLMClient,
     glossary: Glossary,
     config: Config,
-    extra_toc_hrefs: set[str],
+    scope_plan: TranslationScopePlan | None = None,
+    extra_toc_hrefs: set[str] | None = None,
 ) -> NavigationRunResult:
     """Produce merged EN navigation YAML for one RU/EN pair."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -248,13 +257,25 @@ def merge_navigation_pair(
     )
 
     if kind == "toc":
-        pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
+        if scope_plan is not None:
+            pair_extra_hrefs, pair_extra_includes = planned_toc_extras_for_pair(
+                scope_plan,
+                pair.ru_path,
+                ru_pr,
+                docs_root=config.paths.docs_root,
+            )
+        else:
+            pair_extra_hrefs = extra_toc_hrefs_for_pair(
+                ru_pr, extra_toc_hrefs or set()
+            )
+            pair_extra_includes = set()
         scope, restrict_gap_fill = _resolve_toc_merge_scope(
             pair,
             ru_base=ru_base,
             ru_pr=ru_pr,
             en_main=en_main,
-            pair_extra=pair_extra,
+            pair_extra_hrefs=pair_extra_hrefs,
+            pair_extra_includes=pair_extra_includes,
         )
         en_main_hrefs = {it["href"] for it in parse_toc_items(en_main) if it.get("href")}
         ru_base_hrefs = {it["href"] for it in parse_toc_items(ru_base) if it.get("href")}
@@ -327,7 +348,9 @@ def verify_navigation_pair(
     en_text: str,
     ru_base: str,
     en_main: str,
-    extra_toc_hrefs: set[str],
+    scope_plan: TranslationScopePlan | None = None,
+    extra_toc_hrefs: set[str] | None = None,
+    docs_root: str = "ydb/docs",
 ) -> NavigationRunResult:
     """Validate committed EN navigation YAML against RU PR scope (no LLM merge)."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -349,8 +372,24 @@ def verify_navigation_pair(
         )
 
     if kind == "toc":
-        pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs)
-        scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
+        if scope_plan is not None:
+            pair_extra_hrefs, pair_extra_includes = planned_toc_extras_for_pair(
+                scope_plan,
+                pair.ru_path,
+                ru_pr,
+                docs_root=docs_root,
+            )
+            scope, _restrict_gap_fill = _resolve_toc_merge_scope(
+                pair,
+                ru_base=ru_base,
+                ru_pr=ru_pr,
+                en_main=en_main,
+                pair_extra_hrefs=pair_extra_hrefs,
+                pair_extra_includes=pair_extra_includes,
+            )
+        else:
+            pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs or set())
+            scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
     else:
         scope = redirect_translate_scope(ru_base, ru_pr)
 
@@ -388,7 +427,9 @@ def run_navigation_verifies(
     repo_path: str,
     merge_base_with: str,
     ru_pr_by_path: dict[str, str],
+    scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
+    docs_root: str = "ydb/docs",
 ) -> list[NavigationRunResult]:
     """Validate navigation YAML pairs for ``doc_verify``."""
     hrefs = extra_toc_hrefs or set()
@@ -449,7 +490,9 @@ def run_navigation_verifies(
                 en_text=en_text,
                 ru_base=ru_base,
                 en_main=en_main,
-                extra_toc_hrefs=hrefs,
+                scope_plan=scope_plan,
+                extra_toc_hrefs=hrefs if scope_plan is None else None,
+                docs_root=docs_root,
             )
         )
     return results
@@ -463,10 +506,10 @@ def run_navigation_merges(
     client: YandexLLMClient,
     glossary: Glossary,
     config: Config,
+    scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
 ) -> list[NavigationRunResult]:
     """Merge all navigation YAML pairs changed in the source PR."""
-    hrefs = extra_toc_hrefs or set()
     results: list[NavigationRunResult] = []
     for pair in pairs:
         if not pair.ru_changed:
@@ -481,7 +524,8 @@ def run_navigation_merges(
                 client=client,
                 glossary=glossary,
                 config=config,
-                extra_toc_hrefs=hrefs,
+                scope_plan=scope_plan,
+                extra_toc_hrefs=extra_toc_hrefs,
             )
         )
     return results

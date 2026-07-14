@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 from ydbdoc_review.pipeline.navigation_merge import verify_navigation_pair
 from ydbdoc_review.pipeline.pairs import NavigationPair
 
@@ -68,3 +69,34 @@ def test_verify_navigation_pair_blocked_on_empty_toc():
     )
     assert result.verdict == "blocked"
     assert any("empty_toc" in w for w in result.warnings)
+
+
+def test_verify_navigation_pair_uses_scope_plan_for_toc_extras():
+    """J.7: verify scope matches translate when scope plan is provided."""
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/alter_table/toc_i.yaml",
+        en_path="ydb/docs/en/core/alter_table/toc_i.yaml",
+        en_changed=True,
+    )
+    scope_plan = TranslationScopePlan(
+        doc_ru_paths=frozenset(
+            {
+                "ydb/docs/ru/core/alter_table/index.md",
+                "ydb/docs/ru/core/alter_table/compact.md",
+            }
+        ),
+        doc_from_diff=frozenset({"ydb/docs/ru/core/alter_table/compact.md"}),
+        doc_from_main=frozenset({"ydb/docs/ru/core/alter_table/index.md"}),
+        nav_ru_paths=frozenset({"ydb/docs/ru/core/alter_table/toc_i.yaml"}),
+        nav_from_diff=frozenset(),
+        nav_from_main=frozenset({"ydb/docs/ru/core/alter_table/toc_i.yaml"}),
+    )
+    result = verify_navigation_pair(
+        pair,
+        ru_pr=RU_PR,
+        en_text=EN_OK,
+        ru_base=RU_BASE,
+        en_main=EN_MAIN,
+        scope_plan=scope_plan,
+    )
+    assert result.verdict == "ok"

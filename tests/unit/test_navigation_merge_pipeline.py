@@ -6,6 +6,7 @@ from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_for_pair,
     extra_toc_hrefs_from_md_targets,
@@ -283,4 +284,75 @@ def test_merge_navigation_pair_mirrors_absent_en_toc_from_ru():
     assert "toc_i.yaml" in result.target_text
     assert "Overview" in result.target_text
     assert result.target_text.strip() != "items:"
+
+
+def test_merge_navigation_pair_uses_scope_plan_for_toc_extras():
+    """J.6: scope plan replaces extra_toc_hrefs for translate merge."""
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/reference/sqs-api/toc_p.yaml",
+        en_path="ydb/docs/en/core/reference/sqs-api/toc_p.yaml",
+        ru_changed=True,
+        supplement_only=True,
+    )
+    scope_plan = TranslationScopePlan(
+        doc_ru_paths=frozenset(
+            {
+                "ydb/docs/ru/core/reference/sqs-api/index.md",
+                "ydb/docs/ru/core/reference/sqs-api/auth.md",
+            }
+        ),
+        doc_from_diff=frozenset(),
+        doc_from_main=frozenset(
+            {
+                "ydb/docs/ru/core/reference/sqs-api/index.md",
+                "ydb/docs/ru/core/reference/sqs-api/auth.md",
+            }
+        ),
+        nav_ru_paths=frozenset(
+            {
+                "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml",
+                "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml",
+            }
+        ),
+        nav_from_diff=frozenset(),
+        nav_from_main=frozenset(
+            {
+                "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml",
+                "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml",
+            }
+        ),
+    )
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=SQS_RU_TOC_P,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(SQS_RU_TOC_P, ""),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={"Обзор": "Overview"},
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+            scope_plan=scope_plan,
+        )
+
+    assert result.verdict == "ok"
+    assert result.target_text is not None
+    assert "index.md" in result.target_text
+    assert "toc_i.yaml" in result.target_text
+    assert "auth.md" not in result.target_text
 

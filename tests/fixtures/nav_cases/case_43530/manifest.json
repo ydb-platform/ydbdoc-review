@@ -1,0 +1,51 @@
+{
+  "case_id": "case_43530",
+  "description": "Source PR #43530 — OTel observability with explicit toc edits",
+  "source_pr": 43530,
+  "head_sha": "2e849cb25b73cace89e435b53ca172efca7cb215",
+  "base_ref": "main",
+  "pr_diff_ru": [
+    "ydb/docs/ru/core/recipes/ydb-sdk/debug.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/index.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml",
+    "ydb/docs/ru/core/reference/ydb-sdk/index.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/index.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/logging.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/opentelemetry.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/toc_p.yaml",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/metrics/opentelemetry.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/metrics/prometheus.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/metrics/toc_p.yaml",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/toc_p.yaml",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/tracing/jaeger.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/tracing/opentelemetry.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/tracing/toc_p.yaml",
+    "ydb/docs/ru/core/reference/ydb-sdk/toc_i.yaml"
+  ],
+  "files": {
+    "ydb/docs/ru/core/reference/ydb-sdk/toc_i.yaml": {
+      "ref": "2e849cb25b73cace89e435b53ca172efca7cb215",
+      "path": "case_43530/ru/core/reference/ydb-sdk/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/toc_p.yaml": {
+      "ref": "2e849cb25b73cace89e435b53ca172efca7cb215",
+      "path": "case_43530/ru/core/reference/ydb-sdk/observability/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/toc_p.yaml": {
+      "ref": "2e849cb25b73cace89e435b53ca172efca7cb215",
+      "path": "case_43530/ru/core/reference/ydb-sdk/observability/logging/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/metrics/toc_p.yaml": {
+      "ref": "2e849cb25b73cace89e435b53ca172efca7cb215",
+      "path": "case_43530/ru/core/reference/ydb-sdk/observability/metrics/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/tracing/toc_p.yaml": {
+      "ref": "2e849cb25b73cace89e435b53ca172efca7cb215",
+      "path": "case_43530/ru/core/reference/ydb-sdk/observability/tracing/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": {
+      "ref": "2e849cb25b73cace89e435b53ca172efca7cb215",
+      "path": "case_43530/ru/core/recipes/ydb-sdk/toc_i.yaml"
+    }
+  }
+}

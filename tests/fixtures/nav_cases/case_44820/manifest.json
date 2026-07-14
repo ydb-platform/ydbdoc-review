@@ -1,0 +1,49 @@
+{
+  "case_id": "case_44820",
+  "description": "Source PR #44820 — SQS API docs added in RU diff",
+  "source_pr": 44820,
+  "head_sha": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+  "base_ref": "main",
+  "pr_diff_ru": [
+    "ydb/docs/ru/core/reference/sqs-api/auth.md",
+    "ydb/docs/ru/core/reference/sqs-api/examples.md",
+    "ydb/docs/ru/core/reference/sqs-api/index.md",
+    "ydb/docs/ru/core/reference/sqs-api/_includes/limitations.md",
+    "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md",
+    "ydb/docs/ru/core/reference/toc_p.yaml"
+  ],
+  "files": {
+    "ydb/docs/ru/core/reference/toc_p.yaml": {
+      "ref": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+      "path": "case_44820/ru/core/reference/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_44820/ru/core/reference/sqs-api/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_44820/ru/core/reference/sqs-api/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/index.md": {
+      "ref": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+      "path": "case_44820/ru/core/reference/sqs-api/index.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/auth.md": {
+      "ref": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+      "path": "case_44820/ru/core/reference/sqs-api/auth.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/examples.md": {
+      "ref": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+      "path": "case_44820/ru/core/reference/sqs-api/examples.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/_includes/limitations.md": {
+      "ref": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+      "path": "case_44820/ru/core/reference/sqs-api/_includes/limitations.md"
+    },
+    "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md": {
+      "ref": "7d3f9db51edc93b661c379ca9059512deda63a9f",
+      "path": "case_44820/ru/core/reference/sqs-api/_includes/examples_prerequisites.md"
+    }
+  }
+}

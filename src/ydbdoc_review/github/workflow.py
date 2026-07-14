@@ -45,14 +45,20 @@ from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.pipeline.analyze import PairContent
-from ydbdoc_review.pipeline.completeness import completeness_gaps
-from ydbdoc_review.pipeline.include_supplement import supplement_include_pairs
+from ydbdoc_review.navigation.scope_planner import (
+    doc_pairs_from_plan,
+    make_repo_scope_readers,
+    merge_navigation_pair_lists,
+    navigation_pairs_from_plan,
+    plan_translation_scope,
+    synthetic_changes_from_plan,
+)
+from ydbdoc_review.pipeline.completeness import bilingual_en_mirrors, completeness_gaps
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
     run_navigation_verifies,
 )
-from ydbdoc_review.pipeline.navigation_supplement import supplement_navigation_pairs
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import (
     DocPair,
@@ -60,7 +66,6 @@ from ydbdoc_review.pipeline.pairs import (
     build_verify_navigation_pairs,
     filter_translation_pr_verify_scope,
 )
-from ydbdoc_review.pipeline.toc_href_supplement import supplement_toc_href_pairs
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
@@ -162,37 +167,6 @@ def _safe_post_issue_comment(
         return None
 
 
-def _translate_additional_pairs(
-    pr_result: PRTranslationResult,
-    new_pairs: list[DocPair],
-    *,
-    repo_path: str,
-    merge_base_with: str,
-    client,
-    glossary: Glossary,
-    cfg: Config,
-) -> set[str]:
-    """Run translation for pairs added after the initial markdown pass."""
-    if not new_pairs:
-        return set()
-    contents = load_pair_contents(
-        repo_path, new_pairs, merge_base_with=merge_base_with
-    )
-    extra = run_pr_translation(
-        contents,
-        client,
-        glossary,
-        config=cfg,
-        use_analyze_llm=False,
-    )
-    pr_result.pair_results.extend(extra.pair_results)
-    return {
-        r.plan.target_path
-        for r in extra.pair_results
-        if r.target_text is not None and not r.error
-    }
-
-
 def _apply_results_to_disk(
     repo_path: str, result: PRTranslationResult, *, dry_run: bool
 ) -> TouchedPaths:
@@ -264,18 +238,37 @@ def run_doc_translate(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
-    pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
-    seed_ru_paths = {p.ru_path for p in pairs}
-    pairs, include_changes = supplement_include_pairs(
-        pairs,
-        repo_path=repo_path,
-        merge_base_with=merge_base_with,
-        docs_root=cfg.paths.docs_root,
-        seed_ru_paths=seed_ru_paths,
+    docs_root = cfg.paths.docs_root
+    read_ru, read_en_base = make_repo_scope_readers(repo_path, merge_base_with)
+    scope_plan = plan_translation_scope(
+        changes,
+        read_ru=read_ru,
+        read_en_base=read_en_base,
+        docs_root=docs_root,
     )
-    if include_changes:
-        changes = merge_pr_file_changes(changes, include_changes)
-    nav_pairs = build_navigation_pairs(changes, docs_root=cfg.paths.docs_root)
+    logger.info(
+        "Scope plan for PR #%s: %s doc paths (%s diff + %s main), %s nav paths",
+        pr_number,
+        len(scope_plan.doc_ru_paths),
+        len(scope_plan.doc_from_diff),
+        len(scope_plan.doc_from_main),
+        len(scope_plan.nav_ru_paths),
+    )
+    bilingual_skip = frozenset(
+        bilingual_en_mirrors(changes, docs_root=docs_root)
+    )
+    pairs = doc_pairs_from_plan(
+        scope_plan,
+        docs_root=docs_root,
+        skip_en_paths=bilingual_skip,
+    )
+    nav_pairs = merge_navigation_pair_lists(
+        navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
+        build_navigation_pairs(changes, docs_root=docs_root),
+    )
+    changes = merge_pr_file_changes(
+        changes, synthetic_changes_from_plan(scope_plan)
+    )
     job = DocJobResult(
         mode="doc_translate",
         pr_number=pr_number,
@@ -309,45 +302,6 @@ def run_doc_translate(
         for r in pr_result.pair_results
         if r.target_text is not None and not r.error
     }
-    if md_en_paths:
-        nav_pairs = supplement_navigation_pairs(
-            nav_pairs,
-            md_en_paths,
-            repo_path=repo_path,
-            merge_base_with=merge_base_with,
-            docs_root=cfg.paths.docs_root,
-        )
-
-    if nav_pairs:
-        paired_ru = {p.ru_path for p in pairs}
-        pairs, toc_href_changes = supplement_toc_href_pairs(
-            pairs,
-            nav_pairs,
-            repo_path=repo_path,
-            merge_base_with=merge_base_with,
-            docs_root=cfg.paths.docs_root,
-        )
-        pairs, include_changes_after_toc = supplement_include_pairs(
-            pairs,
-            repo_path=repo_path,
-            merge_base_with=merge_base_with,
-            docs_root=cfg.paths.docs_root,
-            seed_ru_paths=seed_ru_paths,
-        )
-        if toc_href_changes:
-            changes = merge_pr_file_changes(changes, toc_href_changes)
-        if include_changes_after_toc:
-            changes = merge_pr_file_changes(changes, include_changes_after_toc)
-        new_pairs = [p for p in pairs if p.ru_path not in paired_ru]
-        md_en_paths |= _translate_additional_pairs(
-            pr_result,
-            new_pairs,
-            repo_path=repo_path,
-            merge_base_with=merge_base_with,
-            client=client,
-            glossary=glossary,
-            cfg=cfg,
-        )
 
     if nav_pairs:
         pr_result.navigation_results = run_navigation_merges(
@@ -357,7 +311,7 @@ def run_doc_translate(
             client=client,
             glossary=glossary,
             config=cfg,
-            extra_toc_hrefs=extra_toc_hrefs_from_md_targets(md_en_paths),
+            scope_plan=scope_plan,
         )
 
     pr_result.completeness_gaps = completeness_gaps(
@@ -544,6 +498,19 @@ def run_doc_verify(
         docs_root=cfg.paths.docs_root,
         source_changes=source_changes,
     )
+    scope_plan = None
+    if source_changes:
+        read_ru, read_en_base = make_repo_scope_readers(repo_path, merge_base_with)
+        scope_plan = plan_translation_scope(
+            source_changes,
+            read_ru=read_ru,
+            read_en_base=read_en_base,
+            docs_root=cfg.paths.docs_root,
+        )
+        nav_pairs = merge_navigation_pair_lists(
+            navigation_pairs_from_plan(scope_plan, docs_root=cfg.paths.docs_root),
+            nav_pairs,
+        )
     job = DocJobResult(
         mode="doc_verify",
         pr_number=pr_number,
@@ -597,14 +564,6 @@ def run_doc_verify(
         pr_result = PRTranslationResult()
 
     md_en_paths = {p.en_path for p in pairs if not p.en_deleted}
-    if md_en_paths and not translation_pr:
-        nav_pairs = supplement_navigation_pairs(
-            nav_pairs,
-            md_en_paths,
-            repo_path=repo_path,
-            merge_base_with=merge_base_with,
-            docs_root=cfg.paths.docs_root,
-        )
 
     if nav_pairs:
         if source_pr is not None:
@@ -632,7 +591,13 @@ def run_doc_verify(
             repo_path=repo_path,
             merge_base_with=merge_base_with,
             ru_pr_by_path=ru_nav_texts,
-            extra_toc_hrefs=extra_toc_hrefs_from_md_targets(md_en_paths),
+            scope_plan=scope_plan,
+            extra_toc_hrefs=(
+                None
+                if scope_plan is not None
+                else extra_toc_hrefs_from_md_targets(md_en_paths)
+            ),
+            docs_root=cfg.paths.docs_root,
         )
 
     apply_include_target_checks(
