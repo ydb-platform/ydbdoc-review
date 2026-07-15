@@ -230,6 +230,14 @@ def format_wikipedia_href(wiki_lang: str, title: str, fragment: str = "") -> str
     return href + fragment
 
 
+# Offline fallbacks when MediaWiki/Wikidata are unreachable (CI TLS flakiness).
+# Keys: (source_wiki_lang, title) → English article title.
+_OFFLINE_EN_TITLES: dict[tuple[str, str], str] = {
+    ("ru", "Язык определения данных"): "Data definition language",
+    ("ru", "Язык манипулирования данными"): "Data manipulation language",
+}
+
+
 def resolve_wikipedia_href(
     href: str,
     *,
@@ -256,6 +264,8 @@ def resolve_wikipedia_href(
 
     resolver = resolver or get_wikipedia_resolver()
     resolved = resolver.resolve_title(lookup_lang, title, wiki_target)
+    if resolved is None and wiki_target == "en":
+        resolved = _OFFLINE_EN_TITLES.get((lookup_lang, title))
     if resolved is None:
         return href
     return format_wikipedia_href(wiki_target, resolved, fragment)

@@ -202,14 +202,9 @@ def source_pr_merged(data: dict) -> bool:
     return bool(data.get("merged"))
 
 
-def source_pr_content_ref_from_pull(
+def _source_pr_head_ref(
     data: dict, owner: str, repo: str, source_pr: int
 ) -> tuple[str, str, str]:
-    """Resolve RU git ref from an already-fetched pull request payload."""
-    if source_pr_merged(data):
-        merge_sha = str(data.get("merge_commit_sha") or "")
-        if merge_sha:
-            return owner, repo, merge_sha
     head = data.get("head") or {}
     head_repo = head.get("repo") or {}
     head_owner = head_repo.get("owner") or {}
@@ -221,16 +216,36 @@ def source_pr_content_ref_from_pull(
     return ru_owner, ru_repo, sha
 
 
+def source_pr_content_ref_from_pull(
+    data: dict, owner: str, repo: str, source_pr: int
+) -> tuple[str, str, str]:
+    """Primary RU git ref: source PR **head** (fork head when applicable, §6.31).
+
+    ``doc_translate`` checks out the labeled PR head; verify must start from the
+    same tree. For merged PRs, ``load_verify_pair_contents`` also loads the merge
+    commit as an alternate candidate (§6.109).
+    """
+    return _source_pr_head_ref(data, owner, repo, source_pr)
+
+
+def source_pr_merge_ref_from_pull(
+    data: dict, owner: str, repo: str
+) -> tuple[str, str, str] | None:
+    """Upstream merge-commit ref for a merged source PR, or ``None``."""
+    if not source_pr_merged(data):
+        return None
+    merge_sha = str(data.get("merge_commit_sha") or "")
+    if not merge_sha:
+        return None
+    return owner, repo, merge_sha
+
+
 def source_pr_content_ref(
     gh: GitHubClient, owner: str, repo: str, source_pr: int
 ) -> tuple[str, str, str]:
-    """Git ref for RU files — same tree ``doc_translate`` uses.
+    """Git ref for RU files — source PR head (same tree ``doc_translate`` uses).
 
-    Open PR: source PR **head** (fork head when applicable, §6.31).
-    Merged PR: **merge commit** on upstream — ``doc_translate`` bases the
-    translation branch on ``base_ref`` (§6.23), not the deleted feature head.
-
-    Returns ``(repo_owner, repo_name, ref_sha)``.
+    Returns ``(repo_owner, repo_name, head_sha)``.
     """
     return source_pr_content_ref_from_pull(
         gh.get_pull(owner, repo, source_pr), owner, repo, source_pr
@@ -253,53 +268,44 @@ def _fence_body_copy_warnings(source_ru: str, en_text: str) -> int:
 def pick_verify_ru_text(
     *,
     en_text: str | None,
-    ru_api: str | None,
-    ru_local: str | None,
+    ru_api: str | None = None,
+    ru_local: str | None = None,
+    ru_merge: str | None = None,
     source_pr_merged: bool = False,
 ) -> str | None:
-    """Choose RU authority for ``doc_verify`` segment alignment (§6.70, §6.106).
+    """Choose RU authority for ``doc_verify`` segment alignment (§6.70/§6.106/§6.109).
 
-    Prefer source PR head (§6.31) when segment counts match. When EN was fixed on
-    the translation branch to match newer RU on checkout (e.g. source PR merged,
-    manual alignment to ``main``), use local RU if only it matches EN segment count.
+    Candidates (in preference order for ties): ``ru_api`` (PR head), ``ru_merge``
+    (merge commit when present), ``ru_local`` (translation-branch checkout).
 
-    When API and local RU both match EN segment count but differ in fenced code
-    (squash-merge drift vs ``main``), prefer the variant with fewer
-    ``fence_body_copy`` warnings; tie-break merged PRs toward checkout RU (§6.106).
+    1. Prefer candidates whose segment count matches EN.
+    2. Among matches that differ in content, pick fewer ``fence_body_copy``
+       warnings (§6.106).
+    3. Remaining ties: prefer later candidates when ``source_pr_merged`` (checkout /
+       merge closer to current ``main``), else keep earlier (head).
     """
-    if ru_api is None and ru_local is None:
+    candidates: list[str] = []
+    for text in (ru_api, ru_merge, ru_local):
+        if isinstance(text, str) and text not in candidates:
+            candidates.append(text)
+    if not candidates:
         return None
     if en_text is None:
-        return ru_api if ru_api is not None else ru_local
+        return candidates[0]
 
     en_n = _markdown_segment_count(en_text)
     if en_n is None:
-        return ru_api if ru_api is not None else ru_local
+        return candidates[0]
 
-    api_n = _markdown_segment_count(ru_api)
-    local_n = _markdown_segment_count(ru_local)
+    matching = [c for c in candidates if _markdown_segment_count(c) == en_n]
+    if not matching:
+        return candidates[0]
+    if len(matching) == 1:
+        return matching[0]
 
-    if (
-        api_n == en_n
-        and local_n == en_n
-        and ru_api is not None
-        and ru_local is not None
-        and ru_api != ru_local
-    ):
-        api_fence = _fence_body_copy_warnings(ru_api, en_text)
-        local_fence = _fence_body_copy_warnings(ru_local, en_text)
-        if local_fence < api_fence:
-            return ru_local
-        if api_fence < local_fence:
-            return ru_api
-        if source_pr_merged:
-            return ru_local
-
-    if api_n == en_n and ru_api is not None:
-        return ru_api
-    if local_n == en_n and ru_local is not None:
-        return ru_local
-    return ru_api if ru_api is not None else ru_local
+    scored = [(_fence_body_copy_warnings(c, en_text), i, c) for i, c in enumerate(matching)]
+    scored.sort(key=lambda row: (row[0], -row[1] if source_pr_merged else row[1]))
+    return scored[0][2]
 
 
 def _toc_labels(yaml_text: str) -> set[str]:
@@ -349,19 +355,20 @@ def load_verify_pair_contents(
     repo: str,
     source_pr: int,
 ) -> list[PairContent]:
-    """Load EN from translation PR checkout; RU from source PR ref or checkout.
+    """Load EN from translation PR checkout; RU from PR head / merge / checkout.
 
     Translation branches commit EN only; checkout RU is often the branch base
-    (``main``). Open source PR: RU from **head** (§6.31). Merged source PR:
-    RU from **merge commit** (§6.106) — same tree ``doc_translate`` uses when
-    basing on ``base_ref`` (§6.23). §6.70 still picks checkout RU when segment
-    counts differ; §6.106 picks checkout when fence bodies match EN better.
+    (``main``). Always fetch source PR **head** (§6.31 — same tree as
+    ``doc_translate`` checkout). For merged PRs also fetch **merge commit** as
+    an alternate. ``pick_verify_ru_text`` chooses among head / merge / local by
+    EN segment parity and fence-body fit (§6.70 / §6.106 / §6.109).
     """
     pull_data = gh.get_pull(owner, repo, source_pr)
     merged = source_pr_merged(pull_data)
     ru_owner, ru_repo, ru_ref = source_pr_content_ref_from_pull(
         pull_data, owner, repo, source_pr
     )
+    merge_ref = source_pr_merge_ref_from_pull(pull_data, owner, repo)
     contents: list[PairContent] = []
     for pair in pairs:
         en_text = read_text(repo_path, pair.en_path)
@@ -369,8 +376,13 @@ def load_verify_pair_contents(
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
 
         ru_api: str | None = None
+        ru_merge: str | None = None
         if not pair.ru_deleted:
             ru_api = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
+            if merge_ref is not None:
+                m_owner, m_repo, m_sha = merge_ref
+                if (m_owner, m_repo, m_sha) != (ru_owner, ru_repo, ru_ref):
+                    ru_merge = gh.get_file_text(m_owner, m_repo, pair.ru_path, m_sha)
 
         ru_local: str | None = None
         if not pair.ru_deleted:
@@ -381,6 +393,7 @@ def load_verify_pair_contents(
         ru_text = pick_verify_ru_text(
             en_text=en_text,
             ru_api=ru_api,
+            ru_merge=ru_merge,
             ru_local=ru_local,
             source_pr_merged=merged,
         )

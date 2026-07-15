@@ -35,20 +35,21 @@ def test_source_pr_content_ref_fork_head():
     assert ref == "abc123"
 
 
-def test_source_pr_content_ref_merged_uses_merge_commit():
+def test_source_pr_content_ref_merged_keeps_head():
+    """§6.109: primary ref is PR head (doc_translate checkout), not merge commit."""
     gh = MagicMock()
     gh.get_pull.return_value = {
         "merged": True,
         "merge_commit_sha": "merge999",
         "head": {
-            "sha": "stale-head",
-            "repo": {"owner": {"login": "ydb-platform"}, "name": "ydb"},
+            "sha": "pr-head",
+            "repo": {"owner": {"login": "contributor"}, "name": "ydb"},
         },
     }
-    owner, repo, ref = source_pr_content_ref(gh, "ydb-platform", "ydb", 43997)
-    assert owner == "ydb-platform"
+    owner, repo, ref = source_pr_content_ref(gh, "ydb-platform", "ydb", 44457)
+    assert owner == "contributor"
     assert repo == "ydb"
-    assert ref == "merge999"
+    assert ref == "pr-head"
 
 
 def test_source_pr_content_ref_from_pull_merged_without_merge_sha_falls_back_to_head():
@@ -106,22 +107,36 @@ def test_load_verify_pair_contents_ru_from_api(tmp_path):
     )
 
 
-def test_load_verify_pair_contents_merged_fetches_merge_commit(tmp_path):
+def test_load_verify_pair_contents_merged_prefers_head_when_segments_match(tmp_path):
+    """Regression #46674: merge commit grew vs translate-from-head EN."""
     repo = tmp_path / "repo"
     en_dir = repo / "ydb" / "docs" / "en"
     en_dir.mkdir(parents=True)
-    (en_dir / "a.md").write_text("EN body\n", encoding="utf-8")
+    en_body = "# Title\n\nPara EN.\n"
+    (en_dir / "a.md").write_text(en_body, encoding="utf-8")
+
+    ru_head = "# Title\n\nPara.\n"
+    ru_merge = "# Title\n\nPara.\n\n### Extra\n\nMore.\n"
 
     gh = MagicMock()
     gh.get_pull.return_value = {
         "merged": True,
         "merge_commit_sha": "merge-sha",
         "head": {
-            "sha": "stale-head",
-            "repo": {"owner": {"login": "o"}, "name": "r"},
+            "sha": "head-sha",
+            "repo": {"owner": {"login": "contributor"}, "name": "ydb"},
         },
     }
-    gh.get_file_text.return_value = "RU merge\n"
+
+    def _get_file(owner, repo_name, path, ref):
+        assert path == "ydb/docs/ru/a.md"
+        if ref == "head-sha":
+            return ru_head
+        if ref == "merge-sha":
+            return ru_merge
+        raise AssertionError(f"unexpected ref {ref}")
+
+    gh.get_file_text.side_effect = _get_file
 
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -135,11 +150,25 @@ def test_load_verify_pair_contents_merged_fetches_merge_commit(tmp_path):
         gh=gh,
         owner="o",
         repo="r",
-        source_pr=43997,
+        source_pr=44457,
     )
-    assert contents[0].ru_text == "RU merge\n"
-    gh.get_file_text.assert_called_once_with(
-        "o", "r", "ydb/docs/ru/a.md", "merge-sha"
+    assert contents[0].ru_text == ru_head
+    assert gh.get_file_text.call_count == 2
+
+
+def test_pick_verify_ru_text_prefers_head_over_longer_merge():
+    ru_head = "# Title\n\nPara.\n"
+    ru_merge = "# Title\n\nPara.\n\n### Extra\n\nMore.\n"
+    en = "# Title\n\nPara EN.\n"
+    assert (
+        pick_verify_ru_text(
+            en_text=en,
+            ru_api=ru_head,
+            ru_merge=ru_merge,
+            ru_local=ru_merge + "\n### Local\n\nX.\n",
+            source_pr_merged=True,
+        )
+        == ru_head
     )
 
 

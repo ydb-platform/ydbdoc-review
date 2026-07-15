@@ -2471,6 +2471,25 @@ local Docker build failed silently.
 **Ops:** publish GHCR via ``docker-publish`` workflow on tag ``v0.1.0`` after each release;
 re-run **doc_translate** on #44457 — commit must show new SHA, not ``e9ff4e7``.
 
+### 6.109. ``doc_verify`` RU candidates: head + merge + checkout (#46674, 2026-07-15)
+
+**Problem:** [#46674](https://github.com/ydb-platform/ydb/pull/46674) (source
+[#44457](https://github.com/ydb-platform/ydb/pull/44457) already merged). §6.106 made
+``source_pr_content_ref`` return **``merge_commit_sha``** for merged PRs (449 segments
+in ``glossary.md``). ``doc_translate`` still checked out **PR head** (443 segments) →
+EN matched head → false 🔴 ``segment count mismatch: 449 vs 443``. Wikipedia DDL left
+on ``ru.wikipedia.org`` when MediaWiki/Wikidata lookup failed in the runner.
+
+**Decision:**
+
+1. Primary API RU = source PR **head** again (§6.31 / translate checkout).
+2. For merged PRs also fetch **merge commit** as ``ru_merge``; ``pick_verify_ru_text``
+   chooses among head / merge / local by EN segment parity, then fewer
+   ``fence_body_copy`` warnings (§6.106 still covers #46609).
+3. Offline Wikipedia title map for common DDL/DML RU articles when live lookup fails.
+
+**Tests:** ``test_github_pr_verify.py`` (#46674 head-over-merge), wikipedia offline map.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

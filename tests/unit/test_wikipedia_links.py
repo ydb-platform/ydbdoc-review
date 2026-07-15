@@ -98,6 +98,17 @@ def test_resolve_wikipedia_href_unresolved_keeps_original_href():
     assert out == href
 
 
+def test_resolve_wikipedia_href_offline_ddl_map_when_lookup_fails():
+    resolver = MagicMock(spec=WikipediaResolver)
+    resolver.resolve_title.return_value = None
+    href = (
+        "https://ru.wikipedia.org/wiki/"
+        "%D0%AF%D0%B7%D1%8B%D0%BA_%D0%BE%D0%BF%D1%80%D0%B5%D0%B4%D0%B5%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F_%D0%B4%D0%B0%D0%BD%D0%BD%D1%8B%D1%85"
+    )
+    out = resolve_wikipedia_href(href, target_lang="en", resolver=resolver)
+    assert out == "https://en.wikipedia.org/wiki/Data_definition_language"
+
+
 def test_resolve_wikipedia_href_wikidata_fallback(monkeypatch):
     import requests
 
