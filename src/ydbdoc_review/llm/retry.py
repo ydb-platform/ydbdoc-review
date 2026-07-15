@@ -161,6 +161,51 @@ def is_eliza_model_overloaded(exc: BaseException) -> bool:
     return "overloaded" in str(exc).lower()
 
 
+def is_eliza_response_format_error(exc: BaseException) -> bool:
+    """True for malformed Eliza HTTP 200 bodies — retry same model, no chain advance."""
+    if not isinstance(exc, LLMRetryableRequestError):
+        return False
+    msg = str(exc).lower()
+    return (
+        "empty choices" in msg
+        or "missing message" in msg
+        or "missing content" in msg
+        or "empty content" in msg
+        or "not a json object" in msg
+        or "invalid choice" in msg
+    )
+
+
+def is_eliza_model_unavailable(exc: BaseException) -> bool:
+    """True when Eliza reports the model slug cannot serve requests."""
+    if is_model_unavailable(exc):
+        return True
+    msg = str(exc).lower()
+    return (
+        "model not available" in msg
+        or "model unavailable" in msg
+        or "model is unavailable" in msg
+    )
+
+
+def should_advance_eliza_model_chain(exc: BaseException | None) -> bool:
+    """True when infra errors on model *i* warrant trying model *i+1*."""
+    if exc is None or is_eliza_response_format_error(exc):
+        return False
+    if isinstance(exc, LLMRequestError) and not isinstance(exc, LLMRetryableRequestError):
+        return False
+    if is_eliza_model_unavailable(exc):
+        return True
+    if isinstance(exc, LLMRetryableRequestError):
+        if exc.status_code == HTTP_RATE_LIMIT:
+            return True
+        if exc.status_code in (408, 500, 502, 503, 504):
+            return True
+    if is_transient_requests_error(exc):
+        return True
+    return False
+
+
 def is_requests_ssl_error(exc: BaseException) -> bool:
     """True for TLS/certificate failures that cannot succeed on retry."""
     try:

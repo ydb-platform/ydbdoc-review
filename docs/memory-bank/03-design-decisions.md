@@ -2291,6 +2291,38 @@ Fixup-path comment (§6.64, link to separate fixup PR on author/fork PRs) unchan
 **Tests:** ``test_run_doc_verify_translation_pr_pushes_fixes_inline`` — one
 ``post_issue_comment`` call, no «коммитом в эту ветку» text.
 
+### 6.103. Eliza ordered model chains for translate/critic (2026-07-15)
+
+**Problem:** §6.98 added overloaded fast-fail and env fallbacks, but ``ElizaLLMClient``
+often returned a **single** model slug; chain advance applied only to 429 ``overloaded``,
+not to full 429/5xx/unavailable exhaustion. Nirvana needs env-only chain config without
+code changes.
+
+**Decision:**
+
+1. **``llm.eliza`` in ``default.yaml``** — separate from Yandex ``llm.models``:
+   translate ``deepseek-v4-flash → gpt-oss-120b → gpt-oss-20b``;
+   critic ``gpt-oss-120b → gpt-oss-20b → deepseek-v4-flash`` (light → heavy).
+2. **Env overrides (Nirvana / local):**
+   - primary: ``YDBDOC_MODEL_TRANSLATE`` / ``YDBDOC_MODEL_CHECK``
+   - fallbacks CSV: ``YDBDOC_ELIZA_TRANSLATE_FALLBACKS`` / ``YDBDOC_ELIZA_CHECK_FALLBACKS``
+     (legacy alias ``YDBDOC_ELIZA_CRITIC_FALLBACKS``)
+3. **``model_chain_for_role()``** returns ``[primary, *fallbacks]`` deduped; Yandex YAML
+   fallbacks still **ignored** for Eliza provider.
+4. **``ElizaLLMClient.chat()``** — per model: existing retry/backoff budgets; advance to
+   **i+1** when retries exhausted on **429**, **5xx**, timeout/connection, model unavailable.
+   **Do not** advance on **4xx** fail-fast or HTTP-200 parse/format errors (empty choices).
+   Placeholder mismatch stays in translator/critic validation (§6.98 translator path).
+5. Chain exhausted → ``LLMRetryExhaustedError`` listing all slugs tried.
+6. **``yandex_cloud``** unchanged — ``ModelChoice.chain`` from YAML.
+
+**Implementation:** ``llm/client.py``, ``llm/retry.py`` (``should_advance_eliza_model_chain``),
+``config/loader.py`` (``ElizaModelsConfig``), ``config/default.yaml``.
+
+**Tests:** ``test_eliza_translate_chain_*``, ``test_eliza_429_after_retries_switches_*``,
+``test_eliza_503_exhausted_switches_*``, ``test_eliza_4xx_does_not_advance_*``,
+``test_eliza_parse_error_does_not_advance_*``, ``test_eliza_full_chain_429_raises_*``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

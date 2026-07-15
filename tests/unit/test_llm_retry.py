@@ -124,7 +124,41 @@ def test_build_eliza_http_error_classifies_retryable_and_fail_fast():
     assert "unauthorized" in str(fail).lower()
 
 
+def test_should_advance_eliza_model_chain():
+    from ydbdoc_review.llm.errors import LLMRequestError, LLMRetryableRequestError
+    from ydbdoc_review.llm.retry import (
+        is_eliza_response_format_error,
+        should_advance_eliza_model_chain,
+    )
+
+    overloaded = LLMRetryableRequestError(
+        "Eliza HTTP 429: overloaded", status_code=429
+    )
+    server = LLMRetryableRequestError("Eliza HTTP 503: down", status_code=503)
+    parse_err = LLMRetryableRequestError("Eliza HTTP 200: empty choices")
+    client_err = LLMRequestError("Eliza HTTP 403 (forbidden)")
+
+    assert should_advance_eliza_model_chain(overloaded)
+    assert should_advance_eliza_model_chain(server)
+    assert not should_advance_eliza_model_chain(parse_err)
+    assert not should_advance_eliza_model_chain(client_err)
+    assert is_eliza_response_format_error(parse_err)
+
+
 def test_is_transient_requests_error():
+    import requests
+
+    from ydbdoc_review.llm.retry import is_transient_requests_error
+
+    assert is_transient_requests_error(requests.exceptions.Timeout("t"))
+    assert is_transient_requests_error(
+        requests.exceptions.ConnectionError("reset")
+    )
+    ssl_exc = requests.exceptions.SSLError("cert verify failed")
+    assert not is_transient_requests_error(ssl_exc)
+    assert not is_transient_requests_error(
+        requests.exceptions.ConnectionError(ssl_exc)
+    )
     import requests
 
     from ydbdoc_review.llm.retry import is_transient_requests_error

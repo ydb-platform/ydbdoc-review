@@ -119,7 +119,7 @@ See **06-llm-config** §13.6 for full contract.
 | GHCR pull 404 on fallback | Image never published for that ref | Run `docker-publish` workflow_dispatch for current tag |
 | Eliza `SSLError` / cert verify failed | Internal CA not in Eliza merged bundle | Set `YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem` in `.env` (§6.99). Do **not** use `REQUESTS_CA_BUNDLE` globally |
 | GitHub `SSLError` on `api.github.com` after CA change | `REQUESTS_CA_BUNDLE` set to internal-only PEM | Remove from `~/.zshrc`; GitHub client uses certifi explicitly (§6.99) |
-| Eliza `HTTP 429 overloaded` | Model pool saturated | `YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b`; §6.98 fast failover; `YDBDOC_LLM_CONCURRENCY_BATCHES_PER_FILE=1` |
+| Eliza `HTTP 429 overloaded` | Model pool saturated | §6.103 chain: defaults or `YDBDOC_ELIZA_*_FALLBACKS`; `YDBDOC_LLM_CONCURRENCY_BATCHES_PER_FILE=1` |
 | Local job used Yandex Cloud not Eliza | Agent/non-login shell skipped `~/.zshrc`; `.env` had no `YDBDOC_MODEL_PROVIDER=eliza` | `YDBDOC_MODEL_PROVIDER=eliza` in `.env` or `zsh -lic '…'`; tokens in `~/.zshrc` |
 | `Ctrl+C` / `pkill` does not stop `job` | Thread pool + long 429 sleep in workers | §6.100; `pkill -9 -f ydbdoc_review`; close terminal tab |
 | Translation PR **не создан** on source PR; ``docs/en/_includes/go/…`` in gaps | Mis-resolved shared ``docs/_includes/`` snippet (§6.80.5, #43997) | Tag with ``include_paths`` fix; re-run ``doc_translate`` |
@@ -145,7 +145,8 @@ image build (local) or last GHCR publish (fallback).
   `GITHUB_TOKEN` (via `YDB_GH_TOKEN`).
 - `ydbdoc-review/.env`: `YDBDOC_MODEL_PROVIDER=eliza`,
   `YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem`,
-  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b`,
+  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b,gpt-oss-20b`,
+  `YDBDOC_ELIZA_CHECK_FALLBACKS=gpt-oss-20b`,
   `YDBDOC_LLM_CONCURRENCY_BATCHES_PER_FILE=1`.
 - **Do not** set `REQUESTS_CA_BUNDLE` to internal CA in zshrc (§6.99).
 

@@ -63,6 +63,14 @@ class ModelsConfig(BaseModel):
     critic: ModelChoice
 
 
+class ElizaModelsConfig(BaseModel):
+    """Eliza-internal model chains (ignored by ``yandex_cloud`` provider)."""
+
+    model_config = ConfigDict(extra="forbid")
+    translate: ModelChoice
+    critic: ModelChoice
+
+
 class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: str = "yandex"
@@ -73,6 +81,7 @@ class LLMConfig(BaseModel):
     retries: RetriesConfig = Field(default_factory=RetriesConfig)
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
     models: ModelsConfig
+    eliza: ElizaModelsConfig | None = None
 
     @field_validator("base_url")
     @classmethod

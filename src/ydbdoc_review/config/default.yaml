@@ -44,6 +44,18 @@ llm:
         - yandexgpt-5.1
         - yandexgpt-5-pro
 
+  eliza:
+    translate:
+      primary: deepseek-v4-flash
+      fallbacks:
+        - gpt-oss-120b
+        - gpt-oss-20b
+    critic:
+      primary: gpt-oss-120b
+      fallbacks:
+        - gpt-oss-20b
+        - deepseek-v4-flash
+
 translation:
   source_lang: ru
   target_lang: en

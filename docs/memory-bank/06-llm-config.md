@@ -309,14 +309,29 @@ Requires ``YDBDOC_MODEL_PROVIDER=eliza`` and ``ELIZA_OAUTH_TOKEN`` in env.
 
 ### 13.6.5. Model ids and role chains
 
-Priority for Eliza roles:
+**Yandex Cloud** (`yandex_cloud`): ``llm.models.{role}.chain`` from YAML (unchanged).
 
-1. `YDBDOC_MODEL_TRANSLATE` / `YDBDOC_MODEL_CHECK` if set (single model per role)
-2. Else if YAML primary is legacy `deepseek-v32` → Eliza defaults above
-3. Else `YDBDOC_LLM_MODELS_*_PRIMARY` + fallbacks from config
+**Eliza** — ``llm.eliza.{translate,critic}`` + env overrides; Yandex YAML slugs ignored:
 
-Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
-`gpt-oss-120b` (critic).
+| Role | Default primary | Default fallbacks (YAML) |
+|------|-----------------|--------------------------|
+| translate | `deepseek-v4-flash` | `gpt-oss-120b`, `gpt-oss-20b` |
+| critic | `gpt-oss-120b` | `gpt-oss-20b`, `deepseek-v4-flash` |
+
+Env (Nirvana / local):
+
+| Env | Role |
+|-----|------|
+| `YDBDOC_MODEL_TRANSLATE` | translate primary |
+| `YDBDOC_ELIZA_TRANSLATE_FALLBACKS` | translate fallbacks (CSV) |
+| `YDBDOC_MODEL_CHECK` | critic primary |
+| `YDBDOC_ELIZA_CHECK_FALLBACKS` | critic fallbacks (CSV; alias `YDBDOC_ELIZA_CRITIC_FALLBACKS`) |
+
+Example: ``YDBDOC_ELIZA_TRANSLATE_FALLBACKS=gpt-oss-120b,gpt-oss-20b`` →
+``model_chain_for_role("translate") == ["deepseek-v4-flash", "gpt-oss-120b", "gpt-oss-20b"]``
+(when primary from env or YAML default).
+
+Legacy YAML primary ``deepseek-v32`` maps to Eliza defaults above when provider is Eliza.
 
 ### 13.6.6. Retries and timeout
 
@@ -326,16 +341,16 @@ Confirmed working internal ids (2026-07): `deepseek-v4-flash` (translate),
 - **HTTP 429:** separate budget in `llm.retries.rate_limit` (default 6 attempts,
   5s→10s→… backoff, cap 120s) — overridable via env:
   `YDBDOC_LLM_RETRIES_RATE_LIMIT_MAX_ATTEMPTS`, `_BACKOFF_INITIAL_S`, etc.
-- **429 overloaded:** when response body contains ``overloaded``, **one** attempt
-  per model slug then advance chain (§6.98) — do not sleep 6× on saturated pool.
+- **429 / 5xx / unavailable:** after retries exhausted on model *i*, advance to model
+  *i+1* in chain (§6.103). **429 overloaded:** one attempt per slug then advance.
+- **Do not advance chain on:** HTTP **400/401/403/404**; HTTP-200 parse/format errors
+  (empty choices, missing content); placeholder mismatch (translator layer).
 - **Retry-After:** when present on 429 (non-overloaded), sleep that many seconds (capped by
   `rate_limit.max_backoff_s`) instead of calculated backoff
 - **Fail-fast (no retry):** HTTP **400/401/403/404** and other non-retryable 4xx;
   `requests.SSLError` / cert verification errors (OAuth token never echoed in errors)
-- Eliza translate/critic chains: primary from env; optional fallbacks only via
-  `YDBDOC_ELIZA_TRANSLATE_FALLBACKS` / `YDBDOC_ELIZA_CRITIC_FALLBACKS` (comma-separated).
-  **Translator** also tries fallback chain on rate-limit exhaustion (§6.98).
-  YAML Yandex fallbacks are **ignored** for Eliza provider.
+- Chain exhausted → ``LLMRetryExhaustedError`` with all model slugs listed.
+- **Translator** (§6.98): separate placeholder-mismatch / rate-limit fallback at batch level.
 - Finalize fail-soft skips (fence comments / text fences / prose Cyrillic) emit
   `*_translate_skipped: rate-limit — …` warnings in heuristics when LLM fails
 - Backoff: `compute_backoff_s()` / `retry_delay_s()` (`llm/retry.py`)

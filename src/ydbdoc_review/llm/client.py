@@ -36,6 +36,7 @@ from ydbdoc_review.llm.retry import (
     is_retryable,
     parse_retry_after_s,
     retry_delay_s,
+    should_advance_eliza_model_chain,
 )
 from ydbdoc_review.shutdown import interruptible_sleep
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
@@ -392,30 +393,39 @@ class ElizaLLMClient(YandexLLMClient):
                 "(doc_translate uses deterministic planning — §6.30); "
                 "pass model= explicitly or use yandex_cloud provider"
             )
-        if role == "translate":
-            env = (os.environ.get("YDBDOC_MODEL_TRANSLATE") or "").strip()
-            if env:
-                return self._dedupe_model_chain([env, *self._eliza_env_fallbacks("translate")])
-            primary = self._llm.models.translate.primary
-            if primary == "deepseek-v32":
-                primary = self._translate_default
-            return self._dedupe_model_chain(
-                [primary, *self._eliza_env_fallbacks("translate")]
+        if role not in ("translate", "critic"):
+            raise LLMConfigError(
+                f'role "{role}" has no internal Eliza model; '
+                "pass model= explicitly or use yandex_cloud provider"
             )
-        if role == "critic":
-            env = (os.environ.get("YDBDOC_MODEL_CHECK") or "").strip()
-            if env:
-                return self._dedupe_model_chain([env, *self._eliza_env_fallbacks("critic")])
-            primary = self._llm.models.critic.primary
+        return self._eliza_model_chain(role)
+
+    def _eliza_model_chain(self, role: Literal["translate", "critic"]) -> list[str]:
+        env_primary = {
+            "translate": "YDBDOC_MODEL_TRANSLATE",
+            "critic": "YDBDOC_MODEL_CHECK",
+        }[role]
+        default_primary = {
+            "translate": self._translate_default,
+            "critic": self._critic_default,
+        }[role]
+
+        primary = (os.environ.get(env_primary) or "").strip()
+        if not primary:
+            eliza_cfg = self._llm.eliza
+            if eliza_cfg is not None:
+                choice = getattr(eliza_cfg, role)
+                primary = choice.primary
+            else:
+                primary = default_primary
             if primary == "deepseek-v32":
-                primary = self._critic_default
-            return self._dedupe_model_chain(
-                [primary, *self._eliza_env_fallbacks("critic")]
-            )
-        raise LLMConfigError(
-            f'role "{role}" has no internal Eliza model; '
-            "pass model= explicitly or use yandex_cloud provider"
-        )
+                primary = default_primary
+
+        fallbacks = self._eliza_env_fallbacks(role)
+        if not fallbacks and self._llm.eliza is not None:
+            fallbacks = list(getattr(self._llm.eliza, role).fallbacks)
+
+        return self._dedupe_model_chain([primary, *fallbacks])
 
     @staticmethod
     def _dedupe_model_chain(models: list[str]) -> list[str]:
@@ -430,17 +440,22 @@ class ElizaLLMClient(YandexLLMClient):
 
     @staticmethod
     def _eliza_env_fallbacks(role: LLMRole) -> list[str]:
-        """Optional confirmed internal fallbacks — never YAML defaults for Eliza."""
-        key = {
-            "translate": "YDBDOC_ELIZA_TRANSLATE_FALLBACKS",
-            "critic": "YDBDOC_ELIZA_CRITIC_FALLBACKS",
-        }.get(role)
-        if not key:
+        """Optional Eliza fallbacks from env (Nirvana / local overrides)."""
+        keys: tuple[str, ...]
+        if role == "translate":
+            keys = ("YDBDOC_ELIZA_TRANSLATE_FALLBACKS",)
+        elif role == "critic":
+            keys = (
+                "YDBDOC_ELIZA_CHECK_FALLBACKS",
+                "YDBDOC_ELIZA_CRITIC_FALLBACKS",
+            )
+        else:
             return []
-        raw = (os.environ.get(key) or "").strip()
-        if not raw:
-            return []
-        return [part.strip() for part in raw.split(",") if part.strip()]
+        for key in keys:
+            raw = (os.environ.get(key) or "").strip()
+            if raw:
+                return [part.strip() for part in raw.split(",") if part.strip()]
+        return []
 
     @staticmethod
     def _eliza_http_error(
@@ -506,7 +521,7 @@ class ElizaLLMClient(YandexLLMClient):
         last_error: BaseException | None = None
         session_retries = 0
 
-        for slug in chain:
+        for model_idx, slug in enumerate(chain):
             url = f"{self._internal_base_url(slug)}/chat/completions"
             headers = {
                 "authorization": f"OAuth {self._oauth_token}",
@@ -627,16 +642,23 @@ class ElizaLLMClient(YandexLLMClient):
 
                 if failure_no >= max_tries:
                     if (
-                        is_rate_limit
-                        and is_eliza_model_overloaded(last_error)
-                        and len(chain) > 1
-                        and slug != chain[-1]
+                        model_idx + 1 < len(chain)
+                        and should_advance_eliza_model_chain(last_error)
                     ):
                         logger.warning(
-                            "Eliza model %s overloaded (429), trying next model in chain",
+                            "Eliza model %s exhausted retries, trying next model in chain: %s",
                             slug,
+                            last_error,
                         )
-                    break
+                        break
+                    models = ", ".join(chain)
+                    if is_rate_limit and len(chain) == 1:
+                        raise LLMRetryExhaustedError(
+                            f"Eliza rate-limit (429) retries exhausted ({models}): {last_error}"
+                        ) from last_error
+                    raise LLMRetryExhaustedError(
+                        f"All models exhausted ({models}): {last_error}"
+                    ) from last_error
 
                 session_retries += 1
                 if is_rate_limit:
@@ -666,13 +688,6 @@ class ElizaLLMClient(YandexLLMClient):
                 interruptible_sleep(delay)
 
         models = ", ".join(chain)
-        if (
-            isinstance(last_error, LLMRetryableRequestError)
-            and last_error.status_code == HTTP_RATE_LIMIT
-        ):
-            raise LLMRetryExhaustedError(
-                f"Eliza rate-limit (429) retries exhausted ({models}): {last_error}"
-            ) from last_error
         raise LLMRetryExhaustedError(
             f"All models exhausted ({models}): {last_error}"
         ) from last_error
