@@ -22,6 +22,40 @@ from ydbdoc_review.navigation.scope_planner import (
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "nav_cases"
 
+CASE_43997_DIFF_RU = frozenset(
+    {
+        "ydb/docs/ru/core/recipes/ydb-sdk/auth-access-token.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/auth-anonymous.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/auth-env.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/auth-metadata.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/auth-service-account.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/auth-static.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/balancing-prefer-local.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/balancing-prefer-location.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/balancing-random-choice.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/bulk-upsert.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/distributed-lock.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/init.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/retry.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/session-pool-limit.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/ttl.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/tx-control.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/upsert.md",
+        "ydb/docs/ru/core/recipes/ydb-sdk/vector-search.md",
+        "ydb/docs/ru/core/reference/ydb-sdk/coordination.md",
+        "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/logging.md",
+    }
+)
+
+_CROSS_SECTION_JUNK = (
+    "json-search",
+    "streaming-query",
+    "integrations/spring",
+    "integrations/sql-translation",
+)
+
+_SIBLING_JUNK = ("sqs-api", "kafka-api", "configuration", "embedded-ui")
+
 
 def _load_case(case_id: str):
     case_dir = FIXTURES / case_id
@@ -105,38 +139,43 @@ def test_navigation_pairs_from_plan_marks_supplement_only():
     assert not by_ru["ydb/docs/ru/core/reference/toc_p.yaml"].supplement_only
 
 
-def test_case_45181_plans_sqs_api_closure_from_topic_diff():
-    """PR #45181: only topic+d diagnostics in diff; sqs-api tree from toc includes."""
+def test_case_43997_scope_is_exactly_diff():
+    """PR #43997 — Java SDK snippets; no cross-section absent-EN mirror."""
+    plan = _plan("case_43997")
+
+    assert plan.doc_from_main == frozenset()
+    assert plan.doc_ru_paths == CASE_43997_DIFF_RU
+    assert plan.doc_from_diff == CASE_43997_DIFF_RU
+    for junk in _CROSS_SECTION_JUNK:
+        assert not any(junk in p for p in plan.doc_ru_paths)
+
+
+def test_case_46577_regression_matches_43997_diff_only():
+    """Translation PR #46577 must not repeat 36-file scope overrun."""
+    plan = _plan("case_43997")
+    pairs = doc_pairs_from_plan(plan)
+    assert len(pairs) == len(CASE_43997_DIFF_RU)
+    assert {p.ru_path for p in pairs} == CASE_43997_DIFF_RU
+
+
+def test_case_45181_does_not_pull_sibling_sqs_api():
+    """PR #45181 — diff pages only; sibling reference sections stay out of scope."""
     plan = _plan("case_45181")
 
-    assert "ydb/docs/ru/core/reference/ydb-sdk/topic.md" in plan.doc_from_diff
-    assert "ydb/docs/ru/core/devops/observability/diagnostics.md" in plan.doc_from_diff
-
-    sqs_pages = {
-        "ydb/docs/ru/core/reference/sqs-api/index.md",
-        "ydb/docs/ru/core/reference/sqs-api/auth.md",
-        "ydb/docs/ru/core/reference/sqs-api/examples.md",
-    }
-    assert sqs_pages <= plan.doc_from_main
-
-    sqs_includes = {
-        "ydb/docs/ru/core/reference/sqs-api/_includes/limitations.md",
-        "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md",
-    }
-    assert sqs_includes <= plan.doc_from_main
-
-    sqs_tocs = {
-        "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml",
-        "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml",
-    }
-    assert sqs_tocs <= plan.nav_from_main
-
-    assert "ydb/docs/ru/core/reference/ydb-sdk/toc_i.yaml" in plan.nav_ru_paths
-    assert "ydb/docs/ru/core/devops/observability/toc_p.yaml" in plan.nav_ru_paths
+    assert plan.doc_ru_paths == frozenset(
+        {
+            "ydb/docs/ru/core/reference/ydb-sdk/topic.md",
+            "ydb/docs/ru/core/devops/observability/diagnostics.md",
+        }
+    )
+    assert plan.doc_from_diff == plan.doc_ru_paths
+    assert plan.doc_from_main == frozenset()
+    for junk in _SIBLING_JUNK:
+        assert not any(junk in p for p in plan.doc_ru_paths | plan.nav_ru_paths)
 
 
 def test_planned_toc_extras_for_pair_case_45181():
-    """J.6: merge extras come from plan, not post-translate basename intersection."""
+    """J.6: merge extras follow scope plan; sqs-api siblings excluded."""
     manifest, read_ru, read_en_base, read_ru_base = _load_case("case_45181")
     changes = changes_from_manifest(manifest["pr_diff_ru"])
     plan = plan_translation_scope(
@@ -146,26 +185,6 @@ def test_planned_toc_extras_for_pair_case_45181():
         read_ru_base=read_ru_base,
     )
 
-    sqs_toc_p = read_ru("ydb/docs/ru/core/reference/sqs-api/toc_p.yaml")
-    assert sqs_toc_p is not None
-    hrefs, includes = planned_toc_extras_for_pair(
-        plan,
-        "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml",
-        sqs_toc_p,
-    )
-    assert hrefs == {"index.md"}
-    assert includes == {"toc_i.yaml"}
-
-    sqs_toc_i = read_ru("ydb/docs/ru/core/reference/sqs-api/toc_i.yaml")
-    assert sqs_toc_i is not None
-    hrefs_i, includes_i = planned_toc_extras_for_pair(
-        plan,
-        "ydb/docs/ru/core/reference/sqs-api/toc_i.yaml",
-        sqs_toc_i,
-    )
-    assert hrefs_i == {"auth.md", "examples.md"}
-    assert includes_i == set()
-
     ref_toc = read_ru("ydb/docs/ru/core/reference/toc_p.yaml")
     assert ref_toc is not None
     ref_hrefs, ref_includes = planned_toc_extras_for_pair(
@@ -173,16 +192,36 @@ def test_planned_toc_extras_for_pair_case_45181():
         "ydb/docs/ru/core/reference/toc_p.yaml",
         ref_toc,
     )
-    assert ref_hrefs == {"sqs-api/index.md"}
-    assert "sqs-api/toc_p.yaml" in ref_includes
+    assert ref_hrefs == set()
+    assert "sqs-api/toc_p.yaml" not in ref_includes
     assert "ydb-sdk/toc_p.yaml" in ref_includes
+
+    ydb_sdk_toc_i = read_ru("ydb/docs/ru/core/reference/ydb-sdk/toc_i.yaml")
+    assert ydb_sdk_toc_i is not None
+    sdk_hrefs, sdk_includes = planned_toc_extras_for_pair(
+        plan,
+        "ydb/docs/ru/core/reference/ydb-sdk/toc_i.yaml",
+        ydb_sdk_toc_i,
+    )
+    assert sdk_hrefs == {"topic.md"}
+    assert sdk_includes == set()
 
 
 def test_case_44820_plans_sqs_from_direct_diff():
     """PR #44820: SQS pages and reference toc in PR diff."""
     plan = _plan("case_44820")
 
+    assert plan.doc_ru_paths == frozenset(
+        {
+            "ydb/docs/ru/core/reference/sqs-api/index.md",
+            "ydb/docs/ru/core/reference/sqs-api/auth.md",
+            "ydb/docs/ru/core/reference/sqs-api/examples.md",
+            "ydb/docs/ru/core/reference/sqs-api/_includes/limitations.md",
+            "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md",
+        }
+    )
     assert "ydb/docs/ru/core/reference/sqs-api/index.md" in plan.doc_from_diff
+    assert plan.doc_from_main == frozenset()
     assert "ydb/docs/ru/core/reference/toc_p.yaml" in plan.nav_from_diff
     assert "ydb/docs/ru/core/reference/sqs-api/toc_p.yaml" in plan.nav_from_main
 
@@ -211,13 +250,15 @@ def test_case_44457_scoped_to_diff_not_whole_menu():
     """PR #44457: 4 RU files in source PR — not every missing EN href in ancestor tocs."""
     plan = _plan("case_44457")
 
-    expected_docs = {
-        "ydb/docs/ru/core/concepts/glossary.md",
-        "ydb/docs/ru/core/concepts/query_execution/execution_process.md",
-        "ydb/docs/ru/core/concepts/query_execution/index.md",
-    }
-    assert expected_docs <= plan.doc_ru_paths
-    assert len(plan.doc_ru_paths) <= len(expected_docs) + 2
+    expected_docs = frozenset(
+        {
+            "ydb/docs/ru/core/concepts/glossary.md",
+            "ydb/docs/ru/core/concepts/query_execution/execution_process.md",
+            "ydb/docs/ru/core/concepts/query_execution/index.md",
+        }
+    )
+    assert plan.doc_ru_paths == expected_docs
+    assert plan.doc_from_main == frozenset()
 
     spurious = {
         "ydb/docs/ru/core/postgresql/connect.md",
@@ -232,7 +273,7 @@ def test_case_44457_scoped_to_diff_not_whole_menu():
 
 @pytest.mark.parametrize(
     "case_id",
-    ["case_45181", "case_44820", "case_43530", "case_44457"],
+    ["case_43997", "case_45181", "case_44820", "case_43530", "case_44457"],
 )
 def test_planner_doc_and_nav_disjoint_kinds(case_id: str):
     plan = _plan(case_id)

@@ -60,6 +60,58 @@
     "ydb/docs/ru/core/reference/sqs-api/_includes/examples_prerequisites.md": {
       "ref": "main",
       "path": "case_45181/ru/core/reference/sqs-api/_includes/examples_prerequisites.md"
+    },
+    "ydb/docs/ru/core/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/reference/embedded-ui/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/embedded-ui/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/integrations/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/integrations/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-cli/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/ydb-cli/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/languages-and-apis/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/languages-and-apis/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ai/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/ai/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/kafka-api/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/kafka-api/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/configuration/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/configuration/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/observability/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/observability/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-dstool/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/ydb-dstool/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydbops/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/ydbops/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/docker/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_45181/ru/core/reference/docker/toc_p.yaml"
     }
   }
 }

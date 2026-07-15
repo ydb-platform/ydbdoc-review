@@ -1,0 +1,186 @@
+{
+  "case_id": "case_43997",
+  "description": "Source PR #43997 — Java SDK recipe snippets; no cross-section scope",
+  "source_pr": 43997,
+  "head_sha": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+  "base_ref": "main",
+  "pr_diff_ru": [
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-access-token.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-anonymous.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-env.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-metadata.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-service-account.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-static.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/balancing-prefer-local.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/balancing-prefer-location.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/balancing-random-choice.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/bulk-upsert.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/distributed-lock.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/init.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/retry.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/session-pool-limit.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/ttl.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/tx-control.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/upsert.md",
+    "ydb/docs/ru/core/recipes/ydb-sdk/vector-search.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/coordination.md",
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/logging.md"
+  ],
+  "files": {
+    "ydb/docs/ru/core/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/recipes/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/recipes/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/reference/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/reference/ydb-sdk/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/reference/ydb-sdk/observability/logging/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/recipes/json-search/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/recipes/json-search/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/concepts/streaming-query/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/concepts/streaming-query/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/concepts/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/concepts/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/dev/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/dev/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/integrations/toc_p.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/integrations/toc_p.yaml"
+    },
+    "ydb/docs/ru/core/integrations/toc_i.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/integrations/toc_i.yaml"
+    },
+    "ydb/docs/ru/core/integrations/spring/toc-spring.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/integrations/spring/toc-spring.yaml"
+    },
+    "ydb/docs/ru/core/integrations/sql-translation/toc-sql-translation.yaml": {
+      "ref": "main",
+      "path": "case_43997/ru/core/integrations/sql-translation/toc-sql-translation.yaml"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-access-token.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/auth-access-token.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-anonymous.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/auth-anonymous.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-env.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/auth-env.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-metadata.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/auth-metadata.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-service-account.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/auth-service-account.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/auth-static.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/auth-static.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/balancing-prefer-local.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/balancing-prefer-local.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/balancing-prefer-location.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/balancing-prefer-location.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/balancing-random-choice.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/balancing-random-choice.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/bulk-upsert.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/bulk-upsert.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/distributed-lock.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/distributed-lock.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/init.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/init.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/retry.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/retry.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/session-pool-limit.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/session-pool-limit.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/ttl.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/ttl.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/tx-control.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/tx-control.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/upsert.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/upsert.md"
+    },
+    "ydb/docs/ru/core/recipes/ydb-sdk/vector-search.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/recipes/ydb-sdk/vector-search.md"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/coordination.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/reference/ydb-sdk/coordination.md"
+    },
+    "ydb/docs/ru/core/reference/ydb-sdk/observability/logging/logging.md": {
+      "ref": "ad5aae770b0602ff84e9b01cea79990a58ad8884",
+      "path": "case_43997/ru/core/reference/ydb-sdk/observability/logging/logging.md"
+    }
+  },
+  "en_present_at_base": [
+    "ydb/docs/en/core/toc_p.yaml",
+    "ydb/docs/en/core/toc_i.yaml",
+    "ydb/docs/en/core/recipes/toc_p.yaml",
+    "ydb/docs/en/core/recipes/ydb-sdk/toc_p.yaml",
+    "ydb/docs/en/core/reference/toc_p.yaml",
+    "ydb/docs/en/core/reference/ydb-sdk/toc_p.yaml",
+    "ydb/docs/en/core/reference/ydb-sdk/coordination.md",
+    "ydb/docs/en/core/reference/ydb-sdk/observability/logging/logging.md",
+    "ydb/docs/en/core/recipes/ydb-sdk/auth-access-token.md",
+    "ydb/docs/en/core/recipes/ydb-sdk/vector-search.md",
+    "ydb/docs/en/core/integrations/toc_p.yaml",
+    "ydb/docs/en/core/concepts/toc_i.yaml",
+    "ydb/docs/en/core/dev/toc_p.yaml"
+  ]
+}

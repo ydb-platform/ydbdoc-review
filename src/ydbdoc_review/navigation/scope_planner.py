@@ -30,6 +30,12 @@ def _norm(path: str) -> str:
     return path.replace("\\", "/")
 
 
+def _toc_dir_contains_diff(ru_toc: str, diff_paths: set[str]) -> bool:
+    """True when a changed file lives in the sidebar's directory subtree."""
+    toc_dir = _norm(ru_toc).rsplit("/", 1)[0] + "/"
+    return any(_norm(p).startswith(toc_dir) for p in diff_paths)
+
+
 @dataclass(frozen=True)
 class TranslationScopePlan:
     """Everything ``doc_translate`` should touch for one source PR."""
@@ -83,6 +89,7 @@ def _discover_ru_tocs(
     seed_ru_md: set[str],
     seed_ru_nav: set[str],
     read_ru: ReadFn,
+    diff_paths: set[str],
 ) -> set[str]:
     """BFS: ancestor sidebars + ``include.path`` child sidebars."""
     todo: set[str] = set(seed_ru_nav)
@@ -102,7 +109,9 @@ def _discover_ru_tocs(
             if kind != "include" or not rel.endswith((".yaml", ".yml")):
                 continue
             child = _norm(resolve_toc_target_path(ru_toc, rel))
-            if child not in seen:
+            if child in seen:
+                continue
+            if child in seed_ru_nav or _toc_dir_contains_diff(child, diff_paths):
                 queue.append(child)
     return seen
 
@@ -171,22 +180,7 @@ def _pages_from_discovered_toc(
     read_ru_base: ReadFn | None,
     docs_root: str,
 ) -> None:
-    """Derive markdown scope from one sidebar (§22.5 / §6.72 / §6.85)."""
-    en_toc = counterpart(ru_toc, docs_root)
-    en_absent = en_toc is None or en_toc_is_absent(read_en_base(en_toc) or "")
-
-    if en_absent:
-        for rel in _toc_md_hrefs(ru_toc_text):
-            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
-            _add_doc_if_en_absent(
-                ru_md,
-                doc_ru=doc_ru,
-                read_ru=read_ru,
-                read_en_base=read_en_base,
-                docs_root=docs_root,
-            )
-        return
-
+    """Derive markdown scope from one sidebar (§22.5 / §6.72)."""
     if ru_toc in diff_ru_nav:
         for rel in _new_toc_md_hrefs(ru_toc, ru_toc_text, read_ru_base):
             ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
@@ -253,9 +247,9 @@ def plan_translation_scope(
     Rules (§22):
     1. Seed from PR diff (RU ``.md`` + nav yaml).
     2. Discover related ``toc_p`` / ``toc_i`` via ancestors + ``include.path``.
-    3. Per discovered sidebar (§22.5): absent EN toc → full mirror of its
-       ``href`` pages; toc in PR diff → **new** ``href`` entries since base;
-       partial EN sidebar → missing EN mirrors for diff pages listed in toc.
+    3. Per discovered sidebar (§22.5): toc in PR diff → **new** ``href``
+       entries since base; partial EN sidebar → missing EN mirrors for diff
+       pages listed in toc. Cross-section absent-EN full mirror is disabled.
     4. Close locale ``{% include %}`` dependencies for all queued pages.
     5. Queue nav yaml merge when toc is in diff, EN absent, or missing href for
        a changed page.
@@ -277,6 +271,7 @@ def plan_translation_scope(
         seed_ru_md=diff_ru_md,
         seed_ru_nav=diff_ru_nav,
         read_ru=read_ru,
+        diff_paths=diff_ru_md | diff_ru_nav,
     )
 
     doc_ru: set[str] = set(diff_ru_md)
