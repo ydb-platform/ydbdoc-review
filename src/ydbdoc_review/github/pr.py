@@ -197,14 +197,19 @@ def is_translation_pr_branch(branch: str, *, translation_branch_prefix: str) -> 
     return source_pr_number_from_branch(branch, prefix=translation_branch_prefix) is not None
 
 
-def source_pr_content_ref(
-    gh: GitHubClient, owner: str, repo: str, source_pr: int
-) -> tuple[str, str, str]:
-    """Git ref for RU files — same tree ``doc_translate`` uses (source PR head).
+def source_pr_merged(data: dict) -> bool:
+    """True when the source PR is merged into its base branch."""
+    return bool(data.get("merged"))
 
-    Returns ``(repo_owner, repo_name, head_sha)``. Head may live on a fork.
-    """
-    data = gh.get_pull(owner, repo, source_pr)
+
+def source_pr_content_ref_from_pull(
+    data: dict, owner: str, repo: str, source_pr: int
+) -> tuple[str, str, str]:
+    """Resolve RU git ref from an already-fetched pull request payload."""
+    if source_pr_merged(data):
+        merge_sha = str(data.get("merge_commit_sha") or "")
+        if merge_sha:
+            return owner, repo, merge_sha
     head = data.get("head") or {}
     head_repo = head.get("repo") or {}
     head_owner = head_repo.get("owner") or {}
@@ -216,6 +221,22 @@ def source_pr_content_ref(
     return ru_owner, ru_repo, sha
 
 
+def source_pr_content_ref(
+    gh: GitHubClient, owner: str, repo: str, source_pr: int
+) -> tuple[str, str, str]:
+    """Git ref for RU files — same tree ``doc_translate`` uses.
+
+    Open PR: source PR **head** (fork head when applicable, §6.31).
+    Merged PR: **merge commit** on upstream — ``doc_translate`` bases the
+    translation branch on ``base_ref`` (§6.23), not the deleted feature head.
+
+    Returns ``(repo_owner, repo_name, ref_sha)``.
+    """
+    return source_pr_content_ref_from_pull(
+        gh.get_pull(owner, repo, source_pr), owner, repo, source_pr
+    )
+
+
 def _markdown_segment_count(text: str | None) -> int | None:
     if not isinstance(text, str):
         return None
@@ -223,17 +244,28 @@ def _markdown_segment_count(text: str | None) -> int | None:
     return len(extract_segments(parse_markdown(normalized)))
 
 
+def _fence_body_copy_warnings(source_ru: str, en_text: str) -> int:
+    from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
+
+    return len(check_fence_body_copy(source_ru, en_text, source_lang="ru"))
+
+
 def pick_verify_ru_text(
     *,
     en_text: str | None,
     ru_api: str | None,
     ru_local: str | None,
+    source_pr_merged: bool = False,
 ) -> str | None:
-    """Choose RU authority for ``doc_verify`` segment alignment (§6.70).
+    """Choose RU authority for ``doc_verify`` segment alignment (§6.70, §6.106).
 
-  Prefer source PR head (§6.31). When EN was fixed on the translation branch to
-  match newer RU on checkout (e.g. source PR merged, manual alignment to
-  ``main``), use local RU if only it matches EN segment count.
+    Prefer source PR head (§6.31) when segment counts match. When EN was fixed on
+    the translation branch to match newer RU on checkout (e.g. source PR merged,
+    manual alignment to ``main``), use local RU if only it matches EN segment count.
+
+    When API and local RU both match EN segment count but differ in fenced code
+    (squash-merge drift vs ``main``), prefer the variant with fewer
+    ``fence_body_copy`` warnings; tie-break merged PRs toward checkout RU (§6.106).
     """
     if ru_api is None and ru_local is None:
         return None
@@ -246,6 +278,22 @@ def pick_verify_ru_text(
 
     api_n = _markdown_segment_count(ru_api)
     local_n = _markdown_segment_count(ru_local)
+
+    if (
+        api_n == en_n
+        and local_n == en_n
+        and ru_api is not None
+        and ru_local is not None
+        and ru_api != ru_local
+    ):
+        api_fence = _fence_body_copy_warnings(ru_api, en_text)
+        local_fence = _fence_body_copy_warnings(ru_local, en_text)
+        if local_fence < api_fence:
+            return ru_local
+        if api_fence < local_fence:
+            return ru_api
+        if source_pr_merged:
+            return ru_local
 
     if api_n == en_n and ru_api is not None:
         return ru_api
@@ -301,14 +349,19 @@ def load_verify_pair_contents(
     repo: str,
     source_pr: int,
 ) -> list[PairContent]:
-    """Load EN from translation PR checkout; RU from source PR head or checkout.
+    """Load EN from translation PR checkout; RU from source PR ref or checkout.
 
     Translation branches commit EN only; checkout RU is often the branch base
-    (``main``). Default RU is source PR head (§6.31). When EN on the translation
-    branch was aligned to checkout RU after the source PR merged, §6.70 picks
-    checkout RU when only it matches EN segment count.
+    (``main``). Open source PR: RU from **head** (§6.31). Merged source PR:
+    RU from **merge commit** (§6.106) — same tree ``doc_translate`` uses when
+    basing on ``base_ref`` (§6.23). §6.70 still picks checkout RU when segment
+    counts differ; §6.106 picks checkout when fence bodies match EN better.
     """
-    ru_owner, ru_repo, ru_ref = source_pr_content_ref(gh, owner, repo, source_pr)
+    pull_data = gh.get_pull(owner, repo, source_pr)
+    merged = source_pr_merged(pull_data)
+    ru_owner, ru_repo, ru_ref = source_pr_content_ref_from_pull(
+        pull_data, owner, repo, source_pr
+    )
     contents: list[PairContent] = []
     for pair in pairs:
         en_text = read_text(repo_path, pair.en_path)
@@ -326,7 +379,10 @@ def load_verify_pair_contents(
                 ru_local = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
 
         ru_text = pick_verify_ru_text(
-            en_text=en_text, ru_api=ru_api, ru_local=ru_local
+            en_text=en_text,
+            ru_api=ru_api,
+            ru_local=ru_local,
+            source_pr_merged=merged,
         )
 
         ru_diff = (

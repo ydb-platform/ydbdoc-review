@@ -168,7 +168,8 @@ OUTPUT: exit code 0 unless infrastructure failure.
 INPUT: translation_pr_number
 
 1. Discover source PR number from translation PR description
-2. Read **EN** from translation PR checkout; **RU** from source PR head (§6.31)
+2. Read **EN** from translation PR checkout; **RU** from source PR **merge commit**
+   when merged, else head (§6.31, §6.106); §6.70/§6.106 fence tie-break vs checkout
 3. Run critic + heuristics (no translator)
 4. Apply critic fixes (suggested_text per segment_id)
 5. If any fixes applied: commit + push to translation PR branch

@@ -2368,6 +2368,32 @@ heading became ``#vector-search`` → **MD051** / ``build-docs`` red.
 
 **Tests:** ``test_yfm_anchor.py``, ``test_link_locale.py`` (remap + validator).
 
+### 6.106. ``doc_verify`` RU authority for merged source PR (#43997 → #46609, 2026-07-15)
+
+**Problem:** [#43997](https://github.com/ydb-platform/ydb/pull/43997) merged 2026-07-12;
+translation [#46609](https://github.com/ydb-platform/ydb/pull/46609) ran 2026-07-15.
+``doc_translate`` bases the branch on ``main`` (§6.23) and copies fenced code from
+checkout RU (post-merge snippets: ``.bulk_upsert``, ``.retry_tx``, ``use ydb::TxMode``).
+``doc_verify`` still fetched RU at **source PR head** (§6.31) — stale pre-squash
+snippets with the **same segment count** as EN → ~8 false ``fence_body_copy`` 🟡 on
+``bulk-upsert``, ``retry``, ``tx-control``, ``vector-search``.
+
+**Decision:**
+
+1. **`source_pr_content_ref`** — merged source PR → upstream **``merge_commit_sha``**,
+   not feature ``head.sha`` (aligns API RU with ``main`` / translate checkout).
+2. **`pick_verify_ru_text``** — when API and local RU both match EN segment count but
+   differ in content, prefer the variant with fewer ``fence_body_copy`` warnings;
+   tie-break merged PRs toward **checkout RU**.
+
+**Not fixed here:** real residual issues on #46609 (Wikipedia slug, trailing ``ы`` in
+fence comment, placeholder critic noise) — separate tracks.
+
+**Implementation:** ``github/pr.py`` (`source_pr_content_ref_from_pull``,
+``pick_verify_ru_text(..., source_pr_merged=…)``).
+
+**Tests:** ``test_github_pr_verify.py`` (merge commit ref, fence-body tie-break #43997).
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

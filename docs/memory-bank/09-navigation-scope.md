@@ -201,6 +201,16 @@ DDL → `https://en.wikipedia.org/wiki/Data_definition_language`.
 
 **build-docs:** MD051 on `vector-search.md` `[Vector search](#векторный-поиск)` — §6.105 heading anchor map + link_locale remap.
 
+### 22.13. False `fence_body_copy` on merged source PR (#43997 → #46609, 2026-07-15)
+
+**Symptom:** translation [#46609](https://github.com/ydb-platform/ydb/pull/46609) — correct 20-file scope and green `build-docs`, but `doc_verify` 🔴 with ~8× ``fence_body_copy`` 🟡 on recipe pages (`bulk-upsert`, `retry`, `tx-control`, …).
+
+**Cause:** source [#43997](https://github.com/ydb-platform/ydb/pull/43997) **merged** before translate; ``doc_translate`` read RU from ``main`` (§6.23) while ``doc_verify`` compared EN to **stale source PR head** RU (same segment count, different Rust snippets after squash merge).
+
+**Fix:** §6.106 — merged source PR → ``merge_commit_sha`` for API RU; ``pick_verify_ru_text`` fence-body tie-break toward checkout RU.
+
+**Re-run:** toggle **`doc_verify`** on #46609 after tag bump — expect only real residuals (Wikipedia, fence comment typo, placeholder critic).
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

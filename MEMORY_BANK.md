@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-15  
-**Current focus:** §22 re-run [#43997](https://github.com/ydb-platform/ydb/pull/43997) locally (Eliza) after §6.104–§6.105 @ `v0.1.0`.
+**Current focus:** §6.106 on `v0.1.0` — re-run `doc_verify` on [#46609](https://github.com/ydb-platform/ydb/pull/46609) after tag bump.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-15 | **§6.106** — `doc_verify` RU from merge commit + fence-body tie-break for merged source PR (#43997/#46609 false `fence_body_copy`) |
 | 2026-07-15 | **§6.104–§6.105** — scope BFS gate + no cross-section absent-EN mirror (`case_43997`); Cyrillic `#fragment` remap via heading anchor map + link_locale validator |
 | 2026-07-15 | **§6.103** — Eliza ordered model chains (translate/critic); env `YDBDOC_ELIZA_*_FALLBACKS` + YAML `llm.eliza` |
 | 2026-07-15 | **§6.102** — drop redundant «автоисправления в этой ветке» comment on translation PR; QA report only |
@@ -45,12 +46,12 @@ Older §6.x entries remain in [03-design-decisions](docs/memory-bank/03-design-d
 
 | Artifact | State |
 |----------|--------|
-| `main` | §22 planner + §6.101–§6.105 (tagged `v0.1.0`) |
-| Tag `v0.1.0` | **moved** on 2026-07-15 — §6.104 scope + §6.105 anchor fragments (`7685056`) |
+| `main` | §22 planner + §6.101–§6.106 (tagged `v0.1.0`) |
+| Tag `v0.1.0` | **moved** on 2026-07-15 — §6.106 verify RU authority + §6.104–§6.105 |
 | Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
 | ydb CI `doc_translate` | **Yandex Cloud** (`YANDEX_CLOUD_*` secrets); default `YDBDOC_MODEL_PROVIDER=yandex_cloud` — **not** Eliza |
 | Local `job` / Reactor | **Eliza** when `YDBDOC_MODEL_PROVIDER=eliza` + `ELIZA_OAUTH_TOKEN` (typically `~/.zshrc`) |
-| Validation | [#43997](https://github.com/ydb-platform/ydb/pull/43997): re-translate locally after deleting `ydbdoc-review/pr-43997` (old [#46577](https://github.com/ydb-platform/ydb/pull/46577) invalid) |
+| Validation | [#46609](https://github.com/ydb-platform/ydb/pull/46609): re-run **`doc_verify`** after tag @ §6.106 (expect ~8 fewer false fence 🟡) |
 
 ## For AI assistants
 
