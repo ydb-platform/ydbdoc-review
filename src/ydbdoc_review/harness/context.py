@@ -23,6 +23,7 @@ class HarnessContext:
     enable_critic: bool
     critic_feedback_retries: int
     usage_record_start: int
+    en_toc_reachable: frozenset[str] | None = None
 
     @classmethod
     def from_options(
@@ -40,6 +41,7 @@ class HarnessContext:
         enable_critic: bool = True,
         critic_feedback_retries: int | None = None,
         usage_record_start: int | None = None,
+        en_toc_reachable: frozenset[str] | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -63,4 +65,5 @@ class HarnessContext:
                 if usage_record_start is not None
                 else len(client.usage_tracker.records)
             ),
+            en_toc_reachable=en_toc_reachable,
         )

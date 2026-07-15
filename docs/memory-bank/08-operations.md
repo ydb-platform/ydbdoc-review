@@ -111,7 +111,8 @@ See **06-llm-config** §13.6 for full contract.
 | `doc_verify` `missing_toc_target` | EN toc lists page outside translate scope | Pre-§22: tag bump + re-run `doc_translate`. §22+: planner should queue page in step 3 — if still failing, check `nav_cases/` fixture |
 | `build-docs` ENOENT on child toc | Child sidebar not merged | Pre-§22: §6.84 supplement. §22+: check planner BFS on `include.path`; tag bump when ready |
 | `doc_verify` `empty_toc` on new EN sidebar | Absent EN file + empty scoped merge (§6.85) | Tag bump + re-run `doc_translate` |
-| `build-docs` `YFM003 unreachable-link` | Page linked but not in toc (§6.86) | Indented `href:` parse + re-run `doc_translate` |
+| `build-docs` `YFM003 unreachable-link` in **glossary** | Hub links to pages outside EN toc (variant A §6.107) | Auto-strip on translate; restore links when target page is translated + added to toc |
+| `build-docs` `YFM003 unreachable-link` elsewhere | Page linked but not in toc (§6.86) | Indented `href:` parse + re-run `doc_translate` |
 | `python:3.12-slim` / ECR timeout on build | Registry unreachable from runner | Retry; or run `docker-publish` and rely on GHCR fallback |
 | Action exits 0 but no report on translation PR | Fixed in §6.48 — update `@v0.1.0` | Tag must include `_safe_post_issue_comment` + report-first order |
 | CI red after translate OK; log `AttributeError: file_url` | §6.101 regression in report builder | Tag bump; re-run **`doc_verify`** label on translation PR (no re-translate) |

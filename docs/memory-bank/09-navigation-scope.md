@@ -180,7 +180,8 @@ Golden: `case_44457` expects ~3 md + 1 toc, not 35.
 `validation/markdown_layout.py` (postprocess).
 
 **Operational rule:** debug one source PR at a time; do not batch-re-run all three until
-[#44457](https://github.com/ydb-platform/ydb/pull/44457) is green end-to-end.
+[#44457](https://github.com/ydb-platform/ydb/pull/44457) is green end-to-end (§6.107:
+delete old translation branch, bump tag, re-run **doc_translate**).
 
 ### 22.11. §22 validation progress (2026-07-15)
 

@@ -80,6 +80,7 @@ class ExecutePairPlansStep:
             ctx.client,
             glossary=ctx.glossary,
             config=ctx.config,
+            en_toc_reachable=ctx.en_toc_reachable,
         )
         results = []
         for plan in state.plans:

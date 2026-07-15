@@ -90,6 +90,55 @@ def test_fetch_langlink_sends_user_agent(monkeypatch):
     assert "ydbdoc-review" in str(headers["User-Agent"])
 
 
+def test_resolve_wikipedia_href_unresolved_keeps_original_href():
+    resolver = MagicMock(spec=WikipediaResolver)
+    resolver.resolve_title.return_value = None
+    href = "https://ru.wikipedia.org/wiki/Копирование_при_записи"
+    out = resolve_wikipedia_href(href, target_lang="en", resolver=resolver)
+    assert out == href
+
+
+def test_resolve_wikipedia_href_wikidata_fallback(monkeypatch):
+    import requests
+
+    resolver = WikipediaResolver(timeout_s=10.0)
+
+    def fake_get(url, **kwargs):
+        params = kwargs.get("params") or {}
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        if "wikidata.org" in url:
+            response.json.return_value = {
+                "entities": {
+                    "Q123": {
+                        "sitelinks": {
+                            "enwiki": {"title": "Copy-on-write"},
+                        }
+                    }
+                }
+            }
+        elif params.get("prop") == "langlinks":
+            response.json.return_value = {
+                "query": {"pages": [{"langlinks": []}]}
+            }
+        elif params.get("prop") == "pageprops":
+            response.json.return_value = {
+                "query": {
+                    "pages": [
+                        {"pageprops": {"wikibase_item": "Q123"}},
+                    ]
+                }
+            }
+        else:
+            raise AssertionError(f"unexpected Wikipedia API call: {url} {params}")
+        return response
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    href = "https://ru.wikipedia.org/wiki/Копирование_при_записи"
+    out = resolve_wikipedia_href(href, target_lang="en", resolver=resolver)
+    assert out == "https://en.wikipedia.org/wiki/Copy-on-write"
+
+
 @pytest.mark.integration
 def test_resolver_live_ru_to_en_copy_on_write():
     resolver = WikipediaResolver(timeout_s=15.0)

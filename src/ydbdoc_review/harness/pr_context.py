@@ -15,6 +15,7 @@ class PRHarnessContext:
     glossary: Glossary
     config: Config
     use_analyze_llm: bool = False
+    en_toc_reachable: frozenset[str] | None = None
 
     @classmethod
     def from_options(
@@ -24,10 +25,12 @@ class PRHarnessContext:
         glossary: Glossary | None = None,
         config: Config | None = None,
         use_analyze_llm: bool = False,
+        en_toc_reachable: frozenset[str] | None = None,
     ) -> PRHarnessContext:
         return cls(
             client=client,
             glossary=glossary or load_glossary(),
             config=config or load_config(),
             use_analyze_llm=use_analyze_llm,
+            en_toc_reachable=en_toc_reachable,
         )

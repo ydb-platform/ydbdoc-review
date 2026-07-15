@@ -2394,6 +2394,41 @@ fence comment, placeholder critic noise) — separate tracks.
 
 **Tests:** ``test_github_pr_verify.py`` (merge commit ref, fence-body tie-break #43997).
 
+### 6.107. Glossary profile + YFM003 variant A (#44457 → #46620, 2026-07-15)
+
+**Problem:** [#44457](https://github.com/ydb-platform/ydb/pull/44457) translation
+[#46620](https://github.com/ydb-platform/ydb/pull/46620) — ``glossary.md`` ~900 lines
+re-translated with generic prompts → terminology critic noise, Wikipedia RU slugs on
+``en.wikipedia.org``, ``build-docs`` 🔴 **16× YFM003** (internal links from glossary hub
+to pages **not in EN toc graph**, e.g. ``spring-retry``, ``streaming-query``).
+
+**Decision (product):** **Variant A — do not expand translation scope.** Strip or
+de-link internal ``.md`` targets outside the EN sidebar graph during glossary finalize.
+When those target pages are translated later, restore links in a follow-up PR.
+
+**Glossary profile:** auto-detect ``concepts/glossary.md`` → dedicated system/translate/critic
+prompts (English-only bold terms; critic skips “missing RU term in bold list”).
+
+**Wikipedia:** keep RU ``ru.wikipedia.org`` URLs in source; finalize resolves EN article
+via MediaWiki **langlinks**, then **Wikidata sitelinks** fallback — no domain swap with
+Cyrillic slug.
+
+**TOC reachability (variant A):**
+
+1. BFS EN ``toc_p.yaml`` graph (+ pending EN ``.md`` / toc yaml from current PR plan).
+2. ``strip_unreachable_glossary_links`` in ``finalize_en_target`` — internal ``.md`` link
+   → plain anchor text when target ∉ reachable set.
+
+**Implementation:** ``translation/file_profiles.py``, ``prompts/v1/*glossary*``,
+``validation/glossary_toc_links.py``, ``validation/wikipedia_links.py`` (Wikidata),
+``github/workflow.py`` (precompute ``en_toc_reachable`` before translate).
+
+**Tests:** ``test_file_profiles.py``, ``test_glossary_prompts.py``,
+``test_glossary_toc_links.py``, ``test_wikipedia_links.py``.
+
+**Re-run:** delete ``ydbdoc-review/pr-44457``, bump ``v0.1.0``, label **doc_translate**
+on [#44457](https://github.com/ydb-platform/ydb/pull/44457).
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

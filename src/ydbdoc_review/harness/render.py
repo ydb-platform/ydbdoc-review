@@ -9,6 +9,7 @@ from ydbdoc_review.parsing.ast_types import Document
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.reinsert import reinsert_segments
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.validation.fence_comments import (
@@ -19,6 +20,7 @@ from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
 )
 from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
+from ydbdoc_review.validation.glossary_toc_links import strip_unreachable_glossary_links
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
@@ -67,6 +69,7 @@ def finalize_en_target(
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     out_warnings: list[str] | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> str:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
     text = enforce_source_fenced_blocks(text, normalized_source_text)
@@ -102,4 +105,15 @@ def finalize_en_target(
             out_warnings=out_warnings,
         )
     text = localize_links_in_text(text, target_lang="en")
+    if (
+        is_glossary_file(file_path)
+        and en_toc_reachable
+        and target_lang.lower() in {"en", "english"}
+    ):
+        text = strip_unreachable_glossary_links(
+            text,
+            file_path=file_path,
+            reachable=en_toc_reachable,
+            target_lang=target_lang,
+        )
     return postprocess_en_target_markdown(text)

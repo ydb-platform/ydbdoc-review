@@ -475,10 +475,10 @@ supplement chain; **§22 planner** replaces that chain (`case_45181` golden test
 Translation PR for #45181 is green on old chain — do not re-run (see §22.8).
 
 **Canonical auto-translate case (§22 rollout):** [ydb #44457](https://github.com/ydb-platform/ydb/pull/44457)
-→ [#46451](https://github.com/ydb-platform/ydb/pull/46451) (bad first run: 35 files,
-MD037 glossary); re-run after `v0.1.0` @ `203956a` — scope (`case_44457`), harness
-import (§6.93), MD037 (§6.94), report UX (§6.96). Remaining 🔴: Wikipedia DML/DDL links.
-See **09-navigation-scope** §22.10–§22.11.
+→ [#46620](https://github.com/ydb-platform/ydb/pull/46620) (bad run: glossary terminology +
+YFM003 hub links). **Re-run** after `v0.1.0` @ §6.107 — glossary profile, Wikipedia
+Wikidata, strip unreachable glossary links (variant A). Scope: `case_44457` (~4 files).
+See **09-navigation-scope** §22.10–§22.11, **03-design-decisions** §6.107.
 
 **Canonical local-debug case:** [ydb #43010](https://github.com/ydb-platform/ydb/pull/43010)
 — merged source PR; local ``job --dry-run`` with Eliza (§19.5); scope 13 doc paths.

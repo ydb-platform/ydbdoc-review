@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-15  
-**Current focus:** §6.106 on `v0.1.0` — re-run `doc_verify` on [#46609](https://github.com/ydb-platform/ydb/pull/46609) after tag bump.
+**Current focus:** §6.107 on `v0.1.0` — re-run `doc_translate` on [#44457](https://github.com/ydb-platform/ydb/pull/44457) after deleting `ydbdoc-review/pr-44457`.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-15 | **§6.107** — glossary profile + Wikipedia Wikidata langlinks; glossary YFM003 variant A (strip unreachable internal links); re-run [#44457](https://github.com/ydb-platform/ydb/pull/44457) |
 | 2026-07-15 | **§6.106** — `doc_verify` RU from merge commit + fence-body tie-break for merged source PR (#43997/#46609 false `fence_body_copy`) |
 | 2026-07-15 | **§6.104–§6.105** — scope BFS gate + no cross-section absent-EN mirror (`case_43997`); Cyrillic `#fragment` remap via heading anchor map + link_locale validator |
 | 2026-07-15 | **§6.103** — Eliza ordered model chains (translate/critic); env `YDBDOC_ELIZA_*_FALLBACKS` + YAML `llm.eliza` |

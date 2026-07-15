@@ -11,6 +11,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from ydbdoc_review.segmentation.chunker import Batch
 from ydbdoc_review.segmentation.placeholder_align import segment_atom_legend
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.file_profiles import GLOSSARY_PROFILE, detect_file_profile
 from ydbdoc_review.translation.glossary import Glossary
 
 DEFAULT_PROMPT_VERSION = "v1"
@@ -18,9 +19,12 @@ DEFAULT_PROMPT_VERSION = "v1"
 _TEMPLATE_NAMES = frozenset(
     {
         "system_common",
+        "system_glossary",
         "translate",
+        "translate_glossary",
         "critic",
         "critic_batch",
+        "critic_glossary_batch",
         "verify",
         "verify_batch",
         "analyze",
@@ -86,8 +90,19 @@ def _style_guide_block(*, target_lang: str, version: str) -> str:
     return load_template("en_style_guide", version=version)
 
 
-def _system_message(glossary: Glossary, *, version: str) -> str:
-    template = load_template("system_common", version=version)
+def _system_template_name(file_path: str) -> str:
+    if detect_file_profile(file_path) == GLOSSARY_PROFILE:
+        return "system_glossary"
+    return "system_common"
+
+
+def _system_message(
+    glossary: Glossary,
+    *,
+    version: str,
+    file_path: str = "",
+) -> str:
+    template = load_template(_system_template_name(file_path), version=version)
     return render_template(template, {"glossary_yaml": glossary.to_prompt_yaml()})
 
 
@@ -101,7 +116,12 @@ def build_translate_messages(
     version: str = DEFAULT_PROMPT_VERSION,
 ) -> list[ChatCompletionMessageParam]:
     """Chat messages for one translation batch."""
-    user_template = load_template("translate", version=version)
+    translate_template = (
+        "translate_glossary"
+        if detect_file_profile(file_path) == GLOSSARY_PROFILE
+        else "translate"
+    )
+    user_template = load_template(translate_template, version=version)
     user_content = render_template(
         user_template,
         {
@@ -115,7 +135,12 @@ def build_translate_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -152,7 +177,12 @@ def build_repair_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -195,7 +225,12 @@ def build_critic_feedback_repair_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -235,7 +270,12 @@ def build_critic_batch_messages(
     version: str = DEFAULT_PROMPT_VERSION,
 ) -> list[ChatCompletionMessageParam]:
     """Chat messages for one critic batch."""
-    template = load_template("critic_batch", version=version)
+    critic_template = (
+        "critic_glossary_batch"
+        if detect_file_profile(file_path) == GLOSSARY_PROFILE
+        else "critic_batch"
+    )
+    template = load_template(critic_template, version=version)
     user_content = render_template(
         template,
         {
@@ -248,7 +288,12 @@ def build_critic_batch_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -282,7 +327,12 @@ def build_verify_batch_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -312,7 +362,12 @@ def build_critic_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -346,7 +401,12 @@ def build_verify_messages(
         },
     )
     return [
-        {"role": "system", "content": _system_message(glossary, version=version)},
+        {
+            "role": "system",
+            "content": _system_message(
+                glossary, version=version, file_path=file_path
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -366,4 +426,4 @@ def build_analyze_messages(
     return [
         {"role": "system", "content": _system_message(glossary, version=version)},
         {"role": "user", "content": user_content},
-    ]
+    ]  # analyze is PR-level; no file_path

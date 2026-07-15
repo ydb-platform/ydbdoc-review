@@ -71,6 +71,7 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
             target_lang=ctx.target_lang,
             prompt_version=ctx.prompt_version,
             out_warnings=state.finalize_warnings,
+            en_toc_reachable=ctx.en_toc_reachable,
         )
 
 
@@ -141,6 +142,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
             target_lang=ctx.target_lang,
             prompt_version=ctx.prompt_version,
             out_warnings=state.finalize_warnings,
+            en_toc_reachable=ctx.en_toc_reachable,
         )
     state.translations, state.segment_alignment_error = gate_round_trip(
         state.segments, state.translated_text

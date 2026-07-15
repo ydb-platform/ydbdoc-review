@@ -79,6 +79,7 @@ from ydbdoc_review.reporting.builder import (
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.include_targets import apply_include_target_checks
+from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.toc_targets import apply_toc_target_checks
 
 logger = logging.getLogger(__name__)
@@ -283,6 +284,15 @@ def run_doc_translate(
     client = create_llm_client(cfg)
     glossary = load_glossary()
 
+    pending_en_md = {p.en_path for p in pairs}
+    pending_en_tocs = {nav.en_path for nav in nav_pairs}
+    en_toc_reachable = build_en_toc_reachable_from_repo(
+        repo_path,
+        docs_root=docs_root,
+        pending_en_md=pending_en_md,
+        pending_en_tocs=pending_en_tocs,
+    )
+
     if pairs:
         contents = load_pair_contents(
             repo_path, pairs, merge_base_with=merge_base_with
@@ -293,6 +303,7 @@ def run_doc_translate(
             glossary,
             config=cfg,
             use_analyze_llm=False,
+            en_toc_reachable=en_toc_reachable,
         )
     else:
         pr_result = PRTranslationResult()

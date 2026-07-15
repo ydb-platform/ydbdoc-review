@@ -45,7 +45,12 @@ class WikipediaResolver:
             return title
         key = (source_lang, title, target_lang)
         if key not in self._cache:
-            self._cache[key] = self._fetch_langlink(source_lang, title, target_lang)
+            resolved = self._fetch_langlink(source_lang, title, target_lang)
+            if resolved is None:
+                resolved = self._fetch_wikidata_sitelink(
+                    source_lang, title, target_lang
+                )
+            self._cache[key] = resolved
         return self._cache[key]
 
     def _fetch_langlink(
@@ -87,6 +92,88 @@ class WikipediaResolver:
                 source_lang,
                 target_lang,
                 title,
+                exc,
+            )
+        return None
+
+    def _fetch_wikidata_sitelink(
+        self,
+        source_lang: str,
+        title: str,
+        target_lang: str,
+    ) -> str | None:
+        """Resolve via Wikidata when direct langlinks are missing."""
+        qid = self._fetch_wikibase_item(source_lang, title)
+        if not qid:
+            return None
+        return self._fetch_wikidata_title(qid, target_lang)
+
+    def _fetch_wikibase_item(self, wiki_lang: str, title: str) -> str | None:
+        url = f"https://{wiki_lang}.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "titles": title,
+            "prop": "pageprops",
+            "ppprop": "wikibase_item",
+            "redirects": "1",
+            "format": "json",
+            "formatversion": "2",
+        }
+        try:
+            resp = requests.get(
+                url,
+                params=params,
+                timeout=self.timeout_s,
+                headers={"User-Agent": _WIKI_USER_AGENT},
+            )
+            resp.raise_for_status()
+            pages = resp.json().get("query", {}).get("pages", [])
+            if not pages:
+                return None
+            page = pages[0]
+            if page.get("missing"):
+                return None
+            item = (page.get("pageprops") or {}).get("wikibase_item")
+            if item:
+                return str(item).strip() or None
+        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Wikipedia wikibase lookup for %r (%s) failed: %s",
+                title,
+                wiki_lang,
+                exc,
+            )
+        return None
+
+    def _fetch_wikidata_title(self, qid: str, target_lang: str) -> str | None:
+        site = f"{target_lang}wiki"
+        url = "https://www.wikidata.org/w/api.php"
+        params = {
+            "action": "wbgetentities",
+            "ids": qid,
+            "props": "sitelinks",
+            "sitefilter": site,
+            "format": "json",
+        }
+        try:
+            resp = requests.get(
+                url,
+                params=params,
+                timeout=self.timeout_s,
+                headers={"User-Agent": _WIKI_USER_AGENT},
+            )
+            resp.raise_for_status()
+            entity = resp.json().get("entities", {}).get(qid, {})
+            sitelink = (entity.get("sitelinks") or {}).get(site)
+            if sitelink:
+                resolved = str(sitelink.get("title") or "").strip()
+                return resolved or None
+        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Wikidata sitelink %s→%s for %s failed: %s",
+                qid,
+                target_lang,
+                site,
                 exc,
             )
         return None
@@ -170,10 +257,5 @@ def resolve_wikipedia_href(
     resolver = resolver or get_wikipedia_resolver()
     resolved = resolver.resolve_title(lookup_lang, title, wiki_target)
     if resolved is None:
-        if lookup_lang != wiki_target:
-            return href.replace(
-                f"{lookup_lang}.wikipedia.org",
-                f"{wiki_target}.wikipedia.org",
-            )
         return href
     return format_wikipedia_href(wiki_target, resolved, fragment)
