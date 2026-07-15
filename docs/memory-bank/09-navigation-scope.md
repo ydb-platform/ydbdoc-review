@@ -31,8 +31,8 @@ For each **source PR**:
    nested sidebars (`include.path` → child toc).
 3. **Plan translation scope** before any LLM call:
    - **From diff:** RU paths touched in the source PR → translate from PR head.
-   - **From main:** RU paths required by the tree but absent in EN at merge-base
-     → read RU from `main`/HEAD and translate (full section mirror).
+   - **From main:** only paths required by **diff-scoped** toc rules + locale
+     ``{% include %}`` closure — **not** whole absent-EN sibling sections (§6.104).
 4. **Close dependencies:** locale `{% include %}` for every queued `.md`.
 5. **Merge / verify navigation** from the same plan object — no second-guessing scope.
 
@@ -66,8 +66,8 @@ uses `read_text` / `read_text_at_ref` via `make_repo_scope_readers()`).
 | Step | Action |
 |------|--------|
 | 1 | Seed `diff_ru_md` / `diff_ru_nav` from PR file list |
-| 2 | `_discover_ru_tocs` — union of diff nav + ancestor tocs of each diff md + BFS on `include.path` |
-| 3 | Per discovered toc (§22.5): **absent EN toc** → all its ``href`` pages missing on EN; **toc in PR diff** → **new** ``href`` since merge-base only; **partial EN sidebar** → missing EN mirrors for diff pages listed in that toc |
+| 2 | `_discover_ru_tocs` — ancestor tocs + BFS on `include.path` **only into child sidebars whose directory contains a diff file or that are in diff-nav** (§6.104) |
+| 3 | Per discovered toc (§22.5): **toc in PR diff** → **new** ``href`` since merge-base only; **partial EN sidebar** → missing EN mirrors for **diff pages listed in that toc**. No queue-all-hrefs for absent EN sibling sections. |
 | 4 | BFS locale `{% include %}` on all `doc_ru` |
 | 5 | `_nav_needed` — queue toc merge if: in diff, EN toc absent, or EN missing href for a diff page |
 
@@ -75,15 +75,16 @@ Merge phase (unchanged location: `navigation_merge.py`):
 
 - Label translation via LLM
 - `supplement_only` flag from `nav_from_main` provenance
-- Absent-EN full mirror (§6.85) and scoped gap-fill (§6.72) via `_resolve_toc_merge_scope`
+- Scoped gap-fill (§6.72) via `_resolve_toc_merge_scope`; absent-EN **full mirror**
+  only at **merge** time for nav yaml already in plan (not scope expansion §6.104)
 - `planned_toc_extras_for_pair` replaces `extra_toc_hrefs_from_md_targets` axis
 
 ### 22.5. Operational rules (authoritative)
 
 | EN `main` state | Pages | Navigation merge |
 |-----------------|-------|------------------|
-| Section entirely absent (no EN toc / pages) | Translate **all** RU `href` + includes from tree | Full RU mirror (§6.85) |
-| Partial EN sidebar | Translate only missing EN mirrors | Supplement missing href/include only (§6.72) |
+| Section entirely absent (no EN toc / pages) | **Not** auto-queued via sibling toc BFS (§6.104). Only diff pages + new toc hrefs in diff + include closure. | `_nav_needed` may still queue toc yaml when EN absent **and** a diff page is listed there |
+| Partial EN sidebar | Translate only missing EN mirrors for **diff** pages listed in toc | Supplement missing href/include only (§6.72) |
 | PR edits toc yaml directly | Translate diff pages + toc labels in scope | Scoped merge from RU base→PR diff (§6.82) |
 
 ### 22.6. Real PR golden fixtures
@@ -96,6 +97,7 @@ Fetched by `scripts/fetch_nav_fixtures.py` into `tests/fixtures/nav_cases/`:
 | `case_44820` | [#44820](https://github.com/ydb-platform/ydb/pull/44820) | SQS pages + `reference/toc_p.yaml` **in diff** |
 | `case_43530` | [#43530](https://github.com/ydb-platform/ydb/pull/43530) | OTel observability — **explicit toc edits** in diff (#44103) |
 | `case_44457` | [#44457](https://github.com/ydb-platform/ydb/pull/44457) | Partial EN sidebar — diff + new toc href only; **not** all missing pages in ancestor menus |
+| `case_43997` | [#43997](https://github.com/ydb-platform/ydb/pull/43997) | Java SDK recipe snippets — **exactly 20** diff md paths; no json-search / streaming-query / spring spill (§6.104) |
 
 Tests: `tests/unit/test_nav_scope_planner.py`.
 
@@ -124,7 +126,7 @@ python scripts/fetch_nav_fixtures.py --all
 | Item | Decision |
 |------|----------|
 | Code on `main` | `d68812f` (Phase J planner) + follow-ups through `203956a` |
-| Tag `v0.1.0` | **`203956a`** (2026-07-14) — scope step-3 fix, harness import, Eliza hardening, MD037 postprocess, report UX (§6.96–§6.97); WIP §6.98–§6.100 pending tag |
+| Tag `v0.1.0` | **`7685056`** (2026-07-15) — §6.104 scope BFS + no cross-section mirror; §6.105 Cyrillic `#fragment` remap |
 | Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
 | [#45181](https://github.com/ydb-platform/ydb/pull/45181) | Translation PR is **green on old chain** — do **not** re-run for regression |
 | §22 validation | Step-by-step: [#44457](https://github.com/ydb-platform/ydb/pull/44457) (CI re-run), [#43010](https://github.com/ydb-platform/ydb/pull/43010) (local Eliza), [#43997](https://github.com/ydb-platform/ydb/pull/43997) |
@@ -180,16 +182,24 @@ Golden: `case_44457` expects ~3 md + 1 toc, not 35.
 **Operational rule:** debug one source PR at a time; do not batch-re-run all three until
 [#44457](https://github.com/ydb-platform/ydb/pull/44457) is green end-to-end.
 
-### 22.11. §22 validation progress (2026-07-14 afternoon)
+### 22.11. §22 validation progress (2026-07-15)
 
 | Source PR | Mode | Scope (expected) | Status |
 |-----------|------|------------------|--------|
-| [#44457](https://github.com/ydb-platform/ydb/pull/44457) | ydb CI `doc_translate` re-run @ `203956a` | ~3 md + nav (`case_44457`) | Translation PR recreated after deleting `ydbdoc-review/pr-44457`; expect 🔴 only on Wikipedia links in `execution_process.md` |
-| [#43010](https://github.com/ydb-platform/ydb/pull/43010) | Local `job --dry-run` + Eliza | 13 doc + 8 nav | In progress — fix TLS (§6.99), then Eliza 429 (§6.98) |
-| [#43997](https://github.com/ydb-platform/ydb/pull/43997) | Pending | — | After #44457 + #43010 |
+| [#44457](https://github.com/ydb-platform/ydb/pull/44457) | ydb CI `doc_translate` | ~3 md + nav (`case_44457`) | Validated @ `203956a`+ |
+| [#43010](https://github.com/ydb-platform/ydb/pull/43010) | Local Eliza dry-run | 13 doc + 8 nav | Done locally |
+| [#43997](https://github.com/ydb-platform/ydb/pull/43997) | Local `job` + Eliza (re-run) | **20 md** + nav for touched ydb-sdk/reference (`case_43997`) | **Re-run** after `v0.1.0` @ §6.104–§6.105 — delete `ydbdoc-review/pr-43997`, old [#46577](https://github.com/ydb-platform/ydb/pull/46577) had 36 files + MD051 |
 
 **Wikipedia manual fix (#44457):** DML → `https://en.wikipedia.org/wiki/Data_manipulation_language`;
 DDL → `https://en.wikipedia.org/wiki/Data_definition_language`.
+
+### 22.12. Cross-section scope overrun (#43997 → #46577, 2026-07-15)
+
+**Symptom:** source [#43997](https://github.com/ydb-platform/ydb/pull/43997) (20 RU files) → translation [#46577](https://github.com/ydb-platform/ydb/pull/46577) (36 files): json-search, streaming-query, spring, sql-translation pulled via lateral BFS + absent-EN full mirror on sibling tocs under `recipes/toc_p.yaml` and `reference/toc_p.yaml`.
+
+**Fix:** §6.104 — `_toc_dir_contains_diff` gates BFS; absent-EN mirror block removed from `_pages_from_discovered_toc`. Golden: `case_43997` (exact 20), `case_45181` no longer pulls sqs-api (sqs only when in diff, e.g. #44820).
+
+**build-docs:** MD051 on `vector-search.md` `[Vector search](#векторный-поиск)` — §6.105 heading anchor map + link_locale remap.
 
 ---
 

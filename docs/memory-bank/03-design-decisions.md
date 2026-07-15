@@ -2323,6 +2323,51 @@ code changes.
 ``test_eliza_503_exhausted_switches_*``, ``test_eliza_4xx_does_not_advance_*``,
 ``test_eliza_parse_error_does_not_advance_*``, ``test_eliza_full_chain_429_raises_*``.
 
+### 6.104. Cross-section scope overrun fix (#43997, 2026-07-15)
+
+**Problem:** [#43997](https://github.com/ydb-platform/ydb/pull/43997) (20 RU recipe files) →
+[#46577](https://github.com/ydb-platform/ydb/pull/46577) (36 EN files). Lateral BFS from
+ancestor tocs (`recipes/toc_p.yaml`, `reference/toc_p.yaml`, `core/toc_i.yaml`) plus
+**absent-EN full mirror** queued json-search, streaming-query, spring, sql-translation —
+same mechanism as sqs-api under `reference/toc_p.yaml` (§6.92 partial fix).
+
+**Decision:**
+
+1. **Remove cross-section absent-EN mirror** from `_pages_from_discovered_toc` — scope
+   pages = diff + locale ``{% include %}`` closure + **new** toc hrefs when toc is in diff.
+2. **Gate BFS** — `_discover_ru_tocs(..., diff_paths=…)` follows ``include.path`` only
+   when child toc is in diff-nav or its directory subtree contains a diff file
+   (`_toc_dir_contains_diff`).
+3. **#45181 behavior change:** sqs-api no longer auto-pulled when only `topic.md` is in
+   diff; sqs-api stays in scope when directly in diff ([#44820](https://github.com/ydb-platform/ydb/pull/44820)).
+
+**Implementation:** ``navigation/scope_planner.py`` (`a628f95`).
+
+**Tests:** ``case_43997`` fixture (exact 20 md, ``doc_from_main == ∅``),
+``test_case_45181_does_not_pull_sibling_sqs_api``, tightened ``<=`` → ``==`` on 44457/44820.
+
+### 6.105. Cyrillic in-page link fragments (#43997 MD051, 2026-07-15)
+
+**Problem:** `vector-search.md` EN kept ``[Vector search](#векторный-поиск)`` while
+heading became ``#vector-search`` → **MD051** / ``build-docs`` red.
+``mirror_link_href`` skipped ``#`` hrefs; ``check_link_locale_in_en`` did not flag them.
+
+**Decision:**
+
+1. **`build_heading_anchor_map(source, target)`** in ``validation/yfm_anchor.py`` —
+   map RU auto-slugs + explicit ``{#…}`` to EN (``diplodoc_auto_slug``, ``english_yfm_anchor``).
+2. **`localize_links_in_document(..., source_doc=…)`** remaps ``#frag`` and ``path#frag``
+   via anchor map before render; ``render_with_translations`` passes ``source_doc=base_doc``.
+3. **`check_link_locale_in_en`** — issue ``Cyrillic anchor fragment in EN document`` for
+   any in-page / relative fragment with Cyrillic (local MD051 gate).
+
+**Not in scope:** ``{#connect-ydb}`` ASCII YFM links, Wikipedia RU slugs (existing heuristics).
+
+**Implementation:** ``validation/link_locale.py``, ``validation/yfm_anchor.py``,
+``harness/render.py`` (`7685056`).
+
+**Tests:** ``test_yfm_anchor.py``, ``test_link_locale.py`` (remap + validator).
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

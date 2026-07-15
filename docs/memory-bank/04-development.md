@@ -165,9 +165,11 @@ Fixtures are committed and not auto-updated, so older versions stay reproducible
 
 ```
 tests/fixtures/nav_cases/
-├── case_45181/   # sqs-api closure from topic-only diff
+├── case_45181/   # topic-only diff — must NOT pull sqs-api siblings (§6.104)
 ├── case_44820/   # SQS in PR diff
-└── case_43530/   # explicit toc edits (OTel)
+├── case_43530/   # explicit toc edits (OTel)
+├── case_44457/   # partial EN sidebar
+└── case_43997/   # Java SDK snippets — exactly 20 md paths
 ```
 
 ```bash
@@ -176,8 +178,11 @@ pytest tests/unit/test_nav_scope_planner.py -v
 ```
 
 Golden tests define planner contract before touching `workflow.py`. See
-**09-navigation-scope** §22.6–§22.8 for rollout notes (tags not moved; #45181
-left green on old chain).
+**09-navigation-scope** §22.6–§22.12 for rollout notes.
+
+**Local re-translate #43997:** delete remote `ydbdoc-review/pr-43997`, run
+`python -m ydbdoc_review job --mode translate --repo ydb-platform/ydb --pr 43997 …`
+with Eliza env; expect **20** doc paths (§6.104).
 
 ---
 
