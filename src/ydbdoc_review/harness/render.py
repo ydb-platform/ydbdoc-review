@@ -111,10 +111,17 @@ def finalize_en_target(
         en_toc_reachable is not None
         and target_lang.lower() in {"en", "english"}
     ):
+        stripped: list[str] = []
         text = strip_unreachable_internal_links(
             text,
             file_path=en_mirror_path(file_path),
             reachable=en_toc_reachable,
             target_lang=target_lang,
+            out_stripped=stripped,
         )
+        if stripped and out_warnings is not None:
+            out_warnings.append(
+                f"strip_unreachable_links: removed {len(stripped)} internal "
+                f"href(s) outside EN toc graph"
+            )
     return postprocess_en_target_markdown(text)

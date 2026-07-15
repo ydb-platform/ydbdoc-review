@@ -2452,6 +2452,25 @@ on [#44457](https://github.com/ydb-platform/ydb/pull/44457).
    ``en_toc_reachable is not None``; resolve hrefs via ``en_mirror_path(file_path)``.
 3. Tests: RU fallback must not add ``watermarks.md``; case_44457 watermarks/spring-retry strip.
 
+### 6.109. Existence filter + Docker stale-image guard (#44457 → #46649, 2026-07-15)
+
+**Problem:** [#46649](https://github.com/ydb-platform/ydb/pull/46649) still had
+``json-indexes.md``, ``watermarks.md``, ``spring-retry.md`` in glossary. CI commit
+message showed ``ydbdoc-review @ e9ff4e7`` (June) — **stale GHCR fallback** after
+local Docker build failed silently.
+
+**Fix:**
+
+1. ``collect_en_toc_reachable_md``: add toc ``href`` to reachable only when the EN
+   ``.md`` **exists on disk** (Diplodoc YFM003); ``pending_en_md`` paths always included.
+2. ``action-docker.sh``: derive ``YDBDOC_GIT_SHA`` from Action checkout HEAD; pass into
+   container; **disable GHCR fallback by default** (``YDBDOC_GHCR_FALLBACK=1`` to opt in);
+   log which image is used.
+3. ``finalize_en_target``: log stripped href count; ``workflow.py`` logs reachable set size.
+
+**Ops:** publish GHCR via ``docker-publish`` workflow on tag ``v0.1.0`` after each release;
+re-run **doc_translate** on #44457 — commit must show new SHA, not ``e9ff4e7``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

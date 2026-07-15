@@ -105,7 +105,8 @@ def collect_en_toc_reachable_md(
 ) -> frozenset[str]:
     """Collect EN ``.md`` paths reachable from the **EN-only** sidebar toc graph."""
     pending_tocs = frozenset(normalize_repo_path(p) for p in extra_toc_paths)
-    reachable: set[str] = {normalize_repo_path(p) for p in extra_md_paths}
+    pending_md = frozenset(normalize_repo_path(p) for p in extra_md_paths)
+    reachable: set[str] = set(pending_md)
     toc_queue: deque[str] = deque()
     seen_tocs: set[str] = set()
 
@@ -129,7 +130,9 @@ def collect_en_toc_reachable_md(
         for kind, rel in collect_toc_link_targets(yaml_text):
             resolved = normalize_repo_path(resolve_toc_target_path(toc_path, rel))
             if kind == "href" and resolved.endswith(".md"):
-                reachable.add(resolved)
+                # Diplodoc YFM003: href must exist on disk in EN checkout.
+                if read_text(resolved) is not None:
+                    reachable.add(resolved)
             elif kind == "include" and resolved not in seen_tocs:
                 toc_queue.append(resolved)
     return frozenset(reachable)
@@ -207,11 +210,56 @@ def strip_unreachable_internal_links(
     file_path: str,
     reachable: frozenset[str],
     target_lang: str = "en",
+    out_stripped: list[str] | None = None,
 ) -> str:
     """Drop internal ``.md`` links whose targets are outside the EN toc graph."""
     doc = parse_markdown(text)
     from_en = en_mirror_path(file_path)
-    _walk_blocks(doc.children, from_file=from_en, reachable=reachable)
+    stripped: list[str] = []
+
+    def _walk_inline_count(
+        nodes: list[InlineNode],
+        *,
+        from_file: str,
+    ) -> None:
+        i = 0
+        while i < len(nodes):
+            node = nodes[i]
+            if isinstance(node, InlineLink):
+                target = resolve_internal_md_href(from_file, node.href)
+                if target is not None and target not in reachable:
+                    stripped.append(node.href)
+                    nodes[i : i + 1] = list(node.children)
+                    continue
+                _walk_inline_count(node.children, from_file=from_file)
+            elif isinstance(node, (InlineEmphasis, InlineStrong)):
+                _walk_inline_count(node.children, from_file=from_file)
+            i += 1
+
+    def _walk_blocks_count(blocks) -> None:
+        for block in blocks:
+            if isinstance(block, (Paragraph, Heading)):
+                _walk_inline_count(block.children, from_file=from_en)
+            elif isinstance(block, TermDefinition):
+                _walk_inline_count(block.children, from_file=from_en)
+            elif isinstance(block, (BulletList, OrderedList)):
+                for item in block.children:
+                    if isinstance(item, ListItem):
+                        _walk_blocks_count(item.children)
+            elif isinstance(block, BlockQuote):
+                _walk_blocks_count(block.children)
+            elif isinstance(block, Table):
+                for row in block.children:
+                    if isinstance(row, TableRow):
+                        for cell in row.children:
+                            if isinstance(cell, TableCell):
+                                _walk_inline_count(cell.children, from_file=from_en)
+            elif isinstance(block, (YfmNote, YfmCut, YfmIf, YfmTabs)):
+                _walk_blocks_count(block.children)
+
+    _walk_blocks_count(doc.children)
+    if out_stripped is not None:
+        out_stripped.extend(stripped)
     return render_markdown(doc, target_lang=target_lang)
 
 

@@ -73,6 +73,8 @@ def test_collect_en_toc_reachable_md_bfs():
     files = {
         "ydb/docs/en/core/toc_p.yaml": _MINI_TOC,
         "ydb/docs/en/core/concepts/toc_p.yaml": _CONCEPTS_TOC,
+        "ydb/docs/en/core/concepts/glossary.md": "# glossary\n",
+        "ydb/docs/en/core/concepts/datamodel/view.md": "# view\n",
     }
 
     def read_text(path: str) -> str | None:
@@ -115,6 +117,7 @@ items:
 - name: Process
   href: execution_process.md
 """,
+        "ydb/docs/en/core/concepts/query_execution/execution_process.md": "# process\n",
     }
 
     def read_text(path: str) -> str | None:
@@ -129,6 +132,32 @@ items:
         "ydb/docs/en/core/concepts/query_execution/execution_process.md"
         in reachable
     )
+
+
+def test_collect_en_toc_reachable_md_skips_missing_en_files():
+    files = {
+        "ydb/docs/en/core/toc_p.yaml": _MINI_TOC,
+        "ydb/docs/en/core/concepts/toc_p.yaml": _CONCEPTS_TOC,
+        "ydb/docs/en/core/dev/toc_p.yaml": """\
+items:
+- name: Fulltext indexes
+  href: fulltext-indexes.md
+- name: JSON indexes
+  href: json-indexes.md
+""",
+        "ydb/docs/en/core/dev/fulltext-indexes.md": "# fulltext\n",
+    }
+
+    def read_text(path: str) -> str | None:
+        return files.get(path)
+
+    reachable = collect_en_toc_reachable_md(
+        read_text,
+        root_toc="ydb/docs/en/core/toc_p.yaml",
+        extra_toc_paths=frozenset({"ydb/docs/en/core/dev/toc_p.yaml"}),
+    )
+    assert "ydb/docs/en/core/dev/fulltext-indexes.md" in reachable
+    assert "ydb/docs/en/core/dev/json-indexes.md" not in reachable
 
 
 def test_strip_unreachable_glossary_links():

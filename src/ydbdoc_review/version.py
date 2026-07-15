@@ -34,9 +34,12 @@ def action_release_label() -> str:
     """
     ref = os.environ.get("GITHUB_ACTION_REF", "").strip()
     sha = os.environ.get("YDBDOC_GIT_SHA", "").strip()
-    if not sha or sha == "dev":
-        sha = _git_head_sha() or "dev"
-    short = _short_sha(sha)
+    if sha and sha != "dev" and not sha.startswith("v"):
+        short = _short_sha(sha)
+    elif sha and sha != "dev":
+        short = sha
+    else:
+        short = _short_sha(_git_head_sha() or "") or "dev"
     if ref:
         return f"ydbdoc-review {ref} @ {short}"
     if short != "dev":

@@ -292,6 +292,12 @@ def run_doc_translate(
         pending_en_md=pending_en_md,
         pending_en_tocs=pending_en_tocs,
     )
+    logger.info(
+        "EN toc reachability: %s md paths (%s pending md, %s pending toc)",
+        len(en_toc_reachable),
+        len(pending_en_md),
+        len(pending_en_tocs),
+    )
 
     if pairs:
         contents = load_pair_contents(
