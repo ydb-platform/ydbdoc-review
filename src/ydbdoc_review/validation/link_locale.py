@@ -27,6 +27,10 @@ from ydbdoc_review.validation.wikipedia_links import (
     resolve_wikipedia_href,
     wiki_lang_for_target,
 )
+from ydbdoc_review.validation.yfm_anchor import (
+    build_heading_anchor_map,
+    diplodoc_auto_slug,
+)
 
 _HOST_REPLACEMENTS_EN: tuple[tuple[str, str], ...] = (
     ("ru.wikipedia.org", "en.wikipedia.org"),
@@ -93,9 +97,57 @@ def _mirror_relative_asset_path(href: str, *, target_lang: str) -> str:
     return href
 
 
-def mirror_link_href(href: str, *, target_lang: str = "en") -> str:
+def _strip_md(text: str) -> str:
+    return re.sub(r"[*_`]", "", text).strip()
+
+
+def _remap_anchor_fragment(
+    href: str,
+    anchor_map: dict[str, str] | None,
+    *,
+    link_text: str | None = None,
+) -> str:
+    """Rewrite ``#fragment`` or ``path#fragment`` using heading anchor map."""
+    if not href or href.startswith(("http://", "https://", "mailto:")):
+        return href
+
+    def _map_frag(fragment: str) -> str:
+        decoded = unquote(fragment)
+        if anchor_map:
+            if decoded in anchor_map:
+                return anchor_map[decoded]
+            if fragment in anchor_map:
+                return anchor_map[fragment]
+        if _CYRILLIC.search(decoded) and link_text:
+            slug = diplodoc_auto_slug(_strip_md(link_text))
+            if slug:
+                return slug
+        return fragment
+
+    if href.startswith("#"):
+        return f"#{_map_frag(href[1:])}"
+    if "#" not in href:
+        return href
+    base, fragment = href.split("#", 1)
+    return f"{base}#{_map_frag(fragment)}"
+
+
+def mirror_link_href(
+    href: str,
+    *,
+    target_lang: str = "en",
+    anchor_map: dict[str, str] | None = None,
+    link_text: str | None = None,
+) -> str:
     """Apply deterministic URL locale fixes, including Wikipedia langlinks."""
-    if not href or href.startswith("#"):
+    if not href:
+        return href
+
+    tgt = target_lang.strip().lower()
+    if tgt in {"en", "english"}:
+        href = _remap_anchor_fragment(href, anchor_map, link_text=link_text)
+
+    if href.startswith("#"):
         return href
 
     wiki = resolve_wikipedia_href(href, target_lang=target_lang)
@@ -124,6 +176,7 @@ def _walk_inline(
     nodes: Iterable[InlineNode],
     *,
     target_lang: str,
+    anchor_map: dict[str, str] | None = None,
     on_href: Callable[[str], None] | None = None,
 ) -> None:
     for node in nodes:
@@ -131,51 +184,117 @@ def _walk_inline(
             if on_href is not None:
                 on_href(node.href)
             else:
-                node.href = mirror_link_href(node.href, target_lang=target_lang)
+                from ydbdoc_review.rendering.markdown_renderer import _render_inline
+
+                link_text = _render_inline(node.children)
+                node.href = mirror_link_href(
+                    node.href,
+                    target_lang=target_lang,
+                    anchor_map=anchor_map,
+                    link_text=link_text,
+                )
         elif isinstance(node, InlineImage):
             if on_href is not None:
                 on_href(node.src)
             else:
-                node.src = mirror_link_href(node.src, target_lang=target_lang)
+                node.src = mirror_link_href(
+                    node.src, target_lang=target_lang, anchor_map=anchor_map
+                )
         elif hasattr(node, "children") and isinstance(node.children, list):
-            _walk_inline(node.children, target_lang=target_lang, on_href=on_href)
+            _walk_inline(
+                node.children,
+                target_lang=target_lang,
+                anchor_map=anchor_map,
+                on_href=on_href,
+            )
 
 
 def _walk_blocks(
     blocks: Iterable[BlockNode],
     *,
     target_lang: str,
+    anchor_map: dict[str, str] | None = None,
     on_href: Callable[[str], None] | None = None,
 ) -> None:
     from ydbdoc_review.parsing.ast_types import Heading, TermDefinition
 
     for block in blocks:
         if isinstance(block, (Paragraph, Heading, TermDefinition)):
-            _walk_inline(block.children, target_lang=target_lang, on_href=on_href)
+            _walk_inline(
+                block.children,
+                target_lang=target_lang,
+                anchor_map=anchor_map,
+                on_href=on_href,
+            )
         elif isinstance(block, (BulletList, OrderedList)):
             for item in block.children:
                 if isinstance(item, ListItem):
                     for child in item.children:
-                        _walk_blocks([child], target_lang=target_lang, on_href=on_href)
+                        _walk_blocks(
+                            [child],
+                            target_lang=target_lang,
+                            anchor_map=anchor_map,
+                            on_href=on_href,
+                        )
         elif isinstance(block, BlockQuote):
-            _walk_blocks(block.children, target_lang=target_lang, on_href=on_href)
+            _walk_blocks(
+                block.children,
+                target_lang=target_lang,
+                anchor_map=anchor_map,
+                on_href=on_href,
+            )
         elif isinstance(block, Table):
             for cell in block.header.cells:
-                _walk_inline(cell.children, target_lang=target_lang, on_href=on_href)
+                _walk_inline(
+                    cell.children,
+                    target_lang=target_lang,
+                    anchor_map=anchor_map,
+                    on_href=on_href,
+                )
             for row in block.rows:
                 for cell in row.cells:
-                    _walk_inline(cell.children, target_lang=target_lang, on_href=on_href)
+                    _walk_inline(
+                        cell.children,
+                        target_lang=target_lang,
+                        anchor_map=anchor_map,
+                        on_href=on_href,
+                    )
         elif isinstance(block, YfmNote):
-            _walk_blocks(block.children, target_lang=target_lang, on_href=on_href)
+            _walk_blocks(
+                block.children,
+                target_lang=target_lang,
+                anchor_map=anchor_map,
+                on_href=on_href,
+            )
         elif isinstance(block, YfmTabs):
             for tab in block.children:
-                _walk_inline(tab.title, target_lang=target_lang, on_href=on_href)
-                _walk_blocks(tab.children, target_lang=target_lang, on_href=on_href)
+                _walk_inline(
+                    tab.title,
+                    target_lang=target_lang,
+                    anchor_map=anchor_map,
+                    on_href=on_href,
+                )
+                _walk_blocks(
+                    tab.children,
+                    target_lang=target_lang,
+                    anchor_map=anchor_map,
+                    on_href=on_href,
+                )
         elif isinstance(block, YfmCut):
-            _walk_blocks(block.children, target_lang=target_lang, on_href=on_href)
+            _walk_blocks(
+                block.children,
+                target_lang=target_lang,
+                anchor_map=anchor_map,
+                on_href=on_href,
+            )
         elif isinstance(block, YfmIf):
             for branch in block.branches:
-                _walk_blocks(branch.children, target_lang=target_lang, on_href=on_href)
+                _walk_blocks(
+                    branch.children,
+                    target_lang=target_lang,
+                    anchor_map=anchor_map,
+                    on_href=on_href,
+                )
 
 
 def collect_link_hrefs(doc: Document) -> list[str]:
@@ -188,6 +307,28 @@ def collect_link_hrefs(doc: Document) -> list[str]:
 
     _walk_blocks(doc.children, target_lang="en", on_href=remember)
     return hrefs
+
+
+def collect_fragment_hrefs(doc: Document) -> list[str]:
+    """Return in-page and relative hrefs that include a ``#fragment``."""
+    hrefs: list[str] = []
+
+    def remember(href: str) -> None:
+        if not href or _HTTP_HREF.match(href) or href.startswith("mailto:"):
+            return
+        if href.startswith("#") or "#" in href:
+            hrefs.append(href)
+
+    _walk_blocks(doc.children, target_lang="en", on_href=remember)
+    return hrefs
+
+
+def _fragment_has_cyrillic(href: str) -> bool:
+    if href.startswith("#"):
+        return bool(_CYRILLIC.search(unquote(href[1:])))
+    if "#" in href:
+        return bool(_CYRILLIC.search(unquote(href.rsplit("#", 1)[1])))
+    return False
 
 
 def collect_relative_hrefs(doc: Document) -> list[str]:
@@ -256,12 +397,29 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
             issues.append(
                 f"link_locale: RU asset suffix in EN relative path: {href}"
             )
+    for href in collect_fragment_hrefs(doc):
+        if href in seen:
+            continue
+        seen.add(href)
+        if _fragment_has_cyrillic(href):
+            issues.append(
+                f"link_locale: Cyrillic anchor fragment in EN document: {href}"
+            )
     return issues
 
 
-def localize_links_in_document(doc: Document, *, target_lang: str = "en") -> None:
+def localize_links_in_document(
+    doc: Document,
+    *,
+    target_lang: str = "en",
+    source_doc: Document | None = None,
+    anchor_map: dict[str, str] | None = None,
+) -> None:
     """Rewrite link/image URLs in-place for the target document locale."""
-    _walk_blocks(doc.children, target_lang=target_lang)
+    tgt = target_lang.strip().lower()
+    if anchor_map is None and tgt in {"en", "english"} and source_doc is not None:
+        anchor_map = build_heading_anchor_map(source_doc, doc)
+    _walk_blocks(doc.children, target_lang=target_lang, anchor_map=anchor_map)
 
 
 _WIKI_HREF_IN_TEXT = re.compile(

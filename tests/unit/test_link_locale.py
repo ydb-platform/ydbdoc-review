@@ -125,6 +125,36 @@ def test_check_link_locale_flags_ru_asset_suffix_in_relative_image():
     assert "RU asset suffix in EN relative path" in issues[0]
 
 
+def test_check_link_locale_flags_cyrillic_anchor_fragment():
+    md = "[Vector search](#векторный-поиск)\n"
+    issues = check_link_locale_in_en(md)
+    assert len(issues) == 1
+    assert "Cyrillic anchor fragment in EN document" in issues[0]
+
+
+def test_check_link_locale_accepts_english_anchor_fragment():
+    md = "[Vector search](#vector-search)\n"
+    assert check_link_locale_in_en(md) == []
+
+
+def test_localize_links_remaps_cyrillic_fragment_with_heading_map():
+    ru = parse_markdown("## Векторный поиск\n\n[Vector search](#векторный-поиск)\n")
+    en = parse_markdown("## Vector search\n\n[Vector search](#векторный-поиск)\n")
+    localize_links_in_document(en, target_lang="en", source_doc=ru)
+    out = render_markdown(en)
+    assert "[Vector search](#vector-search)" in out
+    assert check_link_locale_in_en(out) == []
+
+
+def test_localize_links_explicit_anchor_remaps_fragment():
+    ru = parse_markdown("### Поля {#fields-Описание}\n\n[Fields](#fields-Описание)\n")
+    en = parse_markdown("### Fields {#fields-Description}\n\n[Fields](#fields-Описание)\n")
+    localize_links_in_document(en, target_lang="en", source_doc=ru)
+    out = render_markdown(en)
+    assert "[Fields](#fields-Description)" in out
+    assert check_link_locale_in_en(out) == []
+
+
 def test_localize_links_in_document_table_cell():
     md = (
         "| RU |\n"
