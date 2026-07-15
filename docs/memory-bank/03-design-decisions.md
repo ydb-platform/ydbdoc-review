@@ -2429,6 +2429,29 @@ Cyrillic slug.
 **Re-run:** delete ``ydbdoc-review/pr-44457``, bump ``v0.1.0``, label **doc_translate**
 on [#44457](https://github.com/ydb-platform/ydb/pull/44457).
 
+### 6.108. EN-only toc reachability for link strip (#44457 → #46637, 2026-07-15)
+
+**Problem:** [#46637](https://github.com/ydb-platform/ydb/pull/46637) still had glossary /
+``query_execution/index.md`` links to ``./streaming-query/watermarks.md``,
+``spring-retry.md``, etc. → ``build-docs`` 🔴 ``unreachable-link … watermarks.html``.
+
+**Root causes:**
+
+1. ``collect_en_toc_reachable_md`` fell back to **RU toc yaml** whenever EN child toc
+   was missing → BFS pulled RU-only pages (``streaming-query/watermarks.md``) into the
+   reachable set → strip kept those links.
+2. Strip ran **only on glossary** (`is_glossary_file`), not on other scoped md files.
+3. ``if not reachable: return text`` and ``and en_toc_reachable`` skipped strip when
+   the set was empty or unset.
+
+**Fix:**
+
+1. EN toc BFS reads **EN yaml only**; RU mirror allowed **only** for ``pending_en_tocs``
+   from the current PR nav plan (new sidebars not yet on disk).
+2. ``strip_unreachable_internal_links`` runs on **every** EN finalize when
+   ``en_toc_reachable is not None``; resolve hrefs via ``en_mirror_path(file_path)``.
+3. Tests: RU fallback must not add ``watermarks.md``; case_44457 watermarks/spring-retry strip.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

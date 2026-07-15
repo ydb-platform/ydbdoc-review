@@ -1,4 +1,4 @@
-"""EN toc reachability and glossary link stripping (YFM003 variant A)."""
+"""EN toc reachability and internal link stripping (YFM003 variant A)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from ydbdoc_review.navigation.toc import collect_toc_link_targets, resolve_toc_t
 from ydbdoc_review.parsing.ast_types import (
     BlockQuote,
     BulletList,
-    Document,
+    Heading,
     InlineEmphasis,
     InlineLink,
     InlineNode,
@@ -21,6 +21,7 @@ from ydbdoc_review.parsing.ast_types import (
     Table,
     TableCell,
     TableRow,
+    TermDefinition,
     YfmCut,
     YfmIf,
     YfmNote,
@@ -32,13 +33,24 @@ from ydbdoc_review.rendering.markdown_renderer import render_markdown
 ReadText = Callable[[str], str | None]
 
 _DEFAULT_EN_ROOT_TOC = "ydb/docs/en/core/toc_p.yaml"
+_DOCS_ROOT = "ydb/docs"
 
 
 def normalize_repo_path(path: str) -> str:
     return path.replace("\\", "/").lstrip("./")
 
 
-def ru_toc_to_en_path(ru_toc_path: str, *, docs_root: str = "ydb/docs") -> str | None:
+def en_mirror_path(file_path: str, *, docs_root: str = _DOCS_ROOT) -> str:
+    """Map a RU doc path to its EN mirror for relative link resolution."""
+    normalized = normalize_repo_path(file_path)
+    ru_prefix = f"{docs_root}/ru/"
+    en_prefix = f"{docs_root}/en/"
+    if normalized.startswith(ru_prefix):
+        return en_prefix + normalized[len(ru_prefix) :]
+    return normalized
+
+
+def ru_toc_to_en_path(ru_toc_path: str, *, docs_root: str = _DOCS_ROOT) -> str | None:
     """Map ``…/ru/…/toc*.yaml`` to the EN mirror path."""
     normalized = normalize_repo_path(ru_toc_path)
     prefix = f"{docs_root}/ru/"
@@ -48,7 +60,7 @@ def ru_toc_to_en_path(ru_toc_path: str, *, docs_root: str = "ydb/docs") -> str |
 
 
 def resolve_internal_md_href(from_file: str, href: str) -> str | None:
-    """Return normalized repo path for a relative ``.md`` href, or ``None``."""
+    """Return normalized EN repo path for a relative ``.md`` href, or ``None``."""
     if not href or href.startswith(("http://", "https://", "mailto:")):
         return None
     if href.startswith("#"):
@@ -56,7 +68,8 @@ def resolve_internal_md_href(from_file: str, href: str) -> str | None:
     path_part = href.split("#", 1)[0].strip()
     if not path_part or not path_part.endswith(".md"):
         return None
-    base = PurePosixPath(normalize_repo_path(from_file)).parent
+    from_en = en_mirror_path(from_file)
+    base = PurePosixPath(from_en).parent
     parts: list[str] = []
     for part in (base / path_part).parts:
         if part == "..":
@@ -67,10 +80,18 @@ def resolve_internal_md_href(from_file: str, href: str) -> str | None:
     return normalize_repo_path("/".join(parts))
 
 
-def _read_toc_yaml(read_text: ReadText, en_toc_path: str) -> str | None:
+def _read_toc_yaml(
+    read_text: ReadText,
+    en_toc_path: str,
+    *,
+    allow_ru_fallback: bool,
+) -> str | None:
+    """Read EN toc yaml; optional RU mirror only for pending PR nav files."""
     text = read_text(en_toc_path)
     if text is not None:
         return text
+    if not allow_ru_fallback:
+        return None
     ru_path = en_toc_path.replace("/en/", "/ru/", 1)
     return read_text(ru_path)
 
@@ -82,7 +103,8 @@ def collect_en_toc_reachable_md(
     extra_md_paths: set[str] | frozenset[str] = frozenset(),
     extra_toc_paths: set[str] | frozenset[str] = frozenset(),
 ) -> frozenset[str]:
-    """Collect EN ``.md`` paths reachable from the sidebar toc graph."""
+    """Collect EN ``.md`` paths reachable from the **EN-only** sidebar toc graph."""
+    pending_tocs = frozenset(normalize_repo_path(p) for p in extra_toc_paths)
     reachable: set[str] = {normalize_repo_path(p) for p in extra_md_paths}
     toc_queue: deque[str] = deque()
     seen_tocs: set[str] = set()
@@ -97,7 +119,11 @@ def collect_en_toc_reachable_md(
         if toc_path in seen_tocs:
             continue
         seen_tocs.add(toc_path)
-        yaml_text = _read_toc_yaml(read_text, toc_path)
+        yaml_text = _read_toc_yaml(
+            read_text,
+            toc_path,
+            allow_ru_fallback=toc_path in pending_tocs,
+        )
         if not yaml_text:
             continue
         for kind, rel in collect_toc_link_targets(yaml_text):
@@ -112,7 +138,7 @@ def collect_en_toc_reachable_md(
 def build_en_toc_reachable_from_repo(
     repo_path: str,
     *,
-    docs_root: str = "ydb/docs",
+    docs_root: str = _DOCS_ROOT,
     pending_en_md: set[str] | frozenset[str] = frozenset(),
     pending_en_tocs: set[str] | frozenset[str] = frozenset(),
     read_text: ReadText | None = None,
@@ -128,12 +154,8 @@ def build_en_toc_reachable_from_repo(
     return collect_en_toc_reachable_md(
         read_text,
         root_toc=root_toc,
-        extra_md_paths={
-            normalize_repo_path(p) for p in pending_en_md
-        },
-        extra_toc_paths={
-            normalize_repo_path(p) for p in pending_en_tocs
-        },
+        extra_md_paths={normalize_repo_path(p) for p in pending_en_md},
+        extra_toc_paths={normalize_repo_path(p) for p in pending_en_tocs},
     )
 
 
@@ -159,7 +181,9 @@ def _walk_inline(
 
 def _walk_blocks(blocks, *, from_file: str, reachable: frozenset[str]) -> None:
     for block in blocks:
-        if isinstance(block, Paragraph):
+        if isinstance(block, (Paragraph, Heading)):
+            _walk_inline(block.children, from_file=from_file, reachable=reachable)
+        elif isinstance(block, TermDefinition):
             _walk_inline(block.children, from_file=from_file, reachable=reachable)
         elif isinstance(block, (BulletList, OrderedList)):
             for item in block.children:
@@ -177,7 +201,7 @@ def _walk_blocks(blocks, *, from_file: str, reachable: frozenset[str]) -> None:
             _walk_blocks(block.children, from_file=from_file, reachable=reachable)
 
 
-def strip_unreachable_glossary_links(
+def strip_unreachable_internal_links(
     text: str,
     *,
     file_path: str,
@@ -185,8 +209,11 @@ def strip_unreachable_glossary_links(
     target_lang: str = "en",
 ) -> str:
     """Drop internal ``.md`` links whose targets are outside the EN toc graph."""
-    if not reachable:
-        return text
     doc = parse_markdown(text)
-    _walk_blocks(doc.children, from_file=file_path, reachable=reachable)
+    from_en = en_mirror_path(file_path)
+    _walk_blocks(doc.children, from_file=from_en, reachable=reachable)
     return render_markdown(doc, target_lang=target_lang)
+
+
+# Backward-compatible alias
+strip_unreachable_glossary_links = strip_unreachable_internal_links

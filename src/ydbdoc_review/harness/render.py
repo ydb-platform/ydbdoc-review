@@ -9,22 +9,24 @@ from ydbdoc_review.parsing.ast_types import Document
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.reinsert import reinsert_segments
 from ydbdoc_review.segmentation.types import Segment
-from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_fence_comments_with_client,
     translate_cyrillic_text_fences_with_client,
 )
-from ydbdoc_review.validation.prose_cyrillic import (
-    translate_cyrillic_prose_with_client,
-)
 from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
-from ydbdoc_review.validation.glossary_toc_links import strip_unreachable_glossary_links
+from ydbdoc_review.validation.glossary_toc_links import (
+    en_mirror_path,
+    strip_unreachable_internal_links,
+)
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
+)
+from ydbdoc_review.validation.prose_cyrillic import (
+    translate_cyrillic_prose_with_client,
 )
 
 
@@ -106,13 +108,12 @@ def finalize_en_target(
         )
     text = localize_links_in_text(text, target_lang="en")
     if (
-        is_glossary_file(file_path)
-        and en_toc_reachable
+        en_toc_reachable is not None
         and target_lang.lower() in {"en", "english"}
     ):
-        text = strip_unreachable_glossary_links(
+        text = strip_unreachable_internal_links(
             text,
-            file_path=file_path,
+            file_path=en_mirror_path(file_path),
             reachable=en_toc_reachable,
             target_lang=target_lang,
         )
