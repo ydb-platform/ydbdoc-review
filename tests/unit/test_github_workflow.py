@@ -552,11 +552,11 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
     mock_gh.return_value.delete_branch.assert_not_called()
     mock_gh.return_value.create_pull.assert_not_called()
     assert result.translation_pr_number == 11
-    assert result.source_comment_url == "url"
     posted_bodies = [
         c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list
     ]
-    assert any("коммитом в эту ветку" in body for body in posted_bodies)
+    assert len(posted_bodies) == 1
+    assert "коммитом в эту ветку" not in posted_bodies[0]
 
 
 def test_run_doc_verify_same_repo_author_pr_opens_fixup_pr(git_repo: str):
@@ -664,5 +664,5 @@ def test_run_doc_verify_posts_comment(git_repo: str):
                             )
 
     assert result.translation_comment_url == "url"
-    assert mock_gh.return_value.post_issue_comment.call_count == 2
+    assert mock_gh.return_value.post_issue_comment.call_count == 1
 

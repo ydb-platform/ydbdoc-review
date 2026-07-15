@@ -702,15 +702,6 @@ def build_verify_fixup_source_comment(fixup_pr_number: int) -> str:
     )
 
 
-def build_verify_translation_inline_comment() -> str:
-    """Short note when critic fixes were committed on the translation branch (§6.75)."""
-    return (
-        "🤖 **ydbdoc-review** — правки критика\n\n"
-        "Безопасные автоисправления добавлены **коммитом в эту ветку** перевода. "
-        "Отдельный fixup PR не создаётся — merge этого PR уже включает правки критика."
-    )
-
-
 def build_source_pr_comment(
     result: PRTranslationResult,
     *,

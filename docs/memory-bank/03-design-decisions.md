@@ -1672,9 +1672,8 @@ without fixup and lose applied fixes.
 2. **Author / fork / manual verify PRs:** keep §6.64 fixup branch + separate PR —
    never push onto the verified head.
 3. QA report is posted **after** the inline push; ``Checkout:`` in the report is the
-   commit that **includes** applied critic fixes.
-4. Comment on translation PR: ``build_verify_translation_inline_comment`` — fixes are
-   already in this branch.
+   commit that **includes** applied critic fixes. **One** comment on the translation PR
+   (full QA report only) — no extra «fixes are in this branch» note (§6.102).
 
 **Implementation:** ``is_translation_pr_branch`` in ``pr.py``;
 ``run_doc_verify`` branch selection in ``workflow.py``.
@@ -2274,6 +2273,23 @@ nonexistent ``link.file_url()`` instead of ``locations.format_line_ref()``.
 (§6.73, ``ydbdoc-verify.yml``).
 
 **Tests:** ``test_format_heuristic_location_github_link`` in ``test_heuristic_context.py``.
+
+### 6.102. Drop redundant inline-fix comment on translation PR (2026-07-15)
+
+**Problem:** After ``doc_verify`` on a translation PR, workflow posted **two** comments:
+the full QA report plus ``build_verify_translation_inline_comment`` («Безопасные
+автоисправления добавлены коммитом в эту ветку…»). The second message duplicated
+information already in the report (``Checkout:`` SHA after critic push, «Что исправить»,
+commit message ``Apply critic fixes from doc_verify``).
+
+**Decision:** remove the extra comment; translation PR gets **only** ``build_full_report``.
+Fixup-path comment (§6.64, link to separate fixup PR on author/fork PRs) unchanged.
+
+**Implementation:** ``run_doc_verify`` in ``workflow.py``; deleted
+``build_verify_translation_inline_comment`` from ``reporting/builder.py``.
+
+**Tests:** ``test_run_doc_verify_translation_pr_pushes_fixes_inline`` — one
+``post_issue_comment`` call, no «коммитом в эту ветку» text.
 
 ---
 

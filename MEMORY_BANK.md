@@ -2,7 +2,7 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.
 
-**Last updated:** 2026-07-14  
+**Last updated:** 2026-07-15  
 **Current focus:** §22 rollout validation (#44457, #43010, #43997); local Eliza dry-run playbook.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-15 | **§6.102** — drop redundant «автоисправления в этой ветке» comment on translation PR; QA report only |
 | 2026-07-14 | **§6.101** — fix `format_heuristic_location` (`file_url` → `format_line_ref`); #46475 CI crash after translate OK |
 | 2026-07-14 | **§6.96–§6.100** — report UX; Eliza 429 fallback; TLS split; CLI shutdown; pytest conftest isolates provider |
 | 2026-07-14 | **`v0.1.0` tag moved** — includes §6.101 + Eliza/TLS hardening (after `203956a`) |
@@ -42,8 +43,8 @@ Older §6.x entries remain in [03-design-decisions](docs/memory-bank/03-design-d
 
 | Artifact | State |
 |----------|--------|
-| `main` | §22 planner + §6.101 report fix + Eliza/TLS/shutdown (tagged `v0.1.0`) |
-| Tag `v0.1.0` | **moved** on 2026-07-14 — §6.101, §6.98–§6.100, prior `203956a` chain |
+| `main` | §22 planner + §6.101–§6.102 (tagged `v0.1.0`) |
+| Tag `v0.1.0` | **moved** on 2026-07-15 — §6.102 redundant comment removed |
 | Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
 | ydb CI `doc_translate` | **Yandex Cloud** (`YANDEX_CLOUD_*` secrets); default `YDBDOC_MODEL_PROVIDER=yandex_cloud` — **not** Eliza |
 | Local `job` / Reactor | **Eliza** when `YDBDOC_MODEL_PROVIDER=eliza` + `ELIZA_OAUTH_TOKEN` (typically `~/.zshrc`) |

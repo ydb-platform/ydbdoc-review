@@ -276,7 +276,7 @@ When critic proposes fixes that pass the pipeline guard:
 
 | PR kind | Branch | Follow-up |
 |---------|--------|-----------|
-| Translation PR `ydbdoc-review/pr-{N}` | same branch, 2nd commit (§6.75) | comment «правки в этой ветке» |
+| Translation PR `ydbdoc-review/pr-{N}` | same branch, 2nd commit (§6.75) | full QA report only (§6.102) |
 | Author / fork / manual | `ydbdoc-review/verify-{N}` + fixup PR (§6.64) | comment with fixup PR link |
 
 Commit message template:
@@ -330,10 +330,9 @@ After push and translation PR open (`doc_translate`):
 
 1. **Inline `doc_verify`** — same action / CI job calls `run_doc_verify`; pushes
    safe critic fixes onto the translation branch (§6.75), then posts the full QA
-   report (`Checkout:` = commit **with** those fixes).
-2. **Translation PR** — if fixes were applied: short note
-   (`build_verify_translation_inline_comment`) — no separate fixup PR.
-3. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
+   report (`Checkout:` = commit **with** those fixes). **One** comment on the
+   translation PR — no separate «fixes in this branch» note (§6.102).
+2. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
    `verify_result=`).
 
 Label **`doc_verify`** on the translation PR (`ydbdoc-verify.yml`) is for **manual

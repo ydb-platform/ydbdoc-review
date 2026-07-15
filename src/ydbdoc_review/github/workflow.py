@@ -75,7 +75,6 @@ from ydbdoc_review.reporting.builder import (
     build_translation_pr_body,
     build_verify_fixup_pr_body,
     build_verify_fixup_source_comment,
-    build_verify_translation_inline_comment,
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
@@ -747,16 +746,7 @@ def run_doc_verify(
         ),
         label="doc_verify QA report",
     )
-    if pushed and translation_pr:
-        job.source_comment_url = _safe_post_issue_comment(
-            gh,
-            owner,
-            repo,
-            pr_number,
-            build_verify_translation_inline_comment(),
-            label="doc_verify inline critic fixes",
-        )
-    elif fixup_pr_number is not None:
+    if fixup_pr_number is not None:
         job.source_comment_url = _safe_post_issue_comment(
             gh,
             owner,
