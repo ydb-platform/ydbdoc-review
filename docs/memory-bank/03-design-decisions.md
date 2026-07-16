@@ -461,8 +461,9 @@ single ``enrichment.md`` item and blocked on ``index.md`` / ``topics.md`` in sco
 2. ``extra_toc_hrefs_from_md_targets`` unioned every translated ``.md`` basename
    into **every** toc pair (``topics.md`` from recipes/, ``index.md`` page file).
 
-**Decision:** ``_read_navigation_baselines()`` — RU at merge-base; EN at
-merge-base with **fallback to** ``merge_base_with`` (upstream ``main``).
+**Decision (updated §6.111):** ``_read_navigation_baselines()`` — RU at
+merge-base; **EN always from** ``merge_base_with`` (upstream ``main``), with
+fallback to merge-base EN only when the file is still absent on main.
 ``extra_toc_hrefs_for_pair()`` intersects translated basenames with hrefs in
 that RU PR toc before scope union.
 
@@ -2471,7 +2472,7 @@ local Docker build failed silently.
 **Ops:** publish GHCR via ``docker-publish`` workflow on tag ``v0.1.0`` after each release;
 re-run **doc_translate** on #44457 — commit must show new SHA, not ``e9ff4e7``.
 
-### 6.109. ``doc_verify`` RU candidates: head + merge + checkout (#46674, 2026-07-15)
+### 6.110. ``doc_verify`` RU candidates: head + merge + checkout (#46674, 2026-07-15)
 
 **Problem:** [#46674](https://github.com/ydb-platform/ydb/pull/46674) (source
 [#44457](https://github.com/ydb-platform/ydb/pull/44457) already merged). §6.106 made
@@ -2489,6 +2490,31 @@ on ``ru.wikipedia.org`` when MediaWiki/Wikidata lookup failed in the runner.
 3. Offline Wikipedia title map for common DDL/DML RU articles when live lookup fails.
 
 **Tests:** ``test_github_pr_verify.py`` (#46674 head-over-merge), wikipedia offline map.
+
+### 6.111. EN toc baseline = current upstream main (#39856 → #46845, 2026-07-16)
+
+**Problem:** [#46845](https://github.com/ydb-platform/ydb/pull/46845) (translate of
+[#39856](https://github.com/ydb-platform/ydb/pull/39856)) overwrote
+``dev/streaming-query/toc_i.yaml`` and ``concepts/query_execution/toc_i.yaml``,
+**dropping** EN-only / newer-on-main entries:
+
+- ``local-and-external-topics.md`` (EN-only; other EN pages already link to it)
+- ``execution_process.md`` (added on EN main after the source PR merge-base)
+
+``build-docs`` → YFM003 ``File is not declared in toc`` on glossary, recipes,
+``select/streaming.md``, plus hub links inside translated pages.
+
+**Root cause:** ``_read_navigation_baselines`` preferred EN at **PR merge-base**.
+Long-lived source PRs have a stale merge-base whose EN toc predates entries
+added later on ``main``. Merge then had nothing to preserve/append.
+
+**Fix:** Read ``en_main`` from ``merge_base_with`` (current upstream ``main``)
+first; use merge-base EN only if absent on main. ``ru_base`` stays at merge-base
+for scope. Preserve rule (§6.17 #5) unchanged once the baseline is current.
+
+**Tests:** ``test_read_navigation_baselines_prefers_upstream_en_main``,
+``test_merge_preserves_en_only_href_present_on_current_main``,
+``test_merge_en_toc_preserves_en_only_local_and_external_topics``.
 
 ---
 

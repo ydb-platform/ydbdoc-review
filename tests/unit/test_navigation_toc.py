@@ -819,6 +819,41 @@ def test_merge_en_toc_drops_en_legacy_href_removed_from_ru_pr():
     assert "sql-translation/index.md" in merged
 
 
+def test_merge_en_toc_preserves_en_only_local_and_external_topics():
+    """Regression #46845: EN-only href not in RU must survive scoped merge."""
+    en_main = dedent("""
+        items:
+        - name: Local and external topics
+          href: local-and-external-topics.md
+        - name: Common patterns
+          href: patterns.md
+        - name: Checkpoints
+          href: checkpoints.md
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: Типичные шаблоны
+          href: patterns.md
+        - name: Чекпоинты
+          href: checkpoints.md
+    """).strip()
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs={"patterns.md"},
+        translate_name=lambda n: {
+            "Типичные шаблоны": "Typical patterns",
+            "Чекпоинты": "Checkpoints",
+        }.get(n, n),
+        ru_base_hrefs={"patterns.md", "checkpoints.md"},
+        restrict_gap_fill_to_scope=True,
+    )
+    hrefs = [it.get("href") for it in parse_toc_items(merged)]
+    assert "local-and-external-topics.md" in hrefs
+    assert "patterns.md" in hrefs
+    assert "checkpoints.md" in hrefs
+
+
 def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
     """Regression #46258: Spring-only toc edit must not pull sql-translation include."""
     en_main = dedent("""

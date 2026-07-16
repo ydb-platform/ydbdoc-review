@@ -132,6 +132,8 @@ def test_verify_orm_toc_ok_when_include_translated_not_in_sidebar():
 
 STREAMING_EN_MAIN = dedent("""
     items:
+    - name: Local and external topics
+      href: local-and-external-topics.md
     - name: Common patterns
       href: patterns.md
     - name: Writing to tables
@@ -161,6 +163,115 @@ STREAMING_RU_PR = dedent("""
     - name: Чекпоинты
       href: checkpoints.md
 """).strip()
+
+STREAMING_RU_BASE_STALE = dedent("""
+    items:
+    - name: Типичные шаблоны
+      href: patterns.md
+    - name: Запись в таблицы
+      href: table-writing.md
+    - name: Обогащение данных
+      href: enrichment.md
+    - name: Форматы данных при чтении/записи топиков
+      href: streaming-query-formats.md
+    - name: Гарантии доставки данных
+      href: guarantees.md
+    - name: Чекпоинты
+      href: checkpoints.md
+""").strip()
+
+STREAMING_EN_AT_MERGE_BASE_STALE = dedent("""
+    items:
+    - name: Common patterns
+      href: patterns.md
+    - name: Writing to tables
+      href: table-writing.md
+    - name: Data enrichment
+      href: enrichment.md
+    - name: Topic read and write formats
+      href: streaming-query-formats.md
+    - name: Delivery guarantees
+      href: guarantees.md
+    - name: Checkpoints
+      href: checkpoints.md
+""").strip()
+
+
+def test_read_navigation_baselines_prefers_upstream_en_main():
+    """§6.111 / #46845: EN baseline is current main, not stale PR merge-base."""
+    from ydbdoc_review.pipeline.navigation_merge import _read_navigation_baselines
+
+    def fake_read(_repo: str, ref: str, path: str) -> str | None:
+        if path.endswith("toc_i.yaml") and "en/" in path:
+            if ref in {"origin/main", "main"}:
+                return STREAMING_EN_MAIN
+            return STREAMING_EN_AT_MERGE_BASE_STALE
+        if path.endswith("toc_i.yaml") and "ru/" in path:
+            return STREAMING_RU_BASE_STALE
+        return None
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.merge_base",
+            return_value="merge-base-sha",
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_ref",
+            side_effect=fake_read,
+        ),
+    ):
+        ru_base, en_main = _read_navigation_baselines(
+            "/tmp/repo",
+            "origin/main",
+            ru_path="ydb/docs/ru/core/dev/streaming-query/toc_i.yaml",
+            en_path="ydb/docs/en/core/dev/streaming-query/toc_i.yaml",
+        )
+
+    assert "local-and-external-topics.md" in en_main
+    assert "local-and-external-topics.md" not in STREAMING_EN_AT_MERGE_BASE_STALE
+    assert ru_base == STREAMING_RU_BASE_STALE
+
+
+def test_merge_preserves_en_only_href_present_on_current_main():
+    """Regression #46845: do not drop EN-only toc entries when merging RU toc."""
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/dev/streaming-query/toc_i.yaml",
+        en_path="ydb/docs/en/core/dev/streaming-query/toc_i.yaml",
+        ru_changed=True,
+    )
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=STREAMING_RU_PR,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(STREAMING_RU_BASE_STALE, STREAMING_EN_MAIN),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={"Обогащение данных": "Data enrichment"},
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+            extra_toc_hrefs={"enrichment.md"},
+        )
+
+    assert result.verdict == "ok"
+    assert result.target_text is not None
+    assert "local-and-external-topics.md" in result.target_text
+    assert "patterns.md" in result.target_text
+    assert "checkpoints.md" in result.target_text
 
 
 def test_merge_fork_pr_toc_uses_upstream_en_main_fallback():
@@ -210,7 +321,13 @@ def test_merge_fork_pr_toc_uses_upstream_en_main_fallback():
     assert result.target_text is not None
     assert "patterns.md" in result.target_text
     assert "checkpoints.md" in result.target_text
-    assert "topics.md" not in result.target_text
+    assert "local-and-external-topics.md" in result.target_text
+    hrefs = [
+        line.split("href:", 1)[1].strip()
+        for line in result.target_text.splitlines()
+        if "href:" in line
+    ]
+    assert "topics.md" not in hrefs
 
 
 OBSERVABILITY_RU_TOC = dedent("""

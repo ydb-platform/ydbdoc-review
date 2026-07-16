@@ -69,17 +69,21 @@ def _read_navigation_baselines(
     ru_path: str,
     en_path: str,
 ) -> tuple[str, str]:
-    """RU/EN navigation YAML at PR merge-base, with upstream EN fallback (§6.44).
+    """RU at PR merge-base; EN from current upstream main (§6.44, §6.111).
 
-    Fork PR checkouts often lack EN files at ``merge-base(merge_base_with, HEAD)``.
-    ``en_main`` falls back to ``merge_base_with`` (upstream ``main``).
+    ``ru_base`` must be the merge-base snapshot so toc scope reflects what the
+    source PR changed. ``en_main`` must be **current** ``merge_base_with``
+    (usually ``origin/main``): long-lived source PRs have an old merge-base
+    whose EN toc predates EN-only entries added later on main. Using that stale
+    EN baseline drops those entries (YFM003 / #46845). Fall back to merge-base
+    EN only when the file is still absent on upstream main (new sidebar).
     """
     mb = merge_base(repo_path, merge_base_with, "HEAD")
     ru_text = read_text_at_ref(repo_path, mb, ru_path)
     ru_base = ru_text if ru_text is not None else ""
-    en_text = read_text_at_ref(repo_path, mb, en_path)
+    en_text = read_text_at_ref(repo_path, merge_base_with, en_path)
     if en_text is None:
-        en_text = read_text_at_ref(repo_path, merge_base_with, en_path)
+        en_text = read_text_at_ref(repo_path, mb, en_path)
     en_main = en_text if en_text is not None else ""
     return ru_base, en_main
 
