@@ -19,6 +19,7 @@ from ydbdoc_review.navigation.toc import (
     en_toc_is_absent,
     merge_en_toc_yaml,
     parse_toc_items,
+    resolve_toc_target_path,
     toc_entry_paths,
     toc_translate_scope,
 )
@@ -81,11 +82,51 @@ def _read_navigation_baselines(
     mb = merge_base(repo_path, merge_base_with, "HEAD")
     ru_text = read_text_at_ref(repo_path, mb, ru_path)
     ru_base = ru_text if ru_text is not None else ""
-    en_text = read_text_at_ref(repo_path, merge_base_with, en_path)
+    en_text = _read_en_nav_from_upstream(repo_path, merge_base_with, en_path)
+    if en_text is None:
+        # Worktree may already be at/near main after fetch (better than empty).
+        en_text = read_text(repo_path, en_path)
     if en_text is None:
         en_text = read_text_at_ref(repo_path, mb, en_path)
     en_main = en_text if en_text is not None else ""
+    if not en_main.strip():
+        logger.warning(
+            "EN navigation baseline empty for %s (merge_base_with=%s, mb=%s) — "
+            "merge may drop EN-only toc entries",
+            en_path,
+            merge_base_with,
+            mb[:12] if mb else mb,
+        )
     return ru_base, en_main
+
+
+def _read_en_nav_from_upstream(
+    repo_path: str,
+    merge_base_with: str,
+    en_path: str,
+) -> str | None:
+    """Resolve EN toc/redirect YAML from upstream main tip (several ref forms)."""
+    candidates: list[str] = [merge_base_with]
+    if merge_base_with.startswith("origin/"):
+        branch = merge_base_with[len("origin/") :]
+        candidates.extend(
+            (
+                f"refs/remotes/origin/{branch}",
+                branch,
+            )
+        )
+    elif "/" not in merge_base_with:
+        candidates.append(f"origin/{merge_base_with}")
+        candidates.append(f"refs/remotes/origin/{merge_base_with}")
+    seen: set[str] = set()
+    for ref in candidates:
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        text = read_text_at_ref(repo_path, ref, en_path)
+        if text is not None:
+            return text
+    return None
 
 
 def extra_toc_hrefs_from_md_targets(
@@ -301,6 +342,15 @@ def merge_navigation_pair(
         name_map = _translate_menu_labels(
             client, labels, glossary, config=config
         )
+        # Keep EN-main hrefs whose .md still exists on upstream (§6.112 / #46846).
+        keep_en_hrefs: set[str] = set()
+        for href in en_main_hrefs:
+            target = resolve_toc_target_path(pair.en_path, href)
+            if (
+                _read_en_nav_from_upstream(repo_path, merge_base_with, target)
+                is not None
+            ):
+                keep_en_hrefs.add(href)
         merged = merge_en_toc_yaml(
             en_main,
             ru_pr,
@@ -310,6 +360,7 @@ def merge_navigation_pair(
             translate_include_paths=set(scope.include_paths),
             ru_base_include_paths=ru_base_include_paths,
             restrict_gap_fill_to_scope=restrict_gap_fill,
+            keep_en_hrefs=keep_en_hrefs,
         )
         warnings = validate_navigation_merge_warnings(
             pair.ru_path,

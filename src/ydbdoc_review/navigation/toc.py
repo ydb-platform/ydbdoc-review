@@ -395,9 +395,11 @@ def _merge_en_toc_yaml_nested(
     translate_include_paths: set[str] | None = None,
     ru_base_include_paths: set[str] | None = None,
     restrict_gap_fill_to_scope: bool = False,
+    keep_en_hrefs: set[str] | frozenset[str] | None = None,
 ) -> str:
     include_scope = translate_include_paths or set()
     base_includes = ru_base_include_paths or set()
+    preserve_hrefs = set(keep_en_hrefs or ())
     en_text = en_main_yaml.replace("\r\n", "\n")
     en_lines = en_text.splitlines()
     items_start = 0
@@ -429,7 +431,7 @@ def _merge_en_toc_yaml_nested(
     base_hrefs = ru_base_hrefs or set()
     for node in _walk_toc_nodes(en_tree):
         if node.href and node.href not in seen_hrefs and node.href not in ru_hrefs:
-            if node.href in base_hrefs:
+            if node.href in base_hrefs and node.href not in preserve_hrefs:
                 continue
             merged.append(node)
             seen_hrefs.add(node.href)
@@ -675,6 +677,7 @@ def merge_en_toc_yaml(
     translate_include_paths: set[str] | None = None,
     ru_base_include_paths: set[str] | None = None,
     restrict_gap_fill_to_scope: bool = False,
+    keep_en_hrefs: set[str] | frozenset[str] | None = None,
 ) -> str:
     """Build EN toc from RU PR order with strict scope.
 
@@ -686,11 +689,13 @@ def merge_en_toc_yaml(
       unless ``restrict_gap_fill_to_scope`` (§6.72 parent toc supplement).
     - ``include.path`` sidebar links: same scope rules via
       ``translate_include_paths`` / ``ru_base_include_paths``.
-    - RU removed ``href``: omit from output (mirror RU structure).
+    - RU removed ``href``: omit from output (mirror RU structure), **unless**
+      ``href`` ∈ ``keep_en_hrefs`` (§6.112 — EN page still exists on main).
     - EN-only ``href`` not in RU PR: append unchanged at end (legacy entries).
     """
     include_scope = translate_include_paths or set()
     base_includes = ru_base_include_paths or set()
+    preserve_hrefs = set(keep_en_hrefs or ())
     if _has_nested_block_items(en_main_yaml) or _has_nested_block_items(ru_pr_yaml):
         return _merge_en_toc_yaml_nested(
             en_main_yaml,
@@ -701,6 +706,7 @@ def merge_en_toc_yaml(
             translate_include_paths=include_scope,
             ru_base_include_paths=base_includes,
             restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
+            keep_en_hrefs=preserve_hrefs,
         )
 
     line_prefix = _inline_list_line_prefix(en_main_yaml)
@@ -777,7 +783,7 @@ def merge_en_toc_yaml(
     for it in en_items:
         href = it.get("href")
         if href and href not in seen_hrefs and href not in ru_hrefs:
-            if href in base_hrefs:
+            if href in base_hrefs and href not in preserve_hrefs:
                 continue
             merged.append(it)
         include_path = it.get("include_path")

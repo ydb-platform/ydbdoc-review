@@ -854,6 +854,34 @@ def test_merge_en_toc_preserves_en_only_local_and_external_topics():
     assert "checkpoints.md" in hrefs
 
 
+def test_merge_en_toc_keep_en_hrefs_overrides_ru_base_drop():
+    """§6.112: keep EN href when target page still exists on main."""
+    en_main = dedent("""
+        items:
+        - name: Local and external topics
+          href: local-and-external-topics.md
+        - name: Patterns
+          href: patterns.md
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: Patterns
+          href: patterns.md
+    """).strip()
+    # Simulate: href was on RU base (would be dropped) but EN page still exists.
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=set(),
+        translate_name=lambda n: n,
+        ru_base_hrefs={"local-and-external-topics.md", "patterns.md"},
+        keep_en_hrefs={"local-and-external-topics.md"},
+    )
+    hrefs = [it.get("href") for it in parse_toc_items(merged)]
+    assert "local-and-external-topics.md" in hrefs
+    assert "patterns.md" in hrefs
+
+
 def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
     """Regression #46258: Spring-only toc edit must not pull sql-translation include."""
     en_main = dedent("""

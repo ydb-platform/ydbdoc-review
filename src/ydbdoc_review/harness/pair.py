@@ -70,6 +70,7 @@ def run_pair_plan(
         cache=cache,
         enable_critic=enable_critic,
         usage_record_start=len(ctx.client.usage_tracker.records),
+        en_toc_reachable=ctx.en_toc_reachable,
     )
 
     try:

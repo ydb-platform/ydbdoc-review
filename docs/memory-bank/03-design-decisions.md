@@ -2516,6 +2516,33 @@ for scope. Preserve rule (§6.17 #5) unchanged once the baseline is current.
 ``test_merge_preserves_en_only_href_present_on_current_main``,
 ``test_merge_en_toc_preserves_en_only_local_and_external_topics``.
 
+### 6.112. Wire ``en_toc_reachable`` into pair harness + keep existing EN toc (#39856 → #46846, 2026-07-16)
+
+**Problem:** [#46846](https://github.com/ydb-platform/ydb/pull/46846) still failed
+``build-docs`` with YFM003 on ``watermarks`` / ``concepts/streaming-query/…`` inside
+**translated** pages, and again dropped ``local-and-external-topics`` from
+``streaming-query/toc_i.yaml``. Reachability log showed 769 paths — strip never ran.
+
+**Root causes:**
+
+1. ``ExecutePairPlansStep`` built a parent ``HarnessContext`` with
+   ``en_toc_reachable``, but ``run_pair_plan`` **rebuilt** ``HarnessContext``
+   without forwarding it → ``finalize_en_target`` skipped strip
+   (``en_toc_reachable is None``). Present since strip was introduced (§6.107).
+2. EN toc baseline still fragile (empty → full RU mirror); EN-only hrefs lost.
+
+**Fix:**
+
+1. ``run_pair_plan``: pass ``en_toc_reachable=ctx.en_toc_reachable``.
+2. ``_read_navigation_baselines``: try several upstream ref forms + worktree
+   fallback; warn when EN baseline is empty.
+3. ``merge_en_toc_yaml(..., keep_en_hrefs=…)``: do not drop EN-main hrefs whose
+   ``.md`` still exists on upstream main (§6.112), even if listed in
+   ``ru_base_hrefs``.
+
+**Tests:** ``test_run_pair_plan_forwards_en_toc_reachable_to_harness``,
+``test_merge_en_toc_keep_en_hrefs_overrides_ru_base_drop``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)
