@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.ast_types import Document
@@ -28,6 +29,8 @@ from ydbdoc_review.validation.link_locale import (
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def render_with_translations(
@@ -112,16 +115,28 @@ def finalize_en_target(
         and target_lang.lower() in {"en", "english"}
     ):
         stripped: list[str] = []
-        text = strip_unreachable_internal_links(
-            text,
-            file_path=en_mirror_path(file_path),
-            reachable=en_toc_reachable,
-            target_lang=target_lang,
-            out_stripped=stripped,
-        )
-        if stripped and out_warnings is not None:
-            out_warnings.append(
-                f"strip_unreachable_links: removed {len(stripped)} internal "
-                f"href(s) outside EN toc graph"
+        try:
+            text = strip_unreachable_internal_links(
+                text,
+                file_path=en_mirror_path(file_path),
+                reachable=en_toc_reachable,
+                target_lang=target_lang,
+                out_stripped=stripped,
             )
+        except Exception as exc:  # noqa: BLE001 — never abort translate on strip
+            logger.warning(
+                "strip_unreachable_links failed for %s: %s",
+                file_path or "(unknown)",
+                exc,
+            )
+            if out_warnings is not None:
+                out_warnings.append(
+                    f"strip_unreachable_links_failed: {type(exc).__name__}: {exc}"
+                )
+        else:
+            if stripped and out_warnings is not None:
+                out_warnings.append(
+                    f"strip_unreachable_links: removed {len(stripped)} internal "
+                    f"href(s) outside EN toc graph"
+                )
     return postprocess_en_target_markdown(text)

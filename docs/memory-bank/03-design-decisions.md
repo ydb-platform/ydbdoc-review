@@ -2543,6 +2543,21 @@ for scope. Preserve rule (§6.17 #5) unchanged once the baseline is current.
 **Tests:** ``test_run_pair_plan_forwards_en_toc_reachable_to_harness``,
 ``test_merge_en_toc_keep_en_hrefs_overrides_ru_base_drop``.
 
+### 6.113. Strip walker: Table is header/rows/cells (#39856 translate crash, 2026-07-16)
+
+**Problem:** Re-run after §6.112 crashed the whole ``doc_translate`` job:
+
+``AttributeError: 'Table' object has no attribute 'children'`` in
+``strip_unreachable_internal_links`` (file with a markdown table, e.g. topic docs).
+
+**Root cause:** Strip AST walk assumed ``Table.children`` / ``TableRow.children``;
+real model is ``Table.header`` + ``Table.rows``, ``TableRow.cells``.
+
+**Fix:** Walk ``header``/``rows``/``cells``; ``finalize_en_target`` catches strip
+exceptions so a walker bug cannot abort the PR job.
+
+**Tests:** ``test_strip_unreachable_links_inside_table_cells``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

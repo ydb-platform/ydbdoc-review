@@ -197,3 +197,24 @@ def test_strip_unreachable_internal_links_case_44457_watermarks():
     assert "spring-retry.md" not in out
     assert "watermarks" in out
     assert "spring-ydb-retry" in out
+
+
+def test_strip_unreachable_links_inside_table_cells():
+    """Regression #39856: Table uses header/rows/cells, not .children (#46846 crash)."""
+    text = (
+        "| Topic | Link |\n"
+        "| --- | --- |\n"
+        "| W | [watermarks](watermarks.md) |\n"
+        "| OK | [patterns](patterns.md) |\n"
+    )
+    reachable = frozenset(
+        {"ydb/docs/en/core/dev/streaming-query/patterns.md"}
+    )
+    out = strip_unreachable_internal_links(
+        text,
+        file_path="ydb/docs/en/core/dev/streaming-query/index.md",
+        reachable=reachable,
+    )
+    assert "watermarks.md" not in out
+    assert "patterns.md" in out
+    assert "watermarks" in out

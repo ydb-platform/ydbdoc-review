@@ -19,8 +19,6 @@ from ydbdoc_review.parsing.ast_types import (
     OrderedList,
     Paragraph,
     Table,
-    TableCell,
-    TableRow,
     TermDefinition,
     YfmCut,
     YfmIf,
@@ -182,6 +180,12 @@ def _walk_inline(
         i += 1
 
 
+def _walk_table_cells(table: Table, walk_inline) -> None:
+    for row in (table.header, *table.rows):
+        for cell in row.cells:
+            walk_inline(cell.children)
+
+
 def _walk_blocks(blocks, *, from_file: str, reachable: frozenset[str]) -> None:
     for block in blocks:
         if isinstance(block, (Paragraph, Heading)):
@@ -195,11 +199,12 @@ def _walk_blocks(blocks, *, from_file: str, reachable: frozenset[str]) -> None:
         elif isinstance(block, BlockQuote):
             _walk_blocks(block.children, from_file=from_file, reachable=reachable)
         elif isinstance(block, Table):
-            for row in block.children:
-                if isinstance(row, TableRow):
-                    for cell in row.children:
-                        if isinstance(cell, TableCell):
-                            _walk_inline(cell.children, from_file=from_file, reachable=reachable)
+            _walk_table_cells(
+                block,
+                lambda nodes: _walk_inline(
+                    nodes, from_file=from_file, reachable=reachable
+                ),
+            )
         elif isinstance(block, (YfmNote, YfmCut, YfmIf, YfmTabs)):
             _walk_blocks(block.children, from_file=from_file, reachable=reachable)
 
@@ -249,11 +254,10 @@ def strip_unreachable_internal_links(
             elif isinstance(block, BlockQuote):
                 _walk_blocks_count(block.children)
             elif isinstance(block, Table):
-                for row in block.children:
-                    if isinstance(row, TableRow):
-                        for cell in row.children:
-                            if isinstance(cell, TableCell):
-                                _walk_inline_count(cell.children, from_file=from_en)
+                _walk_table_cells(
+                    block,
+                    lambda nodes: _walk_inline_count(nodes, from_file=from_en),
+                )
             elif isinstance(block, (YfmNote, YfmCut, YfmIf, YfmTabs)):
                 _walk_blocks_count(block.children)
 
