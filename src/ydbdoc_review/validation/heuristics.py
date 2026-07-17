@@ -122,16 +122,38 @@ def check_md_link_parity(
     *,
     source_lang: str,
     target_lang: str,
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> list[str]:
-    """Blocking when EN is missing ``.md`` links present in RU (§6.59 index/toc gaps)."""
+    """Blocking when EN is missing ``.md`` links present in RU (§6.59 index/toc gaps).
+
+    Links whose EN targets sit outside the EN toc graph (intentionally stripped
+    in finalize, §6.107 / §6.114) are excluded from the comparison.
+    """
     if source_lang.lower() not in {"ru", "russian"} or target_lang.lower() != "en":
         return []
-    missing = sorted(_md_link_basenames(source_text) - _md_link_basenames(target_text))
-    if not missing:
+    missing = _md_link_basenames(source_text) - _md_link_basenames(target_text)
+    if (
+        missing
+        and en_toc_reachable is not None
+        and source_file
+    ):
+        from ydbdoc_review.validation.glossary_toc_links import (
+            md_link_basenames_outside_reachable,
+        )
+
+        ignore = md_link_basenames_outside_reachable(
+            source_text,
+            file_path=source_file,
+            reachable=en_toc_reachable,
+        )
+        missing -= ignore
+    missing_sorted = sorted(missing)
+    if not missing_sorted:
         return []
-    preview = ", ".join(missing[:6])
-    if len(missing) > 6:
-        preview += f", … (+{len(missing) - 6})"
+    preview = ", ".join(missing_sorted[:6])
+    if len(missing_sorted) > 6:
+        preview += f", … (+{len(missing_sorted) - 6})"
     return [f"md_link_parity: EN missing RU links: {preview}"]
 
 
@@ -226,6 +248,8 @@ def _collect_raw_heuristics(
     normalized_source_text: str,
     source_lang: str,
     target_lang: str,
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
@@ -262,6 +286,8 @@ def _collect_raw_heuristics(
             target_text,
             source_lang=source_lang,
             target_lang=target_lang,
+            source_file=source_file,
+            en_toc_reachable=en_toc_reachable,
         )
     )
     raw.extend(check_fence_parity(normalized_source_text, target_text))
@@ -289,6 +315,8 @@ def run_file_heuristics_classified(
     normalized_source_text: str,
     source_lang: str = "ru",
     target_lang: str = "en",
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> ClassifiedHeuristics:
     """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
     out = ClassifiedHeuristics()
@@ -298,6 +326,8 @@ def run_file_heuristics_classified(
         normalized_source_text=normalized_source_text,
         source_lang=source_lang,
         target_lang=target_lang,
+        source_file=source_file,
+        en_toc_reachable=en_toc_reachable,
     ):
         bucket = _classify_heuristic(message)
         getattr(out, bucket).append(message)
@@ -310,6 +340,8 @@ def run_file_heuristics(
     *,
     source_lang: str = "ru",
     target_lang: str = "en",
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> list[str]:
     """Run all markdown file heuristics; return non-info warning strings."""
     from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -325,6 +357,8 @@ def run_file_heuristics(
         normalized_source_text=norm,
         source_lang=source_lang,
         target_lang=target_lang,
+        source_file=source_file,
+        en_toc_reachable=en_toc_reachable,
     )
     return classified.all_non_info
 

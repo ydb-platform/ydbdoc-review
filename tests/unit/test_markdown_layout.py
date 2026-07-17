@@ -6,7 +6,10 @@ import re
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
-from ydbdoc_review.validation.markdown_layout import fix_blanks_around_fences
+from ydbdoc_review.validation.markdown_layout import (
+    fix_blanks_around_fences,
+    fix_image_bang_spacing,
+)
 
 
 def _md031_after_close_violations(text: str) -> list[int]:
@@ -121,3 +124,8 @@ def test_postprocess_en_pipeline_clears_multiple_violations():
     )
     fixed = postprocess_en_target_markdown(bad)
     assert _md031_after_close_violations(fixed) == []
+
+
+def test_fix_image_bang_spacing():
+    assert fix_image_bang_spacing("! [alt](img.png)") == "![alt](img.png)"
+    assert fix_image_bang_spacing("![ok](img.png)") == "![ok](img.png)"

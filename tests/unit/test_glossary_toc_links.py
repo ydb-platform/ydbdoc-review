@@ -5,6 +5,7 @@ from __future__ import annotations
 from ydbdoc_review.validation.glossary_toc_links import (
     collect_en_toc_reachable_md,
     en_mirror_path,
+    md_link_basenames_outside_reachable,
     resolve_internal_md_href,
     ru_toc_to_en_path,
     strip_unreachable_glossary_links,
@@ -218,3 +219,18 @@ def test_strip_unreachable_links_inside_table_cells():
     assert "watermarks.md" not in out
     assert "patterns.md" in out
     assert "watermarks" in out
+
+
+def test_md_link_basenames_outside_reachable():
+    text = (
+        "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
+    )
+    reachable = frozenset(
+        {"ydb/docs/en/core/concepts/streaming-query/patterns.md"}
+    )
+    ignore = md_link_basenames_outside_reachable(
+        text,
+        file_path="ydb/docs/ru/core/concepts/streaming-query/index.md",
+        reachable=reachable,
+    )
+    assert ignore == {"watermarks.md"}

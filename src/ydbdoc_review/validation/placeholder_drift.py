@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import PurePosixPath
 
 from ydbdoc_review.parsing.ast_types import InlineLink
 from ydbdoc_review.segmentation.placeholder_align import segment_atom_legend
@@ -49,6 +50,13 @@ _HALLUCINATED_LINK_ISSUE = re.compile(
     r"added a link|content change",
     re.IGNORECASE,
 )
+_MISSING_LINK_ISSUE = re.compile(
+    r"missing\s+(?:the\s+)?(?:markdown\s+)?link|missing\s+link|"
+    r"link\s+(?:is\s+)?missing|does not (?:contain|include|have)\s+(?:the\s+)?link|"
+    r"omitted\s+(?:the\s+)?link|removed\s+(?:the\s+)?link",
+    re.IGNORECASE,
+)
+_MD_HREF = re.compile(r"\[[^\]]*\]\(([^)]+)\)|\(([^)]+\.md(?:#[^)]*)?)\)")
 
 
 def critic_issue_dedupe_key(issue: CriticIssueOut) -> tuple:
@@ -264,6 +272,32 @@ def is_spurious_hallucinated_link_issue(
     )
 
 
+def is_intentionally_stripped_link_issue(
+    issue: CriticIssueOut,
+    *,
+    ignore_basenames: set[str],
+) -> bool:
+    """Drop critic complaints about EN links stripped as outside EN toc reachability."""
+    if not ignore_basenames:
+        return False
+    haystack = f"{issue.category} {issue.comment}"
+    if issue.suggested_text:
+        haystack = f"{haystack} {issue.suggested_text}"
+    if not _MISSING_LINK_ISSUE.search(haystack):
+        # Also catch bare basename mentions when category is about links/structure.
+        if "link" not in haystack.lower():
+            return False
+    mentioned: set[str] = set()
+    for match in _MD_HREF.finditer(haystack):
+        href = (match.group(1) or match.group(2) or "").strip().split("#", 1)[0]
+        if href.endswith(".md"):
+            mentioned.add(PurePosixPath(href).name)
+    for name in ignore_basenames:
+        if name in mentioned or name in haystack:
+            return True
+    return False
+
+
 def is_spurious_hallucinated_substitution_issue(
     issue: CriticIssueOut,
     segment: Segment | None,
@@ -291,12 +325,37 @@ def drop_spurious_placeholder_issues(
     issues: list[CriticIssueOut],
     segments: list[Segment],
     translations: dict[str, str],
+    *,
+    source_text: str | None = None,
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> list[CriticIssueOut]:
     by_id = {s.id: s for s in segments}
+    ignore_basenames: set[str] = set()
+    if (
+        source_text
+        and source_file
+        and en_toc_reachable is not None
+    ):
+        from ydbdoc_review.validation.glossary_toc_links import (
+            md_link_basenames_outside_reachable,
+        )
+
+        ignore_basenames = md_link_basenames_outside_reachable(
+            source_text,
+            file_path=source_file,
+            reachable=en_toc_reachable,
+        )
     out: list[CriticIssueOut] = []
     for issue in issues:
         seg = by_id.get(issue.segment_id) if issue.segment_id else None
         trans = translations.get(issue.segment_id) if issue.segment_id else None
+        if is_intentionally_stripped_link_issue(issue, ignore_basenames=ignore_basenames):
+            logger.info(
+                "Ignoring intentionally stripped-link critic issue for %s",
+                issue.segment_id,
+            )
+            continue
         if is_spurious_variable_placeholder_issue(issue, seg, trans):
             logger.info(
                 "Ignoring spurious V-placeholder critic issue for %s",
@@ -369,11 +428,21 @@ def filter_critic_response(
     translations: dict[str, str],
     *,
     skipped: list[CriticIssueOut] | None = None,
+    source_text: str | None = None,
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> CriticResponse | None:
     """Remove spurious placeholder issues, skipped duplicates, and refresh verdict."""
     if response is None:
         return None
-    filtered = drop_spurious_placeholder_issues(response.issues, segments, translations)
+    filtered = drop_spurious_placeholder_issues(
+        response.issues,
+        segments,
+        translations,
+        source_text=source_text,
+        source_file=source_file,
+        en_toc_reachable=en_toc_reachable,
+    )
     filtered = exclude_skipped_issues(filtered, skipped or [])
     if filtered == response.issues:
         return response

@@ -7,6 +7,8 @@ import re
 _FENCE_LINE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 # Glossary-style bold links: ``** [text](url)**`` → ``**[text](url)**`` (MD037).
 _BOLD_LINK_OPEN = re.compile(r"\*\* \[")
+# LLM sometimes emits ``! [alt](src)`` instead of ``![alt](src)``.
+_IMAGE_BANG_SPACE = re.compile(r"!(\s+)\[")
 
 
 def _is_closing_fence_line(line: str) -> bool:
@@ -45,3 +47,8 @@ def fix_blanks_around_fences(text: str) -> str:
 def fix_no_space_in_emphasis(text: str) -> str:
     """Remove spurious space after ``**`` before a link opener (MD037)."""
     return _BOLD_LINK_OPEN.sub("**[", text)
+
+
+def fix_image_bang_spacing(text: str) -> str:
+    """Normalize ``! [alt](src)`` to ``![alt](src)`` so images parse as images."""
+    return _IMAGE_BANG_SPACE.sub("![", text)

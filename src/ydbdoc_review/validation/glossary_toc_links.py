@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from pathlib import PurePosixPath
 from typing import Callable
@@ -76,6 +77,32 @@ def resolve_internal_md_href(from_file: str, href: str) -> str | None:
         elif part != ".":
             parts.append(part)
     return normalize_repo_path("/".join(parts))
+
+
+_MD_LINK_HREF = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+
+def md_link_basenames_outside_reachable(
+    text: str,
+    *,
+    file_path: str,
+    reachable: frozenset[str],
+) -> set[str]:
+    """Basenames of internal ``.md`` links whose EN targets are outside toc reachability.
+
+    Used by ``md_link_parity`` / critic filters so intentional strip (§6.107) does
+    not fail QA for missing EN mirrors of those links.
+    """
+    ignore: set[str] = set()
+    for match in _MD_LINK_HREF.finditer(text):
+        href = match.group(1).strip()
+        path_part = href.split("#", 1)[0].strip()
+        if not path_part.endswith(".md"):
+            continue
+        target = resolve_internal_md_href(file_path, href)
+        if target is not None and target not in reachable:
+            ignore.add(PurePosixPath(path_part).name)
+    return ignore
 
 
 def _read_toc_yaml(

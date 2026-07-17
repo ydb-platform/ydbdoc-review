@@ -35,6 +35,28 @@ def test_md_link_parity_flags_missing_en_link():
     assert "md_link_parity" in warnings[0]
 
 
+def test_md_link_parity_ignores_links_outside_en_toc_reachable():
+    """Strip (§6.107) drops unreachable EN links; parity must not fail QA (§6.114)."""
+    ru = (
+        "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
+    )
+    en = "See watermarks and [patterns](patterns.md).\n"
+    reachable = frozenset(
+        {
+            "ydb/docs/en/core/concepts/streaming-query/patterns.md",
+        }
+    )
+    warnings = check_md_link_parity(
+        ru,
+        en,
+        source_lang="ru",
+        target_lang="en",
+        source_file="ydb/docs/ru/core/concepts/streaming-query/index.md",
+        en_toc_reachable=reachable,
+    )
+    assert warnings == []
+
+
 def test_cyrillic_in_en_ignores_fenced_code():
     text = "Intro\n\n```\nпривет\n```\n"
     assert check_cyrillic_in_en(text, target_lang="en") == []

@@ -2558,6 +2558,38 @@ exceptions so a walker bug cannot abort the PR job.
 
 **Tests:** ``test_strip_unreachable_links_inside_table_cells``.
 
+### 6.114. Strip ↔ verify alignment + image bang spacing (#39856 → #46848, 2026-07-17)
+
+**Problem:** After §6.107–§6.113, ``build-docs`` on translation PRs went green, but
+``doc_verify`` stayed 🔴:
+
+1. **``md_link_parity`` / critic** treated intentionally stripped EN links
+   (``watermarks.md``, streaming-query pages outside the EN toc graph, …) as
+   missing-link blockers — strip runs only in ``finalize_en_target``, while
+   verify compared RU source links to the stripped EN text.
+2. **``doc_verify``** never received ``en_toc_reachable`` (only ``doc_translate``
+   built it), so even a wired filter could not fire on the QA path.
+3. **Broken images** in EN: LLM sometimes emitted ``! [alt](⟦S1⟧)`` (space after
+   ``!``). The inline parser treated it as prose + link; percent-encoded
+   ``⟦S⟧`` then survived as ``%E2%9F%A6S1%E2%9F%A7`` instead of a real ``src``.
+
+**Fix:**
+
+1. ``check_md_link_parity`` ignores basenames whose EN targets resolve outside
+   ``en_toc_reachable`` (``md_link_basenames_outside_reachable``).
+2. Critic filter drops “missing link …” issues that mention those basenames;
+   ``HeuristicsStep`` / ``run_critic_loop`` pass ``source_file`` + reachable set.
+3. ``run_doc_verify`` builds the same reachable set and forwards it into
+   ``PRHarnessContext``.
+4. ``fix_image_bang_spacing`` (``! [`` → ``![``) in reinsert + EN postprocess;
+   reinsert also recovers ``InlineLink`` whose href is an image ``⟦S⟧``
+   placeholder (including URL-encoded forms).
+
+**Tests:** ``test_md_link_parity_ignores_links_outside_en_toc_reachable``,
+``test_drop_intentionally_stripped_link_critic_issues``,
+``test_translate_image_bang_space_and_encoded_placeholder``,
+``test_fix_image_bang_spacing``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

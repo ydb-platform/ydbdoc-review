@@ -205,10 +205,17 @@ def _run_verify_pairs(
     client: YandexLLMClient,
     glossary: Glossary,
     config: Config,
+    *,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
     state = PRRunState(contents=contents)
-    ctx = PRHarnessContext.from_options(client, glossary=glossary, config=config)
+    ctx = PRHarnessContext.from_options(
+        client,
+        glossary=glossary,
+        config=config,
+        en_toc_reachable=en_toc_reachable,
+    )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
 
@@ -558,6 +565,21 @@ def run_doc_verify(
     client = create_llm_client(cfg)
     glossary = load_glossary()
 
+    pending_en_md = {p.en_path for p in pairs}
+    pending_en_tocs = {nav.en_path for nav in nav_pairs}
+    en_toc_reachable = build_en_toc_reachable_from_repo(
+        repo_path,
+        docs_root=cfg.paths.docs_root,
+        pending_en_md=pending_en_md,
+        pending_en_tocs=pending_en_tocs,
+    )
+    logger.info(
+        "EN toc reachability (verify): %s md paths (%s pending md, %s pending toc)",
+        len(en_toc_reachable),
+        len(pending_en_md),
+        len(pending_en_tocs),
+    )
+
     if pairs:
         if source_pr is None:
             logger.warning(
@@ -577,7 +599,13 @@ def run_doc_verify(
                 repo=repo,
                 source_pr=source_pr,
             )
-        pr_result = _run_verify_pairs(contents, client, glossary, cfg)
+        pr_result = _run_verify_pairs(
+            contents,
+            client,
+            glossary,
+            cfg,
+            en_toc_reachable=en_toc_reachable,
+        )
     else:
         pr_result = PRTranslationResult()
 

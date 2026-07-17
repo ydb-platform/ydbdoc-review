@@ -63,6 +63,10 @@ def _build_inline_from_translation(
     text: str, placeholders: list[ProtectedInline]
 ) -> list[InlineNode]:
     """Parse translated text and substitute placeholders for original nodes."""
+    from ydbdoc_review.validation.markdown_layout import fix_image_bang_spacing
+
+    # Normalize ``! [alt](src)`` before parse so image placeholders reinsert as images.
+    text = fix_image_bang_spacing(text)
     # Parse the text as inline markdown — placeholders ⟦K1⟧ will become InlineText.
     nodes = parse_inline_text(text)
     # Replace placeholder text nodes with the original protected nodes.
@@ -94,6 +98,28 @@ def _resolve_url_placeholder(
     return None
 
 
+def _resolve_image_src_placeholder(
+    src: str, mapping: dict[str, InlineNode]
+) -> InlineNode | None:
+    """Return image-src template for src/href if it is a ⟦S⟧ placeholder."""
+    template = mapping.get(src) or mapping.get(unquote(src))
+    if template is not None and _is_image_src_placeholder_template(template):
+        return template
+    return None
+
+
+def _inline_link_alt_text(node: InlineLink) -> str:
+    parts: list[str] = []
+    for child in node.children:
+        if isinstance(child, InlineText):
+            parts.append(child.content)
+        elif hasattr(child, "children") and isinstance(child.children, list):
+            for nested in child.children:
+                if isinstance(nested, InlineText):
+                    parts.append(nested.content)
+    return "".join(parts)
+
+
 def _substitute_placeholders(
     nodes: list[InlineNode], mapping: dict[str, InlineNode]
 ) -> list[InlineNode]:
@@ -105,6 +131,33 @@ def _substitute_placeholders(
             if template is not None:
                 node.href = template.href
                 node.title = template.title
+                if hasattr(node, "children") and isinstance(node.children, list):
+                    node.children = _substitute_placeholders(node.children, mapping)
+                out.append(node)
+                continue
+            # LLM sometimes emits ``! [alt](⟦S1⟧)`` which parses as bang-text + link.
+            # After bang-spacing fix it is an image; without it, recover here.
+            img_template = _resolve_image_src_placeholder(node.href, mapping)
+            if img_template is not None:
+                if out and isinstance(out[-1], InlineText) and out[-1].content.rstrip().endswith("!"):
+                    prev = out[-1].content
+                    stripped = prev.rstrip()
+                    keep = stripped[:-1]
+                    trailing_ws = prev[len(stripped) :]
+                    if keep or trailing_ws:
+                        out[-1] = InlineText(content=keep + trailing_ws)
+                    else:
+                        out.pop()
+                out.append(
+                    InlineImage(
+                        alt=_inline_link_alt_text(node),
+                        src=img_template.src,
+                        title=img_template.title,
+                        width=img_template.width,
+                        height=img_template.height,
+                    )
+                )
+                continue
             if hasattr(node, "children") and isinstance(node.children, list):
                 node.children = _substitute_placeholders(node.children, mapping)
             out.append(node)

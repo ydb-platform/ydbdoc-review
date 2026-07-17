@@ -396,3 +396,32 @@ def test_plain_text_wrapping_not_dropped_when_identifier_missing():
     assert not is_spurious_plain_text_wrapping_issue(issue, seg, en)
     assert drop_spurious_placeholder_issues([issue], [seg], {"s0046": en}) == [issue]
 
+
+def test_drop_intentionally_stripped_link_critic_issues():
+    """Critic must not block when EN omitted links outside toc reachability (§6.114)."""
+    ru = "See [watermarks](watermarks.md) for details."
+    en = "See watermarks for details."
+    seg = _segment("s0001", ru)
+    issue = CriticIssueOut(
+        segment_id="s0001",
+        severity="blocked",
+        category="missing link",
+        comment=(
+            "The EN translation is missing the Markdown link "
+            "`[watermarks](watermarks.md)` present in the RU source."
+        ),
+        suggested_text=None,
+    )
+    reachable = frozenset(
+        {"ydb/docs/en/core/concepts/streaming-query/patterns.md"}
+    )
+    filtered = drop_spurious_placeholder_issues(
+        [issue],
+        [seg],
+        {"s0001": en},
+        source_text=ru,
+        source_file="ydb/docs/ru/core/concepts/streaming-query/index.md",
+        en_toc_reachable=reachable,
+    )
+    assert filtered == []
+

@@ -234,6 +234,27 @@ def test_translate_with_link_placeholder():
     assert "See [documentation](http://x) for details." in out
 
 
+def test_translate_image_bang_space_and_encoded_placeholder():
+    """LLM ``! [alt](⟦S1⟧)`` / percent-encoded ⟦S⟧ must restore real image src (§6.114)."""
+    from urllib.parse import quote
+
+    text = "Diagram: ![topic-design](_images/topic.svg).\n"
+    doc = parse_markdown(text)
+    segments = extract_segments(doc)
+    seg = segments[0]
+    assert any(p.placeholder.startswith("⟦S") for p in seg.placeholders)
+    ph = next(p.placeholder for p in seg.placeholders if p.placeholder.startswith("⟦S"))
+    # Space after bang + URL-encoded placeholder (as seen on #46848 topic.md).
+    translated = f"Diagram: ! [topic-design]({quote(ph)})."
+    translations = {seg.id: translated}
+    new_doc = reinsert_segments(doc, segments, translations)
+    out = render_markdown(new_doc)
+    assert "![" in out
+    assert "_images/topic.svg" in out
+    assert "%E2%9F%A6" not in out
+    assert "⟦S" not in out
+
+
 def test_translate_with_multiple_placeholders():
     text = "Run `cmd` then see [docs](http://x) with {{ var }}.\n"
     doc = parse_markdown(text)

@@ -105,7 +105,12 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         max_chars=ctx.batch_chars,
     )
     actionable_issues = drop_spurious_placeholder_issues(
-        state.critic_initial.issues, state.segments, state.translations
+        state.critic_initial.issues,
+        state.segments,
+        state.translations,
+        source_text=state.raw_source_text,
+        source_file=state.file_path,
+        en_toc_reachable=ctx.en_toc_reachable,
     )
     state.translations, state.critic_applied, state.critic_skipped = apply_critic_fixes(
         state.translations,
@@ -166,6 +171,9 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         state.segments,
         state.translations,
         skipped=state.critic_skipped,
+        source_text=state.raw_source_text,
+        source_file=state.file_path,
+        en_toc_reachable=ctx.en_toc_reachable,
     )
 
 
@@ -317,6 +325,8 @@ class HeuristicsStep:
             normalized_source_text=state.source_text,
             source_lang=ctx.source_lang,
             target_lang=ctx.target_lang,
+            source_file=state.file_path,
+            en_toc_reachable=ctx.en_toc_reachable,
         )
         for message in state.finalize_warnings:
             bucket = _classify_heuristic(message)
