@@ -425,3 +425,44 @@ def test_drop_intentionally_stripped_link_critic_issues():
     )
     assert filtered == []
 
+
+def test_drop_missing_u_placeholder_for_stripped_href():
+    """Critic often cites only ⟦U1⟧ without the .md basename (#46870)."""
+    from ydbdoc_review.parsing.ast_types import InlineLink
+    from ydbdoc_review.segmentation.types import ProtectedInline
+
+    ru = "See [{#T}](../../../concepts/streaming-query/streaming-query.md)."
+    en = "See {#T}."
+    seg = _segment(
+        "s0009",
+        "See [{#T}](⟦U1⟧).",
+        placeholders=[
+            ProtectedInline(
+                placeholder="⟦U1⟧",
+                node=InlineLink(
+                    href="../../../concepts/streaming-query/streaming-query.md",
+                    children=[],
+                ),
+            )
+        ],
+    )
+    issue = CriticIssueOut(
+        segment_id="s0009",
+        severity="blocked",
+        category="placeholder",
+        comment="Missing link placeholder ⟦U1⟧ in translated text.",
+        suggested_text="See [{#T}](⟦U1⟧).",
+    )
+    reachable = frozenset(
+        {"ydb/docs/en/core/yql/reference/syntax/create-streaming-query.md"}
+    )
+    filtered = drop_spurious_placeholder_issues(
+        [issue],
+        [seg],
+        {"s0009": en},
+        source_text=ru,
+        source_file="ydb/docs/ru/core/yql/reference/syntax/create-streaming-query.md",
+        en_toc_reachable=reachable,
+    )
+    assert filtered == []
+

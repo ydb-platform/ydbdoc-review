@@ -53,10 +53,12 @@ _HALLUCINATED_LINK_ISSUE = re.compile(
 _MISSING_LINK_ISSUE = re.compile(
     r"missing\s+(?:the\s+)?(?:markdown\s+)?link|missing\s+link|"
     r"link\s+(?:is\s+)?missing|does not (?:contain|include|have)\s+(?:the\s+)?link|"
-    r"omitted\s+(?:the\s+)?link|removed\s+(?:the\s+)?link",
+    r"omitted\s+(?:the\s+)?link|removed\s+(?:the\s+)?link|"
+    r"missing\s+link\s+placeholder",
     re.IGNORECASE,
 )
 _MD_HREF = re.compile(r"\[[^\]]*\]\(([^)]+)\)|\(([^)]+\.md(?:#[^)]*)?)\)")
+_U_PLACEHOLDER = re.compile(r"⟦(U\d+)⟧")
 
 
 def critic_issue_dedupe_key(issue: CriticIssueOut) -> tuple:
@@ -276,25 +278,48 @@ def is_intentionally_stripped_link_issue(
     issue: CriticIssueOut,
     *,
     ignore_basenames: set[str],
+    segment: Segment | None = None,
+    source_file: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> bool:
     """Drop critic complaints about EN links stripped as outside EN toc reachability."""
-    if not ignore_basenames:
-        return False
     haystack = f"{issue.category} {issue.comment}"
     if issue.suggested_text:
         haystack = f"{haystack} {issue.suggested_text}"
-    if not _MISSING_LINK_ISSUE.search(haystack):
-        # Also catch bare basename mentions when category is about links/structure.
-        if "link" not in haystack.lower():
-            return False
-    mentioned: set[str] = set()
-    for match in _MD_HREF.finditer(haystack):
-        href = (match.group(1) or match.group(2) or "").strip().split("#", 1)[0]
-        if href.endswith(".md"):
-            mentioned.add(PurePosixPath(href).name)
-    for name in ignore_basenames:
-        if name in mentioned or name in haystack:
-            return True
+    linkish = bool(_MISSING_LINK_ISSUE.search(haystack)) or "link" in haystack.lower()
+    if not linkish:
+        return False
+
+    if ignore_basenames:
+        mentioned: set[str] = set()
+        for match in _MD_HREF.finditer(haystack):
+            href = (match.group(1) or match.group(2) or "").strip().split("#", 1)[0]
+            if href.endswith(".md"):
+                mentioned.add(PurePosixPath(href).name)
+        for name in ignore_basenames:
+            if name in mentioned or name in haystack:
+                return True
+
+    # Critic often says only ``Missing link placeholder ⟦U1⟧`` without the .md path.
+    if (
+        segment is not None
+        and source_file
+        and en_toc_reachable is not None
+        and _U_PLACEHOLDER.search(haystack)
+    ):
+        from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+        by_ph = {p.placeholder: p.node for p in segment.placeholders}
+        for match in _U_PLACEHOLDER.finditer(haystack):
+            node = by_ph.get(f"⟦{match.group(1)}⟧")
+            if not isinstance(node, InlineLink) or not node.href:
+                continue
+            target = resolve_internal_md_href(source_file, node.href)
+            if target is not None and target not in en_toc_reachable:
+                return True
+            basename = PurePosixPath(node.href.split("#", 1)[0]).name
+            if basename in ignore_basenames:
+                return True
     return False
 
 
@@ -350,7 +375,13 @@ def drop_spurious_placeholder_issues(
     for issue in issues:
         seg = by_id.get(issue.segment_id) if issue.segment_id else None
         trans = translations.get(issue.segment_id) if issue.segment_id else None
-        if is_intentionally_stripped_link_issue(issue, ignore_basenames=ignore_basenames):
+        if is_intentionally_stripped_link_issue(
+            issue,
+            ignore_basenames=ignore_basenames,
+            segment=seg,
+            source_file=source_file,
+            en_toc_reachable=en_toc_reachable,
+        ):
             logger.info(
                 "Ignoring intentionally stripped-link critic issue for %s",
                 issue.segment_id,

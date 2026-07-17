@@ -24,6 +24,7 @@ from ydbdoc_review.parsing.ast_types import (
     YfmCut,
     YfmIf,
     YfmNote,
+    YfmTab,
     YfmTabs,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -232,7 +233,21 @@ def _walk_blocks(blocks, *, from_file: str, reachable: frozenset[str]) -> None:
                     nodes, from_file=from_file, reachable=reachable
                 ),
             )
-        elif isinstance(block, (YfmNote, YfmCut, YfmIf, YfmTabs)):
+        elif isinstance(block, YfmIf):
+            for branch in block.branches:
+                _walk_blocks(
+                    branch.children, from_file=from_file, reachable=reachable
+                )
+        elif isinstance(block, YfmTabs):
+            for tab in block.children:
+                if isinstance(tab, YfmTab):
+                    _walk_inline(
+                        tab.title, from_file=from_file, reachable=reachable
+                    )
+                    _walk_blocks(
+                        tab.children, from_file=from_file, reachable=reachable
+                    )
+        elif isinstance(block, (YfmNote, YfmCut)):
             _walk_blocks(block.children, from_file=from_file, reachable=reachable)
 
 
@@ -285,7 +300,15 @@ def strip_unreachable_internal_links(
                     block,
                     lambda nodes: _walk_inline_count(nodes, from_file=from_en),
                 )
-            elif isinstance(block, (YfmNote, YfmCut, YfmIf, YfmTabs)):
+            elif isinstance(block, YfmIf):
+                for branch in block.branches:
+                    _walk_blocks_count(branch.children)
+            elif isinstance(block, YfmTabs):
+                for tab in block.children:
+                    if isinstance(tab, YfmTab):
+                        _walk_inline_count(tab.title, from_file=from_en)
+                        _walk_blocks_count(tab.children)
+            elif isinstance(block, (YfmNote, YfmCut)):
                 _walk_blocks_count(block.children)
 
     _walk_blocks_count(doc.children)

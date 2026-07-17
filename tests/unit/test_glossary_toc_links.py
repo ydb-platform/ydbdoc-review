@@ -221,6 +221,28 @@ def test_strip_unreachable_links_inside_table_cells():
     assert "watermarks" in out
 
 
+def test_strip_unreachable_links_inside_yfm_if():
+    """YfmIf uses branches, not .children (#46870 strip crash)."""
+    text = (
+        "{% if feature %}\n"
+        "See [watermarks](watermarks.md).\n"
+        "{% else %}\n"
+        "See [patterns](patterns.md).\n"
+        "{% endif %}\n"
+    )
+    reachable = frozenset(
+        {"ydb/docs/en/core/dev/streaming-query/patterns.md"}
+    )
+    out = strip_unreachable_internal_links(
+        text,
+        file_path="ydb/docs/en/core/dev/streaming-query/index.md",
+        reachable=reachable,
+    )
+    assert "watermarks.md" not in out
+    assert "patterns.md" in out
+    assert "watermarks" in out
+
+
 def test_md_link_basenames_outside_reachable():
     text = (
         "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
