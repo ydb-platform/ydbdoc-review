@@ -2590,6 +2590,25 @@ exceptions so a walker bug cannot abort the PR job.
 ``test_translate_image_bang_space_and_encoded_placeholder``,
 ``test_fix_image_bang_spacing``.
 
+### 6.115. Strip walker: YfmIf uses branches (#39856 → #46870, 2026-07-17)
+
+**Problem:** After §6.114, ``build-docs`` stayed green but ``doc_verify`` was still
+🔴. ``finalize_en_target`` logged
+``strip_unreachable_links_failed: AttributeError: 'YfmIf' object has no
+attribute 'children'`` — strip aborted for files with ``{% if %}`` (e.g.
+``topic.md``), so unreachable links remained / QA still complained.
+
+Separately, critic often reported only ``Missing link placeholder ⟦U1⟧`` without
+the ``.md`` basename, so the §6.114 basename filter did not drop those issues
+for intentionally stripped streaming-query links.
+
+**Fix:** Walk ``YfmIf.branches[].children`` (and ``YfmTabs`` / ``YfmTab``
+properly); resolve mentioned ``⟦U*⟧`` placeholders against the segment atom map
+and drop issues whose href is outside ``en_toc_reachable``.
+
+**Tests:** ``test_strip_unreachable_links_inside_yfm_if``,
+``test_drop_missing_u_placeholder_for_stripped_href``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)
