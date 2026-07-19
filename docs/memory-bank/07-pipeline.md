@@ -99,6 +99,7 @@ OUTPUT: final_text, file_report = {
 INPUT: pr_number, source_repo, merge_base_with
 
 1. SCOPE PLAN (§22 — before any LLM)
+   # Merged source PR: RU from merge_commit_sha (§6.120), not stale feature head
    changes = merge_pr_file_changes(git diff, GitHub PR files API)
    scope_plan = plan_translation_scope(changes, read_ru, read_en_base)
    pairs = doc_pairs_from_plan(scope_plan, skip bilingual EN mirrors)
@@ -109,7 +110,7 @@ INPUT: pr_number, source_repo, merge_base_with
    changes += synthetic_changes_from_plan(scope_plan)  # completeness audit
 
 2. PER-FILE TRANSLATION (single pass)
-   contents = load_pair_contents(pairs)
+   contents = load_pair_contents(pairs, ru_content_ref=merge_sha_if_merged)
    pr_result = run_pr_translation(contents)   # PRHarness / TRANSLATE_PR_PROFILE
 
 3. NAVIGATION MERGE (same scope_plan)
@@ -168,8 +169,8 @@ OUTPUT: exit code 0 unless infrastructure failure.
 INPUT: translation_pr_number
 
 1. Discover source PR number from translation PR description
-2. Read **EN** from translation PR checkout; **RU** from source PR **merge commit**
-   when merged, else head (§6.31, §6.106); §6.70/§6.106 fence tie-break vs checkout
+2. Read **EN** from translation PR checkout; **RU** from source PR **head**
+   (with merge/local candidates, §6.31 / §6.110); §6.70/§6.106 fence tie-break.
 3. Run critic + heuristics (no translator)
 4. Apply critic fixes (suggested_text per segment_id)
 5. If any fixes applied: commit + push to translation PR branch

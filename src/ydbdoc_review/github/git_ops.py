@@ -92,6 +92,32 @@ def read_text(repo: str, rel_path: str) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
+def ensure_commit(repo: str, sha: str) -> bool:
+    """Make ``sha`` resolvable locally (fetch from ``origin`` if needed)."""
+    if not sha:
+        return False
+    probe = subprocess.run(
+        ["git", "-C", repo, "cat-file", "-e", f"{sha}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        return True
+    fetch = subprocess.run(
+        ["git", "-C", repo, "fetch", "--no-tags", "origin", sha],
+        capture_output=True,
+        text=True,
+    )
+    if fetch.returncode != 0:
+        return False
+    probe = subprocess.run(
+        ["git", "-C", repo, "cat-file", "-e", f"{sha}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    return probe.returncode == 0
+
+
 def read_text_at_ref(repo: str, ref: str, rel_path: str) -> str | None:
     path = rel_path.replace(os.sep, "/")
     proc = subprocess.run(

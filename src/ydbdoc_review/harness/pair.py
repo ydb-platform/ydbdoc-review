@@ -80,8 +80,13 @@ def run_pair_plan(
         return PairRunResult(plan=plan, error=str(exc))
 
     target_text = file_result.final_text
-    if plan.action == "translate_to_ru" and target_text and content.ru_text:
-        target_text = restore_autotitle_hrefs(target_text, content.ru_text)
+    if target_text and content.ru_text:
+        if plan.action == "translate_to_ru":
+            target_text = restore_autotitle_hrefs(target_text, content.ru_text)
+        elif plan.action == "translate_to_en":
+            target_text = restore_autotitle_hrefs(
+                target_text, content.ru_text, force_exact=True
+            )
 
     return PairRunResult(
         plan=plan,

@@ -2677,6 +2677,32 @@ extras only — never ``ru_hrefs − en_hrefs``.
 
 **Tests:** ``test_pr_46878_supplement_only_does_not_add_all_missing_ru_hrefs``.
 
+### 6.120. Merged source PR: translate RU from merge commit (#47100, 2026-07-19)
+
+**Problem:** [#47100](https://github.com/ydb-platform/ydb/pull/47100) (Spring from
+merged [#43010](https://github.com/ydb-platform/ydb/pull/43010)) failed ``build-docs``
+with **YFM010** ``unreachable-autotitle-anchor`` on
+``en/concepts/glossary.md`` → ``query_execution/index.html#sessions``.
+
+**Root cause:** CI checked out **PR head**. After squash/rebase, head still had
+``[{#T}](query_execution/index.md#sessions)`` while the **merge commit** (and
+``main``) already pointed at ``execution_process.md#sessions`` (#44457). Faithful
+translate of stale head **regressed** EN that #46674 had fixed.
+
+**Decision:**
+
+1. ``doc_translate``: when the source PR is **merged**, read RU (docs + nav) from
+   ``merge_commit_sha`` (fetch if needed), not feature ``head.sha``.
+2. ``restore_autotitle_hrefs(..., force_exact=True)`` on ``translate_to_en`` — when
+   ``{#T}`` counts match, copy RU hrefs exactly (belt against LLM sibling-path
+   hallucinations).
+3. Example workflow: checkout ``merge_commit_sha`` when ``pull_request.merged``.
+
+**Not changed:** ``doc_verify`` still prefers head first among candidates (§6.110)
+so EN from a head-based translate stays alignable; merge remains an alternate.
+
+**Tests:** ``test_translate_ru_content_ref_*``, ``test_restore_force_exact_ru_to_en_sessions_href``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-19  
-**Current focus:** §6.119 — supplement_only scope (#46878 json-search toc pollution).
+**Current focus:** §6.120 — merged PR translate from merge commit (#47100 YFM010).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-19 | **§6.120** — merged source PR: ``doc_translate`` RU from ``merge_commit_sha``; force exact ``{#T}`` hrefs RU→EN (#47100 YFM010) |
 | 2026-07-19 | **§6.119** — `supplement_only` must not expand to all RU−EN missing hrefs (#46878) |
 | 2026-07-19 | **§22.14** — TOC PR regression catalog: `test_toc_pr_regressions.py` covers validate/planner/merge/QA kinds from failing PRs |
 | 2026-07-19 | **§6.118** — parse/validate keep `include_path` on href+include toc entries (#47100 false `scope_not_applied`) |

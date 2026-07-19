@@ -1,4 +1,4 @@
-"""Preserve RU autotitle link targets when EN→RU re-translate would break YFM paths."""
+"""Preserve Diplodoc ``[{#T}](href)`` targets across locale translates."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ _AUTO_LINK = re.compile(r"\[\{#T\}\]\(([^)]+)\)")
 
 
 def _doc_href_stem(href: str) -> str:
-    path = href.strip()
+    path = href.strip().split("#", 1)[0]
     if path.endswith("/index.md"):
         return path[: -len("/index.md")]
     if path.endswith(".md"):
@@ -16,17 +16,28 @@ def _doc_href_stem(href: str) -> str:
     return path
 
 
-def restore_autotitle_hrefs(translated: str, ru_base: str | None) -> str:
-    """Copy ``[{#T}](href)`` targets from ``ru_base`` when paths denote the same doc.
+def restore_autotitle_hrefs(
+    translated: str,
+    source_base: str | None,
+    *,
+    force_exact: bool = False,
+) -> str:
+    """Copy ``[{#T}](href)`` targets from ``source_base`` onto ``translated``.
 
-    EN mirrors often use ``page.md`` where RU uses ``page/index.md``; Diplodoc
-    toc validation fails if EN→RU translation copies the EN path literally.
+    EN→RU (default): rewrite when paths denote the same doc (``page.md`` vs
+    ``page/index.md``); Diplodoc toc validation fails if EN→RU copies the EN
+    path literally.
+
+    RU→EN (``force_exact=True``): always take the source href when ``{#T}``
+    counts match — autotitle destinations must stay in lockstep with RU, and
+    the model sometimes emits a stale sibling path (e.g. ``index.md#sessions``
+    instead of ``execution_process.md#sessions``, #47100 / YFM010).
     """
-    if not ru_base or not translated:
+    if not source_base or not translated:
         return translated
 
     tr_paths = _AUTO_LINK.findall(translated)
-    base_paths = _AUTO_LINK.findall(ru_base)
+    base_paths = _AUTO_LINK.findall(source_base)
     if len(tr_paths) != len(base_paths) or not tr_paths:
         return translated
 
@@ -34,7 +45,7 @@ def restore_autotitle_hrefs(translated: str, ru_base: str | None) -> str:
     for tr_href, base_href in zip(tr_paths, base_paths):
         if tr_href == base_href:
             continue
-        if _doc_href_stem(tr_href) != _doc_href_stem(base_href):
+        if not force_exact and _doc_href_stem(tr_href) != _doc_href_stem(base_href):
             continue
         out = out.replace(f"[{{#T}}]({tr_href})", f"[{{#T}}]({base_href})", 1)
     return out

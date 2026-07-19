@@ -407,8 +407,13 @@ def changes_from_manifest(
 def make_repo_scope_readers(
     repo_path: str,
     merge_base_with: str,
+    *,
+    ru_content_ref: str | None = None,
 ) -> tuple[ReadFn, ReadFn, ReadFn]:
-    """Build scope readers for ``plan_translation_scope`` in CI."""
+    """Build scope readers for ``plan_translation_scope`` in CI.
+
+    ``ru_content_ref`` — optional git ref for RU (merged PR → merge commit, §6.120).
+    """
     from ydbdoc_review.github.git_ops import merge_base, read_text, read_text_at_ref
 
     mb = "HEAD"
@@ -421,6 +426,10 @@ def make_repo_scope_readers(
         )
 
     def read_ru(path: str) -> str | None:
+        if ru_content_ref:
+            text = read_text_at_ref(repo_path, ru_content_ref, path)
+            if text is not None:
+                return text
         text = read_text(repo_path, path)
         if text is not None:
             return text

@@ -12,6 +12,8 @@ from ydbdoc_review.github.pr import (
     pick_verify_ru_text,
     source_pr_content_ref,
     source_pr_content_ref_from_pull,
+    translate_ru_content_ref,
+    PullRequestContext,
 )
 from ydbdoc_review.pipeline.pairs import DocPair, NavigationPair
 from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
@@ -50,6 +52,41 @@ def test_source_pr_content_ref_merged_keeps_head():
     assert owner == "contributor"
     assert repo == "ydb"
     assert ref == "pr-head"
+
+
+def test_translate_ru_content_ref_merged_uses_merge_commit():
+    """§6.120: doc_translate RU from merge commit, not stale feature head."""
+    ctx = PullRequestContext(
+        owner="ydb-platform",
+        repo="ydb",
+        number=43010,
+        title="spring",
+        head_ref="feature",
+        head_sha="stale-head",
+        head_repo_full_name="ydb-platform/ydb",
+        head_repo_https_url="https://github.com/ydb-platform/ydb.git",
+        base_ref="main",
+        merged=True,
+        merge_commit_sha="merge-landed",
+    )
+    assert translate_ru_content_ref(ctx) == "merge-landed"
+
+
+def test_translate_ru_content_ref_open_pr_uses_checkout():
+    ctx = PullRequestContext(
+        owner="ydb-platform",
+        repo="ydb",
+        number=1,
+        title="open",
+        head_ref="feature",
+        head_sha="head",
+        head_repo_full_name="ydb-platform/ydb",
+        head_repo_https_url="https://github.com/ydb-platform/ydb.git",
+        base_ref="main",
+        merged=False,
+        merge_commit_sha=None,
+    )
+    assert translate_ru_content_ref(ctx) is None
 
 
 def test_source_pr_content_ref_from_pull_merged_without_merge_sha_falls_back_to_head():

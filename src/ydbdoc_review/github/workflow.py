@@ -12,6 +12,7 @@ from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.git_ops import (
+    ensure_commit,
     git_commit_paths,
     git_head_sha,
     prepare_translation_branch_on_base,
@@ -34,6 +35,7 @@ from ydbdoc_review.github.pr import (
     repo_https_clone_url,
     is_translation_pr_branch,
     source_pr_number_from_branch,
+    translate_ru_content_ref,
     translation_branch_base,
     translation_pr_base,
     verify_fixup_branch,
@@ -244,12 +246,31 @@ def run_doc_translate(
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
+    ru_ref = translate_ru_content_ref(ctx)
+    if ru_ref is not None:
+        if ensure_commit(repo_path, ru_ref):
+            logger.info(
+                "Merged source PR #%s: reading RU from merge commit %s",
+                pr_number,
+                ru_ref[:12],
+            )
+        else:
+            logger.warning(
+                "Merged source PR #%s: merge commit %s not fetchable; "
+                "falling back to checkout HEAD for RU",
+                pr_number,
+                ru_ref[:12],
+            )
+            ru_ref = None
+
     changes = merge_pr_file_changes(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
     docs_root = cfg.paths.docs_root
-    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
+    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
+        repo_path, merge_base_with, ru_content_ref=ru_ref
+    )
     scope_plan = plan_translation_scope(
         changes,
         read_ru=read_ru,
@@ -311,7 +332,10 @@ def run_doc_translate(
 
     if pairs:
         contents = load_pair_contents(
-            repo_path, pairs, merge_base_with=merge_base_with
+            repo_path,
+            pairs,
+            merge_base_with=merge_base_with,
+            ru_content_ref=ru_ref,
         )
         pr_result = run_pr_translation(
             contents,
@@ -339,6 +363,7 @@ def run_doc_translate(
             glossary=glossary,
             config=cfg,
             scope_plan=scope_plan,
+            ru_content_ref=ru_ref,
         )
 
     pr_result.completeness_gaps = completeness_gaps(

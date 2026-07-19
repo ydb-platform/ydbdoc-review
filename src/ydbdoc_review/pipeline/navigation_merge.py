@@ -257,6 +257,7 @@ def merge_navigation_pair(
     config: Config,
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
+    ru_content_ref: str | None = None,
 ) -> NavigationRunResult:
     """Produce merged EN navigation YAML for one RU/EN pair."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -278,7 +279,11 @@ def merge_navigation_pair(
             verdict="ok",
         )
 
-    ru_pr = read_text(repo_path, pair.ru_path)
+    ru_pr: str | None = None
+    if ru_content_ref:
+        ru_pr = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
+    if ru_pr is None:
+        ru_pr = read_text(repo_path, pair.ru_path)
     if ru_pr is None:
         ru_pr = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
     if ru_pr is None:
@@ -559,6 +564,7 @@ def run_navigation_merges(
     config: Config,
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
+    ru_content_ref: str | None = None,
 ) -> list[NavigationRunResult]:
     """Merge all navigation YAML pairs changed in the source PR."""
     results: list[NavigationRunResult] = []
@@ -577,6 +583,7 @@ def run_navigation_merges(
                 config=config,
                 scope_plan=scope_plan,
                 extra_toc_hrefs=extra_toc_hrefs,
+                ru_content_ref=ru_content_ref,
             )
         )
     return results

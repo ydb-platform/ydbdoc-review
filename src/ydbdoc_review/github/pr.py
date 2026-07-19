@@ -57,6 +57,7 @@ class PullRequestContext:
     base_ref: str
     merged: bool = False
     state: str = "open"
+    merge_commit_sha: str | None = None
 
 
 def pull_request_context(
@@ -69,6 +70,7 @@ def pull_request_context(
     clone_url = str(head_repo.get("clone_url") or "")
     if not clone_url:
         raise ValueError(f"PR #{pr_number} missing head repo clone URL")
+    merge_sha = str(data.get("merge_commit_sha") or "") or None
     return PullRequestContext(
         owner=owner,
         repo=repo,
@@ -81,7 +83,20 @@ def pull_request_context(
         base_ref=str(base.get("ref") or ""),
         merged=bool(data.get("merged")),
         state=str(data.get("state") or "open"),
+        merge_commit_sha=merge_sha,
     )
+
+
+def translate_ru_content_ref(ctx: PullRequestContext) -> str | None:
+    """Git ref for RU bodies during ``doc_translate``.
+
+    Open PRs: checkout HEAD (caller default). Merged PRs: ``merge_commit_sha`` —
+    the tree that landed on the base branch. Feature ``head.sha`` can lag behind
+    squash/rebase resolution and regress EN (e.g. #43010 → #47100 YFM010).
+    """
+    if ctx.merged and ctx.merge_commit_sha:
+        return ctx.merge_commit_sha
+    return None
 
 
 def repo_https_clone_url(owner: str, repo: str) -> str:
@@ -425,14 +440,24 @@ def load_pair_contents(
     pairs: list[DocPair],
     *,
     merge_base_with: str,
+    ru_content_ref: str | None = None,
 ) -> list[PairContent]:
-    """Load RU/EN bodies and diffs for each pair from the local checkout."""
+    """Load RU/EN bodies and diffs for each pair from the local checkout.
+
+    When ``ru_content_ref`` is set (merged source PR → merge commit, §6.120),
+    RU bodies are read from that ref first so stale PR-head trees cannot
+    regress already-fixed links on the base branch.
+    """
     contents: list[PairContent] = []
     for pair in pairs:
-        ru_text = read_text(repo_path, pair.ru_path)
-        en_text = read_text(repo_path, pair.en_path)
+        ru_text: str | None = None
+        if ru_content_ref:
+            ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
+        if ru_text is None:
+            ru_text = read_text(repo_path, pair.ru_path)
         if ru_text is None and not pair.ru_deleted:
             ru_text = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
+        en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
 

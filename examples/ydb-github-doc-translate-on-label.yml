@@ -27,10 +27,12 @@ jobs:
       group: ydbdoc-review-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - name: Checkout PR head
+      - name: Checkout translation source
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Merged PRs: merge commit (landed tree). Open PRs: feature head.
+          # Stale head after squash can regress EN vs main (YFM010, §6.120).
+          ref: ${{ github.event.pull_request.merged && github.event.pull_request.merge_commit_sha || github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Fetch merge base ref
