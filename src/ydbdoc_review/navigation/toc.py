@@ -200,22 +200,16 @@ def _parse_toc_nodes_at_level(
 def _flatten_toc_nodes(nodes: list[TocNode]) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for node in nodes:
-        if node.href:
-            items.append(
-                {
-                    "name": node.name,
-                    "href": node.href,
-                    "block": node.block,
-                }
-            )
-        elif node.include_path:
-            items.append(
-                {
-                    "name": node.name,
-                    "include_path": node.include_path,
-                    "block": node.block,
-                }
-            )
+        if node.href or node.include_path:
+            entry: dict[str, str] = {
+                "name": node.name,
+                "block": node.block,
+            }
+            if node.href:
+                entry["href"] = node.href
+            if node.include_path:
+                entry["include_path"] = node.include_path
+            items.append(entry)
         if node.children:
             items.extend(_flatten_toc_nodes(node.children))
     return items
@@ -499,22 +493,16 @@ def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
             href = _first_href_in_block(block)
             include_path = _first_include_in_block(block)
             name = name_match.group(2).strip()
-            if href:
-                items.append(
-                    {
-                        "name": name,
-                        "href": href,
-                        "block": block,
-                    }
-                )
-            elif include_path:
-                items.append(
-                    {
-                        "name": name,
-                        "include_path": include_path,
-                        "block": block,
-                    }
-                )
+            # Diplodoc section entries often have both href (index.md) and
+            # include.path (child toc). Dropping include_path made validate_toc_merge
+            # report false scope_not_applied (#47100 / Spring).
+            if href or include_path:
+                entry: dict[str, str] = {"name": name, "block": block}
+                if href:
+                    entry["href"] = href
+                if include_path:
+                    entry["include_path"] = include_path
+                items.append(entry)
             continue
         include_match = _INCLUDE_ONLY_ITEM.match(line)
         if include_match:
@@ -654,12 +642,13 @@ def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope
     include_paths: set[str] = set()
     for it in parse_toc_items(ru_pr_yaml):
         href = it.get("href")
+        include_path = it.get("include_path")
+        # Section entries often have both href (index.md) and include.path
+        # (child sidebar). Do not skip include when href is present (#47100).
         if href:
             prev = base_by_href.get(href)
             if prev is None or prev.get("name", "") != it.get("name", ""):
                 hrefs.add(href)
-            continue
-        include_path = it.get("include_path")
         if include_path:
             prev = base_by_include.get(include_path)
             if prev is None or prev.get("name", "") != it.get("name", ""):

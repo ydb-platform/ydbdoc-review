@@ -882,6 +882,58 @@ def test_merge_en_toc_keep_en_hrefs_overrides_ru_base_drop():
     assert "patterns.md" in hrefs
 
 
+def test_parse_toc_items_keeps_include_path_alongside_href():
+    """Regression #47100: Spring-style section has both href and include.path."""
+    toc = dedent("""
+        items:
+        - name: Spring
+          href: spring/index.md
+          include:
+            mode: link
+            path: spring/toc-spring.yaml
+    """).strip()
+    items = parse_toc_items(toc)
+    assert len(items) == 1
+    assert items[0]["href"] == "spring/index.md"
+    assert items[0]["include_path"] == "spring/toc-spring.yaml"
+
+
+def test_validate_toc_merge_accepts_href_plus_include_section():
+    """False scope_not_applied when EN already has section include (#47100)."""
+    en = dedent("""
+        items:
+        - name: Spring
+          href: spring/index.md
+          include:
+            mode: link
+            path: spring/toc-spring.yaml
+        - name: Vector search
+          href: vectorsearch/index.md
+    """).strip()
+    ru = dedent("""
+        items:
+        - name: Spring
+          href: spring/index.md
+          include:
+            mode: link
+            path: spring/toc-spring.yaml
+        - name: Vector search
+          href: vectorsearch/index.md
+    """).strip()
+    issues = validate_toc_merge(
+        ru,
+        en,
+        translate_hrefs={"spring/index.md"},
+        translate_include_paths={"spring/toc-spring.yaml"},
+        en_main_yaml=dedent("""
+            items:
+            - name: Vector search
+              href: vectorsearch/index.md
+        """).strip(),
+    )
+    assert not any(i.kind == "scope_not_applied" for i in issues)
+
+
 def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
     """Regression #46258: Spring-only toc edit must not pull sql-translation include."""
     en_main = dedent("""
@@ -918,7 +970,7 @@ def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
     """).strip()
     scope = toc_translate_scope(ru_base, ru_pr)
     assert scope.hrefs == {"spring/index.md"}
-    assert scope.include_paths == frozenset()
+    assert scope.include_paths == {"spring/toc-spring.yaml"}
 
     merged = merge_en_toc_yaml(
         en_main,

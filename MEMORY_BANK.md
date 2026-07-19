@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-19  
-**Current focus:** §6.117 — orphan translated EN pages must be in toc graph.
+**Current focus:** §6.118 — href+include toc parse (#47100 Spring false scope_not_applied).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
