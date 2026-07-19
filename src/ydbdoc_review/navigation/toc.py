@@ -321,22 +321,35 @@ def _merge_toc_tree_nodes(
                 and href in base_hrefs
             ):
                 en_name = translate_name(ru_node.name).strip()
-                list_indent = 0
-                if en_node and en_node.block:
-                    m = _NAME_LINE.match(en_node.block.splitlines()[0])
-                    if m:
-                        list_indent = len(m.group(1))
-                elif ru_node.block:
-                    m = _NAME_LINE.match(ru_node.block.splitlines()[0])
-                    if m:
-                        list_indent = len(m.group(1))
-                merged.append(
-                    TocNode(
-                        name=en_name,
-                        href=href,
-                        block=_leaf_block(en_name, href, list_indent=list_indent),
+                # Keep include.path on section entries (href + include); do not
+                # collapse to a leaf-only block (#47100 / #46878).
+                if ru_node.include_path and ru_node.block.strip():
+                    block = _replace_item_name(ru_node.block, en_name)
+                    merged.append(
+                        TocNode(
+                            name=en_name,
+                            href=href,
+                            include_path=ru_node.include_path,
+                            block=block,
+                        )
                     )
-                )
+                else:
+                    list_indent = 0
+                    if en_node and en_node.block:
+                        m = _NAME_LINE.match(en_node.block.splitlines()[0])
+                        if m:
+                            list_indent = len(m.group(1))
+                    elif ru_node.block:
+                        m = _NAME_LINE.match(ru_node.block.splitlines()[0])
+                        if m:
+                            list_indent = len(m.group(1))
+                    merged.append(
+                        TocNode(
+                            name=en_name,
+                            href=href,
+                            block=_leaf_block(en_name, href, list_indent=list_indent),
+                        )
+                    )
             continue
 
         if ru_node.include_path:

@@ -162,8 +162,9 @@ def _resolve_toc_merge_scope(
     """Return merge scope and whether gap-fill is restricted to that scope.
 
     When EN sidebar yaml is absent, mirror the full RU structure (§6.85).
-    ``supplement_only`` pairs add only RU entries missing from EN main, without
-    renaming legacy EN href aliases (§6.72).
+    Otherwise scope = ``toc_translate_scope`` (RU base→PR diff) ∪ planned
+    extras from the translation plan. ``supplement_only`` no longer expands to
+    every RU−EN missing href (§6.72 / #46878).
     """
     ru_hrefs, ru_includes = toc_entry_paths(ru_pr)
     planned_includes = pair_extra_includes or set()
@@ -177,20 +178,15 @@ def _resolve_toc_merge_scope(
         )
 
     scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra_hrefs)
-    if not pair.supplement_only:
-        if planned_includes:
-            scope = scope.with_extra_include_paths(planned_includes)
-        return scope, True
+    if planned_includes:
+        scope = scope.with_extra_include_paths(planned_includes)
 
-    en_hrefs, en_includes = toc_entry_paths(en_main)
-    missing_hrefs = ru_hrefs - en_hrefs
-    missing_includes = (ru_includes - en_includes) | planned_includes
-    return (
-        scope.with_extra_hrefs(missing_hrefs).with_extra_include_paths(
-            missing_includes
-        ),
-        True,
-    )
+    # Always restrict gap-fill to ``scope`` (§6.82). For ``supplement_only``
+    # parents (§6.72 / #46878) do **not** expand scope with every RU−EN missing
+    # href — that pulled ``secondary_indexes.md`` / stale flat paths into EN and
+    # failed ``missing_toc_target``. Planned extras already list the pages/includes
+    # that caused the parent to be queued.
+    return scope, True
 
 
 def _toc_label_names(

@@ -36,6 +36,9 @@ tests/
 │   ├── test_translate_file.py             incl. heuristic verdict bump
 │   ├── test_validation_heuristics.py      Phase E (+ list_tab, redirect nav)
 │   ├── test_navigation_toc.py
+│   ├── test_toc_pr_regressions.py         §22.14 PR→test catalog (validate/planner/QA)
+│   ├── test_nav_scope_planner.py          §22 nav_cases goldens
+│   ├── test_toc_targets.py                missing_toc_target + orphan_toc_page
 │   ├── test_navigation_redirects.py
 │   ├── test_navigation_paths.py
 │   ├── test_pipeline_pairs.py
@@ -175,10 +178,12 @@ tests/fixtures/nav_cases/
 ```bash
 python scripts/fetch_nav_fixtures.py --all   # refresh from ydb PR snapshots
 pytest tests/unit/test_nav_scope_planner.py -v
+pytest tests/unit/test_toc_pr_regressions.py -v   # §22.14 PR failure catalog
 ```
 
 Golden tests define planner contract before touching `workflow.py`. See
-**09-navigation-scope** §22.6–§22.12 for rollout notes.
+**09-navigation-scope** §22.6–§22.14 for rollout notes and the **TOC regression
+catalog** (every production toc red → named `test_pr_<N>_…`).
 
 **Local re-translate #43997:** delete remote `ydbdoc-review/pr-43997`, run
 `python -m ydbdoc_review job --mode translate --repo ydb-platform/ydb --pr 43997 …`

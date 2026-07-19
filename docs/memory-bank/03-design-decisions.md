@@ -2663,8 +2663,19 @@ also ``continue``d after href and skipped include-path diff.
 
 **Decision:** emit both fields on section entries; scope both independently.
 
-**Tests:** ``test_parse_toc_items_keeps_include_path_alongside_href``,
-``test_validate_toc_merge_accepts_href_plus_include_section``.
+### 6.119. supplement_only must not expand to all RU−EN missing hrefs (#46878, 2026-07-19)
+
+**Problem:** [#46878](https://github.com/ydb-platform/ydb/pull/46878) (json-search from
+[#41271](https://github.com/ydb-platform/ydb/pull/41271)) queued parent
+``concepts/toc_i.yaml`` as ``supplement_only``. ``_resolve_toc_merge_scope`` then
+set ``translate_hrefs = ru_hrefs − en_hrefs``, pulling ``secondary_indexes.md``
+(and other RU-only paths) into EN → ``missing_toc_target`` / ``unexpected_href``.
+Defeated §6.72 even though ``restrict_gap_fill_to_scope=True``.
+
+**Decision:** for present EN tocs, scope = ``toc_translate_scope`` ∪ planned
+extras only — never ``ru_hrefs − en_hrefs``.
+
+**Tests:** ``test_pr_46878_supplement_only_does_not_add_all_missing_ru_hrefs``.
 
 ---
 

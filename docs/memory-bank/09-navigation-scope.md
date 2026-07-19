@@ -212,6 +212,62 @@ DDL → `https://en.wikipedia.org/wiki/Data_definition_language`.
 
 **Re-run:** toggle **`doc_verify`** on #46609 after tag bump — expect only real residuals (Wikipedia, fence comment typo, placeholder critic).
 
+### 22.14. TOC regression catalog (PR → test, 2026-07-19)
+
+**Rule:** every production toc red (planner, merge, validate, QA) gets a named
+regression in ``tests/unit/test_toc_pr_regressions.py`` and/or a golden under
+``tests/fixtures/nav_cases/``. Do not close a toc bug without a test named after
+the source or translation PR.
+
+#### Validation kinds (`validate_toc_merge` / QA)
+
+| Kind | Symptom PR(s) | § | Test |
+|------|---------------|---|------|
+| `collapsed_toc` | [#42884](https://github.com/ydb-platform/ydb/pull/42884), [#44117](https://github.com/ydb-platform/ydb/pull/44117) | §6.44 / §6.63 | `test_pr_42884_collapsed_toc_when_en_shrunk_to_half` |
+| `unexpected_href` | [#44872](https://github.com/ydb-platform/ydb/pull/44872)-class | §6.33 | `test_pr_44872_unexpected_href_not_in_ru_or_en_main` |
+| `empty_toc` | [#42725](https://github.com/ydb-platform/ydb/pull/42725), [#46346](https://github.com/ydb-platform/ydb/pull/46346) | §6.33 / §6.86 | `test_pr_42725_empty_toc_when_parse_yields_no_items` (+ indented parse in `test_navigation_toc.py`) |
+| `inconsistent_indent` | [#42726](https://github.com/ydb-platform/ydb/pull/42726) | §6.34 | `test_pr_42726_inconsistent_indent_mixed_inline_prefixes` |
+| `scope_not_applied` (missing) | [#44942](https://github.com/ydb-platform/ydb/pull/44942) | §6.74 | `test_pr_44942_scope_not_applied_when_href_missing_from_en` |
+| `scope_not_applied` (false +) | [#47100](https://github.com/ydb-platform/ydb/pull/47100) ← [#43010](https://github.com/ydb-platform/ydb/pull/43010) | §6.118 | `test_pr_47100_scope_not_applied_false_positive_href_plus_include` |
+| supplement_only pulls all RU−EN gaps | [#46878](https://github.com/ydb-platform/ydb/pull/46878) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.119 | `test_pr_46878_supplement_only_does_not_add_all_missing_ru_hrefs` |
+| `missing_toc_target` | [#46338](https://github.com/ydb-platform/ydb/pull/46338), [#46258](https://github.com/ydb-platform/ydb/pull/46258) | §6.83 | `test_pr_46338_missing_toc_target_for_absent_include_yaml` |
+| `orphan_toc_page` | [#46569](https://github.com/ydb-platform/ydb/pull/46569) | §6.117 | `test_pr_46569_orphan_page_when_parent_not_wired` |
+
+#### Planner / merge contracts
+
+| Failure mode | Symptom PR(s) | § | Test |
+|--------------|---------------|---|------|
+| md-only → parent toc missing href | [#44889](https://github.com/ydb-platform/ydb/pull/44889) | §6.71 | `test_pr_44889_md_only_queues_parent_toc_when_en_missing_href` |
+| child sidebar needed, parent flat | [#46569](https://github.com/ydb-platform/ydb/pull/46569) | §6.116 | `test_case_46569_*` + `test_pr_46569_queues_all_three_parent_tocs_*` |
+| Spring section parent + child toc | [#43010](https://github.com/ydb-platform/ydb/pull/43010) → [#47100](https://github.com/ydb-platform/ydb/pull/47100) | §6.116 / §6.118 | `test_pr_43010_spring_queues_integrations_parent_and_child_toc`, `test_pr_47100_merge_preserves_href_and_include_*` |
+| child toc via `include.path` | [#46338](https://github.com/ydb-platform/ydb/pull/46338) | §6.84 | `test_pr_46338_queues_child_toc_via_parent_include_path` |
+| locale `{% include %}` closure | [#44820](https://github.com/ydb-platform/ydb/pull/44820) / §22.4 step 4 | §6.90 | `test_pr_include_closure_queues_locale_include_not_in_diff` |
+| absent EN full mirror | [#46349](https://github.com/ydb-platform/ydb/pull/46349) | §6.85 | `test_pr_46349_absent_en_toc_full_mirror_from_ru` |
+| supplement_only no gap-fill | [#44916](https://github.com/ydb-platform/ydb/pull/44916) | §6.72 | `test_pr_44916_supplement_only_does_not_gap_fill_*` |
+| scope overrun (sibling pull) | [#46577](https://github.com/ydb-platform/ydb/pull/46577) ← [#43997](https://github.com/ydb-platform/ydb/pull/43997) | §6.104 | `case_43997`, `case_45181` goldens |
+| whole-menu pull | [#46451](https://github.com/ydb-platform/ydb/pull/46451) ← [#44457](https://github.com/ydb-platform/ydb/pull/44457) | §6.92 / §22.10 | `case_44457` |
+
+#### Golden fixtures (`tests/fixtures/nav_cases/`)
+
+| Case | Source PR | Asserts |
+|------|-----------|---------|
+| `case_45181` | #45181 | topic+diagnostics only; **no** sqs sibling |
+| `case_44820` | #44820 | SQS in diff + child toc |
+| `case_43530` | #43530 | explicit observability toc edits |
+| `case_44457` | #44457 | ~3 md + toc; not whole ancestor menu |
+| `case_43997` | #43997 | exact 20 md; no cross-section spill |
+
+#### How to add the next toc failure
+
+1. Reproduce with the smallest synthetic tree (prefer over full fixture first).
+2. Add `test_pr_<N>_<symptom>` in `test_toc_pr_regressions.py`.
+3. If scope needs a real tree snapshot, extend `scripts/fetch_nav_fixtures.py` +
+   `nav_cases/case_<N>`.
+4. Row in this §22.14 table + one-line Recent changes in `MEMORY_BANK.md`.
+
+**Not in planner yet (tracked §22.7):** redirect yaml discovery — no PR golden until
+feature lands.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

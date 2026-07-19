@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-19  
-**Current focus:** §6.118 — href+include toc parse (#47100 Spring false scope_not_applied).
+**Current focus:** §6.119 — supplement_only scope (#46878 json-search toc pollution).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -20,12 +20,14 @@ stable cross-references — use them when linking between files.
 | LLM & config | [06-llm-config](docs/memory-bank/06-llm-config.md) | 12–14, 18 | Models, YAML config, prompts |
 | Pipeline & reporting | [07-pipeline](docs/memory-bank/07-pipeline.md) | 15–17 | Per-file flow, PR workflow, reports |
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
-| Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner (authoritative for nav) |
+| Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
 
 ## Recent changes
 
 | When | What |
 |------|------|
+| 2026-07-19 | **§6.119** — `supplement_only` must not expand to all RU−EN missing hrefs (#46878) |
+| 2026-07-19 | **§22.14** — TOC PR regression catalog: `test_toc_pr_regressions.py` covers validate/planner/merge/QA kinds from failing PRs |
 | 2026-07-19 | **§6.118** — parse/validate keep `include_path` on href+include toc entries (#47100 false `scope_not_applied`) |
 | 2026-07-19 | **§6.117** — blocking `orphan_toc_page` when translated EN `.md` is not reachable from EN toc graph |
 | 2026-07-19 | **§6.116** — queue parent toc when it `include.path`s a needed child sidebar (#46569 pages translated but off EN nav tree) |
