@@ -2650,6 +2650,22 @@ after toc-target checks in ``run_doc_verify`` (and inline verify after translate
 **Tests:** ``test_check_orphan_translated_pages_*``,
 ``test_apply_orphan_toc_page_checks_blocks_file_verdict``.
 
+### 6.118. Keep ``include_path`` on href+include toc entries (#47100, 2026-07-19)
+
+**Problem:** [#47100](https://github.com/ydb-platform/ydb/pull/47100) (Spring from
+#43010) had a correct EN ``integrations/toc_i.yaml`` with Spring
+``href`` + ``include.path``, but ``doc_verify`` reported 🔴
+``scope_not_applied: include.path 'spring/toc-spring.yaml' … missing``.
+
+**Root cause:** ``parse_toc_items`` / ``_flatten_toc_nodes`` kept only ``href`` when
+both were present; ``_toc_entry_labels`` never saw the include. ``toc_translate_scope``
+also ``continue``d after href and skipped include-path diff.
+
+**Decision:** emit both fields on section entries; scope both independently.
+
+**Tests:** ``test_parse_toc_items_keeps_include_path_alongside_href``,
+``test_validate_toc_merge_accepts_href_plus_include_section``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

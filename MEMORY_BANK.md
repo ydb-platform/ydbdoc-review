@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-19 | **§6.118** — parse/validate keep `include_path` on href+include toc entries (#47100 false `scope_not_applied`) |
 | 2026-07-19 | **§6.117** — blocking `orphan_toc_page` when translated EN `.md` is not reachable from EN toc graph |
 | 2026-07-19 | **§6.116** — queue parent toc when it `include.path`s a needed child sidebar (#46569 pages translated but off EN nav tree) |
 | 2026-07-17 | **§6.111–§6.115** — EN toc baseline on main; harness strip wiring; Table/YfmIf walkers; strip↔verify alignment (#39856) |
