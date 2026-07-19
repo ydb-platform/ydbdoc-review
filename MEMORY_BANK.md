@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.
 
-**Last updated:** 2026-07-15  
-**Current focus:** §6.109 on `v0.1.0` — `doc_verify` RU candidates (head+merge+local) for [#46674](https://github.com/ydb-platform/ydb/pull/46674).
+**Last updated:** 2026-07-19  
+**Current focus:** §6.116 — parent toc include when child sidebar is needed (#46569).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,7 +26,9 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-07-15 | **§6.109** — `doc_verify` pick RU among head/merge/local (fix #46674 false glossary alignment after §6.106); offline DDL/DML Wikipedia map |
+| 2026-07-19 | **§6.116** — queue parent toc when it `include.path`s a needed child sidebar (#46569 pages translated but off EN nav tree) |
+| 2026-07-17 | **§6.111–§6.115** — EN toc baseline on main; harness strip wiring; Table/YfmIf walkers; strip↔verify alignment (#39856) |
+| 2026-07-15 | **§6.110** — `doc_verify` pick RU among head/merge/local (#46674); offline DDL/DML Wikipedia map |
 | 2026-07-15 | **§6.108** — fix EN-only toc BFS for link strip (no RU toc pollution); strip all scoped EN md, not glossary-only (#46637) |
 | 2026-07-15 | **§6.107** — glossary profile + Wikipedia Wikidata langlinks; glossary YFM003 variant A (strip unreachable internal links); re-run [#44457](https://github.com/ydb-platform/ydb/pull/44457) |
 | 2026-07-15 | **§6.106** — `doc_verify` RU from merge commit + fence-body tie-break for merged source PR (#43997/#46609 false `fence_body_copy`) |

@@ -271,6 +271,68 @@ def test_case_44457_scoped_to_diff_not_whole_menu():
     assert "ydb/docs/ru/core/concepts/query_execution/toc_i.yaml" in plan.nav_from_diff
 
 
+def test_case_46569_queues_parent_toc_that_includes_needed_child():
+    """Regression #46569: child sidebar merged, parent still flat legacy href.
+
+    RU parent lists ``section/index.md`` + ``include.path: section/toc_p.yaml``.
+    Diff only has pages/tocs under ``section/``. Without parent propagation,
+    EN keeps ``href: section.md`` and never gains the include.
+    """
+    files = {
+        "ydb/docs/ru/core/concepts/toc_i.yaml": (
+            "items:\n"
+            "- name: Streaming\n"
+            "  href: streaming-query/index.md\n"
+            "  include:\n"
+            "    path: streaming-query/toc_p.yaml\n"
+            "    mode: link\n"
+        ),
+        "ydb/docs/ru/core/concepts/streaming-query/toc_p.yaml": (
+            "items:\n- include: { mode: link, path: toc_i.yaml }\n"
+        ),
+        "ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml": (
+            "items:\n"
+            "- name: Streaming queries\n"
+            "  href: streaming-query.md\n"
+            "- name: Watermarks\n"
+            "  href: watermarks.md\n"
+        ),
+        "ydb/docs/ru/core/concepts/streaming-query/streaming-query.md": "# RU SQ\n",
+        "ydb/docs/ru/core/concepts/streaming-query/watermarks.md": "# RU WM\n",
+        "ydb/docs/ru/core/concepts/streaming-query/index.md": "# RU index\n",
+        "ydb/docs/en/core/concepts/toc_i.yaml": (
+            "items:\n"
+            "- name: Streaming queries\n"
+            "  href: streaming-query.md\n"
+        ),
+    }
+
+    def read_ru(path: str) -> str | None:
+        return files.get(path)
+
+    def read_en(path: str) -> str | None:
+        if path == "ydb/docs/en/core/concepts/toc_i.yaml":
+            return files[path]
+        return None
+
+    changes = [
+        ("ydb/docs/ru/core/concepts/streaming-query/streaming-query.md", "added"),
+        ("ydb/docs/ru/core/concepts/streaming-query/watermarks.md", "added"),
+        ("ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml", "added"),
+        ("ydb/docs/ru/core/concepts/streaming-query/toc_p.yaml", "added"),
+    ]
+    plan = plan_translation_scope(
+        changes,
+        read_ru=read_ru,
+        read_en_base=read_en,
+        read_ru_base=lambda _p: None,
+    )
+    assert "ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml" in plan.nav_ru_paths
+    assert "ydb/docs/ru/core/concepts/streaming-query/toc_p.yaml" in plan.nav_ru_paths
+    assert "ydb/docs/ru/core/concepts/toc_i.yaml" in plan.nav_ru_paths
+    assert "ydb/docs/ru/core/concepts/toc_i.yaml" in plan.nav_from_main
+
+
 @pytest.mark.parametrize(
     "case_id",
     ["case_43997", "case_45181", "case_44820", "case_43530", "case_44457"],

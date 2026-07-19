@@ -15,6 +15,7 @@ from ydbdoc_review.navigation.toc import (
     collect_toc_link_targets,
     en_toc_is_absent,
     resolve_toc_target_path,
+    toc_entry_paths,
 )
 from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
 from ydbdoc_review.pipeline.pairs import ChangeKind, DocPair, NavigationPair, counterpart, is_docs_markdown
@@ -234,6 +235,52 @@ def _nav_needed(
     return False
 
 
+def _en_has_include(en_toc_text: str, rel: str) -> bool:
+    """True when EN sidebar already lists ``include.path: rel`` (exact match)."""
+    if not en_toc_text:
+        return False
+    _, includes = toc_entry_paths(en_toc_text)
+    return rel in includes
+
+
+def _queue_parents_of_needed_nav(
+    *,
+    discovered_tocs: set[str],
+    nav_ru: set[str],
+    read_ru: ReadFn,
+    read_en_base: ReadFn,
+    docs_root: str,
+) -> None:
+    """Queue parent sidebars that ``include.path`` a child already in ``nav_ru``.
+
+    §6.116 / #46569: child ``toc_*.yaml`` can be merged while the parent still
+    points at a legacy flat ``href`` and never gains ``include.path``. Basename
+    checks in ``_nav_needed`` miss parents that only list ``section/index.md``.
+    """
+    changed = True
+    while changed:
+        changed = False
+        for ru_toc in sorted(discovered_tocs):
+            if ru_toc in nav_ru:
+                continue
+            ru_text = read_ru(ru_toc)
+            if not ru_text:
+                continue
+            en_toc = counterpart(ru_toc, docs_root)
+            en_text = (read_en_base(en_toc) or "") if en_toc else ""
+            for kind, rel in collect_toc_link_targets(ru_text):
+                if kind != "include" or not rel.endswith((".yaml", ".yml")):
+                    continue
+                child = _norm(resolve_toc_target_path(ru_toc, rel))
+                if child not in nav_ru:
+                    continue
+                if _en_has_include(en_text, rel):
+                    continue
+                nav_ru.add(ru_toc)
+                changed = True
+                break
+
+
 def plan_translation_scope(
     changes: list[tuple[str, ChangeKind]],
     *,
@@ -252,7 +299,8 @@ def plan_translation_scope(
        pages listed in toc. Cross-section absent-EN full mirror is disabled.
     4. Close locale ``{% include %}`` dependencies for all queued pages.
     5. Queue nav yaml merge when toc is in diff, EN absent, or missing href for
-       a changed page.
+       a changed page; then queue any parent that ``include.path``s a needed
+       child while EN lacks that include (§6.116 / #46569).
     """
     root = docs_root.strip("/")
     diff_ru_md: set[str] = set()
@@ -327,6 +375,14 @@ def plan_translation_scope(
             nav_ru.add(ru_toc)
             if ru_toc in diff_ru_nav:
                 nav_from_diff.add(ru_toc)
+
+    _queue_parents_of_needed_nav(
+        discovered_tocs=discovered_tocs,
+        nav_ru=nav_ru,
+        read_ru=read_ru,
+        read_en_base=read_en_base,
+        docs_root=docs_root,
+    )
 
     nav_from_main = frozenset(nav_ru - nav_from_diff)
 

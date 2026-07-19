@@ -2608,6 +2608,28 @@ and drop issues whose href is outside ``en_toc_reachable``.
 
 **Tests:** ``test_strip_unreachable_links_inside_yfm_if``,
 ``test_drop_missing_u_placeholder_for_stripped_href``.
+### 6.116. Parent toc must merge when child sidebar is needed (#46569, 2026-07-19)
+
+**Problem:** [#46569](https://github.com/ydb-platform/ydb/pull/46569) translated
+``streaming-query/*.md``, ``json-search/*.md``, ``sql-translation/*.md`` and even
+merged **child** ``toc_*.yaml``, but **parent** EN sidebars stayed on legacy flat
+links:
+
+- ``concepts/toc_i.yaml``: EN ``href: streaming-query.md`` vs RU
+  ``href: streaming-query/index.md`` + ``include.path: streaming-query/toc_p.yaml``
+- ``recipes/toc_p.yaml``: missing ``json-search`` include entirely
+- ``integrations/toc_i.yaml``: flat ``sql-dialect-converter.md`` vs RU section include
+
+**Root cause:** ``_nav_needed`` only checks whether a **diff page basename** appears
+as a direct ``href`` in the sidebar. Parents that only list ``section/index.md`` +
+``include.path`` never match ``streaming-query.md`` / ``watermarks.md`` → parent
+not queued; child is.
+
+**Decision:** after the first ``_nav_needed`` pass, ``_queue_parents_of_needed_nav``
+walks discovered tocs: if RU has ``include.path`` to a child already in
+``nav_ru_paths`` and EN lacks that include, queue the parent (``nav_from_main``).
+
+**Tests:** ``test_case_46569_queues_parent_toc_that_includes_needed_child``.
 
 ---
 
