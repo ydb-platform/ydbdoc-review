@@ -919,6 +919,41 @@ def validate_toc_merge(
     ru_hrefs = {it["href"] for it in ru_items if it.get("href")}
     ru_includes = {it["include_path"] for it in ru_items if it.get("include_path")}
 
+    # §6.121 — RU and EN sidebar structures must mirror (same href / include.path).
+    only_ru_hrefs = sorted(ru_hrefs - en_merged_hrefs)
+    only_en_hrefs = en_merged_hrefs - ru_hrefs
+    new_en_only_hrefs = sorted(only_en_hrefs - en_main_hrefs)
+    legacy_en_only_hrefs = sorted(only_en_hrefs & en_main_hrefs)
+    only_ru_includes = sorted(ru_includes - en_merged_includes)
+    only_en_includes = en_merged_includes - ru_includes
+    new_en_only_includes = sorted(only_en_includes - en_main_includes)
+    legacy_en_only_includes = sorted(only_en_includes & en_main_includes)
+    if only_ru_hrefs or new_en_only_hrefs or only_ru_includes or new_en_only_includes:
+        issues.append(
+            TocValidationIssue(
+                kind="toc_structure_parity",
+                detail=(
+                    "RU/EN toc href|include sets differ "
+                    f"(only_ru_hrefs={only_ru_hrefs}, "
+                    f"only_en_hrefs_not_on_main={new_en_only_hrefs}, "
+                    f"only_ru_includes={only_ru_includes}, "
+                    f"only_en_includes_not_on_main={new_en_only_includes})"
+                ),
+            )
+        )
+    if legacy_en_only_hrefs or legacy_en_only_includes:
+        issues.append(
+            TocValidationIssue(
+                kind="toc_en_only_legacy",
+                detail=(
+                    "EN toc keeps entries absent from RU "
+                    f"(hrefs={legacy_en_only_hrefs}, "
+                    f"includes={legacy_en_only_includes}) — "
+                    "menus should match; add RU mirror or drop EN entry"
+                ),
+            )
+        )
+
     unexpected_hrefs = en_merged_hrefs - ru_hrefs - en_main_hrefs
     unexpected_includes = en_merged_includes - ru_includes - en_main_includes
     unexpected = sorted(

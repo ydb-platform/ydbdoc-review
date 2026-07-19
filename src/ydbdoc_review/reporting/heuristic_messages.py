@@ -47,7 +47,9 @@ _LINK_LOCALE_CYRILLIC_PATH = re.compile(
 )
 _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
-    r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent|missing_toc_target|orphan_toc_page): (.+)$"
+    r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|"
+    r"inconsistent_indent|missing_toc_target|orphan_toc_page|toc_structure_parity|"
+    r"toc_en_only_legacy): (.+)$"
 )
 
 
@@ -84,6 +86,8 @@ def heuristic_location_label(message: str) -> str:
             "collapsed_toc:",
             "missing_toc_target:",
             "orphan_toc_page:",
+            "toc_structure_parity:",
+            "toc_en_only_legacy:",
         )
     ):
         return "навигация (toc/redirect)"
@@ -268,6 +272,14 @@ def _humanize_heuristic_problem(message: str) -> str:
         if kind == "orphan_toc_page":
             return (
                 f"Переведённая EN-страница не связана ни с одним EN toc: {detail}"
+            )
+        if kind == "toc_structure_parity":
+            return (
+                f"Структура RU/EN toc не совпадает (href/include): {detail}"
+            )
+        if kind == "toc_en_only_legacy":
+            return (
+                f"В EN toc есть пункты без RU-зеркала (legacy): {detail}"
             )
 
     if message.startswith("ru_source"):

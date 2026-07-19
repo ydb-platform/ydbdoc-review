@@ -267,7 +267,7 @@ def test_merge_preserves_en_only_href_present_on_current_main():
             extra_toc_hrefs={"enrichment.md"},
         )
 
-    assert result.verdict == "ok"
+    assert result.verdict in {"ok", "warnings"}  # toc_en_only_legacy soft drift (§6.121)
     assert result.target_text is not None
     assert "local-and-external-topics.md" in result.target_text
     assert "patterns.md" in result.target_text
@@ -317,7 +317,7 @@ def test_merge_fork_pr_toc_uses_upstream_en_main_fallback():
             extra_toc_hrefs=md_basenames,
         )
 
-    assert result.verdict == "ok"
+    assert result.verdict in {"ok", "warnings"}  # toc_en_only_legacy soft drift (§6.121)
     assert result.target_text is not None
     assert "patterns.md" in result.target_text
     assert "checkpoints.md" in result.target_text

@@ -114,7 +114,56 @@ def test_pr_44872_unexpected_href_not_in_ru_or_en_main():
         ru, en_merged, translate_hrefs=set(), en_main_yaml=en_main
     )
     assert "unexpected_href" in _kinds(issues)
+    assert "toc_structure_parity" in _kinds(issues)
     assert any("system-tablet-backup" in i.detail for i in issues)
+
+
+def test_pr_43753_toc_structure_parity_ru_en_menus_must_match():
+    """§6.121: RU/EN toc href sets must match (orphan OTel recipes class)."""
+    en_main = dedent("""
+        items:
+        - name: Overview
+          href: debug.md
+        - name: Tracing
+          href: debug-otel.md
+    """).strip()
+    # EN re-added Troubleshooting with old href; RU already dropped the section.
+    en_merged = en_main
+    ru = dedent("""
+        items:
+        - name: Обзор
+          href: index.md
+    """).strip()
+    issues = validate_toc_merge(
+        ru, en_merged, translate_hrefs=set(), en_main_yaml=en_main
+    )
+    assert "toc_structure_parity" in _kinds(issues)
+    # EN-only that already sat on main → soft drift warning, not parity block alone
+    legacy = [i for i in issues if i.kind == "toc_en_only_legacy"]
+    assert legacy
+    assert "debug-otel.md" in legacy[0].detail
+
+
+def test_toc_en_only_legacy_when_preserved_from_main():
+    ru = dedent("""
+        items:
+        - name: A
+          href: a.md
+    """).strip()
+    en = dedent("""
+        items:
+        - name: A
+          href: a.md
+        - name: EN only
+          href: local-and-external-topics.md
+    """).strip()
+    issues = validate_toc_merge(
+        ru, en, translate_hrefs={"a.md"}, en_main_yaml=en
+    )
+    kinds = _kinds(issues)
+    assert "toc_en_only_legacy" in kinds
+    assert "toc_structure_parity" not in kinds
+    assert "unexpected_href" not in kinds
 
 
 def test_pr_42725_empty_toc_when_parse_yields_no_items():

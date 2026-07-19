@@ -2703,6 +2703,35 @@ so EN from a head-based translate stays alignable; merge remains an alternate.
 
 **Tests:** ``test_translate_ru_content_ref_*``, ``test_restore_force_exact_ru_to_en_sessions_href``.
 
+### 6.121. RU/EN toc structure parity + EN toc orphans (#43753 leftovers, 2026-07-19)
+
+**Problem:** After [#43753](https://github.com/ydb-platform/ydb/pull/43753) translated
+OTel recipe pages and [#43530](https://github.com/ydb-platform/ydb/pull/43530) moved
+observability to ``reference/``, EN still had
+``recipes/ydb-sdk/debug-otel-metrics.md`` /
+``debug-otel-tracing.md`` **on disk** but **not in the recipes toc**.
+[#45103](https://github.com/ydb-platform/ydb/pull/45103) had re-added a Troubleshooting
+menu with the old ``debug-otel.md`` while RU no longer listed those recipes.
+
+**Invariant:** RU and EN **sidebar structures must match** — same relative ``href``
+and ``include.path`` sets for each toc pair. An EN ``.md`` that is not reachable
+from ``en/core/toc_p.yaml`` is an orphan: delete it or wire it into toc (do not
+leave unreachable translations). Prefer delete when ``redirects.yaml`` already
+maps the old URL to the new section.
+
+**Decision:**
+
+1. ``toc_structure_parity`` (blocking) — RU vs EN href/include sets differ on
+   entries that are not “EN-main legacy”.
+2. ``toc_en_only_legacy`` (warning) — EN-only entries already present on EN main
+   (§6.111 preserve); nudge toward RU mirror or drop.
+3. Cleanup PR: [#47107](https://github.com/ydb-platform/ydb/pull/47107) deletes the
+   orphan OTel recipe pages.
+4. Ops skill **en-toc-orphans** + ``scripts/find_en_toc_orphans.py`` for repo-wide
+   audit (``find_en_pages_missing_from_toc``).
+
+**Tests:** ``test_pr_43753_toc_structure_parity_*``, ``test_toc_en_only_legacy_*``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

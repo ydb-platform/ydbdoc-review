@@ -64,6 +64,37 @@ def _is_toc_orphan_exempt(en_md_path: str, *, docs_root: str) -> bool:
     return False
 
 
+def find_en_pages_missing_from_toc(
+    repo_path: str,
+    *,
+    docs_root: str = "ydb/docs",
+    pending_toc_texts: dict[str, str] | None = None,
+) -> list[str]:
+    """Return EN ``.md`` paths under ``docs_root`` that are off the EN toc graph.
+
+    Skips ``_includes/``. Used by the en-toc-orphans audit skill and ops scripts.
+    """
+    root = docs_root.strip("/")
+    en_root = Path(repo_path) / root.replace("/", os.sep) / "en"
+    if not en_root.is_dir():
+        return []
+
+    candidates: set[str] = set()
+    for path in en_root.rglob("*.md"):
+        rel = path.relative_to(repo_path).as_posix()
+        if _is_toc_orphan_exempt(rel, docs_root=docs_root):
+            continue
+        candidates.add(normalize_repo_path(rel))
+
+    orphans = check_orphan_translated_pages(
+        candidates,
+        repo_path=repo_path,
+        docs_root=docs_root,
+        pending_toc_texts=pending_toc_texts,
+    )
+    return sorted(orphans)
+
+
 def check_orphan_translated_pages(
     en_md_paths: set[str] | frozenset[str],
     *,
