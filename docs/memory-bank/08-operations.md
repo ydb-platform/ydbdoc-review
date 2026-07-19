@@ -110,6 +110,7 @@ See **06-llm-config** §13.6 for full contract.
 |---------|----------------|------------|
 | `doc_verify` `missing_toc_target` | EN toc lists page outside translate scope | Pre-§22: tag bump + re-run `doc_translate`. §22+: planner should queue page in step 3 — if still failing, check `nav_cases/` fixture |
 | `doc_verify` `orphan_toc_page` | Translated EN page not linked from any EN toc (§6.117) | Parent toc missing `include`/`href` (§6.116); re-run `doc_translate` after tag bump, or fix parent toc on the translation PR |
+| EN pages on disk but off toc | Stale leftovers after restructure (§6.121) | Skill **en-toc-orphans** / `scripts/find_en_toc_orphans.py`; delete or wire into toc (example [#47107](https://github.com/ydb-platform/ydb/pull/47107)) |
 | `build-docs` ENOENT on child toc | Child sidebar not merged | Pre-§22: §6.84 supplement. §22+: check planner BFS on `include.path`; tag bump when ready |
 | `doc_verify` `empty_toc` on new EN sidebar | Absent EN file + empty scoped merge (§6.85) | Tag bump + re-run `doc_translate` |
 | `build-docs` `YFM003 unreachable-link` in **glossary** | Hub links to pages outside EN toc (variant A §6.107) | Auto-strip on translate; restore links when target page is translated + added to toc |
