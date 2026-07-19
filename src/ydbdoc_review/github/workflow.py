@@ -80,7 +80,10 @@ from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.include_targets import apply_include_target_checks
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
-from ydbdoc_review.validation.toc_targets import apply_toc_target_checks
+from ydbdoc_review.validation.toc_targets import (
+    apply_orphan_toc_page_checks,
+    apply_toc_target_checks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -664,6 +667,11 @@ def run_doc_verify(
             for n in pr_result.navigation_results
             if n.target_text is not None
         },
+    )
+    apply_orphan_toc_page_checks(
+        pr_result,
+        repo_path=repo_path,
+        docs_root=cfg.paths.docs_root,
     )
     if inherited_completeness_gaps:
         merged_gaps = list(

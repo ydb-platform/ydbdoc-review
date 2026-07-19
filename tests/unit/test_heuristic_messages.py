@@ -48,6 +48,19 @@ def test_humanize_unexpected_href():
     assert "system-tablet-backup" in text
 
 
+def test_humanize_orphan_toc_page():
+    raw = (
+        "orphan_toc_page: translated EN page "
+        "`ydb/docs/en/core/concepts/streaming-query/watermarks.md` "
+        "is not linked from any EN toc "
+        "(reachable from `ydb/docs/en/core/toc_p.yaml` via href/include.path)"
+    )
+    text = humanize_heuristic(raw)
+    assert heuristic_location_label(raw) == "навигация (toc/redirect)"
+    assert "не связана" in text
+    assert "orphan_toc_page" not in text
+
+
 def test_format_heuristic_wikipedia_link_locale():
     raw = (
         "link_locale: en.wikipedia.org uses Russian article slug "

@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-19  
-**Current focus:** §6.116 — parent toc include when child sidebar is needed (#46569).
+**Current focus:** §6.117 — orphan translated EN pages must be in toc graph.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-19 | **§6.117** — blocking `orphan_toc_page` when translated EN `.md` is not reachable from EN toc graph |
 | 2026-07-19 | **§6.116** — queue parent toc when it `include.path`s a needed child sidebar (#46569 pages translated but off EN nav tree) |
 | 2026-07-17 | **§6.111–§6.115** — EN toc baseline on main; harness strip wiring; Table/YfmIf walkers; strip↔verify alignment (#39856) |
 | 2026-07-15 | **§6.110** — `doc_verify` pick RU among head/merge/local (#46674); offline DDL/DML Wikipedia map |

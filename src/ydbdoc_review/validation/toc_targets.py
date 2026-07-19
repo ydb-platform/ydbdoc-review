@@ -1,14 +1,21 @@
-"""Verify EN toc ``href`` / ``include.path`` targets exist on disk (§6.83)."""
+"""Verify EN toc ``href`` / ``include.path`` targets exist on disk (§6.83).
+
+Also flag translated EN pages that are not reachable from any sidebar toc (§6.117).
+"""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from ydbdoc_review.github.git_ops import read_text
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.toc import collect_toc_link_targets, resolve_toc_target_path
 from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.validation.glossary_toc_links import (
+    collect_en_toc_reachable_md,
+    normalize_repo_path,
+)
 from ydbdoc_review.validation.heuristics import bump_verdict_for_blocking_heuristics
 
 
@@ -46,6 +53,69 @@ def check_missing_toc_targets(
     return missing
 
 
+def _is_toc_orphan_exempt(en_md_path: str, *, docs_root: str) -> bool:
+    """Locale includes and non-doc paths are not expected as sidebar ``href``s."""
+    normalized = normalize_repo_path(en_md_path)
+    root = docs_root.strip("/")
+    if not normalized.startswith(f"{root}/en/"):
+        return True
+    if "/_includes/" in normalized or normalized.endswith("/_includes"):
+        return True
+    return False
+
+
+def check_orphan_translated_pages(
+    en_md_paths: set[str] | frozenset[str],
+    *,
+    repo_path: str,
+    docs_root: str = "ydb/docs",
+    pending_toc_texts: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
+    """Map EN page path → blocking messages when the page is off the EN toc graph.
+
+    A translated ``.md`` (except ``_includes/``) must appear as a ``href`` reachable
+    from ``{docs_root}/en/core/toc_p.yaml`` via ``include.path`` child sidebars.
+    """
+    pending_tocs = {
+        normalize_repo_path(p): text
+        for p, text in (pending_toc_texts or {}).items()
+    }
+    pending_md = {
+        normalize_repo_path(p)
+        for p in en_md_paths
+        if p.endswith(".md") and not _is_toc_orphan_exempt(p, docs_root=docs_root)
+    }
+    if not pending_md:
+        return {}
+
+    def _read(path: str) -> str | None:
+        key = normalize_repo_path(path)
+        if key in pending_tocs:
+            return pending_tocs[key]
+        return read_text(repo_path, key)
+
+    # Do not seed pending tocs into the BFS queue: only pages reachable from
+    # root via include.path count. Pending toc text is still served by _read.
+    root_toc = f"{docs_root.strip('/')}/en/core/toc_p.yaml"
+    reachable = collect_en_toc_reachable_md(
+        _read,
+        root_toc=root_toc,
+        extra_md_paths=pending_md,
+        seed_extra_md=False,
+    )
+
+    out: dict[str, list[str]] = {}
+    for path in sorted(pending_md):
+        if path in reachable:
+            continue
+        out[path] = [
+            "orphan_toc_page: "
+            f"translated EN page `{path}` is not linked from any EN toc "
+            f"(reachable from `{root_toc}` via href/include.path)"
+        ]
+    return out
+
+
 def apply_toc_target_checks(
     result: PRTranslationResult,
     *,
@@ -78,3 +148,44 @@ def apply_toc_target_checks(
             continue
         nav.warnings.extend(msgs)
         nav.verdict = bump_verdict_for_blocking_heuristics(nav.verdict, msgs)
+
+
+def apply_orphan_toc_page_checks(
+    result: PRTranslationResult,
+    *,
+    repo_path: str,
+    docs_root: str = "ydb/docs",
+) -> None:
+    """Attach blocking findings for translated EN pages missing from the toc graph."""
+    pending_toc_texts: dict[str, str] = {}
+    for nav in result.navigation_results:
+        if nav.error or nav.kind != "toc":
+            continue
+        if nav.target_text is not None:
+            pending_toc_texts[nav.en_path] = nav.target_text
+
+    en_md_paths: set[str] = set()
+    runs_by_path: dict[str, list] = {}
+    for run in result.pair_results:
+        fr = run.file_result
+        if fr is None or run.skipped or run.deleted or run.error:
+            continue
+        if run.plan.target_lang != "en" or not run.plan.target_path.endswith(".md"):
+            continue
+        path = normalize_repo_path(run.plan.target_path)
+        en_md_paths.add(path)
+        runs_by_path.setdefault(path, []).append(run)
+
+    orphans = check_orphan_translated_pages(
+        en_md_paths,
+        repo_path=repo_path,
+        docs_root=docs_root,
+        pending_toc_texts=pending_toc_texts,
+    )
+    for path, msgs in orphans.items():
+        for run in runs_by_path.get(path, []):
+            fr = run.file_result
+            if fr is None:
+                continue
+            fr.heuristic_blocking.extend(msgs)
+            fr.verdict = bump_verdict_for_blocking_heuristics(fr.verdict, msgs)

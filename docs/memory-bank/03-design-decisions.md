@@ -2631,6 +2631,25 @@ walks discovered tocs: if RU has ``include.path`` to a child already in
 
 **Tests:** ``test_case_46569_queues_parent_toc_that_includes_needed_child``.
 
+### 6.117. Orphan translated pages must be reachable from EN toc (#46569, 2026-07-19)
+
+**Problem:** Even after parent-queue (§6.116), a translated EN ``.md`` can still land
+off the sidebar graph (stale branch, partial nav merge, manual edits). Inverse of
+``missing_toc_target`` (toc → missing file): page exists but no toc ``href`` reaches it.
+
+**Decision:** ``check_orphan_translated_pages`` / ``apply_orphan_toc_page_checks``
+after toc-target checks in ``run_doc_verify`` (and inline verify after translate):
+
+1. Collect translated EN ``.md`` targets (skip ``_includes/``).
+2. BFS EN toc graph from ``{docs_root}/en/core/toc_p.yaml`` with
+   ``collect_en_toc_reachable_md(..., seed_extra_md=False)`` — pending toc texts are
+   readable, but **not** seeded into the queue (disconnected child toc does not
+   count as reachability).
+3. Blocking ``orphan_toc_page:`` on each unreachable page → file verdict 🔴.
+
+**Tests:** ``test_check_orphan_translated_pages_*``,
+``test_apply_orphan_toc_page_checks_blocks_file_verdict``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

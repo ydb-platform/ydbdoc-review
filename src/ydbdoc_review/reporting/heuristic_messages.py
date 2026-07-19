@@ -47,7 +47,7 @@ _LINK_LOCALE_CYRILLIC_PATH = re.compile(
 )
 _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
-    r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent|missing_toc_target): (.+)$"
+    r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|inconsistent_indent|missing_toc_target|orphan_toc_page): (.+)$"
 )
 
 
@@ -83,6 +83,7 @@ def heuristic_location_label(message: str) -> str:
             "empty_toc:",
             "collapsed_toc:",
             "missing_toc_target:",
+            "orphan_toc_page:",
         )
     ):
         return "навигация (toc/redirect)"
@@ -264,6 +265,10 @@ def _humanize_heuristic_problem(message: str) -> str:
             return f"Смешанные отступы в inline toc: {detail}"
         if kind == "missing_toc_target":
             return f"В EN toc ссылка на отсутствующий файл: {detail}"
+        if kind == "orphan_toc_page":
+            return (
+                f"Переведённая EN-страница не связана ни с одним EN toc: {detail}"
+            )
 
     if message.startswith("ru_source"):
         return message.replace("ru_source", "Исходник RU", 1)
