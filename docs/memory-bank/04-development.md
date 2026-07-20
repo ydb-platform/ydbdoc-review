@@ -265,9 +265,12 @@ in ``tests/harness/cases/``; critic-feedback retranslate retry (default 2, env o
 - **One step at a time.** Each step produces something testable.
 - **Tests are mandatory.** No "works on my machine".
 - **Round-trip on real files is the canonical signal** — must stay green forever.
+- **Memory Bank before commit:** update `MEMORY_BANK.md` + the relevant
+  `docs/memory-bank/*.md` **before** every git commit that changes pipeline,
+  heuristics, nav, or encodes a lasting decision. Cursor enforces this via
+  `.cursor/rules/memory-bank-before-commit.mdc` (`alwaysApply: true`).
 - **Memory Bank is updated after every meaningful step**, or at phase boundaries.
 - **Code delivered as copy-pasteable blocks**; the human applies, runs, reports.
-- **The AI assistant does NOT have GitHub write access.** The human commits and pushes.
 - **Failed test output is shared in full** — never paraphrased. The AI needs
   to see actual diffs, tracebacks, and tool output to debug correctly.
 - **Memory Bank verbosity is intentional** — a different AI may take over.
