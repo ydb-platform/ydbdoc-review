@@ -2872,4 +2872,29 @@ glossary/json-index articles so locale rewrite works without the network.
 
 ---
 
+
+### 6.130. Stabilize Wikipedia resolve chain (2026-07-20)
+
+**Problem:** ``resolve_wikipedia_href`` returned the original RU href on API
+failure, and offline map was tiny — EN docs kept ``ru.wikipedia.org`` (#47104).
+
+**Decision:** chain MediaWiki langlink → Wikidata → offline map → ``None``;
+expand ``_OFFLINE_EN_TITLES`` (~80 hand-curated); map/drop Cyrillic fragments
+with WARNING; ``mirror_link_href`` does not naive-swap Wikipedia hosts on miss.
+
+**Tests:** ``test_wikipedia_links.py``.
+
+### 6.131. Additive TOC merge models (gradual refactor) (2026-07-20)
+
+**Problem:** AGENT_TASKS Task 2 proposed a full TocItem AST cutover, which
+conflicts with «do not change public APIs / do not delete old code».
+
+**Decision:** add ``TocMergeScope``, ``TocEntryMapping``, ``TocMergeIssue`` in
+``toc_models.py``; ``_en_covers_ru_href`` delegates to mappings; document merge
+strategy on ``merge_en_toc_yaml``. Defer unified AST parser/renderer to a later
+tranche.
+
+**Tests:** ``test_toc_models.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

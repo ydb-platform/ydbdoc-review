@@ -24,6 +24,7 @@ from ydbdoc_review.parsing.ast_types import (
     YfmTabs,
 )
 from ydbdoc_review.validation.wikipedia_links import (
+    parse_wikipedia_href,
     resolve_wikipedia_href,
     wiki_lang_for_target,
 )
@@ -153,6 +154,10 @@ def mirror_link_href(
     wiki = resolve_wikipedia_href(href, target_lang=target_lang)
     if wiki is not None:
         return wiki
+    # Unresolved Wikipedia: do not naive-swap ru.↔en. host (keeps Cyrillic
+    # slug on the wrong edition). Leave original for link_locale heuristics.
+    if parse_wikipedia_href(href) is not None:
+        return href
 
     tgt = target_lang.strip().lower()
     if tgt in {"en", "english"}:

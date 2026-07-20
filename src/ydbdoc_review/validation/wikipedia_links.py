@@ -1,4 +1,12 @@
-"""Resolve Wikipedia article titles via the MediaWiki API (no LLM)."""
+"""Resolve Wikipedia article titles via the MediaWiki API (no LLM).
+
+Resolution chain for cross-locale hrefs (§6.130):
+
+1. MediaWiki ``langlinks`` (timeout ``timeout_s``)
+2. Wikidata sitelink (same timeout)
+3. Offline ``_OFFLINE_EN_TITLES`` / fragment map
+4. ``None`` — caller decides (do **not** return the original RU href)
+"""
 
 from __future__ import annotations
 
@@ -26,11 +34,15 @@ _TARGET_TO_WIKI_LANG = {
     "russian": "ru",
 }
 
+# Default MediaWiki/Wikidata timeout (AGENT_TASKS: 5s).
+_DEFAULT_TIMEOUT_S = 5.0
+
+
 @dataclass
 class WikipediaResolver:
     """Cached langlink lookups between Wikipedia language editions."""
 
-    timeout_s: float = 10.0
+    timeout_s: float = _DEFAULT_TIMEOUT_S
     _cache: dict[tuple[str, str, str], str | None] = field(default_factory=dict)
 
     def resolve_title(
@@ -47,8 +59,21 @@ class WikipediaResolver:
         if key not in self._cache:
             resolved = self._fetch_langlink(source_lang, title, target_lang)
             if resolved is None:
+                logger.warning(
+                    "Wikipedia langlink miss %s→%s for %r; trying Wikidata",
+                    source_lang,
+                    target_lang,
+                    title,
+                )
                 resolved = self._fetch_wikidata_sitelink(
                     source_lang, title, target_lang
+                )
+            if resolved is None:
+                logger.warning(
+                    "Wikipedia Wikidata miss %s→%s for %r; will try offline map",
+                    source_lang,
+                    target_lang,
+                    title,
                 )
             self._cache[key] = resolved
         return self._cache[key]
@@ -199,6 +224,26 @@ def wiki_lang_for_target(target_lang: str) -> str | None:
     return _TARGET_TO_WIKI_LANG.get(target_lang.strip().lower())
 
 
+def _is_valid_wikipedia_url(href: str, wiki_lang: str, title: str) -> bool:
+    """Validate parsed Wikipedia URL pieces (format, non-empty title)."""
+    if not href or not isinstance(href, str):
+        return False
+    if not wiki_lang or len(wiki_lang) < 2 or not wiki_lang.isalpha():
+        return False
+    if not title or not title.strip():
+        return False
+    parsed = urlparse(href)
+    host = (parsed.netloc or "").lower()
+    if not host.endswith("wikipedia.org"):
+        return False
+    if not parsed.path.startswith(_WIKI_PATH):
+        return False
+    # Reject NUL / control characters in title
+    if any(ord(ch) < 32 for ch in title):
+        return False
+    return True
+
+
 def parse_wikipedia_href(href: str) -> tuple[str, str, str] | None:
     """Return ``(wiki_lang, article_title, fragment)`` or ``None``."""
     parsed = urlparse(href)
@@ -220,6 +265,8 @@ def parse_wikipedia_href(href: str) -> tuple[str, str, str] | None:
         fragment = "#" + raw_slug.split("#", 1)[1]
     elif parsed.fragment:
         fragment = "#" + parsed.fragment
+    if not _is_valid_wikipedia_url(href, lang, title):
+        return None
     return lang, title, fragment
 
 
@@ -231,10 +278,14 @@ def format_wikipedia_href(wiki_lang: str, title: str, fragment: str = "") -> str
 
 
 # Offline fallbacks when MediaWiki/Wikidata are unreachable (CI TLS flakiness).
-# Keys: (source_wiki_lang, title) → English article title.
+# Keys: (source_wiki_lang, title) → English article title. Hand-curated from
+# ydb/docs RU Wikipedia usage (§6.129 / §6.130) — do not auto-generate from JSON.
 _OFFLINE_EN_TITLES: dict[tuple[str, str], str] = {
+    # Previously shipped
     ("ru", "Язык определения данных"): "Data definition language",
     ("ru", "Язык манипулирования данными"): "Data manipulation language",
+    ("ru", "Data Definition Language"): "Data definition language",
+    ("ru", "Data Manipulation Language"): "Data manipulation language",
     ("ru", "N-грамм"): "N-gram",
     ("ru", "Инвертированный индекс"): "Inverted index",
     ("ru", "Модель акторов"): "Actor model",
@@ -247,9 +298,78 @@ _OFFLINE_EN_TITLES: dict[tuple[str, str], str] = {
     ("ru", "Консенсус в распределённых вычислениях"): "Consensus (computer science)",
     ("ru", "LSM-дерево"): "Log-structured merge-tree",
     ("ru", "Стирающий код"): "Erasure code",
+    # Same-title / Latin tech tokens (common in RU docs)
+    ("ru", "JSON"): "JSON",
+    ("ru", "ISO 8601"): "ISO 8601",
+    ("ru", "Base64"): "Base64",
+    ("ru", "CSV"): "Comma-separated values",
+    ("ru", "TSV"): "Tab-separated values",
+    ("ru", "UTF-8"): "UTF-8",
+    ("ru", "UUID"): "UUID",
+    ("ru", "ACID"): "ACID",
+    ("ru", "LDAP"): "Lightweight Directory Access Protocol",
+    ("ru", "OLTP"): "Online transaction processing",
+    ("ru", "OLAP"): "Online analytical processing",
+    ("ru", "FQDN"): "Fully qualified domain name",
+    ("ru", "SQL:2016"): "SQL:2016",
+    ("ru", "PostgreSQL"): "PostgreSQL",
+    ("ru", "Apache Kafka"): "Apache Kafka",
+    ("ru", "Protocol Buffers"): "Protocol Buffers",
+    ("ru", "Network File System"): "Network File System",
+    ("ru", "Resident set size"): "Resident set size",
+    ("ru", "Transport Layer Security"): "Transport Layer Security",
+    ("ru", "Common Language Runtime"): "Common Language Runtime",
+    ("ru", "Java Database Connectivity"): "Java Database Connectivity",
+    # Compression / codecs
+    ("ru", "Zstandard"): "Zstandard",
+    ("ru", "Gzip"): "Gzip",
+    ("ru", "LZ4"): "LZ4",
+    ("ru", "Brotli"): "Brotli",
+    ("ru", "Bzip2"): "bzip2",
+    ("ru", "XZ"): "XZ Utils",
+    ("ru", "Lzop"): "LZO",
+    ("ru", "Snappy (библиотека)"): "Snappy (compression)",
+    # Algorithms / CS
+    ("ru", "Unix-время"): "Unix time",
+    ("ru", "Регулярные выражения"): "Regular expression",
+    ("ru", "Юникод"): "Unicode",
+    ("ru", "Порядок байтов"): "Endianness",
+    ("ru", "Копирование при записи"): "Copy-on-write",
+    ("ru", "Свёртка констант"): "Constant folding",
+    ("ru", "Абстрактное синтаксическое дерево"): "Abstract syntax tree",
+    ("ru", "Цепь Маркова"): "Markov chain",
+    ("ru", "Round-robin (алгоритм)"): "Round-robin scheduling",
+    ("ru", "Средняя загрузка"): "Load (computing)",
+    ("ru", "Среднеквадратическое отклонение"): "Standard deviation",
+    ("ru", "Полнота и точность"): "Precision and recall",
+    ("ru", "Внедрение SQL-кода"): "SQL injection",
+    ("ru", "Argon2"): "Argon2",
+    # Systems / ops
+    ("ru", "Аутентификация"): "Authentication",
+    ("ru", "Авторизация"): "Authorization",
+    ("ru", "Нагрузочное тестирование"): "Load testing",
+    ("ru", "Путь к файлу"): "Path (computing)",
+    ("ru", "Цепочка доверия"): "Chain of trust",
+    ("ru", "Система управления версиями"): "Version control",
+    ("ru", "Инфраструктура как код"): "Infrastructure as code",
+    ("ru", "Непрерывная интеграция"): "Continuous integration",
+    ("ru", "Непрерывная доставка"): "Continuous delivery",
+    ("ru", "Дамп памяти"): "Core dump",
+    ("ru", "Контрольная группа (Linux)"): "Cgroups",
+    ("ru", "Издатель — подписчик"): "Publish–subscribe pattern",
+    ("ru", "Очередь сообщений"): "Message queue",
+    ("ru", "Семафор (программирование)"): "Semaphore (programming)",
+    ("ru", "Мьютекс"): "Mutual exclusion",
+    ("ru", "Таблица (база данных)"): "Table (database)",
+    ("ru", "Индекс (базы данных)"): "Database index",
+    ("ru", "Большая языковая модель"): "Large language model",
+    ("ru", "Медленно меняющееся измерение"): "Slowly changing dimension",
+    ("ru", "Заголовочный регистр"): "Letter case",
+    ("ru", "RAID"): "RAID",
 }
 
 # When the RU fragment is Cyrillic / locale-specific, map to EN section id.
+# Key: (english_article_title, ru_fragment_without_hash) → en_fragment_without_hash
 _OFFLINE_EN_FRAGMENTS: dict[tuple[str, str], str] = {
     (
         "Isolation (database systems)",
@@ -258,13 +378,49 @@ _OFFLINE_EN_FRAGMENTS: dict[tuple[str, str], str] = {
 }
 
 
+def _lookup_lang_for_title(source_lang: str, title: str) -> str:
+    """Prefer RU lookup when an EN host carries a Cyrillic article slug."""
+    if source_lang == "en" and _CYRILLIC.search(title):
+        return "ru"
+    return source_lang
+
+
+def _map_fragment(resolved_title: str, fragment: str) -> str:
+    """Map or drop locale-specific ``#fragment`` after title resolution."""
+    if not fragment.startswith("#"):
+        return fragment
+    frag_key = unquote(fragment[1:])
+    mapped = _OFFLINE_EN_FRAGMENTS.get((resolved_title, frag_key))
+    if mapped is None:
+        # Also try underscore form used in raw URLs
+        mapped = _OFFLINE_EN_FRAGMENTS.get(
+            (resolved_title, frag_key.replace(" ", "_"))
+        )
+    if mapped is not None:
+        return f"#{mapped}"
+    if _CYRILLIC.search(frag_key):
+        logger.warning(
+            "Dropping unmapped Cyrillic Wikipedia fragment %r on EN article %r",
+            frag_key,
+            resolved_title,
+        )
+        return ""
+    return fragment
+
+
 def resolve_wikipedia_href(
     href: str,
     *,
     target_lang: str,
     resolver: WikipediaResolver | None = None,
 ) -> str | None:
-    """Map a Wikipedia URL to the equivalent article in ``target_lang``."""
+    """Map a Wikipedia URL to the equivalent article in ``target_lang``.
+
+    Returns ``None`` when the URL is not Wikipedia, the target lang is unknown,
+    or no EN title could be resolved (API + offline). Callers must not treat
+    ``None`` as «keep the RU href» for EN output — leave the link for
+    heuristics / manual fix instead of inventing a broken EN slug.
+    """
     parsed = parse_wikipedia_href(href)
     if parsed is None:
         return None
@@ -273,10 +429,12 @@ def resolve_wikipedia_href(
         return None
 
     source_lang, title, fragment = parsed
-    lookup_lang = source_lang
-    if source_lang == "en" and _CYRILLIC.search(title):
-        lookup_lang = "ru"
+    if not _is_valid_wikipedia_url(href, source_lang, title):
+        return None
 
+    lookup_lang = _lookup_lang_for_title(source_lang, title)
+
+    # Already on the target edition with a non-Cyrillic slug — keep as-is.
     if lookup_lang == wiki_target and not (
         wiki_target == "en" and _CYRILLIC.search(title)
     ):
@@ -286,15 +444,22 @@ def resolve_wikipedia_href(
     resolved = resolver.resolve_title(lookup_lang, title, wiki_target)
     if resolved is None and wiki_target == "en":
         resolved = _OFFLINE_EN_TITLES.get((lookup_lang, title))
+        if resolved is not None:
+            logger.warning(
+                "Wikipedia offline map hit %s→en for %r → %r",
+                lookup_lang,
+                title,
+                resolved,
+            )
     if resolved is None:
-        return href
-    out_fragment = fragment
-    if fragment.startswith("#"):
-        frag_key = fragment[1:]
-        mapped = _OFFLINE_EN_FRAGMENTS.get((resolved, frag_key))
-        if mapped is not None:
-            out_fragment = f"#{mapped}"
-        elif _CYRILLIC.search(frag_key):
-            # Drop unmapped Cyrillic section ids — they 404 on en.wikipedia.
-            out_fragment = ""
+        logger.warning(
+            "Wikipedia resolve failed %s→%s for %r (href=%s); returning None",
+            lookup_lang,
+            wiki_target,
+            title,
+            href,
+        )
+        return None
+
+    out_fragment = _map_fragment(resolved, fragment)
     return format_wikipedia_href(wiki_target, resolved, out_fragment)

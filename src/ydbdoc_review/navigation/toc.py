@@ -683,6 +683,21 @@ def merge_en_toc_yaml(
 ) -> str:
     """Build EN toc from RU PR order with strict scope.
 
+    Merge strategy (§6.131 / AGENT_TASKS Task 2):
+
+    1. Walk RU PR items (preserve RU structure / order).
+    2. For each RU item:
+       - If ``href``/``include`` ∈ translate scope → translate ``name``, keep
+         RU structure (including section ``href`` + ``include.path``).
+       - Else if EN main has the same ``href``/``include`` → keep the EN block
+         unchanged.
+       - Else if RU had the entry on merge-base but EN main lacks it → gap-fill
+         with translated name (unless ``restrict_gap_fill_to_scope``).
+       - Else → skip (out of scope, not on EN).
+    3. Append EN-only leftovers present on EN main but absent from RU
+       (legacy). New EN-only entries not on main are rejected by validate.
+    4. RU-removed hrefs are omitted unless ``keep_en_hrefs`` (§6.112).
+
     - Existing ``href``: keep EN block unless ``href`` ∈ ``translate_hrefs``
       → translate ``name`` from RU only.
     - New ``href`` in RU PR: add **only** if ``href`` ∈ ``translate_hrefs``.
@@ -856,24 +871,22 @@ def _en_covers_ru_href(
 ) -> bool:
     """True when EN toc mirrors a scoped RU ``href`` (exact or legacy alias).
 
-    Legacy alias: same Diplodoc ``name``, different ``href`` basename, and the
-    EN ``href`` already exists on EN main (e.g. RU ``hive_config.md`` vs EN
-    ``hive.md`` — §6.74 / #44942).
+    Delegates to ``TocEntryMapping`` (§6.131). Legacy alias: same Diplodoc
+    ``name``, different ``href`` basename, and the EN ``href`` already exists
+    on EN main (e.g. RU ``hive_config.md`` vs EN ``hive.md`` — §6.74 / #44942).
     """
+    from ydbdoc_review.navigation.toc_models import (
+        build_toc_entry_mappings,
+        mapping_covers_ru_href,
+    )
+
     href = ru_item.get("href")
     if not href:
         return True
-    en_hrefs = {it["href"] for it in en_items if it.get("href")}
-    if href in en_hrefs:
-        return True
-    name = ru_item.get("name")
-    if not name:
-        return False
-    for en_it in en_items:
-        en_href = en_it.get("href")
-        if en_it.get("name") == name and en_href and en_href in en_main_hrefs:
-            return True
-    return False
+    mappings = build_toc_entry_mappings(
+        [ru_item], en_items, en_main_hrefs=en_main_hrefs
+    )
+    return mapping_covers_ru_href(mappings, href)
 
 
 def validate_toc_merge(
