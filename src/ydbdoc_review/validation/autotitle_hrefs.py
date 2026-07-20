@@ -78,4 +78,28 @@ def _restore_autotitle_force_exact(translated: str, source_base: str) -> str:
             if tr_href == base_href:
                 continue
             out = out.replace(f"[{{#T}}]({tr_href})", f"[{{#T}}]({base_href})", 1)
+        return out
+
+    # Counts differ (e.g. after strip_unreachable): still force unique
+    # ``#fragment`` twins so critic cannot leave ``index.md#sessions`` when RU
+    # has ``execution_process.md#sessions`` (#47104).
+    by_frag: dict[str, str] = {}
+    for href in base_hrefs:
+        if "#" not in href:
+            continue
+        frag = href.rsplit("#", 1)[-1]
+        if not frag:
+            continue
+        if frag in by_frag and by_frag[frag] != href:
+            by_frag[frag] = ""  # ambiguous — skip
+        else:
+            by_frag.setdefault(frag, href)
+    for tr_href in _AUTO_LINK.findall(out):
+        if "#" not in tr_href:
+            continue
+        frag = tr_href.rsplit("#", 1)[-1]
+        base_href = by_frag.get(frag) or ""
+        if not base_href or base_href == tr_href:
+            continue
+        out = out.replace(f"[{{#T}}]({tr_href})", f"[{{#T}}]({base_href})", 1)
     return out

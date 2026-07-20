@@ -83,7 +83,12 @@ def run_pair_plan(
     if target_text and content.ru_text:
         if plan.action == "translate_to_ru":
             target_text = restore_autotitle_hrefs(target_text, content.ru_text)
-        elif plan.action == "translate_to_en":
+        elif plan.action in ("translate_to_en", "critic_only") and (
+            plan.target_lang.lower() in {"en", "english"}
+            or plan.target_path == content.pair.en_path
+        ):
+            # Also on doc_verify critic_only: critic can reintroduce stale
+            # hrefs (Sessions → index.md#sessions, #47104 after 05:32 fixup).
             target_text = restore_autotitle_hrefs(
                 target_text, content.ru_text, force_exact=True
             )

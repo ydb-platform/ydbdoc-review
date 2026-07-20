@@ -51,3 +51,18 @@ def test_restore_without_force_keeps_different_stems():
     ru = "[{#T}](query_execution/execution_process.md#sessions)\n"
     en = "[{#T}](query_execution/index.md#sessions)\n"
     assert restore_autotitle_hrefs(en, ru) == en
+
+
+def test_restore_force_exact_fragment_when_link_counts_differ():
+    """#47104: after strip, counts differ — still fix unique #sessions href."""
+    ru = (
+        "See [{#T}](other.md#alpha) and "
+        "[{#T}](query_execution/execution_process.md#sessions).\n"
+    )
+    en = (
+        "See stripped and "
+        "[{#T}](query_execution/index.md#sessions).\n"
+    )
+    fixed = restore_autotitle_hrefs(en, ru, force_exact=True)
+    assert "execution_process.md#sessions" in fixed
+    assert "index.md#sessions" not in fixed

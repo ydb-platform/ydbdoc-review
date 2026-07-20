@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-20  
-**Current focus:** §6.124 — scope-aware toc_structure_parity for only_ru (#47108).
+**Current focus:** §6.125 — force_exact autotitle on critic_only verify (#47104).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-20 | **§6.125** — force_exact `{#T}` restore after critic_only verify; fragment remap (#47104)
 | 2026-07-20 | **§6.124** — scope-aware `toc_structure_parity` for only_ru; soft legacy does not yellow-block (#47108) |
 | 2026-07-20 | **§6.123** — always merge toc when RU changed even if EN also changed (#41271 / #47104 orphan) |
 | 2026-07-20 | **§6.122** — EN toc reachability from main; no bare `{#T}` after strip; restore bare autotitle (#47108) |

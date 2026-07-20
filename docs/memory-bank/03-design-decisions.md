@@ -2793,6 +2793,17 @@ has legacy ``sql-dialect-converter.md`` — pre-existing drift unrelated to Spri
 
 **Tests:** ``test_pr_47108_spring_toc_parity_ignores_unscoped_sql_translation_drift``.
 
+### 6.125. Force-exact autotitle restore on ``critic_only`` verify (#47104, 2026-07-20)
+
+**Problem:** Manual Sessions href fix on [#47104](https://github.com/ydb-platform/ydb/pull/47104)
+was reverted by the next ``doc_verify`` critic fixup commit — ``restore_autotitle_hrefs(..., force_exact=True)``
+ran only for ``translate_to_en``, not ``critic_only``.
+
+**Decision:** run force-exact restore for EN targets on ``critic_only`` as well; when
+RU/EN ``[{#T}]`` counts differ, still remap unique ``#fragment`` twins.
+
+**Tests:** ``test_restore_force_exact_fragment_when_link_counts_differ``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)
