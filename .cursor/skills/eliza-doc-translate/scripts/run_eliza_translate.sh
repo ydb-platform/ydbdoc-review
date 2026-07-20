@@ -29,9 +29,11 @@ rm -f "${DONE}"
   echo "ydbdoc-review=${REVIEW_ROOT}"
 } | tee -a "${LOG}"
 
-# Prepare checkout (source PR head + main for merge-base)
+# Prepare checkout (source PR head + main for merge-base).
+# Cannot fetch into a branch that is currently checked out.
 git -C "${YDB_PATH}" fetch origin main
-git -C "${YDB_PATH}" fetch origin "pull/${PR}/head:pr-${PR}"
+git -C "${YDB_PATH}" checkout --detach origin/main
+git -C "${YDB_PATH}" fetch origin "pull/${PR}/head:pr-${PR}" --force
 git -C "${YDB_PATH}" checkout "pr-${PR}"
 git -C "${YDB_PATH}" fetch origin main
 
