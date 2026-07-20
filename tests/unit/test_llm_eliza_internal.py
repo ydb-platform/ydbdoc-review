@@ -285,7 +285,9 @@ def test_eliza_429_overloaded_fails_fast_on_single_model():
 
 def test_eliza_429_after_retries_switches_to_next_model_in_chain(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "translate-fallback-model")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.rate_limit.max_attempts = 2
     cfg.llm.retries.rate_limit.backoff_initial_s = 0.0
@@ -305,13 +307,15 @@ def test_eliza_429_after_retries_switches_to_next_model_in_chain(monkeypatch):
         out = client.chat([{"role": "user", "content": "x"}], role="translate")
 
     assert out.content == "ok"
-    assert out.model_slug == "gpt-oss-120b"
+    assert out.model_slug == "translate-fallback-model"
     assert post.call_count == 3
 
 
 def test_eliza_503_exhausted_switches_to_next_model_in_chain(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "translate-fallback-model")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.max_attempts = 2
     cfg.llm.retries.backoff_initial_s = 0.0
@@ -330,13 +334,15 @@ def test_eliza_503_exhausted_switches_to_next_model_in_chain(monkeypatch):
         ]
         out = client.chat([{"role": "user", "content": "x"}], role="translate")
 
-    assert out.model_slug == "gpt-oss-120b"
+    assert out.model_slug == "translate-fallback-model"
     assert post.call_count == 3
 
 
 def test_eliza_4xx_does_not_advance_model_chain(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "translate-fallback-model")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     client = ElizaLLMClient(
         api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
@@ -348,12 +354,14 @@ def test_eliza_4xx_does_not_advance_model_chain(monkeypatch):
             client.chat([{"role": "user", "content": "x"}], role="translate")
 
     assert post.call_count == 1
-    assert "gpt-oss-120b" not in post.call_args[0][0]
+    assert "translate-fallback-model" not in post.call_args[0][0]
 
 
 def test_eliza_parse_error_does_not_advance_model_chain(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "translate-fallback-model")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.max_attempts = 2
     cfg.llm.retries.backoff_initial_s = 0.0
@@ -381,7 +389,9 @@ def test_eliza_parse_error_does_not_advance_model_chain(monkeypatch):
 
 def test_eliza_full_chain_429_raises_all_model_names(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "translate-fallback-model")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.rate_limit.max_attempts = 1
     cfg.llm.retries.rate_limit.backoff_initial_s = 0.0
@@ -399,13 +409,15 @@ def test_eliza_full_chain_429_raises_all_model_names(monkeypatch):
 
     msg = str(exc_info.value)
     assert "deepseek-v4-flash" in msg
-    assert "gpt-oss-120b" in msg
+    assert "translate-fallback-model" in msg
     assert post.call_count == 2
 
 
 def test_eliza_429_overloaded_switches_to_next_model_in_chain(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "translate-fallback-model")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     client = ElizaLLMClient(
         api_root="https://api.eliza.yandex.net", oauth_token="t", llm=cfg.llm
@@ -419,43 +431,56 @@ def test_eliza_429_overloaded_switches_to_next_model_in_chain(monkeypatch):
         out = client.chat([{"role": "user", "content": "x"}], role="translate")
 
     assert out.content == "ok"
-    assert out.model_slug == "gpt-oss-120b"
+    assert out.model_slug == "translate-fallback-model"
     assert post.call_count == 2
     assert post.call_args_list[1][0][0].endswith(
-        "/raw/internal/gpt-oss-120b/v1/chat/completions"
+        "/raw/internal/translate-fallback-model/v1/chat/completions"
     )
 
 
 def test_eliza_translate_chain_env_primary_and_fallbacks(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b,gpt-oss-20b")
+    # Fallbacks must not reuse critic primary (§6.127)
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "other-translate-fallback")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     client = _client()
     assert client.model_chain_for_role("translate") == [
         "deepseek-v4-flash",
-        "gpt-oss-120b",
-        "gpt-oss-20b",
+        "other-translate-fallback",
     ]
 
 
 def test_eliza_critic_chain_env_check_fallbacks(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
-    monkeypatch.setenv("YDBDOC_ELIZA_CHECK_FALLBACKS", "gpt-oss-20b")
+    monkeypatch.setenv("YDBDOC_ELIZA_CHECK_FALLBACKS", "other-critic-fallback")
+    monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
+    monkeypatch.delenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", raising=False)
     client = _client()
     assert client.model_chain_for_role("critic") == [
         "gpt-oss-120b",
-        "gpt-oss-20b",
+        "other-critic-fallback",
     ]
 
 
 def test_eliza_translate_chain_uses_yaml_eliza_defaults(monkeypatch):
     monkeypatch.delenv("YDBDOC_MODEL_TRANSLATE", raising=False)
     monkeypatch.delenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", raising=False)
+    monkeypatch.delenv("YDBDOC_MODEL_CHECK", raising=False)
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     client = _client()
-    assert client.model_chain_for_role("translate") == [
-        "deepseek-v4-flash",
-        "gpt-oss-120b",
-        "gpt-oss-20b",
-    ]
+    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
+    assert client.model_chain_for_role("critic") == ["gpt-oss-120b"]
+
+
+def test_eliza_strips_overlapping_translate_fallback_into_critic(monkeypatch):
+    monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
+    monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
+    monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
+    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
+    client = _client()
+    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
+    assert client.model_chain_for_role("critic") == ["gpt-oss-120b"]
 
 
 def test_eliza_internal_503_retries_until_exhausted():
@@ -688,16 +713,8 @@ def test_eliza_public_surface_translate_critic_usage():
     client = _client()
 
     assert client.model_uri("deepseek-v4-flash") == "deepseek-v4-flash"
-    assert client.model_chain_for_role("translate") == [
-        "deepseek-v4-flash",
-        "gpt-oss-120b",
-        "gpt-oss-20b",
-    ]
-    assert client.model_chain_for_role("critic") == [
-        "gpt-oss-120b",
-        "gpt-oss-20b",
-        "deepseek-v4-flash",
-    ]
+    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
+    assert client.model_chain_for_role("critic") == ["gpt-oss-120b"]
     assert client.usage_tracker.records == []
 
     with patch.object(client._http, "post") as post:

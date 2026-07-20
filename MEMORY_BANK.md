@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-20  
-**Current focus:** §6.126 — empty toc scope must not full-audit only_ru (#47104).
+**Current focus:** §6.127 — translate/critic model chains must stay disjoint.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-20 | **§6.127** — translate/critic never share a model (YC + Eliza defaults + runtime strip) |
 | 2026-07-20 | **§6.126** — empty translate scope: no full-menu `only_ru` → `toc_structure_parity` (#47104 red report) |
 | 2026-07-20 | **§6.125** — force_exact `{#T}` restore after critic_only verify; fragment remap (#47104)
 | 2026-07-20 | **§6.124** — scope-aware `toc_structure_parity` for only_ru; soft legacy does not yellow-block (#47108) |

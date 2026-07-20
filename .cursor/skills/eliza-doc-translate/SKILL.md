@@ -93,8 +93,8 @@ export YDBDOC_MODEL_PROVIDER=eliza
 export ELIZA_API_ROOT="${ELIZA_API_ROOT:-https://api.eliza.yandex.net}"
 export YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem
 export GITHUB_TOKEN="${GITHUB_TOKEN:-$YDB_GH_TOKEN}"
-# Prefer working fallbacks; drop unknown ids (gpt-oss-20b 404s)
-export YDBDOC_ELIZA_TRANSLATE_FALLBACKS="${YDBDOC_ELIZA_TRANSLATE_FALLBACKS:-gpt-oss-120b}"
+# Prefer working fallbacks; do not reuse the other role's model (§6.127)
+export YDBDOC_ELIZA_TRANSLATE_FALLBACKS="${YDBDOC_ELIZA_TRANSLATE_FALLBACKS:-}"
 export YDBDOC_ELIZA_CHECK_FALLBACKS="${YDBDOC_ELIZA_CHECK_FALLBACKS:-}"
 cd /Users/iuriisintiaev/projects/ydbdoc-review && source .venv/bin/activate
 python -m ydbdoc_review job \

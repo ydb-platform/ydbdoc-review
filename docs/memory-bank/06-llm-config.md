@@ -315,8 +315,18 @@ Requires ``YDBDOC_MODEL_PROVIDER=eliza`` and ``ELIZA_OAUTH_TOKEN`` in env.
 
 | Role | Default primary | Default fallbacks (YAML) |
 |------|-----------------|--------------------------|
-| translate | `deepseek-v4-flash` | `gpt-oss-120b`, `gpt-oss-20b` |
-| critic | `gpt-oss-120b` | `gpt-oss-20b`, `deepseek-v4-flash` |
+| translate | `deepseek-v4-flash` | _(none — must not reuse critic)_ |
+| critic | `gpt-oss-120b` | _(none — must not reuse translate)_ |
+
+Chains for translate and critic must be **disjoint** (§6.127). Runtime strips
+cross-role overlaps; equal primaries raise ``LLMConfigError``.
+
+**Yandex Cloud** defaults (§6.127):
+
+| Role | Default primary | Default fallbacks |
+|------|-----------------|-------------------|
+| translate | `deepseek-v32` | `yandexgpt-5-pro` |
+| critic | `yandexgpt-5.1` | `yandexgpt-5-lite` |
 
 Env (Nirvana / local):
 

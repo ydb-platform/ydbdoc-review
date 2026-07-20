@@ -32,8 +32,14 @@ def test_load_default_no_env():
     assert cfg.llm.base_url == "https://ai.api.cloud.yandex.net/v1"
     assert cfg.llm.temperature == 0.1
     assert cfg.llm.models.translate.primary == "deepseek-v32"
-    assert cfg.llm.models.critic.primary == "deepseek-v32"
+    assert cfg.llm.models.critic.primary == "yandexgpt-5.1"
     assert cfg.llm.models.analyze.primary == "yandexgpt-5-lite"
+    assert "yandexgpt-5.1" not in cfg.llm.models.translate.chain
+    assert "deepseek-v32" not in cfg.llm.models.critic.chain
+    assert cfg.llm.eliza is not None
+    assert cfg.llm.eliza.translate.primary == "deepseek-v4-flash"
+    assert cfg.llm.eliza.critic.primary == "gpt-oss-120b"
+    assert set(cfg.llm.eliza.translate.chain).isdisjoint(cfg.llm.eliza.critic.chain)
 
 
 def test_default_secrets_empty():

@@ -28,6 +28,8 @@ llm:
   concurrency:
     batches_per_file: 3
 
+  # Translate and critic chains must be disjoint (§6.127) — never the same model
+  # for both roles, including after fallback.
   models:
     analyze:
       primary: yandexgpt-5-lite
@@ -36,23 +38,19 @@ llm:
     translate:
       primary: deepseek-v32
       fallbacks:
-        - yandexgpt-5.1
         - yandexgpt-5-pro
     critic:
-      primary: deepseek-v32
+      primary: yandexgpt-5.1
       fallbacks:
-        - yandexgpt-5.1
-        - yandexgpt-5-pro
+        - yandexgpt-5-lite
 
   eliza:
     translate:
       primary: deepseek-v4-flash
-      fallbacks:
-        - gpt-oss-120b
+      fallbacks: []
     critic:
       primary: gpt-oss-120b
-      fallbacks:
-        - deepseek-v4-flash
+      fallbacks: []
 
 translation:
   source_lang: ru

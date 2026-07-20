@@ -2822,6 +2822,25 @@ only for entries in that scope.
 **Tests:** ``test_pr_47104_empty_scope_does_not_block_preexisting_only_ru``,
 ``test_pr_43753_toc_structure_parity_ru_en_menus_must_match`` (empty vs scoped).
 
+### 6.127. Translate and critic must never share a model (2026-07-20)
+
+**Problem:** Yandex Cloud defaults used the same primary for both roles
+(``deepseek-v32``). Eliza chains crossed each other (``deepseek-v4-flash`` ↔
+``gpt-oss-120b``), so a 429 failover put translator and critic on the same slug.
+
+**Decision:**
+
+1. **Defaults (disjoint chains):**
+   - Yandex: translate ``deepseek-v32`` → ``yandexgpt-5-pro``; critic
+     ``yandexgpt-5.1`` → ``yandexgpt-5-lite``.
+   - Eliza: translate ``deepseek-v4-flash`` only; critic ``gpt-oss-120b`` only
+     (no cross-role fallbacks — only two reliable internal models).
+2. **Runtime:** ``ensure_disjoint_translate_critic_chains`` strips any model that
+   appears in the other role's chain (keeps both primaries; rejects equal
+   primaries / empty chain after strip).
+
+**Tests:** ``test_role_chains.py``, ``test_eliza_strips_overlapping_*``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -18,7 +18,7 @@ from openai import OpenAI
 import requests
 from openai.types.chat import ChatCompletionMessageParam
 
-from ydbdoc_review.config.loader import Config, LLMConfig, ModelChoice
+from ydbdoc_review.config.loader import Config, LLMConfig
 from ydbdoc_review.llm.errors import (
     LLMConfigError,
     LLMRequestError,
@@ -38,6 +38,7 @@ from ydbdoc_review.llm.retry import (
     retry_delay_s,
     should_advance_eliza_model_chain,
 )
+from ydbdoc_review.llm.role_chains import ensure_disjoint_translate_critic_chains
 from ydbdoc_review.shutdown import interruptible_sleep
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 
@@ -244,8 +245,17 @@ class YandexLLMClient:
         ) from last_error
 
     def _model_chain_for_role(self, role: LLMRole) -> list[str]:
-        choice: ModelChoice = getattr(self._llm.models, role)
-        return choice.chain
+        if role == "analyze":
+            return list(self._llm.models.analyze.chain)
+        translate, critic = ensure_disjoint_translate_critic_chains(
+            self._llm.models.translate.chain,
+            self._llm.models.critic.chain,
+        )
+        if role == "translate":
+            return translate
+        if role == "critic":
+            return critic
+        raise LLMConfigError(f"Unknown LLM role: {role!r}")
 
     def _call_once(
         self,
@@ -398,9 +408,13 @@ class ElizaLLMClient(YandexLLMClient):
                 f'role "{role}" has no internal Eliza model; '
                 "pass model= explicitly or use yandex_cloud provider"
             )
-        return self._eliza_model_chain(role)
+        translate, critic = ensure_disjoint_translate_critic_chains(
+            self._eliza_raw_model_chain("translate"),
+            self._eliza_raw_model_chain("critic"),
+        )
+        return translate if role == "translate" else critic
 
-    def _eliza_model_chain(self, role: Literal["translate", "critic"]) -> list[str]:
+    def _eliza_raw_model_chain(self, role: Literal["translate", "critic"]) -> list[str]:
         env_primary = {
             "translate": "YDBDOC_MODEL_TRANSLATE",
             "critic": "YDBDOC_MODEL_CHECK",
@@ -426,6 +440,10 @@ class ElizaLLMClient(YandexLLMClient):
             fallbacks = list(getattr(self._llm.eliza, role).fallbacks)
 
         return self._dedupe_model_chain([primary, *fallbacks])
+
+    def _eliza_model_chain(self, role: Literal["translate", "critic"]) -> list[str]:
+        """Backward-compat alias — prefer ``model_chain_for_role``."""
+        return self._model_chain_for_role(role)
 
     @staticmethod
     def _dedupe_model_chain(models: list[str]) -> list[str]:
