@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-20  
-**Current focus:** §6.128 — overlay main autotitle fragments onto merge-commit RU.
+**Current focus:** §6.129 — expand offline Wikipedia RU→EN map for TLS-offline verify.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-20 | **§6.129** — offline Wikipedia RU→EN titles for glossary/json-index (#47104 TLS) |
 | 2026-07-20 | **§6.128** — merged-PR RU: overlay `#fragment` autotitles from main (#47104 YFM010 Sessions) |
 | 2026-07-20 | **§6.127** — translate/critic never share a model (YC + Eliza defaults + runtime strip) |
 | 2026-07-20 | **§6.126** — empty translate scope: no full-menu `only_ru` → `toc_structure_parity` (#47104 red report) |

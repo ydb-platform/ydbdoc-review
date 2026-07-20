@@ -2861,4 +2861,15 @@ targets follow post-merge main.
 
 ---
 
+### 6.129. Expand offline Wikipedia RU→EN map (#47104, 2026-07-20)
+
+**Problem:** ``doc_verify`` on [#47104](https://github.com/ydb-platform/ydb/pull/47104)
+could not call MediaWiki (TLS), so RU Wikipedia URLs stayed in EN → blocking
+``link_locale`` / 🔴 report.
+
+**Decision:** extend ``_OFFLINE_EN_TITLES`` (and Cyrillic fragment remap) for common
+glossary/json-index articles so locale rewrite works without the network.
+
+---
+
 [← Memory Bank index](../../MEMORY_BANK.md)

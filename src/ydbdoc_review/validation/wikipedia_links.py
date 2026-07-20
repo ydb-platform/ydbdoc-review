@@ -235,6 +235,26 @@ def format_wikipedia_href(wiki_lang: str, title: str, fragment: str = "") -> str
 _OFFLINE_EN_TITLES: dict[tuple[str, str], str] = {
     ("ru", "Язык определения данных"): "Data definition language",
     ("ru", "Язык манипулирования данными"): "Data manipulation language",
+    ("ru", "N-грамм"): "N-gram",
+    ("ru", "Инвертированный индекс"): "Inverted index",
+    ("ru", "Модель акторов"): "Actor model",
+    ("ru", "Уровень изолированности транзакций"): "Isolation (database systems)",
+    ("ru", "MVCC"): "Multiversion concurrency control",
+    ("ru", "Фильтр Блума"): "Bloom filter",
+    ("ru", "Оптимизация запросов СУБД"): "Query optimization",
+    ("ru", "Алгоритм Паксос"): "Paxos (computer science)",
+    ("ru", "Raft (алгоритм)"): "Raft (algorithm)",
+    ("ru", "Консенсус в распределённых вычислениях"): "Consensus (computer science)",
+    ("ru", "LSM-дерево"): "Log-structured merge-tree",
+    ("ru", "Стирающий код"): "Erasure code",
+}
+
+# When the RU fragment is Cyrillic / locale-specific, map to EN section id.
+_OFFLINE_EN_FRAGMENTS: dict[tuple[str, str], str] = {
+    (
+        "Isolation (database systems)",
+        "Serializable_(упорядочиваемость)",
+    ): "Serializable",
 }
 
 
@@ -268,4 +288,13 @@ def resolve_wikipedia_href(
         resolved = _OFFLINE_EN_TITLES.get((lookup_lang, title))
     if resolved is None:
         return href
-    return format_wikipedia_href(wiki_target, resolved, fragment)
+    out_fragment = fragment
+    if fragment.startswith("#"):
+        frag_key = fragment[1:]
+        mapped = _OFFLINE_EN_FRAGMENTS.get((resolved, frag_key))
+        if mapped is not None:
+            out_fragment = f"#{mapped}"
+        elif _CYRILLIC.search(frag_key):
+            # Drop unmapped Cyrillic section ids — they 404 on en.wikipedia.
+            out_fragment = ""
+    return format_wikipedia_href(wiki_target, resolved, out_fragment)
