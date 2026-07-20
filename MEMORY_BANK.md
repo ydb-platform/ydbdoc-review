@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-20  
-**Current focus:** §6.122 — bare ``{#T}`` after strip / EN toc graph from main (#47108).
+**Current focus:** §6.123 — always merge toc when RU changed even if EN also changed (#47104).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-20 | **§6.123** — always merge toc when RU changed even if EN also changed (#41271 / #47104 orphan) |
 | 2026-07-20 | **§6.122** — EN toc reachability from main; no bare `{#T}` after strip; restore bare autotitle (#47108) |
 | 2026-07-19 | **§6.121** — RU/EN toc structure parity; skill `en-toc-orphans`; cleanup [#47107](https://github.com/ydb-platform/ydb/pull/47107) |
 | 2026-07-19 | **§6.120** — merged source PR: ``doc_translate`` RU from ``merge_commit_sha``; force exact ``{#T}`` hrefs RU→EN (#47100 YFM010) |

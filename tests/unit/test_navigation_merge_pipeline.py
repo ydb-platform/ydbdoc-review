@@ -11,6 +11,7 @@ from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_for_pair,
     extra_toc_hrefs_from_md_targets,
     merge_navigation_pair,
+    run_navigation_merges,
     verify_navigation_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
@@ -472,4 +473,94 @@ def test_merge_navigation_pair_uses_scope_plan_for_toc_extras():
     assert "index.md" in result.target_text
     assert "toc_i.yaml" in result.target_text
     assert "auth.md" not in result.target_text
+
+
+def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
+    """#41271 / #47104: EN toc reorder must not skip merge that adds json-indexes.
+
+    Source PR touched both RU and EN ``dev/toc_p.yaml`` (Hybrid search move) but
+    only RU gained ``json-indexes.md``. §6.76 used to skip nav merge when
+    ``en_changed``, leaving the translated page as ``orphan_toc_page``.
+    """
+    ru_base = dedent("""
+        items:
+        - name: Полнотекстовые индексы
+          href: fulltext-indexes.md
+        - name: Локальные индексы
+          href: local-indexes/index.md
+        - name: Гибридный поиск
+          href: hybrid-search.md
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: Полнотекстовые индексы
+          href: fulltext-indexes.md
+        - name: Гибридный поиск
+          href: hybrid-search.md
+        - name: JSON-индексы
+          href: json-indexes.md
+        - name: Локальные индексы
+          href: local-indexes/index.md
+    """).strip()
+    en_main = dedent("""
+        items:
+        - name: Fulltext indexes
+          href: fulltext-indexes.md
+        - name: Local indexes
+          href: local-indexes/index.md
+        - name: Hybrid search
+          href: hybrid-search.md
+    """).strip()
+
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/dev/toc_p.yaml",
+        en_path="ydb/docs/en/core/dev/toc_p.yaml",
+        ru_changed=True,
+        en_changed=True,
+    )
+    scope_plan = TranslationScopePlan(
+        doc_ru_paths=frozenset({"ydb/docs/ru/core/dev/json-indexes.md"}),
+        doc_from_diff=frozenset({"ydb/docs/ru/core/dev/json-indexes.md"}),
+        doc_from_main=frozenset(),
+        nav_ru_paths=frozenset({pair.ru_path}),
+        nav_from_diff=frozenset({pair.ru_path}),
+        nav_from_main=frozenset(),
+    )
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=ru_pr,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(ru_base, en_main),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={"JSON-индексы": "JSON indexes"},
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_en_nav_from_upstream",
+            return_value="# keep\n",
+        ),
+    ):
+        results = run_navigation_merges(
+            [pair],
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+            scope_plan=scope_plan,
+        )
+
+    assert len(results) == 1
+    assert results[0].verdict == "ok"
+    assert results[0].target_text is not None
+    assert "json-indexes.md" in results[0].target_text
+    assert "JSON indexes" in results[0].target_text
 

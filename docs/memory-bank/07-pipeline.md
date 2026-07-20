@@ -114,7 +114,7 @@ INPUT: pr_number, source_repo, merge_base_with
    pr_result = run_pr_translation(contents)   # PRHarness / TRANSLATE_PR_PROFILE
 
 3. NAVIGATION MERGE (same scope_plan)
-   for each nav pair (ru_changed, not en_changed):
+   for each nav pair (ru_changed):  # §6.123 — still merge if en_changed too
      merge_navigation_pair(..., scope_plan=scope_plan)
        # planned_toc_extras_for_pair → _resolve_toc_merge_scope
        # absent EN → full RU mirror (§6.85)

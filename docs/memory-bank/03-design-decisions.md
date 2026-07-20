@@ -1693,8 +1693,10 @@ RU (§6.30), overwriting the author's manual EN edits (+807/−258 on ``basic.md
 
 1. **Markdown pairs:** if merge-base diff shows **both** ``ru_changed`` and
    ``en_changed`` → ``plan_pair_heuristic`` returns ``skip`` (no LLM, no commit).
-2. **Navigation YAML:** ``build_navigation_pairs`` tracks ``en_changed``; skip
-   ``run_navigation_merges`` when both sides changed in the source PR.
+2. **Navigation YAML:** ``build_navigation_pairs`` tracks ``en_changed`` for
+   completeness / verify scope. **Superseded for merge by §6.123** — do **not**
+   skip ``run_navigation_merges`` when both sides changed (partial EN toc edits
+   left orphans, #41271 / #47104).
 3. **Completeness:** ``bilingual_en_mirrors`` excludes those EN paths from
    ``completeness_gaps`` — no false «не переведён» on bilingual PRs.
 4. **Reporting:** ``build_source_pr_comment`` — «перевод не требуется», no
@@ -2755,6 +2757,23 @@ the child text ``{#T}``.
 
 **Tests:** ``test_restore_force_exact_repairs_bare_autotitle_after_strip``,
 ``test_strip_unreachable_autotitle_uses_stem_not_bare_t``.
+
+### 6.123. Always merge toc when RU changed, even if EN also changed (#47104, 2026-07-20)
+
+**Problem:** [YDBDOCS-2550](https://st.yandex-team.ru/YDBDOCS-2550) /
+[#47104](https://github.com/ydb-platform/ydb/pull/47104) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271):
+translated ``dev/json-indexes.md`` was 🔴 ``orphan_toc_page``. Source PR edited
+both ``ru/.../dev/toc_p.yaml`` (added JSON indexes) and ``en/.../dev/toc_p.yaml``
+(only moved Hybrid search). §6.76 skipped ``run_navigation_merges`` whenever
+``en_changed``, so the new RU ``href`` never reached EN toc.
+
+**Decision:** Markdown bilingual skip (§6.76) stays. For **navigation YAML**,
+``run_navigation_merges`` runs whenever ``ru_changed`` — including when EN toc
+was also in the source PR. Merge still preserves out-of-scope EN ``name`` blocks
+and EN-only legacy hrefs; authors' partial EN toc tweaks no longer block wiring
+translated pages.
+
+**Tests:** ``test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed``.
 
 ---
 

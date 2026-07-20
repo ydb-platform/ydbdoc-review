@@ -568,12 +568,17 @@ def run_navigation_merges(
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
 ) -> list[NavigationRunResult]:
-    """Merge all navigation YAML pairs changed in the source PR."""
+    """Merge all navigation YAML pairs with a RU change in the source PR.
+
+    Unlike markdown bilingual skip (§6.76), toc merge still runs when both RU
+    and EN sidebars changed. Authors often touch EN toc for a partial reorder
+    while RU adds new ``href``s (#41271 / #47104); skipping left translated
+    pages as ``orphan_toc_page``. Merge keeps out-of-scope EN ``name`` blocks
+    and EN-only legacy hrefs.
+    """
     results: list[NavigationRunResult] = []
     for pair in pairs:
         if not pair.ru_changed:
-            continue
-        if pair.en_changed:
             continue
         results.append(
             merge_navigation_pair(

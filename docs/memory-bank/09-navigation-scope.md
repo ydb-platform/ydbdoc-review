@@ -231,13 +231,14 @@ the source or translation PR.
 | `scope_not_applied` (false +) | [#47100](https://github.com/ydb-platform/ydb/pull/47100) ← [#43010](https://github.com/ydb-platform/ydb/pull/43010) | §6.118 | `test_pr_47100_scope_not_applied_false_positive_href_plus_include` |
 | supplement_only pulls all RU−EN gaps | [#46878](https://github.com/ydb-platform/ydb/pull/46878) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.119 | `test_pr_46878_supplement_only_does_not_add_all_missing_ru_hrefs` |
 | `missing_toc_target` | [#46338](https://github.com/ydb-platform/ydb/pull/46338), [#46258](https://github.com/ydb-platform/ydb/pull/46258) | §6.83 | `test_pr_46338_missing_toc_target_for_absent_include_yaml` |
-| `orphan_toc_page` | [#46569](https://github.com/ydb-platform/ydb/pull/46569) | §6.117 | `test_pr_46569_orphan_page_when_parent_not_wired` |
+| `orphan_toc_page` | [#46569](https://github.com/ydb-platform/ydb/pull/46569), [#47104](https://github.com/ydb-platform/ydb/pull/47104) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.117 / §6.123 | `test_pr_46569_orphan_page_when_parent_not_wired`, `test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed` |
 | `toc_structure_parity` / `toc_en_only_legacy` | [#43753](https://github.com/ydb-platform/ydb/pull/43753) leftovers → [#47107](https://github.com/ydb-platform/ydb/pull/47107) | §6.121 | `test_pr_43753_toc_structure_parity_*`, `test_toc_en_only_legacy_*` |
 
 #### Planner / merge contracts
 
 | Failure mode | Symptom PR(s) | § | Test |
 |--------------|---------------|---|------|
+| bilingual EN toc skip left orphan href | [#47104](https://github.com/ydb-platform/ydb/pull/47104) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.123 | `test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed` |
 | md-only → parent toc missing href | [#44889](https://github.com/ydb-platform/ydb/pull/44889) | §6.71 | `test_pr_44889_md_only_queues_parent_toc_when_en_missing_href` |
 | child sidebar needed, parent flat | [#46569](https://github.com/ydb-platform/ydb/pull/46569) | §6.116 | `test_case_46569_*` + `test_pr_46569_queues_all_three_parent_tocs_*` |
 | Spring section parent + child toc | [#43010](https://github.com/ydb-platform/ydb/pull/43010) → [#47100](https://github.com/ydb-platform/ydb/pull/47100) | §6.116 / §6.118 | `test_pr_43010_spring_queues_integrations_parent_and_child_toc`, `test_pr_47100_merge_preserves_href_and_include_*` |
