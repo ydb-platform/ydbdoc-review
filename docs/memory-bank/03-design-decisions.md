@@ -2843,4 +2843,22 @@ only for entries in that scope.
 
 ---
 
+### 6.128. Overlay main autotitle fragments onto merge-commit RU (#47104, 2026-07-20)
+
+**Problem:** Re-translating merged [#41271](https://github.com/ydb-platform/ydb/pull/41271)
+read RU glossary from the merge commit, which still had
+``query_execution/index.md#sessions``. ``force_exact`` (§6.125) copied that stale
+href into EN → YFM010 on [#47104](https://github.com/ydb-platform/ydb/pull/47104)
+(``build-docs`` red). Main RU (after [#44457](https://github.com/ydb-platform/ydb/pull/44457))
+already pointed at ``execution_process.md#sessions``.
+
+**Decision:** when loading RU from ``ru_content_ref`` (merge commit), overlay unique
+``#fragment`` ``[{#T}]`` hrefs from ``merge_base_with`` (usually ``origin/main``)
+via ``overlay_autotitle_fragment_hrefs``. Body stays at the merge snapshot; fragment
+targets follow post-merge main.
+
+**Tests:** ``test_overlay_autotitle_fragment_hrefs_*``.
+
+---
+
 [← Memory Bank index](../../MEMORY_BANK.md)

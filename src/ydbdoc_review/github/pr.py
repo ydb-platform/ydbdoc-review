@@ -13,6 +13,7 @@ from ydbdoc_review.github.git_ops import (
     read_text_at_ref,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
 from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
@@ -446,7 +447,9 @@ def load_pair_contents(
 
     When ``ru_content_ref`` is set (merged source PR → merge commit, §6.120),
     RU bodies are read from that ref first so stale PR-head trees cannot
-    regress already-fixed links on the base branch.
+    regress already-fixed links on the base branch. Unique ``#fragment``
+    autotitle hrefs are then overlaid from the checkout RU (usually ``main``)
+    so post-merge moves (Sessions → ``execution_process.md``, §6.128) still win.
     """
     contents: list[PairContent] = []
     for pair in pairs:
@@ -457,6 +460,14 @@ def load_pair_contents(
             ru_text = read_text(repo_path, pair.ru_path)
         if ru_text is None and not pair.ru_deleted:
             ru_text = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
+        if ru_content_ref and ru_text is not None:
+            # Prefer post-merge main fragment targets over stale merge-commit ones
+            # (§6.128). Checkout may still be the source PR head — use merge base.
+            ru_main = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+            if ru_main is None:
+                ru_main = read_text(repo_path, pair.ru_path)
+            if ru_main:
+                ru_text = overlay_autotitle_fragment_hrefs(ru_text, ru_main)
         en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)

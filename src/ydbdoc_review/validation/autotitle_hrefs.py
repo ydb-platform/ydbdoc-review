@@ -17,6 +17,41 @@ def _doc_href_stem(href: str) -> str:
     return path
 
 
+def overlay_autotitle_fragment_hrefs(target: str, preferred: str) -> str:
+    """Rewrite ``[{#T}](…#frag)`` in ``target`` using ``preferred`` when fragments match.
+
+    Used for merged source PRs (§6.120 / §6.128): RU body comes from the merge
+    commit, but unique ``#fragment`` targets may have moved on ``main`` after
+    merge (e.g. Sessions ``index.md#sessions`` → ``execution_process.md#sessions``).
+    Preferring HEAD/main hrefs for those fragments avoids YFM010 on EN.
+    """
+    if not target or not preferred:
+        return target
+
+    by_frag: dict[str, str] = {}
+    for href in _AUTO_LINK.findall(preferred):
+        if "#" not in href:
+            continue
+        frag = href.rsplit("#", 1)[-1]
+        if not frag:
+            continue
+        if frag in by_frag and by_frag[frag] != href:
+            by_frag[frag] = ""  # ambiguous
+        else:
+            by_frag.setdefault(frag, href)
+
+    out = target
+    for href in _AUTO_LINK.findall(target):
+        if "#" not in href:
+            continue
+        frag = href.rsplit("#", 1)[-1]
+        preferred_href = by_frag.get(frag) or ""
+        if not preferred_href or preferred_href == href:
+            continue
+        out = out.replace(f"[{{#T}}]({href})", f"[{{#T}}]({preferred_href})", 1)
+    return out
+
+
 def restore_autotitle_hrefs(
     translated: str,
     source_base: str | None,

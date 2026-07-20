@@ -1,6 +1,9 @@
 """Tests for autotitle href preservation across locale translates."""
 
-from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
+from ydbdoc_review.validation.autotitle_hrefs import (
+    overlay_autotitle_fragment_hrefs,
+    restore_autotitle_hrefs,
+)
 
 
 def test_restore_index_md_autotitle_hrefs():
@@ -64,5 +67,37 @@ def test_restore_force_exact_fragment_when_link_counts_differ():
         "[{#T}](query_execution/index.md#sessions).\n"
     )
     fixed = restore_autotitle_hrefs(en, ru, force_exact=True)
+    assert "execution_process.md#sessions" in fixed
+    assert "index.md#sessions" not in fixed
+
+
+def test_overlay_autotitle_fragment_hrefs_prefers_main_sessions_target():
+    """§6.128: merge-commit RU still has index.md#sessions; main moved it."""
+    merge_ru = (
+        "Сессии описаны в [{#T}](query_execution/index.md#sessions).\n"
+    )
+    main_ru = (
+        "Сессии описаны в [{#T}](query_execution/execution_process.md#sessions).\n"
+    )
+    out = overlay_autotitle_fragment_hrefs(merge_ru, main_ru)
+    assert "execution_process.md#sessions" in out
+    assert "index.md#sessions" not in out
+
+
+def test_overlay_then_force_exact_fixes_en_yfm010():
+    merge_ru = (
+        "See [{#T}](other.md#alpha) and "
+        "[{#T}](query_execution/index.md#sessions).\n"
+    )
+    main_ru = (
+        "See [{#T}](other.md#alpha) and "
+        "[{#T}](query_execution/execution_process.md#sessions).\n"
+    )
+    en_bad = (
+        "See [{#T}](other.md#alpha) and "
+        "[{#T}](query_execution/index.md#sessions).\n"
+    )
+    ru = overlay_autotitle_fragment_hrefs(merge_ru, main_ru)
+    fixed = restore_autotitle_hrefs(en_bad, ru, force_exact=True)
     assert "execution_process.md#sessions" in fixed
     assert "index.md#sessions" not in fixed
