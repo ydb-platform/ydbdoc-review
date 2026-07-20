@@ -2787,7 +2787,7 @@ has legacy ``sql-dialect-converter.md`` — pre-existing drift unrelated to Spri
 1. When ``translate_hrefs`` / ``translate_include_paths`` is non-empty, ``only_ru_*``
    counts toward ``toc_structure_parity`` **only if** the missing entry is in that
    scope (failed to apply this merge). Unscoped RU-only structure is ignored here.
-2. Empty scope keeps a full-menu ``only_ru`` audit (§6.121 / #43753).
+2. Empty scope: see §6.126 (no full-menu ``only_ru`` audit).
 3. ``toc_en_only_legacy`` remains a soft warning; soft-only nav verdict stays
    ``ok`` so merge recommendation can be 🟢.
 
@@ -2803,6 +2803,24 @@ ran only for ``translate_to_en``, not ``critic_only``.
 RU/EN ``[{#T}]`` counts differ, still remap unique ``#fragment`` twins.
 
 **Tests:** ``test_restore_force_exact_fragment_when_link_counts_differ``.
+
+### 6.126. Empty translate scope must not full-audit ``only_ru`` (#47104, 2026-07-20)
+
+**Problem:** [#47104](https://github.com/ydb-platform/ydb/pull/47104) (json indexes ← #41271)
+had green ``build-docs`` and green content files, but the QA report stayed 🔴:
+parent ``concepts/toc_i.yaml`` / ``recipes/toc_p.yaml`` failed ``toc_structure_parity``
+on pre-existing ``only_ru`` drift (``secondary_indexes.md``, ``streaming-query/…``,
+``nfs-backup/…``) while the translate scope for those menus was **empty**.
+§6.124 point 2 still ran a full-menu ``only_ru`` audit on empty scope.
+
+**Decision:** when both ``translate_hrefs`` and ``translate_include_paths`` are empty,
+treat ``only_ru_*`` as **out of scope** (do not emit ``toc_structure_parity``).
+Still block on **new** EN-only entries (not on main). Soft ``toc_en_only_legacy``
+covers EN leftovers already on main. Scoped merges keep §6.124: ``only_ru`` blocks
+only for entries in that scope.
+
+**Tests:** ``test_pr_47104_empty_scope_does_not_block_preexisting_only_ru``,
+``test_pr_43753_toc_structure_parity_ru_en_menus_must_match`` (empty vs scoped).
 
 ---
 

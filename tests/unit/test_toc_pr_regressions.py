@@ -119,7 +119,7 @@ def test_pr_44872_unexpected_href_not_in_ru_or_en_main():
 
 
 def test_pr_43753_toc_structure_parity_ru_en_menus_must_match():
-    """§6.121: RU/EN toc href sets must match (orphan OTel recipes class)."""
+    """§6.121 / §6.126: EN-only legacy is soft; only_ru blocks when in scope."""
     en_main = dedent("""
         items:
         - name: Overview
@@ -134,14 +134,58 @@ def test_pr_43753_toc_structure_parity_ru_en_menus_must_match():
         - name: Обзор
           href: index.md
     """).strip()
+    # Empty scope: do not 🔴 on pre-existing only_ru (#47104).
+    issues_empty = validate_toc_merge(
+        ru, en_merged, translate_hrefs=set(), en_main_yaml=en_main
+    )
+    assert "toc_structure_parity" not in _kinds(issues_empty)
+    legacy = [i for i in issues_empty if i.kind == "toc_en_only_legacy"]
+    assert legacy
+    assert "debug-otel.md" in legacy[0].detail
+
+    # Scoped add that never landed on EN → still blocking parity.
+    issues_scoped = validate_toc_merge(
+        ru,
+        en_merged,
+        translate_hrefs={"index.md"},
+        en_main_yaml=en_main,
+    )
+    assert "toc_structure_parity" in _kinds(issues_scoped)
+    assert any("index.md" in i.detail for i in issues_scoped)
+
+
+def test_pr_47104_empty_scope_does_not_block_preexisting_only_ru():
+    """#47104: parent concepts toc verify must not 🔴 on secondary_indexes drift."""
+    en_main = dedent("""
+        items:
+        - name: Glossary
+          href: glossary.md
+        - name: Query execution
+          href: query_execution/index.md
+        - name: Streaming queries
+          href: streaming-query.md
+    """).strip()
+    en_merged = en_main
+    ru = dedent("""
+        items:
+        - name: Glossary
+          href: glossary.md
+        - name: Secondary indexes
+          href: secondary_indexes.md
+        - name: Query execution
+          href: query_execution/index.md
+        - name: Streaming
+          href: streaming-query/index.md
+          include:
+            path: streaming-query/toc_p.yaml
+            mode: link
+    """).strip()
     issues = validate_toc_merge(
         ru, en_merged, translate_hrefs=set(), en_main_yaml=en_main
     )
-    assert "toc_structure_parity" in _kinds(issues)
-    # EN-only that already sat on main → soft drift warning, not parity block alone
-    legacy = [i for i in issues if i.kind == "toc_en_only_legacy"]
-    assert legacy
-    assert "debug-otel.md" in legacy[0].detail
+    kinds = _kinds(issues)
+    assert "toc_structure_parity" not in kinds
+    assert "toc_en_only_legacy" in kinds
 
 
 def test_toc_en_only_legacy_when_preserved_from_main():

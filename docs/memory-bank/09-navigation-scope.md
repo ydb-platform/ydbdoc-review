@@ -232,7 +232,7 @@ the source or translation PR.
 | supplement_only pulls all RU−EN gaps | [#46878](https://github.com/ydb-platform/ydb/pull/46878) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.119 | `test_pr_46878_supplement_only_does_not_add_all_missing_ru_hrefs` |
 | `missing_toc_target` | [#46338](https://github.com/ydb-platform/ydb/pull/46338), [#46258](https://github.com/ydb-platform/ydb/pull/46258) | §6.83 | `test_pr_46338_missing_toc_target_for_absent_include_yaml` |
 | `orphan_toc_page` | [#46569](https://github.com/ydb-platform/ydb/pull/46569), [#47104](https://github.com/ydb-platform/ydb/pull/47104) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.117 / §6.123 | `test_pr_46569_orphan_page_when_parent_not_wired`, `test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed` |
-| `toc_structure_parity` / `toc_en_only_legacy` | [#43753](https://github.com/ydb-platform/ydb/pull/43753) leftovers → [#47107](https://github.com/ydb-platform/ydb/pull/47107); scoped only_ru [#47108](https://github.com/ydb-platform/ydb/pull/47108) | §6.121 / §6.124 | `test_pr_43753_toc_structure_parity_*`, `test_toc_en_only_legacy_*`, `test_pr_47108_spring_toc_parity_ignores_unscoped_sql_translation_drift` |
+| `toc_structure_parity` / `toc_en_only_legacy` | [#43753](https://github.com/ydb-platform/ydb/pull/43753) leftovers → [#47107](https://github.com/ydb-platform/ydb/pull/47107); scoped only_ru [#47108](https://github.com/ydb-platform/ydb/pull/47108); empty scope [#47104](https://github.com/ydb-platform/ydb/pull/47104) | §6.121 / §6.124 / §6.126 | `test_pr_43753_toc_structure_parity_*`, `test_toc_en_only_legacy_*`, `test_pr_47108_spring_toc_parity_*`, `test_pr_47104_empty_scope_*` |
 
 #### Planner / merge contracts
 

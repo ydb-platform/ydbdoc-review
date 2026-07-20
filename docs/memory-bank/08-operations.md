@@ -174,6 +174,8 @@ python -m ydbdoc_review job \
   --dry-run
 ```
 
+**Cursor skill:** `.cursor/skills/eliza-doc-translate/` — Eliza translate, background DONE sentinel, iterate to green (not GitHub `doc_translate` label; do not wait for build-docs).
+
 **Agent / non-interactive shells** must load zshrc tokens:
 
 ```bash
