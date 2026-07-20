@@ -293,7 +293,12 @@ def test_validate_toc_merge_accepts_legacy_href_alias_supplement():
         translate_hrefs=scope,
         en_main_yaml=en_main,
     )
-    assert issues == []
+    kinds = {i.kind for i in issues}
+    # Scoped only_ru must not flag hive_config/kafka aliases (§6.124); EN-only
+    # basename aliases remain soft toc_en_only_legacy.
+    assert "toc_structure_parity" not in kinds
+    assert "scope_not_applied" not in kinds
+    assert kinds <= {"toc_en_only_legacy"}
 
 
 def test_validate_toc_merge_flags_scoped_href_missing_from_en():
@@ -468,7 +473,10 @@ def test_validate_toc_merge_clean():
     issues = validate_toc_merge(
         RU_PR, merged, translate_hrefs=set(scope.hrefs), en_main_yaml=EN_MAIN
     )
-    assert not issues
+    kinds = {i.kind for i in issues}
+    assert "toc_structure_parity" not in kinds
+    assert "scope_not_applied" not in kinds
+    assert kinds <= {"toc_en_only_legacy"}
 
 
 YDB_SDK_EN_MAIN = dedent("""

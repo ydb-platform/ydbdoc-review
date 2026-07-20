@@ -919,15 +919,26 @@ def validate_toc_merge(
     ru_hrefs = {it["href"] for it in ru_items if it.get("href")}
     ru_includes = {it["include_path"] for it in ru_items if it.get("include_path")}
 
-    # §6.121 — RU and EN sidebar structures must mirror (same href / include.path).
-    only_ru_hrefs = sorted(ru_hrefs - en_merged_hrefs)
+    # §6.121 / §6.124 — RU and EN sidebar structures must mirror for this merge's
+    # scope. Pre-existing RU-only entries outside ``translate_*`` (e.g. RU
+    # ``sql-translation/`` vs EN legacy ``sql-dialect-converter.md`` while this
+    # PR only adds Spring — #47108) must not block; they stay as backlog /
+    # ``toc_en_only_legacy``. Empty scope → full only_ru audit (no partial merge).
+    only_ru_hrefs_all = sorted(ru_hrefs - en_merged_hrefs)
     only_en_hrefs = en_merged_hrefs - ru_hrefs
     new_en_only_hrefs = sorted(only_en_hrefs - en_main_hrefs)
     legacy_en_only_hrefs = sorted(only_en_hrefs & en_main_hrefs)
-    only_ru_includes = sorted(ru_includes - en_merged_includes)
+    only_ru_includes_all = sorted(ru_includes - en_merged_includes)
     only_en_includes = en_merged_includes - ru_includes
     new_en_only_includes = sorted(only_en_includes - en_main_includes)
     legacy_en_only_includes = sorted(only_en_includes & en_main_includes)
+    include_scope = translate_include_paths or set()
+    if translate_hrefs or include_scope:
+        only_ru_hrefs = [h for h in only_ru_hrefs_all if h in translate_hrefs]
+        only_ru_includes = [p for p in only_ru_includes_all if p in include_scope]
+    else:
+        only_ru_hrefs = only_ru_hrefs_all
+        only_ru_includes = only_ru_includes_all
     if only_ru_hrefs or new_en_only_hrefs or only_ru_includes or new_en_only_includes:
         issues.append(
             TocValidationIssue(
@@ -985,7 +996,6 @@ def validate_toc_merge(
                 )
             )
 
-    include_scope = translate_include_paths or set()
     ru_by_href = {it["href"]: it for it in ru_items if it.get("href")}
     for href in translate_hrefs:
         ru_item = ru_by_href.get(href)

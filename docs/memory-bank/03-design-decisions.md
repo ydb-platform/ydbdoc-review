@@ -2775,6 +2775,24 @@ translated pages.
 
 **Tests:** ``test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed``.
 
+### 6.124. Scope-aware ``toc_structure_parity`` for only_ru (#47108, 2026-07-20)
+
+**Problem:** [#47108](https://github.com/ydb-platform/ydb/pull/47108) (Spring ← #43010)
+correctly added ``spring/`` to EN ``integrations/toc_i.yaml``, then ``doc_verify``
+🔴 ``toc_structure_parity`` because RU also has ``sql-translation/`` while EN still
+has legacy ``sql-dialect-converter.md`` — pre-existing drift unrelated to Spring.
+
+**Decision:**
+
+1. When ``translate_hrefs`` / ``translate_include_paths`` is non-empty, ``only_ru_*``
+   counts toward ``toc_structure_parity`` **only if** the missing entry is in that
+   scope (failed to apply this merge). Unscoped RU-only structure is ignored here.
+2. Empty scope keeps a full-menu ``only_ru`` audit (§6.121 / #43753).
+3. ``toc_en_only_legacy`` remains a soft warning; soft-only nav verdict stays
+   ``ok`` so merge recommendation can be 🟢.
+
+**Tests:** ``test_pr_47108_spring_toc_parity_ignores_unscoped_sql_translation_drift``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

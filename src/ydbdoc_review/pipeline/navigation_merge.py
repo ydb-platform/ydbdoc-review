@@ -47,6 +47,8 @@ _NAV_BLOCKING_WARNING_KINDS = frozenset(
         "orphan_toc_page",
     }
 )
+# Soft drift: keep in the report, but do not downgrade merge recommendation (§6.121).
+_NAV_SOFT_WARNING_KINDS = frozenset({"toc_en_only_legacy"})
 
 
 def _navigation_verdict(warnings: list[str]) -> FileVerdict:
@@ -54,7 +56,12 @@ def _navigation_verdict(warnings: list[str]) -> FileVerdict:
         kind = w.split(":", 1)[0]
         if kind in _NAV_BLOCKING_WARNING_KINDS:
             return "blocked"
-    if warnings:
+    hard = [
+        w
+        for w in warnings
+        if w.split(":", 1)[0] not in _NAV_SOFT_WARNING_KINDS
+    ]
+    if hard:
         return "warnings"
     return "ok"
 

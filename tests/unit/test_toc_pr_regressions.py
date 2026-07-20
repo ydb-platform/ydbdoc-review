@@ -166,6 +166,79 @@ def test_toc_en_only_legacy_when_preserved_from_main():
     assert "unexpected_href" not in kinds
 
 
+def test_pr_47108_spring_toc_parity_ignores_unscoped_sql_translation_drift():
+    """#47108: adding Spring must not 🔴 on pre-existing sql-translation vs converter.
+
+    RU integrations toc has ``sql-translation/``; EN main still has legacy
+    ``sql-dialect-converter.md``. Scoped merge only adds Spring — only_ru for
+    sql-translation is outside translate scope (§6.124).
+    """
+    en_main = dedent("""
+        items:
+        - name: ORM
+          href: orm/index.md
+        - name: Vector search
+          href: vectorsearch/index.md
+        - name: SQL Dialect Converter to YQL
+          href: sql-dialect-converter.md
+    """).strip()
+    en_merged = dedent("""
+        items:
+        - name: ORM
+          href: orm/index.md
+        - name: Spring
+          href: spring/index.md
+          include:
+            mode: link
+            path: spring/toc-spring.yaml
+        - name: Vector search
+          href: vectorsearch/index.md
+        - name: SQL Dialect Converter to YQL
+          href: sql-dialect-converter.md
+    """).strip()
+    ru = dedent("""
+        items:
+        - name: ORM
+          href: orm/index.md
+        - name: Spring
+          href: spring/index.md
+          include:
+            mode: link
+            path: spring/toc-spring.yaml
+        - name: Vector search
+          href: vectorsearch/index.md
+        - name: SQL translation
+          href: sql-translation/index.md
+          include:
+            mode: link
+            path: sql-translation/toc-sql-translation.yaml
+    """).strip()
+    issues = validate_toc_merge(
+        ru,
+        en_merged,
+        translate_hrefs={"spring/index.md"},
+        translate_include_paths={"spring/toc-spring.yaml"},
+        en_main_yaml=en_main,
+    )
+    kinds = _kinds(issues)
+    assert "toc_structure_parity" not in kinds
+    assert "toc_en_only_legacy" in kinds
+    assert any("sql-dialect-converter.md" in i.detail for i in issues)
+
+    # Still block when scoped RU href was not applied to EN.
+    en_missing_spring = en_main
+    issues_miss = validate_toc_merge(
+        ru,
+        en_missing_spring,
+        translate_hrefs={"spring/index.md"},
+        translate_include_paths={"spring/toc-spring.yaml"},
+        en_main_yaml=en_main,
+    )
+    assert "toc_structure_parity" in _kinds(issues_miss) or "scope_not_applied" in _kinds(
+        issues_miss
+    )
+
+
 def test_pr_42725_empty_toc_when_parse_yields_no_items():
     """#42725 / §6.33: broken inline toc parsed as empty → empty_toc."""
     en_main = "items:\n"
