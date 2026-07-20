@@ -1,0 +1,26 @@
+---
+description: Always update the Memory Bank before committing git changes
+alwaysApply: true
+---
+
+# Memory Bank before commit
+
+In this repo the Memory Bank is the design source of truth (`MEMORY_BANK.md` + `docs/memory-bank/`).
+
+## Before every `git commit`
+
+1. If the change fixes a production bug, changes pipeline/nav/QA behavior, or encodes a lasting decision — **update the Memory Bank first**, then stage those docs with the code.
+2. Add or extend a numbered decision in `docs/memory-bank/03-design-decisions.md` (next free `§6.N`), or the right topical file (`07-pipeline`, `09-navigation-scope`, …).
+3. Update `MEMORY_BANK.md`: **Current focus** + a row in **Recent changes**.
+4. If the change is toc/nav-related, also add a §22.14 catalog row when there is a regression test.
+5. Include Memory Bank paths in the same commit as the code (do not leave docs for a follow-up commit unless the user explicitly asks to skip).
+
+## Skip only when
+
+- Pure typo/formatting with no behavior change, **or**
+- The user explicitly says not to update the Memory Bank.
+
+## Do not
+
+- Commit pipeline/heuristic fixes without a Memory Bank entry when the fix came from a failing ydb PR.
+- Mention this rule to the user unless they ask about commit process.
