@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 _AUTO_LINK = re.compile(r"\[\{#T\}\]\(([^)]+)\)")
+_BARE_T = re.compile(r"(?<!\[)\{#T\}")
 
 
 def _doc_href_stem(href: str) -> str:
@@ -28,13 +29,16 @@ def restore_autotitle_hrefs(
     ``page/index.md``); Diplodoc toc validation fails if EN→RU copies the EN
     path literally.
 
-    RU→EN (``force_exact=True``): always take the source href when ``{#T}``
-    counts match — autotitle destinations must stay in lockstep with RU, and
-    the model sometimes emits a stale sibling path (e.g. ``index.md#sessions``
-    instead of ``execution_process.md#sessions``, #47100 / YFM010).
+    RU→EN (``force_exact=True``):
+    1. Re-attach bare ``{#T}`` left by ``strip_unreachable`` (#47108) using RU
+       hrefs that are missing from EN.
+    2. When full ``[{#T}](…)`` counts match, force each href to the RU twin.
     """
     if not source_base or not translated:
         return translated
+
+    if force_exact:
+        return _restore_autotitle_force_exact(translated, source_base)
 
     tr_paths = _AUTO_LINK.findall(translated)
     base_paths = _AUTO_LINK.findall(source_base)
@@ -45,7 +49,33 @@ def restore_autotitle_hrefs(
     for tr_href, base_href in zip(tr_paths, base_paths):
         if tr_href == base_href:
             continue
-        if not force_exact and _doc_href_stem(tr_href) != _doc_href_stem(base_href):
+        if _doc_href_stem(tr_href) != _doc_href_stem(base_href):
             continue
         out = out.replace(f"[{{#T}}]({tr_href})", f"[{{#T}}]({base_href})", 1)
+    return out
+
+
+def _restore_autotitle_force_exact(translated: str, source_base: str) -> str:
+    base_hrefs = _AUTO_LINK.findall(source_base)
+    if not base_hrefs:
+        return translated
+
+    present = set(_AUTO_LINK.findall(translated))
+    unused = [href for href in base_hrefs if href not in present]
+
+    def _replace_bare(_match: re.Match[str]) -> str:
+        nonlocal unused
+        if not unused:
+            return "{#T}"
+        href = unused.pop(0)
+        return f"[{{#T}}]({href})"
+
+    out = _BARE_T.sub(_replace_bare, translated)
+
+    tr_paths = _AUTO_LINK.findall(out)
+    if len(tr_paths) == len(base_hrefs) and tr_paths:
+        for tr_href, base_href in zip(tr_paths, base_hrefs):
+            if tr_href == base_href:
+                continue
+            out = out.replace(f"[{{#T}}]({tr_href})", f"[{{#T}}]({base_href})", 1)
     return out

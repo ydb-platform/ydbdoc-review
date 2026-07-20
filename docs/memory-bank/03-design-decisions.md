@@ -2732,6 +2732,30 @@ maps the old URL to the new section.
 
 **Tests:** ``test_pr_43753_toc_structure_parity_*``, ``test_toc_en_only_legacy_*``.
 
+### 6.122. Never leave bare ``{#T}`` after strip; EN toc graph from main (#47108, 2026-07-20)
+
+**Problem:** [#47108](https://github.com/ydb-platform/ydb/pull/47108) (re-translate of
+#43010) had ``glossary`` Sessions as ``section {#T}.`` — link markup gone.
+``doc_verify`` 🔴 (``md_link_parity`` + critic formatting); critic fix with
+``⟦U1⟧`` was rejected by placeholder protection.
+
+**Root cause:** ``strip_unreachable_internal_links`` removed
+``[{#T}](execution_process.md#sessions)`` because ``en_toc_reachable`` was built
+from the **source PR checkout** (stale head without that toc entry), then left
+the child text ``{#T}``.
+
+**Decision:**
+
+1. Build EN toc reachability from ``merge_base_with`` (upstream main) for EN
+   paths during ``doc_translate``.
+2. When stripping an unreachable autotitle link, substitute the path **stem**
+   (never a bare ``{#T}``).
+3. ``restore_autotitle_hrefs(..., force_exact=True)`` re-attaches bare ``{#T}``
+   using RU hrefs missing from EN.
+
+**Tests:** ``test_restore_force_exact_repairs_bare_autotitle_after_strip``,
+``test_strip_unreachable_autotitle_uses_stem_not_bare_t``.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

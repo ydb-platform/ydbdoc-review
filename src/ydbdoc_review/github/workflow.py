@@ -317,11 +317,22 @@ def run_doc_translate(
 
     pending_en_md = {p.en_path for p in pairs}
     pending_en_tocs = {nav.en_path for nav in nav_pairs}
+
+    def _read_en_toc_graph(path: str) -> str | None:
+        # Prefer upstream main for EN toc/pages so strip_unreachable does not
+        # use a stale source-PR checkout (#47108 bare ``{#T}`` after strip).
+        if path.replace("\\", "/").startswith(f"{docs_root}/en/"):
+            text = read_text_at_ref(repo_path, merge_base_with, path)
+            if text is not None:
+                return text
+        return read_text(repo_path, path)
+
     en_toc_reachable = build_en_toc_reachable_from_repo(
         repo_path,
         docs_root=docs_root,
         pending_en_md=pending_en_md,
         pending_en_tocs=pending_en_tocs,
+        read_text=_read_en_toc_graph,
     )
     logger.info(
         "EN toc reachability: %s md paths (%s pending md, %s pending toc)",

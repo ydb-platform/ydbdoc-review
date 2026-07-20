@@ -16,6 +16,7 @@ from ydbdoc_review.parsing.ast_types import (
     InlineLink,
     InlineNode,
     InlineStrong,
+    InlineText,
     ListItem,
     OrderedList,
     Paragraph,
@@ -195,6 +196,38 @@ def build_en_toc_reachable_from_repo(
     )
 
 
+def _link_plain_text(node: InlineLink) -> str:
+    parts: list[str] = []
+    for child in node.children:
+        if isinstance(child, InlineText):
+            parts.append(child.content)
+        elif isinstance(child, (InlineEmphasis, InlineStrong)):
+            for nested in child.children:
+                if isinstance(nested, InlineText):
+                    parts.append(nested.content)
+    return "".join(parts)
+
+
+def _is_autotitle_link(node: InlineLink) -> bool:
+    """Diplodoc ``[{#T}](href)`` — stripping children leaves a bare ``{#T}`` token."""
+    return _link_plain_text(node).strip() == "{#T}"
+
+
+def _plain_text_for_stripped_link(node: InlineLink) -> InlineText:
+    """Readable fallback when an unreachable link is removed.
+
+    Autotitle links must not leave a raw ``{#T}`` in EN prose (#47108). Use the
+    target path stem (``execution_process``, ``watermarks``) instead.
+    """
+    if _is_autotitle_link(node):
+        path = (node.href or "").split("#", 1)[0].rstrip("/")
+        stem = PurePosixPath(path).stem or path
+        if stem.endswith(".md"):
+            stem = stem[: -len(".md")]
+        return InlineText(content=stem or "{#T}")
+    return InlineText(content=_link_plain_text(node))
+
+
 def _walk_inline(
     nodes: list[InlineNode],
     *,
@@ -207,7 +240,10 @@ def _walk_inline(
         if isinstance(node, InlineLink):
             target = resolve_internal_md_href(from_file, node.href)
             if target is not None and target not in reachable:
-                nodes[i : i + 1] = list(node.children)
+                if _is_autotitle_link(node):
+                    nodes[i] = _plain_text_for_stripped_link(node)
+                else:
+                    nodes[i : i + 1] = list(node.children)
                 continue
             _walk_inline(node.children, from_file=from_file, reachable=reachable)
         elif isinstance(node, (InlineEmphasis, InlineStrong)):
@@ -283,7 +319,10 @@ def strip_unreachable_internal_links(
                 target = resolve_internal_md_href(from_file, node.href)
                 if target is not None and target not in reachable:
                     stripped.append(node.href)
-                    nodes[i : i + 1] = list(node.children)
+                    if _is_autotitle_link(node):
+                        nodes[i] = _plain_text_for_stripped_link(node)
+                    else:
+                        nodes[i : i + 1] = list(node.children)
                     continue
                 _walk_inline_count(node.children, from_file=from_file)
             elif isinstance(node, (InlineEmphasis, InlineStrong)):

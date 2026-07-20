@@ -196,8 +196,22 @@ def test_strip_unreachable_internal_links_case_44457_watermarks():
     )
     assert "watermarks.md" not in out
     assert "spring-retry.md" not in out
+    # Autotitle must not leave a bare ``{#T}`` (#47108); use path stem.
+    assert "{#T}" not in out
     assert "watermarks" in out
     assert "spring-ydb-retry" in out
+
+
+def test_strip_unreachable_autotitle_uses_stem_not_bare_t():
+    text = "See [{#T}](query_execution/execution_process.md#sessions).\n"
+    out = strip_unreachable_internal_links(
+        text,
+        file_path="ydb/docs/en/core/concepts/glossary.md",
+        reachable=frozenset(),
+    )
+    assert "{#T}" not in out
+    assert "execution_process" in out
+    assert "execution_process.md" not in out
 
 
 def test_strip_unreachable_links_inside_table_cells():
