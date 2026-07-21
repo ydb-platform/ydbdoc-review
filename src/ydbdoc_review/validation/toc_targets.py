@@ -101,12 +101,19 @@ def check_orphan_translated_pages(
     repo_path: str,
     docs_root: str = "ydb/docs",
     pending_toc_texts: dict[str, str] | None = None,
+    extra_toc_paths: set[str] | frozenset[str] | None = None,
 ) -> dict[str, list[str]]:
     """Map EN page path → blocking messages when the page is off the EN toc graph.
 
     A translated ``.md`` (except ``_includes/``) must appear as a ``href`` reachable
     from ``{docs_root}/en/core/toc_p.yaml`` via ``include.path`` child sidebars.
+
+    ``extra_toc_paths`` — EN toc files from the translation PR — are queued into
+    the BFS besides the root walk (§6.133). Prefer ``HEAD`` over a dirty worktree
+    so a momentary main-like EN sidebar cannot false-🔴 orphan pages.
     """
+    from ydbdoc_review.github.git_ops import read_text_at_ref
+
     pending_tocs = {
         normalize_repo_path(p): text
         for p, text in (pending_toc_texts or {}).items()
@@ -123,15 +130,22 @@ def check_orphan_translated_pages(
         key = normalize_repo_path(path)
         if key in pending_tocs:
             return pending_tocs[key]
+        head = read_text_at_ref(repo_path, "HEAD", key)
+        if head is not None:
+            return head
         return read_text(repo_path, key)
 
-    # Do not seed pending tocs into the BFS queue: only pages reachable from
-    # root via include.path count. Pending toc text is still served by _read.
     root_toc = f"{docs_root.strip('/')}/en/core/toc_p.yaml"
+    extra = {
+        normalize_repo_path(p)
+        for p in (extra_toc_paths or ())
+        if str(p).endswith((".yaml", ".yml"))
+    }
     reachable = collect_en_toc_reachable_md(
         _read,
         root_toc=root_toc,
         extra_md_paths=pending_md,
+        extra_toc_paths=extra,
         seed_extra_md=False,
     )
 
@@ -154,6 +168,8 @@ def apply_toc_target_checks(
     pending_paths: set[str] | None = None,
 ) -> None:
     """Attach blocking toc-target findings to navigation verify results."""
+    from ydbdoc_review.github.git_ops import read_text_at_ref
+
     extra_pending = set(pending_paths or ())
     for run in result.pair_results:
         if run.plan.target_lang == "en" and run.plan.target_path.endswith(
@@ -165,6 +181,8 @@ def apply_toc_target_checks(
         if nav.error or nav.kind != "toc":
             continue
         en_text = nav.target_text
+        if en_text is None:
+            en_text = read_text_at_ref(repo_path, "HEAD", nav.en_path)
         if en_text is None:
             en_text = read_text(repo_path, nav.en_path)
         if en_text is None:
@@ -189,9 +207,11 @@ def apply_orphan_toc_page_checks(
 ) -> None:
     """Attach blocking findings for translated EN pages missing from the toc graph."""
     pending_toc_texts: dict[str, str] = {}
+    extra_toc_paths: set[str] = set()
     for nav in result.navigation_results:
         if nav.error or nav.kind != "toc":
             continue
+        extra_toc_paths.add(normalize_repo_path(nav.en_path))
         if nav.target_text is not None:
             pending_toc_texts[nav.en_path] = nav.target_text
 
@@ -212,6 +232,7 @@ def apply_orphan_toc_page_checks(
         repo_path=repo_path,
         docs_root=docs_root,
         pending_toc_texts=pending_toc_texts,
+        extra_toc_paths=extra_toc_paths,
     )
     for path, msgs in orphans.items():
         for run in runs_by_path.get(path, []):

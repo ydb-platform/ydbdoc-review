@@ -2921,5 +2921,22 @@ added/modified PR segments. Still **render from the current source AST**
 
 **Tests:** ``test_differential_translation.py``.
 
+### 6.133. Verify EN toc from translation tip; allow safe placeholder reorder (2026-07-21)
+
+**Problem:** ``doc_verify`` on #47104 reported 🔴 ``scope_not_applied`` /
+``orphan_toc_page`` for json_* pages while the same checkout already listed
+those hrefs in EN tocs — false red. Critic fixes for ``nfs-backup`` (reorder
+``⟦U⟧``/``⟦V⟧``) were rejected by ``strict_placeholder_order``.
+
+**Decision:**
+
+1. Navigation verify and orphan checks prefer ``git show HEAD:en_path`` over a
+   dirty worktree; seed orphan BFS with translation-PR EN toc paths.
+2. ``strict_placeholder_order`` allows same placeholder **multiset** with a
+   different order (post §6.55 aligned ids); still rejects renumber/add/drop.
+
+**Tests:** ``test_toc_targets.py`` (HEAD vs stale WT); ``test_critic.py``
+(reorder allowed / renumber rejected).
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

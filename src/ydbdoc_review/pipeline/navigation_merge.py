@@ -527,9 +527,11 @@ def run_navigation_verifies(
             )
             continue
 
-        en_text = read_text(repo_path, pair.en_path)
+        # Prefer HEAD of the translation branch tip (§6.133): working tree may
+        # briefly mirror main / merge-base EN and false-🔴 scope_not_applied.
+        en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
         if en_text is None:
-            en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+            en_text = read_text(repo_path, pair.en_path)
         if en_text is None:
             results.append(
                 NavigationRunResult(

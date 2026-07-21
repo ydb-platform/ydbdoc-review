@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.
 
 **Last updated:** 2026-07-21  
-**Current focus:** §6.132 — differential (incremental) translation.
+**Current focus:** §6.133 — verify EN toc from translation tip (false 🔴 fix).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-21 | **§6.133** — verify EN toc from HEAD; orphan BFS seed; safe placeholder reorder |
 | 2026-07-21 | **§6.132** — differential translation: seed unchanged EN segments, LLM only diffs |
 | 2026-07-20 | **§6.131** — additive TocMergeScope / TocEntryMapping (gradual TOC refactor) |
 | 2026-07-20 | **§6.130** — Wikipedia resolve: langlink→wikidata→offline→None; expanded map |

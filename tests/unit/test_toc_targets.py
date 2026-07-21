@@ -264,6 +264,43 @@ def test_check_orphan_translated_pages_ignores_disconnected_pending_child_toc(
     assert page in orphans
 
 
+def test_check_orphan_uses_head_not_stale_worktree(tmp_path: Path):
+    """§6.133: committed EN toc on HEAD wins over a main-like dirty worktree."""
+    repo = _init_repo(tmp_path)
+    root = "ydb/docs/en/core/toc_p.yaml"
+    concepts = "ydb/docs/en/core/concepts/toc_i.yaml"
+    page = "ydb/docs/en/core/concepts/json_search.md"
+    good_root = dedent("""
+        items:
+        - name: Concepts
+          include: { mode: link, path: concepts/toc_i.yaml }
+    """).strip() + "\n"
+    good_concepts = dedent("""
+        items:
+        - name: JSON search
+          href: json_search.md
+    """).strip() + "\n"
+    stale_concepts = dedent("""
+        items:
+        - name: Overview
+          href: index.md
+    """).strip() + "\n"
+    _write(repo, root, good_root)
+    _write(repo, concepts, good_concepts)
+    _write(repo, page, "# JSON\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "good toc"], cwd=repo, check=True)
+    # Dirty worktree looks like main (no json_search href)
+    _write(repo, concepts, stale_concepts)
+    orphans = check_orphan_translated_pages(
+        {page},
+        repo_path=repo,
+        docs_root="ydb/docs",
+        extra_toc_paths={concepts},
+    )
+    assert orphans == {}
+
+
 def test_check_orphan_translated_pages_skips_includes(tmp_path: Path):
     repo = _init_repo(tmp_path)
     _write(repo, "ydb/docs/en/core/toc_p.yaml", "items: []\n")

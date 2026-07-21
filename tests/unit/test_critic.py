@@ -181,26 +181,37 @@ def test_apply_critic_fixes_skips_unknown_segment_id():
     assert len(skipped) == 1
 
 
-def test_apply_critic_fixes_strict_order_rejects_reorder():
-    """Regression: doc_verify must reject critic-proposed placeholder reorders.
-
-    In doc_verify, RU and EN segments use independent left-to-right
-    placeholder numbering. A critic that reorders ⟦C⟧ markers in EN would
-    cause re-render to substitute the wrong atoms (columns.md s0013/s0014:
-    `views ... Uint64 ... episodes` got corrupted to `Uint64 ... episodes
-    ... views` when the multiset-only validator accepted the reorder).
-    """
+def test_apply_critic_fixes_strict_order_allows_same_set_reorder():
+    """After §6.55 align, same ⟦C⟧ ids are the same atoms — reorder is safe (§6.133)."""
     seg = _segment("s1", "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧")
-    # Current EN translation uses EN-local numbering for the same atoms.
     current = "column named ⟦C1⟧ with data type ⟦C2⟧ to the ⟦C3⟧ table"
-    # Critic, confused by mismatched RU/EN numbering, suggests a reorder
-    # that would mis-render against EN placeholder map.
     suggested = "column named ⟦C2⟧ with data type ⟦C3⟧ to the ⟦C1⟧ table"
     issues = [
         _issue(
             segment_id="s1",
             category="placeholder mapping",
             comment="Placeholder order mismatch",
+            suggested_text=suggested,
+        )
+    ]
+    updated, applied, skipped = apply_critic_fixes(
+        {"s1": current}, [seg], issues, strict_placeholder_order=True
+    )
+    assert updated["s1"] == suggested
+    assert len(applied) == 1
+    assert skipped == []
+
+
+def test_apply_critic_fixes_strict_order_rejects_renumber():
+    """Strict mode still blocks add/drop/renumber of placeholder ids."""
+    seg = _segment("s1", "к таблице ⟦C1⟧ колонку ⟦C2⟧")
+    current = "column ⟦C1⟧ type ⟦C2⟧"
+    suggested = "column ⟦C1⟧ type ⟦C9⟧"
+    issues = [
+        _issue(
+            segment_id="s1",
+            category="placeholder mapping",
+            comment="Wrong marker id",
             suggested_text=suggested,
         )
     ]

@@ -250,10 +250,8 @@ def apply_critic_fixes(
     """Apply ``suggested_text`` fixes that pass structural validation.
 
     When ``strict_placeholder_order`` is True, reject suggestions whose
-    placeholder sequence differs from the current translation. Required in
-    doc_verify mode where RU and EN segments use independent left-to-right
-    placeholder numbering — accepting a critic-proposed reorder there would
-    substitute atoms by EN numbering and corrupt the rendered text.
+    placeholder **set** differs from the current translation (renumber / add /
+    drop). Same ids in a different order are allowed after §6.55 align (§6.133).
 
     Returns ``(updated_translations, applied_issues, skipped_issues)``.
     """
@@ -289,9 +287,11 @@ def apply_critic_fixes(
         if strict_placeholder_order:
             current_ph = extract_placeholders(current)
             suggested_ph = extract_placeholders(issue.suggested_text)
-            if current_ph != suggested_ph:
+            # Same placeholder ids, different order is safe after §6.55 align
+            # (ids name the same atoms). Reject only renumber / add / drop (§6.133).
+            if sorted(current_ph) != sorted(suggested_ph):
                 logger.warning(
-                    "Skipping critic fix for %s: placeholder order change in doc_verify "
+                    "Skipping critic fix for %s: placeholder set change in doc_verify "
                     "(current=%s, suggested=%s) would mis-render EN atoms",
                     issue.segment_id,
                     current_ph,
@@ -299,6 +299,7 @@ def apply_critic_fixes(
                 )
                 skipped.append(issue)
                 continue
+            # same multiset, possibly reordered — apply
         try:
             validate_segment_translation(seg, issue.suggested_text)
         except TranslationValidationError as exc:
