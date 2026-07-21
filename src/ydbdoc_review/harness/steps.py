@@ -28,6 +28,10 @@ from ydbdoc_review.translation.critic_retranslate import (
     issues_by_segment_id,
     retranslate_segments_with_critic_feedback,
 )
+from ydbdoc_review.translation.differential import (
+    DifferentialTranslationConfig,
+    prepare_differential_seed,
+)
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
@@ -206,19 +210,64 @@ class TranslateStep:
         if state.mode != "translate":
             return
         assert state.source_doc is not None
-        state.translations = translate_segments(
-            state.segments,
-            ctx.client,
-            ctx.glossary,
-            file_path=state.file_path,
-            source_lang=ctx.source_lang,
-            target_lang=ctx.target_lang,
-            max_chars=ctx.batch_chars,
-            prompt_version=ctx.prompt_version,
-            cache=ctx.cache,
-            max_parallel_batches=ctx.parallel,
-            manual_actions=state.manual_actions,
+        cfg = ctx.config.translation
+        diff_cfg = DifferentialTranslationConfig.from_env_and_defaults(
+            enabled=cfg.differential_enabled,
+            stale_days_threshold=cfg.differential_stale_days,
+            change_magnitude_threshold=cfg.differential_change_magnitude,
+            min_en_file_ratio=cfg.differential_min_en_ratio,
         )
+        strategy, seeded, pending = prepare_differential_seed(
+            pr_segments=state.segments,
+            ru_pr_text=state.source_text,
+            en_current_text=state.existing_target_text,
+            ru_base_text=state.base_source_text,
+            config=diff_cfg,
+        )
+        state.differential_meta = {
+            "mode": strategy.mode,
+            "reason": strategy.reason,
+            "seeded": len(seeded),
+            "pending": len(pending),
+            **strategy.config,
+        }
+        if strategy.mode == "skip":
+            state.translations = {}
+            state.translated_text = state.existing_target_text or state.source_text
+            state.stopped_early = True
+            return
+
+        state.translations = dict(seeded)
+        if pending:
+            new_trans = translate_segments(
+                pending,
+                ctx.client,
+                ctx.glossary,
+                file_path=state.file_path,
+                source_lang=ctx.source_lang,
+                target_lang=ctx.target_lang,
+                max_chars=ctx.batch_chars,
+                prompt_version=ctx.prompt_version,
+                cache=ctx.cache,
+                max_parallel_batches=ctx.parallel,
+                manual_actions=state.manual_actions,
+            )
+            state.translations.update(new_trans)
+        elif not state.translations:
+            # Full path with empty pending should not happen; safety net.
+            state.translations = translate_segments(
+                state.segments,
+                ctx.client,
+                ctx.glossary,
+                file_path=state.file_path,
+                source_lang=ctx.source_lang,
+                target_lang=ctx.target_lang,
+                max_chars=ctx.batch_chars,
+                prompt_version=ctx.prompt_version,
+                cache=ctx.cache,
+                max_parallel_batches=ctx.parallel,
+                manual_actions=state.manual_actions,
+            )
         _render_translated_from_source(state, ctx)
 
 

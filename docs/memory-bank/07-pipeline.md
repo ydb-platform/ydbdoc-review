@@ -194,8 +194,11 @@ For each changed `.md` under `ydb/docs/`:
   language-neutral (images, shared assets); not translated.
 - Non-`.md` under `_includes/` (png, svg, …) — never sent to the translator.
 
-If RU changed (EN unchanged) → **full** translate RU→EN; commit replaces EN
-entirely (render from RU AST — §6.30). Existing EN on `main` is ignored.
+If RU changed (EN unchanged) → translate RU→EN; commit replaces EN entirely
+(render from RU AST — §6.30). Prefer **differential** seeding of unchanged
+segments from existing EN when merge-base RU aligns (§6.132); otherwise full
+LLM translate. Existing EN is **not** left as-is as the file body — it only
+seeds segment texts.
 If EN changed and RU did not → full translate EN→RU (overwrite RU).
 If **both** changed in the source PR → **skip** auto-translate (§6.76); authors
 updated the bilingual pair — no translation PR, no EN overwrite.

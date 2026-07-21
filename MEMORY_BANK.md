@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.
 
-**Last updated:** 2026-07-20  
-**Current focus:** §6.130–§6.131 — Wikipedia resolve chain + additive TOC models.
+**Last updated:** 2026-07-21  
+**Current focus:** §6.132 — differential (incremental) translation.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-21 | **§6.132** — differential translation: seed unchanged EN segments, LLM only diffs |
 | 2026-07-20 | **§6.131** — additive TocMergeScope / TocEntryMapping (gradual TOC refactor) |
 | 2026-07-20 | **§6.130** — Wikipedia resolve: langlink→wikidata→offline→None; expanded map |
 | 2026-07-20 | **§6.129** — offline Wikipedia RU→EN titles for glossary/json-index (#47104 TLS) |

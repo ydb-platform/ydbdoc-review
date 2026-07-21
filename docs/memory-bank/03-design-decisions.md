@@ -2896,5 +2896,30 @@ tranche.
 
 **Tests:** ``test_toc_models.py``.
 
+### 6.132. Differential (incremental) translation (2026-07-21)
+
+**Problem:** ``doc_translate`` always full-rewrote EN from the RU AST (§6.30),
+burning tokens and risking regression on unchanged prose
+(``AGENT_TASK_DIFFERENTIAL_TRANSLATION.md``).
+
+**Decision:** when existing EN + merge-base RU are available and change
+magnitude is low, **seed** unchanged segment translations from EN (aligned to
+base RU via ``align_translations_from_target``) and LLM-translate only
+added/modified PR segments. Still **render from the current source AST**
+(§6.30 structural parity). Fall back to **full** when:
+
+- no / empty EN, incomplete EN (``len(EN)/len(RU) < min_ratio``),
+- EN stale (optional last-commit age > N days),
+- change magnitude > threshold (default 50%),
+- EN cannot be aligned to base RU (segment count/structure),
+- ``translation.differential_enabled=false`` /
+  ``YDBDOC_TRANSLATION_DIFFERENTIAL_ENABLED=0``.
+
+**Wiring:** ``translation/differential.py``; ``PairContent.ru_base_text``;
+``FileRunState.base_source_text`` + ``existing_target_text`` on translate;
+``TranslateStep`` logs ``differential_meta``.
+
+**Tests:** ``test_differential_translation.py``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

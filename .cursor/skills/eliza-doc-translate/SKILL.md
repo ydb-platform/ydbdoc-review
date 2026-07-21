@@ -30,6 +30,13 @@ GitHub label `doc_translate` (Yandex Cloud). Do **not** block the chat for
 
 Override paths only if the user gives different ones.
 
+## Standing permission
+
+The user already allows the full Eliza translate/verify loop (launch, poll,
+force-push `ydbdoc-review/pr-*`, re-verify, iterate to 🟢). **Do not ask**
+«можно ли запустить / продолжить?» and **do not** end the turn as if waiting
+for approval while a job runs. See rule `eliza-translate-autonomy`.
+
 ## Hard rules
 
 1. **Eliza only** — `python -m ydbdoc_review job --mode translate …` via
@@ -38,10 +45,46 @@ Override paths only if the user gives different ones.
 3. **Start → background → continue** — do not `gh run watch` / sleep through
    docs builds. Translation itself may take tens of minutes; wait on **log
    sentinel**, not on `build-docs`.
-4. After the job finishes, **inspect the translation PR** and act until 🟢
+4. **Keep watching until DONE** — do **not** drop the job after the first
+   turn. Arm **both**:
+   - `notify_on_output` on `YDBDOC_ELIZA_TRANSLATE_DONE` /
+     `YDBDOC_ELIZA_VERIFY_DONE` (or the helper `.done` file), **and**
+   - a **5-minute heartbeat loop** (see § Monitoring) so the agent wakes even
+     if the sentinel notification was missed or the chat went idle.
+5. After the job finishes, **inspect the translation PR** and act until 🟢
    (or hit a real blocker you must report).
-5. Keep `YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem`. Do **not**
+6. Keep `YDBDOC_ELIZA_CA_BUNDLE=/etc/ssl/certs/YandexInternalCA.pem`. Do **not**
    set `REQUESTS_CA_BUNDLE` to the internal CA alone.
+
+## Monitoring (mandatory for long jobs)
+
+Why agents look «stuck»: between user messages the model only wakes on tool
+notifications. Relying only on DONE is fragile (missed pattern, early exit,
+chat idle). **Always** add a 5-minute poll until the job ends.
+
+After launching translate or verify:
+
+```bash
+# Loop every 5m: check Eliza job <PR>
+while true; do
+  sleep 300
+  echo "AGENT_LOOP_TICK_eliza {\"prompt\":\"Check Eliza job for PR <N>: read /tmp/ydbdoc-translate-<N>.done or /tmp/ydbdoc-verify-<TRANSLATION_PR>.done if present; else tail -20 the matching log and report still-running vs errors. If DONE: handle completion per skill (QA report → iterate to green). If still running: one-line status then keep looping. If user asked to stop: kill this loop.\"}"
+done
+```
+
+Shell tool:
+
+- `block_until_ms: 0`
+- `notify_on_output`: pattern `^AGENT_LOOP_TICK_eliza`
+- Unique purpose suffix if several jobs run (`eliza_41271`, `eliza_verify_47104`)
+- Smoke-check the loop started; first tick after ~5m
+- On each tick: short status to the user if still running; on DONE → full
+  completion handling and **kill the loop** (do not re-arm)
+- Also keep `notify_on_output` on the job’s DONE sentinel — whichever fires
+  first, handle completion once and stop the heartbeat
+
+Stop the heartbeat when: DONE handled, unblockable failure reported, or user
+says stop.
 
 ## Workflow
 
@@ -111,11 +154,14 @@ Shell tool:
 - `block_until_ms: 0` (background immediately).
 - `notify_on_output`: pattern `YDBDOC_ELIZA_TRANSLATE_DONE` (or read
   `/tmp/ydbdoc-translate-<N>.done` when the helper finishes).
+- **Also** start the § Monitoring 5-minute `AGENT_LOOP_TICK_eliza` heartbeat
+  for this PR (same turn as launch).
 - After start: smoke-check the log for `Starting Eliza translate` /
   `Scope plan for PR` within a few seconds. If missing tokens/CA, fix and
   relaunch — do not wait blindly.
 
-Tell the user: PR N started; log path; you will report when DONE (no build wait).
+Tell the user: PR N started; log path; you will report on DONE **and** every
+~5m while it runs (no build wait).
 
 ### 4. On completion — verify what happened
 

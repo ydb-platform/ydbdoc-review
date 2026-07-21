@@ -95,6 +95,11 @@ class TranslationConfig(BaseModel):
     target_lang: str = "en"
     segments_per_batch_chars: int = 4000
     critic_feedback_retries: int = 2
+    # §6.132 differential translation (override via YDBDOC_TRANSLATION_*)
+    differential_enabled: bool = True
+    differential_stale_days: int = 90
+    differential_change_magnitude: float = 0.5
+    differential_min_en_ratio: float = 0.3
 
 
 class PromptsConfig(BaseModel):

@@ -54,12 +54,20 @@ def run_pair_plan(
     enable_critic = plan.action != "skip"
     profile = TRANSLATE_PROFILE if enable_translate else VERIFY_PROFILE
 
+    # §6.132: pass existing EN + base RU into translate so differential can seed.
+    base_source: str | None = None
+    if enable_translate and plan.action == "translate_to_en":
+        base_source = content.ru_base_text
+    elif enable_translate and plan.action == "translate_to_ru":
+        base_source = content.en_base_text
+
     state = FileRunState(
         mode=profile.name,  # type: ignore[arg-type]
         file_path=plan.source_path,
         raw_source_text=source_text,
         source_text=source_text,
-        existing_target_text=existing_target if not enable_translate else None,
+        existing_target_text=existing_target,
+        base_source_text=base_source if enable_translate else None,
     )
     harness_ctx = HarnessContext.from_options(
         ctx.client,

@@ -24,9 +24,13 @@ class FileRunState:
     raw_source_text: str
     source_text: str
     existing_target_text: str | None = None
+    # Merge-base source (RU) for differential translate (§6.132).
+    base_source_text: str | None = None
 
     source_doc: Document | None = None
     segments: list[Segment] = field(default_factory=list)
+    # Metrics from differential seed (mode, kept/pending counts).
+    differential_meta: dict[str, object] = field(default_factory=dict)
     segment_locations: dict[str, str] = field(default_factory=dict)
 
     translations: dict[str, str] = field(default_factory=dict)

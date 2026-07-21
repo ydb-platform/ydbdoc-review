@@ -41,11 +41,14 @@ def translate_file(
     enable_critic: bool = False,
     enable_translate: bool = True,
     existing_target_text: str | None = None,
+    base_source_text: str | None = None,
 ) -> FileTranslationResult:
     """Run the per-file harness.
 
     ``doc_translate`` uses translate-only; ``doc_verify`` uses critic QA on disk.
     Pass ``enable_critic=True`` for local ``translate-file --with-critic``.
+    Optional ``base_source_text`` + ``existing_target_text`` enable §6.132
+    differential seeding on translate.
     """
     critic_on = True if not enable_translate else enable_critic
     ctx = HarnessContext.from_options(
@@ -70,5 +73,6 @@ def translate_file(
         raw_source_text=source_text,
         source_text=source_text,
         existing_target_text=existing_target_text,
+        base_source_text=base_source_text if enable_translate else None,
     )
     return FileHarness(profile).run(state, ctx)

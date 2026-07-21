@@ -424,6 +424,8 @@ def load_verify_pair_contents(
             if pair.en_changed
             else None
         )
+        ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         contents.append(
             PairContent(
                 pair=pair,
@@ -431,6 +433,8 @@ def load_verify_pair_contents(
                 en_text=en_text,
                 ru_diff_vs_base=ru_diff or None,
                 en_diff_vs_base=en_diff or None,
+                ru_base_text=ru_base_text,
+                en_base_text=en_base_text,
             )
         )
     return contents
@@ -482,6 +486,8 @@ def load_pair_contents(
             if pair.en_changed
             else None
         )
+        ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         contents.append(
             PairContent(
                 pair=pair,
@@ -489,6 +495,8 @@ def load_pair_contents(
                 en_text=en_text,
                 ru_diff_vs_base=ru_diff or None,
                 en_diff_vs_base=en_diff or None,
+                ru_base_text=ru_base_text,
+                en_base_text=en_base_text,
             )
         )
     return contents

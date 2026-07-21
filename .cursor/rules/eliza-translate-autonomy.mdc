@@ -1,0 +1,33 @@
+---
+description: Standing permission to run Eliza translate/verify and keep watching until green
+alwaysApply: true
+---
+
+# Eliza translate / verify — standing autonomy
+
+The user has **standing permission** for all actions needed to run and track
+local Eliza doc translation. Do **not** ask for confirmation and do **not** go
+idle waiting for the next user message while a job is in flight.
+
+## Allowed without asking
+
+- Start / restart `job --mode translate` and `job --mode verify` (Eliza)
+- Background shells, log + DONE sentinels, 5-minute `AGENT_LOOP_TICK_eliza*`
+- Fetch / checkout / reset local ydb clone to translation branches
+- Force-push translation branches (`ydbdoc-review/pr-*`) when non-FF after
+  local translate
+- Post/update QA comments, re-verify, iterate toward 🟢 (up to skill limits)
+- Kill heartbeat loops when DONE is handled or the user says stop
+- Delete obsolete `ydbdoc-review/pr-*` branches when the user asks
+
+## Must not idle
+
+While translate/verify is running: keep the heartbeat armed; on each tick give
+a one-line status (or handle DONE). Prefer the `eliza-doc-translate` skill.
+
+## Still ask
+
+- Commits/tags/PRs in **this** repo (`ydbdoc-review`) unless already requested
+- Force-push to non-`ydbdoc-review/*` branches
+- Adding the GitHub `doc_translate` label
+- Destructive ops unrelated to the translation workflow

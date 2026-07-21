@@ -38,6 +38,9 @@ class PairContent:
     en_text: str | None = None
     ru_diff_vs_base: str | None = None
     en_diff_vs_base: str | None = None
+    # Merge-base bodies for §6.132 differential translation (optional).
+    ru_base_text: str | None = None
+    en_base_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,11 +61,11 @@ def _non_trivial(text: str | None) -> bool:
 
 
 def plan_pair_heuristic(content: PairContent) -> PairPlan:
-    """Deterministic plan: always full re-translate from PR source language.
+    """Deterministic plan: translate from PR source language (§6.30 + §6.132).
 
-    ``doc_translate`` renders the target from the source AST (``translate_file``
-    with ``enable_translate=True``), replacing any existing mirror text. The
-    analyze LLM is not used for action selection.
+    ``doc_translate`` still renders the target from the source AST. When base RU
+    and existing EN are available, ``TranslateStep`` may **differentially** seed
+    unchanged segments (§6.132) instead of calling the LLM for every segment.
 
     Source language: whichever side the PR authors edited. RU→EN when only RU
     changed; EN→RU when only EN changed. When **both** sides changed in the
