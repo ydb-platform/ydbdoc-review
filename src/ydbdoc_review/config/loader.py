@@ -100,6 +100,23 @@ class TranslationConfig(BaseModel):
     differential_stale_days: int = 90
     differential_change_magnitude: float = 0.5
     differential_min_en_ratio: float = 0.3
+    continue_feedback: str = ""
+
+
+class OpsConfig(BaseModel):
+    """ACL, quota, transcript backend (§6.134). Override via ``YDBDOC_OPS_*``."""
+
+    model_config = ConfigDict(extra="forbid")
+    daily_budget_rub: float = 5000.0
+    max_continues_per_pr: int = 3
+    transcript_backend: str = "ydb"
+    transcript_ttl_days: int = 14
+    ydb_endpoint: str = "grpcs://ydb.serverless.yandexcloud.net:2135"
+    ydb_database: str = (
+        "/ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k"
+    )
+    allowed_actors: str = ""
+    skip_gates: bool = False
 
 
 class PromptsConfig(BaseModel):
@@ -134,6 +151,9 @@ class Secrets(BaseModel):
     eliza_api_root: str | None = None
     github_token: str | None = None
     github_push_token: str | None = None
+    ydb_sa_key_file: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
 
     def require_yandex(self) -> tuple[str, str]:
         """Return (folder_id, api_key) or raise if missing."""
@@ -206,6 +226,7 @@ class Config(BaseModel):
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+    ops: OpsConfig = Field(default_factory=OpsConfig)
     # Resolved at load time; not part of the YAML.
     secrets: Secrets = Field(default_factory=Secrets)
 
@@ -246,6 +267,8 @@ def _first_env(aliases: tuple[str, ...], env: dict[str, str]) -> str | None:
 
 
 def _resolve_secrets(env: dict[str, str]) -> Secrets:
+    from ydbdoc_review.ops.ydb_driver import resolve_sa_key_file
+
     return Secrets(
         yc_folder_id=_first_env(_FOLDER_ID_ENV_ALIASES, env),
         yc_api_key=_first_env(_API_KEY_ENV_ALIASES, env),
@@ -254,6 +277,9 @@ def _resolve_secrets(env: dict[str, str]) -> Secrets:
         eliza_api_root=_first_env(_ELIZA_API_ROOT_ALIASES, env),
         github_token=_first_env(_GITHUB_TOKEN_ALIASES, env),
         github_push_token=_first_env(_GITHUB_PUSH_TOKEN_ALIASES, env),
+        ydb_sa_key_file=resolve_sa_key_file(env),
+        s3_access_key_id=env.get("YDBDOC_S3_ACCESS_KEY_ID") or None,
+        s3_secret_access_key=env.get("YDBDOC_S3_SECRET_ACCESS_KEY") or None,
     )
 
 
@@ -265,6 +291,9 @@ _OVERRIDE_PREFIX = "YDBDOC_"
 _SECRET_PREFIXES: tuple[str, ...] = (
     "YDBDOC_YC_",
     "YDBDOC_PUSH_",
+    "YDBDOC_YDB_SA_",
+    "YDBDOC_S3_ACCESS_",
+    "YDBDOC_S3_SECRET_",
 )
 
 
@@ -383,6 +412,19 @@ def load_config(
 
     cfg = Config.model_validate(data)
     cfg.secrets = _resolve_secrets(env)
+    # Flat env aliases used by GitHub Actions (not YDBDOC_OPS_* path form).
+    if env.get("YDBDOC_ALLOWED_ACTORS"):
+        cfg.ops.allowed_actors = env["YDBDOC_ALLOWED_ACTORS"]
+    if env.get("YDBDOC_DAILY_BUDGET_RUB"):
+        try:
+            cfg.ops.daily_budget_rub = float(env["YDBDOC_DAILY_BUDGET_RUB"])
+        except ValueError:
+            pass
+    if env.get("YDBDOC_TRANSCRIPT_BACKEND"):
+        cfg.ops.transcript_backend = env["YDBDOC_TRANSCRIPT_BACKEND"].strip()
+    skip = env.get("YDBDOC_SKIP_OPS_GATES", "").strip().lower()
+    if skip in ("1", "true", "yes", "on"):
+        cfg.ops.skip_gates = True
     return cfg
 
 

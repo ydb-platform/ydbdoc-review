@@ -17,7 +17,7 @@ from rich.table import Table
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubConfigError, GitHubError
-from ydbdoc_review.github.workflow import run_doc_translate, run_doc_verify
+from ydbdoc_review.github.workflow import run_doc_continue, run_doc_translate, run_doc_verify
 from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -164,17 +164,61 @@ def verify(
     _print_job_summary(result.mode, result)
 
 
+@app.command("continue")
+def continue_(
+    repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
+    pr: Annotated[
+        int,
+        typer.Option(help="Translation PR number (doc_continue)."),
+    ],
+    repo_path: Annotated[
+        Path | None,
+        typer.Option(help="Local git checkout of the translation PR head."),
+    ] = None,
+    merge_base_with: Annotated[
+        str,
+        typer.Option(help="Second ref for git merge-base."),
+    ] = "origin/main",
+    dry_run: Annotated[bool, typer.Option(help="No writes or comments.")] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option(help="Run QA but skip repair commit/push."),
+    ] = False,
+    instruction: Annotated[
+        str | None,
+        typer.Option(help="Override /ydbdoc continue text (else read from PR comments)."),
+    ] = None,
+) -> None:
+    """Continue translation with operator feedback (``doc_continue``)."""
+    path = _resolve_repo_path(repo_path)
+    try:
+        result = run_doc_continue(
+            repo_path=str(path),
+            github_repo=repo,
+            pr_number=pr,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+            instruction=instruction,
+        )
+    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_job_summary(result.mode, result)
+
+
 @app.command()
 def job(
     mode: Annotated[
         str,
         typer.Option(
             "--mode",
-            help="translate (doc_translate) or verify (doc_verify).",
+            help="translate | verify | continue.",
         ),
     ],
     repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
-    pr: Annotated[int, typer.Option(help="PR number (source for translate; translation for verify).")],
+    pr: Annotated[int, typer.Option(help="PR number (source for translate; translation for verify/continue).")],
     repo_path: Annotated[
         Path | None,
         typer.Option(help="Local git checkout of the PR head."),
@@ -214,8 +258,17 @@ def job(
                 dry_run=dry_run,
                 no_commit=no_commit,
             )
+        elif m in ("continue", "doc_continue"):
+            result = run_doc_continue(
+                repo_path=str(path),
+                github_repo=repo,
+                pr_number=pr,
+                merge_base_with=merge_base_with,
+                dry_run=dry_run,
+                no_commit=no_commit,
+            )
         else:
-            raise typer.BadParameter("mode must be translate or verify")
+            raise typer.BadParameter("mode must be translate, verify, or continue")
     except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc

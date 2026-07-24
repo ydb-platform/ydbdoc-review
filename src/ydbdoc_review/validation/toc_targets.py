@@ -53,15 +53,80 @@ def check_missing_toc_targets(
     return missing
 
 
-def _is_toc_orphan_exempt(en_md_path: str, *, docs_root: str) -> bool:
+def _is_toc_orphan_exempt(
+    md_path: str,
+    *,
+    docs_root: str,
+    locale: str = "en",
+) -> bool:
     """Locale includes and non-doc paths are not expected as sidebar ``href``s."""
-    normalized = normalize_repo_path(en_md_path)
+    normalized = normalize_repo_path(md_path)
     root = docs_root.strip("/")
-    if not normalized.startswith(f"{root}/en/"):
+    loc = locale.strip("/").lower()
+    if loc not in {"en", "ru"}:
+        raise ValueError(f"locale must be 'en' or 'ru', got {locale!r}")
+    if not normalized.startswith(f"{root}/{loc}/"):
         return True
     if "/_includes/" in normalized or normalized.endswith("/_includes"):
         return True
     return False
+
+
+def find_locale_pages_missing_from_toc(
+    repo_path: str,
+    *,
+    locale: str,
+    docs_root: str = "ydb/docs",
+    pending_toc_texts: dict[str, str] | None = None,
+) -> list[str]:
+    """Return ``.md`` paths for ``locale`` that are off that locale's toc graph.
+
+    Skips ``_includes/``. Root toc: ``{docs_root}/{locale}/core/toc_p.yaml``.
+    Used by ops scripts (``scripts/find_toc_orphans.py``).
+    """
+    loc = locale.strip("/").lower()
+    if loc not in {"en", "ru"}:
+        raise ValueError(f"locale must be 'en' or 'ru', got {locale!r}")
+
+    root = docs_root.strip("/")
+    locale_root = Path(repo_path) / root.replace("/", os.sep) / loc
+    if not locale_root.is_dir():
+        return []
+
+    candidates: set[str] = set()
+    for path in locale_root.rglob("*.md"):
+        rel = path.relative_to(repo_path).as_posix()
+        if _is_toc_orphan_exempt(rel, docs_root=docs_root, locale=loc):
+            continue
+        candidates.add(normalize_repo_path(rel))
+
+    orphans = check_orphan_pages_for_locale(
+        candidates,
+        repo_path=repo_path,
+        locale=loc,
+        docs_root=docs_root,
+        pending_toc_texts=pending_toc_texts,
+    )
+    return sorted(orphans)
+
+
+def find_pages_missing_from_toc(
+    repo_path: str,
+    *,
+    locales: tuple[str, ...] | list[str] = ("en", "ru"),
+    docs_root: str = "ydb/docs",
+    pending_toc_texts: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
+    """Return ``{locale: [orphan paths…]}`` for each requested locale."""
+    out: dict[str, list[str]] = {}
+    for locale in locales:
+        out[locale.strip("/").lower()] = find_locale_pages_missing_from_toc(
+            repo_path,
+            locale=locale,
+            docs_root=docs_root,
+            pending_toc_texts=pending_toc_texts,
+        )
+    return out
 
 
 def find_en_pages_missing_from_toc(
@@ -72,47 +137,38 @@ def find_en_pages_missing_from_toc(
 ) -> list[str]:
     """Return EN ``.md`` paths under ``docs_root`` that are off the EN toc graph.
 
-    Skips ``_includes/``. Used by the en-toc-orphans audit skill and ops scripts.
+    Skips ``_includes/``. Alias of ``find_locale_pages_missing_from_toc(…, locale="en")``.
     """
-    root = docs_root.strip("/")
-    en_root = Path(repo_path) / root.replace("/", os.sep) / "en"
-    if not en_root.is_dir():
-        return []
-
-    candidates: set[str] = set()
-    for path in en_root.rglob("*.md"):
-        rel = path.relative_to(repo_path).as_posix()
-        if _is_toc_orphan_exempt(rel, docs_root=docs_root):
-            continue
-        candidates.add(normalize_repo_path(rel))
-
-    orphans = check_orphan_translated_pages(
-        candidates,
-        repo_path=repo_path,
+    return find_locale_pages_missing_from_toc(
+        repo_path,
+        locale="en",
         docs_root=docs_root,
         pending_toc_texts=pending_toc_texts,
     )
-    return sorted(orphans)
 
 
-def check_orphan_translated_pages(
-    en_md_paths: set[str] | frozenset[str],
+def check_orphan_pages_for_locale(
+    md_paths: set[str] | frozenset[str],
     *,
     repo_path: str,
+    locale: str = "en",
     docs_root: str = "ydb/docs",
     pending_toc_texts: dict[str, str] | None = None,
     extra_toc_paths: set[str] | frozenset[str] | None = None,
 ) -> dict[str, list[str]]:
-    """Map EN page path → blocking messages when the page is off the EN toc graph.
+    """Map page path → messages when the page is off that locale's toc graph.
 
-    A translated ``.md`` (except ``_includes/``) must appear as a ``href`` reachable
-    from ``{docs_root}/en/core/toc_p.yaml`` via ``include.path`` child sidebars.
+    A ``.md`` (except ``_includes/``) must appear as a ``href`` reachable from
+    ``{docs_root}/{locale}/core/toc_p.yaml`` via ``include.path`` child sidebars.
 
-    ``extra_toc_paths`` — EN toc files from the translation PR — are queued into
-    the BFS besides the root walk (§6.133). Prefer ``HEAD`` over a dirty worktree
-    so a momentary main-like EN sidebar cannot false-🔴 orphan pages.
+    Prefer ``HEAD`` over a dirty worktree so a momentary sidebar cannot false-flag
+    orphans (§6.133).
     """
     from ydbdoc_review.github.git_ops import read_text_at_ref
+
+    loc = locale.strip("/").lower()
+    if loc not in {"en", "ru"}:
+        raise ValueError(f"locale must be 'en' or 'ru', got {locale!r}")
 
     pending_tocs = {
         normalize_repo_path(p): text
@@ -120,8 +176,9 @@ def check_orphan_translated_pages(
     }
     pending_md = {
         normalize_repo_path(p)
-        for p in en_md_paths
-        if p.endswith(".md") and not _is_toc_orphan_exempt(p, docs_root=docs_root)
+        for p in md_paths
+        if p.endswith(".md")
+        and not _is_toc_orphan_exempt(p, docs_root=docs_root, locale=loc)
     }
     if not pending_md:
         return {}
@@ -135,12 +192,13 @@ def check_orphan_translated_pages(
             return head
         return read_text(repo_path, key)
 
-    root_toc = f"{docs_root.strip('/')}/en/core/toc_p.yaml"
+    root_toc = f"{docs_root.strip('/')}/{loc}/core/toc_p.yaml"
     extra = {
         normalize_repo_path(p)
         for p in (extra_toc_paths or ())
         if str(p).endswith((".yaml", ".yml"))
     }
+    # Name is historical (EN QA); BFS is locale-agnostic given ``root_toc``.
     reachable = collect_en_toc_reachable_md(
         _read,
         root_toc=root_toc,
@@ -155,10 +213,33 @@ def check_orphan_translated_pages(
             continue
         out[path] = [
             "orphan_toc_page: "
-            f"translated EN page `{path}` is not linked from any EN toc "
+            f"{'translated EN' if loc == 'en' else 'RU'} page `{path}` is not "
+            f"linked from any {'EN' if loc == 'en' else 'RU'} toc "
             f"(reachable from `{root_toc}` via href/include.path)"
         ]
     return out
+
+
+def check_orphan_translated_pages(
+    en_md_paths: set[str] | frozenset[str],
+    *,
+    repo_path: str,
+    docs_root: str = "ydb/docs",
+    pending_toc_texts: dict[str, str] | None = None,
+    extra_toc_paths: set[str] | frozenset[str] | None = None,
+) -> dict[str, list[str]]:
+    """Map EN page path → blocking messages when the page is off the EN toc graph.
+
+    Pipeline QA wrapper around ``check_orphan_pages_for_locale(…, locale="en")``.
+    """
+    return check_orphan_pages_for_locale(
+        en_md_paths,
+        repo_path=repo_path,
+        locale="en",
+        docs_root=docs_root,
+        pending_toc_texts=pending_toc_texts,
+        extra_toc_paths=extra_toc_paths,
+    )
 
 
 def apply_toc_target_checks(

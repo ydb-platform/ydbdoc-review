@@ -1,7 +1,7 @@
-# doc_verify на translation PR — ручной перезапуск (первый прогон inline в doc_translate job).
-# QA = critic + эвристики + вердикт (отдельный шаг после doc_translate).
+# doc_continue на translation PR — follow-up с инструкцией `/ydbdoc continue …`.
+# Перед лейблом добавьте комментарий с командой, затем повесьте doc_continue.
 
-name: ydbdoc-review (doc_verify label)
+name: ydbdoc-review (doc_continue label)
 
 on:
   pull_request_target:
@@ -12,13 +12,14 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
-  ydbdoc-verify:
-    if: github.event.label.name == 'doc_verify'
+  ydbdoc-continue:
+    if: github.event.label.name == 'doc_continue'
     runs-on: ubuntu-latest
     concurrency:
-      group: ydbdoc-verify-${{ github.event.pull_request.number }}
+      group: ydbdoc-continue-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
       - name: Checkout PR head
@@ -31,10 +32,18 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
-      - name: Verify translation PR
+      - name: Write YDB SA key
+        env:
+          YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$YDB_SA_KEY" > "$RUNNER_TEMP/ydb-sa.json"
+          echo "YDBDOC_YDB_SA_KEY_FILE=$RUNNER_TEMP/ydb-sa.json" >> "$GITHUB_ENV"
+
+      - name: Continue translation with operator feedback
         uses: ydb-platform/ydbdoc-review@v0.1.0
         with:
-          mode: verify
+          mode: continue
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}
           merge_base_with: origin/${{ github.event.pull_request.base.ref }}
@@ -48,5 +57,4 @@ jobs:
           YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
           YDBDOC_TRANSCRIPT_BACKEND: ydb
           YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
-          # Если push repair даёт 403 (fork/upstream): раскомментируйте
-          # GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
+          YDBDOC_YDB_SA_KEY_FILE: ${{ env.YDBDOC_YDB_SA_KEY_FILE }}

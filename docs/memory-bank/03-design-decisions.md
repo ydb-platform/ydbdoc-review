@@ -2729,8 +2729,8 @@ maps the old URL to the new section.
    (§6.111 preserve); nudge toward RU mirror or drop.
 3. Cleanup PR: [#47107](https://github.com/ydb-platform/ydb/pull/47107) deletes the
    orphan OTel recipe pages.
-4. Ops skill **en-toc-orphans** + ``scripts/find_en_toc_orphans.py`` for repo-wide
-   audit (``find_en_pages_missing_from_toc``).
+4. Repo-wide audit: ``scripts/find_toc_orphans.py``
+   (``find_pages_missing_from_toc`` / ``find_en_pages_missing_from_toc``).
 
 **Tests:** ``test_pr_43753_toc_structure_parity_*``, ``test_toc_en_only_legacy_*``.
 
@@ -2937,6 +2937,55 @@ those hrefs in EN tocs — false red. Critic fixes for ``nfs-backup`` (reorder
 
 **Tests:** ``test_toc_targets.py`` (HEAD vs stale WT); ``test_critic.py``
 (reorder allowed / renumber rejected).
+
+### 6.134. ACL, daily ₽ quota (YDB), S3 transcripts, continue label (2026-07-21)
+
+**Problem:** Anyone who can label a PR can burn Yandex Cloud LLM budget;
+costs are only in PR comments; there is no way to continue a run with
+human instructions (wiki URL, retranslate one file, …) using prior LLM
+context.
+
+**Decisions (locked with product owner):**
+
+1. **ACL** — GitHub Actions **repository variable**
+   ``YDBDOC_ALLOWED_ACTORS`` (comma-separated logins). Gate in Python
+   (``github/gates.py``) for ``doc_translate`` / ``doc_verify`` /
+   ``doc_continue``; workflow ``if`` may short-circuit. Actor =
+   ``GITHUB_ACTOR`` / label sender. Deny → PR comment, job exits 0
+   (not a red CI). GitHub Team + ``read:org`` — later; variable first.
+2. **Daily quota** — sum of estimated ``cost_rub`` per **MSK calendar day**
+   ≤ ``YDBDOC_DAILY_BUDGET_RUB`` (default **5000**). Change via Actions
+   variable / env (no code change). Persist runs in **YDB** (YC). Gate
+   before LLM work; record after run (incl. denied). Soft lock / global
+   concurrency to reduce double-spend races.
+3. **Transcripts** — full LLM request/response JSON via ``TranscriptStore``.
+   **Default backend now: YDB** ``run_objects`` (§20.11) until Object Storage
+   quota is raised; then ``YDBDOC_TRANSCRIPT_BACKEND=s3``. Retention **14 days**.
+   PR comments mention retention. Expired continue → ``expired_context`` +
+   user-facing fallback (§20.9).
+4. **Follow-up** — no separate bot. Label **``doc_continue``** on the
+   translation PR (same pattern as ``doc_verify``). Instructions from the
+   latest comment matching ``/ydbdoc continue …``. Max **3** continue
+   cycles per source PR. Continue loads parent context from the active
+   transcript backend, injects user text into translate+critic prompts,
+   writes new run + report, counts toward daily ₽ quota and ACL.
+
+**Phases:** see roadmap **Phase K**. Each sub-item ships with unit tests.
+
+**Out of scope for K:** GitHub Team ACL; separate comment bot;
+per-user quotas; public S3 URLs in PR comments.
+
+**YDB auth (2026-07-22):** serverless DB
+``/ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k`` via
+``grpcs://ydb.serverless.yandexcloud.net:2135``; credentials =
+``ydb.iam.ServiceAccountCredentials`` from SA JSON key; dep ``ydb[yc]``;
+CI secret ``YDB_SA_KEY``. Details: ops **§20.7**. Schema: **§20.8**.
+
+**S3 TTL / expired continue (2026-07-22):** Object Storage lifecycle **14 days**.
+PR comments mention the retention. If user runs ``doc_continue`` after transcripts
+are gone → deny with clear comment (do **not** silently no-op): delete
+translation branch + re-label ``doc_translate``, **or** fix manually and label
+``doc_verify``. Details: **§20.9**.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)

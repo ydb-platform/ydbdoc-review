@@ -132,6 +132,7 @@ class YandexLLMClient:
             timeout=float(llm.timeout_s),
         )
         self._usage = usage_tracker or UsageTracker()
+        self.transcript_recorder: object | None = None
 
     @classmethod
     def from_config(
@@ -195,6 +196,12 @@ class YandexLLMClient:
                         started=started,
                         role=role,
                     )
+                    self._record_transcript(
+                        role=role,
+                        messages=messages,
+                        content=result.content,
+                        model_slug=result.model_slug,
+                    )
                     return result
                 except BaseException as exc:
                     exc = classify_api_error(exc)
@@ -243,6 +250,27 @@ class YandexLLMClient:
         raise LLMRetryExhaustedError(
             f"All models exhausted ({models}): {last_error}"
         ) from last_error
+
+    def _record_transcript(
+        self,
+        *,
+        role: LLMRole | None,
+        messages: list[ChatCompletionMessageParam],
+        content: str,
+        model_slug: str,
+    ) -> None:
+        recorder = getattr(self, "transcript_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record(
+                role=role,
+                messages=messages,
+                content=content,
+                model_slug=model_slug,
+            )
+        except Exception:
+            logger.debug("transcript recorder failed", exc_info=True)
 
     def _model_chain_for_role(self, role: LLMRole) -> list[str]:
         if role == "analyze":
@@ -338,6 +366,7 @@ class ElizaLLMClient(YandexLLMClient):
         self._critic_default = critic_default
         self._http = requests.Session()
         self._http.verify = eliza_tls_verify()
+        self.transcript_recorder: object | None = None
 
     @classmethod
     def from_config(
@@ -590,12 +619,19 @@ class ElizaLLMClient(YandexLLMClient):
                         role=role,
                     )
                     self._usage.add(usage)
-                    return ChatResult(
+                    result = ChatResult(
                         content=content,
                         model_slug=slug,
                         model_uri=url,
                         usage=usage,
                     )
+                    self._record_transcript(
+                        role=role,
+                        messages=messages,
+                        content=result.content,
+                        model_slug=result.model_slug,
+                    )
+                    return result
                 except LLMRequestError as exc:
                     if not isinstance(exc, LLMRetryableRequestError):
                         raise

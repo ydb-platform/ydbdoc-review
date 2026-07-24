@@ -149,6 +149,30 @@ See **09-navigation-scope** §22.
 - [x] **J.6** Merge layer reads `TranslationScopePlan`; drop `extra_toc_hrefs` axis
 - [x] **J.7** `doc_verify` uses same planner; delete legacy supplement modules
 
+### Phase K — ACL, YDB quota, S3 transcripts, continue (§6.134) 🔲 IN PROGRESS
+
+YDB connection locked (§20.7–§20.8 DDL applied). S3 bucket locked (§20.10);
+cloud size quota may block writes until raised.
+
+- [x] **K.0** Design locked (§6.134) + YDB/S3 env contract (§20.6–§20.10)
+- [x] **K.1 ACL** — `ops/gates.py` allowlist from `YDBDOC_ALLOWED_ACTORS`;
+      wire translate/verify/continue; deny comment; tests `test_ops_gates.py`;
+      update `examples/*.yml`
+- [x] **K.2 YDB runs ledger** — `ops/runs.py` + SA key auth; tests
+      `test_ops_runs_memory.py` / lifecycle
+- [x] **K.3 Daily ₽ gate** — MSK day sum vs `YDBDOC_DAILY_BUDGET_RUB`
+      (default 5000); tests in `test_ops_gates.py` / lifecycle
+- [x] **K.4 Transcripts** — `TranscriptStore`; default **YDB** `run_objects`
+      (§20.11); S3 impl behind `YDBDOC_TRANSCRIPT_BACKEND=s3`; TTL 14d +
+      expired continue; tests `test_ops_transcripts_memory.py`
+- [x] **K.5 Continue** — label `doc_continue`; parse `/ydbdoc continue`;
+      max 3/PR; `run_doc_continue`; example workflow; tests
+      `test_ops_continue_cmd.py`
+- [ ] **K.6** Deploy (operator): merge + move `v0.1.0`; set ydb Actions
+      vars/secrets; patch **real** `.github/workflows` in **ydb** (from
+      `examples/` as reference — do not treat examples as auto-copied);
+      create label `doc_continue`; smoke on a small docs PR
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -1,0 +1,17 @@
+-- Phase K (§20.11) — temporary LLM transcript storage in YDB (until S3 quota).
+-- Same database as runs. Chunked objects mirror future S3 keys.
+--
+-- Apply in YDB Console (CREATE, then TTL), or CLI with --sa-key-file.
+
+CREATE TABLE run_objects (
+    run_id Utf8,
+    object_key Utf8,              -- e.g. manifest.json, llm/001-req.json
+    part_no Uint32,               -- 0..N-1 chunk index
+    created_at Timestamp,
+    payload String,               -- UTF-8 bytes of this chunk
+    PRIMARY KEY (run_id, object_key, part_no)
+);
+
+-- Auto-delete rows 14 days after created_at (same retention as S3 plan).
+-- Timestamp column: no AS <unit>. (AS SECONDS/… only for integer unix-time columns.)
+ALTER TABLE run_objects SET (TTL = Interval("P14D") ON created_at);

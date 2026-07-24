@@ -101,9 +101,26 @@ def _system_message(
     *,
     version: str,
     file_path: str = "",
+    continue_feedback: str = "",
 ) -> str:
     template = load_template(_system_template_name(file_path), version=version)
-    return render_template(template, {"glossary_yaml": glossary.to_prompt_yaml()})
+    base = render_template(template, {"glossary_yaml": glossary.to_prompt_yaml()})
+    feedback = (continue_feedback or "").strip()
+    if not feedback:
+        try:
+            from ydbdoc_review.ops.feedback_ctx import get_continue_feedback
+
+            feedback = get_continue_feedback().strip()
+        except Exception:
+            feedback = ""
+    if not feedback:
+        return base
+    return (
+        f"{base}\n\n## Operator continue instructions\n"
+        "Apply the following human operator instructions when translating "
+        "or reviewing this content:\n\n"
+        f"{feedback}\n"
+    )
 
 
 def build_translate_messages(
@@ -114,6 +131,7 @@ def build_translate_messages(
     source_lang: str = "ru",
     target_lang: str = "en",
     version: str = DEFAULT_PROMPT_VERSION,
+    continue_feedback: str = "",
 ) -> list[ChatCompletionMessageParam]:
     """Chat messages for one translation batch."""
     translate_template = (
@@ -138,7 +156,10 @@ def build_translate_messages(
         {
             "role": "system",
             "content": _system_message(
-                glossary, version=version, file_path=file_path
+                glossary,
+                version=version,
+                file_path=file_path,
+                continue_feedback=continue_feedback,
             ),
         },
         {"role": "user", "content": user_content},

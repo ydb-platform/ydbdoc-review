@@ -42,4 +42,8 @@ def __getattr__(name: str):
         from ydbdoc_review.github.workflow import run_doc_verify
 
         return run_doc_verify
+    if name == "run_doc_continue":
+        from ydbdoc_review.github.workflow import run_doc_continue
+
+        return run_doc_continue
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

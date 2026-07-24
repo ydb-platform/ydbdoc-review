@@ -20,6 +20,8 @@ from ydbdoc_review.validation.toc_targets import (
     apply_toc_target_checks,
     check_missing_toc_targets,
     check_orphan_translated_pages,
+    find_locale_pages_missing_from_toc,
+    find_pages_missing_from_toc,
 )
 
 
@@ -344,3 +346,35 @@ def test_apply_orphan_toc_page_checks_blocks_file_verdict(tmp_path: Path):
     apply_orphan_toc_page_checks(result, repo_path=repo, docs_root="ydb/docs")
     assert fr.verdict == "blocked"
     assert any(m.startswith("orphan_toc_page:") for m in fr.heuristic_blocking)
+
+
+def test_find_locale_pages_missing_from_toc_en_and_ru(tmp_path: Path):
+    """Repo-wide audit finds orphans in both locale trees."""
+    repo = _init_repo(tmp_path)
+    _write(
+        repo,
+        "ydb/docs/en/core/toc_p.yaml",
+        "items:\n- name: Index\n  href: index.md\n",
+    )
+    _write(repo, "ydb/docs/en/core/index.md", "# EN\n")
+    _write(repo, "ydb/docs/en/core/orphan-en.md", "# orphan EN\n")
+    _write(
+        repo,
+        "ydb/docs/ru/core/toc_p.yaml",
+        "items:\n- name: Index\n  href: index.md\n",
+    )
+    _write(repo, "ydb/docs/ru/core/index.md", "# RU\n")
+    _write(repo, "ydb/docs/ru/core/orphan-ru.md", "# orphan RU\n")
+    _write(repo, "ydb/docs/en/core/_includes/x.md", "# include\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "docs"], cwd=repo, check=True)
+
+    en = find_locale_pages_missing_from_toc(repo, locale="en")
+    ru = find_locale_pages_missing_from_toc(repo, locale="ru")
+    assert en == ["ydb/docs/en/core/orphan-en.md"]
+    assert ru == ["ydb/docs/ru/core/orphan-ru.md"]
+
+    both = find_pages_missing_from_toc(repo, locales=("en", "ru"))
+    assert both["en"] == en
+    assert both["ru"] == ru
+

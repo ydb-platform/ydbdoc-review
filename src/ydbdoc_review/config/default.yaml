@@ -62,6 +62,17 @@ translation:
   differential_stale_days: 90
   differential_change_magnitude: 0.5
   differential_min_en_ratio: 0.3
+  continue_feedback: ""
+
+ops:
+  daily_budget_rub: 5000
+  max_continues_per_pr: 3
+  transcript_backend: ydb
+  transcript_ttl_days: 14
+  ydb_endpoint: grpcs://ydb.serverless.yandexcloud.net:2135
+  ydb_database: /ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k
+  allowed_actors: ""
+  skip_gates: false
 
 prompts:
   version: v1

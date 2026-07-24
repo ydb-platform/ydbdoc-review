@@ -41,6 +41,13 @@ case "${MODE}" in
       --merge-base-with "${MB}" \
       ${OPTS}
     ;;
+  continue)
+    set -- ${CLI} continue \
+      --repo "${INPUT_REPO}" \
+      --pr "${INPUT_PR}" \
+      --merge-base-with "${MB}" \
+      ${OPTS}
+    ;;
   *)
     set -- ${CLI} run \
       --repo "${INPUT_REPO}" \

@@ -32,6 +32,7 @@ def _env() -> dict[str, str]:
         "YDBDOC_YC_API_KEY": "k",
         "GITHUB_TOKEN": "gh",
         "GITHUB_PUSH_TOKEN": "ghp",
+        "YDBDOC_SKIP_OPS_GATES": "1",
     }
 
 

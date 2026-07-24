@@ -42,6 +42,13 @@ from ydbdoc_review.github.pr import (
     verify_fixup_pr_base,
 )
 from ydbdoc_review.llm.client import create_llm_client
+from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
+from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
+from ydbdoc_review.ops.lifecycle import (
+    append_retention_footer,
+    begin_ops_job,
+    finish_ops_job,
+)
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
@@ -233,6 +240,9 @@ def run_doc_translate(
     dry_run: bool = False,
     no_commit: bool = False,
     config: Config | None = None,
+    continue_feedback: str | None = None,
+    ops_mode: str = "translate",
+    parent_run_id: str | None = None,
 ) -> DocJobResult:
     """Full ``doc_translate`` workflow for a source PR."""
     started = time.monotonic()
@@ -240,6 +250,25 @@ def run_doc_translate(
     api_token, push_token = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
+
+    ops_ctx, gate, deny_body = begin_ops_job(
+        mode=ops_mode,
+        repo=github_repo,
+        source_pr=pr_number,
+        continue_feedback=continue_feedback,
+        parent_run_id=parent_run_id,
+    )
+    if not gate.ok:
+        if deny_body and not dry_run:
+            _safe_post_issue_comment(
+                gh, owner, repo, pr_number, deny_body, label="ops deny"
+            )
+        return DocJobResult(
+            mode=f"doc_{ops_mode}",
+            pr_number=pr_number,
+            source_pr_number=pr_number,
+            dry_run=dry_run,
+        )
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
     branch = f"{cfg.paths.translation_branch_prefix}{pr_number}"
@@ -302,7 +331,7 @@ def run_doc_translate(
         changes, synthetic_changes_from_plan(scope_plan)
     )
     job = DocJobResult(
-        mode="doc_translate",
+        mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
         pr_number=pr_number,
         source_pr_number=pr_number,
         translation_branch=branch,
@@ -310,72 +339,79 @@ def run_doc_translate(
     )
     if not pairs and not nav_pairs:
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
+        if ops_ctx is not None:
+            finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job
 
     client = create_llm_client(cfg)
+    if ops_ctx is not None:
+        client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
 
-    pending_en_md = {p.en_path for p in pairs}
-    pending_en_tocs = {nav.en_path for nav in nav_pairs}
+    with continue_feedback_scope(
+        continue_feedback or (ops_ctx.continue_feedback if ops_ctx else None)
+    ):
+        pending_en_md = {p.en_path for p in pairs}
+        pending_en_tocs = {nav.en_path for nav in nav_pairs}
 
-    def _read_en_toc_graph(path: str) -> str | None:
-        # Prefer upstream main for EN toc/pages so strip_unreachable does not
-        # use a stale source-PR checkout (#47108 bare ``{#T}`` after strip).
-        if path.replace("\\", "/").startswith(f"{docs_root}/en/"):
-            text = read_text_at_ref(repo_path, merge_base_with, path)
-            if text is not None:
-                return text
-        return read_text(repo_path, path)
+        def _read_en_toc_graph(path: str) -> str | None:
+            # Prefer upstream main for EN toc/pages so strip_unreachable does not
+            # use a stale source-PR checkout (#47108 bare ``{#T}`` after strip).
+            if path.replace("\\", "/").startswith(f"{docs_root}/en/"):
+                text = read_text_at_ref(repo_path, merge_base_with, path)
+                if text is not None:
+                    return text
+            return read_text(repo_path, path)
 
-    en_toc_reachable = build_en_toc_reachable_from_repo(
-        repo_path,
-        docs_root=docs_root,
-        pending_en_md=pending_en_md,
-        pending_en_tocs=pending_en_tocs,
-        read_text=_read_en_toc_graph,
-    )
-    logger.info(
-        "EN toc reachability: %s md paths (%s pending md, %s pending toc)",
-        len(en_toc_reachable),
-        len(pending_en_md),
-        len(pending_en_tocs),
-    )
-
-    if pairs:
-        contents = load_pair_contents(
+        en_toc_reachable = build_en_toc_reachable_from_repo(
             repo_path,
-            pairs,
-            merge_base_with=merge_base_with,
-            ru_content_ref=ru_ref,
+            docs_root=docs_root,
+            pending_en_md=pending_en_md,
+            pending_en_tocs=pending_en_tocs,
+            read_text=_read_en_toc_graph,
         )
-        pr_result = run_pr_translation(
-            contents,
-            client,
-            glossary,
-            config=cfg,
-            use_analyze_llm=False,
-            en_toc_reachable=en_toc_reachable,
+        logger.info(
+            "EN toc reachability: %s md paths (%s pending md, %s pending toc)",
+            len(en_toc_reachable),
+            len(pending_en_md),
+            len(pending_en_tocs),
         )
-    else:
-        pr_result = PRTranslationResult()
 
-    md_en_paths = {
-        r.plan.target_path
-        for r in pr_result.pair_results
-        if r.target_text is not None and not r.error
-    }
+        if pairs:
+            contents = load_pair_contents(
+                repo_path,
+                pairs,
+                merge_base_with=merge_base_with,
+                ru_content_ref=ru_ref,
+            )
+            pr_result = run_pr_translation(
+                contents,
+                client,
+                glossary,
+                config=cfg,
+                use_analyze_llm=False,
+                en_toc_reachable=en_toc_reachable,
+            )
+        else:
+            pr_result = PRTranslationResult()
 
-    if nav_pairs:
-        pr_result.navigation_results = run_navigation_merges(
-            nav_pairs,
-            repo_path=repo_path,
-            merge_base_with=merge_base_with,
-            client=client,
-            glossary=glossary,
-            config=cfg,
-            scope_plan=scope_plan,
-            ru_content_ref=ru_ref,
-        )
+        md_en_paths = {
+            r.plan.target_path
+            for r in pr_result.pair_results
+            if r.target_text is not None and not r.error
+        }
+
+        if nav_pairs:
+            pr_result.navigation_results = run_navigation_merges(
+                nav_pairs,
+                repo_path=repo_path,
+                merge_base_with=merge_base_with,
+                client=client,
+                glossary=glossary,
+                config=cfg,
+                scope_plan=scope_plan,
+                ru_content_ref=ru_ref,
+            )
 
     pr_result.completeness_gaps = completeness_gaps(
         changes, pr_result, docs_root=cfg.paths.docs_root
@@ -481,6 +517,7 @@ def run_doc_translate(
             no_commit=no_commit,
             config=cfg,
             inherited_completeness_gaps=pr_result.completeness_gaps,
+            skip_ops_gates=True,
         )
         job.translation_comment_url = verify_job.translation_comment_url
         verify_result = verify_job.pr_result
@@ -493,16 +530,33 @@ def run_doc_translate(
         owner,
         repo,
         pr_number,
-        build_source_pr_comment(
-            pr_result,
-            translation_pr_number=tr_pr_number,
-            meta=meta,
-            config=cfg,
-            usage=client.usage_tracker,
-            verify_result=verify_result,
+        append_retention_footer(
+            build_source_pr_comment(
+                pr_result,
+                translation_pr_number=tr_pr_number,
+                meta=meta,
+                config=cfg,
+                usage=client.usage_tracker,
+                verify_result=verify_result,
+            )
         ),
         label="source PR summary",
     )
+
+    if ops_ctx is not None:
+        usage = client.usage_tracker
+        finish_ops_job(
+            ops_ctx,
+            status="ok" if not pr_result.failed_count else "failed",
+            cost_rub=usage.estimate_cost_rub(),
+            input_tokens=sum(
+                (r.input_tokens or 0) for r in usage.records if r.success
+            ),
+            output_tokens=sum(
+                (r.output_tokens or 0) for r in usage.records if r.success
+            ),
+            translation_pr=tr_pr_number,
+        )
 
     return job
 
@@ -517,6 +571,9 @@ def run_doc_verify(
     no_commit: bool = False,
     config: Config | None = None,
     inherited_completeness_gaps: list[str] | None = None,
+    continue_feedback: str | None = None,
+    skip_ops_gates: bool = False,
+    ops_mode: str = "verify",
 ) -> DocJobResult:
     """``doc_verify`` workflow on a translation PR."""
     started = time.monotonic()
@@ -536,6 +593,29 @@ def run_doc_verify(
         source_pr = parse_source_pr_from_text(
             f"{ctx.title}\n{pull_body}"
         )
+    source_pr_num = source_pr or pr_number
+
+    ops_ctx = None
+    if not skip_ops_gates:
+        ops_ctx, gate, deny_body = begin_ops_job(
+            mode=ops_mode,
+            repo=github_repo,
+            source_pr=source_pr_num,
+            translation_pr=pr_number,
+            continue_feedback=continue_feedback,
+        )
+        if not gate.ok:
+            if deny_body and not dry_run:
+                _safe_post_issue_comment(
+                    gh, owner, repo, pr_number, deny_body, label="ops deny"
+                )
+            return DocJobResult(
+                mode=f"doc_{ops_mode}",
+                pr_number=pr_number,
+                source_pr_number=source_pr,
+                dry_run=dry_run,
+            )
+
     upstream_url = repo_https_clone_url(owner, repo)
     fixup_source_pr = source_pr or pr_number
     fixup_branch = verify_fixup_branch(
@@ -602,6 +682,8 @@ def run_doc_verify(
             return job
 
     client = create_llm_client(cfg)
+    if ops_ctx is not None:
+        client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
 
     pending_en_md = {p.en_path for p in pairs}
@@ -619,34 +701,35 @@ def run_doc_verify(
         len(pending_en_tocs),
     )
 
-    if pairs:
-        if source_pr is None:
-            logger.warning(
-                "doc_verify PR #%s: source PR unknown — RU from checkout (may differ from doc_translate)",
-                pr_number,
-            )
-            contents = load_pair_contents(
-                repo_path, pairs, merge_base_with=merge_base_with
+    with continue_feedback_scope(continue_feedback):
+        if pairs:
+            if source_pr is None:
+                logger.warning(
+                    "doc_verify PR #%s: source PR unknown — RU from checkout (may differ from doc_translate)",
+                    pr_number,
+                )
+                contents = load_pair_contents(
+                    repo_path, pairs, merge_base_with=merge_base_with
+                )
+            else:
+                contents = load_verify_pair_contents(
+                    repo_path,
+                    pairs,
+                    merge_base_with=merge_base_with,
+                    gh=gh,
+                    owner=owner,
+                    repo=repo,
+                    source_pr=source_pr,
+                )
+            pr_result = _run_verify_pairs(
+                contents,
+                client,
+                glossary,
+                cfg,
+                en_toc_reachable=en_toc_reachable,
             )
         else:
-            contents = load_verify_pair_contents(
-                repo_path,
-                pairs,
-                merge_base_with=merge_base_with,
-                gh=gh,
-                owner=owner,
-                repo=repo,
-                source_pr=source_pr,
-            )
-        pr_result = _run_verify_pairs(
-            contents,
-            client,
-            glossary,
-            cfg,
-            en_toc_reachable=en_toc_reachable,
-        )
-    else:
-        pr_result = PRTranslationResult()
+            pr_result = PRTranslationResult()
 
     md_en_paths = {p.en_path for p in pairs if not p.en_deleted}
 
@@ -825,13 +908,15 @@ def run_doc_verify(
         owner,
         repo,
         pr_number,
-        build_full_report(
-            pr_result,
-            meta=meta,
-            config=cfg,
-            usage=client.usage_tracker,
-            glossary=glossary,
-            link=ReportLinkContext(github_repo=github_repo, ref=ctx.head_ref),
+        append_retention_footer(
+            build_full_report(
+                pr_result,
+                meta=meta,
+                config=cfg,
+                usage=client.usage_tracker,
+                glossary=glossary,
+                link=ReportLinkContext(github_repo=github_repo, ref=ctx.head_ref),
+            )
         ),
         label="doc_verify QA report",
     )
@@ -844,4 +929,75 @@ def run_doc_verify(
             build_verify_fixup_source_comment(fixup_pr_number),
             label="doc_verify fixup link",
         )
+    if ops_ctx is not None:
+        usage = client.usage_tracker
+        finish_ops_job(
+            ops_ctx,
+            status="ok",
+            cost_rub=usage.estimate_cost_rub(),
+            input_tokens=usage.total_input_tokens,
+            output_tokens=usage.total_output_tokens,
+            translation_pr=pr_number,
+            report_text=None,
+        )
+    return job
+
+
+def run_doc_continue(
+    *,
+    repo_path: str,
+    github_repo: str,
+    pr_number: int,
+    merge_base_with: str = "origin/main",
+    dry_run: bool = False,
+    no_commit: bool = False,
+    config: Config | None = None,
+    instruction: str | None = None,
+) -> DocJobResult:
+    """Continue a translation with operator feedback (label ``doc_continue``).
+
+    ``pr_number`` is the **translation** PR. Instruction comes from ``instruction``
+    or the latest ``/ydbdoc continue …`` comment on that PR.
+    """
+    cfg = config or load_config()
+    api_token, _push = _github_tokens(cfg)
+    owner, repo = parse_repo(github_repo)
+    gh = GitHubClient(api_token)
+
+    feedback = (instruction or "").strip()
+    if not feedback:
+        comments = list(gh.iter_issue_comments(owner, repo, pr_number))
+        found = find_latest_continue_instruction(comments)
+        if not found:
+            body = (
+                "⛔ **ydbdoc-review:** не найдена инструкция "
+                "`/ydbdoc continue …` в комментариях PR.\n\n"
+                "Добавьте комментарий, например:\n"
+                "```\n/ydbdoc continue use Wikipedia EN link for Sessions\n```\n"
+                "и снова повесьте лейбл **`doc_continue``."
+            )
+            if not dry_run:
+                _safe_post_issue_comment(
+                    gh, owner, repo, pr_number, body, label="continue missing"
+                )
+            return DocJobResult(
+                mode="doc_continue",
+                pr_number=pr_number,
+                dry_run=dry_run,
+            )
+        feedback = found
+
+    # Re-run verify with operator feedback (critic + heuristics + optional repair).
+    job = run_doc_verify(
+        repo_path=repo_path,
+        github_repo=github_repo,
+        pr_number=pr_number,
+        merge_base_with=merge_base_with,
+        dry_run=dry_run,
+        no_commit=no_commit,
+        config=cfg,
+        continue_feedback=feedback,
+        ops_mode="continue",
+    )
+    job.mode = "doc_continue"
     return job

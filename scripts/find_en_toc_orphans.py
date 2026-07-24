@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """List EN markdown pages not reachable from the EN Diplodoc toc graph.
 
-Usage (from a ydb checkout or any repo with ydb/docs):
+Prefer the bilingual script::
 
-  python -m scripts.find_en_toc_orphans --repo-path /path/to/ydb
-  python scripts/find_en_toc_orphans.py --repo-path .
+  python scripts/find_toc_orphans.py --repo-path /path/to/ydb --locale en
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import argparse
 import sys
 from pathlib import Path
 
-# Allow running as ``python scripts/find_en_toc_orphans.py`` without install.
 _ROOT = Path(__file__).resolve().parents[1]
 _SRC = _ROOT / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:

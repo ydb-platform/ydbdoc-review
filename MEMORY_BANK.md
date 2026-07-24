@@ -1,9 +1,9 @@
 # Memory Bank — ydbdoc-review v2 (doc-translate-ng)
 
-> Living, opinionated document. Treat it as authoritative for design intent.
+> Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-07-21  
-**Current focus:** §6.133 — verify EN toc from translation tip (false 🔴 fix).
+**Last updated:** 2026-07-22  
+**Current focus:** §6.134 / Phase K — ACL, YDB ledger (§20.7 locked), S3 TBD, `doc_continue`.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,12 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-22 | **Phase K code** — ACL/quota/YDB ledger/YDB transcripts/`doc_continue` (`ops/`, wired into workflow) |
+| 2026-07-22 | **§20.11** — transcripts default to YDB `run_objects` until S3 quota; flip via `YDBDOC_TRANSCRIPT_BACKEND` |
+| 2026-07-22 | **§20.10** — S3 bucket `ydb-prs-translations-context` + static-key secrets; note public-read + cloud size quota |
+| 2026-07-22 | **§20.8–§20.9** — YDB `runs` DDL; S3 TTL 14d + expired-continue fallback UX |
+| 2026-07-22 | **§20.7** — YDB ledger: serverless endpoint/DB + SA key (`YDB_SA_KEY`, `ydb[yc]`) |
+| 2026-07-21 | **§6.134** — ACL (variable), YDB daily ₽ quota, S3 full transcripts, `doc_continue` label (Phase K) |
 | 2026-07-21 | **§6.133** — verify EN toc from HEAD; orphan BFS seed; safe placeholder reorder |
 | 2026-07-21 | **§6.132** — differential translation: seed unchanged EN segments, LLM only diffs |
 | 2026-07-20 | **§6.131** — additive TocMergeScope / TocEntryMapping (gradual TOC refactor) |
@@ -38,7 +44,7 @@ stable cross-references — use them when linking between files.
 | 2026-07-20 | **§6.124** — scope-aware `toc_structure_parity` for only_ru; soft legacy does not yellow-block (#47108) |
 | 2026-07-20 | **§6.123** — always merge toc when RU changed even if EN also changed (#41271 / #47104 orphan) |
 | 2026-07-20 | **§6.122** — EN toc reachability from main; no bare `{#T}` after strip; restore bare autotitle (#47108) |
-| 2026-07-19 | **§6.121** — RU/EN toc structure parity; skill `en-toc-orphans`; cleanup [#47107](https://github.com/ydb-platform/ydb/pull/47107) |
+| 2026-07-19 | **§6.121** — RU/EN toc structure parity; toc orphan audit script; cleanup [#47107](https://github.com/ydb-platform/ydb/pull/47107) |
 | 2026-07-19 | **§6.120** — merged source PR: ``doc_translate`` RU from ``merge_commit_sha``; force exact ``{#T}`` hrefs RU→EN (#47100 YFM010) |
 | 2026-07-19 | **§6.119** — `supplement_only` must not expand to all RU−EN missing hrefs (#46878) |
 | 2026-07-19 | **§22.14** — TOC PR regression catalog: `test_toc_pr_regressions.py` covers validate/planner/merge/QA kinds from failing PRs |

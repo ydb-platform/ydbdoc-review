@@ -110,7 +110,7 @@ See **06-llm-config** §13.6 for full contract.
 |---------|----------------|------------|
 | `doc_verify` `missing_toc_target` | EN toc lists page outside translate scope | Pre-§22: tag bump + re-run `doc_translate`. §22+: planner should queue page in step 3 — if still failing, check `nav_cases/` fixture |
 | `doc_verify` `orphan_toc_page` | Translated EN page not linked from any EN toc (§6.117) | Parent toc missing `include`/`href` (§6.116); re-run `doc_translate` after tag bump, or fix parent toc on the translation PR |
-| EN pages on disk but off toc | Stale leftovers after restructure (§6.121) | Skill **en-toc-orphans** / `scripts/find_en_toc_orphans.py`; delete or wire into toc (example [#47107](https://github.com/ydb-platform/ydb/pull/47107)) |
+| EN/RU pages on disk but off toc | Stale leftovers after restructure (§6.121) | `scripts/find_toc_orphans.py`; delete or wire into toc (example [#47107](https://github.com/ydb-platform/ydb/pull/47107)) |
 | `build-docs` ENOENT on child toc | Child sidebar not merged | Pre-§22: §6.84 supplement. §22+: check planner BFS on `include.path`; tag bump when ready |
 | `doc_verify` `empty_toc` on new EN sidebar | Absent EN file + empty scoped merge (§6.85) | Tag bump + re-run `doc_translate` |
 | `build-docs` `YFM003 unreachable-link` in **glossary** | Hub links to pages outside EN toc (variant A §6.107) | Auto-strip on translate; restore links when target page is translated + added to toc |
@@ -234,8 +234,235 @@ Formula: `(input_tokens / 1000) × in_price + (output_tokens / 1000) × out_pric
 
 ### 20.5. Backlog: persistent cost log
 
-`docs-internal/cost-log.md` (in `ydbdoc-review` repo) maintained by a script
-that appends one line per PR run. Not in MVP.
+Superseded by **§6.134 / Phase K** — YDB `runs` ledger (not markdown).
+
+### 20.6. Phase K — secrets & variables (operator setup)
+
+**Where to store (ydb repo GitHub):**
+
+| Name | Type | Purpose |
+|------|------|---------|
+| `YDBDOC_ALLOWED_ACTORS` | **Actions variable** (repo) | Comma-separated GitHub logins; ACL. Start: `sintjuri`. To add people later: edit the variable → append `,login2,login3` (no code change). |
+| `YDBDOC_DAILY_BUDGET_RUB` | **Actions variable** (repo) | Daily ₽ cap; default **5000** if unset |
+| `YDB_SA_KEY` | **Actions secret** | Full contents of YC service-account JSON key (`sa_key.json`) for **YDB** |
+| `YDBDOC_YDB_ENDPOINT` | Variable or hardcoded default | See §20.7 |
+| `YDBDOC_YDB_DATABASE` | Variable or hardcoded default | See §20.7 |
+| `YDBDOC_S3_BUCKET` | Variable (or default in code) | `ydb-prs-translations-context` (§20.10) |
+| `YDBDOC_S3_ENDPOINT` | Variable (or default) | `https://storage.yandexcloud.net` |
+| `YDBDOC_S3_REGION` | Variable (or default) | `ru-central1` |
+| `YDBDOC_S3_ACCESS_KEY_ID` | **Actions secret** | Static access Key ID for Object Storage |
+| `YDBDOC_S3_SECRET_ACCESS_KEY` | **Actions secret** | Static secret key (never commit / never paste in chat) |
+
+**Local:** SA key path via env (e.g. `YDBDOC_YDB_SA_KEY_FILE=/path/to/sa_key.json`) or same JSON in `YDB_SA_KEY` / `YDBDOC_YDB_SA_KEY_JSON`. Never commit the key. `.env` is gitignored.
+
+**How to set in GitHub UI:** Repo → Settings → Secrets and variables → Actions
+→ Variables / Secrets → New. For `YDB_SA_KEY`: paste the **entire** JSON file
+body (one secret value). Workflows pass secrets into the action `env:` block
+(examples under `examples/` after K.6).
+
+**Optional later — GitHub Team ACL (`read:org`):**
+
+1. GitHub → Settings → Developer settings → Personal access tokens
+   (classic) or Fine-grained for the org.
+2. Classic: enable scope **`read:org`**. Fine-grained: Organization
+   permissions → Members: Read (and Teams: Read if checking a team).
+3. Store as secret e.g. `YDBDOC_GITHUB_ORG_TOKEN` (not the job
+   `GITHUB_TOKEN` — default job token often lacks org membership read
+   for private orgs).
+4. Then we can resolve allowlist from team slug instead of a variable.
+
+### 20.7. Phase K — YDB ledger connection (locked 2026-07-22)
+
+Serverless YDB used for run ledger + daily ₽ quota (§6.134 / K.2–K.3).
+
+| Param | Value |
+|-------|--------|
+| Endpoint | `grpcs://ydb.serverless.yandexcloud.net:2135` |
+| Database | `/ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k` |
+| Auth | YC **service account** JSON key → `ydb.iam.ServiceAccountCredentials.from_file(...)` |
+| Python dep | `pip install "ydb[yc]"` (extra `[yc]` required for IAM SA) |
+| CI secret | `YDB_SA_KEY` = contents of `sa_key.json` (write to a temp file in the job, or pass via SDK helper) |
+
+**Verified local pattern** (do not log the key):
+
+```python
+import ydb
+
+ENDPOINT = "grpcs://ydb.serverless.yandexcloud.net:2135"
+DATABASE = "/ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k"
+credentials = ydb.iam.ServiceAccountCredentials.from_file("/path/to/sa_key.json")
+driver = ydb.Driver(endpoint=ENDPOINT, database=DATABASE, credentials=credentials)
+driver.wait(timeout=10, fail_fast=True)
+```
+
+Static `y1_…` access tokens / `YDB_ACCESS_TOKEN_CREDENTIALS` are **not** the CI path;
+SA key is the supported auth for this database.
+
+**Operator status (2026-07-22):** DDL applied (§20.8). S3 bucket locked (§20.10);
+writes may fail until cloud object-size quota is raised.
+
+### 20.8. Phase K — YDB `runs` DDL (operator applies)
+
+One table, PK by MSK calendar day for cheap daily `SUM(cost_rub)`. Secondary
+index by `source_pr` for continue count (max 3) and latest `run_id` lookup.
+
+```yql
+-- Apply once against database:
+--   /ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k
+
+CREATE TABLE runs (
+    run_day Utf8,                 -- 'YYYY-MM-DD' Europe/Moscow
+    run_id Utf8,                  -- UUID string
+    started_at Timestamp,
+    finished_at Timestamp?,
+    actor Utf8,                   -- GitHub login
+    mode Utf8,                    -- translate | verify | continue
+    repo Utf8,                    -- e.g. ydb-platform/ydb
+    source_pr Uint64,
+    translation_pr Uint64?,
+    status Utf8,                  -- ok | denied_acl | denied_quota | failed | expired_context
+    cost_rub Double,              -- estimated ₽ for this run (0 if denied before LLM)
+    input_tokens Uint64,
+    output_tokens Uint64,
+    parent_run_id Utf8?,          -- previous run_id for continue chain
+    continue_index Uint32,        -- 0 for translate/verify; 1..3 for continue
+    s3_prefix Utf8?,              -- logical prefix runs/{source_pr}/{run_id}/ (name historical; used for YDB+S3)
+    PRIMARY KEY (run_day, run_id)
+);
+
+ALTER TABLE runs ADD INDEX runs_by_source_pr GLOBAL ON (source_pr, run_id);
+```
+
+**CLI example** (after `YDB_SA_KEY` / `--sa-key-file`):
+
+```bash
+ydb -e grpcs://ydb.serverless.yandexcloud.net:2135 \
+  -d /ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k \
+  --sa-key-file /path/to/sa_key.json \
+  scheme query -f runs.yql
+```
+
+Or paste the statements into the YDB Console → Query.
+
+**Access patterns:**
+
+| Need | How |
+|------|-----|
+| Daily ₽ gate | `SELECT SUM(cost_rub) FROM runs WHERE run_day = $today` |
+| Continue count | via index `runs_by_source_pr`: count rows with `mode = "continue"` and `status = "ok"` |
+| Latest parent for continue | same index, order/filter by `run_id` / `started_at` from fetched rows |
+
+### 20.9. Phase K — transcript TTL (14 days) + expired continue UX
+
+- Retention **14 days**, then context is gone (YDB table TTL now; S3 lifecycle later).
+- Every QA / continue-related PR comment must state that LLM context is kept
+  **14 days** and then deleted.
+- On ``doc_continue`` when parent run objects are missing/empty
+  (TTL or never written): set status `expired_context`, post comment roughly:
+
+```text
+Контекст предыдущего прогона (промпты/ответы модели) уже удалён
+(хранится 14 дней). Continue недоступен.
+
+Что можно сделать:
+1. Удалить ветку перевода `ydbdoc-review/pr-<N>` (и закрыть translation PR)
+   и заново повесить лейбл `doc_translate` на исходный PR — полный цикл.
+2. Или править EN вручную и повесить `doc_verify` на translation PR —
+   без истории LLM.
+```
+
+Do not start LLM work in that case.
+
+### 20.10. Phase K — Object Storage bucket (locked 2026-07-22)
+
+| Param | Value |
+|-------|--------|
+| Bucket | `ydb-prs-translations-context` |
+| Endpoint | `https://storage.yandexcloud.net` |
+| Region | `ru-central1` |
+| TTL | **14 days** lifecycle delete |
+| SA | `github-actions-sa` (`aje2ospmbbdu2k3cjq4f`), role `storage.editor` |
+| Auth in CI | static keys → secrets `YDBDOC_S3_ACCESS_KEY_ID` + `YDBDOC_S3_SECRET_ACCESS_KEY` |
+| Python | `boto3` (+ `certifi` for verify path if needed) |
+| Object prefix | `runs/{source_pr}/{run_id}/…` |
+
+**Public read:** currently **enabled** on the bucket (objects reachable by direct
+URL). Prefer **not** putting raw LLM transcripts at guessable public keys without
+an unguessable `run_id` (UUID). Longer-term: turn public read **off** and use
+short-lived presigned URLs only if we ever link from PR comments. Default PR
+comments should **not** embed raw S3 URLs to prompt/response JSON.
+
+**Operator checklist (GitHub → ydb → Actions secrets):**
+
+1. `YDBDOC_S3_ACCESS_KEY_ID` = Key ID (`YC…`)
+2. `YDBDOC_S3_SECRET_ACCESS_KEY` = Secret (`YC…`)
+3. Optional variables: `YDBDOC_S3_BUCKET`, `YDBDOC_S3_ENDPOINT`, `YDBDOC_S3_REGION`
+   (code may hardcode the locked defaults above).
+
+**Local `.env`:** same names; never commit.
+
+**Known cloud quota:** `CloudTotalAliveSizeQuotaExceed` on PutObject means the
+**cloud-wide** object storage size quota is exhausted (auth/ACL OK). Raise quota
+with YC support or free space in other buckets before switching transcript
+backend to S3.
+
+**Smoke test** (after quota fixed; do not log secrets):
+
+```python
+import certifi
+import boto3
+
+s3 = boto3.client(
+    "s3",
+    endpoint_url="https://storage.yandexcloud.net",
+    aws_access_key_id="…",       # from env
+    aws_secret_access_key="…",
+    region_name="ru-central1",
+    verify=certifi.where(),
+)
+s3.put_object(
+    Bucket="ydb-prs-translations-context",
+    Key="smoke/test.txt",
+    Body=b"ok",
+)
+```
+
+### 20.11. Phase K — transcript backend: YDB now, S3 later (2026-07-22)
+
+Until Object Storage cloud quota is raised, **full LLM transcripts** are stored
+in YDB table ``run_objects`` (same DB as ``runs``), not in the S3 bucket.
+
+| | Now (default) | After quota |
+|--|---------------|-------------|
+| Backend | `YDBDOC_TRANSCRIPT_BACKEND=ydb` | `=s3` |
+| Store | table ``run_objects`` | bucket ``ydb-prs-translations-context`` |
+| TTL | YDB TTL 14d on ``created_at`` | bucket lifecycle 14d |
+| Code | `TranscriptStore` protocol; `YdbTranscriptStore` / `S3TranscriptStore` | flip env only |
+
+Logical keys stay identical: ``runs/{source_pr}/{run_id}/{object_key}`` so a
+later cutover does not change continue semantics. Column ``runs.s3_prefix``
+keeps the logical prefix (name is historical).
+
+**Chunking:** each object is split into ≤ ~512 KiB ``payload`` parts
+(``part_no`` 0..N-1) to stay under YDB cell size limits.
+
+**DDL** — operator applies ``scripts/ydb_schema_run_objects.yql``:
+
+```yql
+CREATE TABLE run_objects (
+    run_id Utf8,
+    object_key Utf8,
+    part_no Uint32,
+    created_at Timestamp,
+    payload String,
+    PRIMARY KEY (run_id, object_key, part_no)
+);
+
+ALTER TABLE run_objects SET (TTL = Interval("P14D") ON created_at);
+```
+
+Expired continue (§20.9) checks the active backend: missing ``run_objects`` rows
+(or missing S3 keys) → ``expired_context``.
 
 ---
 
