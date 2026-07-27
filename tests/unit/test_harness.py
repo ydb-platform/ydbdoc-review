@@ -61,15 +61,15 @@ def test_profiles_translate_only_verify_has_qa():
     assert verify_names[0] == "parse"
     assert verify_names[1] == "load_target"
     assert "finalize_en" in verify_names
-    assert verify_names.index("heuristics") < verify_names.index("finalize_en")
-    assert verify_names.index("verdict") < verify_names.index("finalize_en")
-    assert verify_names.index("finalize_en") < verify_names.index("report_artifacts")
+    assert verify_names.index("finalize_en") < verify_names.index("heuristics")
+    assert verify_names.index("heuristics") < verify_names.index("verdict")
+    assert verify_names.index("verdict") < verify_names.index("report_artifacts")
     shared_qa = [
         "round_trip",
         "critic_loop",
+        "finalize_en",
         "heuristics",
         "verdict",
-        "finalize_en",
         "report_artifacts",
     ]
     assert verify_names[2:] == shared_qa
@@ -80,10 +80,10 @@ def test_profiles_translate_only_verify_has_qa():
 
 
 def test_verify_profile_translates_yql_trailing_cyrillic_comments():
-    """doc_verify must fix RU ``--`` comments in EN YQL even with Fixed segments: 0 (§6.136).
+    """doc_verify must fix RU ``--`` comments even with Fixed segments: 0 (§6.136).
 
-    Heuristics run *before* finalize (§6.137) so the verdict stays 🟡 when the
-    incoming EN still has Cyrillic; ``final_text`` is English for the fixup commit.
+    Verdict uses post-finalize text (§6.138): incoming Cyrillic is auto-fixed,
+    so the report is 🟢 when ``final_text`` is clean English.
     """
     from textwrap import dedent
 
@@ -152,8 +152,8 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
             config=cfg,
         ),
     )
-    assert result.verdict == "warnings"
-    assert any(
+    assert result.verdict == "ok"
+    assert not any(
         w.startswith("cyrillic_in_fence:") for w in result.heuristic_warnings
     )
     assert "Запрос" not in result.final_text

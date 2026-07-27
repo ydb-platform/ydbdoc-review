@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-27  
-**Current focus:** §6.137 — verify heuristics before finalize; report №N; content checkout SHA.
+**Current focus:** §6.138 — verify verdict on post-finalize text (no false 🟡 after auto-fix).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,7 +26,8 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-07-27 | **§6.137** — verify heuristics before finalize (no false 🟢); report ``№N``; content checkout SHA |
+| 2026-07-27 | **§6.138** — verify verdict after finalize (no false 🟡 when auto-fix / main already clean) |
+| 2026-07-27 | **§6.137** — report ``№N`` (no GitHub PR autolink); content checkout SHA before prepare |
 | 2026-07-27 | **§6.136** — verify always finalizes EN fence comments; delete ``verify-*`` on re-run |
 | 2026-07-27 | **§6.135** — ``doc_verify`` on bilingual source PRs (completeness + checkout/self RU/EN) |
 | 2026-07-22 | **Phase K code** — ACL/quota/YDB ledger/YDB transcripts/`doc_continue` (`ops/`, wired into workflow) |

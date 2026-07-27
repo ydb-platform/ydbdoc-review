@@ -43,12 +43,12 @@ _TRANSLATE_QA_TAIL: tuple[HarnessStep, ...] = (
 _VERIFY_QA_TAIL: tuple[HarnessStep, ...] = (
     RoundTripStep(),
     CriticLoopStep(),
-    # Heuristics on the *incoming* EN (§6.137): Cyrillic fence comments must
-    # surface in the QA verdict. FinalizeEn runs after so the written fixup is
-    # English, but the report stays 🟡 when the verified tip still had Cyrillic.
+    # Finalize first, then heuristics/verdict on the *outcome* text (§6.138).
+    # Recommendation must match what we would commit / what already sits on
+    # main after auto-fix — not the dirty incoming tip.
+    FinalizeEnStep(),
     HeuristicsStep(),
     VerdictStep(),
-    FinalizeEnStep(),
     ReportArtifactsStep(),
 )
 

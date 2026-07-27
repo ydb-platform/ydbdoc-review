@@ -3058,19 +3058,37 @@ though the verified tip had been bad. Separately:
 
 **Decision:**
 
-1. ``VERIFY_PROFILE`` order: ``critic_loop`` → **heuristics → verdict →
-   FinalizeEn** → ``report_artifacts``. Heuristics see the incoming EN (🟡 when
-   Cyrillic remains). Finalize still writes English ``final_text`` for the fixup
-   commit. Recommendation stays 🟡 until a clean tip is re-verified.
-2. Report titles use **``отчёт №{n}``** (not ``#{n}``) so GitHub does not
-   autolink to unrelated PRs. Marker ``ydbdoc-review — отчёт`` still counts
-   both old ``#`` and new ``№`` comments for numbering.
+1. ``VERIFY_PROFILE`` order was briefly heuristics-before-finalize so dirty tip
+   forced 🟡. **Reverted by §6.138** — verdict must follow finalize. Remaining
+   from this decision: report titles use **``отчёт №{n}``**; capture
+   ``verify_content_sha`` before prepare as ``checkout_ref``.
+2. ~~(obsolete) heuristics before finalize~~ — see §6.138.
 3. Capture ``verify_content_sha = git_head_sha(repo_path)`` at the start of
    verify (before prepare/push) and pass it as ``checkout_ref``.
 
 **Tests:** ``test_verify_profile_translates_yql_trailing_cyrillic_comments``
 (verdict ``warnings`` + English ``final_text``); report builder ``№``;
 ``test_run_doc_verify_posts_comment`` asserts Checkout SHA before prepare.
+
+**Superseded in part by §6.138** (verdict must follow finalize, not precede it).
+
+### 6.138. Verify verdict = post-finalize outcome (#47233, 2026-07-27)
+
+**Problem:** After §6.137, ``doc_verify`` on #47233 correctly ran fence-comment
+auto-fix and found **no diff vs main** (comments already English via #47949),
+but the report stayed 🟡 because heuristics scored the dirty incoming tip.
+Operator question: why yellow if everything is already fixed?
+
+**Decision:** ``VERIFY_PROFILE`` order is ``critic_loop`` → **FinalizeEn →
+heuristics → verdict**. Recommendation reflects the text we would commit (and
+what already sits on the fixup base when the commit is empty). Dirty tip alone
+must not yellow the report after a successful auto-fix. The earlier false 🟢
+was missing FinalizeEn (§6.136), not heuristics-before-finalize.
+
+Keep §6.137 report ``№`` and early content ``checkout_ref``.
+
+**Tests:** ``test_verify_profile_translates_yql_trailing_cyrillic_comments``
+expects verdict ``ok`` + English ``final_text``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
