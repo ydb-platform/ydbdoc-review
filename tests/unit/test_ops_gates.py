@@ -46,7 +46,12 @@ def test_quota_gate():
 
 
 def test_retention_and_expired_messages():
-    assert "14" in retention_notice()
+    notice = retention_notice()
+    assert "14" in notice
+    assert "/ydbdoc continue" in notice
+    assert "doc_continue" in notice
+    assert "3" in notice
+    assert "translation PR" in notice
     text = expired_context_comment(41271)
     assert "ydbdoc-review/pr-41271" in text
     assert "doc_translate" in text

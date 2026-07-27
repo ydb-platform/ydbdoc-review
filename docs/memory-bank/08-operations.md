@@ -356,7 +356,10 @@ Or paste the statements into the YDB Console → Query.
 
 - Retention **14 days**, then context is gone (YDB table TTL now; S3 lifecycle later).
 - Every QA / continue-related PR comment must state that LLM context is kept
-  **14 days** and then deleted.
+  **14 days** and then deleted, plus a short **how-to** for continue
+  (``retention_notice``): on the **translation PR**, comment
+  ``/ydbdoc continue <instruction>``, then add label **`doc_continue`**;
+  max **3** continues per PR (``MAX_CONTINUES_PER_PR``).
 - On ``doc_continue`` when parent run objects are missing/empty
   (TTL or never written): set status `expired_context`, post comment roughly:
 
