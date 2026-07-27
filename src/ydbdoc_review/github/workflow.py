@@ -575,7 +575,12 @@ def run_doc_verify(
     skip_ops_gates: bool = False,
     ops_mode: str = "verify",
 ) -> DocJobResult:
-    """``doc_verify`` workflow on a translation PR."""
+    """``doc_verify`` on a translation PR **or** a bilingual source PR.
+
+    Translation branch ``ydbdoc-review/pr-N``: EN from checkout, RU from source PR.
+    Other docs PRs (author/fork, RU+EN in one diff): both locales from checkout;
+    completeness gaps flag RU changes without an EN mirror in the same PR (§6.135).
+    """
     started = time.monotonic()
     cfg = config or load_config()
     api_token, push_token = _github_tokens(cfg)
@@ -583,10 +588,15 @@ def run_doc_verify(
     gh = GitHubClient(api_token)
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
+    translation_pr = is_translation_pr_branch(
+        ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
+    )
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
-    if source_pr is None:
+    # Only parse "PR #N" from title/body on translation PRs. Bilingual author
+    # PRs are self-contained; a title like "fix for PR #999" must not redirect RU.
+    if source_pr is None and translation_pr:
         pull_body = str(
             gh.get_pull(owner, repo, pr_number).get("body") or ""
         )
@@ -601,7 +611,7 @@ def run_doc_verify(
             mode=ops_mode,
             repo=github_repo,
             source_pr=source_pr_num,
-            translation_pr=pr_number,
+            translation_pr=pr_number if translation_pr else None,
             continue_feedback=continue_feedback,
         )
         if not gate.ok:
@@ -625,16 +635,16 @@ def run_doc_verify(
     fixup_pr_base = verify_fixup_pr_base(
         ctx, translation_branch_prefix=cfg.paths.translation_branch_prefix
     )
-    translation_pr = is_translation_pr_branch(
-        ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
-    )
 
-    changes = list_pr_file_changes_git(repo_path, merge_base_with)
+    changes = merge_pr_file_changes(
+        list_pr_file_changes_git(repo_path, merge_base_with),
+        list_pr_file_changes_api(gh, owner, repo, pr_number),
+    )
     pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
     source_changes = (
         list_pr_file_changes_api(gh, owner, repo, source_pr)
         if source_pr is not None
-        else None
+        else (None if translation_pr else changes)
     )
     nav_pairs = build_verify_navigation_pairs(
         changes,
@@ -664,8 +674,13 @@ def run_doc_verify(
         dry_run=dry_run,
     )
     if not pairs and not nav_pairs:
-        logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
-        return job
+        if translation_pr:
+            logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
+            return job
+        logger.info(
+            "No doc/nav pairs on bilingual/source PR #%s — completeness-only verify",
+            pr_number,
+        )
 
     if translation_pr:
         pairs, nav_pairs = filter_translation_pr_verify_scope(
@@ -704,8 +719,8 @@ def run_doc_verify(
     with continue_feedback_scope(continue_feedback):
         if pairs:
             if source_pr is None:
-                logger.warning(
-                    "doc_verify PR #%s: source PR unknown — RU from checkout (may differ from doc_translate)",
+                logger.info(
+                    "doc_verify PR #%s: both locales from checkout (bilingual/source PR)",
                     pr_number,
                 )
                 contents = load_pair_contents(
@@ -792,6 +807,20 @@ def run_doc_verify(
         repo_path=repo_path,
         docs_root=cfg.paths.docs_root,
     )
+    if not translation_pr:
+        # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.
+        computed_gaps = completeness_gaps(
+            changes, pr_result, docs_root=cfg.paths.docs_root
+        )
+        if computed_gaps:
+            logger.info(
+                "doc_verify bilingual completeness gaps on PR #%s: %s",
+                pr_number,
+                computed_gaps,
+            )
+        pr_result.completeness_gaps = list(
+            dict.fromkeys([*pr_result.completeness_gaps, *computed_gaps])
+        )
     if inherited_completeness_gaps:
         merged_gaps = list(
             dict.fromkeys([*inherited_completeness_gaps, *pr_result.completeness_gaps])

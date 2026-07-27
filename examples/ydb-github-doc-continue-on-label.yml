@@ -27,6 +27,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          # Fork PRs + pull_request_target: required after 2026-07-20 checkout guard.
+          allow-unsafe-pr-checkout: true
 
       - name: Fetch merge base ref
         run: |

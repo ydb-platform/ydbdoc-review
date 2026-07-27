@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-07-22  
-**Current focus:** §6.134 / Phase K — ACL, YDB ledger (§20.7 locked), S3 TBD, `doc_continue`.
+**Last updated:** 2026-07-27  
+**Current focus:** §6.135 — ``doc_verify`` on bilingual source PRs; Phase K ops.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-27 | **§6.135** — ``doc_verify`` on bilingual source PRs (completeness + checkout/self RU/EN) |
 | 2026-07-22 | **Phase K code** — ACL/quota/YDB ledger/YDB transcripts/`doc_continue` (`ops/`, wired into workflow) |
 | 2026-07-22 | **§20.11** — transcripts default to YDB `run_objects` until S3 quota; flip via `YDBDOC_TRANSCRIPT_BACKEND` |
 | 2026-07-22 | **§20.10** — S3 bucket `ydb-prs-translations-context` + static-key secrets; note public-read + cloud size quota |

@@ -2987,5 +2987,32 @@ are gone → deny with clear comment (do **not** silently no-op): delete
 translation branch + re-label ``doc_translate``, **or** fix manually and label
 ``doc_verify``. Details: **§20.9**.
 
+### 6.135. ``doc_verify`` on bilingual source PRs (#47233, 2026-07-27)
+
+**Problem:** Authors often land RU+EN in one PR (typo fixes, param renames).
+Operators want to hang **``doc_verify``** on that source PR to check translation
+completeness/quality. Previously verify assumed a translation PR: no
+completeness gaps on author diffs, and ``parse_source_pr_from_text`` could
+steal RU from an unrelated ``PR #N`` in the title. Fork checkouts also failed
+under the 2026-07-20 ``actions/checkout`` guard (verify workflow lacked
+``allow-unsafe-pr-checkout`` / ``merge_commit_sha``).
+
+**Decision:**
+
+1. **Targets:** ``doc_verify`` accepts (a) ``ydbdoc-review/pr-N`` translation
+   PRs and (b) any other docs PR as a **bilingual/source** verify.
+2. **Source discovery:** parse ``PR #N`` from title/body **only** on
+   translation branches. Bilingual author PRs use ``source_pr=None`` and load
+   both locales from checkout.
+3. **Completeness:** on non-translation PRs, compute
+   ``completeness_gaps(changes, result)`` over git∪API diff of the verified PR
+   (same §6.76 bilingual exemption). RU-only docs/nav without EN in the same
+   diff → 🔴.
+4. **CI example:** ``ydb-github-doc-verify-on-label.yml`` uses
+   ``merge_commit_sha`` when merged + ``allow-unsafe-pr-checkout: true`` (same
+   as translate). Deploy the same to ``ydb`` ``.github/workflows/ydbdoc-verify.yml``.
+
+**Tests:** ``test_run_doc_verify_bilingual_source_pr_*``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -166,16 +166,21 @@ OUTPUT: exit code 0 unless infrastructure failure.
 ### 15.3. Verify mode
 
 ```
-INPUT: translation_pr_number
+INPUT: pr_number  (translation PR OR bilingual source PR — §6.135)
 
-1. Discover source PR number from translation PR description
-2. Read **EN** from translation PR checkout; **RU** from source PR **head**
-   (with merge/local candidates, §6.31 / §6.110); §6.70/§6.106 fence tie-break.
-3. Run critic + heuristics (no translator)
-4. Apply critic fixes (suggested_text per segment_id)
-5. If any fixes applied: commit + push to translation PR branch
-6. Post a NEW comment on the translation PR with the report
-   (do NOT replace previous; history is valuable)
+Translation branch ydbdoc-review/pr-N:
+1. Discover source PR from branch / description
+2. Read **EN** from checkout; **RU** from source PR (§6.31 / §6.110 / §6.106)
+3. Critic + heuristics; scope filter §6.77
+4. Push critic fixes onto translation branch
+5. Post report on the translation PR
+
+Bilingual / author source PR (not ydbdoc-review/pr-*):
+1. source_pr = None — both locales from checkout
+2. Critic on RU↔EN pairs present in the PR diff
+3. Completeness gaps: RU docs/nav without EN mirror in the same diff (§6.76/§6.135)
+4. Critic fixes → fixup branch ydbdoc-review/verify-{N} (§6.64/§6.75)
+5. Post report on the same PR
 ```
 
 ---
@@ -340,8 +345,9 @@ After push and translation PR open (`doc_translate`):
 2. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
    `verify_result=`).
 
-Label **`doc_verify`** on the translation PR (`ydbdoc-verify.yml`) is for **manual
-re-runs** only — not required for the first QA pass.
+Label **`doc_verify`** (`ydbdoc-verify.yml`) — manual re-run on a **translation
+PR**, or QA/completeness on a **bilingual source PR** (§6.135). First QA after
+``doc_translate`` is inline and does not need this label.
 
 `trigger-translation-ci` (`YDBOT_TOKEN`, §16.7) adds `rebuild_docs` + `ok-to-test`
 after the translate job succeeds (no workflow changes needed for inline verify).

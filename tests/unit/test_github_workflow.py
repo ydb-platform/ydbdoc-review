@@ -667,3 +667,104 @@ def test_run_doc_verify_posts_comment(git_repo: str):
     assert result.translation_comment_url == "url"
     assert mock_gh.return_value.post_issue_comment.call_count == 1
 
+
+def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
+    """Author PR with RU+EN in the same diff: completeness OK, locales from checkout."""
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+
+    pull = {
+        "title": "YDBDOCS-2562: fix resource_weight (mentions PR #999 noise)",
+        "body": "Fix typo in RU and EN.",
+        "head": {
+            "ref": "fix/YDBDOCS-2562-fix",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/contrib/ydb.git",
+                "full_name": "contrib/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+        "merged": True,
+        "merge_commit_sha": "mergeabc",
+    }
+    changes = [
+        ("ydb/docs/ru/a.md", "modified"),
+        ("ydb/docs/en/a.md", "modified"),
+    ]
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ):
+        with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+            mock_gh.return_value.get_pull.return_value = pull
+            mock_gh.return_value.iter_issue_comments.return_value = iter([])
+            mock_gh.return_value.post_issue_comment.return_value = "url"
+            with patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                return_value=changes,
+            ):
+                with patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                    return_value=changes,
+                ):
+                    result = run_doc_verify(
+                        repo_path=git_repo,
+                        github_repo="o/r",
+                        pr_number=47233,
+                        merge_base_with="HEAD",
+                        dry_run=True,
+                        config=load_config(env=_env()),
+                    )
+
+    assert result.mode == "doc_verify"
+    assert result.source_pr_number is None  # not redirected to #999
+    assert result.pr_result.completeness_gaps == []
+    assert result.pr_result.translated_count == 1
+
+
+def test_run_doc_verify_bilingual_source_pr_ru_only_completeness_gap(git_repo: str):
+    """Author PR that changes RU without EN mirror → completeness 🔴."""
+    pull = {
+        "title": "docs: RU-only tweak",
+        "body": "",
+        "head": {
+            "ref": "docs/ru-only",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    changes = [("ydb/docs/ru/a.md", "modified")]
+    empty = PRTranslationResult()
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=empty,
+    ):
+        with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+            mock_gh.return_value.get_pull.return_value = pull
+            mock_gh.return_value.iter_issue_comments.return_value = iter([])
+            mock_gh.return_value.post_issue_comment.return_value = "url"
+            with patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                return_value=changes,
+            ):
+                with patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                    return_value=changes,
+                ):
+                    result = run_doc_verify(
+                        repo_path=git_repo,
+                        github_repo="o/r",
+                        pr_number=42,
+                        merge_base_with="HEAD",
+                        dry_run=True,
+                        config=load_config(env=_env()),
+                    )
+
+    assert result.source_pr_number is None
+    assert result.pr_result.completeness_gaps == ["ydb/docs/en/a.md"]
+

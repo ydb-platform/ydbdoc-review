@@ -130,11 +130,13 @@ def verify(
     repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
     pr: Annotated[
         int,
-        typer.Option(help="Translation PR number (doc_verify)."),
+        typer.Option(
+            help="PR number: translation PR (ydbdoc-review/pr-N) or bilingual source PR."
+        ),
     ],
     repo_path: Annotated[
         Path | None,
-        typer.Option(help="Local git checkout of the translation PR head."),
+        typer.Option(help="Local git checkout of the PR head (or merge commit)."),
     ] = None,
     merge_base_with: Annotated[
         str,
@@ -146,7 +148,7 @@ def verify(
         typer.Option(help="Run QA but skip repair commit/push."),
     ] = False,
 ) -> None:
-    """Re-run critic QA on a translation PR (``doc_verify``)."""
+    """Critic QA + completeness on a translation PR or bilingual source PR (``doc_verify``)."""
     path = _resolve_repo_path(repo_path)
     try:
         result = run_doc_verify(

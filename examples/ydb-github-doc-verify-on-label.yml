@@ -1,5 +1,10 @@
-# doc_verify на translation PR — ручной перезапуск (первый прогон inline в doc_translate job).
-# QA = critic + эвристики + вердикт (отдельный шаг после doc_translate).
+# doc_verify — QA полноты/качества перевода.
+# Вешать на:
+#   • translation PR (ydbdoc-review/pr-N) — повторный critic после doc_translate;
+#   • bilingual source PR (RU+EN в одном diff) — critic + completeness gaps.
+#
+# Перед лейблом на fork/merged PR нужен checkout merge_commit + allow-unsafe
+# (см. actions/checkout guard, 2026-07-20).
 
 name: ydbdoc-review (doc_verify label)
 
@@ -21,11 +26,15 @@ jobs:
       group: ydbdoc-verify-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - name: Checkout PR head
+      - name: Checkout translation source
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Merged PR (в т.ч. из форка): коммит уже в upstream (main).
+          # Open PR: head как раньше.
+          ref: ${{ github.event.pull_request.merged && github.event.pull_request.merge_commit_sha || github.event.pull_request.head.sha }}
           fetch-depth: 0
+          # Fork PRs + pull_request_target: required after 2026-07-20 checkout guard.
+          allow-unsafe-pr-checkout: true
 
       - name: Fetch merge base ref
         run: |
@@ -50,3 +59,24 @@ jobs:
           YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
           # Если push repair даёт 403 (fork/upstream): раскомментируйте
           # GITHUB_PUSH_TOKEN: ${{ secrets.YDBDOC_PUSH_PAT }}
+
+  trigger-verify-ci:
+    needs: ydbdoc-verify
+    if: ${{ !cancelled() && needs.ydbdoc-verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PR-check and docs rebuild on translation PR
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.YDBOT_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['ok-to-test'],
+            });
+            core.info(
+              `Added ok-to-test to translation PR #${prNumber}`
+            );
