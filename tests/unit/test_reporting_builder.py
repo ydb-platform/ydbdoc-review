@@ -384,6 +384,8 @@ def test_full_report_shows_alignment_error():
         config=cfg,
     )
     assert "Checkout: `abc123def456`" in body
+    assert "отчёт №1" in body
+    assert "отчёт #1" not in body
     assert "(alignment)" in body
     assert "не мержить" in body or "требует правок" in body
 

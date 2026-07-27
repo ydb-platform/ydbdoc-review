@@ -373,7 +373,7 @@ after the translate job succeeds (no workflow changes needed for inline verify).
 ### 17.2. Full report in translation PR (after `doc_translate` or `doc_verify`)
 
 ```markdown
-🤖 **ydbdoc-review** — отчёт #1 (doc_translate, 2024-11-05 14:23 UTC)
+🤖 **ydbdoc-review** — отчёт №1 (doc_translate, 2024-11-05 14:23 UTC)
 
 ## Рекомендация: 🟡 требует правок перед merge
 
@@ -417,7 +417,8 @@ translation commit diff vs base — scoped pairs (§6.77). When source PR is kno
 ``doc_verify`` builds the same ``TranslationScopePlan`` from source diff (§22).
 
 Each `doc_verify` run posts a NEW comment of the same format, with a header
-`🤖 ydbdoc-review — отчёт #N (doc_verify, <timestamp>)` and optional
+`🤖 ydbdoc-review — отчёт №N (doc_verify, <timestamp>)` (§6.137: ``№`` not
+``#``, so GitHub does not autolink to unrelated PRs) and optional
 
 Navigation YAML (§6.35): EN ``toc*.yaml`` / redirect files changed in the
 translation PR are validated against RU from source PR head; listed in the
@@ -429,10 +430,11 @@ To fix a bad ``toc_i.yaml`` already on the translation branch, re-run
 ``doc_translate`` or edit the file manually, then ``doc_verify``.
 `Checkout: \`<sha>\``. Previous comments remain visible for history.
 
-**§6.75 checkout semantics (translation PR):** report is posted **after** the
-inline critic push. ``Checkout:`` is the translation-branch HEAD that **includes**
-applied fixes — 🟢 «можно мержить» matches what merge of this PR brings (except
-skipped critic items in green ``<details>`` blocks, which were never auto-applied).
+**§6.75 / §6.137 checkout semantics:** on translation PRs, report is posted
+**after** the inline critic push; ``Checkout:`` is the translation-branch HEAD
+that **includes** applied fixes. On bilingual source ``doc_verify``, ``Checkout:``
+is the **content SHA under review** (PR tip / merge commit), captured **before**
+``prepare_*`` rewrites HEAD onto the fixup base — not main tip after prepare.
 
 **Legacy (pre-§6.75):** report could precede a separate fixup PR; merging translation
 PR without merging fixup dropped applied critic fixes — see §6.75 problem statement.

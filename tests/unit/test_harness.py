@@ -61,14 +61,15 @@ def test_profiles_translate_only_verify_has_qa():
     assert verify_names[0] == "parse"
     assert verify_names[1] == "load_target"
     assert "finalize_en" in verify_names
-    assert verify_names.index("finalize_en") > verify_names.index("critic_loop")
-    assert verify_names.index("finalize_en") < verify_names.index("heuristics")
+    assert verify_names.index("heuristics") < verify_names.index("finalize_en")
+    assert verify_names.index("verdict") < verify_names.index("finalize_en")
+    assert verify_names.index("finalize_en") < verify_names.index("report_artifacts")
     shared_qa = [
         "round_trip",
         "critic_loop",
-        "finalize_en",
         "heuristics",
         "verdict",
+        "finalize_en",
         "report_artifacts",
     ]
     assert verify_names[2:] == shared_qa
@@ -79,11 +80,16 @@ def test_profiles_translate_only_verify_has_qa():
 
 
 def test_verify_profile_translates_yql_trailing_cyrillic_comments():
-    """doc_verify must fix RU ``--`` comments in EN YQL even with Fixed segments: 0 (§6.136)."""
+    """doc_verify must fix RU ``--`` comments in EN YQL even with Fixed segments: 0 (§6.136).
+
+    Heuristics run *before* finalize (§6.137) so the verdict stays 🟡 when the
+    incoming EN still has Cyrillic; ``final_text`` is English for the fixup commit.
+    """
     from textwrap import dedent
 
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
+        collect_cyrillic_fence_comment_lines,
     )
 
     ru = dedent(
@@ -110,23 +116,7 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
         ```
         """
     ).strip()
-    segments = extract_segments(parse_markdown(ru))
-    # Critic finds nothing actionable; fence-comment LLM must still run.
     critic_ok = json.dumps({"verdict": "ok", "issues": []})
-    fence_json = json.dumps(
-        {
-            "comments": [
-                {"id": "b1-l1", "text": "Query"},
-                {"id": "b1-l2", "text": "Pool ID"},
-            ]
-        },
-        ensure_ascii=False,
-    )
-    # Line indices depend on fence body line numbers — build from collector.
-    from ydbdoc_review.validation.fence_comments import (
-        collect_cyrillic_fence_comment_lines,
-    )
-
     items = collect_cyrillic_fence_comment_lines(en)
     assert len(items) >= 2
     fence_json = json.dumps(
@@ -145,7 +135,6 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
         },
         ensure_ascii=False,
     )
-    del segments  # unused; verify loads EN
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
     glossary = load_glossary()
     state = FileRunState(
@@ -163,9 +152,12 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
             config=cfg,
         ),
     )
+    assert result.verdict == "warnings"
+    assert any(
+        w.startswith("cyrillic_in_fence:") for w in result.heuristic_warnings
+    )
     assert "Запрос" not in result.final_text
     assert "Идентификатор" not in result.final_text
-    assert "Query" in result.final_text or "-- Query" in result.final_text
     assert check_cyrillic_in_en_fence_comments(result.final_text, target_lang="en") == []
 
 

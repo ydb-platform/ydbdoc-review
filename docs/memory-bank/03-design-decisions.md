@@ -3030,10 +3030,11 @@ a successful push path deleted it.
 
 **Decision:**
 
-1. Insert **``FinalizeEnStep``** in ``VERIFY_PROFILE`` after ``critic_loop`` and
-   before ``heuristics``. Always run ``finalize_en_target`` on EN using
-   ``fence_reference_text`` (EN self on verify) so Cyrillic ``--`` / ``//`` / ``#``
-   comments are LLM-translated even when critic applied 0 segment fixes.
+1. Insert **``FinalizeEnStep``** in ``VERIFY_PROFILE`` so
+   ``finalize_en_target`` always runs on EN (``fence_reference_text`` = EN self
+   on verify) and Cyrillic ``--`` / ``//`` / ``#`` comments are LLM-translated
+   even when critic applied 0 segment fixes. Order vs heuristics: see **§6.137**
+   (heuristics/verdict on incoming EN, then finalize for the fixup write).
 2. At the **start** of ``run_doc_verify`` for non-translation PRs (and again
    before push), delete ``ydbdoc-review/verify-{N}`` via API. Deleting the head
    closes any open fixup PR. Operator does not need to delete the branch by hand
@@ -3041,6 +3042,35 @@ a successful push path deleted it.
 
 **Tests:** ``test_verify_profile_translates_yql_trailing_cyrillic_comments``;
 ``test_run_doc_verify_deletes_stale_fixup_branch_at_start``.
+
+### 6.137. Verify heuristics before finalize; report №N; checkout SHA (#47233, 2026-07-27)
+
+**Problem:** Second ``doc_verify`` on #47233 (after §6.136) reported 🟢 and
+«можно мержить», while the merge tip still had Cyrillic ``--`` comments in EN
+YQL. Root cause: ``FinalizeEnStep`` ran **before** heuristics, so the working
+tree was already English when heuristics/verdict ran. Report looked clean even
+though the verified tip had been bad. Separately:
+
+1. Title ``отчёт #1`` GitHub-autolinks to
+   [PR #1](https://github.com/ydb-platform/ydb/pull/1) in the same repo.
+2. ``ReportMeta.checkout_ref`` was ``git_head_sha`` **after**
+   ``prepare_translation_branch_on_base``, i.e. main tip, not the PR content SHA.
+
+**Decision:**
+
+1. ``VERIFY_PROFILE`` order: ``critic_loop`` → **heuristics → verdict →
+   FinalizeEn** → ``report_artifacts``. Heuristics see the incoming EN (🟡 when
+   Cyrillic remains). Finalize still writes English ``final_text`` for the fixup
+   commit. Recommendation stays 🟡 until a clean tip is re-verified.
+2. Report titles use **``отчёт №{n}``** (not ``#{n}``) so GitHub does not
+   autolink to unrelated PRs. Marker ``ydbdoc-review — отчёт`` still counts
+   both old ``#`` and new ``№`` comments for numbering.
+3. Capture ``verify_content_sha = git_head_sha(repo_path)`` at the start of
+   verify (before prepare/push) and pass it as ``checkout_ref``.
+
+**Tests:** ``test_verify_profile_translates_yql_trailing_cyrillic_comments``
+(verdict ``warnings`` + English ``final_text``); report builder ``№``;
+``test_run_doc_verify_posts_comment`` asserts Checkout SHA before prepare.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)

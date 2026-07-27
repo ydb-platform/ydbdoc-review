@@ -657,6 +657,10 @@ def run_doc_verify(
     if not translation_pr and not dry_run:
         _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
 
+    # Content under review (PR tip / merge commit). Capture before prepare_*
+    # moves HEAD onto main for the fixup branch (§6.137).
+    verify_content_sha = git_head_sha(repo_path)
+
     changes = merge_pr_file_changes(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
@@ -948,7 +952,7 @@ def run_doc_verify(
         mode="doc_verify",
         report_number=report_num,
         elapsed_s=elapsed,
-        checkout_ref=git_head_sha(repo_path),
+        checkout_ref=verify_content_sha,
     )
     job.translation_comment_url = _safe_post_issue_comment(
         gh,

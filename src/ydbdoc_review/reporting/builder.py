@@ -668,7 +668,7 @@ def build_translate_handoff_comment(
     source_url = f"https://github.com/{source_repo}/pull/{source_pr}"
     return (
         f"🤖 **ydbdoc-review** — перевод выполнен "
-        f"(отчёт #{meta.report_number}, {meta.ts_label})\n\n"
+        f"(отчёт №{meta.report_number}, {meta.ts_label})\n\n"
         f"{checkout_line}"
         f"Исходный PR: [#{source_pr}]({source_url})\n\n"
         "| | |\n"
@@ -830,7 +830,7 @@ def build_full_report(
         short = meta.checkout_ref[:12]
         checkout_line = f"Checkout: `{short}`\n\n"
     header = (
-        f"🤖 **ydbdoc-review** — отчёт #{meta.report_number} "
+        f"🤖 **ydbdoc-review** — отчёт №{meta.report_number} "
         f"({meta.mode}, {meta.ts_label})\n\n"
         f"{checkout_line}"
         f"## Рекомендация: {rec_emoji} {rec_label}\n\n"

@@ -676,6 +676,9 @@ def test_run_doc_verify_posts_comment(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    content_sha = subprocess.check_output(
+        ["git", "-C", git_repo, "rev-parse", "HEAD"], text=True
+    ).strip()
 
     pull = {
         "title": "Auto-translate docs from PR #3",
@@ -688,17 +691,26 @@ def test_run_doc_verify_posts_comment(git_repo: str):
         "base": {"ref": "feature/docs"},
     }
 
+    def _fake_prepare(*_a, **_k):
+        # Simulate prepare_* moving HEAD away from the verified content tip.
+        subprocess.check_call(
+            ["git", "-C", git_repo, "commit", "--allow-empty", "-m", "main tip"],
+        )
+
     with patch(
         "ydbdoc_review.github.workflow._run_verify_pairs",
         return_value=_fake_pr_result(),
     ):
-        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
+        with patch(
+            "ydbdoc_review.github.workflow.prepare_translation_branch_on_base",
+            side_effect=_fake_prepare,
+        ):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch"):
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                         mock_gh.return_value.get_pull.return_value = pull
                         mock_gh.return_value.iter_issue_comments.return_value = iter(
-                            [{"body": "ydbdoc-review — отчёт #1"}]
+                            [{"body": "ydbdoc-review — отчёт №1"}]
                         )
                         mock_gh.return_value.post_issue_comment.return_value = "url"
                         mock_gh.return_value.create_pull.return_value = (
@@ -721,6 +733,15 @@ def test_run_doc_verify_posts_comment(git_repo: str):
 
     assert result.translation_comment_url == "url"
     assert mock_gh.return_value.post_issue_comment.call_count == 1
+    posted = mock_gh.return_value.post_issue_comment.call_args.args[3]
+    assert "отчёт №2" in posted
+    assert "отчёт #2" not in posted
+    assert f"Checkout: `{content_sha[:12]}`" in posted
+    after_prepare = subprocess.check_output(
+        ["git", "-C", git_repo, "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert after_prepare != content_sha
+    assert f"Checkout: `{after_prepare[:12]}`" not in posted
 
 
 def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
