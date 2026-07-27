@@ -178,9 +178,11 @@ Translation branch ydbdoc-review/pr-N:
 Bilingual / author source PR (not ydbdoc-review/pr-*):
 1. source_pr = None — both locales from checkout
 2. Critic on RU↔EN pairs present in the PR diff
-3. Completeness gaps: RU docs/nav without EN mirror in the same diff (§6.76/§6.135)
-4. Critic fixes → fixup branch ydbdoc-review/verify-{N} (§6.64/§6.75)
-5. Post report on the same PR
+3. **Finalize EN** — always translate residual Cyrillic in fences/prose (§6.136)
+4. Completeness gaps: RU docs/nav without EN mirror in the same diff (§6.76/§6.135)
+5. Critic fixes → fixup branch ydbdoc-review/verify-{N} (§6.64/§6.75);
+   stale ``verify-*`` deleted at start of each re-run (§6.136)
+6. Post report on the same PR
 ```
 
 ---

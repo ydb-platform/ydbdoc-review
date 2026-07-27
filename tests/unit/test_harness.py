@@ -60,11 +60,113 @@ def test_profiles_translate_only_verify_has_qa():
     assert translate_names == ["parse", "translate"]
     assert verify_names[0] == "parse"
     assert verify_names[1] == "load_target"
-    shared_qa = ["round_trip", "critic_loop", "heuristics", "verdict", "report_artifacts"]
+    assert "finalize_en" in verify_names
+    assert verify_names.index("finalize_en") > verify_names.index("critic_loop")
+    assert verify_names.index("finalize_en") < verify_names.index("heuristics")
+    shared_qa = [
+        "round_trip",
+        "critic_loop",
+        "finalize_en",
+        "heuristics",
+        "verdict",
+        "report_artifacts",
+    ]
     assert verify_names[2:] == shared_qa
     with_qa_names = [s.name for s in TRANSLATE_WITH_QA_PROFILE.steps]
     assert with_qa_names[:2] == ["parse", "translate"]
     assert "critic_feedback_retry" in with_qa_names
+    assert "finalize_en" not in with_qa_names
+
+
+def test_verify_profile_translates_yql_trailing_cyrillic_comments():
+    """doc_verify must fix RU ``--`` comments in EN YQL even with Fixed segments: 0 (§6.136)."""
+    from textwrap import dedent
+
+    from ydbdoc_review.validation.fence_comments import (
+        check_cyrillic_in_en_fence_comments,
+    )
+
+    ru = dedent(
+        """
+        Intro with enough words so heuristics do not complain about length here.
+
+        ```yql
+        select
+            Query,          -- Запрос
+            WmPoolId        -- Идентификатор пула
+        from `.sys/query_sessions`
+        ```
+        """
+    ).strip()
+    en = dedent(
+        """
+        Intro with enough words so heuristics do not complain about length here.
+
+        ```yql
+        select
+            Query,          -- Запрос
+            WmPoolId        -- Идентификатор пула
+        from `.sys/query_sessions`
+        ```
+        """
+    ).strip()
+    segments = extract_segments(parse_markdown(ru))
+    # Critic finds nothing actionable; fence-comment LLM must still run.
+    critic_ok = json.dumps({"verdict": "ok", "issues": []})
+    fence_json = json.dumps(
+        {
+            "comments": [
+                {"id": "b1-l1", "text": "Query"},
+                {"id": "b1-l2", "text": "Pool ID"},
+            ]
+        },
+        ensure_ascii=False,
+    )
+    # Line indices depend on fence body line numbers — build from collector.
+    from ydbdoc_review.validation.fence_comments import (
+        collect_cyrillic_fence_comment_lines,
+    )
+
+    items = collect_cyrillic_fence_comment_lines(en)
+    assert len(items) >= 2
+    fence_json = json.dumps(
+        {
+            "comments": [
+                {
+                    "id": f"b{it.block_index}-l{it.line_index}",
+                    "text": (
+                        "Query"
+                        if "Запрос" in it.body
+                        else "Pool ID"
+                    ),
+                }
+                for it in items
+            ]
+        },
+        ensure_ascii=False,
+    )
+    del segments  # unused; verify loads EN
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    state = FileRunState(
+        mode="verify",
+        file_path="ydb/docs/ru/core/dev/a.md",
+        raw_source_text=ru,
+        source_text=ru,
+        existing_target_text=en,
+    )
+    result = FileHarness(VERIFY_PROFILE).run(
+        state,
+        HarnessContext.from_options(
+            _mock_client([critic_ok, fence_json]),
+            glossary=glossary,
+            config=cfg,
+        ),
+    )
+    assert "Запрос" not in result.final_text
+    assert "Идентификатор" not in result.final_text
+    assert "Query" in result.final_text or "-- Query" in result.final_text
+    assert check_cyrillic_in_en_fence_comments(result.final_text, target_lang="en") == []
 
 
 def test_parse_step_empty_file_stops_early():

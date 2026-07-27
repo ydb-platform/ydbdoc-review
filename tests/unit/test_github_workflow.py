@@ -426,9 +426,10 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     prep.assert_called_once()
     assert prep.call_args.kwargs["translation_branch"] == "ydbdoc-review/verify-11"
     assert prep.call_args.kwargs["base_branch"] == "main"
-    mock_gh.return_value.delete_branch.assert_called_once_with(
+    mock_gh.return_value.delete_branch.assert_called_with(
         "o", "r", "ydbdoc-review/verify-11"
     )
+    assert mock_gh.return_value.delete_branch.call_count >= 1
     mock_gh.return_value.create_pull.assert_called_once()
     create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
     assert create_kwargs["head"] == "ydbdoc-review/verify-11"
@@ -492,12 +493,66 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
                                 config=load_config(env=_env()),
                             )
 
-    mock_gh.return_value.delete_branch.assert_called_once_with(
+    mock_gh.return_value.delete_branch.assert_called_with(
         "o", "r", "ydbdoc-review/verify-11"
     )
+    assert mock_gh.return_value.delete_branch.call_count >= 2
     push.assert_called_once()
     assert push.call_args.args[2] == "ydbdoc-review/verify-11"
     assert result.translation_pr_number == 100
+
+
+def test_run_doc_verify_deletes_stale_fixup_branch_at_start(git_repo: str):
+    """Re-run deletes ydbdoc-review/verify-N before LLM work (§6.136)."""
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+
+    pull = {
+        "title": "docs bilingual",
+        "body": "",
+        "head": {
+            "ref": "feature/docs",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    changes = [
+        ("ydb/docs/ru/a.md", "modified"),
+        ("ydb/docs/en/a.md", "modified"),
+    ]
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ):
+        with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+            mock_gh.return_value.get_pull.return_value = pull
+            mock_gh.return_value.iter_issue_comments.return_value = iter([])
+            mock_gh.return_value.post_issue_comment.return_value = "url"
+            mock_gh.return_value.delete_branch.return_value = True
+            with patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                return_value=changes,
+            ):
+                with patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                    return_value=changes,
+                ):
+                    run_doc_verify(
+                        repo_path=git_repo,
+                        github_repo="o/r",
+                        pr_number=47233,
+                        merge_base_with="HEAD",
+                        dry_run=False,
+                        no_commit=True,
+                        config=load_config(env=_env()),
+                    )
+
+    mock_gh.return_value.delete_branch.assert_called_with(
+        "o", "r", "ydbdoc-review/verify-47233"
+    )
 
 
 def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):

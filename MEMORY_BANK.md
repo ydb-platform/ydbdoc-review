@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-27  
-**Current focus:** §6.135 — ``doc_verify`` on bilingual source PRs; Phase K ops.
+**Current focus:** §6.136 — verify finalize EN fence comments; reset verify-* on re-run.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-27 | **§6.136** — verify always finalizes EN fence comments; delete ``verify-*`` on re-run |
 | 2026-07-27 | **§6.135** — ``doc_verify`` on bilingual source PRs (completeness + checkout/self RU/EN) |
 | 2026-07-22 | **Phase K code** — ACL/quota/YDB ledger/YDB transcripts/`doc_continue` (`ops/`, wired into workflow) |
 | 2026-07-22 | **§20.11** — transcripts default to YDB `run_objects` until S3 quota; flip via `YDBDOC_TRANSCRIPT_BACKEND` |

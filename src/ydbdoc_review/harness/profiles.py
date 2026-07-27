@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from ydbdoc_review.harness.steps import (
     CriticFeedbackRetryStep,
     CriticLoopStep,
+    FinalizeEnStep,
     HeuristicsStep,
     HarnessStep,
     LoadTargetStep,
@@ -39,6 +40,17 @@ _TRANSLATE_QA_TAIL: tuple[HarnessStep, ...] = (
     ReportArtifactsStep(),
 )
 
+_VERIFY_QA_TAIL: tuple[HarnessStep, ...] = (
+    RoundTripStep(),
+    CriticLoopStep(),
+    # Always translate residual Cyrillic in EN fences/prose (§6.136), even when
+    # critic applied 0 segment fixes (Fixed segments: 0).
+    FinalizeEnStep(),
+    HeuristicsStep(),
+    VerdictStep(),
+    ReportArtifactsStep(),
+)
+
 
 @dataclass(frozen=True)
 class HarnessProfile:
@@ -60,5 +72,5 @@ TRANSLATE_WITH_QA_PROFILE = HarnessProfile(
 
 VERIFY_PROFILE = HarnessProfile(
     name="verify",
-    steps=(ParseStep(), LoadTargetStep(), *_QA_TAIL),
+    steps=(ParseStep(), LoadTargetStep(), *_VERIFY_QA_TAIL),
 )

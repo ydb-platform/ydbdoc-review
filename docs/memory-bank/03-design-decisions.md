@@ -3014,5 +3014,33 @@ under the 2026-07-20 ``actions/checkout`` guard (verify workflow lacked
 
 **Tests:** ``test_run_doc_verify_bilingual_source_pr_*``.
 
+### 6.136. Verify must finalize EN fence comments; reset fixup branch (#47233, 2026-07-27)
+
+**Problem:** On bilingual ``doc_verify`` for #47233 the critic/heuristics correctly
+flagged Cyrillic ``--`` comments inside EN YQL fences, but the fixup PR
+(``ydbdoc-review/verify-47233`` / #47964) kept Russian comments
+(``Fixed segments: 0``). Root cause: ``VERIFY_PROFILE`` ran critic → heuristics
+without ``finalize_en_target``, so
+``translate_cyrillic_fence_comments_with_client`` never ran unless the critic
+applied segment ``suggested_text`` and re-rendered. Fence-comment issues are
+usually heuristics, not applied segment fixes.
+
+Also a second ``doc_verify`` re-run left the stale fixup branch/PR in place until
+a successful push path deleted it.
+
+**Decision:**
+
+1. Insert **``FinalizeEnStep``** in ``VERIFY_PROFILE`` after ``critic_loop`` and
+   before ``heuristics``. Always run ``finalize_en_target`` on EN using
+   ``fence_reference_text`` (EN self on verify) so Cyrillic ``--`` / ``//`` / ``#``
+   comments are LLM-translated even when critic applied 0 segment fixes.
+2. At the **start** of ``run_doc_verify`` for non-translation PRs (and again
+   before push), delete ``ydbdoc-review/verify-{N}`` via API. Deleting the head
+   closes any open fixup PR. Operator does not need to delete the branch by hand
+   before re-labeling ``doc_verify``.
+
+**Tests:** ``test_verify_profile_translates_yql_trailing_cyrillic_comments``;
+``test_run_doc_verify_deletes_stale_fixup_branch_at_start``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

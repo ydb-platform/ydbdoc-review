@@ -315,6 +315,51 @@ class CriticLoopStep:
         run_critic_loop(state, ctx)
 
 
+class FinalizeEnStep:
+    """Post-critic EN finalize: fence/prose Cyrillic translate (§6.136).
+
+    On ``doc_verify``, critic often reports fence-comment issues via heuristics
+    only (``Fixed segments: 0``). Without this step those Cyrillic ``--`` / ``//``
+    comments stay in the EN file and get committed unchanged.
+    """
+
+    name = "finalize_en"
+
+    def run(self, state: FileRunState, ctx: HarnessContext) -> None:
+        if state.stopped_early or state.segment_alignment_error:
+            return
+        if ctx.target_lang.lower() not in {"en", "english"}:
+            return
+        if not state.translated_text:
+            return
+        # Prefer EN self-reference on verify so enforce_source does not copy RU
+        # fence bodies over the target (LoadTargetStep sets fence_reference_text).
+        fence_ref = state.fence_reference_text or state.translated_text
+        before = state.translated_text
+        state.translated_text = finalize_en_target(
+            state.translated_text,
+            fence_ref,
+            client=ctx.client,
+            glossary=ctx.glossary,
+            file_path=state.file_path,
+            source_lang=ctx.source_lang,
+            target_lang=ctx.target_lang,
+            prompt_version=ctx.prompt_version,
+            out_warnings=state.finalize_warnings,
+            en_toc_reachable=ctx.en_toc_reachable,
+        )
+        if state.translated_text == before or not state.segments:
+            return
+        state.translations, align_err = gate_round_trip(
+            state.segments, state.translated_text
+        )
+        if align_err:
+            # Fence-only edits should not fail the whole verify; keep text.
+            state.finalize_warnings.append(
+                f"finalize_en_round_trip: {align_err}"
+            )
+
+
 class CriticFeedbackRetryStep:
     """Re-translate segments with unresolved critic issues (translate mode only)."""
 

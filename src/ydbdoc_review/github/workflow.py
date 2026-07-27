@@ -179,6 +179,23 @@ def _safe_post_issue_comment(
         return None
 
 
+def _delete_stale_verify_fixup(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    fixup_branch: str,
+) -> None:
+    """Remove ``ydbdoc-review/verify-*`` so a re-run starts clean (§6.136).
+
+    Deleting the head branch also closes any open fixup PR that used it.
+    """
+    if gh.delete_branch(owner, repo, fixup_branch):
+        logger.info(
+            "Deleted stale doc_verify fixup branch %s before run/push",
+            fixup_branch,
+        )
+
+
 def _apply_results_to_disk(
     repo_path: str, result: PRTranslationResult, *, dry_run: bool
 ) -> TouchedPaths:
@@ -636,6 +653,10 @@ def run_doc_verify(
         ctx, translation_branch_prefix=cfg.paths.translation_branch_prefix
     )
 
+    # Re-run must not reuse a stale fixup branch/PR (closes open fixup PRs).
+    if not translation_pr and not dry_run:
+        _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
+
     changes = merge_pr_file_changes(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
@@ -865,11 +886,8 @@ def run_doc_verify(
             deleted_paths=touched.deleted,
         )
         if committed:
-            if not translation_pr and gh.delete_branch(owner, repo, fixup_branch):
-                logger.info(
-                    "Deleted stale doc_verify fixup branch %s before push",
-                    fixup_branch,
-                )
+            if not translation_pr:
+                _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
             if translation_pr:
                 logger.info(
                     "Pushing critic fixes onto translation branch %s (PR #%s)",
