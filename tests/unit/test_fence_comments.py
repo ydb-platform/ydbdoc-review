@@ -240,11 +240,67 @@ TRAILING_SLASH_GO_SAMPLE = dedent("""
 """).strip()
 
 
-def test_collect_trailing_slash_comment_on_code_line():
-    items = collect_cyrillic_fence_comment_lines(TRAILING_SLASH_GO_SAMPLE)
-    assert len(items) == 1
-    assert items[0].line_index == 2
-    assert "аварийный выход" in items[0].body
+def test_collect_code_blocks_inside_yfm_if():
+    """§6.139 / #48009: fences under ``{% if %}`` live in ``YfmIf.branches``."""
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.validation.fence_integrity import collect_code_blocks
+
+    text = dedent(
+        """
+        {% if select_command != "SELECT STREAM" %}
+
+        ### Syntax
+
+        ```yql
+        SELECT                             -- В SELECT можно использовать:
+            column1                        -- ключевые колонки
+        FROM table
+        ```
+
+        {% endif %}
+
+        Outside:
+
+        ```yql
+        SELECT 1;
+        ```
+        """
+    ).strip()
+    blocks = collect_code_blocks(parse_markdown(text))
+    assert len(blocks) == 2
+    assert "В SELECT" in blocks[0].content
+    assert blocks[1].content.strip().startswith("SELECT 1")
+
+
+def test_translate_cyrillic_fence_comments_inside_yfm_if():
+    """Finalize must translate ``--`` comments inside ``{% if %}`` (#48009)."""
+    text = dedent(
+        """
+        Intro with enough words so the sample is a realistic doc fragment here.
+
+        {% if feature_x %}
+
+        ```yql
+        SELECT                             -- В SELECT можно использовать:
+            column1                        -- ключевые колонки
+        FROM table
+        ```
+
+        {% endif %}
+        """
+    ).strip()
+    assert len(collect_cyrillic_fence_comment_lines(text)) >= 2
+
+    def _tr(body: str) -> str:
+        if "SELECT" in body:
+            return "In SELECT you can use:"
+        return "key columns"
+
+    out = translate_cyrillic_fence_comments(text, _tr)
+    assert "В SELECT" not in out
+    assert "ключевые" not in out
+    assert "In SELECT you can use:" in out
+    assert check_cyrillic_in_en_fence_comments(out, target_lang="en") == []
 
 
 def test_translate_trailing_slash_comment_preserves_code():

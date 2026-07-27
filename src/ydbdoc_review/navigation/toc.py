@@ -498,7 +498,12 @@ def _parse_toc_items_block(text: str) -> list[dict[str, str]]:
             i += 1
             while i < len(lines):
                 nxt = lines[i]
-                if re.match(r"^\s*-\s+(name:|include:)", nxt):
+                # Next top-level list item (block ``- name:`` / ``- include:`` or
+                # inline ``- { name: … }``). Do not swallow mixed inline siblings
+                # into a multiline WITH-style entry (#48009).
+                if re.match(r"^\s*-\s+(name:|include:)", nxt) or re.match(
+                    r"^\s*-\s*\{", nxt
+                ):
                     break
                 block_lines.append(nxt)
                 i += 1
@@ -587,15 +592,69 @@ def _inline_line_prefixes(yaml_text: str) -> set[str]:
     return prefixes
 
 
+def _item_block_offset(text: str, item: dict[str, str]) -> int:
+    """Document offset of an item's YAML ``block`` (best-effort)."""
+    block = item.get("block") or ""
+    needle = block.rstrip("\n")
+    if not needle:
+        return len(text)
+    idx = text.find(needle)
+    return idx if idx >= 0 else len(text)
+
+
+def _merge_inline_and_block_toc_items(
+    text: str,
+    inline: list[dict[str, str]],
+    block: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Keep document order when a sidebar mixes ``- { name, href }`` and block entries.
+
+    ``select/toc_i.yaml`` is mostly inline but WITH is a multiline ``- name:`` /
+    ``href:`` / ``include.path`` block. Returning only inline hid ``with.md``
+    from scope/orphan checks (#48009 / §6.139).
+    """
+    merged = sorted(
+        [*inline, *block],
+        key=lambda it: _item_block_offset(text, it),
+    )
+    out: list[dict[str, str]] = []
+    seen_href: set[str] = set()
+    seen_include: set[str] = set()
+    seen_blocks: set[str] = set()
+    for item in merged:
+        block_text = item.get("block") or ""
+        if block_text and block_text in seen_blocks:
+            continue
+        href = item.get("href")
+        include_path = item.get("include_path")
+        if href and href in seen_href:
+            continue
+        if not href and include_path and include_path in seen_include:
+            continue
+        if block_text:
+            seen_blocks.add(block_text)
+        if href:
+            seen_href.add(href)
+        if include_path:
+            seen_include.add(include_path)
+        out.append(item)
+    return out
+
+
 def parse_toc_items(yaml_text: str) -> list[dict[str, str]]:
     """Return ``[{name, href, block}, ...]`` preserving each item's YAML block."""
     text = yaml_text.replace("\r\n", "\n")
     if not text.strip():
         return []
+    if _has_nested_block_items(text):
+        return _flatten_toc_nodes(_parse_toc_tree_block(text))
     inline = _parse_toc_items_inline(text)
+    block = _parse_toc_items_block(text)
+    if inline and block:
+        return _merge_inline_and_block_toc_items(text, inline, block)
     if inline:
         return inline
-    return _parse_toc_items_block(text)
+    return block
 
 
 def collect_toc_link_targets(yaml_text: str) -> list[tuple[str, str]]:

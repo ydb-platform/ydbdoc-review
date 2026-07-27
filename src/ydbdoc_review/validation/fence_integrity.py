@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import re
 
-from ydbdoc_review.parsing.ast_types import BlockNode, Document, FencedCode, IndentedCode
+from ydbdoc_review.parsing.ast_types import (
+    BlockNode,
+    Document,
+    FencedCode,
+    IndentedCode,
+    YfmIf,
+)
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.homoglyphs import (
@@ -13,10 +19,17 @@ from ydbdoc_review.validation.homoglyphs import (
 )
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
+
 def _walk_blocks(blocks: list[BlockNode], out: list[FencedCode | IndentedCode]) -> None:
+    """Recurse into nested blocks, including ``YfmIf.branches`` (#48009 / §6.139)."""
     for block in blocks:
         if isinstance(block, (FencedCode, IndentedCode)):
             out.append(block)
+        # YfmIf stores body in ``branches``, not ``.children`` (empty/absent).
+        if isinstance(block, YfmIf):
+            for branch in block.branches:
+                _walk_blocks(branch.children, out)
+            continue
         children = getattr(block, "children", None)
         if children:
             _walk_blocks(children, out)

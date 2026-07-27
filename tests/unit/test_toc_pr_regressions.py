@@ -935,3 +935,110 @@ def test_pr_46569_orphan_page_when_parent_not_wired(tmp_path: Path):
         },
     )
     assert page in orphans
+
+
+def test_pr_48009_mixed_inline_block_toc_parses_with_md():
+    """#48009 / §6.139: inline ``- { }`` toc must not hide block ``WITH`` / ``with.md``."""
+    ru = dedent("""
+        items:
+        - { name: GROUP BY,             href: group-by.md                                            }
+        - { name: STREAMING,            href: streaming.md                                            }
+        - name: WITH
+          href: with.md
+          include: { mode: link, path: with/toc_p.yaml }
+        - { name: WITHOUT,              href: without.md                                              }
+        - { name: WHERE,                href: where.md                                                }
+    """).strip()
+    items = parse_toc_items(ru)
+    hrefs = [it.get("href") for it in items]
+    assert "with.md" in hrefs
+    assert "without.md" in hrefs
+    assert "group-by.md" in hrefs
+    with_it = next(it for it in items if it.get("href") == "with.md")
+    assert with_it.get("include_path") == "with/toc_p.yaml"
+    assert "WITHOUT" not in (with_it.get("block") or "")
+    # document order: WITH before WITHOUT
+    assert hrefs.index("with.md") < hrefs.index("without.md")
+
+
+def test_pr_48009_md_only_queues_select_toc_when_en_missing_with():
+    """#48009: changing ``with.md`` must queue ``select/toc_i.yaml`` for merge."""
+    files = {
+        "ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml": dedent("""
+            items:
+            - { name: GROUP BY, href: group-by.md }
+            - name: WITH
+              href: with.md
+              include: { mode: link, path: with/toc_p.yaml }
+            - { name: WITHOUT, href: without.md }
+        """).strip(),
+        "ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml": dedent("""
+            items:
+            - { name: GROUP BY, href: group-by.md }
+            - { name: WITHOUT, href: without.md }
+        """).strip(),
+        "ydb/docs/ru/core/yql/reference/syntax/select/with.md": "# WITH\n",
+        "ydb/docs/en/core/yql/reference/syntax/select/with.md": "# WITH\n",
+        "ydb/docs/ru/core/yql/reference/syntax/select/group-by.md": "# G\n",
+        "ydb/docs/en/core/yql/reference/syntax/select/group-by.md": "# G\n",
+    }
+    # Discover via ancestor toc_p include so select/toc_i is found
+    files["ydb/docs/ru/core/yql/reference/syntax/toc_i.yaml"] = dedent("""
+        items:
+        - name: SELECT
+          include: { mode: link, path: select/toc_p.yaml }
+    """).strip()
+    files["ydb/docs/ru/core/yql/reference/syntax/select/toc_p.yaml"] = (
+        "items:\n- include: { mode: link, path: toc_i.yaml }\n"
+    )
+    files["ydb/docs/en/core/yql/reference/syntax/toc_i.yaml"] = files[
+        "ydb/docs/ru/core/yql/reference/syntax/toc_i.yaml"
+    ]
+    files["ydb/docs/en/core/yql/reference/syntax/select/toc_p.yaml"] = files[
+        "ydb/docs/ru/core/yql/reference/syntax/select/toc_p.yaml"
+    ]
+
+    def read_ru(path: str) -> str | None:
+        return files.get(path)
+
+    def read_en(path: str) -> str | None:
+        return files.get(path)
+
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/yql/reference/syntax/select/with.md", "modified")],
+        read_ru=read_ru,
+        read_en_base=read_en,
+        docs_root="ydb/docs",
+    )
+    assert (
+        "ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml"
+        in plan.nav_ru_paths
+    )
+
+
+def test_pr_48009_merge_adds_with_into_inline_en_toc():
+    """#48009: merge inserts block WITH into mostly-inline EN select toc."""
+    ru = dedent("""
+        items:
+        - { name: GROUP BY, href: group-by.md }
+        - name: WITH
+          href: with.md
+          include: { mode: link, path: with/toc_p.yaml }
+        - { name: WITHOUT, href: without.md }
+    """).strip()
+    en = dedent("""
+        items:
+        - { name: GROUP BY, href: group-by.md }
+        - { name: WITHOUT, href: without.md }
+    """).strip()
+    merged = merge_en_toc_yaml(
+        en,
+        ru,
+        translate_hrefs={"with.md"},
+        translate_include_paths={"with/toc_p.yaml"},
+        translate_name=lambda n: n,
+    )
+    hrefs = [it.get("href") for it in parse_toc_items(merged)]
+    assert "with.md" in hrefs
+    assert hrefs.index("with.md") < hrefs.index("without.md")
+    assert "with/toc_p.yaml" in merged

@@ -3090,5 +3090,32 @@ Keep §6.137 report ``№`` and early content ``checkout_ref``.
 **Tests:** ``test_verify_profile_translates_yql_trailing_cyrillic_comments``
 expects verdict ``ok`` + English ``final_text``.
 
+### 6.139. YfmIf fence walk + mixed inline/block toc (#48009, 2026-07-27)
+
+**Problem:** Translation [#48009](https://github.com/ydb-platform/ydb/pull/48009)
+(from [#30237](https://github.com/ydb-platform/ydb/pull/30237)) stayed 🔴:
+
+1. ``group-by.md`` — Cyrillic ``--`` comments inside ``{% if %}``. Heuristics
+   (text scan) flagged them; ``FinalizeEn`` / ``collect_code_blocks`` missed them
+   because ``YfmIf`` stores body in ``branches``, not ``.children``.
+2. ``with.md`` — ``orphan_toc_page``. RU ``select/toc_i.yaml`` is mostly inline
+   ``- { name, href }`` but WITH is a multiline ``- name:`` / ``href:`` /
+   ``include.path`` block. ``parse_toc_items`` returned **only** inline items,
+   so ``with.md`` was invisible to ``_nav_needed`` and never merged into EN toc.
+   Block parser also swallowed following inline siblings into the WITH ``block``.
+
+**Decision:**
+
+1. ``collect_code_blocks`` / ``_walk_blocks`` recurse into ``YfmIf.branches``
+   (same pattern as link_locale / glossary strip).
+2. ``parse_toc_items`` merges inline + block items in document order; block
+   parser stops at the next ``- {`` list item so WITH's ``block`` stays clean.
+
+**Tests:** ``test_collect_code_blocks_inside_yfm_if``,
+``test_translate_cyrillic_fence_comments_inside_yfm_if``,
+``test_pr_48009_mixed_inline_block_toc_parses_with_md``,
+``test_pr_48009_md_only_queues_select_toc_when_en_missing_with``,
+``test_pr_48009_merge_adds_with_into_inline_en_toc``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
