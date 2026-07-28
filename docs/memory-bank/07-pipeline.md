@@ -271,6 +271,7 @@ comment fails — see §6.48 (`_safe_post_issue_comment`).
 - **Translation PR** (`ydbdoc-review/pr-{N}`): second commit on the same branch (§6.75) — no fixup PR.
 - **Author/fork/manual PR:** separate fixup PR on `ydbdoc-review/verify-{N}` + link comment (§6.64). **Full QA report posts on the fixup PR** (§6.146); source gets a short pointer. ``doc_continue`` on the fixup head iterates inline.
 - **Existing ``verify-*`` PR:** inline push like translation; report stays on that PR.
+- **Alignment mismatch on verify:** rebuild EN from RU (``verify_realign``, §6.147) so critic can run; YFM ``#|`` tables parse as tables.
 
 Do **not** set `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` in env unless `git push` returns 403
 (org policy blocking default `GITHUB_TOKEN`).
