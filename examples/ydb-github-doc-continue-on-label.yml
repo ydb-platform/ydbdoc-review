@@ -1,4 +1,7 @@
-# doc_continue на translation PR — follow-up с инструкцией `/ydbdoc continue …`.
+# doc_continue — follow-up с инструкцией `/ydbdoc continue …`.
+# Вешать на:
+#   • translation PR (ydbdoc-review/pr-N);
+#   • critic-fixup PR (ydbdoc-review/verify-N) после bilingual doc_verify (§6.146).
 # Перед лейблом добавьте комментарий с командой, затем повесьте doc_continue.
 
 name: ydbdoc-review (doc_continue label)

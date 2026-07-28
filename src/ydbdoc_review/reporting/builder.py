@@ -690,6 +690,9 @@ def build_verify_fixup_pr_body(source_pr: int, source_repo: str, branch: str) ->
         f"For author/fork PRs critic fixes use a separate branch/PR — the workflow "
         f"never pushes commits onto the verified PR head (see §6.64). "
         f"Translation PRs use inline push (§6.75).\n\n"
+        f"The full ``doc_verify`` QA report is posted on **this** PR (§6.146). "
+        f"Use ``doc_continue`` here to iterate; do not expect the report on the "
+        f"source PR once a fixup exists.\n\n"
         f"Branch: `{branch}`\n"
     )
 
@@ -704,6 +707,8 @@ def build_verify_fixup_source_comment(
     Translation PRs: merge/cherry-pick into the translation branch.
     Bilingual/author PRs: merge the fixup PR (usually into ``main`` / the
     verified base) or cherry-pick onto the author branch — never «ветка перевода».
+
+    Full QA report lives on the fixup PR (§6.146); this comment is a short pointer.
     """
     if translation_pr:
         how = "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
@@ -715,8 +720,10 @@ def build_verify_fixup_source_comment(
         )
     return (
         "🤖 **ydbdoc-review** — критик предложил правки\n\n"
-        f"Правки оформлены отдельным PR: #{fixup_pr_number}.\n\n"
-        f"{how}"
+        f"Правки и **полный QA-отчёт** — в #{fixup_pr_number}.\n\n"
+        f"{how}\n\n"
+        f"Дальше: ``/ydbdoc continue …`` + лейбл ``doc_continue`` "
+        f"**на #{fixup_pr_number}** (§6.146)."
     )
 
 

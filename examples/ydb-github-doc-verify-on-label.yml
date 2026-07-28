@@ -1,7 +1,9 @@
 # doc_verify — QA полноты/качества перевода.
 # Вешать на:
 #   • translation PR (ydbdoc-review/pr-N) — повторный critic после doc_translate;
-#   • bilingual source PR (RU+EN в одном diff) — critic + completeness gaps.
+#   • bilingual source PR (RU+EN в одном diff) — critic + completeness gaps;
+#     при правках полный отчёт уходит в fixup PR ydbdoc-review/verify-N (§6.146);
+#   • verify fixup PR — повторный critic / после doc_continue (отчёт на том же PR).
 #
 # Перед лейблом на fork/merged PR нужен checkout merge_commit + allow-unsafe
 # (см. actions/checkout guard, 2026-07-20).

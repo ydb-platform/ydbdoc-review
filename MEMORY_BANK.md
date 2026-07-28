@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-28  
-**Current focus:** §6.145 — bilingual doc_verify fixup comment (no «ветка перевода»).
+**Current focus:** §6.146 — bilingual verify report on fixup + ``doc_continue`` on ``verify-*``.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-28 | **§6.146** — bilingual verify: full QA on fixup PR; ``doc_continue`` on ``verify-*`` (#46742) |
 | 2026-07-28 | **§6.145** — verify fixup comment: bilingual ≠ «ветка перевода» (#46742 / #48045) |
 | 2026-07-28 | **§6.144** — nav merge no-op (`target_text=None`, ok) counts as complete; unblocks #47091 re-translate |
 | 2026-07-28 | **§6.143** — Docker action forwards `YDB_SA_KEY`/ops env; continue misconfig ≠ TTL; mount SA key file |

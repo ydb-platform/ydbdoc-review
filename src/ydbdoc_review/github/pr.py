@@ -213,6 +213,11 @@ def is_translation_pr_branch(branch: str, *, translation_branch_prefix: str) -> 
     return source_pr_number_from_branch(branch, prefix=translation_branch_prefix) is not None
 
 
+def is_verify_fixup_branch(branch: str, *, verify_fixup_branch_prefix: str) -> bool:
+    """True when the PR head is a critic-fixup branch (``ydbdoc-review/verify-<N>``)."""
+    return source_pr_number_from_branch(branch, prefix=verify_fixup_branch_prefix) is not None
+
+
 def source_pr_merged(data: dict) -> bool:
     """True when the source PR is merged into its base branch."""
     return bool(data.get("merged"))

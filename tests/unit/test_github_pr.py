@@ -19,6 +19,7 @@ from ydbdoc_review.github.pr import (
     repo_https_clone_url,
     source_pr_number_from_branch,
     is_translation_pr_branch,
+    is_verify_fixup_branch,
     translation_pr_base,
     translation_branch_base,
     verify_fixup_pr_base,
@@ -159,6 +160,15 @@ def test_source_pr_from_branch():
     assert source_pr_number_from_branch("feature/x", prefix="ydbdoc-review/pr-") is None
     assert is_translation_pr_branch("ydbdoc-review/pr-42", translation_branch_prefix="ydbdoc-review/pr-")
     assert not is_translation_pr_branch("ydbdoc-review/verify-42", translation_branch_prefix="ydbdoc-review/pr-")
+    assert is_verify_fixup_branch(
+        "ydbdoc-review/verify-42", verify_fixup_branch_prefix="ydbdoc-review/verify-"
+    )
+    assert not is_verify_fixup_branch(
+        "ydbdoc-review/pr-42", verify_fixup_branch_prefix="ydbdoc-review/verify-"
+    )
+    assert source_pr_number_from_branch(
+        "ydbdoc-review/verify-46742", prefix="ydbdoc-review/verify-"
+    ) == 46742
 
 
 def test_parse_source_pr_from_text():

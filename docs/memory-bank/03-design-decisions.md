@@ -3255,5 +3255,32 @@ the author branch.
 
 **Tests:** ``test_verify_fixup_comment_bilingual_vs_translation``.
 
+### 6.146. Bilingual verify: QA report on fixup PR + ``doc_continue`` on ``verify-*`` (#46742, 2026-07-28)
+
+**Problem:** After bilingual ``doc_verify``, the full QA report stayed on the
+**source** PR while critic commits lived on ``ydbdoc-review/verify-N``. Operators
+could not iterate with ``doc_continue`` on the fixup (only translation
+``pr-N`` heads were treated as inline-push targets), and the source thread mixed
+report + «merge fixup» noise.
+
+**Desired UX:** bilingual author PR → ``doc_verify`` → either 🟢 on source, or a
+fixup PR that carries the **full** mergeability report; if still 🔴, continue on
+that fixup via ``/ydbdoc continue`` + ``doc_continue``.
+
+**Decision:**
+
+1. **Report routing:** when a new fixup PR is opened, post ``build_full_report``
+   on the **fixup** issue; source gets only ``build_verify_fixup_source_comment``
+   (pointer + merge hint + continue-on-fixup). No fixup → report stays on the
+   verified PR (translation / bilingual green / no disk writes).
+2. **Inline push on ``verify-*``:** ``is_verify_fixup_branch`` — same push path as
+   translation heads (no second fixup PR; do not delete own branch on start).
+3. **Scope on fixup re-verify/continue:** pairs/nav from the **original** source
+   PR file list (``verify-N`` → source ``N``), content from the fixup checkout.
+4. Examples / continue docstring mention ``verify-*``.
+
+**Tests:** ``is_verify_fixup_branch`` in ``test_github_pr``; updated
+``test_verify_fixup_comment_bilingual_vs_translation``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

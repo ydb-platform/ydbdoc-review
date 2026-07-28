@@ -35,6 +35,7 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     is_translation_pr_branch,
+    is_verify_fixup_branch,
     source_pr_number_from_branch,
     translate_ru_content_ref,
     translation_branch_base,
@@ -626,11 +627,14 @@ def run_doc_verify(
     skip_ops_gates: bool = False,
     ops_mode: str = "verify",
 ) -> DocJobResult:
-    """``doc_verify`` on a translation PR **or** a bilingual source PR.
+    """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
     Translation branch ``ydbdoc-review/pr-N``: EN from checkout, RU from source PR.
+    Critic-fixup ``ydbdoc-review/verify-N``: re-verify original source scope; push
+    inline onto the fixup head; full QA report stays on the fixup PR (§6.146).
     Other docs PRs (author/fork, RU+EN in one diff): both locales from checkout;
     completeness gaps flag RU changes without an EN mirror in the same PR (§6.135).
+    When a new fixup PR is opened, the full report is posted there (not on source).
     """
     started = time.monotonic()
     cfg = config or load_config()
@@ -642,6 +646,11 @@ def run_doc_verify(
     translation_pr = is_translation_pr_branch(
         ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
     )
+    verify_fixup_pr = is_verify_fixup_branch(
+        ctx.head_ref, verify_fixup_branch_prefix=cfg.paths.verify_fixup_branch_prefix
+    )
+    # Inline push (no separate fixup PR): translation heads and existing verify-* heads.
+    inline_fixup_push = translation_pr or verify_fixup_pr
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
@@ -654,6 +663,10 @@ def run_doc_verify(
         source_pr = parse_source_pr_from_text(
             f"{ctx.title}\n{pull_body}"
         )
+    if source_pr is None and verify_fixup_pr:
+        source_pr = source_pr_number_from_branch(
+            ctx.head_ref, prefix=cfg.paths.verify_fixup_branch_prefix
+        )
     source_pr_num = source_pr or pr_number
 
     ops_ctx = None
@@ -662,7 +675,7 @@ def run_doc_verify(
             mode=ops_mode,
             repo=github_repo,
             source_pr=source_pr_num,
-            translation_pr=pr_number if translation_pr else None,
+            translation_pr=pr_number if inline_fixup_push else None,
             continue_feedback=continue_feedback,
         )
         if not gate.ok:
@@ -688,7 +701,8 @@ def run_doc_verify(
     )
 
     # Re-run must not reuse a stale fixup branch/PR (closes open fixup PRs).
-    if not translation_pr and not dry_run:
+    # Never delete the branch we are currently verifying (verify-* head).
+    if not inline_fixup_push and not dry_run:
         _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
 
     # Content under review (PR tip / merge commit). Capture before prepare_*
@@ -699,14 +713,21 @@ def run_doc_verify(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
-    pairs = build_pairs_from_changes(changes, docs_root=cfg.paths.docs_root)
     source_changes = (
         list_pr_file_changes_api(gh, owner, repo, source_pr)
         if source_pr is not None
         else (None if translation_pr else changes)
     )
+    # On verify-* continue/re-verify: re-check the original bilingual source scope
+    # (not only the narrow fixup diff).
+    pair_changes = (
+        source_changes
+        if verify_fixup_pr and source_changes is not None
+        else changes
+    )
+    pairs = build_pairs_from_changes(pair_changes, docs_root=cfg.paths.docs_root)
     nav_pairs = build_verify_navigation_pairs(
-        changes,
+        pair_changes,
         docs_root=cfg.paths.docs_root,
         source_changes=source_changes,
     )
@@ -901,7 +922,7 @@ def run_doc_verify(
             config=cfg,
             verify=True,
         )
-        if translation_pr:
+        if inline_fixup_push:
             push_branch_name = ctx.head_ref
             prep_base_branch = ctx.head_ref
         else:
@@ -925,11 +946,17 @@ def run_doc_verify(
             deleted_paths=touched.deleted,
         )
         if committed:
-            if not translation_pr:
+            if not inline_fixup_push:
                 _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
             if translation_pr:
                 logger.info(
                     "Pushing critic fixes onto translation branch %s (PR #%s)",
+                    push_branch_name,
+                    pr_number,
+                )
+            elif verify_fixup_pr:
+                logger.info(
+                    "Pushing critic fixes onto verify fixup branch %s (PR #%s)",
                     push_branch_name,
                     pr_number,
                 )
@@ -955,7 +982,7 @@ def run_doc_verify(
     if dry_run:
         return job
 
-    if pushed and not translation_pr:
+    if pushed and not inline_fixup_push:
         title = f"Critic fixes for #{pr_number}"
         body = build_verify_fixup_pr_body(pr_number, github_repo, fixup_branch)
         opened = gh.create_pull(
@@ -982,7 +1009,10 @@ def run_doc_verify(
                         exc,
                     )
 
-    report_num = _next_report_number(gh, owner, repo, pr_number)
+    # Full QA report: on newly opened fixup PR when one exists; otherwise on
+    # the verified PR (translation / verify-* / bilingual with no fixes).
+    report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
+    report_num = _next_report_number(gh, owner, repo, report_pr)
     meta = ReportMeta(
         mode="doc_verify",
         report_number=report_num,
@@ -993,7 +1023,7 @@ def run_doc_verify(
         gh,
         owner,
         repo,
-        pr_number,
+        report_pr,
         append_retention_footer(
             build_full_report(
                 pr_result,
@@ -1042,10 +1072,11 @@ def run_doc_continue(
     config: Config | None = None,
     instruction: str | None = None,
 ) -> DocJobResult:
-    """Continue a translation with operator feedback (label ``doc_continue``).
+    """Continue with operator feedback (label ``doc_continue``).
 
-    ``pr_number`` is the **translation** PR. Instruction comes from ``instruction``
-    or the latest ``/ydbdoc continue …`` comment on that PR.
+    ``pr_number`` is a **translation** PR (``ydbdoc-review/pr-N``) or a
+    **verify fixup** PR (``ydbdoc-review/verify-N``, §6.146). Instruction comes
+    from ``instruction`` or the latest ``/ydbdoc continue …`` comment on that PR.
     """
     cfg = config or load_config()
     api_token, _push = _github_tokens(cfg)

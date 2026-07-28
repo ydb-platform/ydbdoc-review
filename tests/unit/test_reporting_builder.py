@@ -648,8 +648,13 @@ def test_verify_fixup_comment_bilingual_vs_translation():
 
     bilingual = build_verify_fixup_source_comment(48045, translation_pr=False)
     assert "#48045" in bilingual
-    assert "не** translation PR" in bilingual or "не** translation" in bilingual
+    assert "translation PR" in bilingual
     assert "ветку перевода" not in bilingual
+    assert "полный QA-отчёт" in bilingual
+    assert "doc_continue" in bilingual
+    assert "на #48045" in bilingual
 
     translation = build_verify_fixup_source_comment(99, translation_pr=True)
     assert "ветку перевода" in translation
+    assert "полный QA-отчёт" in translation
+    assert "на #99" in translation
