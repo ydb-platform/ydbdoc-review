@@ -3306,10 +3306,12 @@ stayed 🔴 with mixed false positives and real gaps:
    render as GFM (EN house style).
 4. ``RoundTripStep`` on ``verify``: if alignment still fails, **rebuild EN from
    RU** (full ``translate_segments`` + render), then re-gate — so critic can
-   finish and ``doc_continue`` can converge to 🟢.
+   finish and ``doc_continue`` can converge to 🟢. The ``verify_realign:`` note
+   is classified as **info** (not blocking).
 
 **Tests:** ``test_collect_toc_link_targets_odd_nested_indent``,
-``test_md_link_parity_ignores_self_basename_link``, ``test_yfm_tables``.
+``test_md_link_parity_ignores_self_basename_link``, ``test_yfm_tables``,
+``test_verify_realign_message_is_info_not_blocking``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
