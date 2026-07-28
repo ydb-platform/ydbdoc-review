@@ -3381,5 +3381,17 @@ relative place without a manual EN toc edit.
 ``test_pr_47856_reorder_adds_en_page_missing_from_toc``,
 ``test_pr_47856_ru_only_toc_reorder_is_nav_noop``.
 
+### 6.151. Nav-only QA report is 🟢 (#47856 / #48124, 2026-07-28)
+
+**Problem:** Toc-only translate (#47856 → #48124) correctly moved ``FROM Topic``
+in EN, but the QA header said **⚪ нет обработанных файлов** because
+``_merge_recommendation`` only counted markdown ``pair_results`` toward 🟢.
+Navigation ``verdict=ok`` (including soft ``toc_en_only_legacy``) was ignored.
+
+**Decision:** if there are no blocking/warning pair or nav results, and at least
+one navigation result is ``ok``, recommend **🟢 можно мержить**.
+
+**Tests:** ``test_merge_recommendation_green_for_nav_only_ok``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

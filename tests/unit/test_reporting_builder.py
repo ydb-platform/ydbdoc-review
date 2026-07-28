@@ -469,6 +469,30 @@ def test_merge_recommendation_red_when_navigation_blocked():
     assert "🔴" in body
 
 
+def test_merge_recommendation_green_for_nav_only_ok():
+    """§6.151 / #47856: toc-only translate must not report ⚪ «нет обработанных файлов»."""
+    cfg = _cfg()
+    nav = NavigationRunResult(
+        ru_path="ydb/docs/ru/a/toc_i.yaml",
+        en_path="ydb/docs/en/a/toc_i.yaml",
+        kind="toc",
+        target_text="items:\n- { name: X, href: x.md }\n",
+        warnings=[
+            "toc_en_only_legacy: EN toc keeps entries absent from RU "
+            "(hrefs=['streaming.md'], includes=[]) — menus should match"
+        ],
+        verdict="ok",
+    )
+    body = build_full_report(
+        PRTranslationResult(navigation_results=[nav]),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "🟢" in body
+    assert "можно мержить" in body
+    assert "нет обработанных файлов" not in body
+
+
 def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
     """Regression: verdict warnings + empty issue list must not yield yellow header."""
     cfg = _cfg()

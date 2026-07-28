@@ -89,11 +89,15 @@ def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
     nav_warn = any(
         n.verdict == "warnings" and not n.error for n in result.navigation_results
     )
+    nav_ok = any(
+        n.verdict == "ok" and not n.error for n in result.navigation_results
+    )
     if blocked or nav_blocked:
         return "🔴", "не мержить — есть блокирующие проблемы"
     if warn or nav_warn:
         return "🟡", "требует правок перед merge"
-    if ok:
+    # Nav-only PRs (e.g. #47856 toc reorder) have no markdown pair_results (§6.151).
+    if ok or nav_ok:
         return "🟢", "можно мержить"
     return "⚪", "нет обработанных файлов"
 
