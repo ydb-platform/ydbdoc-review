@@ -1012,7 +1012,9 @@ def run_doc_verify(
             owner,
             repo,
             pr_number,
-            build_verify_fixup_source_comment(fixup_pr_number),
+            build_verify_fixup_source_comment(
+                fixup_pr_number, translation_pr=translation_pr
+            ),
             label="doc_verify fixup link",
         )
     if ops_ctx is not None:

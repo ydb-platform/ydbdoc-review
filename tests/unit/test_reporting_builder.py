@@ -641,3 +641,15 @@ def test_excerpt_found_in_file_rejects_broken_preview():
     final = "when a query (e.g., `SELECT a FROM t`) is executed"
     assert not excerpt_found_in_file("when a query (e.g., ) is executed", final)
     assert excerpt_found_in_file("when a query (e.g., `SELECT a FROM t`)", final)
+
+
+def test_verify_fixup_comment_bilingual_vs_translation():
+    from ydbdoc_review.reporting.builder import build_verify_fixup_source_comment
+
+    bilingual = build_verify_fixup_source_comment(48045, translation_pr=False)
+    assert "#48045" in bilingual
+    assert "не** translation PR" in bilingual or "не** translation" in bilingual
+    assert "ветку перевода" not in bilingual
+
+    translation = build_verify_fixup_source_comment(99, translation_pr=True)
+    assert "ветку перевода" in translation

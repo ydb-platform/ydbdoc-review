@@ -694,11 +694,29 @@ def build_verify_fixup_pr_body(source_pr: int, source_repo: str, branch: str) ->
     )
 
 
-def build_verify_fixup_source_comment(fixup_pr_number: int) -> str:
+def build_verify_fixup_source_comment(
+    fixup_pr_number: int,
+    *,
+    translation_pr: bool = False,
+) -> str:
+    """Comment on the verified PR pointing at the critic-fixup PR.
+
+    Translation PRs: merge/cherry-pick into the translation branch.
+    Bilingual/author PRs: merge the fixup PR (usually into ``main`` / the
+    verified base) or cherry-pick onto the author branch — never «ветка перевода».
+    """
+    if translation_pr:
+        how = "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
+    else:
+        how = (
+            "Это **не** translation PR: замёрджите fixup-PR "
+            "(обычно в базовую ветку проверенного PR, чаще ``main``) "
+            "или cherry-pick'ните коммиты в авторскую ветку."
+        )
     return (
         "🤖 **ydbdoc-review** — критик предложил правки\n\n"
         f"Правки оформлены отдельным PR: #{fixup_pr_number}.\n\n"
-        "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
+        f"{how}"
     )
 
 

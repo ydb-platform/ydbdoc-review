@@ -3240,5 +3240,20 @@ leave a gap.
 
 **Tests:** ``test_completeness_ok_when_navigation_noop``.
 
+### 6.145. Verify fixup comment must not say «ветка перевода» on bilingual PRs (#46742, 2026-07-28)
+
+**Problem:** ``doc_verify`` on bilingual/author [#46742](https://github.com/ydb-platform/ydb/pull/46742)
+opened fixup [#48045](https://github.com/ydb-platform/ydb/pull/48045) (base ``main``, correct
+per §6.64 / ``verify_fixup_pr_base``) but posted
+``build_verify_fixup_source_comment``: «Замёрджите его в ветку перевода…» —
+wrong for non-translation PRs.
+
+**Decision:** ``build_verify_fixup_source_comment(..., translation_pr=)`` —
+translation PRs keep the old wording; bilingual/author PRs tell the operator to
+merge the fixup into the verified base (usually ``main``) or cherry-pick onto
+the author branch.
+
+**Tests:** ``test_verify_fixup_comment_bilingual_vs_translation``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
