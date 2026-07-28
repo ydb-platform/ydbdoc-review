@@ -413,15 +413,25 @@ def make_repo_scope_readers(
     """Build scope readers for ``plan_translation_scope`` in CI.
 
     ``ru_content_ref`` — optional git ref for RU (merged PR → merge commit, §6.120).
+
+    EN baseline is the **translation-branch tip** (``merge_base_with``, usually
+    ``origin/main``), not ``merge-base(HEAD, main)``. For merged source PRs HEAD
+    is often an ancestor of main, so merge-base == HEAD and EN menus look
+    falsely complete (§6.140 / #48018).
     """
-    from ydbdoc_review.github.git_ops import merge_base, read_text, read_text_at_ref
+    from ydbdoc_review.github.git_ops import (
+        merge_base,
+        read_text,
+        read_text_at_ref,
+        read_text_at_upstream_tip,
+    )
 
     mb = "HEAD"
     try:
         mb = merge_base(repo_path, merge_base_with, "HEAD")
     except RuntimeError:
         logger.debug(
-            "merge-base %s..HEAD unavailable; using HEAD for EN baseline reads",
+            "merge-base %s..HEAD unavailable; using HEAD for RU-base reads",
             merge_base_with,
         )
 
@@ -436,10 +446,10 @@ def make_repo_scope_readers(
         return read_text_at_ref(repo_path, "HEAD", path)
 
     def read_en_base(path: str) -> str | None:
-        text = read_text_at_ref(repo_path, mb, path)
+        text = read_text_at_upstream_tip(repo_path, merge_base_with, path)
         if text is not None:
             return text
-        return read_text_at_ref(repo_path, merge_base_with, path)
+        return read_text_at_ref(repo_path, mb, path)
 
     def read_ru_base(path: str) -> str | None:
         text = read_text_at_ref(repo_path, mb, path)

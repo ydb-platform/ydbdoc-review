@@ -155,16 +155,21 @@ def check_orphan_pages_for_locale(
     docs_root: str = "ydb/docs",
     pending_toc_texts: dict[str, str] | None = None,
     extra_toc_paths: set[str] | frozenset[str] | None = None,
+    baseline_ref: str | None = None,
 ) -> dict[str, list[str]]:
     """Map page path → messages when the page is off that locale's toc graph.
 
     A ``.md`` (except ``_includes/``) must appear as a ``href`` reachable from
     ``{docs_root}/{locale}/core/toc_p.yaml`` via ``include.path`` child sidebars.
 
-    Prefer ``HEAD`` over a dirty worktree so a momentary sidebar cannot false-flag
-    orphans (§6.133).
+    Prefer ``baseline_ref`` (translation-branch tip, e.g. ``origin/main``) over
+    ``HEAD`` when provided (§6.140): merged-PR checkouts are stale ancestors.
+    Otherwise prefer ``HEAD`` over a dirty worktree (§6.133).
     """
-    from ydbdoc_review.github.git_ops import read_text_at_ref
+    from ydbdoc_review.github.git_ops import (
+        read_text_at_ref,
+        read_text_at_upstream_tip,
+    )
 
     loc = locale.strip("/").lower()
     if loc not in {"en", "ru"}:
@@ -187,6 +192,10 @@ def check_orphan_pages_for_locale(
         key = normalize_repo_path(path)
         if key in pending_tocs:
             return pending_tocs[key]
+        if baseline_ref:
+            tip = read_text_at_upstream_tip(repo_path, baseline_ref, key)
+            if tip is not None:
+                return tip
         head = read_text_at_ref(repo_path, "HEAD", key)
         if head is not None:
             return head
@@ -227,6 +236,7 @@ def check_orphan_translated_pages(
     docs_root: str = "ydb/docs",
     pending_toc_texts: dict[str, str] | None = None,
     extra_toc_paths: set[str] | frozenset[str] | None = None,
+    baseline_ref: str | None = None,
 ) -> dict[str, list[str]]:
     """Map EN page path → blocking messages when the page is off the EN toc graph.
 
@@ -239,6 +249,7 @@ def check_orphan_translated_pages(
         docs_root=docs_root,
         pending_toc_texts=pending_toc_texts,
         extra_toc_paths=extra_toc_paths,
+        baseline_ref=baseline_ref,
     )
 
 
@@ -285,8 +296,12 @@ def apply_orphan_toc_page_checks(
     *,
     repo_path: str,
     docs_root: str = "ydb/docs",
-) -> None:
-    """Attach blocking findings for translated EN pages missing from the toc graph."""
+    baseline_ref: str | None = None,
+) -> list[str]:
+    """Attach blocking findings for translated EN pages missing from the toc graph.
+
+    Returns orphan EN ``.md`` paths (for translate completeness gating, §6.140).
+    """
     pending_toc_texts: dict[str, str] = {}
     extra_toc_paths: set[str] = set()
     for nav in result.navigation_results:
@@ -314,6 +329,7 @@ def apply_orphan_toc_page_checks(
         docs_root=docs_root,
         pending_toc_texts=pending_toc_texts,
         extra_toc_paths=extra_toc_paths,
+        baseline_ref=baseline_ref,
     )
     for path, msgs in orphans.items():
         for run in runs_by_path.get(path, []):
@@ -322,3 +338,4 @@ def apply_orphan_toc_page_checks(
                 continue
             fr.heuristic_blocking.extend(msgs)
             fr.verdict = bump_verdict_for_blocking_heuristics(fr.verdict, msgs)
+    return sorted(orphans.keys())

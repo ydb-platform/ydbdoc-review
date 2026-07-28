@@ -7,7 +7,12 @@ import logging
 from pathlib import PurePosixPath
 
 from ydbdoc_review.config.loader import Config
-from ydbdoc_review.github.git_ops import merge_base, read_text, read_text_at_ref
+from ydbdoc_review.github.git_ops import (
+    merge_base,
+    read_text,
+    read_text_at_ref,
+    read_text_at_upstream_tip,
+)
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.redirects import (
@@ -91,7 +96,7 @@ def _read_navigation_baselines(
     mb = merge_base(repo_path, merge_base_with, "HEAD")
     ru_text = read_text_at_ref(repo_path, mb, ru_path)
     ru_base = ru_text if ru_text is not None else ""
-    en_text = _read_en_nav_from_upstream(repo_path, merge_base_with, en_path)
+    en_text = read_text_at_upstream_tip(repo_path, merge_base_with, en_path)
     if en_text is None:
         # Worktree may already be at/near main after fetch (better than empty).
         en_text = read_text(repo_path, en_path)
@@ -107,35 +112,6 @@ def _read_navigation_baselines(
             mb[:12] if mb else mb,
         )
     return ru_base, en_main
-
-
-def _read_en_nav_from_upstream(
-    repo_path: str,
-    merge_base_with: str,
-    en_path: str,
-) -> str | None:
-    """Resolve EN toc/redirect YAML from upstream main tip (several ref forms)."""
-    candidates: list[str] = [merge_base_with]
-    if merge_base_with.startswith("origin/"):
-        branch = merge_base_with[len("origin/") :]
-        candidates.extend(
-            (
-                f"refs/remotes/origin/{branch}",
-                branch,
-            )
-        )
-    elif "/" not in merge_base_with:
-        candidates.append(f"origin/{merge_base_with}")
-        candidates.append(f"refs/remotes/origin/{merge_base_with}")
-    seen: set[str] = set()
-    for ref in candidates:
-        if not ref or ref in seen:
-            continue
-        seen.add(ref)
-        text = read_text_at_ref(repo_path, ref, en_path)
-        if text is not None:
-            return text
-    return None
 
 
 def extra_toc_hrefs_from_md_targets(
@@ -357,7 +333,7 @@ def merge_navigation_pair(
         for href in en_main_hrefs:
             target = resolve_toc_target_path(pair.en_path, href)
             if (
-                _read_en_nav_from_upstream(repo_path, merge_base_with, target)
+                read_text_at_upstream_tip(repo_path, merge_base_with, target)
                 is not None
             ):
                 keep_en_hrefs.add(href)

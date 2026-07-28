@@ -3117,5 +3117,30 @@ expects verdict ``ok`` + English ``final_text``.
 ``test_pr_48009_md_only_queues_select_toc_when_en_missing_with``,
 ``test_pr_48009_merge_adds_with_into_inline_en_toc``.
 
+### 6.140. EN nav baseline = translation-branch tip (#48018, 2026-07-28)
+
+**Problem:** Re-translate of merged [#30237](https://github.com/ydb-platform/ydb/pull/30237)
+→ [#48018](https://github.com/ydb-platform/ydb/pull/48018) still left
+``with.md`` as ``orphan_toc_page`` after §6.139. At the source merge commit EN
+``select/toc_i.yaml`` still listed ``with.md``; today's ``main`` tip does not
+(WITH dropped by [#47995](https://github.com/ydb-platform/ydb/pull/47995)).
+
+``make_repo_scope_readers`` used ``merge-base(HEAD, origin/main)`` for
+``read_en_base``. For merged PRs HEAD is an ancestor of main → merge-base ==
+HEAD → ``_nav_needed`` saw WITH on the stale EN toc and **did not queue**
+``select/toc_i.yaml``. The translation branch is cut from **current** main
+(no WITH) → orphan. Nav **merge** already preferred upstream tip (§6.111);
+scope planning did not.
+
+**Decision:**
+
+1. ``read_en_base`` / orphan BFS use ``read_text_at_upstream_tip(merge_base_with)``
+   (translation-branch tip), not merge-base HEAD.
+2. ``doc_translate`` runs ``apply_orphan_toc_page_checks(..., baseline_ref=merge_base_with)``
+   before commit; orphan paths join ``completeness_gaps`` and skip push.
+
+**Tests:** ``test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base``,
+``test_orphan_check_uses_baseline_ref_not_stale_head``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

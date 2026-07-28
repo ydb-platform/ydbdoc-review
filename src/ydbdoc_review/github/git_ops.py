@@ -130,6 +130,46 @@ def read_text_at_ref(repo: str, ref: str, rel_path: str) -> str | None:
     return proc.stdout
 
 
+def upstream_ref_candidates(merge_base_with: str) -> list[str]:
+    """Ref spellings for the translation-branch tip (usually ``origin/main``)."""
+    candidates: list[str] = [merge_base_with]
+    if merge_base_with.startswith("origin/"):
+        branch = merge_base_with[len("origin/") :]
+        candidates.extend(
+            (
+                f"refs/remotes/origin/{branch}",
+                branch,
+            )
+        )
+    elif "/" not in merge_base_with:
+        candidates.append(f"origin/{merge_base_with}")
+        candidates.append(f"refs/remotes/origin/{merge_base_with}")
+    out: list[str] = []
+    seen: set[str] = set()
+    for ref in candidates:
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        out.append(ref)
+    return out
+
+
+def read_text_at_upstream_tip(
+    repo: str, merge_base_with: str, rel_path: str
+) -> str | None:
+    """Read a path from the upstream tip used as the translation-branch base.
+
+    Prefer ``origin/main`` (etc.) over ``merge-base(HEAD, main)``. For merged
+    source PRs HEAD is often an ancestor of main, so merge-base == HEAD and EN
+    sidebars look falsely up-to-date (§6.140 / #48018).
+    """
+    for ref in upstream_ref_candidates(merge_base_with):
+        text = read_text_at_ref(repo, ref, rel_path)
+        if text is not None:
+            return text
+    return None
+
+
 def write_text(repo: str, rel_path: str, content: str) -> None:
     path = Path(repo) / rel_path.replace("/", os.sep)
     path.parent.mkdir(parents=True, exist_ok=True)

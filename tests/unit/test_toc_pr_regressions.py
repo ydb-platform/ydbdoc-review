@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import patch
 
 from ydbdoc_review.navigation.scope_planner import plan_translation_scope
 from ydbdoc_review.navigation.toc import (
@@ -933,6 +934,138 @@ def test_pr_46569_orphan_page_when_parent_not_wired(tmp_path: Path):
                 "items:\n- name: Watermarks\n  href: watermarks.md\n"
             ),
         },
+    )
+def test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base():
+    """#48018 / §6.140: EN baseline for ``_nav_needed`` is origin/main tip.
+
+    Merged source PR checkout → merge-base(HEAD, main) == HEAD where EN still
+    listed ``with.md``. Today's main tip does not → must queue ``select/toc_i``.
+    """
+    from ydbdoc_review.navigation.scope_planner import make_repo_scope_readers
+
+    en_at_head = dedent("""
+        items:
+        - { name: GROUP BY, href: group-by.md }
+        - name: WITH
+          href: with.md
+          include: { mode: link, path: with/toc_p.yaml }
+        - { name: WITHOUT, href: without.md }
+    """).strip()
+    en_at_main = dedent("""
+        items:
+        - { name: GROUP BY, href: group-by.md }
+        - { name: WITHOUT, href: without.md }
+    """).strip()
+    ru_toc = en_at_head  # RU still has WITH
+
+    def fake_read(_repo: str, ref: str, path: str) -> str | None:
+        if "en/" in path and path.endswith("toc_i.yaml"):
+            if ref in {"origin/main", "main", "refs/remotes/origin/main"}:
+                return en_at_main
+            if ref in {"HEAD", "merge-base-sha"}:
+                return en_at_head
+        if "ru/" in path and path.endswith("toc_i.yaml"):
+            return ru_toc
+        if path.endswith("with.md"):
+            return "# WITH\n"
+        return None
+
+    with (
+        patch(
+            "ydbdoc_review.github.git_ops.merge_base",
+            return_value="merge-base-sha",
+        ),
+        patch(
+            "ydbdoc_review.github.git_ops.read_text_at_ref",
+            side_effect=fake_read,
+        ),
+        patch(
+            "ydbdoc_review.github.git_ops.read_text",
+            return_value=None,
+        ),
+    ):
+        _read_ru, read_en_base, _read_ru_base = make_repo_scope_readers(
+            "/tmp/repo", "origin/main"
+        )
+        en_text = read_en_base(
+            "ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml"
+        )
+
+    assert en_text is not None
+    assert "href: with.md" not in en_text
+    assert "without.md" in en_text
+
+    files = {
+        "ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml": ru_toc,
+        "ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml": en_at_main,
+        "ydb/docs/ru/core/yql/reference/syntax/select/with.md": "# WITH\n",
+        "ydb/docs/en/core/yql/reference/syntax/select/with.md": "# WITH\n",
+    }
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/yql/reference/syntax/select/with.md", "modified")],
+        read_ru=lambda p: files.get(p),
+        read_en_base=lambda p: files.get(p),
+        docs_root="ydb/docs",
+    )
+    assert (
+        "ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml"
+        in plan.nav_ru_paths
+    )
+
+
+def test_orphan_check_uses_baseline_ref_not_stale_head(tmp_path: Path):
+    """#48018 / §6.140: orphan BFS must follow translation-branch tip tocs."""
+    repo = _repo(tmp_path)
+    # HEAD (stale): WITH present — would false-green orphans.
+    _write(
+        repo,
+        "ydb/docs/en/core/toc_p.yaml",
+        "items:\n- name: Select\n  include: { mode: link, path: yql/reference/syntax/select/toc_i.yaml }\n",
+    )
+    _write(
+        repo,
+        "ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml",
+        dedent("""
+            items:
+            - name: WITH
+              href: with.md
+        """).strip()
+        + "\n",
+    )
+    _write(repo, "ydb/docs/en/core/yql/reference/syntax/select/with.md", "# WITH\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "head has WITH"], cwd=repo, check=True)
+
+    # origin/main tip: WITH removed from toc (page still exists).
+    subprocess.run(["git", "checkout", "-b", "main-tip"], cwd=repo, check=True)
+    _write(
+        repo,
+        "ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml",
+        "items:\n- name: WITHOUT\n  href: without.md\n",
+    )
+    _write(
+        repo, "ydb/docs/en/core/yql/reference/syntax/select/without.md", "# W\n"
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "main tip drops WITH"], cwd=repo, check=True)
+    tip_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+    subprocess.run(["git", "checkout", "-"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", tip_sha],
+        cwd=repo,
+        check=True,
+    )
+
+    page = "ydb/docs/en/core/yql/reference/syntax/select/with.md"
+    # Against HEAD (has WITH): not orphan.
+    assert page not in check_orphan_translated_pages({page}, repo_path=repo)
+    # Against origin/main tip: orphan.
+    orphans = check_orphan_translated_pages(
+        {page},
+        repo_path=repo,
+        baseline_ref="origin/main",
     )
     assert page in orphans
 

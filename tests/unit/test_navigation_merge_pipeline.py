@@ -217,6 +217,12 @@ def test_read_navigation_baselines_prefers_upstream_en_main():
             return_value="merge-base-sha",
         ),
         patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
+            side_effect=lambda _repo, ref, path: fake_read(_repo, ref, path)
+            if ref in {"origin/main", "main"}
+            else None,
+        ),
+        patch(
             "ydbdoc_review.pipeline.navigation_merge.read_text_at_ref",
             side_effect=fake_read,
         ),
@@ -544,7 +550,7 @@ def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
             return_value={"JSON-индексы": "JSON indexes"},
         ),
         patch(
-            "ydbdoc_review.pipeline.navigation_merge._read_en_nav_from_upstream",
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
             return_value="# keep\n",
         ),
     ):

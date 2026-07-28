@@ -430,9 +430,26 @@ def run_doc_translate(
                 ru_content_ref=ru_ref,
             )
 
+    # Orphan gate vs translation-branch tip (not stale merged-PR HEAD), §6.140.
+    orphan_paths = apply_orphan_toc_page_checks(
+        pr_result,
+        repo_path=repo_path,
+        docs_root=docs_root,
+        baseline_ref=merge_base_with,
+    )
     pr_result.completeness_gaps = completeness_gaps(
         changes, pr_result, docs_root=cfg.paths.docs_root
     )
+    if orphan_paths:
+        logger.error(
+            "Orphan EN pages after nav merge — treat as completeness gaps "
+            "for PR #%s: %s",
+            pr_number,
+            orphan_paths,
+        )
+        pr_result.completeness_gaps = list(
+            dict.fromkeys([*pr_result.completeness_gaps, *orphan_paths])
+        )
     job.pr_result = pr_result
 
     if pr_result.completeness_gaps:
