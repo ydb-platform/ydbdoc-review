@@ -3411,5 +3411,32 @@ stayed 🔴 despite a successful intentional repair (same class of bug as
 
 **Tests:** ``test_strip_unreachable_links_message_is_info_not_blocking``.
 
+### 6.153. Fragment repair when RU and EN baseline are both stale (#48012, 2026-07-28)
+
+**Problem:** [#48012](https://github.com/ydb-platform/ydb/pull/48012) ``docs_build``
+failed with Title not found on:
+
+* ``glossary.md`` → ``query_execution/index.md#sessions``
+* ``create-resource-pool-classifier.md`` → ``authentication.md#ldap``
+
+Those pages were **not** in the PR diff (only ``limits-ydb.md``). The PR head was
+~69 commits behind ``main`` and still carried broken fragments from our
+auto-translates [#47995](https://github.com/ydb-platform/ydb/pull/47995) /
+[#47949](https://github.com/ydb-platform/ydb/pull/47949) (before §6.142). ``main``
+already had the correct links (fixed in [#46889](https://github.com/ydb-platform/ydb/pull/46889)).
+
+§6.142 repair could not retarget ``sessions`` when **both** RU source and EN
+baseline still pointed at ``index.md#sessions`` — no path declared ``{#sessions}``.
+
+**Decision:**
+
+1. After baseline/RU/heading-map steps, search sibling ``href``s from the local
+   ``toc_*.yaml`` (and ``index.md`` → ``execution_process.md`` hint) for a page
+   that declares ``{#frag}``; rewrite the link.
+2. Unblock author PRs stuck on stale bases: update-branch onto ``main`` when
+   maintainer-can-modify (done for #48012).
+
+**Tests:** ``test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

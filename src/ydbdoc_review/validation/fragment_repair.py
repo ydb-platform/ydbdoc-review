@@ -1,12 +1,14 @@
 """Repair EN ``path#fragment`` links that Diplodoc would flag as Title not found.
 
-Covers two failure modes from auto-translate (§6.142 / #48047):
+Covers failure modes from auto-translate (§6.142 / #48047, §6.153 / #48012):
 
 1. Stale autotitle path — RU merge-commit still has ``index.md#sessions`` while
    the heading lives on ``execution_process.md`` (EN baseline / main already
    correct, or RU main overlay missed).
 2. Cross-locale explicit anchors — RU ``{#ldap}`` vs EN ``{#ldap-auth-provider}``
    on the twin page; ``force_exact`` copies the RU fragment verbatim.
+3. Both RU and EN baseline stale — discover a sibling page that declares the
+   fragment via the local toc (or ``index.md`` → ``execution_process.md`` hint).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from collections.abc import Callable
 from pathlib import PurePosixPath
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
 from ydbdoc_review.validation.yfm_anchor import build_heading_anchor_map
 
@@ -90,6 +93,64 @@ def _heading_map_for_targets(
     if not ru_md or not en_md:
         return {}
     return build_heading_anchor_map(parse_markdown(ru_md), parse_markdown(en_md))
+
+
+def _find_href_declaring_frag_via_toc(
+    *,
+    en_page_path: str,
+    broken_abs_path: str,
+    frag: str,
+    read_text: DocsReader,
+) -> str | None:
+    """Search sibling ``href``s from local toc for a page that declares ``{#frag}``.
+
+    Covers the case where RU + EN baseline both still point at a stale path
+    (e.g. ``index.md#sessions``) while the heading lives on a sibling
+    (``execution_process.md``) listed in the same folder toc (§6.153).
+    """
+    parent = str(PurePosixPath(broken_abs_path).parent)
+    page_parent = str(PurePosixPath(en_page_path).parent)
+    candidates: list[str] = []
+    for toc_name in ("toc_i.yaml", "toc_p.yaml", "toc.yaml"):
+        toc_path = f"{parent}/{toc_name}"
+        toc_text = read_text(toc_path)
+        if not toc_text:
+            continue
+        for it in parse_toc_items(toc_text):
+            href = it.get("href")
+            if href and href.endswith(".md"):
+                candidates.append(href)
+    # Also try the stem itself replaced by common process/index siblings when
+    # toc is missing (still cheap — only paths we can resolve).
+    broken_name = PurePosixPath(broken_abs_path).name
+    if broken_name == "index.md":
+        candidates.extend(
+            [
+                "execution_process.md",
+                "process.md",
+                "overview.md",
+            ]
+        )
+
+    seen: set[str] = set()
+    for href in candidates:
+        if href in seen:
+            continue
+        seen.add(href)
+        abs_cand = _resolve_href_path(f"{parent}/_dummy.md", href)
+        if abs_cand is None or abs_cand == broken_abs_path:
+            continue
+        md = read_text(abs_cand)
+        if not md or not fragment_declared_in_markdown(md, frag):
+            continue
+        # Prefer a relative href from the linking page when both share a parent.
+        try:
+            rel = PurePosixPath(abs_cand).relative_to(page_parent).as_posix()
+        except ValueError:
+            # Fall back to path relative to broken file's directory.
+            rel = href if not href.startswith("/") else PurePosixPath(href).name
+        return f"{rel}#{frag}"
+    return None
 
 
 def repair_en_fragments(
@@ -177,5 +238,16 @@ def repair_en_fragments(
             if en_target and fragment_declared_in_markdown(en_target, new_frag):
                 new_href = f"{path_part}#{new_frag}"
                 out = _rewrite_href(out, href, new_href)
+                continue
+
+        # 4) Both RU and EN baseline stale: find sibling page via local toc (§6.153).
+        found = _find_href_declaring_frag_via_toc(
+            en_page_path=en_page_path,
+            broken_abs_path=abs_path,
+            frag=frag,
+            read_text=read_text,
+        )
+        if found:
+            out = _rewrite_href(out, href, found)
 
     return out

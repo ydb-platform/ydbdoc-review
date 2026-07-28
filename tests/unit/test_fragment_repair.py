@@ -120,3 +120,34 @@ def test_repair_keeps_valid_fragment():
         read_text=files.get,
     )
     assert fixed == en_ok
+
+
+def test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale():
+    """§6.153 / #48012: both RU and EN still say index.md#sessions — use toc sibling."""
+    en_page = "ydb/docs/en/core/concepts/glossary.md"
+    stale = (
+        "Sessions are described in "
+        "[{#T}](query_execution/index.md#sessions).\n"
+    )
+    files = {
+        "ydb/docs/en/core/concepts/query_execution/index.md": (
+            "# Query execution\n\nSee [{#T}](execution_process.md).\n"
+        ),
+        "ydb/docs/en/core/concepts/query_execution/execution_process.md": (
+            "# Process\n\n## Sessions {#sessions}\n"
+        ),
+        "ydb/docs/en/core/concepts/query_execution/toc_i.yaml": (
+            "items:\n"
+            "- { name: Overview, href: index.md }\n"
+            "- { name: Process, href: execution_process.md }\n"
+        ),
+    }
+    fixed = repair_en_fragments(
+        stale,
+        en_page_path=en_page,
+        read_text=files.get,
+        ru_source=stale.replace("Sessions are", "Сессии"),
+        en_baseline=stale,
+    )
+    assert "execution_process.md#sessions" in fixed
+    assert "index.md#sessions" not in fixed
