@@ -3313,5 +3313,23 @@ stayed 🔴 with mixed false positives and real gaps:
 ``test_md_link_parity_ignores_self_basename_link``, ``test_yfm_tables``,
 ``test_verify_realign_message_is_info_not_blocking``.
 
+### 6.148. RU→EN ``{% include %}`` parity + auto-repair (#48103 / career, 2026-07-28)
+
+**Problem:** ``{% include %}`` is not a translation segment. RU
+``hive-booting.md`` ended with ``{% include [career](./_includes/career.md) %}``
+while EN lacked the call (EN ``_includes/career.md`` already existed). Segment
+align + critic stayed green — silent footer/CTA loss. Post-merge auto-translate
+would accumulate such holes forever.
+
+**Decision:**
+
+1. Blocking heuristic ``include_parity``: every locale-relative include in RU
+   must appear in EN (match by resolved EN mirror path).
+2. Auto-repair in finalize / PR safety net: append missing include lines when
+   the EN target file exists; leftover gaps stay blocking.
+3. ``include_parity_repaired:`` is **info** (not red).
+
+**Tests:** ``test_include_parity_detects_missing_career_include``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

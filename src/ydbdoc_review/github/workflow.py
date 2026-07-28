@@ -89,7 +89,10 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
-from ydbdoc_review.validation.include_targets import apply_include_target_checks
+from ydbdoc_review.validation.include_targets import (
+    apply_include_parity_repair,
+    apply_include_target_checks,
+)
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
@@ -864,6 +867,11 @@ def run_doc_verify(
             docs_root=cfg.paths.docs_root,
         )
 
+    apply_include_parity_repair(
+        pr_result,
+        repo_path=repo_path,
+        docs_root=cfg.paths.docs_root,
+    )
     apply_include_target_checks(
         pr_result,
         repo_path=repo_path,

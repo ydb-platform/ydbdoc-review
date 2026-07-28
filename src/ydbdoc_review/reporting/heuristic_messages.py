@@ -69,6 +69,8 @@ def heuristic_location_label(message: str) -> str:
         return "блоки кода"
     if message.startswith("link_locale:") or message.startswith("md_link_parity:"):
         return "ссылки"
+    if message.startswith("include_parity:") or message.startswith("include_target:"):
+        return "include"
     if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
         return "текст"
     if message.startswith("heading_parity:"):
@@ -248,6 +250,18 @@ def _humanize_heuristic_problem(message: str) -> str:
         return (
             f"В EN нет ссылок на страницы, которые есть в RU: {m.group(1)}. "
             "Добавьте те же ``.md``-ссылки или обновите путь, если RU переехал."
+        )
+
+    if message.startswith("include_parity:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"В EN нет ``{{% include %}}``, которые есть в RU: {detail}. "
+            "Добавьте те же include (файл ``_includes/…`` уже должен быть на EN)."
+        )
+    if message.startswith("include_target:"):
+        return (
+            "В EN указан ``{% include %}`` на отсутствующий файл: "
+            + message.split(":", 1)[1].strip()
         )
 
     m = _NAV_KIND.match(message)

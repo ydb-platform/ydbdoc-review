@@ -226,6 +226,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
     if message.startswith("verify_realign:"):
         # Informational: EN was rebuilt from RU so critic could run (§6.147).
         return "info"
+    if message.startswith("include_parity_repaired:"):
+        return "info"
     if message.startswith("finalize_en_round_trip:"):
         return "warnings"
     if message.startswith("length_ratio:") and "borderline" in message:
@@ -243,6 +245,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
     if message.startswith("prose_cyrillic_translate_skipped:"):
         return "warnings"
     if message.startswith("md_link_parity:"):
+        return "blocking"
+    if message.startswith("include_parity:"):
         return "blocking"
     if message.startswith("include_target:"):
         return "blocking"
@@ -313,6 +317,16 @@ def _collect_raw_heuristics(
     raw.extend(check_heading_parity(normalized_source_text, target_text))
     raw.extend(check_list_tab_parity(normalized_source_text, target_text))
     raw.extend(check_link_locale_in_en(target_text, target_lang=target_lang))
+    if source_file and source_lang.lower() in {"ru", "russian"}:
+        from ydbdoc_review.validation.include_targets import check_include_parity
+
+        raw.extend(
+            check_include_parity(
+                source_text,
+                target_text,
+                source_file=source_file,
+            )
+        )
     return raw
 
 

@@ -37,6 +37,34 @@ def test_check_missing_locale_include_targets_detects_absent_file(tmp_path: Path
     assert "export-additional-params.md" in msgs[0]
 
 
+def test_include_parity_detects_missing_career_include(tmp_path: Path):
+    from ydbdoc_review.validation.include_targets import (
+        check_include_parity,
+        repair_missing_includes,
+    )
+
+    repo = _init_repo(tmp_path)
+    ru_path = "ydb/docs/ru/core/contributor/hive-booting.md"
+    en_inc = "ydb/docs/en/core/contributor/_includes/career.md"
+    Path(repo, "ydb/docs/en/core/contributor/_includes").mkdir(parents=True)
+    Path(repo, en_inc).write_text("note\n", encoding="utf-8")
+
+    ru = "# Hive\n\nBoot.\n\n{% include [career](./_includes/career.md) %}\n"
+    en = "# Hive\n\nBoot.\n"
+    msgs = check_include_parity(ru, en, source_file=ru_path)
+    assert msgs and msgs[0].startswith("include_parity:")
+    assert "career.md" in msgs[0]
+
+    repaired = repair_missing_includes(
+        ru,
+        en,
+        source_file=ru_path,
+        repo_path=repo,
+    )
+    assert "{% include [career](./_includes/career.md) %}" in repaired
+    assert check_include_parity(ru, repaired, source_file=ru_path) == []
+
+
 def test_apply_include_target_checks_blocks_verdict(tmp_path: Path):
     repo = _init_repo(tmp_path)
     en_path = (

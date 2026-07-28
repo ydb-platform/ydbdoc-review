@@ -38,6 +38,7 @@ from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
     run_file_heuristics_classified,
 )
+from ydbdoc_review.validation.include_targets import repair_missing_includes
 from ydbdoc_review.validation.placeholder_drift import (
     drop_spurious_placeholder_issues,
     filter_critic_response,
@@ -79,6 +80,14 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
             prompt_version=ctx.prompt_version,
             out_warnings=state.finalize_warnings,
             en_toc_reachable=ctx.en_toc_reachable,
+        )
+        state.translated_text = repair_missing_includes(
+            state.source_text,
+            state.translated_text,
+            source_file=state.file_path,
+            docs_root=ctx.config.paths.docs_root,
+            docs_text_reader=ctx.docs_text_reader,
+            out_warnings=state.finalize_warnings,
         )
 
 
@@ -382,13 +391,22 @@ class FinalizeEnStep:
             out_warnings=state.finalize_warnings,
             en_toc_reachable=ctx.en_toc_reachable,
         )
+        # RU→EN include parity repair (§6.148): must use RU source, not fence_ref.
+        state.translated_text = repair_missing_includes(
+            state.source_text,
+            state.translated_text,
+            source_file=state.file_path,
+            docs_root=ctx.config.paths.docs_root,
+            docs_text_reader=ctx.docs_text_reader,
+            out_warnings=state.finalize_warnings,
+        )
         if state.translated_text == before or not state.segments:
             return
         state.translations, align_err = gate_round_trip(
             state.segments, state.translated_text
         )
         if align_err:
-            # Fence-only edits should not fail the whole verify; keep text.
+            # Fence/include-only edits should not fail the whole verify; keep text.
             state.finalize_warnings.append(
                 f"finalize_en_round_trip: {align_err}"
             )
