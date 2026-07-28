@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-28  
-**Current focus:** §6.142 — repair missing EN path#fragment after translate (sessions / ldap).
+**Current focus:** §6.143 — forward YDB/ops env into Docker so doc_continue can load transcripts.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-28 | **§6.143** — Docker action forwards `YDB_SA_KEY`/ops env; continue misconfig ≠ TTL; mount SA key file |
 | 2026-07-28 | **§6.142** — repair EN ``path#fragment`` (stale sessions path + ldap→ldap-auth-provider); wired into translate/verify |
 | 2026-07-28 | **§6.141** — nav merge no-op when EN==main; honest source comment (no false «перевод готов»); skip wasted gap-label LLM (#47856) |
 | 2026-07-28 | **§6.140** — EN scope/orphan baseline = ``origin/main`` tip (not stale merge-base); orphan blocks translate push |

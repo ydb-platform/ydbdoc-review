@@ -361,7 +361,15 @@ Or paste the statements into the YDB Console → Query.
   ``/ydbdoc continue <instruction>``, then add label **`doc_continue`**;
   max **3** continues per PR (``MAX_CONTINUES_PER_PR``).
 - On ``doc_continue`` when parent run objects are missing/empty
-  (TTL or never written): set status `expired_context`, post comment roughly:
+  (TTL or never written **after a successful store**): set status
+  `expired_context`, post the **14-day TTL** comment (§20.9 text below).
+- On ``doc_continue`` when the transcript backend cannot start (missing
+  ``YDB_SA_KEY`` inside Docker, etc.): post **`store_unavailable_comment`**
+  — do **not** claim TTL deletion. See **§6.143**.
+- Docker composite action must forward ``YDB_SA_KEY`` /
+  ``YDBDOC_TRANSCRIPT_BACKEND`` / ACL quota vars into the container
+  (``action-docker.sh``); a host-only ``YDBDOC_YDB_SA_KEY_FILE`` path is
+  invisible unless mounted.
 
 ```text
 Контекст предыдущего прогона (промпты/ответы модели) уже удалён

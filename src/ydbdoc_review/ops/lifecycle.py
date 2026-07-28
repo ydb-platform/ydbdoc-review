@@ -18,6 +18,7 @@ from ydbdoc_review.ops.gates import (
     parse_allowed_actors,
     quota_deny_comment,
     retention_notice,
+    store_unavailable_comment,
 )
 from ydbdoc_review.ops.msk import msk_today
 from ydbdoc_review.ops.recorder import LlmTranscriptRecorder
@@ -170,15 +171,56 @@ def begin_ops_job(
             )
 
     backend = (env_map.get("YDBDOC_TRANSCRIPT_BACKEND") or "ydb").strip().lower()
-    try:
-        store_impl: TranscriptStore = store or create_transcript_store(
-            backend, env=env_map
-        )
-    except Exception as exc:
-        logger.warning("Transcript store unavailable (%s); using null store", exc)
-        store_impl = NullTranscriptStore()
+    store_error: str | None = None
+    if store is not None:
+        store_impl: TranscriptStore = store
+    else:
+        try:
+            store_impl = create_transcript_store(backend, env=env_map)
+        except Exception as exc:
+            store_error = str(exc)
+            logger.warning(
+                "Transcript store unavailable (%s); using null store", exc
+            )
+            store_impl = NullTranscriptStore()
 
     if mode == "continue":
+        # Null fallback means we never persisted / cannot read context (§6.143).
+        # Do not blame the 14-day TTL for a missing YDB_SA_KEY in Docker.
+        store_unusable = store_error is not None or (
+            store is None
+            and isinstance(store_impl, NullTranscriptStore)
+            and backend not in ("off", "null", "none", "memory")
+        )
+        if store_unusable:
+            try:
+                ledger_impl.upsert_run(
+                    RunRecord(
+                        run_day=run_day,
+                        run_id=run_id,
+                        actor=actor,
+                        mode=mode,
+                        repo=repo,
+                        source_pr=source_pr,
+                        translation_pr=translation_pr,
+                        status="expired_context",
+                        parent_run_id=parent_run_id,
+                        continue_index=continue_index,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Failed to record store_unavailable: %s", exc)
+            return (
+                None,
+                GateResult(
+                    ok=False,
+                    reason="transcript store unavailable",
+                    status="expired_context",
+                ),
+                store_unavailable_comment(
+                    source_pr, detail=store_error or "null transcript store"
+                ),
+            )
         if not parent_run_id or not store_impl.exists_run(parent_run_id):
             try:
                 ledger_impl.upsert_run(

@@ -74,3 +74,29 @@ def test_expired_continue():
     assert ctx is None
     assert gate.status == "expired_context"
     assert comment and "14 дней" in comment
+
+
+def test_continue_store_unavailable_is_not_ttl_message():
+    """Missing YDB_SA_KEY must not claim 14-day TTL deletion (§6.143)."""
+    ledger = InMemoryRunsLedger()
+    ctx, gate, comment = begin_ops_job(
+        mode="continue",
+        repo="o/r",
+        source_pr=48047,
+        parent_run_id="any",
+        env={
+            "YDBDOC_ALLOWED_ACTORS": "",
+            "GITHUB_ACTOR": "sintjuri",
+            "YDBDOC_DAILY_BUDGET_RUB": "5000",
+            "YDBDOC_TRANSCRIPT_BACKEND": "ydb",
+            # no YDB_SA_KEY → create_transcript_store fails → null store
+        },
+        ledger=ledger,
+        store=None,
+    )
+    assert ctx is None
+    assert gate.status == "expired_context"
+    assert comment is not None
+    assert "не" in comment and "TTL" in comment
+    assert "хранилищ" in comment
+    assert "14 дней" not in comment

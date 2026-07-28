@@ -59,6 +59,8 @@ jobs:
           GITHUB_ACTOR: ${{ github.event.sender.login }}
           YDBDOC_ALLOWED_ACTORS: ${{ vars.YDBDOC_ALLOWED_ACTORS }}
           YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
+          # Required for doc_continue: action-docker.sh forwards these into the
+          # container (host YDBDOC_YDB_SA_KEY_FILE paths alone are not enough).
           YDBDOC_TRANSCRIPT_BACKEND: ydb
           YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
 

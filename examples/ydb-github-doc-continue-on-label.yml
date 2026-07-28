@@ -34,6 +34,8 @@ jobs:
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
 
+      # Optional: write SA key to a file (action mounts it into Docker). Prefer
+      # also passing YDB_SA_KEY below — the JSON env is the reliable path.
       - name: Write YDB SA key
         env:
           YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
@@ -58,5 +60,6 @@ jobs:
           YDBDOC_ALLOWED_ACTORS: ${{ vars.YDBDOC_ALLOWED_ACTORS }}
           YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
           YDBDOC_TRANSCRIPT_BACKEND: ydb
+          # Must be forwarded into Docker by action-docker.sh (§6.143).
           YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
           YDBDOC_YDB_SA_KEY_FILE: ${{ env.YDBDOC_YDB_SA_KEY_FILE }}

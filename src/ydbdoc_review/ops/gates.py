@@ -93,3 +93,20 @@ def expired_context_comment(source_pr: int) -> str:
         "2. Или править EN вручную и повесить **`doc_verify`** на translation PR — "
         "без истории LLM."
     )
+
+
+def store_unavailable_comment(source_pr: int, *, detail: str = "") -> str:
+    """Continue denied because YDB/S3 transcript backend is not usable (not TTL)."""
+    hint = (detail or "").strip()
+    extra = f"\n\nДетали: `{hint}`" if hint else ""
+    return (
+        "⛔ **ydbdoc-review:** хранилище контекста LLM недоступно "
+        "(нет `YDB_SA_KEY` / бэкенд не поднялся). Continue недоступен — "
+        "это **не** истечение 14-дневного TTL."
+        f"{extra}\n\n"
+        "Что можно сделать:\n"
+        "1. Проверить, что в workflow в контейнер попадают "
+        "`YDB_SA_KEY` и `YDBDOC_TRANSCRIPT_BACKEND=ydb`, затем "
+        f"заново повесить **`doc_translate`** на исходный PR `#{source_pr}`.\n"
+        "2. Или править EN вручную и повесить **`doc_verify`** на translation PR."
+    )

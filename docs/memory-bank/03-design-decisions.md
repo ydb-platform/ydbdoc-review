@@ -3193,5 +3193,35 @@ Wire ``docs_text_reader`` through ``PRHarnessContext`` / ``HarnessContext`` from
 ``test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares``,
 ``test_pr_48047_ldap_remaps_via_heading_map``.
 
+### 6.143. Forward ops env into Docker action (#48047 doc_continue, 2026-07-28)
+
+**Problem:** Same-day ``doc_continue`` on
+[#48047](https://github.com/ydb-platform/ydb/pull/48047) posted the **14-day TTL**
+``expired_context`` comment. CI log:
+
+``Transcript store unavailable (YDB SA key not configured…); using null store``
+
+Workflow set ``YDB_SA_KEY`` and wrote ``YDBDOC_YDB_SA_KEY_FILE`` on the **runner**,
+but ``action-docker.sh`` only forwarded a whitelist of env vars into the
+container — **without** ``YDB_SA_KEY`` / ``YDBDOC_TRANSCRIPT_BACKEND`` / ACL
+quota / ``GITHUB_ACTOR``. Host file paths are also invisible inside Docker
+unless mounted. Translate on ``ydb`` often omitted ``YDB_SA_KEY`` entirely, so
+transcripts were never written.
+
+**Decision:**
+
+1. ``action-docker.sh`` forwards ops secrets **by name** (``-e VAR``, safe for
+   multiline JSON) including ``YDB_SA_KEY``, ``YDBDOC_TRANSCRIPT_BACKEND``,
+   ``YDBDOC_ALLOWED_ACTORS``, ``YDBDOC_DAILY_BUDGET_RUB``, ``GITHUB_ACTOR``, …
+2. If ``YDBDOC_YDB_SA_KEY_FILE`` exists on the host, mount it at
+   ``/run/secrets/ydb-sa.json`` and set that path inside the container.
+3. When the transcript store fails to start, ``doc_continue`` posts
+   ``store_unavailable_comment`` (misconfig), **not** the TTL text.
+4. Example / production ``doc_translate`` workflows must pass ``YDB_SA_KEY`` +
+   ``YDBDOC_TRANSCRIPT_BACKEND=ydb`` so the parent run is persisted for continue.
+
+**Tests:** ``test_action_docker_forwards_ydb_sa_key``,
+``test_continue_store_unavailable_is_not_ttl_message``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -41,21 +41,37 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Pass-by-name (-e VAR) so multiline JSON secrets (YDB_SA_KEY) survive.
+# Host file paths are not visible inside the container unless mounted below.
 docker_env=()
 for var in \
   GITHUB_TOKEN GITHUB_PUSH_TOKEN YDBDOC_PUSH_PAT YDBDOC_REPO_PATH \
+  GITHUB_ACTOR \
   YANDEX_CLOUD_FOLDER_DOC_REVIEW YANDEX_CLOUD_API_KEY_DOC_REVIEW \
   YDBDOC_YC_FOLDER_ID YDBDOC_YC_API_KEY \
   YDBDOC_REVIEW_ENABLED YDBDOC_MODEL_CHECK YDBDOC_MODEL_TRANSLATE \
+  YDBDOC_ALLOWED_ACTORS YDBDOC_DAILY_BUDGET_RUB YDBDOC_SKIP_OPS_GATES \
+  YDBDOC_TRANSCRIPT_BACKEND YDBDOC_RUNS_LEDGER \
+  YDBDOC_YDB_ENDPOINT YDBDOC_YDB_DATABASE \
+  YDB_SA_KEY YDBDOC_YDB_SA_KEY_JSON \
+  YDBDOC_S3_BUCKET YDBDOC_S3_ACCESS_KEY_ID YDBDOC_S3_SECRET_ACCESS_KEY \
+  YDBDOC_S3_ENDPOINT YDBDOC_S3_REGION \
   INPUT_REPO INPUT_PR INPUT_MERGE_BASE_WITH INPUT_DRY_RUN INPUT_NO_COMMIT INPUT_MODE; do
   if [[ -n "${!var:-}" ]]; then
-    docker_env+=(-e "${var}=${!var}")
+    docker_env+=(-e "${var}")
   fi
 done
 
+docker_mounts=(-v "${WORKSPACE}:/github/workspace")
+# Optional: host SA key file → fixed path inside the container (§6.143).
+if [[ -n "${YDBDOC_YDB_SA_KEY_FILE:-}" && -f "${YDBDOC_YDB_SA_KEY_FILE}" ]]; then
+  docker_mounts+=(-v "${YDBDOC_YDB_SA_KEY_FILE}:/run/secrets/ydb-sa.json:ro")
+  docker_env+=(-e "YDBDOC_YDB_SA_KEY_FILE=/run/secrets/ydb-sa.json")
+fi
+
 set -e
 exec docker run --rm \
-  -v "${WORKSPACE}:/github/workspace" \
+  "${docker_mounts[@]}" \
   -w /github/workspace \
   -e "GITHUB_WORKSPACE=/github/workspace" \
   -e "GITHUB_ACTION_REF=${GITHUB_ACTION_REF:-}" \
