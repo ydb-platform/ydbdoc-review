@@ -26,6 +26,20 @@ def test_cyrillic_in_en_detects_prose():
     assert len(warnings) == 1
 
 
+def test_md_link_parity_ignores_self_basename_link():
+    """RU self-link to the same file basename is not an EN gap (§6.147)."""
+    ru = "See [this page](hive_config.md) and [Hive](../../contributor/hive.md).\n"
+    en = "See [Hive](../../contributor/hive.md).\n"
+    warnings = check_md_link_parity(
+        ru,
+        en,
+        source_lang="ru",
+        target_lang="en",
+        source_file="ydb/docs/ru/core/reference/configuration/hive_config.md",
+    )
+    assert warnings == []
+
+
 def test_md_link_parity_flags_missing_en_link():
     ru = "- [logs](debug-logs.md)\n- [otel logs](debug-logs-otel.md)\n"
     en = "- [logs](debug-logs.md)\n"

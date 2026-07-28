@@ -55,17 +55,20 @@ def test_collect_toc_link_targets_reads_include_on_href_item():
     ]
 
 
-def test_collect_toc_link_targets_reads_inline_include_only_item():
+def test_collect_toc_link_targets_odd_nested_indent():
+    """Diplodoc sometimes nests with odd indent (5 spaces); orphans must still see href (§6.147)."""
     toc = dedent("""
         items:
-        - name: Overview
-          href: index.md
-        - include: { mode: link, path: toc_i.yaml }
+        - name: Hive
+          href: hive.md
+          items:
+           - name: Tablet Boot Process
+             href: hive-booting.md
+        - name: Other
+          href: other.md
     """).strip()
-    assert collect_toc_link_targets(toc) == [
-        ("href", "index.md"),
-        ("include", "toc_i.yaml"),
-    ]
+    hrefs = [p for kind, p in collect_toc_link_targets(toc) if kind == "href"]
+    assert hrefs == ["hive.md", "hive-booting.md", "other.md"]
 
 
 def test_check_missing_toc_targets_detects_inline_include_child(tmp_path: Path):

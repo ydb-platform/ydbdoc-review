@@ -172,18 +172,28 @@ def _parse_toc_nodes_at_level(
 
             m_href = _HREF_INDENTED.match(inner)
             m_items = _NESTED_ITEMS_LINE.match(inner)
-            if m_href and len(m_href.group(1)) == item_indent + 2:
+            # Diplodoc tocs sometimes use odd nesting (e.g. 5 spaces under a
+            # 2-space parent instead of +2). Accept any deeper indent (§6.147).
+            if m_href and len(m_href.group(1)) > item_indent:
                 node.href = m_href.group(2).strip()
                 block_lines.append(inner)
                 i += 1
                 continue
-            if m_items and len(m_items.group(1)) == item_indent + 2:
+            if m_items and len(m_items.group(1)) > item_indent:
                 block_lines.append(inner)
                 i += 1
+                while i < len(lines) and not lines[i].strip():
+                    block_lines.append(lines[i])
+                    i += 1
+                child_indent = item_indent + 2
+                if i < len(lines):
+                    m_child = _NAME_LINE.match(lines[i])
+                    if m_child and len(m_child.group(1)) > item_indent:
+                        child_indent = len(m_child.group(1))
                 children, i = _parse_toc_nodes_at_level(
                     lines,
                     i,
-                    list_indent=item_indent + 2,
+                    list_indent=child_indent,
                 )
                 node.children = children
                 continue

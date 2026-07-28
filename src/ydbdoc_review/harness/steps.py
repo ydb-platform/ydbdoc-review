@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from ydbdoc_review.harness.context import HarnessContext
@@ -42,6 +43,8 @@ from ydbdoc_review.validation.placeholder_drift import (
     filter_critic_response,
 )
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
+
+logger = logging.getLogger(__name__)
 
 
 class HarnessStep(Protocol):
@@ -300,7 +303,38 @@ class RoundTripStep:
     name = "round_trip"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
-        del ctx
+        state.translations, state.segment_alignment_error = gate_round_trip(
+            state.segments, state.translated_text
+        )
+        if not state.segment_alignment_error or state.mode != "verify":
+            return
+        # Structural RU/EN mismatch (YFM↔GFM rows, condensed sections, …):
+        # rebuild EN from RU so critic/heuristics can finish (§6.147).
+        logger.info(
+            "verify realign for %s: %s",
+            state.file_path,
+            state.segment_alignment_error,
+        )
+        state.finalize_warnings.append(
+            "verify_realign: rebuilt EN from RU due to segment alignment mismatch"
+        )
+        state.translations = translate_segments(
+            state.segments,
+            ctx.client,
+            ctx.glossary,
+            file_path=state.file_path,
+            source_lang=ctx.source_lang,
+            target_lang=ctx.target_lang,
+            max_chars=ctx.batch_chars,
+            prompt_version=ctx.prompt_version,
+            cache=ctx.cache,
+            max_parallel_batches=ctx.parallel,
+            manual_actions=state.manual_actions,
+        )
+        state.render_base_doc = state.source_doc
+        state.render_base_segments = state.segments
+        state.fence_reference_text = state.source_text
+        _render_translated_from_source(state, ctx)
         state.translations, state.segment_alignment_error = gate_round_trip(
             state.segments, state.translated_text
         )

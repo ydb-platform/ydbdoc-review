@@ -3282,5 +3282,34 @@ that fixup via ``/ydbdoc continue`` + ``doc_continue``.
 **Tests:** ``is_verify_fixup_branch`` in ``test_github_pr``; updated
 ``test_verify_fixup_comment_bilingual_vs_translation``.
 
+### 6.147. Verify false 🔴: odd toc indent, self-links, YFM tables, realign (#46742, 2026-07-28)
+
+**Problem:** bilingual ``doc_verify`` on [#46742](https://github.com/ydb-platform/ydb/pull/46742)
+stayed 🔴 with mixed false positives and real gaps:
+
+1. ``hive-booting.md`` orphan — page is in ``contributor/toc_i.yaml`` under Hive,
+   but nested ``href`` used **odd indent** (5 spaces); tree parser required
+   ``parent+2`` and skipped the child.
+2. ``hive_config.md`` link parity — only missing basename was a **RU self-link**
+   to ``hive_config.md``.
+3. ``kafka_proxy_config`` alignment 5↔48 — RU ``#|`` YFM table was one paragraph;
+   EN GFM table exploded into cells.
+4. Real structure gaps (missing table rows / condensed ``auth.md``) could not be
+   fixed by critic because alignment failure short-circuits the critic loop.
+
+**Decision:**
+
+1. Toc tree parse: accept any deeper indent for ``href`` / ``items:``; set child
+   ``list_indent`` from the first nested ``- name:`` line.
+2. ``md_link_parity``: drop the source file's own basename from the missing set.
+3. YFM table plugin (``#|`` … ``|#``) → standard table tokens / ``Table`` IR;
+   render as GFM (EN house style).
+4. ``RoundTripStep`` on ``verify``: if alignment still fails, **rebuild EN from
+   RU** (full ``translate_segments`` + render), then re-gate — so critic can
+   finish and ``doc_continue`` can converge to 🟢.
+
+**Tests:** ``test_collect_toc_link_targets_odd_nested_indent``,
+``test_md_link_parity_ignores_self_basename_link``, ``test_yfm_tables``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

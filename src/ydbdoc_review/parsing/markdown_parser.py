@@ -15,6 +15,7 @@ from ydbdoc_review.parsing.yfm_plugins.image_size import yfm_image_size_plugin  
 from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
 from ydbdoc_review.parsing.yfm_plugins.link_with_variable import yfm_link_with_variable_plugin  # NEW
 from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
+from ydbdoc_review.parsing.yfm_plugins.tables import yfm_table_plugin
 from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
 from ydbdoc_review.parsing.yfm_plugins.terms import yfm_terms_plugin  
 from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
@@ -67,6 +68,7 @@ def create_parser() -> MarkdownIt:
     md.use(yfm_link_with_variable_plugin)  # must be early (mutates source)
     md.use(yfm_variable_plugin)
     md.use(yfm_note_plugin)
+    md.use(yfm_table_plugin)
     md.use(yfm_tabs_plugin)
     md.use(yfm_include_plugin)
     md.use(yfm_if_plugin)

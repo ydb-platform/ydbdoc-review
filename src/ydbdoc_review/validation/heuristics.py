@@ -133,6 +133,9 @@ def check_md_link_parity(
     if source_lang.lower() not in {"ru", "russian"} or target_lang.lower() != "en":
         return []
     missing = _md_link_basenames(source_text) - _md_link_basenames(target_text)
+    # Same-file self-links (RU often links to its own basename) are not EN gaps.
+    if source_file:
+        missing.discard(PurePosixPath(source_file).name)
     if (
         missing
         and en_toc_reachable is not None
