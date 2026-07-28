@@ -40,6 +40,17 @@ def test_md_link_parity_ignores_self_basename_link():
     assert warnings == []
 
 
+def test_verify_realign_message_is_info_not_blocking():
+    from ydbdoc_review.validation.heuristics import _classify_heuristic
+
+    assert (
+        _classify_heuristic(
+            "verify_realign: rebuilt EN from RU due to segment alignment mismatch"
+        )
+        == "info"
+    )
+
+
 def test_md_link_parity_flags_missing_en_link():
     ru = "- [logs](debug-logs.md)\n- [otel logs](debug-logs-otel.md)\n"
     en = "- [logs](debug-logs.md)\n"

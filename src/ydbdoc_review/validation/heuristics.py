@@ -223,6 +223,11 @@ class ClassifiedHeuristics:
 def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]:
     if message.startswith("ru_source"):
         return "info"
+    if message.startswith("verify_realign:"):
+        # Informational: EN was rebuilt from RU so critic could run (§6.147).
+        return "info"
+    if message.startswith("finalize_en_round_trip:"):
+        return "warnings"
     if message.startswith("length_ratio:") and "borderline" in message:
         return "warnings"
     if message.startswith("fence_body_copy:"):
