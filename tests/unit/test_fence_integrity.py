@@ -118,6 +118,38 @@ def test_fence_content_allows_trailing_slash_comment_translation():
     assert not check_fence_body_copy(f"```go\n{ru}```", f"```go\n{en}```")
 
 
+def test_fence_content_allows_trailing_hash_yaml_comment_translation():
+    """Regression #47164: YAML ``#`` trailing comments may be translated."""
+    ru = "    disk_scope: <disk_scope>  # необязательный атрибут\n"
+    en = "    disk_scope: <disk_scope>  # optional attribute\n"
+    assert fence_content_matches_source(ru, en)
+    assert not check_fence_body_copy(f"```yaml\n{ru}```", f"```yaml\n{en}```")
+
+
+def test_fence_content_allows_angle_placeholder_translation():
+    """Regression #47164: RU ``<имя домена>`` vs EN ``<domain name>`` in fences."""
+    ru = (
+        "domains:\n"
+        "- name: <имя домена>\n"
+        "  storage_pool_types:\n"
+        "  - kind: <тип используемых физических устройств>\n"
+    )
+    en = (
+        "domains:\n"
+        "- name: <domain name>\n"
+        "  storage_pool_types:\n"
+        "  - kind: <type of physical devices used>\n"
+    )
+    assert fence_content_matches_source(ru, en)
+    assert not check_fence_body_copy(f"```yaml\n{ru}```", f"```yaml\n{en}```")
+
+
+def test_fence_content_allows_angle_placeholder_plus_hash_comment():
+    ru = "    disk_scope: <имя>  # необязательный атрибут\n"
+    en = "    disk_scope: <name>  # optional attribute\n"
+    assert fence_content_matches_source(ru, en)
+
+
 def test_fence_content_rejects_code_line_change_beside_comments():
     ru = "x := 1 // значение\n"
     en = "y := 1 // value\n"

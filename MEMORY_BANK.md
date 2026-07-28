@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-28  
-**Current focus:** §6.148 — include_parity + auto-repair for missing RU→EN ``{% include %}``.
+**Current focus:** §6.149 — fence_body_copy allows trailing YAML `#` comments + RU→EN angle placeholders (#47164).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-28 | **§6.149** — fence QA: trailing YAML `#` + angle placeholder translation (#47164 host_configs) |
 | 2026-07-28 | **§6.148** — include_parity blocking + auto-insert missing ``{% include %}`` (#48103 career) |
 | 2026-07-28 | **§6.147** — verify: odd toc indent, self-link parity, YFM tables, verify realign (#46742) |
 | 2026-07-28 | **§6.146** — bilingual verify: full QA on fixup PR; ``doc_continue`` on ``verify-*`` (#46742) |

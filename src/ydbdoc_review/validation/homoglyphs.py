@@ -78,9 +78,11 @@ _ANGLE_PLACEHOLDER_EN: dict[str, str] = {
     "строка": "string",
     "значение": "value",
     "имя": "name",
+    "имя домена": "domain name",
     "путь": "path",
     "адрес": "address",
     "описание ошибки": "error description",
+    "тип используемых физических устройств": "type of physical devices used",
     "uuid": "uuid",
 }
 

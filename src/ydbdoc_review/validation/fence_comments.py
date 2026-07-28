@@ -32,6 +32,8 @@ _SQL_LINE_COMMENT = re.compile(
 _SQL_TRAILING_COMMENT = re.compile(r"(?P<prefix>.*?)(?P<marker>\s--\s+)(?P<body>[^\n]*)$")
 # Trailing ``//`` on a code line (``panic(err) // comment``), not ``://`` in URLs.
 _SLASH_TRAILING_COMMENT = re.compile(r"(?P<prefix>.*?)(?P<marker>\s//\s*)(?P<body>[^\n]*)$")
+# Trailing YAML/shell ``#`` (``disk_scope: <x>  # optional``). Prefer after ``//`` / ``--``.
+_HASH_TRAILING_COMMENT = re.compile(r"(?P<prefix>.*?)(?P<marker>\s+#\s*)(?P<body>[^\n]*)$")
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,11 @@ class FenceCommentLine:
 
 
 def _trailing_comment_match(line: str) -> re.Match[str] | None:
-    for trail_re in (_SQL_TRAILING_COMMENT, _SLASH_TRAILING_COMMENT):
+    for trail_re in (
+        _SQL_TRAILING_COMMENT,
+        _SLASH_TRAILING_COMMENT,
+        _HASH_TRAILING_COMMENT,
+    ):
         m = trail_re.match(line)
         if m is not None:
             return m
@@ -51,7 +57,7 @@ def _trailing_comment_match(line: str) -> re.Match[str] | None:
 
 
 def trailing_comment_code_prefix(line: str) -> str | None:
-    """Source code before a trailing ``//`` or ``--`` comment; ``None`` otherwise."""
+    """Source code before a trailing ``//`` / ``--`` / ``#`` comment; ``None`` otherwise."""
     m = _trailing_comment_match(line)
     return m.group("prefix") if m is not None else None
 

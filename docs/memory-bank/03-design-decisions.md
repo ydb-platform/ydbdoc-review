@@ -3331,5 +3331,30 @@ would accumulate such holes forever.
 
 **Tests:** ``test_include_parity_detects_missing_career_include``.
 
+### 6.149. Fence QA: trailing YAML ``#`` + angle placeholders (#47164, 2026-07-28)
+
+**Problem:** Bilingual ``doc_verify`` on #47164 left ``host_configs.md`` 🟡 with
+``fence_body_copy`` on blocks that only differed by (1) trailing YAML
+``# необязательный`` → ``# optional`` and (2) RU ``<имя домена>`` /
+``<тип…>`` → EN ``<domain name>`` / ``<type…>``. Trailing ``#`` was not
+recognized as a comment (only full-line ``#`` / trailing ``//`` / ``--``).
+Angle placeholder wording outside the fixed map failed compare even though
+structure matched. On verify, ``fence_ref=EN`` so enforce from RU is a no-op —
+false 🟡 blocked green without a real code corruption.
+
+**Decision:**
+
+1. Treat trailing ``\s+#\s*`` like trailing ``//`` / ``--`` in fence comment
+   collect / translate / ``comment_translation_only`` compare.
+2. Collapse RU→EN ``<…>`` placeholder pairs (Cyrillic inner in source, Latin
+   in target, same slot count per line) before fence structural compare;
+   allow that alone or combined with comment translation.
+3. Extend the angle-placeholder repair map for common host_configs phrases
+   (translate path), without requiring exact map hits for QA match.
+
+**Tests:** ``test_fence_content_allows_trailing_hash_yaml_comment_translation``,
+``test_fence_content_allows_angle_placeholder_translation``,
+``test_fence_content_allows_angle_placeholder_plus_hash_comment``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

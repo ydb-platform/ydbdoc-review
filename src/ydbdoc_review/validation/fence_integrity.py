@@ -111,7 +111,7 @@ def _fence_diff_is_comment_translation_only(
     source_content: str,
     target_content: str,
 ) -> bool:
-    """True when EN differs from RU only on ``//`` / ``#`` lines that had Cyrillic."""
+    """True when EN differs from RU only on ``//`` / ``#`` / ``--`` lines that had Cyrillic."""
     from ydbdoc_review.validation.fence_comments import (
         _CYRILLIC,
         _comment_body_if_cyrillic,
@@ -141,6 +141,71 @@ def _fence_diff_is_comment_translation_only(
 
 
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
+_ANGLE_PLACEHOLDER = re.compile(r"<([^<>]+)>")
+
+
+def _collapse_translated_angle_placeholders(
+    source_content: str,
+    target_content: str,
+) -> tuple[str, str] | None:
+    """Collapse RU→EN ``<…>`` placeholder pairs to ``<>`` for structural compare.
+
+    Returns ``None`` when line counts differ or a Cyrillic angle in source has no
+    matching angle slot on the same target line.
+    """
+    src_lines = source_content.splitlines()
+    tgt_lines = target_content.splitlines()
+    if len(src_lines) != len(tgt_lines):
+        return None
+    out_src: list[str] = []
+    out_tgt: list[str] = []
+    for src_line, tgt_line in zip(src_lines, tgt_lines, strict=True):
+        src_angles = list(_ANGLE_PLACEHOLDER.finditer(src_line))
+        tgt_angles = list(_ANGLE_PLACEHOLDER.finditer(tgt_line))
+        if not any(_CYRILLIC.search(m.group(1)) for m in src_angles):
+            out_src.append(src_line)
+            out_tgt.append(tgt_line)
+            continue
+        if len(src_angles) != len(tgt_angles):
+            return None
+        src_parts: list[str] = []
+        tgt_parts: list[str] = []
+        src_pos = 0
+        tgt_pos = 0
+        for sm, tm in zip(src_angles, tgt_angles, strict=True):
+            src_parts.append(src_line[src_pos : sm.start()])
+            tgt_parts.append(tgt_line[tgt_pos : tm.start()])
+            if _CYRILLIC.search(sm.group(1)):
+                if _CYRILLIC.search(tm.group(1)):
+                    return None
+                src_parts.append("<>")
+                tgt_parts.append("<>")
+            else:
+                src_parts.append(sm.group(0))
+                tgt_parts.append(tm.group(0))
+            src_pos = sm.end()
+            tgt_pos = tm.end()
+        src_parts.append(src_line[src_pos:])
+        tgt_parts.append(tgt_line[tgt_pos:])
+        out_src.append("".join(src_parts))
+        out_tgt.append("".join(tgt_parts))
+    return "\n".join(out_src), "\n".join(out_tgt)
+
+
+def _fence_diff_is_angle_placeholder_translation(
+    source_content: str,
+    target_content: str,
+) -> bool:
+    """True when EN differs from RU only in translated ``<…>`` placeholders."""
+    collapsed = _collapse_translated_angle_placeholders(source_content, target_content)
+    if collapsed is None:
+        return False
+    src_n, tgt_n = collapsed
+    if src_n == source_content and tgt_n == target_content:
+        return False
+    return _normalize_fence_content_for_compare(src_n) == _normalize_fence_content_for_compare(
+        tgt_n
+    )
 
 
 def _fence_diff_is_text_diagram_label_translation(
@@ -206,7 +271,16 @@ def fence_content_matches_source(
         return True
     if _fence_diff_is_mermaid_label_translation(source_content, target_content):
         return True
-    return _fence_diff_is_comment_translation_only(source_content, target_content)
+    if _fence_diff_is_comment_translation_only(source_content, target_content):
+        return True
+    if _fence_diff_is_angle_placeholder_translation(source_content, target_content):
+        return True
+    # Comments + angle placeholders in one fence (YAML examples, #47164).
+    collapsed = _collapse_translated_angle_placeholders(source_content, target_content)
+    if collapsed is None:
+        return False
+    src_n, tgt_n = collapsed
+    return _fence_diff_is_comment_translation_only(src_n, tgt_n)
 
 
 def _source_text_for_fence_compare(source_text: str, *, source_lang: str) -> str:
