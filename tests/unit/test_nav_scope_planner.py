@@ -344,3 +344,25 @@ def test_planner_doc_and_nav_disjoint_kinds(case_id: str):
     assert plan.doc_ru_paths == doc
     assert plan.nav_ru_paths == nav
     assert not (doc & nav)
+
+
+def test_scope_closes_empty_locale_include_missing_on_en():
+    """§6.154: size-0 RU ``{% include %}`` target must enter doc_from_main."""
+    ru_page = "ydb/docs/ru/core/cli/export-import/_includes/index.md"
+    ru_empty = "ydb/docs/ru/core/cli/export-import/_includes/options_overlay.md"
+    files = {
+        ru_page: "# Index\n\n{% include [overlay](options_overlay.md) %}\n",
+        ru_empty: "",
+    }
+
+    def read_ru(path: str) -> str | None:
+        return files.get(path)
+
+    plan = plan_translation_scope(
+        [(ru_page, "modified")],
+        read_ru=read_ru,
+        read_en_base=lambda _p: None,
+        read_ru_base=lambda _p: None,
+    )
+    assert ru_empty in plan.doc_ru_paths
+    assert ru_empty in plan.doc_from_main

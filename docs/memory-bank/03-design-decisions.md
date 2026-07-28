@@ -3438,5 +3438,34 @@ baseline still pointed at ``index.md#sessions`` — no path declared ``{#session
 
 **Tests:** ``test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale``.
 
+### 6.154. Verify include_parity vs merge-commit RU; empty include scope (#38700, 2026-07-28)
+
+**Problem:** Auto-translate of merged [#38700](https://github.com/ydb-platform/ydb/pull/38700)
+produced [#48133](https://github.com/ydb-platform/ydb/pull/48133) with 🔴
+``include_parity`` / ``include_target``:
+
+1. ``import-resource-broker-note.md`` — added to RU *after* #38700 merge
+   (#45064). ``doc_translate`` correctly read RU from the merge commit (§6.120),
+   but ``doc_verify`` / ``apply_include_parity_repair`` compared EN to checkout
+   ``main`` (or picked ``ru_local`` on equal segment+fence scores).
+   ``{% include %}`` is not a segment, so main RU matched EN segment count while
+   carrying post-merge includes.
+2. ``options_overlay.md`` — empty (size 0) RU include referenced from
+   ``_includes/index.md``. Scope closure used ``if read_ru(target):``, so the
+   empty file never entered ``doc_from_main`` and EN never got a mirror.
+
+**Decision:**
+
+1. ``pick_verify_ru_text``: on equal fence score for a merged source PR, prefer
+   ``ru_merge`` over checkout/main (still lose to fewer ``fence_body_copy``).
+2. ``apply_include_parity_repair``: use ``PairRunResult.source_text`` (the body
+   actually verified/translated), not disk checkout.
+3. Scope include closure: ``read_ru(target) is not None`` so empty RU includes
+   are queued; empty → empty EN via existing no-segment ParseStep path.
+
+**Tests:** ``test_pick_verify_ru_text_merged_prefers_merge_over_main_when_fence_equal``,
+``test_apply_include_parity_repair_uses_pair_source_text_not_checkout``,
+``test_scope_closes_empty_locale_include_missing_on_en``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

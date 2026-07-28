@@ -302,8 +302,9 @@ def pick_verify_ru_text(
     1. Prefer candidates whose segment count matches EN.
     2. Among matches that differ in content, pick fewer ``fence_body_copy``
        warnings (§6.106).
-    3. Remaining ties: prefer later candidates when ``source_pr_merged`` (checkout /
-       merge closer to current ``main``), else keep earlier (head).
+    3. Remaining ties: when ``source_pr_merged`` and ``ru_merge`` matches, prefer
+       the merge commit (§6.154 / align with ``doc_translate``); else prefer
+       later candidates (checkout/main) when merged, earlier (head) when open.
     """
     candidates: list[str] = []
     for text in (ru_api, ru_merge, ru_local):
@@ -324,8 +325,23 @@ def pick_verify_ru_text(
     if len(matching) == 1:
         return matching[0]
 
-    scored = [(_fence_body_copy_warnings(c, en_text), i, c) for i, c in enumerate(matching)]
-    scored.sort(key=lambda row: (row[0], -row[1] if source_pr_merged else row[1]))
+    # Fewer fence_body_copy first (§6.106). On equal fence score for a merged
+    # source PR prefer merge commit over checkout/main (§6.154 / #38700):
+    # ``{% include %}`` is not a segment, so main RU can match EN segment count
+    # while carrying post-merge includes that ``doc_translate`` never saw.
+    def _tie_key(row: tuple[int, int, str]) -> tuple[int, int]:
+        fence_n, idx, text = row
+        if source_pr_merged and ru_merge is not None and text == ru_merge:
+            return (fence_n, -1)
+        # Open PRs: prefer earlier (head). Merged without merge text: prefer later
+        # (checkout/main) as before §6.106.
+        secondary = -idx if source_pr_merged else idx
+        return (fence_n, secondary)
+
+    scored = [
+        (_fence_body_copy_warnings(c, en_text), i, c) for i, c in enumerate(matching)
+    ]
+    scored.sort(key=_tie_key)
     return scored[0][2]
 
 

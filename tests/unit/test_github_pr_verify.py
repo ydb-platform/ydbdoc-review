@@ -260,6 +260,34 @@ def test_pick_verify_ru_text_merged_tie_breaks_to_local_when_fence_counts_equal(
     )
 
 
+def test_pick_verify_ru_text_merged_prefers_merge_over_main_when_fence_equal():
+    """§6.154: post-merge includes on main must not win over merge-commit RU."""
+    ru_merge = (
+        "# Import\n\nBody.\n\n"
+        "{% include [workflow](server-import-workflow.md) %}\n"
+    )
+    ru_local = (
+        "# Import\n\nBody.\n\n"
+        "{% include [params](import-additional-params.md) %}\n\n"
+        "{% include [broker](import-resource-broker-note.md) %}\n\n"
+        "{% include [workflow](server-import-workflow.md) %}\n"
+    )
+    en = (
+        "# Import\n\nBody EN.\n\n"
+        "{% include [workflow](server-import-workflow.md) %}\n"
+    )
+    assert (
+        pick_verify_ru_text(
+            en_text=en,
+            ru_api=ru_merge,
+            ru_merge=ru_merge,
+            ru_local=ru_local,
+            source_pr_merged=True,
+        )
+        == ru_merge
+    )
+
+
 def test_pick_verify_ru_text_uses_local_when_api_mismatch(tmp_path):
     """Regression #44872: EN aligned to checkout RU after source PR merged."""
     ydb = "/Users/iuriisintiaev/projects/ydb"

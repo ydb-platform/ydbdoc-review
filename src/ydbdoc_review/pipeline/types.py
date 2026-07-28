@@ -88,6 +88,8 @@ class PairRunResult:
     skipped: bool = False
     file_result: FileTranslationResult | None = None
     error: str | None = None
+    # RU/EN source body actually used for this run (verify pick / merge ref).
+    source_text: str | None = None
 
 
 @dataclass

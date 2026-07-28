@@ -9,6 +9,7 @@ from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
 from ydbdoc_review.validation.include_targets import (
+    apply_include_parity_repair,
     apply_include_target_checks,
     check_missing_locale_include_targets,
 )
@@ -63,6 +64,51 @@ def test_include_parity_detects_missing_career_include(tmp_path: Path):
     )
     assert "{% include [career](./_includes/career.md) %}" in repaired
     assert check_include_parity(ru, repaired, source_file=ru_path) == []
+
+
+def test_apply_include_parity_repair_uses_pair_source_text_not_checkout(
+    tmp_path: Path,
+):
+    """§6.154: do not demand post-merge includes from checkout main."""
+    repo = _init_repo(tmp_path)
+    ru_path = "ydb/docs/ru/core/cli/import-s3.md"
+    en_path = "ydb/docs/en/core/cli/import-s3.md"
+    Path(repo, "ydb/docs/ru/core/cli").mkdir(parents=True)
+    Path(repo, "ydb/docs/en/core/cli").mkdir(parents=True)
+    # Checkout (= main) has a post-merge include; merge-commit RU does not.
+    Path(repo, ru_path).write_text(
+        "# Import\n\n{% include [broker](import-resource-broker-note.md) %}\n",
+        encoding="utf-8",
+    )
+    merge_ru = "# Import\n\nBody.\n"
+    en = "# Import\n\nBody EN.\n"
+    pair = DocPair(ru_path=ru_path, en_path=en_path)
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=ru_path,
+        target_path=en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=en_path,
+        final_text=en,
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(plan=plan, file_result=fr, source_text=merge_ru)
+        ]
+    )
+    apply_include_parity_repair(result, repo_path=repo, docs_root="ydb/docs")
+    assert result.pair_results[0].file_result.verdict == "ok"
+    assert not any(
+        m.startswith("include_parity:")
+        for m in result.pair_results[0].file_result.heuristic_blocking
+    )
 
 
 def test_apply_include_target_checks_blocks_verdict(tmp_path: Path):

@@ -354,7 +354,9 @@ def plan_translation_scope(
             en_md = counterpart(target, docs_root)
             if en_md is None:
                 continue
-            if read_en_base(en_md) is None and read_ru(target):
+            # Empty RU includes (size 0) must still enter scope so EN gets a
+            # mirror file; ``{% include %}`` otherwise fails include_target (§6.154).
+            if read_en_base(en_md) is None and read_ru(target) is not None:
                 doc_ru.add(target)
                 queue.append(target)
 

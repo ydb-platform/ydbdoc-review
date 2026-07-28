@@ -115,4 +115,5 @@ def run_pair_plan(
         plan=plan,
         target_text=target_text,
         file_result=file_result,
+        source_text=source_text,
     )

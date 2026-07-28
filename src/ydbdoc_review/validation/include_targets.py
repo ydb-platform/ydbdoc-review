@@ -246,7 +246,11 @@ def apply_include_parity_repair(
             continue
         if run.plan.target_lang != "en" or not run.plan.target_path.endswith(".md"):
             continue
-        source = read_text(repo_path, run.plan.source_path) or ""
+        # Prefer the RU body used for this pair (merge commit / verify pick),
+        # not checkout ``main`` — post-merge includes are not translation debt (§6.154).
+        source = run.source_text
+        if source is None:
+            source = read_text(repo_path, run.plan.source_path) or ""
         en_text = fr.final_text or run.target_text or ""
         if not source or not en_text:
             continue
