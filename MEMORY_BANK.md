@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-28  
-**Current focus:** §6.141 — nav merge no-op + honest «перевод не требуется» when EN unchanged (#47856).
+**Current focus:** §6.142 — repair missing EN path#fragment after translate (sessions / ldap).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-28 | **§6.142** — repair EN ``path#fragment`` (stale sessions path + ldap→ldap-auth-provider); wired into translate/verify |
 | 2026-07-28 | **§6.141** — nav merge no-op when EN==main; honest source comment (no false «перевод готов»); skip wasted gap-label LLM (#47856) |
 | 2026-07-28 | **§6.140** — EN scope/orphan baseline = ``origin/main`` tip (not stale merge-base); orphan blocks translate push |
 | 2026-07-27 | **§6.139** — walk ``YfmIf.branches`` in fence collect; parse mixed inline+block toc (``with.md`` / #48009) |

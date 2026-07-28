@@ -3164,5 +3164,34 @@ comment still said **«перевод готов»** with ``Translation PR | —
 **Tests:** ``test_pr_47856_ru_only_toc_reorder_is_nav_noop``,
 ``test_build_source_pr_comment_noop_no_commit``.
 
+### 6.142. Repair missing EN ``path#fragment`` after translate (#48047, 2026-07-28)
+
+**Problem:** ``build-docs`` on translation [#48047](https://github.com/ydb-platform/ydb/pull/48047)
+failed with two ``Title not found`` WARNs that were already on ``main`` from prior
+auto-translates:
+
+1. ``glossary.md`` → ``query_execution/index.md#sessions`` — heading lives on
+   ``execution_process.md``. Re-translate of merged [#41271](https://github.com/ydb-platform/ydb/pull/41271)
+   → [#47995](https://github.com/ydb-platform/ydb/pull/47995) re-applied the stale
+   merge-commit path despite §6.128 overlay.
+2. ``create-resource-pool-classifier.md`` → ``authentication.md#ldap`` — RU
+   ``{#ldap}`` vs EN ``{#ldap-auth-provider}``. ``force_exact`` copied the RU
+   fragment; in-page heading maps do not cover **cross-file** targets.
+
+**Decision:** after ``restore_autotitle_hrefs(..., force_exact=True)`` run
+``repair_en_fragments`` (§6.142) with a docs reader (worktree, else upstream tip):
+
+1. If EN target lacks ``{#frag}``, prefer EN-baseline or RU-source autotitle path
+   that **does** declare the frag on the EN tree.
+2. Else load RU/EN twins of the linked page and remap ``frag`` via
+   ``build_heading_anchor_map`` (ldap → ldap-auth-provider).
+
+Wire ``docs_text_reader`` through ``PRHarnessContext`` / ``HarnessContext`` from
+``doc_translate`` / ``doc_verify`` workflows.
+
+**Tests:** ``test_pr_48047_sessions_prefers_en_baseline_path``,
+``test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares``,
+``test_pr_48047_ldap_remaps_via_heading_map``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

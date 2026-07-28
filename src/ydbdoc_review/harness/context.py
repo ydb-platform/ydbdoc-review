@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+
+DocsTextReader = Callable[[str], str | None]
 
 
 @dataclass
@@ -24,6 +27,7 @@ class HarnessContext:
     critic_feedback_retries: int
     usage_record_start: int
     en_toc_reachable: frozenset[str] | None = None
+    docs_text_reader: DocsTextReader | None = None
 
     @classmethod
     def from_options(
@@ -42,6 +46,7 @@ class HarnessContext:
         critic_feedback_retries: int | None = None,
         usage_record_start: int | None = None,
         en_toc_reachable: frozenset[str] | None = None,
+        docs_text_reader: DocsTextReader | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -66,4 +71,5 @@ class HarnessContext:
                 else len(client.usage_tracker.records)
             ),
             en_toc_reachable=en_toc_reachable,
+            docs_text_reader=docs_text_reader,
         )

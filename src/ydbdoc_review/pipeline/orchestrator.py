@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ydbdoc_review.config.loader import Config, load_config
+from ydbdoc_review.harness.context import DocsTextReader
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import TRANSLATE_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
@@ -22,6 +23,7 @@ def run_pr_translation(
     use_analyze_llm: bool = False,
     per_pr_cache: dict[str, str] | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    docs_text_reader: DocsTextReader | None = None,
 ) -> PRTranslationResult:
     """Plan and execute translation for all pairs (sequential, one shared cache)."""
     state = PRRunState(
@@ -34,5 +36,6 @@ def run_pr_translation(
         config=config,
         use_analyze_llm=use_analyze_llm,
         en_toc_reachable=en_toc_reachable,
+        docs_text_reader=docs_text_reader,
     )
     return PRHarness(TRANSLATE_PR_PROFILE).run(state, ctx)

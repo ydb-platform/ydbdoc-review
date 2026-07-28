@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ydbdoc_review.config.loader import Config, load_config
+from ydbdoc_review.harness.context import DocsTextReader
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 
@@ -16,6 +17,7 @@ class PRHarnessContext:
     config: Config
     use_analyze_llm: bool = False
     en_toc_reachable: frozenset[str] | None = None
+    docs_text_reader: DocsTextReader | None = None
 
     @classmethod
     def from_options(
@@ -26,6 +28,7 @@ class PRHarnessContext:
         config: Config | None = None,
         use_analyze_llm: bool = False,
         en_toc_reachable: frozenset[str] | None = None,
+        docs_text_reader: DocsTextReader | None = None,
     ) -> PRHarnessContext:
         return cls(
             client=client,
@@ -33,4 +36,5 @@ class PRHarnessContext:
             config=config or load_config(),
             use_analyze_llm=use_analyze_llm,
             en_toc_reachable=en_toc_reachable,
+            docs_text_reader=docs_text_reader,
         )

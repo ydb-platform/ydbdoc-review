@@ -19,6 +19,7 @@ from ydbdoc_review.github.git_ops import (
     push_branch,
     read_text,
     read_text_at_ref,
+    read_text_at_upstream_tip,
     write_text,
 )
 from ydbdoc_review.github.pr import (
@@ -229,6 +230,18 @@ def _apply_results_to_disk(
     return TouchedPaths(written=written, deleted=deleted)
 
 
+def _docs_text_reader(repo_path: str, merge_base_with: str):
+    """Read docs paths from worktree, else upstream tip (§6.142 fragment repair)."""
+
+    def _read(path: str) -> str | None:
+        text = read_text(repo_path, path)
+        if text is not None:
+            return text
+        return read_text_at_upstream_tip(repo_path, merge_base_with, path)
+
+    return _read
+
+
 def _run_verify_pairs(
     contents: list[PairContent],
     client: YandexLLMClient,
@@ -236,6 +249,7 @@ def _run_verify_pairs(
     config: Config,
     *,
     en_toc_reachable: frozenset[str] | None = None,
+    docs_text_reader=None,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
     state = PRRunState(contents=contents)
@@ -244,6 +258,7 @@ def _run_verify_pairs(
         glossary=glossary,
         config=config,
         en_toc_reachable=en_toc_reachable,
+        docs_text_reader=docs_text_reader,
     )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
@@ -408,6 +423,7 @@ def run_doc_translate(
                 config=cfg,
                 use_analyze_llm=False,
                 en_toc_reachable=en_toc_reachable,
+                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
             )
         else:
             pr_result = PRTranslationResult()
@@ -785,6 +801,7 @@ def run_doc_verify(
                 glossary,
                 cfg,
                 en_toc_reachable=en_toc_reachable,
+                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
             )
         else:
             pr_result = PRTranslationResult()

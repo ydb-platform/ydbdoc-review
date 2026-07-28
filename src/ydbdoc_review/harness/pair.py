@@ -13,6 +13,7 @@ from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.types import PairRunResult
 from ydbdoc_review.translation.errors import TranslationError
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
+from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,15 @@ def run_pair_plan(
             target_text = restore_autotitle_hrefs(
                 target_text, content.ru_text, force_exact=True
             )
+            # §6.142: retarget missing EN fragments (stale path / ldap≠ldap-auth).
+            if ctx.docs_text_reader is not None:
+                target_text = repair_en_fragments(
+                    target_text,
+                    en_page_path=plan.target_path,
+                    read_text=ctx.docs_text_reader,
+                    ru_source=content.ru_text,
+                    en_baseline=content.en_text or content.en_base_text,
+                )
 
     return PairRunResult(
         plan=plan,

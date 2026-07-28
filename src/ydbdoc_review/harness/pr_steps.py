@@ -81,6 +81,7 @@ class ExecutePairPlansStep:
             glossary=ctx.glossary,
             config=ctx.config,
             en_toc_reachable=ctx.en_toc_reachable,
+            docs_text_reader=ctx.docs_text_reader,
         )
         results = []
         for plan in state.plans:
