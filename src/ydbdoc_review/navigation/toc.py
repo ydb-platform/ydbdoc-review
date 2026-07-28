@@ -711,6 +711,8 @@ def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope
 
     Scope = newly added items or items whose Russian ``name`` changed
     between base and PR head. Unchanged items are **not** in scope.
+    Reorder-only changes are handled by ``merge_en_toc_yaml`` (RU walk order)
+    and ``toc_reordered_shared_hrefs`` (§6.150) — not by this set.
     """
     base_by_href = {
         it["href"]: it for it in parse_toc_items(ru_base_yaml) if it.get("href")
@@ -738,6 +740,36 @@ def toc_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> TocTranslateScope
     return TocTranslateScope(frozenset(hrefs), frozenset(include_paths))
 
 
+def _toc_href_sequence(yaml_text: str) -> list[str]:
+    """Top-level ``href`` values in document order (first occurrence only)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in parse_toc_items(yaml_text):
+        href = it.get("href")
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        out.append(href)
+    return out
+
+
+def toc_reordered_shared_hrefs(ru_base_yaml: str, ru_pr_yaml: str) -> frozenset[str]:
+    """Hrefs present in both RU base and PR whose relative shared order changed.
+
+    Used to mirror RU menu reshuffles into EN (§6.150 / #47856). Empty when the
+    shared subsequence is unchanged (pure adds/removes/renames do not count).
+    """
+    base_seq = _toc_href_sequence(ru_base_yaml)
+    pr_seq = _toc_href_sequence(ru_pr_yaml)
+    base_set = set(base_seq)
+    pr_set = set(pr_seq)
+    shared_base = [h for h in base_seq if h in pr_set]
+    shared_pr = [h for h in pr_seq if h in base_set]
+    if shared_base == shared_pr:
+        return frozenset()
+    return frozenset(shared_pr)
+
+
 def merge_en_toc_yaml(
     en_main_yaml: str,
     ru_pr_yaml: str,
@@ -752,14 +784,15 @@ def merge_en_toc_yaml(
 ) -> str:
     """Build EN toc from RU PR order with strict scope.
 
-    Merge strategy (§6.131 / AGENT_TASKS Task 2):
+    Merge strategy (§6.131 / AGENT_TASKS Task 2 / §6.150):
 
-    1. Walk RU PR items (preserve RU structure / order).
+    1. Walk RU PR items (preserve RU structure / **order** — this is how RU
+       menu reshuffles are mirrored into EN when the EN entry already exists).
     2. For each RU item:
        - If ``href``/``include`` ∈ translate scope → translate ``name``, keep
          RU structure (including section ``href`` + ``include.path``).
        - Else if EN main has the same ``href``/``include`` → keep the EN block
-         unchanged.
+         unchanged **at the RU position**.
        - Else if RU had the entry on merge-base but EN main lacks it → gap-fill
          with translated name (unless ``restrict_gap_fill_to_scope``).
        - Else → skip (out of scope, not on EN).

@@ -7,6 +7,7 @@ from textwrap import dedent
 from ydbdoc_review.navigation.toc import (
     merge_en_toc_yaml,
     parse_toc_items,
+    toc_reordered_shared_hrefs,
     toc_translate_scope,
     validate_toc_merge,
 )
@@ -51,6 +52,60 @@ def test_toc_translate_scope_detects_new_and_renamed():
     scope = toc_translate_scope(RU_BASE, RU_PR)
     assert scope.hrefs == {"old.md", "new-page.md"}
     assert "stable.md" not in scope.hrefs
+
+
+def test_toc_reordered_shared_hrefs_detects_move():
+    """§6.150: shared subsequence order change is detected; adds alone are not."""
+    base = dedent("""
+        items:
+        - { name: A, href: a.md }
+        - { name: B, href: b.md }
+        - { name: C, href: c.md }
+    """).strip()
+    moved = dedent("""
+        items:
+        - { name: A, href: a.md }
+        - { name: C, href: c.md }
+        - { name: B, href: b.md }
+    """).strip()
+    added = dedent("""
+        items:
+        - { name: A, href: a.md }
+        - { name: B, href: b.md }
+        - { name: C, href: c.md }
+        - { name: D, href: d.md }
+    """).strip()
+    assert toc_reordered_shared_hrefs(base, moved) == frozenset({"a.md", "b.md", "c.md"})
+    assert toc_reordered_shared_hrefs(base, added) == frozenset()
+    assert toc_translate_scope(base, moved).hrefs == frozenset()
+
+
+def test_merge_mirrors_ru_shared_href_reorder():
+    """§6.150: EN blocks stay, but land in RU order."""
+    ru_pr = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FROM Topic, href: topics.md }
+        - { name: FOLDER, href: folder.md }
+    """).strip()
+    en_main = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+        - { name: FROM Topic, href: topics.md }
+    """).strip()
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=set(),
+        translate_name=lambda n: n,
+        restrict_gap_fill_to_scope=True,
+    )
+    assert [it["href"] for it in parse_toc_items(merged)] == [
+        "from_select.md",
+        "topics.md",
+        "folder.md",
+    ]
 
 
 def test_merge_keeps_unchanged_en_labels():

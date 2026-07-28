@@ -3356,5 +3356,30 @@ false 🟡 blocked green without a real code corruption.
 ``test_fence_content_allows_angle_placeholder_translation``,
 ``test_fence_content_allows_angle_placeholder_plus_hash_comment``.
 
+### 6.150. Mirror RU toc menu reshuffles into EN (#47856, 2026-07-28)
+
+**Problem:** [#47856](https://github.com/ydb-platform/ydb/pull/47856) only moved
+``FROM Topic`` / ``topics.md`` in RU ``select/toc_i.yaml``. At merge time EN
+lacked the page → §6.141 no-op. Later EN gained ``topics.md`` (still at the old
+position). Operators expect a RU menu reshuffle to land in EN at the same
+relative place without a manual EN toc edit.
+
+**Decision:**
+
+1. ``merge_en_toc_yaml`` already walks RU PR order — shared EN blocks are
+   emitted at the RU position (no separate permute pass).
+2. ``toc_reordered_shared_hrefs(ru_base, ru_pr)`` detects when the shared href
+   subsequence changed (reorder-only; pure adds do not count).
+3. When gap-fill is restricted (§6.82) and a reordered href is **missing from
+   EN toc** but the EN ``.md`` exists on upstream tip → add that href to
+   translate scope so gap-fill inserts it at the RU position.
+4. RU-only reshuffles with **no** EN page remain a no-op (§6.141).
+
+**Tests:** ``test_toc_reordered_shared_hrefs_detects_move``,
+``test_merge_mirrors_ru_shared_href_reorder``,
+``test_pr_47856_shared_toc_reorder_mirrors_en_order``,
+``test_pr_47856_reorder_adds_en_page_missing_from_toc``,
+``test_pr_47856_ru_only_toc_reorder_is_nav_noop``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

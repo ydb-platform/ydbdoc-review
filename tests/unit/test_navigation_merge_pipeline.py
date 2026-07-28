@@ -15,6 +15,7 @@ from ydbdoc_review.pipeline.navigation_merge import (
     verify_navigation_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.translation.glossary import load_glossary
 
 RU_BASE = dedent("""
@@ -572,7 +573,7 @@ def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
 
 
 def test_pr_47856_ru_only_toc_reorder_is_nav_noop():
-    """§6.141 / #47856: reorder RU-only href → EN unchanged, no write, no LLM."""
+    """§6.141 / #47856: reorder RU-only href (no EN page/toc) → EN unchanged."""
     ru_base = dedent("""
         items:
         - { name: FROM SELECT, href: from_select.md }
@@ -613,7 +614,7 @@ def test_pr_47856_ru_only_toc_reorder_is_nav_noop():
         ) as translate_labels,
         patch(
             "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
-            return_value="# page\n",
+            return_value=None,
         ),
     ):
         result = merge_navigation_pair(
@@ -630,4 +631,138 @@ def test_pr_47856_ru_only_toc_reorder_is_nav_noop():
     assert result.verdict == "ok"
     translate_labels.assert_called_once()
     assert translate_labels.call_args.args[1] == []
+
+
+def test_pr_47856_shared_toc_reorder_mirrors_en_order():
+    """§6.150 / #47856: RU reshuffle of href already on EN toc → EN order updates."""
+    ru_base = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+        - { name: FROM Topic, href: topics.md }
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FROM Topic, href: topics.md }
+        - { name: FOLDER, href: folder.md }
+    """).strip()
+    en_main = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+        - { name: FROM Topic, href: topics.md }
+    """).strip()
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml",
+        en_path="ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml",
+        ru_changed=True,
+    )
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=ru_pr,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(ru_base, en_main),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={},
+        ) as translate_labels,
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
+            return_value="# page\n",
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+        )
+
+    assert result.error is None
+    assert result.verdict == "ok"
+    assert result.target_text is not None
+    hrefs = [
+        it["href"] for it in parse_toc_items(result.target_text) if it.get("href")
+    ]
+    assert hrefs == ["from_select.md", "topics.md", "folder.md"]
+    translate_labels.assert_called_once()
+    assert translate_labels.call_args.args[1] == []
+
+
+def test_pr_47856_reorder_adds_en_page_missing_from_toc():
+    """§6.150: RU reorder + EN page on disk but absent from EN toc → insert at RU pos."""
+    ru_base = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+        - { name: FROM Topic, href: topics.md }
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FROM Topic, href: topics.md }
+        - { name: FOLDER, href: folder.md }
+    """).strip()
+    en_main = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+    """).strip()
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml",
+        en_path="ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml",
+        ru_changed=True,
+    )
+
+    def _upstream(_repo: str, _ref: str, path: str) -> str | None:
+        if path.endswith("topics.md"):
+            return "# FROM Topic\n"
+        if path.endswith(".md"):
+            return "# page\n"
+        return None
+
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=ru_pr,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(ru_base, en_main),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            side_effect=lambda _c, labels, _g, config=None: {n: n for n in labels},
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
+            side_effect=_upstream,
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+        )
+
+    assert result.error is None
+    assert result.target_text is not None
+    hrefs = [it["href"] for it in parse_toc_items(result.target_text) if it.get("href")]
+    assert hrefs == ["from_select.md", "topics.md", "folder.md"]
 

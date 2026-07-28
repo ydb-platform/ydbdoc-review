@@ -26,6 +26,7 @@ from ydbdoc_review.navigation.toc import (
     parse_toc_items,
     resolve_toc_target_path,
     toc_entry_paths,
+    toc_reordered_shared_hrefs,
     toc_translate_scope,
 )
 from ydbdoc_review.navigation.scope_planner import (
@@ -315,6 +316,25 @@ def merge_navigation_pair(
             for it in parse_toc_items(ru_base)
             if it.get("include_path")
         }
+        # §6.150 / #47856: RU menu reshuffle among existing entries. Shared EN
+        # entries are already repositioned by the RU walk in ``merge_en_toc_yaml``.
+        # If the EN page exists on upstream but the href is missing from EN toc,
+        # pull it into translate scope so gap-fill places it at the RU position.
+        reorder_hrefs = toc_reordered_shared_hrefs(ru_base, ru_pr)
+        if reorder_hrefs and restrict_gap_fill:
+            for href in sorted(reorder_hrefs):
+                if href in en_main_hrefs or href in scope.hrefs:
+                    continue
+                target = resolve_toc_target_path(pair.en_path, href)
+                if (
+                    read_text_at_upstream_tip(repo_path, merge_base_with, target)
+                    is not None
+                ):
+                    scope = scope.with_extra_hrefs({href})
+                    logger.info(
+                        "Nav reorder: EN page exists for %s — adding to toc at RU position",
+                        href,
+                    )
         gap_hrefs = {
             it["href"]
             for it in parse_toc_items(ru_pr)
