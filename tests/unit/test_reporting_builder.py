@@ -142,6 +142,34 @@ def test_build_source_pr_comment_bilingual_skip():
     assert "Translation PR не создаётся" in body
 
 
+def test_build_source_pr_comment_noop_no_commit():
+    """§6.141: empty commit / no translation PR must not say «перевод готов»."""
+    from ydbdoc_review.pipeline.types import NavigationRunResult
+
+    cfg = _cfg()
+    result = PRTranslationResult(
+        navigation_results=[
+            NavigationRunResult(
+                ru_path="ydb/docs/ru/core/toc_i.yaml",
+                en_path="ydb/docs/en/core/toc_i.yaml",
+                kind="toc",
+                target_text=None,
+            )
+        ]
+    )
+    body = build_source_pr_comment(
+        result,
+        translation_pr_number=None,
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=19),
+        config=cfg,
+        committed=False,
+    )
+    assert "перевод не требуется" in body
+    assert "§6.141" in body
+    assert "перевод готов" not in body
+    assert "Translation PR | — |" in body
+
+
 def test_build_source_pr_comment_completeness_gaps_no_translation_pr():
     cfg = _cfg()
     result = _sample_result(new_file=True)

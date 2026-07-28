@@ -3142,5 +3142,27 @@ scope planning did not.
 **Tests:** ``test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base``,
 ``test_orphan_check_uses_baseline_ref_not_stale_head``.
 
+### 6.141. Nav merge no-op + honest source comment (#47856, 2026-07-28)
+
+**Problem:** Merged [#47856](https://github.com/ydb-platform/ydb/pull/47856) only
+reordered ``FROM Topic`` / ``topics.md`` in RU ``select/toc_i.yaml``. That href
+is absent from EN toc (and ``topics.md`` has no EN page). Scoped merge (§6.82
+``restrict_gap_fill_to_scope``) skipped the RU-only entry; shared EN order was
+unchanged → empty ``git commit`` → no push → no translation PR. The source
+comment still said **«перевод готов»** with ``Translation PR | —`` and
+``Файлов | 1``, and spent ~₽0.91 translating a gap label that was never applied.
+
+**Decision:**
+
+1. After toc/redirect merge, if ``merged`` equals the EN baseline →
+   ``target_text=None`` (no disk write, not counted as translated).
+2. When ``restrict_gap_fill``, do not LLM-translate out-of-scope gap href labels.
+3. ``build_source_pr_comment(..., committed=…)``: if no translation PR and
+   ``committed is False`` (or zero files), say **«перевод не требуется»** with
+   §6.141 explanation — never **«перевод готов»** without a PR.
+
+**Tests:** ``test_pr_47856_ru_only_toc_reorder_is_nav_noop``,
+``test_build_source_pr_comment_noop_no_commit``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

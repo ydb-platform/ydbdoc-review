@@ -710,6 +710,7 @@ def build_source_pr_comment(
     config: Config,
     usage: UsageTracker | None = None,
     verify_result: PRTranslationResult | None = None,
+    committed: bool | None = None,
 ) -> str:
     """Short summary comment for the source PR after ``doc_translate``."""
     total, new_count, updated_count = _file_translation_counts(result)
@@ -758,6 +759,32 @@ def build_source_pr_comment(
             if cost_label:
                 body += f"\n| Стоимость перевода | {cost_label} |\n"
         return body
+
+    # No translation PR and nothing to push: RU toc reorder / no-op merge (§6.141).
+    if translation_pr_number is None and (
+        committed is False or (committed is not True and total == 0)
+    ):
+        cost_line = ""
+        if config.reporting.include_cost:
+            cost_label = _format_cost_estimate(
+                usage=usage,
+                file_usage=_aggregate_file_usage(result),
+            )
+            if cost_label:
+                cost_line = f"| Стоимость перевода | {cost_label} |\n"
+        return (
+            "🤖 **ydbdoc-review** — перевод не требуется\n\n"
+            "После scoped merge EN совпадает с `main` "
+            "(нет коммита / Translation PR не создаётся). "
+            "Типичный случай: перестановка пунктов toc, которых нет на EN, "
+            "или RU-only правки без изменений зеркала (§6.141).\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            f"| Translation PR | — |\n"
+            f"| Файлов | {total} |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            f"{cost_line}"
+        )
 
     if total:
         if new_count and updated_count:

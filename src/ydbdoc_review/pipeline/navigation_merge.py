@@ -322,7 +322,10 @@ def merge_navigation_pair(
             and it["href"] not in en_main_hrefs
             and it["href"] in ru_base_hrefs
         }
-        labels = _toc_label_names(ru_pr, scope, gap_hrefs=gap_hrefs)
+        # When gap-fill is restricted to translate scope (§6.82), labels for
+        # out-of-scope gap hrefs are never applied — skip the LLM call (#47856).
+        label_gaps = set() if restrict_gap_fill else gap_hrefs
+        labels = _toc_label_names(ru_pr, scope, gap_hrefs=label_gaps)
         if en_toc_is_absent(en_main):
             labels = [it["name"] for it in parse_toc_items(ru_pr) if it.get("name")]
         name_map = _translate_menu_labels(
@@ -369,6 +372,22 @@ def merge_navigation_pair(
             merged,
             en_main_yaml=en_main,
             translate_scope=scope,
+        )
+
+    # Pure RU reorder / RU-only toc entries that §6.82 will not mirror leave EN
+    # identical to main — do not write or count as translated (§6.141 / #47856).
+    if merged == en_main or merged.strip() == en_main.strip():
+        logger.info(
+            "Navigation merge no-op for %s — EN unchanged vs upstream baseline",
+            pair.en_path,
+        )
+        return NavigationRunResult(
+            ru_path=pair.ru_path,
+            en_path=pair.en_path,
+            kind=kind,
+            target_text=None,
+            warnings=warnings,
+            verdict="ok",
         )
 
     verdict = _navigation_verdict(warnings)

@@ -572,6 +572,7 @@ def run_doc_translate(
                 config=cfg,
                 usage=client.usage_tracker,
                 verify_result=verify_result,
+                committed=committed,
             )
         ),
         label="source PR summary",

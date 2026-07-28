@@ -570,3 +570,64 @@ def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
     assert "json-indexes.md" in results[0].target_text
     assert "JSON indexes" in results[0].target_text
 
+
+def test_pr_47856_ru_only_toc_reorder_is_nav_noop():
+    """§6.141 / #47856: reorder RU-only href → EN unchanged, no write, no LLM."""
+    ru_base = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+        - { name: FROM Topic, href: topics.md }
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FROM Topic, href: topics.md }
+        - { name: FOLDER, href: folder.md }
+    """).strip()
+    en_main = dedent("""
+        items:
+        - { name: FROM SELECT, href: from_select.md }
+        - { name: FOLDER, href: folder.md }
+    """).strip()
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    glossary = load_glossary()
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/yql/reference/syntax/select/toc_i.yaml",
+        en_path="ydb/docs/en/core/yql/reference/syntax/select/toc_i.yaml",
+        ru_changed=True,
+    )
+    with (
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text",
+            return_value=ru_pr,
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(ru_base, en_main),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={},
+        ) as translate_labels,
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
+            return_value="# page\n",
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=glossary,
+            config=cfg,
+        )
+
+    assert result.error is None
+    assert result.target_text is None
+    assert result.verdict == "ok"
+    translate_labels.assert_called_once()
+    assert translate_labels.call_args.args[1] == []
+
