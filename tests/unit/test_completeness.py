@@ -92,6 +92,51 @@ def test_completeness_ok_when_navigation_merged():
     assert completeness_gaps(changes, result) == []
 
 
+def test_completeness_ok_when_navigation_noop():
+    """§6.144 / #47091: EN toc unchanged after merge must not block push."""
+    changes = [
+        ("ydb/docs/ru/core/yql/toc_i.yaml", "modified"),
+        ("ydb/docs/ru/core/yql/reference/syntax/select/topics.md", "modified"),
+    ]
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/yql/reference/syntax/select/topics.md",
+        en_path="ydb/docs/en/core/yql/reference/syntax/select/topics.md",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=plan,
+                target_text="# Topics\n",
+                file_result=FileTranslationResult(
+                    file_path=pair.ru_path,
+                    final_text="# Topics\n",
+                    segments_count=1,
+                    verdict="ok",
+                    prompt_version="v1",
+                ),
+            )
+        ],
+        navigation_results=[
+            NavigationRunResult(
+                ru_path="ydb/docs/ru/core/yql/toc_i.yaml",
+                en_path="ydb/docs/en/core/yql/toc_i.yaml",
+                kind="toc",
+                target_text=None,
+                verdict="ok",
+            )
+        ],
+    )
+    assert completeness_gaps(changes, result) == []
+
+
 def test_bilingual_en_mirrors_detects_both_sides():
     changes = [
         ("ydb/docs/ru/a/compact.md", "modified"),

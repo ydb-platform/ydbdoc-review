@@ -83,7 +83,12 @@ def expected_en_mirrors(
 
 
 def committed_en_paths(result: PRTranslationResult) -> set[str]:
-    """EN paths written or planned with output text in this run."""
+    """EN paths written or intentionally satisfied in this run.
+
+    Navigation merge may return ``target_text=None`` with ``verdict=ok`` when the
+    merged EN equals the upstream baseline (§6.141 no-op). That still satisfies
+    the completeness gate: there is nothing to push for that file (§6.144).
+    """
     paths: set[str] = set()
     for run in result.pair_results:
         if run.deleted or run.skipped or run.error:
@@ -93,7 +98,7 @@ def committed_en_paths(result: PRTranslationResult) -> set[str]:
     for nav in result.navigation_results:
         if nav.error:
             continue
-        if nav.target_text is not None:
+        if nav.target_text is not None or nav.verdict == "ok":
             paths.add(nav.en_path)
     return paths
 

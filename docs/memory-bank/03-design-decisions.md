@@ -3223,5 +3223,22 @@ transcripts were never written.
 **Tests:** ``test_action_docker_forwards_ydb_sa_key``,
 ``test_continue_store_unavailable_is_not_ttl_message``.
 
+### 6.144. Nav merge no-op must satisfy completeness (#47091, 2026-07-28)
+
+**Problem:** Re-translate of [#47091](https://github.com/ydb-platform/ydb/pull/47091)
+after §6.143 skipped commit/push with completeness gap
+``ydb/docs/en/core/yql/toc_i.yaml`` — «navigation merge не выполнен». Log showed
+``Navigation merge no-op … EN unchanged vs upstream baseline`` (§6.141): merge
+returned ``target_text=None``, ``verdict=ok``. ``committed_en_paths`` only
+counted nav rows with ``target_text is not None``, so a successful no-op looked
+like a missing mirror and blocked the translation PR.
+
+**Decision:** ``committed_en_paths`` treats navigation results with
+``verdict=ok`` and no ``error`` as satisfied even when ``target_text is None``
+(intentional no-op / RU-deleted handled elsewhere). Real merge failures still
+leave a gap.
+
+**Tests:** ``test_completeness_ok_when_navigation_noop``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
