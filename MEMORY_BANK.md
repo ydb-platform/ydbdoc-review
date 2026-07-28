@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-28  
-**Current focus:** §6.151 — nav-only translate QA reports 🟢 (#47856).
+**Current focus:** §6.152 — strip_unreachable_links is info not blocking (#46889 / #48123).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-28 | **§6.152** — ``strip_unreachable_links:`` is info (not 🔴) after Variant A strip (#46889 / #48123) |
 | 2026-07-28 | **§6.151** — nav-only QA recommendation is 🟢 (not ⚪) (#47856 / #48124) |
 | 2026-07-28 | **§6.150** — mirror RU toc reshuffles into EN; EN page on disk fills missing toc slot (#47856) |
 | 2026-07-28 | **§6.149** — fence QA: trailing YAML `#` + angle placeholder translation (#47164 host_configs) |

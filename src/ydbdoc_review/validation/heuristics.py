@@ -228,6 +228,11 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "info"
     if message.startswith("include_parity_repaired:"):
         return "info"
+    if message.startswith("strip_unreachable_links:"):
+        # Intentional Variant A repair (§6.107 / §6.152) — not a merge blocker.
+        return "info"
+    if message.startswith("strip_unreachable_links_failed:"):
+        return "warnings"
     if message.startswith("finalize_en_round_trip:"):
         return "warnings"
     if message.startswith("length_ratio:") and "borderline" in message:

@@ -51,6 +51,24 @@ def test_verify_realign_message_is_info_not_blocking():
     )
 
 
+def test_strip_unreachable_links_message_is_info_not_blocking():
+    """§6.152 / #48123: Variant A strip is intentional repair, not a red QA."""
+    from ydbdoc_review.validation.heuristics import _classify_heuristic
+
+    assert (
+        _classify_heuristic(
+            "strip_unreachable_links: removed 5 internal href(s) outside EN toc graph"
+        )
+        == "info"
+    )
+    assert (
+        _classify_heuristic(
+            "strip_unreachable_links_failed: AttributeError: boom"
+        )
+        == "warnings"
+    )
+
+
 def test_md_link_parity_flags_missing_en_link():
     ru = "- [logs](debug-logs.md)\n- [otel logs](debug-logs-otel.md)\n"
     en = "- [logs](debug-logs.md)\n"

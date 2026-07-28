@@ -3393,5 +3393,23 @@ one navigation result is ``ok``, recommend **🟢 можно мержить**.
 
 **Tests:** ``test_merge_recommendation_green_for_nav_only_ok``.
 
+### 6.152. ``strip_unreachable_links`` is info, not 🔴 (#46889 / #48123, 2026-07-28)
+
+**Problem:** Bilingual ``doc_verify`` on [#46889](https://github.com/ydb-platform/ydb/pull/46889)
+realigned ``glossary.md`` from RU (§6.147), then Variant A
+``strip_unreachable_internal_links`` (§6.107) correctly removed 5 internal hrefs
+outside the EN toc graph (e.g. ``streaming-query.md``, watermarks). The strip
+appended ``strip_unreachable_links: removed N…`` to finalize warnings, and
+``_classify_heuristic`` defaulted that prefix to **blocking** → fixup [#48123](https://github.com/ydb-platform/ydb/pull/48123)
+stayed 🔴 despite a successful intentional repair (same class of bug as
+``verify_realign`` before §6.147).
+
+**Decision:**
+
+1. ``strip_unreachable_links:`` → **info** (shown under «Справка»).
+2. ``strip_unreachable_links_failed:`` → **warnings** (walker/exception path).
+
+**Tests:** ``test_strip_unreachable_links_message_is_info_not_blocking``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
