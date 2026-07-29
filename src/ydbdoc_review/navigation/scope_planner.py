@@ -14,6 +14,7 @@ from ydbdoc_review.navigation.paths import is_navigation_yaml
 from ydbdoc_review.navigation.toc import (
     collect_toc_link_targets,
     en_toc_is_absent,
+    parse_toc_items,
     resolve_toc_target_path,
     toc_entry_paths,
 )
@@ -160,7 +161,7 @@ def _add_doc_if_en_absent(
 ) -> None:
     if ru_md in doc_ru:
         return
-    if not read_ru(ru_md):
+    if read_ru(ru_md) is None:
         return
     en_md = counterpart(ru_md, docs_root)
     if en_md is None:
@@ -360,9 +361,6 @@ def plan_translation_scope(
                 doc_ru.add(target)
                 queue.append(target)
 
-    doc_from_diff = frozenset(diff_ru_md)
-    doc_from_main = frozenset(doc_ru - diff_ru_md)
-
     nav_ru: set[str] = set()
     nav_from_diff: set[str] = set()
     for ru_toc in discovered_tocs:
@@ -386,6 +384,78 @@ def plan_translation_scope(
         docs_root=docs_root,
     )
 
+    # Absent EN **sibling** sidebars are full-mirrored (§6.85). Queue every RU
+    # href in that toc that lacks an EN mirror so the new menu does not point at
+    # missing files. Do **not** expand ancestor hubs (``reference/toc_p``) —
+    # that reopens §6.104 / #45181 spill. Also queue parent section ``href``
+    # (e.g. ``streaming-query/index.md``) when its ``include.path`` child is in
+    # nav (§6.155 / #46446).
+    for ru_toc in sorted(nav_ru):
+        ru_text = read_ru(ru_toc)
+        if not ru_text:
+            continue
+        en_toc = counterpart(ru_toc, docs_root)
+        en_text = (read_en_base(en_toc) or "") if en_toc else ""
+        toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
+        sibling_of_diff = any(
+            _norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md
+        )
+        if en_toc_is_absent(en_text) and sibling_of_diff:
+            for rel in _toc_md_hrefs(ru_text):
+                ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
+                _add_doc_if_en_absent(
+                    ru_md,
+                    doc_ru=doc_ru,
+                    read_ru=read_ru,
+                    read_en_base=read_en_base,
+                    docs_root=docs_root,
+                )
+        for it in parse_toc_items(ru_text):
+            include_path = it.get("include_path")
+            href = it.get("href")
+            if not include_path or not href or not href.endswith(".md"):
+                continue
+            child = _norm(resolve_toc_target_path(ru_toc, include_path))
+            if child not in nav_ru:
+                continue
+            # Only when the included child sidebar sits next to a diff page.
+            child_dir = child.rsplit("/", 1)[0]
+            if not any(
+                _norm(p).rsplit("/", 1)[0] == child_dir for p in diff_ru_md
+            ):
+                continue
+            ru_md = _norm(resolve_toc_target_path(ru_toc, href))
+            _add_doc_if_en_absent(
+                ru_md,
+                doc_ru=doc_ru,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+            )
+
+    # Close includes for pages added after the first pass (absent-toc hrefs).
+    queue = sorted(doc_ru)
+    seen_close = set(doc_ru)
+    while queue:
+        ru_md = queue.pop(0)
+        ru_text = read_ru(ru_md)
+        if not ru_text:
+            continue
+        for target in sorted(
+            _ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)
+        ):
+            if target in seen_close:
+                continue
+            en_md = counterpart(target, docs_root)
+            if en_md is None:
+                continue
+            if read_en_base(en_md) is None and read_ru(target) is not None:
+                doc_ru.add(target)
+                seen_close.add(target)
+                queue.append(target)
+
+    doc_from_diff = frozenset(diff_ru_md)
+    doc_from_main = frozenset(doc_ru - diff_ru_md)
     nav_from_main = frozenset(nav_ru - nav_from_diff)
 
     return TranslationScopePlan(

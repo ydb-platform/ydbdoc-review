@@ -3467,5 +3467,36 @@ produced [#48133](https://github.com/ydb-platform/ydb/pull/48133) with 🔴
 ``test_apply_include_parity_repair_uses_pair_source_text_not_checkout``,
 ``test_scope_closes_empty_locale_include_missing_on_en``.
 
+### 6.155. Section href+include merge + absent-EN toc page queue (#46446, 2026-07-29)
+
+**Problem:** Auto-translate of merged [#46446](https://github.com/ydb-platform/ydb/pull/46446)
+(only ``watermarks.md`` ×2) produced [#48183](https://github.com/ydb-platform/ydb/pull/48183) 🔴:
+
+1. EN ``concepts/streaming-query/toc_i.yaml`` full-mirrored from RU listed
+   ``streaming-query.md``, but that page was never queued → ``missing_toc_target``.
+2. Parent ``concepts/toc_i.yaml`` was queued (§6.116) with planned
+   ``include.path: streaming-query/toc_p.yaml``, yet merge kept EN's flat
+   ``href: streaming-query.md`` and never emitted the RU section
+   (``href: streaming-query/index.md`` + include) → ``scope_not_applied`` /
+   ``toc_structure_parity``.
+
+**Root cause:** flat ``merge_en_toc_yaml`` handled ``if href: … continue`` before
+``include_path``, so a scoped include on a section whose href differs from the
+EN legacy flat path was skipped. Planner queued the absent child toc (§6.85)
+without pulling sibling/section ``href`` pages into ``doc_from_main``.
+
+**Decision:**
+
+1. Treat href+include as a section entry: if ``include_path`` ∈ translate scope
+   (or href is), emit the full RU block even when EN still has a flat alias.
+2. After nav queue: for **sibling** absent EN tocs (same directory as a diff
+   page), add every RU toc ``href`` missing on EN; for parent items whose
+   ``include.path`` child is that sibling sidebar, also queue the section
+   ``href`` (e.g. ``streaming-query/index.md``). Do not expand ancestor hubs
+   (``reference/toc_p``) — that reopens §6.104. Re-run include closure.
+
+**Tests:** ``test_merge_applies_scoped_include_when_section_href_differs_from_en_flat``,
+``test_pr_46446_absent_en_streaming_toc_queues_sibling_pages``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

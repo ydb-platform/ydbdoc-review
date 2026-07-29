@@ -366,3 +366,55 @@ def test_scope_closes_empty_locale_include_missing_on_en():
     )
     assert ru_empty in plan.doc_ru_paths
     assert ru_empty in plan.doc_from_main
+
+
+def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
+    """§6.155: watermarks-only PR must also translate sibling pages listed in
+    the absent EN ``streaming-query/toc_i`` full mirror (and section index)."""
+    files = {
+        "ydb/docs/ru/core/concepts/toc_i.yaml": (
+            "items:\n"
+            "- name: Streaming\n"
+            "  href: streaming-query/index.md\n"
+            "  include:\n"
+            "    path: streaming-query/toc_p.yaml\n"
+            "    mode: link\n"
+        ),
+        "ydb/docs/ru/core/concepts/streaming-query/toc_p.yaml": (
+            "items:\n- include: { mode: link, path: toc_i.yaml }\n"
+        ),
+        "ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml": (
+            "items:\n"
+            "- name: Streaming queries\n"
+            "  href: streaming-query.md\n"
+            "- name: Watermarks\n"
+            "  href: watermarks.md\n"
+        ),
+        "ydb/docs/ru/core/concepts/streaming-query/streaming-query.md": "# RU SQ\n",
+        "ydb/docs/ru/core/concepts/streaming-query/watermarks.md": "# RU WM\n",
+        "ydb/docs/ru/core/concepts/streaming-query/index.md": "# RU index\n",
+        "ydb/docs/en/core/concepts/toc_i.yaml": (
+            "items:\n"
+            "- name: Streaming queries\n"
+            "  href: streaming-query.md\n"
+        ),
+        "ydb/docs/en/core/concepts/streaming-query.md": "# EN flat SQ\n",
+    }
+
+    def read_ru(path: str) -> str | None:
+        return files.get(path)
+
+    def read_en(path: str) -> str | None:
+        return files.get(path)
+
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/concepts/streaming-query/watermarks.md", "modified")],
+        read_ru=read_ru,
+        read_en_base=read_en,
+        read_ru_base=lambda _p: files.get(_p),
+    )
+    assert "ydb/docs/ru/core/concepts/streaming-query/watermarks.md" in plan.doc_ru_paths
+    assert "ydb/docs/ru/core/concepts/streaming-query/streaming-query.md" in plan.doc_from_main
+    assert "ydb/docs/ru/core/concepts/streaming-query/index.md" in plan.doc_from_main
+    assert "ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml" in plan.nav_ru_paths
+    assert "ydb/docs/ru/core/concepts/toc_i.yaml" in plan.nav_from_main

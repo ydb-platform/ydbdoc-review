@@ -1054,3 +1054,45 @@ def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
     assert "spring/toc-spring.yaml" in merged
     assert "sql-translation/toc-sql-translation.yaml" not in merged
     assert "sql-dialect-converter.md" in merged
+
+
+def test_merge_applies_scoped_include_when_section_href_differs_from_en_flat():
+    """§6.155 / #46446: RU section href+include vs EN legacy flat href."""
+    en_main = dedent("""
+        items:
+        - name: Glossary
+          href: glossary.md
+        - name: Streaming queries
+          href: streaming-query.md
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: Глоссарий
+          href: glossary.md
+        - name: Потоковая обработка
+          href: streaming-query/index.md
+          include:
+            path: streaming-query/toc_p.yaml
+            mode: link
+    """).strip()
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=set(),
+        translate_include_paths={"streaming-query/toc_p.yaml"},
+        translate_name=lambda n: {
+            "Глоссарий": "Glossary",
+            "Потоковая обработка": "Streaming processing",
+        }.get(n, n),
+        ru_base_hrefs={"glossary.md", "streaming-query/index.md"},
+        ru_base_include_paths={"streaming-query/toc_p.yaml"},
+        restrict_gap_fill_to_scope=True,
+        keep_en_hrefs={"streaming-query.md"},
+    )
+    items = parse_toc_items(merged)
+    includes = [it.get("include_path") for it in items if it.get("include_path")]
+    hrefs = [it.get("href") for it in items if it.get("href")]
+    assert "streaming-query/toc_p.yaml" in includes
+    assert "streaming-query/index.md" in hrefs
+    # Legacy flat page may remain (warning), but section include must be present.
+    assert "streaming-query.md" in hrefs
