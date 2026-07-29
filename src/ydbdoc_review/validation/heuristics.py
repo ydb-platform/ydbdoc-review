@@ -124,11 +124,14 @@ def check_md_link_parity(
     target_lang: str,
     source_file: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    ignore_basenames: set[str] | frozenset[str] | None = None,
 ) -> list[str]:
     """Blocking when EN is missing ``.md`` links present in RU (§6.59 index/toc gaps).
 
     Links whose EN targets sit outside the EN toc graph (intentionally stripped
     in finalize, §6.107 / §6.114) are excluded from the comparison.
+    ``ignore_basenames`` covers hrefs already removed by strip in this run
+    (§6.156) even when verify-time reachability would no longer exclude them.
     """
     if source_lang.lower() not in {"ru", "russian"} or target_lang.lower() != "en":
         return []
@@ -136,6 +139,8 @@ def check_md_link_parity(
     # Same-file self-links (RU often links to its own basename) are not EN gaps.
     if source_file:
         missing.discard(PurePosixPath(source_file).name)
+    if ignore_basenames:
+        missing -= set(ignore_basenames)
     if (
         missing
         and en_toc_reachable is not None
@@ -192,11 +197,39 @@ def check_fence_parity(source_text: str, target_text: str) -> list[str]:
 
 
 def check_heading_parity(source_text: str, target_text: str) -> list[str]:
-    src = len(_HEADING.findall(source_text))
-    tgt = len(_HEADING.findall(target_text))
+    """Compare heading counts via AST (incl. ``{% if %}`` bodies, §6.156).
+
+    Line-regex ``^#{1,6}`` misses headings indented inside YFM conditionals
+    (RU ``  ## ROLLUP`` vs EN ``## ROLLUP`` → false 24 vs 25).
+    """
+    src = _count_headings_ast(source_text)
+    tgt = _count_headings_ast(target_text)
     if src == tgt:
         return []
     return [f"heading_parity: source {src} headings vs target {tgt}"]
+
+
+def _count_headings_ast(text: str) -> int:
+    from ydbdoc_review.parsing.ast_types import Heading, YfmIf
+
+    doc = parse_markdown(text)
+    count = 0
+
+    def walk(blocks: list) -> None:
+        nonlocal count
+        for block in blocks:
+            if isinstance(block, Heading):
+                count += 1
+            if isinstance(block, YfmIf):
+                for branch in block.branches:
+                    walk(branch.children)
+                continue
+            children = getattr(block, "children", None)
+            if children:
+                walk(children)
+
+    walk(doc.children)
+    return count
 
 
 def check_list_tab_parity(source_text: str, target_text: str) -> list[str]:
@@ -267,6 +300,7 @@ def _collect_raw_heuristics(
     target_lang: str,
     source_file: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    ignore_link_basenames: set[str] | frozenset[str] | None = None,
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
@@ -305,6 +339,7 @@ def _collect_raw_heuristics(
             target_lang=target_lang,
             source_file=source_file,
             en_toc_reachable=en_toc_reachable,
+            ignore_basenames=ignore_link_basenames,
         )
     )
     raw.extend(check_fence_parity(normalized_source_text, target_text))
@@ -344,6 +379,7 @@ def run_file_heuristics_classified(
     target_lang: str = "en",
     source_file: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    ignore_link_basenames: set[str] | frozenset[str] | None = None,
 ) -> ClassifiedHeuristics:
     """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
     out = ClassifiedHeuristics()
@@ -355,9 +391,22 @@ def run_file_heuristics_classified(
         target_lang=target_lang,
         source_file=source_file,
         en_toc_reachable=en_toc_reachable,
+        ignore_link_basenames=ignore_link_basenames,
     ):
         bucket = _classify_heuristic(message)
         getattr(out, bucket).append(message)
+    return out
+
+
+def stripped_link_basenames_from_warnings(warnings: list[str]) -> set[str]:
+    """Parse basenames from ``strip_unreachable_links: … [a.md, b.md]`` info lines."""
+    out: set[str] = set()
+    for message in warnings:
+        if not message.startswith("strip_unreachable_links:"):
+            continue
+        # Prefer explicit basename list: ``…: `a.md`, `b.md```
+        for name in re.findall(r"`([^`]+\.md)`", message):
+            out.add(PurePosixPath(name).name)
     return out
 
 

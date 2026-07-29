@@ -120,6 +120,11 @@ def _fence_diff_is_comment_translation_only(
 
     src_lines = source_content.splitlines()
     tgt_lines = target_content.splitlines()
+    # Trailing blank lines often differ after render (§6.156 / group-by fence).
+    while src_lines and not src_lines[-1].strip():
+        src_lines.pop()
+    while tgt_lines and not tgt_lines[-1].strip():
+        tgt_lines.pop()
     if len(src_lines) != len(tgt_lines):
         return False
     saw_diff = False

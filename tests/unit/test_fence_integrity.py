@@ -281,3 +281,23 @@ def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
     assert "ВМ" not in final
     assert "<string>" in final
     assert "<строка>" not in final
+
+
+def test_fence_body_allows_comment_translation_with_trailing_blank_line():
+    """§6.156: RU fence often keeps a trailing blank line EN drops."""
+    ru = (
+        "```yql\n"
+        "SELECT\n"
+        "   x,  -- ОК: колонка\n"
+        "FROM t\n"
+        "\n"
+        "```\n"
+    )
+    en = (
+        "```yql\n"
+        "SELECT\n"
+        "   x,  -- OK: column\n"
+        "FROM t\n"
+        "```\n"
+    )
+    assert check_fence_body_copy(ru, en, source_lang="ru") == []

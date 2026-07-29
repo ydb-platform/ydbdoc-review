@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from pathlib import PurePosixPath
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.ast_types import Document
@@ -135,8 +136,13 @@ def finalize_en_target(
                 )
         else:
             if stripped and out_warnings is not None:
+                names = ", ".join(
+                    f"`{PurePosixPath(h.split('#', 1)[0]).name}`"
+                    for h in stripped[:8]
+                )
+                extra = f", … (+{len(stripped) - 8})" if len(stripped) > 8 else ""
                 out_warnings.append(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
-                    f"href(s) outside EN toc graph"
+                    f"href(s) outside EN toc graph: {names}{extra}"
                 )
     return postprocess_en_target_markdown(text)

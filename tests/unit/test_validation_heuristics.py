@@ -256,3 +256,34 @@ def test_validate_navigation_merge_warnings_redirect():
     )
     assert warnings
     assert any("missing_from" in w for w in warnings)
+
+
+def test_heading_parity_counts_indented_headings_inside_yfm_if():
+    """§6.156: RU headings indented in ``{% if %}`` must still count."""
+    ru = (
+        "{% if feature_group_by_rollup_cube %}\n"
+        "  ## ROLLUP {#rollup}\n"
+        "{% endif %}\n"
+        "## Other\n"
+    )
+    en = (
+        "{% if feature_group_by_rollup_cube %}\n"
+        "## ROLLUP {#rollup}\n"
+        "{% endif %}\n"
+        "## Other\n"
+    )
+    assert check_heading_parity(ru, en) == []
+
+
+def test_md_link_parity_ignores_stripped_basenames():
+    """§6.156: intentional strip must not re-block via md_link_parity."""
+    ru = "See [t](table.md) and [c](create-resource-pool-classifier.md).\n"
+    en = "See t and c.\n"
+    assert check_md_link_parity(
+        ru,
+        en,
+        source_lang="ru",
+        target_lang="en",
+        source_file="ydb/docs/ru/core/dev/system-views.md",
+        ignore_basenames={"table.md", "create-resource-pool-classifier.md"},
+    ) == []

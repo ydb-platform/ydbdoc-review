@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-29  
-**Current focus:** §6.155 — section href+include merge + absent-EN toc page queue (#46446).
+**Current focus:** §6.156 — heading AST parity; strip vs md_link_parity; fence trailing blank (#30237).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-29 | **§6.156** — heading AST (YfmIf); strip basenames → md_link ignore; fence trailing blank (#30237 / #48202) |
 | 2026-07-29 | **§6.155** — section href+include merge; queue sibling pages for absent EN toc (#46446 / #48183) |
 | 2026-07-28 | **§6.154** — verify include_parity uses merge-commit RU; empty ``{% include %}`` enters scope (#38700 / #48133) |
 | 2026-07-28 | **§6.153** — fragment repair finds sibling via toc when RU+EN baseline both stale (#48012) |

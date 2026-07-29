@@ -465,6 +465,8 @@ class HeuristicsStep:
     name = "heuristics"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
+        from ydbdoc_review.validation.heuristics import stripped_link_basenames_from_warnings
+
         state.heuristics = run_file_heuristics_classified(
             state.raw_source_text,
             state.translated_text,
@@ -473,6 +475,9 @@ class HeuristicsStep:
             target_lang=ctx.target_lang,
             source_file=state.file_path,
             en_toc_reachable=ctx.en_toc_reachable,
+            ignore_link_basenames=stripped_link_basenames_from_warnings(
+                state.finalize_warnings
+            ),
         )
         for message in state.finalize_warnings:
             bucket = _classify_heuristic(message)

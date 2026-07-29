@@ -3498,5 +3498,33 @@ without pulling sibling/section ``href`` pages into ``doc_from_main``.
 **Tests:** ``test_merge_applies_scoped_include_when_section_href_differs_from_en_flat``,
 ``test_pr_46446_absent_en_streaming_toc_queues_sibling_pages``.
 
+### 6.156. Heading AST parity; strip vs md_link_parity; fence trailing blank (#30237, 2026-07-29)
+
+**Problem:** Auto-translate [#30237](https://github.com/ydb-platform/ydb/pull/30237)
+→ [#48202](https://github.com/ydb-platform/ydb/pull/48202) 🔴:
+
+1. ``group-by.md`` ``heading_parity`` 24 vs 25 — RU ``## ROLLUP`` is indented
+   inside ``{% if feature_group_by_rollup_cube %}``; line-regex ``^#{1,6}``
+   missed it while EN heading is flush-left.
+2. Same file ``fence_body_copy`` on block 4 — only ``--`` comment translation
+   plus a trailing blank line in RU (13 vs 12 lines) failed the equal-length
+   gate of comment-only compare.
+3. ``system-views.md`` ``md_link_parity`` for ``table.md`` /
+   ``create-resource-pool-classifier.md`` after finalize
+   ``strip_unreachable_links`` removed them — verify-time reachability no
+   longer treated those basenames as ignorable.
+
+**Decision:**
+
+1. ``check_heading_parity`` counts headings via AST, walking ``YfmIf.branches``.
+2. ``_fence_diff_is_comment_translation_only`` drops trailing blank lines before
+   comparing.
+3. Strip info lists removed ``*.md`` basenames; ``HeuristicsStep`` passes them
+   to ``md_link_parity`` as ``ignore_basenames``.
+
+**Tests:** ``test_heading_parity_counts_indented_headings_inside_yfm_if``,
+``test_md_link_parity_ignores_stripped_basenames``,
+``test_fence_body_allows_comment_translation_with_trailing_blank_line``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
