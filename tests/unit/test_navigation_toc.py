@@ -494,6 +494,89 @@ def test_merge_inline_toc_matches_alter_table_en_main_style():
             assert line.startswith(" - {"), line
 
 
+def test_pr_48409_mixed_nested_column_shell_stays_valid_yaml():
+    """#48409 / §6.160: scoped ``columns.md`` must not emit empty nested ``items:``.
+
+    Source #44466 promoted COLUMN to a section with FAMILY/NOT NULL children.
+    When ``columns.md`` is also in translate scope (page was translated), the
+    flat merge used to paste the RU ``- name``/``items:`` shell and then
+    concatenate EN-prefixed siblings → Diplodoc YAML parse failure.
+    """
+    ru_base = dedent("""
+        items:
+        - { name: Обзор,      href: index.md                                          }
+        - { name: INDEX,      href: indexes.md, when: feature_secondary_index }
+        - { name: COLUMN,     href: columns.md                                        }
+        - { name: SET,        href: set.md,             when: backend_name == "YDB"   }
+        - { name: CHANGEFEED, href: changefeed.md,      when: feature_changefeed and backend_name == "YDB" }
+        - { name: RENAME,     href: rename.md,          when: feature_map_tables      }
+        - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+        - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - { name: Обзор,      href: index.md                                          }
+        - { name: INDEX,      href: indexes.md, when: feature_secondary_index }
+        - name: COLUMN
+          href: columns.md
+          items:
+          - { name: FAMILY,     href: family.md,          when: backend_name == "YDB"   }
+          - { name: NOT NULL,   href: not_null.md,        when: backend_name == "YDB"   }
+        - { name: SET,        href: set.md,             when: backend_name == "YDB"   }
+        - { name: CHANGEFEED, href: changefeed.md,      when: feature_changefeed and backend_name == "YDB" }
+        - { name: RENAME,     href: rename.md,          when: feature_map_tables      }
+        - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
+    """).strip()
+    en_main = dedent("""
+        items:
+         - { name: Overview,      href: index.md                                          }
+         - { name: INDEX,       href: indexes.md, when: feature_secondary_index }
+         - { name: COLUMN,      href: columns.md                                        }
+         - { name: SET,         href: set.md,             when: backend_name == "YDB"   }
+         - { name: CHANGEFEED,  href: changefeed.md,      when: feature_changefeed      }
+         - { name: RENAME,      href: rename.md,          when: feature_map_tables      }
+         - { name: FAMILY,      href: family.md                                         }
+         - { name: COMPACT,    href: compact.md,         when: backend_name == "YDB"   }
+    """).strip()
+    scope = {"not_null.md", "columns.md"}
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs=scope,
+        translate_name=lambda n: "Overview" if n == "Обзор" else n,
+        ru_base_hrefs={it["href"] for it in parse_toc_items(ru_base) if it.get("href")},
+    )
+    assert "- name: COLUMN" not in merged
+    assert "items:\n - { name: Overview" in merged or merged.startswith(
+        "items:\n - { name: Overview"
+    )
+    hrefs = [it.get("href") for it in parse_toc_items(merged)]
+    assert "not_null.md" in hrefs
+    assert "columns.md" in hrefs
+    assert "family.md" in hrefs
+    assert validate_toc_merge(
+        ru_pr, merged, translate_hrefs=scope, en_main_yaml=en_main
+    ) == []
+    for line in merged.splitlines():
+        if line.strip().startswith("- {"):
+            assert line.startswith(" - {"), line
+
+
+def test_validate_toc_merge_flags_invalid_yaml():
+    bad = dedent("""
+        items:
+         - { name: Overview, href: index.md }
+        - name: COLUMN
+          href: columns.md
+          items:
+         - { name: FAMILY, href: family.md }
+    """).strip()
+    issues = validate_toc_merge(
+        "items:\n", bad, translate_hrefs=set(), en_main_yaml="items:\n"
+    )
+    assert any(i.kind == "invalid_yaml" for i in issues)
+
+
 def test_validate_toc_merge_flags_inconsistent_indent():
     bad = dedent("""
         items:

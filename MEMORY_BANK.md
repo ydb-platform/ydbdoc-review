@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-30  
-**Current focus:** §6.158 — repair_en_fragments must not emit unreachable bare basenames (#48223 / #48272).
+**Current focus:** §6.160 — mixed nested toc_i shell must not break EN YAML (#48409); retranslate #44466 after tag move.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,8 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-30 | **§6.160** — toc merge: never emit empty nested `items:` shell for scoped parent (#48409 / #44466) |
+| 2026-07-30 | **§6.159** — ydb CI: restore dispatch-only `rebuild_docs` after #48223 mangled it ([#48410](https://github.com/ydb-platform/ydb/pull/48410)) |
 | 2026-07-30 | **§6.158** — fragment repair: linking-page-relative paths; auto-slug + includes; no bare toc basenames (#48223 / #48272) |
 | 2026-07-30 | **§6.157** — copy locale `_assets` (svg/png/…) RU→EN on translate+verify (#45185 / #48187) |
 | 2026-07-29 | **§6.156** — heading AST (YfmIf); strip basenames → md_link ignore; fence trailing blank (#30237 / #48202) |

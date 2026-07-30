@@ -258,7 +258,7 @@ next to untrusted PR content.
 |------|--------|-------------------------|
 | Action: API (PR, comments, `documentation` label) | `GITHUB_TOKEN` | `pull-requests: write`, `issues: write` |
 | Action: `git push` branch `ydbdoc-review/pr-N` | same (`GITHUB_PUSH_TOKEN` unset → falls back to `GITHUB_TOKEN`) | `contents: write` |
-| `trigger-translation-ci`: `rebuild_docs` + `ok-to-test` | `YDBOT_TOKEN` in `github-script` | (job has no checkout) |
+| `trigger-translation-ci`: `rebuild_docs` + `ok-to-test` | `YDBOT_TOKEN` in `github-script` | (job has no checkout; rebuild must dispatch-only, §6.159) |
 | Inline `doc_verify` in `run_doc_translate` (same CI job) | `GITHUB_TOKEN` | same as translate step |
 | `ydbdoc-verify.yml`: manual re-run via `doc_verify` label | `GITHUB_TOKEN` | label workflow |
 

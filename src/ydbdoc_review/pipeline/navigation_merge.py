@@ -48,6 +48,7 @@ _NAV_BLOCKING_WARNING_KINDS = frozenset(
         "empty_toc",
         "collapsed_toc",
         "inconsistent_indent",
+        "invalid_yaml",
         "missing_toc_target",
         "toc_structure_parity",
         "orphan_toc_page",

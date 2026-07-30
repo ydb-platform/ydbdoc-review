@@ -3595,5 +3595,64 @@ failure fell back to the toc's bare ``href``. Those basenames resolve under
 **Tests:** ``test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames``,
 ``test_fragment_declared_accepts_diplodoc_auto_slug``.
 
+### 6.159. Restore dispatch-only ``rebuild_docs`` workflow (#48223 / #48410, 2026-07-30)
+
+**Problem:** After [#48223](https://github.com/ydb-platform/ydb/pull/48223)
+merged, translation PRs got a red **Rebuild documentation** check and a
+cancelled **Build documentation** even when QA was 🟢 (e.g. #48409).
+
+Root cause: #48223 replaced ``.github/workflows/docs_build_rebuild.yaml`` with
+a hybrid that (1) runs ``docs-build-action`` **without checkout** → ENOENT
+``ydb/docs``, and (2) only ``workflow_dispatch``es ``docs_build.yaml`` from a
+misnamed final step. ``docs_build.yaml`` concurrency
+``docs-build-<PR>`` + ``cancel-in-progress: true`` then cancels the in-flight
+``pull_request`` build.
+
+**Decision:** Keep ``trigger-translation-ci`` adding ``rebuild_docs`` +
+``ok-to-test`` (``GITHUB_TOKEN`` does not cascade CI; see §16.7). Restore the
+[#43222](https://github.com/ydb-platform/ydb/pull/43222) rebuild workflow:
+remove label → check ``ydb/docs/**`` → ``createWorkflowDispatch(docs_build.yaml)``
+only. No local Diplodoc build in privileged ``pull_request_target``.
+
+**Fix PR:** [ydb #48410](https://github.com/ydb-platform/ydb/pull/48410).
+
+### 6.160. Mixed nested ``toc_i`` shell must not break EN YAML (#48409 / #44466, 2026-07-30)
+
+**Problem:** [#48409](https://github.com/ydb-platform/ydb/pull/48409) QA 🟢 but
+docs build failed:
+
+```text
+Unable to resolve en/.../alter_table/toc_i.yaml
+end of the stream or a document separator is expected (4:1)
+- name: COLUMN
+```
+
+Source [#44466](https://github.com/ydb-platform/ydb/pull/44466) promoted RU
+``COLUMN`` from inline ``- { href: columns.md }`` to a nested section with
+``FAMILY`` / ``NOT NULL`` children. ``planned_toc_extras_for_pair`` put
+``columns.md`` in toc translate scope because that page was also translated.
+Flat merge then emitted the truncated RU block:
+
+```yaml
+- name: COLUMN
+  href: columns.md
+  items:
+```
+
+and concatenated EN-prefixed siblings (`` - { name: FAMILY …}``) after it →
+invalid YAML. (Broken rebuild workflow §6.159 masked/cancelled the real build
+as well.)
+
+**Decision:**
+
+1. When a scoped RU block is a nested ``items:`` **shell** (opens ``items:``
+   but has no child list entries in the same block), keep the EN leaf block
+   (name-translated) or emit a plain ``_leaf_block`` — never the empty shell.
+2. ``validate_toc_merge`` treats unparseable EN toc YAML as blocking
+   ``invalid_yaml``.
+
+**Tests:** ``test_pr_48409_mixed_nested_column_shell_stays_valid_yaml``,
+``test_validate_toc_merge_flags_invalid_yaml``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

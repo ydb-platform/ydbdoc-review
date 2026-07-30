@@ -635,6 +635,48 @@ def _normalize_inline_block(block: str, line_prefix: str) -> str:
     return line_prefix + stripped + "\n"
 
 
+def _block_is_nested_items_shell(block: str) -> bool:
+    """True when a block opens nested ``items:`` but contains no child entries.
+
+    Mixed inline/block tocs (``alter_table/toc_i.yaml``) parse ``COLUMN`` as
+    ``- name`` / ``href`` / ``items:`` while FAMILY / NOT NULL are separate
+    inline items. Emitting that shell into EN, then concatenating siblings,
+    yields invalid YAML (#48409 / §6.160).
+    """
+    lines = [ln for ln in block.replace("\r\n", "\n").splitlines() if ln.strip()]
+    items_idx = next(
+        (i for i, ln in enumerate(lines) if _NESTED_ITEMS_LINE.match(ln)),
+        None,
+    )
+    if items_idx is None:
+        return False
+    return not any(re.match(r"^\s*-\s", ln) for ln in lines[items_idx + 1 :])
+
+
+def _emit_scoped_toc_block(
+    rit: dict[str, str],
+    *,
+    en_name: str,
+    en_by_href: dict[str, dict[str, str]],
+    line_prefix: str | None,
+) -> str:
+    """EN YAML block for a scoped RU toc entry (avoid empty nested ``items:``)."""
+    href = rit.get("href") or ""
+    ru_block = rit.get("block") or ""
+    if _block_is_nested_items_shell(ru_block):
+        en_it = en_by_href.get(href)
+        if en_it and (en_it.get("block") or "").strip():
+            block = _replace_item_name(en_it["block"], en_name)
+        else:
+            list_indent = len(line_prefix) if line_prefix is not None else 0
+            block = _leaf_block(en_name, href, list_indent=list_indent)
+    else:
+        block = _replace_item_name(ru_block, en_name)
+    if line_prefix is not None:
+        block = _normalize_inline_block(block, line_prefix)
+    return block
+
+
 def _inline_line_prefixes(yaml_text: str) -> set[str]:
     """Distinct leading whitespace prefixes before ``-`` on inline toc lines."""
     text = yaml_text.replace("\r\n", "\n")
@@ -913,9 +955,12 @@ def merge_en_toc_yaml(
                 seen_hrefs.add(href)
                 seen_includes.add(include_path)
                 en_name = translate_name(rit["name"]).strip()
-                block = _replace_item_name(rit["block"], en_name)
-                if line_prefix is not None:
-                    block = _normalize_inline_block(block, line_prefix)
+                block = _emit_scoped_toc_block(
+                    rit,
+                    en_name=en_name,
+                    en_by_href=en_by_href,
+                    line_prefix=line_prefix,
+                )
                 merged.append(
                     {
                         "name": en_name,
@@ -946,9 +991,12 @@ def merge_en_toc_yaml(
             ):
                 seen_hrefs.add(href)
                 en_name = translate_name(rit["name"]).strip()
-                block = _replace_item_name(rit["block"], en_name)
-                if line_prefix is not None:
-                    block = _normalize_inline_block(block, line_prefix)
+                block = _emit_scoped_toc_block(
+                    rit,
+                    en_name=en_name,
+                    en_by_href=en_by_href,
+                    line_prefix=line_prefix,
+                )
                 merged.append(
                     {
                         "name": en_name,
@@ -1247,6 +1295,18 @@ def validate_toc_merge(
                     "inline toc list entries use mixed indentation "
                     f"(prefixes: {sorted(prefixes)!r})"
                 ),
+            )
+        )
+
+    try:
+        import yaml
+
+        yaml.safe_load(en_merged_yaml)
+    except Exception as exc:  # noqa: BLE001 — any YAML failure blocks merge
+        issues.append(
+            TocValidationIssue(
+                kind="invalid_yaml",
+                detail=f"EN merged toc is not valid YAML: {exc}",
             )
         )
 

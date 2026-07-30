@@ -5,6 +5,8 @@
 # Лейбл doc_verify на translation PR — только для ручного перезапуска (ydbdoc-verify.yml).
 #
 # YDBOT_TOKEN — только в trigger-translation-ci (без checkout): ok-to-test + rebuild_docs.
+# rebuild_docs → docs_build_rebuild.yaml must ONLY dispatch docs_build.yaml (no local
+# Diplodoc build / no checkout). See Memory Bank §6.159 / ydb #48410.
 
 name: ydbdoc-review (doc_translate label)
 
