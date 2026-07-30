@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-30  
-**Current focus:** §6.157 — copy locale `_assets` binaries RU→EN (#45185 / #48187).
+**Current focus:** §6.158 — repair_en_fragments must not emit unreachable bare basenames (#48223 / #48272).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-30 | **§6.158** — fragment repair: linking-page-relative paths; auto-slug + includes; no bare toc basenames (#48223 / #48272) |
 | 2026-07-30 | **§6.157** — copy locale `_assets` (svg/png/…) RU→EN on translate+verify (#45185 / #48187) |
 | 2026-07-29 | **§6.156** — heading AST (YfmIf); strip basenames → md_link ignore; fence trailing blank (#30237 / #48202) |
 | 2026-07-29 | **§6.155** — section href+include merge; queue sibling pages for absent EN toc (#46446 / #48183) |

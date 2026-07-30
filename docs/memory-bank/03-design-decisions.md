@@ -3559,5 +3559,41 @@ The diagram is part of that page’s release-branch scheme section.
 
 **Tests:** ``test_locale_assets.py`` (plan + rub strip + copy idempotence).
 
+### 6.158. ``repair_en_fragments`` must not emit unreachable bare basenames (#48223 / #48272, 2026-07-30)
+
+**Problem:** After [#48223](https://github.com/ydb-platform/ydb/pull/48223)
+merged, bilingual [#48272](https://github.com/ydb-platform/ydb/pull/48272)
+``build-docs`` failed:
+
+```text
+Link is unreachable: en/dev/create-resource-pool.md in en/dev/system-views.md
+Link is unreachable: en/dev/topic.md in en/dev/system-views.md
+```
+
+Root cause: ``doc_verify`` on #48223 ran ``repair_en_fragments`` on correct
+links from a manual fix:
+
+- ``../concepts/datamodel/table.md#partitioning`` (stub page + include; no
+  exact ``{#partitioning}``)
+- ``../yql/reference/syntax/create-resource-pool-classifier.md#parameters``
+  (``### Parameters`` auto-slug, no explicit ``{#parameters}``)
+
+Repair treated fragments as missing, searched the **target folder** toc, found
+``topic.md`` / ``create-resource-pool.md``, then on ``PurePosixPath.relative_to``
+failure fell back to the toc's bare ``href``. Those basenames resolve under
+``en/core/dev/`` (the linking page) → unreachable.
+
+**Decision:**
+
+1. Always emit toc-sibling hits as a path **relative to the linking page**
+   (posix ``..`` climb) — never the toc-local basename.
+2. Treat Diplodoc auto-slugs and locale ``{% include %}`` bodies as declaring
+   fragments.
+3. Same-page unique prefix remap (``#partitioning`` → ``#partitioning_row_table``)
+   before toc retarget.
+
+**Tests:** ``test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames``,
+``test_fragment_declared_accepts_diplodoc_auto_slug``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

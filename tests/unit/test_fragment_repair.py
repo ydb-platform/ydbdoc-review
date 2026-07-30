@@ -122,6 +122,64 @@ def test_repair_keeps_valid_fragment():
     assert fixed == en_ok
 
 
+def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
+    """§6.158 / #48223: existing table.md / classifier.md must not become
+    unreachable ``topic.md`` / ``create-resource-pool.md`` under ``en/core/dev/``.
+    """
+    en_page = "ydb/docs/en/core/dev/system-views.md"
+    good = (
+        "about [partitions](../concepts/datamodel/table.md#partitioning) of tables.\n"
+        "about [settings](../yql/reference/syntax/create-resource-pool-classifier.md"
+        "#parameters) of classifiers.\n"
+    )
+    files = {
+        "ydb/docs/en/core/concepts/datamodel/table.md": (
+            "{% include [table.md](_includes/table.md) %}\n"
+        ),
+        "ydb/docs/en/core/concepts/datamodel/_includes/table.md": (
+            "### Partitioning Row-Oriented Tables {#partitioning_row_table}\n"
+        ),
+        "ydb/docs/en/core/concepts/datamodel/topic.md": (
+            "## Partitioning {#partitioning}\n"
+        ),
+        "ydb/docs/en/core/concepts/datamodel/toc_i.yaml": (
+            "items:\n"
+            "- { name: Tables, href: table.md }\n"
+            "- { name: Topics, href: topic.md }\n"
+        ),
+        "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md": (
+            "### Parameters\n\nRank and pool.\n"
+        ),
+        "ydb/docs/en/core/yql/reference/syntax/create-resource-pool.md": (
+            "### Parameters {#parameters}\n"
+        ),
+        "ydb/docs/en/core/yql/reference/syntax/toc_i.yaml": (
+            "items:\n"
+            "- { name: CREATE RESOURCE POOL, href: create-resource-pool.md }\n"
+            "- { name: CREATE RESOURCE POOL CLASSIFIER, "
+            "href: create-resource-pool-classifier.md }\n"
+        ),
+    }
+    fixed = repair_en_fragments(
+        good,
+        en_page_path=en_page,
+        read_text=files.get,
+    )
+    # Existing targets must stay under datamodel / yql paths — not bare basenames.
+    assert "topic.md#partitioning" not in fixed
+    assert "](create-resource-pool.md#parameters)" not in fixed
+    assert "](topic.md#" not in fixed
+    # Classifier keeps path; Parameters auto-slug counts as declared.
+    assert "create-resource-pool-classifier.md#parameters" in fixed
+    # table.md stub: remap stale #partitioning → unique #partitioning_row_table
+    assert "table.md#partitioning_row_table" in fixed
+    assert "table.md#partitioning)" not in fixed
+
+
+def test_fragment_declared_accepts_diplodoc_auto_slug():
+    assert fragment_declared_in_markdown("### Parameters\n\nbody\n", "parameters")
+
+
 def test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale():
     """§6.153 / #48012: both RU and EN still say index.md#sessions — use toc sibling."""
     en_page = "ydb/docs/en/core/concepts/glossary.md"
