@@ -202,9 +202,15 @@ def _delete_stale_verify_fixup(
 
 
 def _apply_results_to_disk(
-    repo_path: str, result: PRTranslationResult, *, dry_run: bool
+    repo_path: str,
+    result: PRTranslationResult,
+    *,
+    dry_run: bool,
+    docs_root: str = "ydb/docs",
 ) -> TouchedPaths:
-    """Write translated markdown, navigation YAML, and deletes; return paths."""
+    """Write translated markdown, navigation YAML, locale assets, and deletes."""
+    from ydbdoc_review.validation.locale_assets import apply_locale_asset_copies
+
     written: list[str] = []
     deleted: list[str] = []
     for run in result.pair_results:
@@ -231,7 +237,15 @@ def _apply_results_to_disk(
         written.append(rel)
         if not dry_run:
             write_text(repo_path, rel, nav.target_text)
-    return TouchedPaths(written=written, deleted=deleted)
+    written.extend(
+        apply_locale_asset_copies(
+            result,
+            repo_path=repo_path,
+            docs_root=docs_root,
+            dry_run=dry_run,
+        )
+    )
+    return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
 
 
 def _docs_text_reader(repo_path: str, merge_base_with: str):
@@ -480,7 +494,12 @@ def run_doc_translate(
         )
         touched = TouchedPaths([], [])
     else:
-        touched = _apply_results_to_disk(repo_path, pr_result, dry_run=dry_run)
+        touched = _apply_results_to_disk(
+            repo_path,
+            pr_result,
+            dry_run=dry_run,
+            docs_root=cfg.paths.docs_root,
+        )
 
     committed = pushed = False
     if touched and not dry_run and not no_commit:
@@ -918,7 +937,12 @@ def run_doc_verify(
 
     job.pr_result = pr_result
 
-    touched = _apply_results_to_disk(repo_path, pr_result, dry_run=dry_run)
+    touched = _apply_results_to_disk(
+            repo_path,
+            pr_result,
+            dry_run=dry_run,
+            docs_root=cfg.paths.docs_root,
+        )
 
     committed = pushed = False
     fixup_pr_number: int | None = None

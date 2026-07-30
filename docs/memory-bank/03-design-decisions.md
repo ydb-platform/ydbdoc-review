@@ -3526,5 +3526,38 @@ without pulling sibling/section ``href`` pages into ``doc_from_main``.
 ``test_md_link_parity_ignores_stripped_basenames``,
 ``test_fence_body_allows_comment_translation_with_trailing_blank_line``.
 
+### 6.157. Copy locale ``_assets`` binaries RU→EN (#45185 / #48187, 2026-07-30)
+
+**Problem:** Auto-translate [#45185](https://github.com/ydb-platform/ydb/pull/45185)
+→ [#48187](https://github.com/ydb-platform/ydb/pull/48187) QA 🟢 but
+``build-docs`` failed:
+
+```text
+ENOENT … en/contributor/_assets/major_release_branches.svg
+```
+
+Source PR edited ``manage-releases.md`` (versioning note). RU already linked
+``![…](_assets/major_release_branches.svg)``; full-file translate correctly
+brought that image into EN. The SVG existed only under ``docs/ru/…/_assets/``
+(EN never had this diagram file). Pipeline wrote only ``.md`` / nav YAML —
+no binary copy — so Diplodoc resolved the EN-relative asset to a missing path.
+
+This is **not** scope pollution: ``manage-releases.md`` was in the source PR.
+The diagram is part of that page’s release-branch scheme section.
+
+**Decision:**
+
+1. New ``validation/locale_assets.py``: from RU ``source_text``, collect relative
+   image hrefs with binary extensions; resolve under ``docs/ru``; map via
+   ``counterpart`` + strip ``-rub`` (§6.47) for the EN path; ``shutil.copy2``
+   when EN is missing or differs.
+2. ``_apply_results_to_disk`` runs asset copy for every successful pair — so
+   both ``doc_translate`` and ``doc_verify`` heal missing EN assets without a
+   full retranslate.
+3. Re-run after fix: prefer **``doc_verify``** on the translation PR (cheaper);
+   ``doc_translate`` only if EN markdown must be regenerated.
+
+**Tests:** ``test_locale_assets.py`` (plan + rub strip + copy idempotence).
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
