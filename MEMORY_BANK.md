@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-07-31  
-**Current focus:** §6.161 — rebuild_docs cancels PR build-docs check (#48409 / ydb #48439).
+**Current focus:** §6.162 — wire `YDBDOC_ALLOWED_ACTORS` into live `doc_verify`.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-07-31 | **§6.162** — live `ydbdoc-verify.yml` must pass ACL/quota env (`YDBDOC_ALLOWED_ACTORS`) like translate ([ydb#48518](https://github.com/ydb-platform/ydb/pull/48518)) |
 | 2026-07-31 | **§6.161** — ydb CI: rebuild_docs dispatch cancels PR `build-docs` check (attaches to main SHA); fix in [#48439](https://github.com/ydb-platform/ydb/pull/48439) |
 | 2026-07-30 | **§6.160** — toc merge: never emit empty nested `items:` shell for scoped parent (#48409 / #44466) |
 | 2026-07-30 | **§6.159** — ydb CI: restore dispatch-only `rebuild_docs` after #48223 mangled it ([#48410](https://github.com/ydb-platform/ydb/pull/48410)) |

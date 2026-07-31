@@ -7,6 +7,10 @@
 #
 # Перед лейблом на fork/merged PR нужен checkout merge_commit + allow-unsafe
 # (см. actions/checkout guard, 2026-07-20).
+#
+# ACL / quota: тот же allowlist, что у doc_translate — GITHUB_ACTOR +
+# YDBDOC_ALLOWED_ACTORS (+ daily budget / YDB ledger). Без этих env ACL на
+# verify в ydb не сработает (§6.162).
 
 name: ydbdoc-review (doc_verify label)
 

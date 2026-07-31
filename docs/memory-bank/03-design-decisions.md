@@ -3675,5 +3675,25 @@ Root cause (ydb CI, not translation content):
 2. Auto-label after ``doc_translate``: only ``ok-to-test`` (not ``rebuild_docs``).
    Manual ``rebuild_docs`` remains for explicit rebuilds/preview.
 
+### 6.162. Wire ``YDBDOC_ALLOWED_ACTORS`` into live ``doc_verify`` (2026-07-31)
+
+**Problem:** Phase K ACL (§6.134) already gates ``doc_translate`` /
+``doc_verify`` / ``doc_continue`` in Python when ``YDBDOC_ALLOWED_ACTORS`` and
+``GITHUB_ACTOR`` are set. The ydb example
+``examples/ydb-github-doc-verify-on-label.yml`` passed those env vars, but the
+**live** ``ydb-platform/ydb`` workflow ``.github/workflows/ydbdoc-verify.yml``
+did not — so anyone who could add the ``doc_verify`` label burned LLM budget
+while ``doc_translate`` stayed allowlisted (``sintjuri`` only).
+
+**Decision:**
+
+1. Pass the same ops env on verify as on translate:
+   ``GITHUB_ACTOR``, ``YDBDOC_ALLOWED_ACTORS``, ``YDBDOC_DAILY_BUDGET_RUB``,
+   ``YDBDOC_TRANSCRIPT_BACKEND``, ``YDB_SA_KEY``.
+2. Keep a single repo variable ``YDBDOC_ALLOWED_ACTORS`` for all three labels
+   (no separate verify allowlist).
+3. Deploy via ydb [#48518](https://github.com/ydb-platform/ydb/pull/48518)
+   (``ydbdoc-verify.yml``); example already matched.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

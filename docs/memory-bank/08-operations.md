@@ -242,7 +242,7 @@ Superseded by **§6.134 / Phase K** — YDB `runs` ledger (not markdown).
 
 | Name | Type | Purpose |
 |------|------|---------|
-| `YDBDOC_ALLOWED_ACTORS` | **Actions variable** (repo) | Comma-separated GitHub logins; ACL. Start: `sintjuri`. To add people later: edit the variable → append `,login2,login3` (no code change). |
+| `YDBDOC_ALLOWED_ACTORS` | **Actions variable** (repo) | Comma-separated GitHub logins; ACL for **`doc_translate`**, **`doc_verify`**, and **`doc_continue`** (§6.134 / §6.162). Start: `sintjuri`. To add people later: edit the variable → append `,login2,login3` (no code change). Workflows must pass `GITHUB_ACTOR` + this var into the action `env:` (verify historically omitted them on live ydb until §6.162). |
 | `YDBDOC_DAILY_BUDGET_RUB` | **Actions variable** (repo) | Daily ₽ cap; default **5000** if unset |
 | `YDB_SA_KEY` | **Actions secret** | Full contents of YC service-account JSON key (`sa_key.json`) for **YDB** |
 | `YDBDOC_YDB_ENDPOINT` | Variable or hardcoded default | See §20.7 |
