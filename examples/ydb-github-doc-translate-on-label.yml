@@ -4,7 +4,10 @@
 # doc_translate — перевод + translation PR + inline doc_verify (QA-отчёт в том же job).
 # Лейбл doc_verify на translation PR — только для ручного перезапуска (ydbdoc-verify.yml).
 #
-# YDBOT_TOKEN — только в trigger-translation-ci (без checkout): ok-to-test + rebuild_docs.
+# YDBOT_TOKEN — только в trigger-translation-ci (без checkout): ok-to-test.
+# Do NOT auto-add rebuild_docs: pull_request already builds docs on the translation
+# PR; rebuild's workflow_dispatch cancels that check and attaches success to main
+# (§6.161 / ydb #48439). Manual rebuild_docs still OK for explicit rebuilds.
 # rebuild_docs → docs_build_rebuild.yaml must ONLY dispatch docs_build.yaml (no local
 # Diplodoc build / no checkout). See Memory Bank §6.159 / ydb #48410.
 
@@ -113,9 +116,9 @@ jobs:
               owner,
               repo,
               issue_number: translationPr.number,
-              labels: ['rebuild_docs', 'ok-to-test'],
+              labels: ['ok-to-test'],
             });
 
             core.info(
-              `Added rebuild_docs and ok-to-test to translation PR #${translationPr.number}`
+              `Added ok-to-test to translation PR #${translationPr.number}`
             );

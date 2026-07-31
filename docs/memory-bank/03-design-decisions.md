@@ -3654,5 +3654,26 @@ as well.)
 **Tests:** ``test_pr_48409_mixed_nested_column_shell_stays_valid_yaml``,
 ``test_validate_toc_merge_flags_invalid_yaml``.
 
+### 6.161. ``rebuild_docs`` cancels PR ``build-docs`` check (#48409, 2026-07-31)
+
+**Problem:** [#48409](https://github.com/ydb-platform/ydb/pull/48409) content built
+successfully via ``workflow_dispatch``, QA 🟢, but the PR Checks tab still
+showed ``build-docs`` failed/cancelled.
+
+Root cause (ydb CI, not translation content):
+
+1. ``pull_request`` starts ``docs_build.yaml`` → check run on **PR head SHA**.
+2. ``trigger-translation-ci`` adds ``rebuild_docs`` → dispatch from **main**.
+3. Shared concurrency ``docs-build-<PR>`` + ``cancel-in-progress`` cancels (1).
+4. Successful dispatch check attaches to **main SHA**, not the PR head → PR
+   keeps the cancelled check.
+
+**Decision (ydb [#48439](https://github.com/ydb-platform/ydb/pull/48439)):**
+
+1. Concurrency group includes ``event_name`` so dispatch does not cancel the
+   ``pull_request`` build.
+2. Auto-label after ``doc_translate``: only ``ok-to-test`` (not ``rebuild_docs``).
+   Manual ``rebuild_docs`` remains for explicit rebuilds/preview.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
