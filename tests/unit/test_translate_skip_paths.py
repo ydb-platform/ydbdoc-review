@@ -14,7 +14,12 @@ from ydbdoc_review.pipeline.skip_paths import (
     toc_entry_is_skipped,
 )
 
-GLOBS = ["**/public-materials/**", "public-materials/**"]
+GLOBS = [
+    "**/public-materials/**",
+    "public-materials/**",
+    "**/guide-to-public-material.md",
+    "guide-to-public-material.md",
+]
 
 
 def test_matches_public_materials_repo_and_relative():
@@ -25,11 +30,16 @@ def test_matches_public_materials_repo_and_relative():
     assert matches_translate_skip(
         "ydb/docs/en/core/public-materials/toc_p.yaml", GLOBS
     )
-    assert not matches_translate_skip(
+    assert matches_translate_skip(
         "ydb/docs/ru/core/contributor/documentation/guide-to-public-material.md",
         GLOBS,
     )
+    assert matches_translate_skip("guide-to-public-material.md", GLOBS)
     assert not matches_translate_skip("ydb/docs/ru/core/toc_i.yaml", GLOBS)
+    assert not matches_translate_skip(
+        "ydb/docs/ru/core/contributor/documentation/style-guide.md",
+        GLOBS,
+    )
 
 
 def test_filter_translate_changes_drops_public_materials():
@@ -44,7 +54,6 @@ def test_filter_translate_changes_drops_public_materials():
     out = filter_translate_changes(changes, GLOBS)
     assert [p for p, _ in out] == [
         "ydb/docs/ru/core/toc_i.yaml",
-        "ydb/docs/ru/core/contributor/documentation/guide-to-public-material.md",
     ]
 
 

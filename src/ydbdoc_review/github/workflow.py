@@ -918,6 +918,7 @@ def run_doc_verify(
             ),
             docs_root=cfg.paths.docs_root,
             active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
+            skip_globs=cfg.paths.translate_skip_globs,
         )
 
     apply_include_parity_repair(

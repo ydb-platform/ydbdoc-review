@@ -35,7 +35,7 @@ from ydbdoc_review.navigation.scope_planner import (
     planned_toc_extras_for_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
-from ydbdoc_review.pipeline.skip_paths import toc_entry_is_skipped
+from ydbdoc_review.pipeline.skip_paths import matches_translate_skip, toc_entry_is_skipped
 from ydbdoc_review.pipeline.types import FileVerdict, NavigationRunResult
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.validation.heuristics import validate_navigation_merge_warnings
@@ -202,6 +202,21 @@ def _resolve_toc_merge_scope(
     return scope, True
 
 
+def _drop_skipped_from_toc_scope(
+    scope: TocTranslateScope,
+    skip_globs: list[str] | tuple[str, ...] | None,
+) -> TocTranslateScope:
+    """Remove href/include targets under ``translate_skip_globs`` (§6.167)."""
+    if not skip_globs:
+        return scope
+    return TocTranslateScope(
+        frozenset(h for h in scope.hrefs if not matches_translate_skip(h, skip_globs)),
+        frozenset(
+            p for p in scope.include_paths if not matches_translate_skip(p, skip_globs)
+        ),
+    )
+
+
 def _toc_label_names(
     ru_pr: str,
     scope: TocTranslateScope,
@@ -338,6 +353,7 @@ def merge_navigation_pair(
             pair_extra_hrefs=pair_extra_hrefs,
             pair_extra_includes=pair_extra_includes,
         )
+        scope = _drop_skipped_from_toc_scope(scope, config.paths.translate_skip_globs)
         en_main_hrefs = {it["href"] for it in parse_toc_items(en_main) if it.get("href")}
         ru_base_hrefs = {it["href"] for it in parse_toc_items(ru_base) if it.get("href")}
         ru_base_include_paths = {
@@ -468,6 +484,7 @@ def verify_navigation_pair(
     extra_toc_hrefs: set[str] | None = None,
     docs_root: str = "ydb/docs",
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
+    skip_globs: list[str] | tuple[str, ...] | None = None,
 ) -> NavigationRunResult:
     """Validate committed EN navigation YAML against RU PR scope (no LLM merge)."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -505,9 +522,11 @@ def verify_navigation_pair(
                 pair_extra_hrefs=pair_extra_hrefs,
                 pair_extra_includes=pair_extra_includes,
             )
+            scope = _drop_skipped_from_toc_scope(scope, skip_globs)
         else:
             pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs or set())
             scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
+            scope = _drop_skipped_from_toc_scope(scope, skip_globs)
     else:
         scope = redirect_translate_scope(ru_base, ru_pr)
 
@@ -549,6 +568,7 @@ def run_navigation_verifies(
     extra_toc_hrefs: set[str] | None = None,
     docs_root: str = "ydb/docs",
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
+    skip_globs: list[str] | tuple[str, ...] | None = None,
 ) -> list[NavigationRunResult]:
     """Validate navigation YAML pairs for ``doc_verify``.
 
@@ -618,6 +638,7 @@ def run_navigation_verifies(
                 extra_toc_hrefs=hrefs if scope_plan is None else None,
                 docs_root=docs_root,
                 active_doc_ru_paths=active_doc_ru_paths,
+                skip_globs=skip_globs,
             )
         )
     return results

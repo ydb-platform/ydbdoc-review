@@ -3841,8 +3841,8 @@ out of auto-translate scope.
    matching href/include entries at their **EN-main** slots so a parent
    ``toc_i`` RU reorder of Public materials is a nav no-op on EN.
 
-Guide pages outside the tree (e.g. ``contributor/.../guide-to-public-material.md``)
-are still translated.
+Guide page ``contributor/.../guide-to-public-material.md`` is also skipped
+(same topic; path is outside the ``public-materials/`` tree — #48760).
 
 **Tests:** ``tests/unit/test_translate_skip_paths.py``.
 
