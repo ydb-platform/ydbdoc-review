@@ -145,6 +145,21 @@ def postprocess_en_target_markdown(text: str) -> str:
 
     text = fix_cyrillic_homoglyphs_in_en(text)
     text = fix_russian_angle_placeholders_in_en(text)
+    text = decode_percent_encoded_protect_markers(text)
     text = fix_image_bang_spacing(text)
     text = fix_no_space_in_emphasis(text)
     return fix_blanks_around_fences(text)
+
+
+_PERCENT_PROTECT_RE = re.compile(
+    r"%E2%9F%A6([CLIHVTUS]\d+)%E2%9F%A7", re.IGNORECASE
+)
+
+
+def decode_percent_encoded_protect_markers(text: str) -> str:
+    """Turn ``%E2%9F%A6U1%E2%9F%A7`` back into ``⟦U1⟧`` (#48764).
+
+    Does not restore atoms (that needs reinsert); makes leftovers visible to
+    ``unrestored_placeholder`` / repair in the literal ``⟦…⟧`` form.
+    """
+    return _PERCENT_PROTECT_RE.sub(r"⟦\1⟧", text)

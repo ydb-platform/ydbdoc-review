@@ -3870,5 +3870,31 @@ copied from RU via ``enforce_source_fenced_blocks``.
 
 **Tests:** ``tests/unit/test_differential_partial_seed.py``.
 
+### 6.169. LCS partial seed + percent-encoded protect reinsert (#48764 / #46798, 2026-08-03)
+
+**Problem:** After §6.168, re-translate of [#46798](https://github.com/ydb-platform/ydb/pull/46798)
+→ [#48764](https://github.com/ydb-platform/ydb/pull/48764) still 🔴. Logs showed
+``authentication.md`` seeded only **9/141** segments; mass unrestored ``⟦…⟧`` and
+``%E2%9F%A6…%E2%9F%A7`` across auth/security/glossary.
+
+**Root cause:**
+
+1. Prefix+suffix partial align collapses when an **early** kind wedge appears —
+   the whole middle+suffix is treated as the gap → near-full retranslate.
+2. When LLM leaves protect markers inside markdown link/image hrefs, render can
+   percent-encode ``⟦U1⟧``; reinsert only matched literal markers → leftovers.
+
+**Decision:**
+
+1. ``partial_align_translations_from_target`` uses **LCS over segment kinds**,
+   then kind-normalizes each matched pair (keeps large stable islands).
+2. ``_split_text_by_placeholders`` also matches ``%E2%9F%A6Xn%E2%9F%A7`` and
+   ``unquote``s to the mapping key.
+3. ``decode_percent_encoded_protect_markers`` in EN postprocess so remaining
+   encoded markers become literal ``⟦…⟧`` for heuristics.
+
+**Tests:** ``test_differential_partial_seed.py`` (LCS wedge),
+``test_reinsert_percent_placeholders.py``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

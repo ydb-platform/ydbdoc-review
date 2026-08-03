@@ -111,13 +111,12 @@ def partial_align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
 ) -> dict[str, str]:
-    """Best-effort seed map when full structural align fails (§6.168).
+    """Best-effort seed map when full structural align fails (§6.168 / §6.169).
 
-    Seeds a common **prefix** and **suffix** of positionally kind-matched
-    segments. The mismatched middle (extra RU heading, split paragraph, …)
-    stays unseeded and will be LLM-translated. Prevents wiping good EN prose
-    (e.g. glossary ``client certificate``) when one structural wedge makes
-    full 1:1 align impossible (#48762 / #46798).
+    Uses LCS over segment **kinds** so a single early wedge (extra RU heading,
+    nested list path drift, …) does not drop the entire suffix — that regressed
+    ``authentication.md`` to 9/141 seeds and left unrestored ``⟦…⟧`` after a
+    near-full retranslate (#48764).
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
     n_src = len(source_segments)
@@ -125,38 +124,37 @@ def partial_align_translations_from_target(
     if n_src == 0 or n_tgt == 0:
         return {}
 
-    prefix = 0
-    while (
-        prefix < n_src
-        and prefix < n_tgt
-        and source_segments[prefix].kind == target_segments_raw[prefix].kind
-    ):
-        prefix += 1
+    src_kinds = [s.kind for s in source_segments]
+    tgt_kinds = [t.kind for t in target_segments_raw]
+    # LCS DP on kinds
+    dp = [[0] * (n_tgt + 1) for _ in range(n_src + 1)]
+    for i in range(1, n_src + 1):
+        for j in range(1, n_tgt + 1):
+            if src_kinds[i - 1] == tgt_kinds[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
 
-    suffix = 0
-    while (
-        suffix < (n_src - prefix)
-        and suffix < (n_tgt - prefix)
-        and source_segments[n_src - 1 - suffix].kind
-        == target_segments_raw[n_tgt - 1 - suffix].kind
-    ):
-        suffix += 1
+    pairs: list[tuple[int, int]] = []
+    i, j = n_src, n_tgt
+    while i > 0 and j > 0:
+        if src_kinds[i - 1] == tgt_kinds[j - 1] and dp[i][j] == dp[i - 1][j - 1] + 1:
+            pairs.append((i - 1, j - 1))
+            i -= 1
+            j -= 1
+        elif dp[i - 1][j] >= dp[i][j - 1]:
+            i -= 1
+        else:
+            j -= 1
+    pairs.reverse()
 
     seeded: dict[str, str] = {}
-    if prefix:
-        src_prefix = source_segments[:prefix]
-        tgt_prefix = normalize_target_segments_to_source(
-            src_prefix, target_segments_raw[:prefix]
-        )
-        for src, tgt in zip(src_prefix, tgt_prefix, strict=True):
-            seeded[src.id] = tgt.text
-    if suffix:
-        src_suffix = source_segments[n_src - suffix :]
-        tgt_suffix = normalize_target_segments_to_source(
-            src_suffix, target_segments_raw[n_tgt - suffix :]
-        )
-        for src, tgt in zip(src_suffix, tgt_suffix, strict=True):
-            seeded[src.id] = tgt.text
+    for si, ti in pairs:
+        src = source_segments[si]
+        tgt_one = normalize_target_segments_to_source(
+            [src], [target_segments_raw[ti]]
+        )[0]
+        seeded[src.id] = tgt_one.text
     return seeded
 
 

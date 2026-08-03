@@ -184,28 +184,53 @@ def _substitute_placeholders(
 def _split_text_by_placeholders(
     text: str, mapping: dict[str, InlineNode]
 ) -> list[InlineNode]:
-    """Split a text string at placeholder markers and substitute originals."""
+    """Split a text string at placeholder markers and substitute originals.
+
+    Also recognizes percent-encoded markers (``%E2%9F%A6U1%E2%9F%A7``) that
+    markdown/link rendering sometimes emits when substitute missed a pass
+    (#48764).
+    """
     if not mapping:
         return [InlineText(content=text)] if text else []
 
-    # Build a single regex over placeholder strings.
     import re
 
-    if not mapping:
-        return [InlineText(content=text)]
     # Sort by length descending so longer placeholders match first
     # (defensive; in practice all placeholders are short and unique).
     keys_sorted = sorted(mapping.keys(), key=len, reverse=True)
-    pattern = "|".join(re.escape(k) for k in keys_sorted)
+    literal = "|".join(re.escape(k) for k in keys_sorted)
+    # Percent-encoded ⟦X⟧ → %E2%9F%A6X%E2%9F%A7 (UTF-8 of U+27E6 / U+27E7)
+    encoded_alts: list[str] = []
+    for k in keys_sorted:
+        inner = k[1:-1]  # e.g. U1
+        encoded_alts.append(
+            re.escape(f"%E2%9F%A6{inner}%E2%9F%A7")
+        )
+        encoded_alts.append(
+            re.escape(f"%e2%9f%a6{inner}%e2%9f%a7")
+        )
+    pattern = literal
+    if encoded_alts:
+        pattern = f"{literal}|{'|'.join(encoded_alts)}"
     parts = re.split(f"({pattern})", text)
 
     out: list[InlineNode] = []
     for part in parts:
         if not part:
             continue
-        if part in mapping:
-            out.append(mapping[part])
+        key = part if part in mapping else unquote(part)
+        if key in mapping:
+            out.append(mapping[key])
         else:
+            # Normalize encoded form to ⟦…⟧ then lookup
+            m = re.fullmatch(
+                r"%E2%9F%A6([CLIHVTUS]\d+)%E2%9F%A7", part, flags=re.IGNORECASE
+            )
+            if m:
+                key = f"⟦{m.group(1)}⟧"
+                if key in mapping:
+                    out.append(mapping[key])
+                    continue
             out.append(InlineText(content=part))
     return out
 

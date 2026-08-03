@@ -57,7 +57,51 @@ def test_partial_align_seeds_prefix_and_suffix_around_wedge():
     assert len(seeded) < len(base_segs)
 
 
-def test_differential_partial_seed_keeps_unchanged_en():
+def test_partial_align_lcs_seeds_past_early_kind_wedge():
+    """#48764: early heading/paragraph drift must not drop the whole suffix."""
+    ru_base = dedent(
+        """\
+        # Title
+
+        Intro.
+
+        ## Early
+
+        Early body.
+
+        ## Mid
+
+        Mid body.
+
+        ## Late
+
+        Late body that must stay seeded.
+        """
+    )
+    # EN missing ## Early heading (paragraph follows Title directly) — kind wedge at index ~2
+    en = dedent(
+        """\
+        # Title
+
+        Intro.
+
+        Early body as paragraph without heading.
+
+        ## Mid
+
+        Mid body.
+
+        ## Late
+
+        Late body that must stay seeded.
+        """
+    )
+    base_segs = extract_segments(parse_markdown(ru_base))
+    seeded = partial_align_translations_from_target(base_segs, en)
+    late = [t for t in seeded.values() if "Late body that must stay seeded" in t]
+    assert late, f"expected Late body seeded, got {len(seeded)}/{len(base_segs)}: {seeded!r}"
+    assert len(seeded) >= len(base_segs) - 2
+
     ru_base = dedent(
         """\
         # G
