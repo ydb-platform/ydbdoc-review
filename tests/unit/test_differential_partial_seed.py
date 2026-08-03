@@ -1,4 +1,4 @@
-"""§6.168: partial differential seed when full EN↔RU align fails."""
+"""§6.168–§6.170: partial differential seed when full EN↔RU align fails."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.translation.differential import DifferentialTranslationAnalyzer
 from ydbdoc_review.validation.homoglyphs import fix_russian_angle_placeholders_in_en_fences
+from ydbdoc_review.validation.markers import placeholders_match
+from ydbdoc_review.harness.render import render_with_translations
+from ydbdoc_review.validation.heuristics import check_unrestored_placeholders
 
 
 def test_partial_align_seeds_prefix_and_suffix_around_wedge():
@@ -49,11 +52,8 @@ def test_partial_align_seeds_prefix_and_suffix_around_wedge():
     )
     base_segs = extract_segments(parse_markdown(ru_base))
     seeded = partial_align_translations_from_target(base_segs, en)
-    # Title + intro + Section A heading/body should seed; Extra may not;
-    # Section B should seed from suffix.
     assert seeded
     assert len(seeded) >= 4
-    # Must not claim seed for every RU segment (extra has no EN twin).
     assert len(seeded) < len(base_segs)
 
 
@@ -78,7 +78,6 @@ def test_partial_align_lcs_seeds_past_early_kind_wedge():
         Late body that must stay seeded.
         """
     )
-    # EN missing ## Early heading (paragraph follows Title directly) — kind wedge at index ~2
     en = dedent(
         """\
         # Title
@@ -102,6 +101,50 @@ def test_partial_align_lcs_seeds_past_early_kind_wedge():
     assert late, f"expected Late body seeded, got {len(seeded)}/{len(base_segs)}: {seeded!r}"
     assert len(seeded) >= len(base_segs) - 2
 
+
+def test_partial_align_rejects_placeholder_mismatched_lcs_pairs():
+    """#48773: kind-only LCS must not seed EN with foreign ⟦…⟧ into a plain RU slot."""
+    ru = dedent(
+        """\
+        # Auth
+
+        Supported modes:
+
+        Anonymous.
+        """
+    )
+    # Same kinds, shifted content: EN "Supported modes" sentence has a variable.
+    en = dedent(
+        """\
+        # Auth
+
+        An authentication client accessing {{ ydb-short-name }}.
+
+        Anonymous.
+        """
+    )
+    ru_segs = extract_segments(parse_markdown(ru))
+    seeded = partial_align_translations_from_target(ru_segs, en)
+    for seg in ru_segs:
+        if seg.id in seeded:
+            assert placeholders_match(seg.text, seeded[seg.id]), (
+                seg.id,
+                seg.text,
+                seeded[seg.id],
+            )
+    # "Supported modes:" (no ph) must not receive the EN sentence with ⟦V1⟧.
+    modes = next(s for s in ru_segs if "Supported" in s.text)
+    assert modes.id not in seeded or "⟦V" not in seeded[modes.id]
+
+    translations = dict(seeded)
+    for s in ru_segs:
+        translations.setdefault(s.id, s.text)
+    out = render_with_translations(parse_markdown(ru), ru_segs, translations)
+    assert check_unrestored_placeholders(out, target_lang="en") == []
+    assert "⟦" not in out
+
+
+def test_differential_partial_seed_keeps_unchanged_en():
     ru_base = dedent(
         """\
         # G
@@ -113,8 +156,6 @@ def test_partial_align_lcs_seeds_past_early_kind_wedge():
         A **client certificate** is used with {{ ydb-short-name }}.
         """
     )
-    # PR adds a sentence in Old paragraph only — plus an extra heading wedge that
-    # breaks full align vs a slightly shorter EN (simulated by omitting Extra).
     ru_pr = dedent(
         """\
         # G
@@ -146,12 +187,18 @@ def test_partial_align_lcs_seeds_past_early_kind_wedge():
         en_current_text=en,
         ru_base_text=ru_base,
     )
-    # Client-certificate EN must be seeded, not wiped for full retranslate.
     cert_seeds = [
         t for t in plan.seeded_translations.values() if "client certificate" in t.lower()
     ]
     assert cert_seeds, plan.seeded_translations
-    assert "⟦V" not in cert_seeds[0]
+    assert "⟦V" not in cert_seeds[0] or placeholders_match(
+        next(
+            s.text
+            for s in extract_segments(parse_markdown(ru_pr))
+            if "client certificate" in s.text.lower()
+        ),
+        cert_seeds[0],
+    )
 
 
 def test_angle_placeholders_client_cert_yaml():

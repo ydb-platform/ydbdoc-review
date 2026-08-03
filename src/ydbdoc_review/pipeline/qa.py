@@ -16,6 +16,7 @@ from ydbdoc_review.validation.heuristics import (
     ClassifiedHeuristics,
     bump_verdict_for_blocking_heuristics,
 )
+from ydbdoc_review.validation.markers import placeholders_match
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
 
@@ -107,16 +108,31 @@ def align_translations_from_target(
     }
 
 
+def _segment_lcs_key(seg: Segment) -> tuple[object, ...]:
+    """LCS key: kind + placeholder-letter signature (§6.170).
+
+    Kind-only LCS on heavily divergent pages (e.g. authentication.md 141 vs 90)
+    pairs unrelated paragraphs and seeds EN text whose ``⟦…⟧`` set does not
+    match the RU segment — reinsert then leaves literal markers in the file.
+    """
+    ph_letters = tuple(
+        p.placeholder[1] for p in seg.placeholders if len(p.placeholder) >= 2
+    )
+    return (seg.kind, ph_letters)
+
+
 def partial_align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
 ) -> dict[str, str]:
-    """Best-effort seed map when full structural align fails (§6.168 / §6.169).
+    """Best-effort seed map when full structural align fails (§6.168–§6.170).
 
-    Uses LCS over segment **kinds** so a single early wedge (extra RU heading,
-    nested list path drift, …) does not drop the entire suffix — that regressed
-    ``authentication.md`` to 9/141 seeds and left unrestored ``⟦…⟧`` after a
-    near-full retranslate (#48764).
+    LCS over ``(kind, placeholder-letter signature)`` so an early wedge does
+    not drop the suffix (#48764), without pairing unrelated same-kind segments
+    (#48773 unrestored ``⟦V1⟧`` / ``⟦C…⟧``).
+
+    After normalize, only keep pairs whose placeholder multiset matches the
+    source segment — otherwise leave the slot for the LLM.
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
     n_src = len(source_segments)
@@ -124,13 +140,12 @@ def partial_align_translations_from_target(
     if n_src == 0 or n_tgt == 0:
         return {}
 
-    src_kinds = [s.kind for s in source_segments]
-    tgt_kinds = [t.kind for t in target_segments_raw]
-    # LCS DP on kinds
+    src_keys = [_segment_lcs_key(s) for s in source_segments]
+    tgt_keys = [_segment_lcs_key(t) for t in target_segments_raw]
     dp = [[0] * (n_tgt + 1) for _ in range(n_src + 1)]
     for i in range(1, n_src + 1):
         for j in range(1, n_tgt + 1):
-            if src_kinds[i - 1] == tgt_kinds[j - 1]:
+            if src_keys[i - 1] == tgt_keys[j - 1]:
                 dp[i][j] = dp[i - 1][j - 1] + 1
             else:
                 dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
@@ -138,7 +153,7 @@ def partial_align_translations_from_target(
     pairs: list[tuple[int, int]] = []
     i, j = n_src, n_tgt
     while i > 0 and j > 0:
-        if src_kinds[i - 1] == tgt_kinds[j - 1] and dp[i][j] == dp[i - 1][j - 1] + 1:
+        if src_keys[i - 1] == tgt_keys[j - 1] and dp[i][j] == dp[i - 1][j - 1] + 1:
             pairs.append((i - 1, j - 1))
             i -= 1
             j -= 1
@@ -154,6 +169,8 @@ def partial_align_translations_from_target(
         tgt_one = normalize_target_segments_to_source(
             [src], [target_segments_raw[ti]]
         )[0]
+        if not placeholders_match(src.text, tgt_one.text):
+            continue
         seeded[src.id] = tgt_one.text
     return seeded
 

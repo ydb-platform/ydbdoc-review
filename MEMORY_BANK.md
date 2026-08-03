@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-03  
-**Current focus:** §6.169 — LCS partial seed + percent-encoded protect reinsert (#48764).
+**Current focus:** §6.170 — placeholder-safe partial seed (#48773 / #46798).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-03 | **§6.170** — partial seed only when placeholder multiset matches; LCS key includes ph signature ([ydb#48773](https://github.com/ydb-platform/ydb/pull/48773) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-08-03 | **§6.169** — LCS partial seed (not prefix/suffix); reinsert percent-encoded ``⟦…⟧`` ([ydb#48764](https://github.com/ydb-platform/ydb/pull/48764) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-08-03 | **§6.168** — partial differential seed on align failure; cert YAML angle map ([ydb#48762](https://github.com/ydb-platform/ydb/pull/48762) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-08-03 | **§6.167** — skip `public-materials/*` + `guide-to-public-material.md`; keep EN toc slots ([ydb#48760](https://github.com/ydb-platform/ydb/pull/48760) / [#48411](https://github.com/ydb-platform/ydb/pull/48411)) |

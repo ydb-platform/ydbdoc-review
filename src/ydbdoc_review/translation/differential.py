@@ -26,6 +26,7 @@ from ydbdoc_review.pipeline.qa import (
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.validation.markers import placeholders_match
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +469,9 @@ class DifferentialTranslationAnalyzer:
         for pr_seg, base_seg in pairs:
             if base_seg is not None:
                 en_text = base_en.get(base_seg.id)
-                if en_text is not None:
+                # §6.170: never seed EN whose protect markers do not match the
+                # PR segment — reinsert would leave literal ``⟦…⟧`` in the file.
+                if en_text is not None and placeholders_match(pr_seg.text, en_text):
                     seeded[pr_seg.id] = en_text
                     kept_en_blocks.append(
                         TextBlock(

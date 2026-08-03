@@ -3896,5 +3896,27 @@ copied from RU via ``enforce_source_fenced_blocks``.
 **Tests:** ``test_differential_partial_seed.py`` (LCS wedge),
 ``test_reinsert_percent_placeholders.py``.
 
+### 6.170. Partial seed must match placeholder multiset (#48773 / #46798, 2026-08-03)
+
+**Problem:** After §6.169, [#48773](https://github.com/ydb-platform/ydb/pull/48773)
+was still 🔴: ``authentication.md`` had **79** leftover ``⟦…⟧``, plus markers on
+glossary / tls / security/index / client_certificate_authorization.
+
+**Root cause:** RU ``authentication.md`` has **141** segments vs EN **90**. Kind-only
+LCS paired unrelated paragraphs (e.g. RU «Поддерживаются следующие виды…» ← EN
+«An authentication client… ⟦V1⟧»). Seeded EN protect markers were reinserted
+against a RU segment whose ``placeholders`` list did not contain those ids →
+literal ``⟦V1⟧`` / ``⟦C…⟧`` in the published file. Reproduced locally: 66/89
+LCS seeds failed ``placeholders_match``.
+
+**Decision:**
+
+1. LCS key = ``(kind, placeholder-letter signature)`` not kind alone.
+2. After normalize, **drop** pairs where ``placeholders_match(src, en)`` is false.
+3. Same gate when applying ``base_en`` onto PR segments in
+   ``DifferentialTranslationAnalyzer.plan_translation``.
+
+**Tests:** ``test_partial_align_rejects_placeholder_mismatched_lcs_pairs``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
