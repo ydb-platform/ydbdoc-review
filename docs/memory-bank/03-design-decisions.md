@@ -3847,4 +3847,28 @@ Guide page ``contributor/.../guide-to-public-material.md`` is also skipped
 **Tests:** ``tests/unit/test_translate_skip_paths.py``.
 
 
+### 6.168. Partial differential seed when EN↔RU structure diverges (#48762 / #46798, 2026-08-03)
+
+**Problem:** Re-translate of [#46798](https://github.com/ydb-platform/ydb/pull/46798)
+→ [#48762](https://github.com/ydb-platform/ydb/pull/48762) went 🔴:
+
+1. ``glossary.md`` — leftover ``⟦V2⟧`` and meaning loss on *client certificate*
+   (main already had a good EN sentence ending in ``{{ ydb-short-name }}``).
+2. ``client_certificate_authorization.md`` — Cyrillic YAML angle placeholders
+   (``<SID по умолчанию>``, ``<массив SID>``, …).
+
+**Root cause:** when ``align_translations_from_target`` failed (RU base 27 vs
+EN 26 segments), differential used an **empty** seed plan → full-page
+retranslate overwrote good EN. Angle map lacked cert-page phrases; fences were
+copied from RU via ``enforce_source_fenced_blocks``.
+
+**Decision:**
+
+1. ``partial_align_translations_from_target`` — seed kind-matched **prefix +
+   suffix**; only the structural wedge is LLM-translated (§6.168).
+2. Expand ``_ANGLE_PLACEHOLDER_EN`` for cert YAML placeholders.
+
+**Tests:** ``tests/unit/test_differential_partial_seed.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

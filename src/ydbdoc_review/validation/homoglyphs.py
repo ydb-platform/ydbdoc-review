@@ -84,6 +84,13 @@ _ANGLE_PLACEHOLDER_EN: dict[str, str] = {
     "описание ошибки": "error description",
     "тип используемых физических устройств": "type of physical devices used",
     "uuid": "uuid",
+    # client_certificate_authorization.yaml examples (#48762 / #48595)
+    "sid по умолчанию": "default SID",
+    "массив sid": "SID array",
+    "массив разрешенных суффиксов": "array of allowed suffixes",
+    "массив разрешённых суффиксов": "array of allowed suffixes",
+    "массив допустимых значений": "array of allowed values",
+    "имя компонента subject name": "Subject Name component name",
 }
 
 

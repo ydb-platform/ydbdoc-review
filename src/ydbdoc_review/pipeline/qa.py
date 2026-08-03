@@ -107,6 +107,59 @@ def align_translations_from_target(
     }
 
 
+def partial_align_translations_from_target(
+    source_segments: list[Segment],
+    target_text: str,
+) -> dict[str, str]:
+    """Best-effort seed map when full structural align fails (§6.168).
+
+    Seeds a common **prefix** and **suffix** of positionally kind-matched
+    segments. The mismatched middle (extra RU heading, split paragraph, …)
+    stays unseeded and will be LLM-translated. Prevents wiping good EN prose
+    (e.g. glossary ``client certificate``) when one structural wedge makes
+    full 1:1 align impossible (#48762 / #46798).
+    """
+    target_segments_raw = extract_segments(parse_markdown(target_text))
+    n_src = len(source_segments)
+    n_tgt = len(target_segments_raw)
+    if n_src == 0 or n_tgt == 0:
+        return {}
+
+    prefix = 0
+    while (
+        prefix < n_src
+        and prefix < n_tgt
+        and source_segments[prefix].kind == target_segments_raw[prefix].kind
+    ):
+        prefix += 1
+
+    suffix = 0
+    while (
+        suffix < (n_src - prefix)
+        and suffix < (n_tgt - prefix)
+        and source_segments[n_src - 1 - suffix].kind
+        == target_segments_raw[n_tgt - 1 - suffix].kind
+    ):
+        suffix += 1
+
+    seeded: dict[str, str] = {}
+    if prefix:
+        src_prefix = source_segments[:prefix]
+        tgt_prefix = normalize_target_segments_to_source(
+            src_prefix, target_segments_raw[:prefix]
+        )
+        for src, tgt in zip(src_prefix, tgt_prefix, strict=True):
+            seeded[src.id] = tgt.text
+    if suffix:
+        src_suffix = source_segments[n_src - suffix :]
+        tgt_suffix = normalize_target_segments_to_source(
+            src_suffix, target_segments_raw[n_tgt - suffix :]
+        )
+        for src, tgt in zip(src_suffix, tgt_suffix, strict=True):
+            seeded[src.id] = tgt.text
+    return seeded
+
+
 def gate_round_trip(
     segments: list[Segment],
     target_text: str,

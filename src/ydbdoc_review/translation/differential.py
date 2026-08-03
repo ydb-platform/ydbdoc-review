@@ -19,7 +19,10 @@ from difflib import SequenceMatcher
 from typing import Literal
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.pipeline.qa import align_translations_from_target
+from ydbdoc_review.pipeline.qa import (
+    align_translations_from_target,
+    partial_align_translations_from_target,
+)
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
@@ -434,19 +437,26 @@ class DifferentialTranslationAnalyzer:
         try:
             base_en = align_translations_from_target(base_segments, en_current_text)
         except TranslationValidationError as exc:
+            base_en = partial_align_translations_from_target(
+                base_segments, en_current_text
+            )
             logger.info(
-                "Cannot align existing EN to base RU (%s) — empty differential plan",
+                "Cannot fully align existing EN to base RU (%s) — "
+                "partial seed for %s/%s base segments (§6.168)",
                 exc,
+                len(base_en),
+                len(base_segments),
             )
-            pending = frozenset(s.id for s in pr_segments)
-            return DifferentialTranslationPlan(
-                added_blocks=[_segment_to_block(s) for s in pr_segments],
-                modified_blocks=[],
-                en_blocks_to_keep=[],
-                merge_strategy="reconstruct",
-                seeded_translations={},
-                pending_segment_ids=pending,
-            )
+            if not base_en:
+                pending = frozenset(s.id for s in pr_segments)
+                return DifferentialTranslationPlan(
+                    added_blocks=[_segment_to_block(s) for s in pr_segments],
+                    modified_blocks=[],
+                    en_blocks_to_keep=[],
+                    merge_strategy="reconstruct",
+                    seeded_translations={},
+                    pending_segment_ids=pending,
+                )
 
         pairs = _align_pr_to_base(base_segments, pr_segments)
         seeded: dict[str, str] = {}

@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-03  
-**Current focus:** §6.167 — skip translating public-materials/* (#48756).
+**Current focus:** §6.168 — partial differential seed + cert YAML angles (#48762).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-03 | **§6.168** — partial differential seed on align failure; cert YAML angle map ([ydb#48762](https://github.com/ydb-platform/ydb/pull/48762) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-08-03 | **§6.167** — skip `public-materials/*` + `guide-to-public-material.md`; keep EN toc slots ([ydb#48760](https://github.com/ydb-platform/ydb/pull/48760) / [#48411](https://github.com/ydb-platform/ydb/pull/48411)) |
 | 2026-08-03 | **§6.166** — re-`doc_translate` uses `--force` on `ydbdoc-review/pr-*` (lease = stale info without fetch) ([ydb#46798](https://github.com/ydb-platform/ydb/pull/46798) / [#48411](https://github.com/ydb-platform/ydb/pull/48411)) |
 | 2026-08-03 | **§6.165** — toc extras from translated docs only; bilingual keep EN menu labels ([ydb#48411](https://github.com/ydb-platform/ydb/pull/48411) / [#48589](https://github.com/ydb-platform/ydb/pull/48589)) |
