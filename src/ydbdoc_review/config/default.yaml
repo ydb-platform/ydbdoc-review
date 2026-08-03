@@ -81,6 +81,10 @@ prompts:
 paths:
   docs_root: ydb/docs
   translation_branch_prefix: ydbdoc-review/pr-
+  # §6.167 — do not translate or mirror-reorder these trees
+  translate_skip_globs:
+    - "**/public-materials/**"
+    - "public-materials/**"
 
 reporting:
   include_cost: true

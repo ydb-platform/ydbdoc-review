@@ -130,6 +130,10 @@ class PathsConfig(BaseModel):
     docs_root: str = "ydb/docs"
     translation_branch_prefix: str = "ydbdoc-review/pr-"
     verify_fixup_branch_prefix: str = "ydbdoc-review/verify-"
+    # §6.167 — never translate / never reorder these trees (toc href/include too)
+    translate_skip_globs: list[str] = Field(
+        default_factory=lambda: ["**/public-materials/**", "public-materials/**"]
+    )
 
 
 class ReportingConfig(BaseModel):

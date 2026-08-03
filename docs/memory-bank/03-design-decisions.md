@@ -3824,4 +3824,27 @@ re-label also unblocks plain push (closes the old translation PR).
 **Tests:** ``test_push_branch_force``.
 
 
+### 6.167. Never translate ``public-materials/*`` (#48756 / #48411, 2026-08-03)
+
+**Problem:** Translation PR [#48756](https://github.com/ydb-platform/ydb/pull/48756)
+mirrored a RU ``toc_i.yaml`` reshuffle of the **Public materials** sidebar
+entry (``public-materials/toc_p.yaml``). Ops decision: that tree is
+out of auto-translate scope.
+
+**Decision:**
+
+1. ``paths.translate_skip_globs`` default
+   ``**/public-materials/**`` + ``public-materials/**``.
+2. ``filter_translate_changes`` / scope-plan path filter drop matching docs
+   and nav under that tree before translate/verify.
+3. After toc merge, ``preserve_en_order_for_skipped_toc_entries`` keeps
+   matching href/include entries at their **EN-main** slots so a parent
+   ``toc_i`` RU reorder of Public materials is a nav no-op on EN.
+
+Guide pages outside the tree (e.g. ``contributor/.../guide-to-public-material.md``)
+are still translated.
+
+**Tests:** ``tests/unit/test_translate_skip_paths.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

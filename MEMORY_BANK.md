@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-03  
-**Current focus:** §6.166 — re-doc_translate force-with-lease (#46798).
+**Current focus:** §6.167 — skip translating public-materials/* (#48756).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-03 | **§6.167** — skip `public-materials/*` translate + keep EN toc slot ([ydb#48756](https://github.com/ydb-platform/ydb/pull/48756) / [#48411](https://github.com/ydb-platform/ydb/pull/48411)) |
 | 2026-08-03 | **§6.166** — re-`doc_translate` uses `--force` on `ydbdoc-review/pr-*` (lease = stale info without fetch) ([ydb#46798](https://github.com/ydb-platform/ydb/pull/46798) / [#48411](https://github.com/ydb-platform/ydb/pull/48411)) |
 | 2026-08-03 | **§6.165** — toc extras from translated docs only; bilingual keep EN menu labels ([ydb#48411](https://github.com/ydb-platform/ydb/pull/48411) / [#48589](https://github.com/ydb-platform/ydb/pull/48589)) |
 | 2026-08-03 | **§6.164** — residual EN Cyrillic (any fence) + protect markers always blocking; critic hard-block ([ydb#48595](https://github.com/ydb-platform/ydb/pull/48595)) |

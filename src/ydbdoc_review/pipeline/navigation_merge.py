@@ -24,6 +24,7 @@ from ydbdoc_review.navigation.toc import (
     en_toc_is_absent,
     merge_en_toc_yaml,
     parse_toc_items,
+    preserve_en_order_for_skipped_toc_entries,
     resolve_toc_target_path,
     toc_entry_paths,
     toc_reordered_shared_hrefs,
@@ -34,6 +35,7 @@ from ydbdoc_review.navigation.scope_planner import (
     planned_toc_extras_for_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
+from ydbdoc_review.pipeline.skip_paths import toc_entry_is_skipped
 from ydbdoc_review.pipeline.types import FileVerdict, NavigationRunResult
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.validation.heuristics import validate_navigation_merge_warnings
@@ -398,6 +400,13 @@ def merge_navigation_pair(
             restrict_gap_fill_to_scope=restrict_gap_fill,
             keep_en_hrefs=keep_en_hrefs,
         )
+        skip_globs = list(config.paths.translate_skip_globs or ())
+        if skip_globs:
+            merged = preserve_en_order_for_skipped_toc_entries(
+                en_main,
+                merged,
+                entry_is_skipped=lambda it: toc_entry_is_skipped(it, skip_globs),
+            )
         warnings = validate_navigation_merge_warnings(
             pair.ru_path,
             ru_pr,

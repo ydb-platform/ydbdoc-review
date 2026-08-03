@@ -1084,6 +1084,53 @@ def _serialize_toc(
     return "items:\n" + body
 
 
+def preserve_en_order_for_skipped_toc_entries(
+    en_main_yaml: str,
+    merged_yaml: str,
+    *,
+    entry_is_skipped,
+) -> str:
+    """Keep skip-glob toc entries at their EN-main slots (§6.167).
+
+    ``merge_en_toc_yaml`` walks RU order, so even unchanged EN blocks for
+    ``public-materials/*`` move when RU reshuffles them. Re-interleave: frozen
+    entries stay where they were on EN main; everything else follows ``merged``.
+    """
+    en_items = parse_toc_items(en_main_yaml)
+    merged_items = parse_toc_items(merged_yaml)
+    if not en_items or not merged_items:
+        return merged_yaml
+
+    def _key(it: dict[str, str]) -> str | None:
+        if it.get("include_path"):
+            return f"include:{it['include_path']}"
+        if it.get("href"):
+            return f"href:{it['href']}"
+        return None
+
+    frozen_keys = {_key(it) for it in en_items if entry_is_skipped(it)}
+    frozen_keys.discard(None)
+    if not frozen_keys:
+        return merged_yaml
+
+    en_by_key = {_key(it): it for it in en_items if _key(it)}
+    merged_nf = [it for it in merged_items if _key(it) not in frozen_keys]
+    nf_iter = iter(merged_nf)
+    out: list[dict[str, str]] = []
+    for eit in en_items:
+        k = _key(eit)
+        if k in frozen_keys:
+            out.append(en_by_key[k])
+            continue
+        try:
+            out.append(next(nf_iter))
+        except StopIteration:
+            break
+    out.extend(nf_iter)
+    line_prefix = _inline_list_line_prefix(en_main_yaml)
+    return _serialize_toc(out, line_prefix=line_prefix)
+
+
 @dataclass(frozen=True)
 class TocValidationIssue:
     kind: str

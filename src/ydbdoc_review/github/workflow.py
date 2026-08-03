@@ -77,6 +77,7 @@ from ydbdoc_review.pipeline.pairs import (
     build_verify_navigation_pairs,
     filter_translation_pr_verify_scope,
 )
+from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
@@ -346,6 +347,7 @@ def run_doc_translate(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
+    changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
     read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
         repo_path, merge_base_with, ru_content_ref=ru_ref
@@ -357,6 +359,18 @@ def run_doc_translate(
         read_ru_base=read_ru_base,
         docs_root=docs_root,
     )
+    skip_globs = cfg.paths.translate_skip_globs
+    if skip_globs:
+        from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+        scope_plan = TranslationScopePlan(
+            doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
+            doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
+            doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
+            nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
+            nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
+            nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
+        )
     logger.info(
         "Scope plan for PR #%s: %s doc paths (%s diff + %s main), %s nav paths",
         pr_number,
@@ -737,11 +751,16 @@ def run_doc_verify(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
+    changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     source_changes = (
         list_pr_file_changes_api(gh, owner, repo, source_pr)
         if source_pr is not None
         else (None if translation_pr else changes)
     )
+    if source_changes is not None:
+        source_changes = filter_translate_changes(
+            source_changes, cfg.paths.translate_skip_globs
+        )
     # On verify-* continue/re-verify: re-check the original bilingual source scope
     # (not only the narrow fixup diff).
     pair_changes = (
@@ -765,6 +784,18 @@ def run_doc_verify(
             read_ru_base=read_ru_base,
             docs_root=cfg.paths.docs_root,
         )
+        skip_globs = cfg.paths.translate_skip_globs
+        if skip_globs:
+            from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+            scope_plan = TranslationScopePlan(
+                doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
+                doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
+                doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
+                nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
+                nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
+                nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
+            )
         nav_pairs = merge_navigation_pair_lists(
             navigation_pairs_from_plan(scope_plan, docs_root=cfg.paths.docs_root),
             nav_pairs,
