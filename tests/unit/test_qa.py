@@ -91,6 +91,22 @@ def test_align_raises_on_mismatch():
         assert "segment count mismatch" in str(exc)
 
 
+def test_align_rejects_kind_mismatch_same_count():
+    """§6.163: equal length but heading vs paragraph must not zip."""
+    ru = "# Title\n\nIntro.\n\n## Syntax\n\nBody.\n"
+    en = "# Title\n\nIntro EN.\n\nSubject paragraph EN.\n\nBody EN.\n"
+    ru_segs = extract_segments(parse_markdown(ru))
+    en_segs = extract_segments(parse_markdown(en))
+    assert len(ru_segs) == len(en_segs)
+    assert any(a.kind != b.kind for a, b in zip(ru_segs, en_segs, strict=True))
+    try:
+        align_translations_from_target(ru_segs, en)
+        raise AssertionError("expected TranslationValidationError")
+    except TranslationValidationError as exc:
+        msg = str(exc)
+        assert "structural diff" in msg or "segment count mismatch" in msg
+
+
 def test_compose_verdict_blocked_on_alignment():
     v = compose_file_verdict(
         critic_verdict="ok",

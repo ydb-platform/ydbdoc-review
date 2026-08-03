@@ -60,6 +60,24 @@ def describe_segment_alignment_mismatch(
     return base
 
 
+def _segment_structure_mismatch(
+    source_segments: list[Segment],
+    target_segments: list[Segment],
+) -> bool:
+    """True when counts differ or positional segment kinds diverge.
+
+    Equal length alone is not enough: after RU-only rewrites the EN page can
+    keep the same segment *count* while kinds drift (e.g. heading vs paragraph).
+    Positional seed then pastes the wrong EN text into the RU AST (§6.163).
+    """
+    if len(target_segments) != len(source_segments):
+        return True
+    return any(
+        src.kind != tgt.kind
+        for src, tgt in zip(source_segments, target_segments, strict=True)
+    )
+
+
 def align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
@@ -71,9 +89,12 @@ def align_translations_from_target(
     semantics across RU/EN — same name = same atom — instead of independent
     left-to-right numbering, which causes spurious "placeholder order
     mismatch" reports when word order shifts in translation.
+
+    Requires matching segment **count and kinds** (positional). Kind drift with
+    equal length rejects align so differential translation falls back to full.
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
-    if len(target_segments_raw) != len(source_segments):
+    if _segment_structure_mismatch(source_segments, target_segments_raw):
         raise TranslationValidationError(
             describe_segment_alignment_mismatch(source_segments, target_segments_raw)
         )

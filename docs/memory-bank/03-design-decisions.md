@@ -2911,7 +2911,7 @@ added/modified PR segments. Still **render from the current source AST**
 - no / empty EN, incomplete EN (``len(EN)/len(RU) < min_ratio``),
 - EN stale (optional last-commit age > N days),
 - change magnitude > threshold (default 50%),
-- EN cannot be aligned to base RU (segment count/structure),
+- EN cannot be aligned to base RU (segment count/**kind** structure, §6.163),
 - ``translation.differential_enabled=false`` /
   ``YDBDOC_TRANSLATION_DIFFERENTIAL_ENABLED=0``.
 
@@ -3694,6 +3694,42 @@ while ``doc_translate`` stayed allowlisted (``sintjuri`` only).
    (no separate verify allowlist).
 3. Deploy via ydb [#48518](https://github.com/ydb-platform/ydb/pull/48518)
    (``ydbdoc-verify.yml``); example already matched.
+
+### 6.163. Differential seed requires kind-aligned EN + block unrestored placeholders (#48595 / #46798, 2026-08-03)
+
+**Problem:** Translation PR [#48595](https://github.com/ydb-platform/ydb/pull/48595)
+(from RU-only [#46798](https://github.com/ydb-platform/ydb/pull/46798), after
+earlier RU rewrite [#43693](https://github.com/ydb-platform/ydb/pull/43693))
+shipped a broken EN ``client_certificate_authorization.md``:
+
+1. **Stale EN, same segment count:** main EN still described *node*
+   authentication (5 intro paragraphs, 7 table rows); current RU describes
+   *device* auth (3 intro paragraphs + ``## Синтаксис``, 8 table rows). Counts
+   matched (26↔26) so ``align_translations_from_target`` accepted a positional
+   zip. Differential seeded EN paragraph text onto the RU ``## Синтаксис``
+   heading → ``## The "Subject" field…``, table headers/cells scrambled,
+   meaning drift, missing ``authentication.md`` / ``index.md`` /
+   ``node-authorization.md`` links. Critic suggestions were correct but
+   rejected by pipeline protection (placeholder / regression guards).
+2. **Unrestored protect markers** in the final EN (``⟦V1⟧``, ``⟦C1⟧``,
+   percent-encoded ``%E2%9F%A6U1%E2%9F%A7``) — §6.114 covered the image-bang
+   case only; prose/link leftovers were not a blocking heuristic.
+
+**Decision:**
+
+1. ``align_translations_from_target`` / round-trip gate require matching
+   segment **kinds** at each index, not only equal length. Kind drift →
+   ``TranslationValidationError`` → empty differential seed → **full**
+   retranslate (§6.132 fallback).
+2. New blocking heuristic ``unrestored_placeholder:`` on leftover
+   ``⟦[CLIHVTUS]n⟧`` and URL-encoded forms in final EN.
+
+**Manual follow-up on #48595:** rewrite EN ``client_certificate_authorization.md``
+to match current RU (device-auth framing); other six files in that PR were 🟢.
+
+**Tests:** ``test_align_rejects_kind_mismatch_same_count``,
+``test_prepare_seed_falls_back_full_on_kind_mismatch``,
+``test_unrestored_placeholder_blocks``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)

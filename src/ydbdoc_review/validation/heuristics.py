@@ -21,6 +21,11 @@ _FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s", re.MULTILINE)
 _LIST_TABS = re.compile(r"\{%\s*list\s+tabs\b")
 _PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
+# Protect markers that survived reinsert / URL encoding (§6.114 images, §6.163 prose).
+_UNRESTORED_PLACEHOLDER = re.compile(r"⟦[CLIHVTUS]\d+⟧")
+_UNRESTORED_PLACEHOLDER_ENCODED = re.compile(
+    r"%E2%9F%A6[CLIHVTUS]\d+%E2%9F%A7", re.IGNORECASE
+)
 _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 _LENGTH_RATIO_MIN = 0.55
@@ -76,6 +81,35 @@ def check_length_ratio(
     if _LENGTH_RATIO_MAX < ratio <= _LENGTH_RATIO_BORDERLINE_MAX:
         return [f"length_ratio: {label} ratio {ratio:.2f} (long vs source, borderline)"]
     return [f"length_ratio: {label} ratio {ratio:.2f} outside sane bounds"]
+
+
+def check_unrestored_placeholders(
+    target_text: str, *, target_lang: str
+) -> list[str]:
+    """Protect markers left in the final EN page (literal or percent-encoded)."""
+    if target_lang.lower() not in {"en", "english"}:
+        return []
+    found: list[str] = []
+    for match in _UNRESTORED_PLACEHOLDER.finditer(target_text):
+        found.append(match.group(0))
+    for match in _UNRESTORED_PLACEHOLDER_ENCODED.finditer(target_text):
+        found.append(match.group(0))
+    if not found:
+        return []
+    # Stable unique preview (order preserved).
+    seen: set[str] = set()
+    unique: list[str] = []
+    for token in found:
+        if token in seen:
+            continue
+        seen.add(token)
+        unique.append(token)
+    preview = ", ".join(f"`{t}`" for t in unique[:8])
+    extra = f", … (+{len(unique) - 8})" if len(unique) > 8 else ""
+    return [
+        f"unrestored_placeholder: {len(found)} leftover protect marker(s) in EN: "
+        f"{preview}{extra}"
+    ]
 
 
 def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
@@ -284,6 +318,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("md_link_parity:"):
         return "blocking"
+    if message.startswith("unrestored_placeholder:"):
+        return "blocking"
     if message.startswith("include_parity:"):
         return "blocking"
     if message.startswith("include_target:"):
@@ -325,6 +361,9 @@ def _collect_raw_heuristics(
         )
     )
     raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
+    raw.extend(
+        check_unrestored_placeholders(target_text, target_lang=target_lang)
+    )
     raw.extend(
         check_cyrillic_in_en_fence_comments(target_text, target_lang=target_lang)
     )
