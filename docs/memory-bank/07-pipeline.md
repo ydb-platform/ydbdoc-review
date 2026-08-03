@@ -447,10 +447,12 @@ re-runs critic (with verdict alias normalization), heuristics, and optional repa
 commit. Results differ when EN changed, segment alignment fails, LLM batches vary,
 or critic JSON parse fails for a batch.
 
-**`doc_verify` alignment:** `_align_translations` must match segment counts; on
-failure → `segment_alignment_error`, critic skipped, 🔴 in report (§6.26).
-Diagnostics name the first structural diff (segment kind + id + path) — §6.56
-``describe_segment_alignment_mismatch``; see §6.58 ``glossary.md`` example.
+**`doc_verify` alignment:** `_align_translations` must match segment **counts and
+kinds** (§6.163); on failure → `segment_alignment_error`, critic skipped, 🔴 in
+report (§6.26). Equal length with drifted kinds (stale EN after RU-only rewrite)
+must not seed differentially. Diagnostics name the first structural diff
+(segment kind + id + path) — §6.56 ``describe_segment_alignment_mismatch``;
+see §6.58 ``glossary.md`` example.
 
 **Critic noise filters (verify path):** after ``run_critic`` and ``apply_critic_fixes``,
 ``drop_spurious_placeholder_issues`` runs on actionable issues; after ``run_verify``,

@@ -153,6 +153,26 @@ def test_prepare_seed_reuses_unchanged() -> None:
     assert all(s.id not in seeded for s in pending)
 
 
+def test_prepare_seed_falls_back_full_on_kind_mismatch() -> None:
+    """§6.163 / #48595: same segment count, drifted kinds → full, not wrong seed."""
+    # RU / base: heading, para, heading, para
+    base = "# Title\n\nIntro.\n\n## Syntax\n\nBody.\n"
+    pr = base
+    # EN: heading, para, para, para — count matches, kinds do not
+    en = "# Title\n\nIntro EN.\n\nSubject field EN.\n\nBody EN.\n"
+    strategy, seeded, pending = prepare_differential_seed(
+        pr_segments=extract_segments(parse_markdown(pr)),
+        ru_pr_text=pr,
+        en_current_text=en,
+        ru_base_text=base,
+        config=_cfg(),
+    )
+    assert strategy.mode == "full"
+    assert strategy.config.get("fallback_from_differential") is True
+    assert seeded == {}
+    assert len(pending) == len(extract_segments(parse_markdown(pr)))
+
+
 def test_translate_step_differential_calls_llm_only_for_pending() -> None:
     base = "## Title\n\nStable.\n"
     pr = "## Title\n\nStable.\n\nНовый абзац.\n"
