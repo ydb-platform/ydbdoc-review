@@ -3769,5 +3769,31 @@ bar.
 tests.
 
 
+### 6.165. Toc extras must use translated docs only; bilingual keep EN labels (#48411 / #48589, 2026-08-03)
+
+**Problem:** Source PR [#48411](https://github.com/ydb-platform/ydb/pull/48411)
+(26 files: DevOps → Cluster Administration) produced translation PR
+[#48589](https://github.com/ydb-platform/ydb/pull/48589) with only ~3–5 files.
+Most pairs were correctly skipped (§6.76 bilingual). The real bug: EN
+``toc_i.yaml`` **regressed** good main labels (``Quick start`` →
+``Getting started``, ``Cluster Administration`` → ``Cluster administration``)
+and reshuffled Public materials vs Downloads.
+
+**Root cause:** ``planned_toc_extras_for_pair`` fed **full**
+``plan.doc_ru_paths`` into toc name-translate scope, including bilingual-
+skipped pages (``quickstart.md``, ``devops/index.md``). Those hrefs entered
+LLM menu-label rewrite. Separately, when ``pair.en_changed``, RU renames still
+re-LLMed labels already present on EN main.
+
+**Decision:**
+
+1. ``planned_toc_extras_for_pair(..., active_doc_ru_paths=)`` — when set,
+   only paths **actually translated** (post §6.76) count as href extras.
+   Workflow passes ``frozenset(p.ru_path for p in pairs)`` on merge and verify.
+2. ``_resolve_toc_merge_scope``: if ``pair.en_changed``, drop href/include
+   already on EN main from name scope; keep extras for pages not yet on EN.
+
+**Tests:** ``tests/unit/test_toc_bilingual_extras.py``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

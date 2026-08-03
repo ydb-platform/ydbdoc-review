@@ -462,6 +462,7 @@ def run_doc_translate(
                 config=cfg,
                 scope_plan=scope_plan,
                 ru_content_ref=ru_ref,
+                active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
 
     # Orphan gate vs translation-branch tip (not stale merged-PR HEAD), §6.140.
@@ -884,6 +885,7 @@ def run_doc_verify(
                 else extra_toc_hrefs_from_md_targets(md_en_paths)
             ),
             docs_root=cfg.paths.docs_root,
+            active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
         )
 
     apply_include_parity_repair(

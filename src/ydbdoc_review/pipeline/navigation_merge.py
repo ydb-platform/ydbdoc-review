@@ -152,6 +152,11 @@ def _resolve_toc_merge_scope(
     Otherwise scope = ``toc_translate_scope`` (RU base→PR diff) ∪ planned
     extras from the translation plan. ``supplement_only`` no longer expands to
     every RU−EN missing href (§6.72 / #46878).
+
+    When the source PR also changed EN toc (``pair.en_changed``, bilingual),
+    drop href/include entries that already exist on EN main from the *name*
+    translate scope — the author already refreshed those labels. Keep extras
+    for pages not yet on EN (§6.165 / #48411).
     """
     ru_hrefs, ru_includes = toc_entry_paths(ru_pr)
     planned_includes = pair_extra_includes or set()
@@ -167,6 +172,25 @@ def _resolve_toc_merge_scope(
     scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra_hrefs)
     if planned_includes:
         scope = scope.with_extra_include_paths(planned_includes)
+
+    if pair.en_changed:
+        en_hrefs = {
+            it["href"] for it in parse_toc_items(en_main) if it.get("href")
+        }
+        en_includes = {
+            it["include_path"]
+            for it in parse_toc_items(en_main)
+            if it.get("include_path")
+        }
+        # New pages (extras not yet on EN) stay in scope for label translate.
+        keep_hrefs = frozenset(
+            h for h in scope.hrefs if h not in en_hrefs or h in pair_extra_hrefs
+        )
+        # Extras are hrefs; includes already on EN were author-maintained.
+        keep_includes = frozenset(
+            p for p in scope.include_paths if p not in en_includes
+        )
+        scope = TocTranslateScope(keep_hrefs, keep_includes)
 
     # Always restrict gap-fill to ``scope`` (§6.82). For ``supplement_only``
     # parents (§6.72 / #46878) do **not** expand scope with every RU−EN missing
@@ -245,6 +269,7 @@ def merge_navigation_pair(
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
+    active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> NavigationRunResult:
     """Produce merged EN navigation YAML for one RU/EN pair."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -296,6 +321,7 @@ def merge_navigation_pair(
                 pair.ru_path,
                 ru_pr,
                 docs_root=config.paths.docs_root,
+                active_doc_ru_paths=active_doc_ru_paths,
             )
         else:
             pair_extra_hrefs = extra_toc_hrefs_for_pair(
@@ -432,6 +458,7 @@ def verify_navigation_pair(
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     docs_root: str = "ydb/docs",
+    active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> NavigationRunResult:
     """Validate committed EN navigation YAML against RU PR scope (no LLM merge)."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -459,6 +486,7 @@ def verify_navigation_pair(
                 pair.ru_path,
                 ru_pr,
                 docs_root=docs_root,
+                active_doc_ru_paths=active_doc_ru_paths,
             )
             scope, _restrict_gap_fill = _resolve_toc_merge_scope(
                 pair,
@@ -511,8 +539,12 @@ def run_navigation_verifies(
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     docs_root: str = "ydb/docs",
+    active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> list[NavigationRunResult]:
-    """Validate navigation YAML pairs for ``doc_verify``."""
+    """Validate navigation YAML pairs for ``doc_verify``.
+
+    ``active_doc_ru_paths`` (§6.165): same filter as ``run_navigation_merges``.
+    """
     hrefs = extra_toc_hrefs or set()
     results: list[NavigationRunResult] = []
     for pair in pairs:
@@ -576,6 +608,7 @@ def run_navigation_verifies(
                 scope_plan=scope_plan,
                 extra_toc_hrefs=hrefs if scope_plan is None else None,
                 docs_root=docs_root,
+                active_doc_ru_paths=active_doc_ru_paths,
             )
         )
     return results
@@ -592,6 +625,7 @@ def run_navigation_merges(
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
+    active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> list[NavigationRunResult]:
     """Merge all navigation YAML pairs with a RU change in the source PR.
 
@@ -600,6 +634,10 @@ def run_navigation_merges(
     while RU adds new ``href``s (#41271 / #47104); skipping left translated
     pages as ``orphan_toc_page``. Merge keeps out-of-scope EN ``name`` blocks
     and EN-only legacy hrefs.
+
+    ``active_doc_ru_paths`` (§6.165): RU markdown paths actually translated in
+    this run (after bilingual skip). Restricts toc href extras so skipped
+    bilingual pages do not trigger menu-label retranslation.
     """
     results: list[NavigationRunResult] = []
     for pair in pairs:
@@ -616,6 +654,7 @@ def run_navigation_merges(
                 scope_plan=scope_plan,
                 extra_toc_hrefs=extra_toc_hrefs,
                 ru_content_ref=ru_content_ref,
+                active_doc_ru_paths=active_doc_ru_paths,
             )
         )
     return results

@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-03  
-**Current focus:** §6.164 — residual EN Cyrillic/placeholders always block (#48595).
+**Current focus:** §6.165 — toc extras = translated docs only; bilingual keep EN labels (#48411).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-03 | **§6.165** — toc extras from translated docs only; bilingual keep EN menu labels ([ydb#48411](https://github.com/ydb-platform/ydb/pull/48411) / [#48589](https://github.com/ydb-platform/ydb/pull/48589)) |
 | 2026-08-03 | **§6.164** — residual EN Cyrillic (any fence) + protect markers always blocking; critic hard-block ([ydb#48595](https://github.com/ydb-platform/ydb/pull/48595)) |
 | 2026-08-03 | **§6.163** — differential seed needs kind-aligned EN (not only equal count); block unrestored `⟦…⟧` / `%E2%9F%A6…` ([ydb#48595](https://github.com/ydb-platform/ydb/pull/48595) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-07-31 | **§6.162** — live `ydbdoc-verify.yml` must pass ACL/quota env (`YDBDOC_ALLOWED_ACTORS`) like translate ([ydb#48518](https://github.com/ydb-platform/ydb/pull/48518)) |

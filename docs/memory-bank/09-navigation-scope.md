@@ -239,6 +239,7 @@ the source or translation PR.
 | Failure mode | Symptom PR(s) | § | Test |
 |--------------|---------------|---|------|
 | bilingual EN toc skip left orphan href | [#47104](https://github.com/ydb-platform/ydb/pull/47104) ← [#41271](https://github.com/ydb-platform/ydb/pull/41271) | §6.123 | `test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed` |
+| bilingual-skipped docs drive toc label re-LLM | [#48589](https://github.com/ydb-platform/ydb/pull/48589) ← [#48411](https://github.com/ydb-platform/ydb/pull/48411) | §6.165 | `test_planned_toc_extras_ignores_bilingual_skipped_docs`, `test_bilingual_en_changed_drops_existing_en_hrefs_from_name_scope` |
 | stale merge-base EN hides missing ``with.md`` | [#48018](https://github.com/ydb-platform/ydb/pull/48018) ← [#30237](https://github.com/ydb-platform/ydb/pull/30237) | §6.140 | `test_pr_48018_scope_readers_use_upstream_en_tip_*`, `test_orphan_check_uses_baseline_ref_*` |
 | RU-only toc reorder → false «перевод готов», no PR | [#47856](https://github.com/ydb-platform/ydb/pull/47856) | §6.141 | `test_pr_47856_ru_only_toc_reorder_is_nav_noop`, `test_build_source_pr_comment_noop_no_commit` |
 | RU shared toc reorder must update EN order | [#47856](https://github.com/ydb-platform/ydb/pull/47856) | §6.150 | `test_pr_47856_shared_toc_reorder_mirrors_en_order`, `test_pr_47856_reorder_adds_en_page_missing_from_toc`, `test_toc_reordered_shared_hrefs_detects_move` |

@@ -620,19 +620,29 @@ def planned_toc_extras_for_pair(
     ru_toc_text: str,
     *,
     docs_root: str = "ydb/docs",
+    active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> tuple[set[str], set[str]]:
     """``(extra_hrefs, extra_include_paths)`` from scope plan for one sidebar.
 
     Replaces ``extra_toc_hrefs_from_md_targets`` + ``extra_toc_hrefs_for_pair``
     (§22 J.6): href/include entries are derived from the unified plan, not from
     post-hoc basename intersection after translate.
+
+    ``active_doc_ru_paths`` (§6.165): when set, only those RU markdown paths
+    count for href extras. Callers must pass the paths **actually translated**
+    (after bilingual skip §6.76). Using the full ``plan.doc_ru_paths`` pulls
+    bilingual-skipped pages (e.g. ``quickstart.md``) into toc name retranslation
+    and overwrites good EN menu labels (#48411 / #48589).
     """
+    doc_paths = plan.doc_ru_paths
+    if active_doc_ru_paths is not None:
+        doc_paths = frozenset(doc_paths & frozenset(active_doc_ru_paths))
     extra_hrefs: set[str] = set()
     extra_includes: set[str] = set()
     for kind, rel in collect_toc_link_targets(ru_toc_text):
         if kind == "href" and rel.endswith(".md"):
             ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
-            if ru_md in plan.doc_ru_paths:
+            if ru_md in doc_paths:
                 extra_hrefs.add(rel)
         elif kind == "include" and rel.endswith((".yaml", ".yml")):
             ru_child = _norm(resolve_toc_target_path(ru_toc, rel))
