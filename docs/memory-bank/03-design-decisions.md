@@ -3796,4 +3796,27 @@ re-LLMed labels already present on EN main.
 **Tests:** ``tests/unit/test_toc_bilingual_extras.py``.
 
 
+### 6.166. Re-``doc_translate`` force-with-lease onto ``ydbdoc-review/pr-*`` (#46798, 2026-08-03)
+
+**Problem:** Re-running ``doc_translate`` on merged source
+[#46798](https://github.com/ydb-platform/ydb/pull/46798) finished translate +
+local commit, then crashed at push:
+
+```
+! [rejected] HEAD -> ydbdoc-review/pr-46798 (non-fast-forward)
+```
+
+[#48595](https://github.com/ydb-platform/ydb/pull/48595) already had the
+branch tip (translate + verify critic commit). ``prepare_translation_branch_on_base``
+rebuilds from upstream ``main``, so the new tip is not a FF of the remote.
+``doc_verify`` fixup path deletes the stale remote ref (§6.52); ``doc_translate``
+did not.
+
+**Decision:** ``push_branch(..., force_with_lease=True)`` for
+``run_doc_translate`` pushes. Keeps the existing translation PR open and
+updates its head. Verify fixup delete path unchanged.
+
+**Tests:** ``test_push_branch_force_with_lease``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

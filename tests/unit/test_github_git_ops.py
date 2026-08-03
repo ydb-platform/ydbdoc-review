@@ -83,6 +83,36 @@ def test_remote_push_url():
     assert "x-access-token:secret@github.com" in url
 
 
+def test_push_branch_force_with_lease(monkeypatch):
+    """§6.166: re-translate must force-with-lease onto ydbdoc-review/pr-*."""
+    from ydbdoc_review.github import git_ops
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class _Proc:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(git_ops.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_ops, "ensure_remote", lambda *a, **k: None)
+    git_ops.push_branch(
+        "/tmp/repo",
+        "ydbdoc-review-push",
+        "ydbdoc-review/pr-46798",
+        "tok",
+        "https://github.com/ydb-platform/ydb.git",
+        force_with_lease=True,
+    )
+    assert calls and "--force-with-lease" in calls[0]
+    assert "HEAD:refs/heads/ydbdoc-review/pr-46798" in calls[0]
+
+
 def test_git_commit_paths_delete_ignore_unmatch(git_repo: str):
     """Regression: PR #37955 — EN mirror already absent on base must not fail."""
     ok = git_commit_paths(
