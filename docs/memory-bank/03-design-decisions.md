@@ -3918,5 +3918,28 @@ LCS seeds failed ``placeholders_match``.
 
 **Tests:** ``test_partial_align_rejects_placeholder_mismatched_lcs_pairs``.
 
+### 6.171. Refuse weak / high-drift partial seeds (#48780 / #46798, 2026-08-03)
+
+**Problem:** After §6.170, [#48780](https://github.com/ydb-platform/ydb/pull/48780)
+was 🟢 on heuristics (no ``⟦…⟧``) but **content was wrong**: LDAP numbered steps
+contained IAM «Refresh Token» / Anonymous bullets; password brute-force and
+manual lockout section bodies were swapped.
+
+**Root cause:** ``authentication.md`` RU/EN segment counts 141 vs 90 (drift
+~36%). LCS still seeded **34** empty/``⟦V⟧``-only paragraphs that shared the
+same signature — placeholder multiset matched, meaning did not.
+
+**Decision:**
+
+1. If segment-count drift ``> 0.25``, return **empty** partial seed → full LLM
+   translate for the file.
+2. Otherwise seed only **trustworthy** pairs: non-variable placeholder
+   fingerprint (C/U/…), or short heading with length parity. Plain / V-only
+   paragraphs are never LCS-seeded.
+3. Same trust gate when applying ``base_en`` onto PR segments.
+
+**Tests:** ``test_partial_align_refuses_high_structure_drift``,
+``test_partial_align_rejects_weak_empty_paragraph_pairs``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

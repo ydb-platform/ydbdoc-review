@@ -10,15 +10,22 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.placeholder_align import (
     normalize_target_segments_to_source,
 )
-from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.validation.heuristics import (
     ClassifiedHeuristics,
     bump_verdict_for_blocking_heuristics,
 )
-from ydbdoc_review.validation.markers import placeholders_match
+from ydbdoc_review.validation.markers import (
+    non_variable_placeholders,
+    placeholders_match,
+)
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
+
+# When RU/EN segment counts diverge this much, LCS pairing is unreliable even
+# with placeholder gates (#48780 authentication.md 141 vs 90 → meaning mix-ups).
+_MAX_PARTIAL_STRUCTURE_DRIFT = 0.25
 
 
 def describe_segment_alignment_mismatch(
@@ -121,23 +128,41 @@ def _segment_lcs_key(seg: Segment) -> tuple[object, ...]:
     return (seg.kind, ph_letters)
 
 
+def partial_seed_is_trustworthy(src: Segment, en_text: str) -> bool:
+    """True when an LCS EN candidate is safe to reuse (§6.171).
+
+    Placeholder multiset match alone is not enough: empty / ``⟦V⟧``-only
+    paragraphs share the same signature and LCS still swaps meaning (LDAP
+    steps ← IAM bullets, brute-force ↔ manual lockout on #48780).
+    """
+    if not placeholders_match(src.text, en_text):
+        return False
+    if non_variable_placeholders(src.text):
+        return True
+    if src.kind == SegmentKind.HEADING and len(src.text) <= 80:
+        ratio = (len(en_text) + 1) / (len(src.text) + 1)
+        return 0.45 <= ratio <= 2.2
+    return False
+
+
 def partial_align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
 ) -> dict[str, str]:
-    """Best-effort seed map when full structural align fails (§6.168–§6.170).
+    """Best-effort seed map when full structural align fails (§6.168–§6.171).
 
-    LCS over ``(kind, placeholder-letter signature)`` so an early wedge does
-    not drop the suffix (#48764), without pairing unrelated same-kind segments
-    (#48773 unrestored ``⟦V1⟧`` / ``⟦C…⟧``).
-
-    After normalize, only keep pairs whose placeholder multiset matches the
-    source segment — otherwise leave the slot for the LLM.
+    LCS over ``(kind, placeholder-letter signature)``. Refuse the whole partial
+    map when segment-count drift is high. Keep only trustworthy pairs (non-V
+    placeholder fingerprint, or short heading with length parity).
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
     n_src = len(source_segments)
     n_tgt = len(target_segments_raw)
     if n_src == 0 or n_tgt == 0:
+        return {}
+
+    drift = abs(n_src - n_tgt) / max(n_src, n_tgt)
+    if drift > _MAX_PARTIAL_STRUCTURE_DRIFT:
         return {}
 
     src_keys = [_segment_lcs_key(s) for s in source_segments]
@@ -169,7 +194,7 @@ def partial_align_translations_from_target(
         tgt_one = normalize_target_segments_to_source(
             [src], [target_segments_raw[ti]]
         )[0]
-        if not placeholders_match(src.text, tgt_one.text):
+        if not partial_seed_is_trustworthy(src, tgt_one.text):
             continue
         seeded[src.id] = tgt_one.text
     return seeded

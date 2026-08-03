@@ -22,11 +22,11 @@ from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import (
     align_translations_from_target,
     partial_align_translations_from_target,
+    partial_seed_is_trustworthy,
 )
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
-from ydbdoc_review.validation.markers import placeholders_match
 
 logger = logging.getLogger(__name__)
 
@@ -469,9 +469,9 @@ class DifferentialTranslationAnalyzer:
         for pr_seg, base_seg in pairs:
             if base_seg is not None:
                 en_text = base_en.get(base_seg.id)
-                # §6.170: never seed EN whose protect markers do not match the
-                # PR segment — reinsert would leave literal ``⟦…⟧`` in the file.
-                if en_text is not None and placeholders_match(pr_seg.text, en_text):
+                # §6.170/§6.171: never seed EN whose protect markers do not match
+                # the PR segment, or weak empty/V-only LCS pairs (meaning swap).
+                if en_text is not None and partial_seed_is_trustworthy(pr_seg, en_text):
                     seeded[pr_seg.id] = en_text
                     kept_en_blocks.append(
                         TextBlock(
