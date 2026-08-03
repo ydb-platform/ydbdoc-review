@@ -154,7 +154,12 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
     )
     assert result.verdict == "ok"
     assert not any(
-        w.startswith("cyrillic_in_fence:") for w in result.heuristic_warnings
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in result.heuristic_warnings
+    )
+    assert not any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in result.heuristic_blocking
     )
     assert "Запрос" not in result.final_text
     assert "Идентификатор" not in result.final_text

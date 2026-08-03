@@ -3732,4 +3732,42 @@ to match current RU (device-auth framing); other six files in that PR were 🟢.
 ``test_unrestored_placeholder_blocks``.
 
 
+### 6.164. Residual Cyrillic + protect markers must block merge (#48595, 2026-08-03)
+
+**Problem:** On translation PR [#48595](https://github.com/ydb-platform/ydb/pull/48595)
+verify marked ``glossary.md`` 🟢 while EN still contained literal ``⟦V2⟧``, and
+``client_certificate_authorization.md`` kept YAML angle-bracket Russian
+(``<SID по умолчанию>``, ``<массив SID>``, …) plus leftover ``⟦C*⟧`` /
+percent-encoded markers. Critic saw meaning drift on the cert page (🔴) but
+auto-fixes were rejected by pipeline protection; glossary/placeholders and
+fence Cyrillic escaped the merge gate:
+
+1. **Protect markers** — ``unrestored_placeholder`` (§6.163) did not exist yet
+   at that verify run; glossary with ``⟦V2⟧`` was green.
+2. **YAML / code-fence Cyrillic** — ``check_cyrillic_in_en`` strips *all*
+   fences, and ``cyrillic_in_fence`` / ``cyrillic_in_text_fence`` only cover
+   comment lines / `` ```text ``. Cyrillic inside yaml example placeholders
+   was invisible. Those fence helpers were also classified as **warnings**,
+   so even comment leftovers would not force 🔴.
+
+**Decision:**
+
+1. Keep / broaden ``unrestored_placeholder`` (any ``⟦…⟧`` + encoded form) as
+   **blocking**.
+2. New ``check_cyrillic_in_en_all_fences`` → ``cyrillic_in_code_fence:`` for
+   **any** fenced language (yaml/yql/go/text/…).
+3. Promote residual Cyrillic helpers and ``*_translate_skipped`` to
+   **blocking** (never soft-warn merge).
+4. Critic / verify prompts: residual Cyrillic or broken placeholders →
+   severity ``blocked`` (hard), not soft warning.
+
+Deterministic heuristics are the hard gate; critic prompts reinforce the same
+bar.
+
+**Tests:** ``test_unrestored_placeholder_blocks_glossary_v2``,
+``test_cyrillic_in_yaml_fence_blocks``, updated fence-comment classification
+tests.
+
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

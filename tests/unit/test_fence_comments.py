@@ -219,7 +219,7 @@ def test_check_cyrillic_in_en_fence_comments_warns():
     warnings = check_cyrillic_in_en_fence_comments(GO_SAMPLE, target_lang="en")
     assert warnings
     assert warnings[0].startswith("cyrillic_in_fence:")
-    assert _classify_heuristic(warnings[0]) == "warnings"
+    assert _classify_heuristic(warnings[0]) == "blocking"
 
 
 def test_check_cyrillic_in_en_fence_comments_skips_prose_outside_fence():
@@ -366,12 +366,15 @@ def test_fence_comment_translate_skip_surfaces_rate_limit_warning():
         target_lang="en",
     )
     for warning in warnings:
-        classified.warnings.append(warning)
-    assert any("rate-limit" in w for w in classified.warnings)
-    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
+        classified.blocking.append(warning)
+    assert any("rate-limit" in w for w in classified.blocking)
+    assert any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in classified.blocking
+    )
 
 
-def test_run_file_heuristics_classified_fence_comment_is_warning_not_blocking():
+def test_run_file_heuristics_classified_fence_comment_is_blocking():
     classified = run_file_heuristics_classified(
         GO_SAMPLE,
         GO_SAMPLE,
@@ -379,8 +382,11 @@ def test_run_file_heuristics_classified_fence_comment_is_warning_not_blocking():
         source_lang="ru",
         target_lang="en",
     )
-    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
-    assert not any(w.startswith("cyrillic_in_fence:") for w in classified.blocking)
+    assert any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in classified.blocking
+    )
+    assert not any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
 
 
 def _completion(content: str):

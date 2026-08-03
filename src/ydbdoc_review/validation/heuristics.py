@@ -21,10 +21,11 @@ _FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s", re.MULTILINE)
 _LIST_TABS = re.compile(r"\{%\s*list\s+tabs\b")
 _PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
-# Protect markers that survived reinsert / URL encoding (§6.114 images, §6.163 prose).
-_UNRESTORED_PLACEHOLDER = re.compile(r"⟦[CLIHVTUS]\d+⟧")
+# Any leftover protect markers (literal or URL-encoded). Letter+digit is the
+# normal form (C/L/I/H/V/T/U/S); broad ⟦…⟧ still blocks odd survivors (§6.164).
+_UNRESTORED_PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
 _UNRESTORED_PLACEHOLDER_ENCODED = re.compile(
-    r"%E2%9F%A6[CLIHVTUS]\d+%E2%9F%A7", re.IGNORECASE
+    r"%E2%9F%A6[^%]*%E2%9F%A7", re.IGNORECASE
 )
 _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
@@ -139,6 +140,48 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
             f"(всего {len(matches)} символов)"
         )
     return warnings
+
+
+def check_cyrillic_in_en_all_fences(
+    target_text: str, *, target_lang: str
+) -> list[str]:
+    """Cyrillic inside **any** fenced code block in EN (yaml/yql/go/text/…).
+
+    Prose Cyrillic is covered by ``check_cyrillic_in_en`` (fences stripped).
+    Comment-only / ``text``-fence helpers still auto-translate, but residual
+    Cyrillic in YAML angle-brackets (``<SID по умолчанию>``, #48595) was
+    invisible to those helpers — this check is the hard merge gate (§6.164).
+    """
+    if target_lang.lower() not in {"en", "english"}:
+        return []
+    from ydbdoc_review.parsing.ast_types import FencedCode
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.validation.fence_integrity import collect_code_blocks
+
+    found: list[str] = []
+    blocks = collect_code_blocks(parse_markdown(target_text))
+    for block_index, block in enumerate(blocks, start=1):
+        if not isinstance(block, FencedCode):
+            continue
+        lang = (block.info or "").strip().split()[0].lower() if block.info else ""
+        for line_index, line in enumerate(block.content.splitlines()):
+            if not _CYRILLIC.search(line):
+                continue
+            preview = line.strip().replace("\n", " ")[:120]
+            lang_hint = f" `{lang}`" if lang else ""
+            found.append(
+                "cyrillic_in_code_fence: "
+                f"block {block_index}{lang_hint} line {line_index}: «{preview}»"
+            )
+    if not found:
+        return []
+    out = found[:12]
+    if len(found) > 12:
+        out.append(
+            f"cyrillic_in_code_fence: … и ещё {len(found) - 12} строк "
+            "с кириллицей в code fence"
+        )
+    return out
 
 
 def _md_link_basenames(text: str) -> set[str]:
@@ -306,16 +349,21 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("fence_body_copy:"):
         return "warnings"
+    # Residual Cyrillic / unrestored protect markers must never green-merge (§6.164).
     if message.startswith("cyrillic_in_fence:"):
-        return "warnings"
+        return "blocking"
     if message.startswith("cyrillic_in_text_fence:"):
-        return "warnings"
+        return "blocking"
+    if message.startswith("cyrillic_in_code_fence:"):
+        return "blocking"
+    if message.startswith("Кириллица в EN-тексте"):
+        return "blocking"
     if message.startswith("fence_comment_translate_skipped:"):
-        return "warnings"
+        return "blocking"
     if message.startswith("text_fence_translate_skipped:"):
-        return "warnings"
+        return "blocking"
     if message.startswith("prose_cyrillic_translate_skipped:"):
-        return "warnings"
+        return "blocking"
     if message.startswith("md_link_parity:"):
         return "blocking"
     if message.startswith("unrestored_placeholder:"):
@@ -364,6 +412,14 @@ def _collect_raw_heuristics(
     raw.extend(
         check_unrestored_placeholders(target_text, target_lang=target_lang)
     )
+    # Any fence language (yaml/yql/go/text/…) — hard gate for residual RU (§6.164).
+    # Comment / text-fence helpers still auto-translate; this catches leftovers
+    # those paths miss (e.g. ``<SID по умолчанию>`` in yaml examples).
+    raw.extend(
+        check_cyrillic_in_en_all_fences(target_text, target_lang=target_lang)
+    )
+    # Keep specialized detectors for messaging parity with older reports; they
+    # may overlap with all-fences — duplicate messages are acceptable vs silent miss.
     raw.extend(
         check_cyrillic_in_en_fence_comments(target_text, target_lang=target_lang)
     )

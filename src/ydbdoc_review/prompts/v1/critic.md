@@ -22,7 +22,7 @@ File: `{file_path}`
 
 ## Task
 
-Find translation issues: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), missing sections, placeholder corruption, CLI flag damage.
+Find translation issues: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), missing sections, placeholder corruption, CLI flag damage, **any residual Cyrillic in {target_lang}** (prose, headings, tables, **and** fenced examples / YAML angle-brackets). Residual Cyrillic or broken/missing placeholders → severity `blocked` and overall `verdict` must be `blocked` (never soft-warn).
 
 Return **only** JSON:
 

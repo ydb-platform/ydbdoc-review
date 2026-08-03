@@ -63,6 +63,12 @@ def heuristic_location_label(message: str) -> str:
     """Short location column for a heuristic line in the PR report."""
     if message.startswith("cyrillic_in_fence:"):
         return "комментарии в коде"
+    if message.startswith("cyrillic_in_code_fence:") or message.startswith(
+        "cyrillic_in_text_fence:"
+    ):
+        return "блок кода"
+    if message.startswith("unrestored_placeholder:"):
+        return "плейсхолдеры"
     if message.startswith("fence_body_copy:") or message.startswith("fence_path_stripped:"):
         return "блок кода"
     if message.startswith("fence_parity:"):
@@ -170,6 +176,27 @@ def humanize_heuristic(message: str) -> str:
 
 
 def _humanize_heuristic_problem(message: str) -> str:
+    if message.startswith("unrestored_placeholder:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            "В EN остались служебные protect-маркеры перевода "
+            f"(`⟦…⟧` / percent-encoded): {detail}. "
+            "Их нельзя оставлять в опубликованном тексте — "
+            "переведите заново или восстановите атомы вручную."
+        )
+    if message.startswith("cyrillic_in_code_fence:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"В fenced-блоке EN осталась кириллица: {detail}. "
+            "Переведите плейсхолдеры/комментарии внутри примера на английский."
+        )
+    if message.startswith("cyrillic_in_text_fence:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"В ``text``-блоке EN осталась кириллица: {detail}. "
+            "Переведите строки диаграммы на английский."
+        )
+
     m = _FENCE_BODY_COPY.match(message)
     if m:
         block, preview = m.group(1), m.group(2)
