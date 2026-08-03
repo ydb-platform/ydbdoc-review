@@ -295,19 +295,21 @@ def push_branch(
     token: str,
     base_https_url: str,
     *,
-    force_with_lease: bool = False,
+    force: bool = False,
 ) -> None:
     """Push ``HEAD`` to ``refs/heads/<branch>`` on the remote.
 
-    ``force_with_lease`` (§6.166): re-``doc_translate`` rebuilds
-    ``ydbdoc-review/pr-*`` from upstream main, so a plain push is rejected as
-    non-fast-forward when a previous translate/verify tip still exists.
+    ``force`` (§6.166): re-``doc_translate`` rebuilds ``ydbdoc-review/pr-*``
+    from upstream main. A plain push is non-fast-forward when a previous
+    translate/verify tip still exists. Use plain ``--force`` (not
+    ``--force-with-lease``): the action checkout never fetches the remote
+    translation tip, so lease checks fail with ``(stale info)``.
     """
     url = remote_push_url(base_https_url, token)
     ensure_remote(repo, remote_name, url)
     cmd = ["git", "-C", repo, "push"]
-    if force_with_lease:
-        cmd.append("--force-with-lease")
+    if force:
+        cmd.append("--force")
     cmd.extend([remote_name, f"HEAD:refs/heads/{branch}"])
     proc = subprocess.run(
         cmd,

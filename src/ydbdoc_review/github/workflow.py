@@ -537,7 +537,7 @@ def run_doc_translate(
                 branch,
                 push_token,
                 upstream_url,
-                force_with_lease=True,
+                force=True,
             )
             pushed = True
     job.committed = committed

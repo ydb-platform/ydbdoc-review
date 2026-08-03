@@ -3812,11 +3812,16 @@ rebuilds from upstream ``main``, so the new tip is not a FF of the remote.
 ``doc_verify`` fixup path deletes the stale remote ref (§6.52); ``doc_translate``
 did not.
 
-**Decision:** ``push_branch(..., force_with_lease=True)`` for
-``run_doc_translate`` pushes. Keeps the existing translation PR open and
-updates its head. Verify fixup delete path unchanged.
+**Decision:** ``push_branch(..., force=True)`` for ``run_doc_translate``
+uses plain ``--force`` (not ``--force-with-lease``). The action checkout
+never fetches the remote ``ydbdoc-review/pr-*`` tip, so lease checks fail
+with ``(stale info)`` even when a rewrite is intended. Keeps / recreates
+the translation PR head. Verify fixup delete path unchanged (§6.52).
 
-**Tests:** ``test_push_branch_force_with_lease``.
+**Ops note:** deleting the remote ``ydbdoc-review/pr-*`` branch before
+re-label also unblocks plain push (closes the old translation PR).
+
+**Tests:** ``test_push_branch_force``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)

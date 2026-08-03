@@ -26,7 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-08-03 | **§6.166** — re-`doc_translate` uses `--force-with-lease` on `ydbdoc-review/pr-*` ([ydb#46798](https://github.com/ydb-platform/ydb/pull/46798) / [#48595](https://github.com/ydb-platform/ydb/pull/48595)) |
+| 2026-08-03 | **§6.166** — re-`doc_translate` uses `--force` on `ydbdoc-review/pr-*` (lease = stale info without fetch) ([ydb#46798](https://github.com/ydb-platform/ydb/pull/46798) / [#48411](https://github.com/ydb-platform/ydb/pull/48411)) |
 | 2026-08-03 | **§6.165** — toc extras from translated docs only; bilingual keep EN menu labels ([ydb#48411](https://github.com/ydb-platform/ydb/pull/48411) / [#48589](https://github.com/ydb-platform/ydb/pull/48589)) |
 | 2026-08-03 | **§6.164** — residual EN Cyrillic (any fence) + protect markers always blocking; critic hard-block ([ydb#48595](https://github.com/ydb-platform/ydb/pull/48595)) |
 | 2026-08-03 | **§6.163** — differential seed needs kind-aligned EN (not only equal count); block unrestored `⟦…⟧` / `%E2%9F%A6…` ([ydb#48595](https://github.com/ydb-platform/ydb/pull/48595) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |

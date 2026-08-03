@@ -83,8 +83,8 @@ def test_remote_push_url():
     assert "x-access-token:secret@github.com" in url
 
 
-def test_push_branch_force_with_lease(monkeypatch):
-    """§6.166: re-translate must force-with-lease onto ydbdoc-review/pr-*."""
+def test_push_branch_force(monkeypatch):
+    """§6.166: re-translate must --force onto ydbdoc-review/pr-*."""
     from ydbdoc_review.github import git_ops
 
     calls: list[list[str]] = []
@@ -107,9 +107,10 @@ def test_push_branch_force_with_lease(monkeypatch):
         "ydbdoc-review/pr-46798",
         "tok",
         "https://github.com/ydb-platform/ydb.git",
-        force_with_lease=True,
+        force=True,
     )
-    assert calls and "--force-with-lease" in calls[0]
+    assert calls and "--force" in calls[0]
+    assert "--force-with-lease" not in calls[0]
     assert "HEAD:refs/heads/ydbdoc-review/pr-46798" in calls[0]
 
 
