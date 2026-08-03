@@ -3941,5 +3941,25 @@ same signature — placeholder multiset matched, meaning did not.
 **Tests:** ``test_partial_align_refuses_high_structure_drift``,
 ``test_partial_align_rejects_weak_empty_paragraph_pairs``.
 
+### 6.172. Placeholder-only segments stay marker-only (#48785 / #46798, 2026-08-03)
+
+**Problem:** [#48785](https://github.com/ydb-platform/ydb/pull/48785) was mostly
+clean, but ``client_certificate_authorization.md`` table key for
+``default_group`` became a full English sentence that still contained the
+backticked name — QA stayed 🟢.
+
+**Root cause:** key cells are a single ``⟦C1⟧``. The LLM “translated” them into
+prose wrapping the same marker. ``placeholders_match`` still passed.
+
+**Decision:**
+
+1. ``is_placeholder_only_text`` — segment is only markers + whitespace.
+2. ``validate_segment_translation`` rejects prose elaboration of such segments.
+3. ``translate_segments`` copies placeholder-only text as-is (no LLM).
+4. ``partial_seed_is_trustworthy`` refuses seeding prose onto placeholder-only
+   sources.
+
+**Tests:** ``tests/unit/test_placeholder_only_segments.py``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

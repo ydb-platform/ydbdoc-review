@@ -17,6 +17,7 @@ from ydbdoc_review.validation.heuristics import (
     bump_verdict_for_blocking_heuristics,
 )
 from ydbdoc_review.validation.markers import (
+    is_placeholder_only_text,
     non_variable_placeholders,
     placeholders_match,
 )
@@ -129,14 +130,19 @@ def _segment_lcs_key(seg: Segment) -> tuple[object, ...]:
 
 
 def partial_seed_is_trustworthy(src: Segment, en_text: str) -> bool:
-    """True when an LCS EN candidate is safe to reuse (§6.171).
+    """True when an LCS EN candidate is safe to reuse (§6.171 / §6.172).
 
     Placeholder multiset match alone is not enough: empty / ``⟦V⟧``-only
     paragraphs share the same signature and LCS still swaps meaning (LDAP
     steps ← IAM bullets, brute-force ↔ manual lockout on #48780).
+
+    Placeholder-only sources (config table keys) must stay marker-only —
+    never seed prose that wraps the same ``⟦C1⟧`` (#48785 ``default_group``).
     """
     if not placeholders_match(src.text, en_text):
         return False
+    if is_placeholder_only_text(src.text):
+        return is_placeholder_only_text(en_text)
     if non_variable_placeholders(src.text):
         return True
     if src.kind == SegmentKind.HEADING and len(src.text) <= 80:

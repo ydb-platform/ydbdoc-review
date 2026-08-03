@@ -14,6 +14,19 @@ def extract_placeholders(text: str) -> list[str]:
     return PLACEHOLDER_RE.findall(text)
 
 
+def is_placeholder_only_text(text: str) -> bool:
+    """True when *text* is only protect markers (and whitespace).
+
+    Config-table key cells are often a single ``⟦C1⟧``. The LLM must not
+    expand them into prose that still contains the marker (#48785
+    ``default_group`` key became a full sentence).
+    """
+    if not text or not extract_placeholders(text):
+        return False
+    remainder = PLACEHOLDER_RE.sub("", text)
+    return remainder.strip() == ""
+
+
 def placeholders_match(source: str, translated: str) -> bool:
     """True when source and translated share the same placeholder multiset.
 

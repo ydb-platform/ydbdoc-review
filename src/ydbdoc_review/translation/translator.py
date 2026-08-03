@@ -25,7 +25,10 @@ from ydbdoc_review.translation.prompts import (
 from ydbdoc_review.translation.schemas import TranslateBatchResponse
 from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
 from ydbdoc_review.validation.heuristics import count_fence_markers
-from ydbdoc_review.validation.markers import placeholders_match
+from ydbdoc_review.validation.markers import (
+    is_placeholder_only_text,
+    placeholders_match,
+)
 from ydbdoc_review.validation.placeholder_repair import repair_translation_placeholders
 from ydbdoc_review.validation.placeholder_roles import placeholder_roles_valid
 
@@ -57,6 +60,14 @@ def validate_segment_translation(source: Segment, translated_text: str) -> None:
         raise TranslationValidationError(
             f"placeholder mismatch for {source.id!r}: "
             f"expected placeholders from source in same order",
+            segment_id=source.id,
+        )
+    if is_placeholder_only_text(source.text) and not is_placeholder_only_text(
+        translated_text
+    ):
+        raise TranslationValidationError(
+            f"placeholder-only segment {source.id!r} must stay marker-only "
+            f"(no prose around ⟦…⟧); got elaboration",
             segment_id=source.id,
         )
     if not placeholder_roles_valid(source, translated_text):
@@ -405,6 +416,10 @@ def translate_segments(
     pending: list[Segment] = []
 
     for seg in segments:
+        # Config-table keys etc.: copy markers as-is — never send to LLM (§6.172).
+        if is_placeholder_only_text(seg.text):
+            translations[seg.id] = seg.text.strip()
+            continue
         if cache is not None:
             key = _cache_key(seg, target_lang=target_lang)
             cached = cache.get(key)
