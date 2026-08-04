@@ -77,8 +77,8 @@ def test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares():
     assert "index.md#sessions" not in fixed
 
 
-def test_pr_48047_ldap_remaps_via_heading_map():
-    """RU {#ldap} vs EN {#ldap-auth-provider} on authentication twin."""
+def test_pr_48047_ldap_does_not_remap_to_en_only_fragment():
+    """§6.174: keep RU ``#ldap``; do not invent ``#ldap-auth-provider``."""
     en_page = (
         "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md"
     )
@@ -101,9 +101,8 @@ def test_pr_48047_ldap_remaps_via_heading_map():
         en_page_path=en_page,
         read_text=files.get,
     )
-    assert "authentication.md#ldap-auth-provider" in fixed
-    assert "authentication.md#ldap." not in fixed
-    assert "authentication.md#ldap)" not in fixed
+    assert "authentication.md#ldap)" in fixed or "authentication.md#ldap\n" in fixed
+    assert "ldap-auth-provider" not in fixed
 
 
 def test_repair_keeps_valid_fragment():
@@ -171,9 +170,9 @@ def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
     assert "](topic.md#" not in fixed
     # Classifier keeps path; Parameters auto-slug counts as declared.
     assert "create-resource-pool-classifier.md#parameters" in fixed
-    # table.md stub: remap stale #partitioning → unique #partitioning_row_table
-    assert "table.md#partitioning_row_table" in fixed
-    assert "table.md#partitioning)" not in fixed
+    # §6.174: do not invent EN-only ``#partitioning_row_table`` — keep RU frag.
+    assert "table.md#partitioning)" in fixed or "table.md#partitioning\n" in fixed
+    assert "partitioning_row_table" not in fixed
 
 
 def test_fragment_declared_accepts_diplodoc_auto_slug():

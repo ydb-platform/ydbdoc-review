@@ -24,6 +24,7 @@ def run_pr_translation(
     per_pr_cache: dict[str, str] | None = None,
     en_toc_reachable: frozenset[str] | None = None,
     docs_text_reader: DocsTextReader | None = None,
+    docs_repo_path: str | None = None,
 ) -> PRTranslationResult:
     """Plan and execute translation for all pairs (sequential, one shared cache)."""
     state = PRRunState(
@@ -37,5 +38,6 @@ def run_pr_translation(
         use_analyze_llm=use_analyze_llm,
         en_toc_reachable=en_toc_reachable,
         docs_text_reader=docs_text_reader,
+        docs_repo_path=docs_repo_path,
     )
     return PRHarness(TRANSLATE_PR_PROFILE).run(state, ctx)

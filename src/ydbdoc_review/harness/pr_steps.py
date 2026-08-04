@@ -82,6 +82,7 @@ class ExecutePairPlansStep:
             config=ctx.config,
             en_toc_reachable=ctx.en_toc_reachable,
             docs_text_reader=ctx.docs_text_reader,
+            docs_repo_path=ctx.docs_repo_path,
         )
         results = []
         for plan in state.plans:

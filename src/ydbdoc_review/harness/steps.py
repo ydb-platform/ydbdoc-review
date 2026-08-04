@@ -478,6 +478,8 @@ class HeuristicsStep:
             ignore_link_basenames=stripped_link_basenames_from_warnings(
                 state.finalize_warnings
             ),
+            docs_text_reader=ctx.docs_text_reader,
+            docs_repo_path=ctx.docs_repo_path,
         )
         for message in state.finalize_warnings:
             bucket = _classify_heuristic(message)

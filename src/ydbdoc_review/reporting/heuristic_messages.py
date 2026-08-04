@@ -77,6 +77,10 @@ def heuristic_location_label(message: str) -> str:
         return "блоки кода"
     if message.startswith("link_locale:") or message.startswith("md_link_parity:"):
         return "ссылки"
+    if message.startswith("href_parity:") or message.startswith("inbound_fragment:"):
+        return "ссылки"
+    if message.startswith("anchor_parity:"):
+        return "якоря"
     if message.startswith("include_parity:") or message.startswith("include_target:"):
         return "include"
     if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
@@ -287,6 +291,25 @@ def _humanize_heuristic_problem(message: str) -> str:
         return (
             f"В EN нет ссылок на страницы, которые есть в RU: {m.group(1)}. "
             "Добавьте те же ``.md``-ссылки или обновите путь, если RU переехал."
+        )
+
+    if message.startswith("href_parity:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"Внутренние ссылки EN должны совпадать с RU один в один: {detail}. "
+            "Скопируйте те же ``path#fragment`` / ``[{#T}](…)`` без EN-only якорей."
+        )
+    if message.startswith("anchor_parity:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"Явные ``{{#id}}`` в EN должны совпадать с RU: {detail}. "
+            "Не переименовывайте якоря при переводе."
+        )
+    if message.startswith("inbound_fragment:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"Другая EN-страница ссылается на якорь, которого нет после перевода: "
+            f"{detail}. Поправьте inbound-ссылку или верните якорь как в RU."
         )
 
     if message.startswith("include_parity:"):

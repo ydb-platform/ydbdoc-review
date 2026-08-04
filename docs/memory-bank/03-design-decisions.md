@@ -3981,5 +3981,27 @@ percent-encoded protect markers — not ``yfmvar-*``.
 
 **Tests:** ``test_unrestored_yfmvar_blocks``.
 
+### 6.174. RU↔EN link 1:1 parity; no EN-only fragment remaps (#48792, 2026-08-04)
+
+**Problem:** Merging [#48792](https://github.com/ydb-platform/ydb/pull/48792)
+rewrote EN ``authentication.md`` ``{#ldap-auth-provider}`` → ``{#ldap}`` (matching
+RU). ``create-resource-pool-classifier.md`` still linked to
+``#ldap-auth-provider`` → YFM010 on ``main``. QA was 🟢: scope was only the
+translated files; §6.142 *outbound* repair had taught the pipeline to **create**
+EN-only fragments.
+
+**Decision (simplify):**
+
+1. **Policy:** internal hrefs and explicit ``{#id}`` on a translated page must
+   match the RU twin one-to-one (same path#fragment, no extras).
+2. Blocking heuristics: ``href_parity:``, ``anchor_parity:``,
+   ``inbound_fragment:`` (other EN pages → missing frag on the new EN page).
+3. ``repair_en_fragments`` only retargets **paths** when the fragment id is
+   shared (``index.md#sessions`` → ``execution_process.md#sessions``). It no
+   longer remaps ``#ldap`` → ``#ldap-auth-provider`` or prefix-extends frags.
+
+**Tests:** ``tests/unit/test_href_parity.py``,
+``test_pr_48047_ldap_does_not_remap_to_en_only_fragment``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

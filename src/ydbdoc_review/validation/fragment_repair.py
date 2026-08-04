@@ -1,18 +1,16 @@
-"""Repair EN ``path#fragment`` links that Diplodoc would flag as Title not found.
+"""Repair EN ``path#fragment`` when the **path** is wrong but the frag is shared.
 
-Covers failure modes from auto-translate (§6.142 / #48047, §6.153 / #48012,
-§6.158 / #48223):
+§6.174: do **not** remap RU fragments onto EN-only ids (``#ldap`` must stay
+``#ldap``). Cross-locale id drift is caught by ``href_parity`` /
+``anchor_parity`` / ``inbound_fragment`` instead.
 
-1. Stale autotitle path — RU merge-commit still has ``index.md#sessions`` while
-   the heading lives on ``execution_process.md`` (EN baseline / main already
-   correct, or RU main overlay missed).
-2. Cross-locale explicit anchors — RU ``{#ldap}`` vs EN ``{#ldap-auth-provider}``
-   on the twin page; ``force_exact`` copies the RU fragment verbatim.
-3. Both RU and EN baseline stale — discover a sibling page that declares the
-   fragment via the local toc (or ``index.md`` → ``execution_process.md`` hint).
-4. Do **not** toc-retarget when the original EN target file already exists
-   (§6.158): that produced bare ``topic.md`` / ``create-resource-pool.md``
-   under ``en/core/dev/`` and broke ``build-docs`` with unreachable links.
+Still covers (§6.142 / #48047, §6.153 / #48012, §6.158 / #48223):
+
+1. Stale autotitle path — ``index.md#sessions`` while the heading lives on
+   ``execution_process.md`` (same fragment id on both locales).
+2. Both RU and EN baseline stale — discover a sibling via local toc.
+3. Do **not** toc-retarget when the original EN target file already exists
+   (§6.158): bare basenames under the wrong folder break ``build-docs``.
 """
 
 from __future__ import annotations
@@ -27,7 +25,6 @@ from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_lo
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
 from ydbdoc_review.validation.yfm_anchor import (
-    build_heading_anchor_map,
     diplodoc_auto_slug,
     split_heading_anchor_suffix,
 )
@@ -36,14 +33,6 @@ from ydbdoc_review.validation.yfm_anchor import _iter_headings
 DocsReader = Callable[[str], str | None]
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
-
-
-def _docs_twin_path(path: str) -> str | None:
-    if "/docs/en/" in path:
-        return path.replace("/docs/en/", "/docs/ru/", 1)
-    if "/docs/ru/" in path:
-        return path.replace("/docs/ru/", "/docs/en/", 1)
-    return None
 
 
 def _resolve_href_path(page_path: str, href_path: str) -> str | None:
@@ -153,15 +142,6 @@ def _rewrite_href(text: str, old: str, new: str) -> str:
     # Ordinary markdown links with the same target.
     text = text.replace(f"]({old})", f"]({new})")
     return text
-
-
-def _heading_map_for_targets(
-    ru_md: str | None,
-    en_md: str | None,
-) -> dict[str, str]:
-    if not ru_md or not en_md:
-        return {}
-    return build_heading_anchor_map(parse_markdown(ru_md), parse_markdown(en_md))
 
 
 def _find_href_declaring_frag_via_toc(
@@ -312,88 +292,18 @@ def repair_en_fragments(
                         out = _rewrite_href(out, href, ru_href)
                         continue
 
-        # 3) Same path, different explicit anchors on RU/EN twins (ldap case).
-        ru_twin = _docs_twin_path(abs_path)
-        ru_md = read_text(ru_twin) if ru_twin else None
-        if en_target is None:
-            en_target = read_text(abs_path)
-        # Expand include stubs so heading map sees real content.
-        en_for_map = en_target
-        if en_target is not None:
-            for inc in collect_yfm_includes(en_target):
-                resolved = resolve_locale_md_path(abs_path, inc.path)
-                if resolved is None:
-                    continue
-                included = read_text(resolved)
-                if included:
-                    en_for_map = included
-                    break
-        ru_for_map = ru_md
-        if ru_md is not None and ru_twin:
-            for inc in collect_yfm_includes(ru_md):
-                resolved = resolve_locale_md_path(ru_twin, inc.path)
-                if resolved is None:
-                    continue
-                included = read_text(resolved)
-                if included:
-                    ru_for_map = included
-                    break
-        mapping = _heading_map_for_targets(ru_for_map, en_for_map)
-        new_frag = mapping.get(frag)
-        if new_frag and new_frag != frag:
-            if en_for_map and fragment_declared_in_markdown(
-                en_for_map,
-                new_frag,
-                page_path=abs_path,
+        # 3) Same fragment on a sibling page — only when the original target is
+        # missing, or is a stale hub ``index.md`` (§6.153 sessions). If the
+        # linked file exists but lacks the frag, leave it: §6.174 / §6.158 —
+        # do not invent another path or EN-only fragment id.
+        if en_target is None or PurePosixPath(abs_path).name == "index.md":
+            found = _find_href_declaring_frag_via_toc(
+                en_page_path=en_page_path,
+                broken_abs_path=abs_path,
+                frag=frag,
                 read_text=read_text,
-            ):
-                new_href = f"{path_part}#{new_frag}"
-                out = _rewrite_href(out, href, new_href)
-                continue
-
-        # 3b) Same page: unique prefix / auto-slug style match on expanded body
-        # (RU ``#partitioning`` vs EN ``{#partitioning_row_table}``).
-        if en_for_map:
-            prefix_hits = _prefix_fragment_candidates(en_for_map, frag)
-            if len(prefix_hits) == 1:
-                new_href = f"{path_part}#{prefix_hits[0]}"
-                out = _rewrite_href(out, href, new_href)
-                continue
-
-        # 4) Fragment still missing: find sibling page via local toc (§6.153).
-        # Relative href is always computed from the linking page (§6.158) so we
-        # never emit a toc-folder basename that is unreachable from ``en_page_path``.
-        found = _find_href_declaring_frag_via_toc(
-            en_page_path=en_page_path,
-            broken_abs_path=abs_path,
-            frag=frag,
-            read_text=read_text,
-        )
-        if found:
-            out = _rewrite_href(out, href, found)
+            )
+            if found:
+                out = _rewrite_href(out, href, found)
 
     return out
-
-
-def _prefix_fragment_candidates(md: str, frag: str) -> list[str]:
-    """Anchors that equal ``frag`` or uniquely extend it (``frag_…``)."""
-    if not md or not frag:
-        return []
-    found: list[str] = []
-    for match in re.finditer(r"\{#([^}]+)\}", md):
-        anchor = match.group(1)
-        if anchor == frag or anchor.startswith(frag + "_"):
-            found.append(anchor)
-    doc = parse_markdown(md)
-    for heading in _iter_headings(doc.children):
-        from ydbdoc_review.rendering.markdown_renderer import _render_inline
-
-        plain = _render_inline(heading.children).strip()
-        title, explicit = split_heading_anchor_suffix(plain)
-        anchor = explicit or diplodoc_auto_slug(title)
-        if not anchor:
-            continue
-        if anchor == frag or anchor.startswith(frag + "_"):
-            if anchor not in found:
-                found.append(anchor)
-    return found

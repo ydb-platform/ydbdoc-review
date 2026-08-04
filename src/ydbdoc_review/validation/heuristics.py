@@ -398,6 +398,12 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "blocking"
     if message.startswith("md_link_parity:"):
         return "blocking"
+    if message.startswith("href_parity:"):
+        return "blocking"
+    if message.startswith("anchor_parity:"):
+        return "blocking"
+    if message.startswith("inbound_fragment:"):
+        return "blocking"
     if message.startswith("unrestored_placeholder:"):
         return "blocking"
     if message.startswith("unrestored_yfmvar:"):
@@ -419,6 +425,8 @@ def _collect_raw_heuristics(
     source_file: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
     ignore_link_basenames: set[str] | frozenset[str] | None = None,
+    docs_text_reader=None,
+    docs_repo_path: str | None = None,
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
@@ -427,6 +435,11 @@ def _collect_raw_heuristics(
     from ydbdoc_review.validation.fence_integrity import (
         check_absolute_paths_in_fences,
         check_fence_body_copy,
+    )
+    from ydbdoc_review.validation.href_parity import (
+        check_heading_anchor_parity,
+        check_href_parity,
+        check_inbound_fragments,
     )
     from ydbdoc_review.validation.link_locale import check_link_locale_in_en
     from ydbdoc_review.validation.ru_source_bugs import (
@@ -474,6 +487,36 @@ def _collect_raw_heuristics(
             ignore_basenames=ignore_link_basenames,
         )
     )
+    raw.extend(
+        check_href_parity(
+            source_text,
+            target_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ignore_basenames=ignore_link_basenames,
+        )
+    )
+    raw.extend(
+        check_heading_anchor_parity(
+            source_text,
+            target_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+    )
+    if source_file and target_lang.lower() in {"en", "english"}:
+        # Prefer the in-flight EN text for the page under review; other EN
+        # pages come from the worktree / upstream tip (§6.174 / #48792).
+        raw.extend(
+            check_inbound_fragments(
+                source_file.replace("/docs/ru/", "/docs/en/", 1)
+                if "/docs/ru/" in source_file
+                else source_file,
+                target_text,
+                repo_path=docs_repo_path,
+                read_text=docs_text_reader,
+            )
+        )
     raw.extend(check_fence_parity(normalized_source_text, target_text))
     raw.extend(
         check_fence_body_copy(
@@ -512,6 +555,8 @@ def run_file_heuristics_classified(
     source_file: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
     ignore_link_basenames: set[str] | frozenset[str] | None = None,
+    docs_text_reader=None,
+    docs_repo_path: str | None = None,
 ) -> ClassifiedHeuristics:
     """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
     out = ClassifiedHeuristics()
@@ -524,6 +569,8 @@ def run_file_heuristics_classified(
         source_file=source_file,
         en_toc_reachable=en_toc_reachable,
         ignore_link_basenames=ignore_link_basenames,
+        docs_text_reader=docs_text_reader,
+        docs_repo_path=docs_repo_path,
     ):
         bucket = _classify_heuristic(message)
         getattr(out, bucket).append(message)

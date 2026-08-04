@@ -28,6 +28,7 @@ class HarnessContext:
     usage_record_start: int
     en_toc_reachable: frozenset[str] | None = None
     docs_text_reader: DocsTextReader | None = None
+    docs_repo_path: str | None = None
 
     @classmethod
     def from_options(
@@ -47,6 +48,7 @@ class HarnessContext:
         usage_record_start: int | None = None,
         en_toc_reachable: frozenset[str] | None = None,
         docs_text_reader: DocsTextReader | None = None,
+        docs_repo_path: str | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -72,4 +74,5 @@ class HarnessContext:
             ),
             en_toc_reachable=en_toc_reachable,
             docs_text_reader=docs_text_reader,
+            docs_repo_path=docs_repo_path,
         )

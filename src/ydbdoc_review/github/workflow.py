@@ -269,6 +269,7 @@ def _run_verify_pairs(
     *,
     en_toc_reachable: frozenset[str] | None = None,
     docs_text_reader=None,
+    docs_repo_path: str | None = None,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
     state = PRRunState(contents=contents)
@@ -278,6 +279,7 @@ def _run_verify_pairs(
         config=config,
         en_toc_reachable=en_toc_reachable,
         docs_text_reader=docs_text_reader,
+        docs_repo_path=docs_repo_path,
     )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
@@ -456,6 +458,7 @@ def run_doc_translate(
                 use_analyze_llm=False,
                 en_toc_reachable=en_toc_reachable,
                 docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_repo_path=repo_path,
             )
         else:
             pr_result = PRTranslationResult()
@@ -878,6 +881,7 @@ def run_doc_verify(
                 cfg,
                 en_toc_reachable=en_toc_reachable,
                 docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_repo_path=repo_path,
             )
         else:
             pr_result = PRTranslationResult()
