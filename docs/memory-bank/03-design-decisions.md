@@ -3961,5 +3961,25 @@ prose wrapping the same marker. ``placeholders_match`` still passed.
 
 **Tests:** ``tests/unit/test_placeholder_only_segments.py``.
 
+### 6.173. Block unrestored ``yfmvar-N-yfmvarend`` in EN (#48812, 2026-08-04)
+
+**Problem:** [#48812](https://github.com/ydb-platform/ydb/pull/48812) cleaned EN
+``indexes.md`` that still had Cyrillic and broken hrefs like
+``](yfmvar-0-yfmvarend#sync)`` instead of ``{{ concept_secondary_index }}``.
+Damage came from an earlier auto-translate ([#47995](https://github.com/ydb-platform/ydb/pull/47995)).
+
+**Root cause:** ``link_with_variable`` replaces ``{{ var }}`` in hrefs with
+``yfmvar-N-yfmvarend`` during parse. If restore fails, the stand-in leaks into
+published EN. ``unrestored_placeholder`` (§6.163) only matches ``⟦…⟧`` /
+percent-encoded protect markers — not ``yfmvar-*``.
+
+**Decision:**
+
+1. New blocking heuristic ``unrestored_yfmvar:`` on leftover
+   ``yfmvar-\d+-yfmvarend`` in EN.
+2. Russian QA copy in ``heuristic_messages`` (плейсхолдеры yfmvar).
+
+**Tests:** ``test_unrestored_yfmvar_blocks``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

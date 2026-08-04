@@ -27,6 +27,9 @@ _UNRESTORED_PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
 _UNRESTORED_PLACEHOLDER_ENCODED = re.compile(
     r"%E2%9F%A6[^%]*%E2%9F%A7", re.IGNORECASE
 )
+# Parser URL stand-ins from link_with_variable; must be restored to ``{{ var }}``
+# before publish (#47995 / #48812 left ``yfmvar-0-yfmvarend`` in EN hrefs).
+_UNRESTORED_YFMVAR = re.compile(r"yfmvar-\d+-yfmvarend", re.IGNORECASE)
 _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 _LENGTH_RATIO_MIN = 0.55
@@ -109,6 +112,35 @@ def check_unrestored_placeholders(
     extra = f", … (+{len(unique) - 8})" if len(unique) > 8 else ""
     return [
         f"unrestored_placeholder: {len(found)} leftover protect marker(s) in EN: "
+        f"{preview}{extra}"
+    ]
+
+
+def check_unrestored_yfmvar_placeholders(
+    target_text: str, *, target_lang: str
+) -> list[str]:
+    """``yfmvar-N-yfmvarend`` left in EN (link_with_variable failed to restore).
+
+    These are parse-time stand-ins for ``{{ var }}`` inside markdown hrefs.
+    If they survive into the published page, links are broken (§6.173 / #48812).
+    """
+    if target_lang.lower() not in {"en", "english"}:
+        return []
+    found = _UNRESTORED_YFMVAR.findall(target_text)
+    if not found:
+        return []
+    seen: set[str] = set()
+    unique: list[str] = []
+    for token in found:
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(token)
+    preview = ", ".join(f"`{t}`" for t in unique[:8])
+    extra = f", … (+{len(unique) - 8})" if len(unique) > 8 else ""
+    return [
+        f"unrestored_yfmvar: {len(found)} leftover yfmvar placeholder(s) in EN: "
         f"{preview}{extra}"
     ]
 
@@ -368,6 +400,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "blocking"
     if message.startswith("unrestored_placeholder:"):
         return "blocking"
+    if message.startswith("unrestored_yfmvar:"):
+        return "blocking"
     if message.startswith("include_parity:"):
         return "blocking"
     if message.startswith("include_target:"):
@@ -411,6 +445,9 @@ def _collect_raw_heuristics(
     raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
     raw.extend(
         check_unrestored_placeholders(target_text, target_lang=target_lang)
+    )
+    raw.extend(
+        check_unrestored_yfmvar_placeholders(target_text, target_lang=target_lang)
     )
     # Any fence language (yaml/yql/go/text/…) — hard gate for residual RU (§6.164).
     # Comment / text-fence helpers still auto-translate; this catches leftovers

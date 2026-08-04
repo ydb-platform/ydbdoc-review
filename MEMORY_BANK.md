@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-03  
-**Current focus:** §6.172 — placeholder-only table keys stay marker-only (#48785).
+**Last updated:** 2026-08-04  
+**Current focus:** §6.173 — block leaked ``yfmvar-N-yfmvarend`` in EN (#48812).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-04 | **§6.173** — blocking heuristic for leftover ``yfmvar-N-yfmvarend`` in EN ([ydb#48812](https://github.com/ydb-platform/ydb/pull/48812)) |
 | 2026-08-03 | **§6.172** — placeholder-only segments (config table keys) copy as-is; reject prose elaboration ([ydb#48785](https://github.com/ydb-platform/ydb/pull/48785) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-08-03 | **§6.171** — no LCS seed on high structure drift or empty/V-only paragraphs ([ydb#48780](https://github.com/ydb-platform/ydb/pull/48780) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |
 | 2026-08-03 | **§6.170** — partial seed only when placeholder multiset matches; LCS key includes ph signature ([ydb#48773](https://github.com/ydb-platform/ydb/pull/48773) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |

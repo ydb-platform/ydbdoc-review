@@ -15,6 +15,7 @@ from ydbdoc_review.validation.heuristics import (
     check_list_tab_parity,
     check_md_link_parity,
     check_unrestored_placeholders,
+    check_unrestored_yfmvar_placeholders,
     run_file_heuristics,
     run_file_heuristics_classified,
     validate_navigation_merge_warnings,
@@ -46,6 +47,26 @@ def test_unrestored_placeholder_blocks():
         target_lang="en",
     )
     assert any(m.startswith("unrestored_placeholder:") for m in classified.blocking)
+
+
+def test_unrestored_yfmvar_blocks():
+    """§6.173 / #48812: leaked link_with_variable stand-ins must block merge."""
+    text = (
+        "Global indexes, [sync](yfmvar-0-yfmvarend#sync) or "
+        "[async](yfmvar-1-yfmvarend#async), are hidden tables.\n"
+    )
+    msgs = check_unrestored_yfmvar_placeholders(text, target_lang="en")
+    assert len(msgs) == 1
+    assert msgs[0].startswith("unrestored_yfmvar:")
+    assert "yfmvar-0-yfmvarend" in msgs[0]
+    classified = run_file_heuristics_classified(
+        "Индексы.\n",
+        text,
+        normalized_source_text="Индексы.\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("unrestored_yfmvar:") for m in classified.blocking)
 
 
 def test_unrestored_placeholder_blocks_glossary_v2():
