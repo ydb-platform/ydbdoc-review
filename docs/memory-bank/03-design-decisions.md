@@ -4003,5 +4003,23 @@ EN-only fragments.
 **Tests:** ``tests/unit/test_href_parity.py``,
 ``test_pr_48047_ldap_does_not_remap_to_en_only_fragment``.
 
+### 6.175. Post «перевод не требуется» on bilingual-only noop (#48751, 2026-08-05)
+
+**Problem:** [#48751](https://github.com/ydb-platform/ydb/pull/48751) changed RU+EN
+glossary in one PR. ``doc_translate`` correctly skipped auto-translate (§6.76)
+via ``skip_en_paths``, logged ``No doc or navigation pairs``, exited early —
+and **never posted** the source-PR comment that ``build_source_pr_comment``
+already knew how to write for bilingual skips.
+
+**Root cause:** bilingual pairs are filtered out of ``pairs`` before analyze, so
+``PRTranslationResult`` was empty and the early return skipped
+``_safe_post_issue_comment``.
+
+**Decision:** on empty ``pairs``/``nav_pairs``, synthesize skipped
+``PairRunResult``s from ``bilingual_en_mirrors`` and post the §6.76 source
+summary when any markdown bilingual skips exist.
+
+**Tests:** ``test_run_doc_translate_bilingual_skip_posts_source_comment``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

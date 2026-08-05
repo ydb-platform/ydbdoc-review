@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-04  
-**Current focus:** §6.174 — RU↔EN href/anchor 1:1 parity; drop EN-only fragment remaps (#48792).
+**Last updated:** 2026-08-05  
+**Current focus:** §6.175 — bilingual noop must post «перевод не требуется» (#48751).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-05 | **§6.175** — bilingual-only ``doc_translate`` posts «перевод не требуется» ([ydb#48751](https://github.com/ydb-platform/ydb/pull/48751)) |
 | 2026-08-04 | **§6.174** — href/anchor 1:1 parity + inbound fragment check; stop remapping to EN-only ids ([ydb#48792](https://github.com/ydb-platform/ydb/pull/48792)) |
 | 2026-08-04 | **§6.173** — blocking heuristic for leftover ``yfmvar-N-yfmvarend`` in EN ([ydb#48812](https://github.com/ydb-platform/ydb/pull/48812)) |
 | 2026-08-03 | **§6.172** — placeholder-only segments (config table keys) copy as-is; reject prose elaboration ([ydb#48785](https://github.com/ydb-platform/ydb/pull/48785) / [#46798](https://github.com/ydb-platform/ydb/pull/46798)) |

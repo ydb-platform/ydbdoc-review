@@ -55,7 +55,6 @@ from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
     make_repo_scope_readers,
@@ -63,6 +62,11 @@ from ydbdoc_review.navigation.scope_planner import (
     navigation_pairs_from_plan,
     plan_translation_scope,
     synthetic_changes_from_plan,
+)
+from ydbdoc_review.pipeline.analyze import (
+    BILINGUAL_SKIP_SUMMARY,
+    PairContent,
+    PairPlan,
 )
 from ydbdoc_review.pipeline.completeness import bilingual_en_mirrors, completeness_gaps
 from ydbdoc_review.pipeline.navigation_merge import (
@@ -75,10 +79,11 @@ from ydbdoc_review.pipeline.pairs import (
     DocPair,
     build_navigation_pairs,
     build_verify_navigation_pairs,
+    counterpart,
     filter_translation_pr_verify_scope,
 )
 from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
-from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
@@ -183,6 +188,38 @@ def _safe_post_issue_comment(
             exc,
         )
         return None
+
+
+def _pr_result_for_bilingual_skips(
+    en_paths: frozenset[str] | set[str],
+    *,
+    docs_root: str,
+) -> PRTranslationResult:
+    """Synthetic skipped pair results so §6.76 source comment can fire (#48751)."""
+    results: list[PairRunResult] = []
+    for en_path in sorted(en_paths):
+        if not en_path.endswith(".md"):
+            continue
+        ru_path = counterpart(en_path, docs_root)
+        if ru_path is None:
+            continue
+        pair = DocPair(
+            ru_path=ru_path,
+            en_path=en_path,
+            ru_changed=True,
+            en_changed=True,
+        )
+        plan = PairPlan(
+            pair=pair,
+            action="skip",
+            source_path=ru_path,
+            target_path=en_path,
+            source_lang="ru",
+            target_lang="en",
+            summary=BILINGUAL_SKIP_SUMMARY,
+        )
+        results.append(PairRunResult(plan=plan, skipped=True))
+    return PRTranslationResult(pair_results=results)
 
 
 def _delete_stale_verify_fixup(
@@ -405,6 +442,34 @@ def run_doc_translate(
     )
     if not pairs and not nav_pairs:
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
+        # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
+        # ``skip_en_paths`` before analyze — still post «перевод не требуется»
+        # (§6.76 / #48751). Without this early path the comment never appeared.
+        pr_result = _pr_result_for_bilingual_skips(
+            bilingual_skip, docs_root=docs_root
+        )
+        job.pr_result = pr_result
+        if pr_result.pair_results and not dry_run:
+            elapsed = time.monotonic() - started
+            meta = ReportMeta(
+                mode="doc_translate", report_number=1, elapsed_s=elapsed
+            )
+            job.source_comment_url = _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                append_retention_footer(
+                    build_source_pr_comment(
+                        pr_result,
+                        translation_pr_number=None,
+                        meta=meta,
+                        config=cfg,
+                        committed=False,
+                    )
+                ),
+                label="source PR summary",
+            )
         if ops_ctx is not None:
             finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job

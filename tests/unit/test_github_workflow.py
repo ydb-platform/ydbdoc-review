@@ -205,6 +205,71 @@ def test_run_doc_translate_no_pairs(git_repo: str):
     assert result.pr_result.pair_results == []
 
 
+def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
+    """§6.175 / #48751: bilingual noop must still comment «перевод не требуется»."""
+    from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+    pull = {
+        "title": "Fix glossary links",
+        "merged": True,
+        "merge_commit_sha": "deadbeef",
+        "head": {
+            "ref": "docs-glossary",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    ru = "ydb/docs/ru/core/concepts/glossary.md"
+    en = "ydb/docs/en/core/concepts/glossary.md"
+    changes = [(ru, "modified"), (en, "modified")]
+    scope = TranslationScopePlan(
+        doc_ru_paths=frozenset({ru}),
+        doc_from_diff=frozenset({ru}),
+        doc_from_main=frozenset(),
+        nav_ru_paths=frozenset(),
+        nav_from_diff=frozenset(),
+        nav_from_main=frozenset(),
+    )
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        client = mock_gh.return_value
+        client.get_pull.return_value = pull
+        client.post_issue_comment.return_value = (
+            "https://github.com/o/r/pull/48751#issuecomment-1"
+        )
+        with patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=changes,
+        ):
+            with patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                return_value=changes,
+            ):
+                with patch(
+                    "ydbdoc_review.github.workflow.plan_translation_scope",
+                    return_value=scope,
+                ):
+                    with patch(
+                        "ydbdoc_review.github.workflow.ensure_commit",
+                        return_value=False,
+                    ):
+                        result = run_doc_translate(
+                            repo_path=git_repo,
+                            github_repo="o/r",
+                            pr_number=48751,
+                            dry_run=False,
+                            config=load_config(env=_env()),
+                        )
+    assert result.translation_pr_number is None
+    assert len(result.pr_result.pair_results) == 1
+    assert result.pr_result.pair_results[0].skipped
+    assert result.source_comment_url
+    posted = client.post_issue_comment.call_args[0][3]
+    assert "перевод не требуется" in posted
+    assert "§6.76" in posted
+    assert "bilingual" in posted.lower()
+
+
 def test_run_doc_translate_posts_comments(git_repo: str):
     pull = {
         "title": "docs",
