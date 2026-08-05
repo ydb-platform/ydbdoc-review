@@ -117,20 +117,33 @@ def align_translations_from_target(
 
 
 def _segment_lcs_key(seg: Segment) -> tuple[object, ...]:
-    """LCS key: kind + placeholder-letter signature (§6.170).
+    """LCS key: kind + placeholder-letter signature (+ heading anchor) (§6.170 / §6.176).
 
     Kind-only LCS on heavily divergent pages (e.g. authentication.md 141 vs 90)
     pairs unrelated paragraphs and seeds EN text whose ``⟦…⟧`` set does not
     match the RU segment — reinsert then leaves literal markers in the file.
+
+    Headings also key on explicit ``{#id}`` so LCS cannot seed «Precommit checks»
+    onto «Заполните описание…» when anchors differ (#49040 / #48968).
     """
     ph_letters = tuple(
         p.placeholder[1] for p in seg.placeholders if len(p.placeholder) >= 2
     )
+    if seg.kind == SegmentKind.HEADING:
+        return (seg.kind, ph_letters, seg.heading_anchor)
     return (seg.kind, ph_letters)
 
 
-def partial_seed_is_trustworthy(src: Segment, en_text: str) -> bool:
-    """True when an LCS EN candidate is safe to reuse (§6.171 / §6.172).
+_MISSING = object()
+
+
+def partial_seed_is_trustworthy(
+    src: Segment,
+    en_text: str,
+    *,
+    target_heading_anchor: str | None | object = _MISSING,
+) -> bool:
+    """True when an LCS EN candidate is safe to reuse (§6.171 / §6.172 / §6.176).
 
     Placeholder multiset match alone is not enough: empty / ``⟦V⟧``-only
     paragraphs share the same signature and LCS still swaps meaning (LDAP
@@ -138,11 +151,20 @@ def partial_seed_is_trustworthy(src: Segment, en_text: str) -> bool:
 
     Placeholder-only sources (config table keys) must stay marker-only —
     never seed prose that wraps the same ``⟦C1⟧`` (#48785 ``default_group``).
+
+    When ``target_heading_anchor`` is passed (partial LCS align), headings
+    require matching explicit ``{#anchor}`` (or both absent).
     """
     if not placeholders_match(src.text, en_text):
         return False
     if is_placeholder_only_text(src.text):
         return is_placeholder_only_text(en_text)
+    if (
+        src.kind == SegmentKind.HEADING
+        and target_heading_anchor is not _MISSING
+        and src.heading_anchor != target_heading_anchor
+    ):
+        return False
     if non_variable_placeholders(src.text):
         return True
     if src.kind == SegmentKind.HEADING and len(src.text) <= 80:
@@ -155,11 +177,12 @@ def partial_align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
 ) -> dict[str, str]:
-    """Best-effort seed map when full structural align fails (§6.168–§6.171).
+    """Best-effort seed map when full structural align fails (§6.168–§6.176).
 
-    LCS over ``(kind, placeholder-letter signature)``. Refuse the whole partial
-    map when segment-count drift is high. Keep only trustworthy pairs (non-V
-    placeholder fingerprint, or short heading with length parity).
+    LCS over ``(kind, placeholder-letter signature[, heading_anchor])``. Refuse
+    the whole partial map when segment-count drift is high. Keep only
+    trustworthy pairs (non-V placeholder fingerprint, or short heading with
+    matching ``{#id}`` and length parity).
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
     n_src = len(source_segments)
@@ -197,10 +220,15 @@ def partial_align_translations_from_target(
     seeded: dict[str, str] = {}
     for si, ti in pairs:
         src = source_segments[si]
+        tgt_seg = target_segments_raw[ti]
         tgt_one = normalize_target_segments_to_source(
-            [src], [target_segments_raw[ti]]
+            [src], [tgt_seg]
         )[0]
-        if not partial_seed_is_trustworthy(src, tgt_one.text):
+        if not partial_seed_is_trustworthy(
+            src,
+            tgt_one.text,
+            target_heading_anchor=tgt_seg.heading_anchor,
+        ):
             continue
         seeded[src.id] = tgt_one.text
     return seeded

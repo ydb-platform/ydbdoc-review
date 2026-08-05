@@ -108,7 +108,11 @@ class _ExtractState:
             )
         elif isinstance(block, Heading):
             self._emit_inline_segment(
-                SegmentKind.HEADING, block.children, ast_path, path
+                SegmentKind.HEADING,
+                block.children,
+                ast_path,
+                path,
+                heading_anchor=block.anchor,
             )
         elif isinstance(block, BulletList) or isinstance(block, OrderedList):
             for j, item in enumerate(block.children):
@@ -215,6 +219,8 @@ class _ExtractState:
         inline_children: list,
         ast_path: list,
         path: list[str],
+        *,
+        heading_anchor: str | None = None,
     ) -> None:
         if not inline_children:
             return
@@ -229,6 +235,7 @@ class _ExtractState:
                 text=text,
                 placeholders=placeholders,
                 ast_path=list(ast_path),
+                heading_anchor=heading_anchor if kind == SegmentKind.HEADING else None,
             )
         )
 

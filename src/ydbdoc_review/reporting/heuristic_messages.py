@@ -71,6 +71,8 @@ def heuristic_location_label(message: str) -> str:
         return "плейсхолдеры"
     if message.startswith("unrestored_yfmvar:"):
         return "плейсхолдеры (yfmvar)"
+    if message.startswith("broken_inline_code:"):
+        return "разметка"
     if message.startswith("fence_body_copy:") or message.startswith("fence_path_stripped:"):
         return "блок кода"
     if message.startswith("fence_parity:"):
@@ -197,6 +199,13 @@ def _humanize_heuristic_problem(message: str) -> str:
             f"(`yfmvar-N-yfmvarend` вместо `{{{{ var }}}}`): {detail}. "
             "Ссылки сломаны — переведите заново или восстановите "
             "`{{ … }}` в href вручную."
+        )
+    if message.startswith("broken_inline_code:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            "В EN сломана разметка inline code / bold "
+            f"(пустые скобки или backtick внутри `**…**`): {detail}. "
+            "Восстановите `` `.ext` `` и путь целиком, как в RU."
         )
     if message.startswith("cyrillic_in_code_fence:"):
         detail = message.split(":", 1)[1].strip()

@@ -7,6 +7,7 @@ from textwrap import dedent
 from ydbdoc_review.validation.heuristics import (
     bump_verdict_for_blocking_heuristics,
     bump_verdict_for_heuristics,
+    check_broken_inline_code_markup,
     check_cyrillic_in_en,
     check_cyrillic_in_en_all_fences,
     check_fence_parity,
@@ -67,6 +68,27 @@ def test_unrestored_yfmvar_blocks():
         target_lang="en",
     )
     assert any(m.startswith("unrestored_yfmvar:") for m in classified.blocking)
+
+
+def test_broken_inline_code_markup_blocks():
+    """§6.176 / #49040: mangled `.pub` bold+backtick and empty ( extension)."""
+    text = (
+        "Select the file with the public key ( extension) from those created, "
+        "for example **/home/user/.ssh/id_ed25519`.pub`**.\n"
+    )
+    msgs = check_broken_inline_code_markup(text, target_lang="en")
+    assert len(msgs) >= 2
+    assert all(m.startswith("broken_inline_code:") for m in msgs)
+    classified = run_file_heuristics_classified(
+        "Ключ (расширение `.pub`), например **/home/user/.ssh/id_ed25519.pub**.\n",
+        text,
+        normalized_source_text=(
+            "Ключ (расширение `.pub`), например **/home/user/.ssh/id_ed25519.pub**.\n"
+        ),
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("broken_inline_code:") for m in classified.blocking)
 
 
 def test_unrestored_placeholder_blocks_glossary_v2():

@@ -4021,5 +4021,34 @@ summary when any markdown bilingual skips exist.
 
 **Tests:** ``test_run_doc_translate_bilingual_skip_posts_source_comment``.
 
+### 6.176. Partial seed headings by ``{#anchor}``; block mangled inline code (#49040 / #48968, 2026-08-05)
+
+**Problem:** Translation PR [#49040](https://github.com/ydb-platform/ydb/pull/49040)
+(from [#48968](https://github.com/ydb-platform/ydb/pull/48968)) had QA 🟢 but bad EN
+``suggest-change.md``:
+
+1. ``### Precommit checks {#create_pr_desc}`` — body is Changelog / PR description
+   (RU ``Заполните описание… {#create_pr_desc}``); next section correctly
+   ``Preliminary checks {#precommit_checks}``.
+2. Mangled SSH path: ``( extension)`` and
+   ``**/home/user/.ssh/id_ed25519`.pub`**`` instead of ``(расширение `.pub`)`` /
+   ``**/…/id_ed25519.pub**``.
+
+**Root cause:** partial LCS seed (§6.168–§6.171) keyed headings by kind only
+(+ length ratio). When RU added ``{#create_pr_desc}`` and kept
+``{#precommit_checks}``, LCS paired the new RU heading with stale EN
+«Precommit checks». Render then attached the RU anchor → wrong title, right id.
+The ``.pub`` damage was model/critic noise that heuristics never blocked.
+
+**Decision:**
+
+1. Store explicit ``heading_anchor`` on ``Segment``; include it in the partial
+   LCS key; refuse heading seeds when anchors differ (§6.176 gate).
+2. Blocking heuristic ``broken_inline_code:`` for bold+mid-path backtick nesting
+   and empty ``( extension)`` parentheticals.
+
+**Tests:** ``test_partial_align_rejects_heading_with_mismatched_anchor``,
+``test_broken_inline_code_markup_blocks``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

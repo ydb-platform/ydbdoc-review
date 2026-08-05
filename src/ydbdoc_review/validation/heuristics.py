@@ -31,6 +31,12 @@ _UNRESTORED_PLACEHOLDER_ENCODED = re.compile(
 # before publish (#47995 / #48812 left ``yfmvar-0-yfmvarend`` in EN hrefs).
 _UNRESTORED_YFMVAR = re.compile(r"yfmvar-\d+-yfmvarend", re.IGNORECASE)
 _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# Bold that opens, then a mid-token backtick closes a path and re-opens code
+# before bold ends: ``**/home/…/id_ed25519`.pub`**`` (#49040 / #48968).
+_BROKEN_BOLD_INLINE_CODE = re.compile(r"\*\*[^*`\n]+`[^`\n]+`\*\*")
+# Dropped inline code left an empty parenthetical: ``( extension)`` vs
+# ``(расширение `.pub`)``.
+_EMPTY_EXTENSION_PAREN = re.compile(r"\(\s+extension\s*\)", re.IGNORECASE)
 
 _LENGTH_RATIO_MIN = 0.55
 _LENGTH_RATIO_MAX = 1.85
@@ -143,6 +149,32 @@ def check_unrestored_yfmvar_placeholders(
         f"unrestored_yfmvar: {len(found)} leftover yfmvar placeholder(s) in EN: "
         f"{preview}{extra}"
     ]
+
+
+def check_broken_inline_code_markup(
+    target_text: str, *, target_lang: str
+) -> list[str]:
+    """Mangled bold+backtick / empty ``( extension)`` in EN (§6.176 / #49040).
+
+    Typical failure: model drops `` `.pub` `` from a parenthetical and then
+    re-inserts the extension with a mid-path backtick inside ``**…**``.
+    """
+    if target_lang.lower() not in {"en", "english"}:
+        return []
+    body = _strip_fenced_blocks(target_text)
+    issues: list[str] = []
+    for match in _BROKEN_BOLD_INLINE_CODE.finditer(body):
+        preview = match.group(0).replace("\n", " ").strip()[:80]
+        issues.append(f"broken_inline_code: bold+backtick nesting «{preview}»")
+    for match in _EMPTY_EXTENSION_PAREN.finditer(body):
+        preview = match.group(0)
+        issues.append(f"broken_inline_code: empty extension paren «{preview}»")
+    if not issues:
+        return []
+    out = issues[:8]
+    if len(issues) > 8:
+        out.append(f"broken_inline_code: … (+{len(issues) - 8} more)")
+    return out
 
 
 def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
@@ -408,6 +440,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "blocking"
     if message.startswith("unrestored_yfmvar:"):
         return "blocking"
+    if message.startswith("broken_inline_code:"):
+        return "blocking"
     if message.startswith("include_parity:"):
         return "blocking"
     if message.startswith("include_target:"):
@@ -461,6 +495,9 @@ def _collect_raw_heuristics(
     )
     raw.extend(
         check_unrestored_yfmvar_placeholders(target_text, target_lang=target_lang)
+    )
+    raw.extend(
+        check_broken_inline_code_markup(target_text, target_lang=target_lang)
     )
     # Any fence language (yaml/yql/go/text/…) — hard gate for residual RU (§6.164).
     # Comment / text-fence helpers still auto-translate; this catches leftovers

@@ -43,4 +43,6 @@ class Segment(BaseModel):
     placeholders: list[ProtectedInline]
     # Mixed: int indices into children, or string markers ("title", "header").
     ast_path: list[int | str]
+    # Explicit YFM ``{#id}`` for headings (None when absent or non-heading).
+    heading_anchor: str | None = None
 

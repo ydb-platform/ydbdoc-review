@@ -196,6 +196,49 @@ def test_partial_align_rejects_weak_empty_paragraph_pairs():
     assert not any("Refresh Token" in t for t in seeded.values())
 
 
+def test_partial_align_rejects_heading_with_mismatched_anchor():
+    """#49040 / #48968: do not seed Precommit checks onto {#create_pr_desc}."""
+    ru = dedent(
+        """\
+        # Guide
+
+        Intro with [ref](./a.md).
+
+        ### Заполните описание к Pull Request'у {#create_pr_desc}
+
+        Body about changelog with [c](./c.md).
+
+        ### Предварительные проверки {#precommit_checks}
+
+        Body about checks with [p](./p.md).
+        """
+    )
+    en = dedent(
+        """\
+        # Guide
+
+        Intro with [ref](./a.md).
+
+        ### Something else {#unrelated_section}
+
+        Body about other topic with [o](./o.md).
+
+        ### Precommit checks {#precommit_checks}
+
+        Body about checks with [p](./p.md).
+        """
+    )
+    ru_segs = extract_segments(parse_markdown(ru))
+    seeded = partial_align_translations_from_target(ru_segs, en)
+    create_desc = next(s for s in ru_segs if "Заполните" in s.text)
+    assert create_desc.heading_anchor == "create_pr_desc"
+    assert create_desc.id not in seeded
+    precommit = next(s for s in ru_segs if "Предварительные" in s.text)
+    assert precommit.heading_anchor == "precommit_checks"
+    assert precommit.id in seeded
+    assert seeded[precommit.id] == "Precommit checks"
+
+
 def test_differential_partial_seed_keeps_unchanged_en():
     ru_base = dedent(
         """\
