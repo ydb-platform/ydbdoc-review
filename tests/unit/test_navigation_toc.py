@@ -1179,3 +1179,128 @@ def test_merge_applies_scoped_include_when_section_href_differs_from_en_flat():
     assert "streaming-query/index.md" in hrefs
     # Legacy flat page may remain (warning), but section include must be present.
     assert "streaming-query.md" in hrefs
+
+
+def test_merge_ru_include_only_matches_en_href_plus_include_without_duplicate():
+    """Regression #49147: RU include-only vs EN href+include must not duplicate."""
+    en_main = dedent("""
+        items:
+        - name: YQL
+          href: ../yql/reference/index.md
+        - name: PostgreSQL compatibility
+          include:
+            mode: link
+            path: ../postgresql/toc_p.yaml
+        - name: Integrations
+          href: ../integrations/index.md
+        - name: SQS API
+          href: sqs-api/index.md
+          include:
+            mode: link
+            path: sqs-api/toc_p.yaml
+        - name: Embedded UI
+          href: embedded-ui/index.md
+          include:
+            mode: link
+            path: embedded-ui/toc_p.yaml
+    """).strip()
+    ru_pr = dedent("""
+        items:
+        - name: YQL
+          href: ../yql/reference/index.md
+        - name: Встроенный UI
+          include:
+            mode: link
+            path: embedded-ui/toc_p.yaml
+        - name: Интеграции
+          href: ../integrations/index.md
+        - name: SQS API
+          href: sqs-api/index.md
+          include:
+            mode: link
+            path: sqs-api/toc_p.yaml
+        - name: Совместимость с PostgreSQL (удалена)
+          href: ../postgresql/intro.md
+          include:
+            mode: link
+            path: ../postgresql/toc_p.yaml
+    """).strip()
+    ru_base = ru_pr.replace(
+        dedent("""
+        - name: SQS API
+          href: sqs-api/index.md
+          include:
+            mode: link
+            path: sqs-api/toc_p.yaml
+        """),
+        "",
+    )
+    name_map = {
+        "Встроенный UI": "Embedded UI",
+        "Интеграции": "Integrations",
+        "Совместимость с PostgreSQL (удалена)": "PostgreSQL compatibility",
+        "SQS API": "SQS API",
+    }
+    merged = merge_en_toc_yaml(
+        en_main,
+        ru_pr,
+        translate_hrefs={"sqs-api/index.md"},
+        translate_include_paths={"sqs-api/toc_p.yaml"},
+        translate_name=lambda n: name_map.get(n, n),
+        ru_base_hrefs={
+            it["href"] for it in parse_toc_items(ru_base) if it.get("href")
+        },
+        ru_base_include_paths={
+            it["include_path"]
+            for it in parse_toc_items(ru_base)
+            if it.get("include_path")
+        },
+        restrict_gap_fill_to_scope=True,
+    )
+    assert merged.count("name: Embedded UI") == 1
+    assert merged.count("embedded-ui/index.md") == 1
+    assert "PostgreSQL compatibility" in merged
+    assert "sqs-api/index.md" in merged
+    issues = validate_toc_merge(
+        ru_pr,
+        merged,
+        translate_hrefs={"sqs-api/index.md"},
+        translate_include_paths={"sqs-api/toc_p.yaml"},
+        en_main_yaml=en_main,
+    )
+    assert "duplicate_toc_entry" not in {i.kind for i in issues}
+
+
+def test_validate_toc_merge_flags_duplicate_toc_entry():
+    """Duplicate href/include in EN toc is blocking (#49147)."""
+    en = dedent("""
+        items:
+        - name: Embedded UI
+          href: embedded-ui/index.md
+          include:
+            mode: link
+            path: embedded-ui/toc_p.yaml
+        - name: Other
+          href: other.md
+        - name: Embedded UI
+          href: embedded-ui/index.md
+          include:
+            mode: link
+            path: embedded-ui/toc_p.yaml
+    """).strip()
+    ru = dedent("""
+        items:
+        - name: Встроенный UI
+          include:
+            mode: link
+            path: embedded-ui/toc_p.yaml
+        - name: Other
+          href: other.md
+    """).strip()
+    issues = validate_toc_merge(
+        ru,
+        en,
+        translate_hrefs=set(),
+        en_main_yaml=en,
+    )
+    assert any(i.kind == "duplicate_toc_entry" for i in issues)

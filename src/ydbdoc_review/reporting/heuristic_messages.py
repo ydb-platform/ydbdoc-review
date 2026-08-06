@@ -49,7 +49,7 @@ _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
     r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|"
     r"inconsistent_indent|missing_toc_target|orphan_toc_page|toc_structure_parity|"
-    r"toc_en_only_legacy): (.+)$"
+    r"toc_en_only_legacy|duplicate_toc_entry): (.+)$"
 )
 
 
@@ -104,6 +104,7 @@ def heuristic_location_label(message: str) -> str:
             "orphan_toc_page:",
             "toc_structure_parity:",
             "toc_en_only_legacy:",
+            "duplicate_toc_entry:",
         )
     ):
         return "навигация (toc/redirect)"
@@ -363,6 +364,10 @@ def _humanize_heuristic_problem(message: str) -> str:
         if kind == "toc_en_only_legacy":
             return (
                 f"В EN toc есть пункты без RU-зеркала (legacy): {detail}"
+            )
+        if kind == "duplicate_toc_entry":
+            return (
+                f"В EN toc дублируются пункты (href/include): {detail}"
             )
 
     if message.startswith("ru_source"):

@@ -490,20 +490,29 @@ def _merge_en_toc_yaml_nested(
     seen_includes = _collect_toc_include_paths(merged)
     base_hrefs = ru_base_hrefs or set()
     for node in _walk_toc_nodes(en_tree):
-        if node.href and node.href not in seen_hrefs and node.href not in ru_hrefs:
+        href_seen = bool(node.href and node.href in seen_hrefs)
+        include_seen = bool(node.include_path and node.include_path in seen_includes)
+        if href_seen or include_seen:
+            continue
+        href_en_only = bool(node.href) and node.href not in ru_hrefs
+        include_en_only = bool(node.include_path) and node.include_path not in ru_includes
+        if not href_en_only and not include_en_only:
+            continue
+        if node.href and href_en_only:
             if node.href in base_hrefs and node.href not in preserve_hrefs:
                 continue
             merged.append(node)
             seen_hrefs.add(node.href)
-        if (
-            node.include_path
-            and node.include_path not in seen_includes
-            and node.include_path not in ru_includes
-        ):
+            if node.include_path:
+                seen_includes.add(node.include_path)
+            continue
+        if node.include_path and include_en_only:
             if node.include_path in base_includes:
                 continue
             merged.append(node)
             seen_includes.add(node.include_path)
+            if node.href:
+                seen_hrefs.add(node.href)
     return _serialize_toc_tree(merged, list_indent=list_indent)
 
 
@@ -972,10 +981,17 @@ def merge_en_toc_yaml(
             elif href in en_by_href:
                 seen_hrefs.add(href)
                 seen_includes.add(include_path)
-                merged.append(en_by_href[href])
+                item = en_by_href[href]
+                if item.get("include_path"):
+                    seen_includes.add(item["include_path"])
+                merged.append(item)
             elif include_path in en_by_include:
                 seen_includes.add(include_path)
-                merged.append(en_by_include[include_path])
+                item = en_by_include[include_path]
+                if item.get("href"):
+                    seen_hrefs.add(item["href"])
+                seen_hrefs.add(href)
+                merged.append(item)
             continue
 
         if href:
@@ -983,7 +999,10 @@ def merge_en_toc_yaml(
                 continue
             if href in en_by_href and href not in translate_hrefs:
                 seen_hrefs.add(href)
-                merged.append(en_by_href[href])
+                item = en_by_href[href]
+                if item.get("include_path"):
+                    seen_includes.add(item["include_path"])
+                merged.append(item)
             elif href in translate_hrefs or (
                 not restrict_gap_fill_to_scope
                 and href not in en_by_href
@@ -997,21 +1016,34 @@ def merge_en_toc_yaml(
                     en_by_href=en_by_href,
                     line_prefix=line_prefix,
                 )
-                merged.append(
-                    {
-                        "name": en_name,
-                        "href": href,
-                        "block": block,
-                    }
-                )
-            continue
+                item = {
+                    "name": en_name,
+                    "href": href,
+                    "block": block,
+                }
+                if include_path:
+                    item["include_path"] = include_path
+                    seen_includes.add(include_path)
+                merged.append(item)
+            elif include_path and include_path not in seen_includes:
+                # RU href did not apply (legacy EN include-only, etc.) — try include.
+                pass
+            else:
+                continue
 
-        if include_path:
+        if include_path and (
+            not href
+            or href not in seen_hrefs
+            or include_path not in seen_includes
+        ):
             if include_path in seen_includes:
                 continue
             if include_path in en_by_include and include_path not in include_scope:
                 seen_includes.add(include_path)
-                merged.append(en_by_include[include_path])
+                item = en_by_include[include_path]
+                if item.get("href"):
+                    seen_hrefs.add(item["href"])
+                merged.append(item)
             elif include_path in include_scope or (
                 not restrict_gap_fill_to_scope
                 and include_path not in en_by_include
@@ -1022,36 +1054,47 @@ def merge_en_toc_yaml(
                 if rit.get("name"):
                     en_name = translate_name(rit["name"]).strip()
                     block = _replace_item_name(block, en_name)
-                    merged.append(
-                        {
-                            "name": en_name,
-                            "include_path": include_path,
-                            "block": block,
-                        }
-                    )
+                    item = {
+                        "name": en_name,
+                        "include_path": include_path,
+                        "block": block,
+                    }
                 else:
-                    merged.append(
-                        {
-                            "include_path": include_path,
-                            "block": block,
-                        }
-                    )
+                    item = {
+                        "include_path": include_path,
+                        "block": block,
+                    }
+                if href:
+                    item["href"] = href
+                    seen_hrefs.add(href)
+                merged.append(item)
 
     for it in en_items:
         href = it.get("href")
-        if href and href not in seen_hrefs and href not in ru_hrefs:
+        include_path = it.get("include_path")
+        if (href and href in seen_hrefs) or (
+            include_path and include_path in seen_includes
+        ):
+            continue
+        href_en_only = bool(href) and href not in ru_hrefs
+        include_en_only = bool(include_path) and include_path not in ru_includes
+        if not href_en_only and not include_en_only:
+            continue
+        if href and href_en_only:
             if href in base_hrefs and href not in preserve_hrefs:
                 continue
             merged.append(it)
-        include_path = it.get("include_path")
-        if (
-            include_path
-            and include_path not in seen_includes
-            and include_path not in ru_includes
-        ):
+            seen_hrefs.add(href)
+            if include_path:
+                seen_includes.add(include_path)
+            continue
+        if include_path and include_en_only:
             if include_path in base_includes:
                 continue
             merged.append(it)
+            seen_includes.add(include_path)
+            if href:
+                seen_hrefs.add(href)
 
     return _serialize_toc(merged, line_prefix=line_prefix)
 
@@ -1218,6 +1261,28 @@ def validate_toc_merge(
     }
     ru_hrefs = {it["href"] for it in ru_items if it.get("href")}
     ru_includes = {it["include_path"] for it in ru_items if it.get("include_path")}
+
+    href_counts: dict[str, int] = {}
+    include_counts: dict[str, int] = {}
+    for it in en_items:
+        href = it.get("href")
+        if href:
+            href_counts[href] = href_counts.get(href, 0) + 1
+        include_path = it.get("include_path")
+        if include_path:
+            include_counts[include_path] = include_counts.get(include_path, 0) + 1
+    dup_hrefs = sorted(h for h, n in href_counts.items() if n > 1)
+    dup_includes = sorted(p for p, n in include_counts.items() if n > 1)
+    if dup_hrefs or dup_includes:
+        issues.append(
+            TocValidationIssue(
+                kind="duplicate_toc_entry",
+                detail=(
+                    "EN toc has duplicate entries "
+                    f"(hrefs={dup_hrefs}, includes={dup_includes})"
+                ),
+            )
+        )
 
     # §6.121 / §6.124 / §6.126 — only_ru blocks only when in translate scope
     # (failed to apply this merge). Empty scope used to full-audit only_ru and

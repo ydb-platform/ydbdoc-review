@@ -4063,5 +4063,22 @@ backticked ``.ext`` only (``…/id_ed25519`.pub`**``). Keep empty
 
 **Tests:** ``test_broken_inline_code_allows_bold_wrapping_code``.
 
+### 6.178. Toc merge: mark href+include together; block duplicates (#49147, 2026-08-06)
+
+**Problem:** Translation PR [#49147](https://github.com/ydb-platform/ydb/pull/49147)
+shipped a green QA report while EN ``reference/toc_p.yaml`` had **duplicate
+Embedded UI** entries. Soft ``toc_en_only_legacy`` did not block.
+
+**Root cause:** RU lists Embedded UI as **include-only**; EN has **href +
+include**. Merge matched via ``include.path`` and marked only the include as
+seen, then leftover re-appended the same EN block (href not in RU).
+
+**Decision:** when applying an EN block, mark **both** ``href`` and
+``include.path``; leftovers skip if either id was seen; ``duplicate_toc_entry``
+is **blocking**.
+
+**Tests:** ``test_merge_ru_include_only_matches_en_href_plus_include_without_duplicate``,
+``test_validate_toc_merge_flags_duplicate_toc_entry``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

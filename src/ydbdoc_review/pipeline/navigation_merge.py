@@ -54,6 +54,7 @@ _NAV_BLOCKING_WARNING_KINDS = frozenset(
         "missing_toc_target",
         "toc_structure_parity",
         "orphan_toc_page",
+        "duplicate_toc_entry",
     }
 )
 # Soft drift: keep in the report, but do not downgrade merge recommendation (§6.121).
