@@ -31,9 +31,12 @@ _UNRESTORED_PLACEHOLDER_ENCODED = re.compile(
 # before publish (#47995 / #48812 left ``yfmvar-0-yfmvarend`` in EN hrefs).
 _UNRESTORED_YFMVAR = re.compile(r"yfmvar-\d+-yfmvarend", re.IGNORECASE)
 _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
-# Bold that opens, then a mid-token backtick closes a path and re-opens code
-# before bold ends: ``**/home/…/id_ed25519`.pub`**`` (#49040 / #48968).
-_BROKEN_BOLD_INLINE_CODE = re.compile(r"\*\*[^*`\n]+`[^`\n]+`\*\*")
+# Path split by a mid-bold backtick that only wraps the extension:
+# ``**/home/…/id_ed25519`.pub`**`` (#49040 / #48968). Do NOT match legitimate
+# ``**Box `workflow`**`` / ``**`flag`**`` (§6.177 / #49059 false positive).
+_BROKEN_BOLD_INLINE_CODE = re.compile(
+    r"\*\*[^*`\n]*/[^*`\n]+`\.[A-Za-z0-9]+`\*\*"
+)
 # Dropped inline code left an empty parenthetical: ``( extension)`` vs
 # ``(расширение `.pub`)``.
 _EMPTY_EXTENSION_PAREN = re.compile(r"\(\s+extension\s*\)", re.IGNORECASE)
@@ -154,10 +157,10 @@ def check_unrestored_yfmvar_placeholders(
 def check_broken_inline_code_markup(
     target_text: str, *, target_lang: str
 ) -> list[str]:
-    """Mangled bold+backtick / empty ``( extension)`` in EN (§6.176 / #49040).
+    """Mangled path+``.ext`` bold/backtick or empty ``( extension)`` (§6.176–§6.177).
 
-    Typical failure: model drops `` `.pub` `` from a parenthetical and then
-    re-inserts the extension with a mid-path backtick inside ``**…**``.
+    Catches ``**/…/id_ed25519`.pub`**`` after the model drops `` `.pub` `` from a
+    parenthetical. Does not flag legitimate ``**Box `workflow`**`` (#49059).
     """
     if target_lang.lower() not in {"en", "english"}:
         return []

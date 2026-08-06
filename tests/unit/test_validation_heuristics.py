@@ -91,6 +91,24 @@ def test_broken_inline_code_markup_blocks():
     assert any(m.startswith("broken_inline_code:") for m in classified.blocking)
 
 
+def test_broken_inline_code_allows_bold_wrapping_code():
+    """§6.177 / #49059: ``**Box `workflow`**`` is valid, not a merge blocker."""
+    text = (
+        "* **Box `workflow`**\n"
+        "* Three others: \"repo\", \"admin:public_key\" and \"read:org\".\n"
+        "Use **/home/user/.ssh/id_ed25519.pub** as the key file.\n"
+    )
+    assert check_broken_inline_code_markup(text, target_lang="en") == []
+    classified = run_file_heuristics_classified(
+        "* Поле **`workflow`**\n",
+        text,
+        normalized_source_text="* Поле **`workflow`**\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert not any(m.startswith("broken_inline_code:") for m in classified.blocking)
+
+
 def test_unrestored_placeholder_blocks_glossary_v2():
     """§6.164 / #48595: glossary leftover ``⟦V2⟧`` must block merge."""
     text = (

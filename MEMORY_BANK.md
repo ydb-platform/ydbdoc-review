@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-05  
-**Current focus:** §6.176 — heading partial-seed by `{#anchor}` + broken inline-code gate (#49040 / #48968).
+**Last updated:** 2026-08-06  
+**Current focus:** §6.177 — narrow `broken_inline_code` (no FP on `**Box `workflow`**`, #49059).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-06 | **§6.177** — `broken_inline_code` only path+``.ext`` split; allow ``**Box `workflow`**`` ([ydb#49059](https://github.com/ydb-platform/ydb/pull/49059)) |
 | 2026-08-05 | **§6.176** — heading LCS seed requires matching `{#anchor}`; block mangled bold/backtick / `( extension)` ([ydb#49040](https://github.com/ydb-platform/ydb/pull/49040) / [#48968](https://github.com/ydb-platform/ydb/pull/48968)) |
 | 2026-08-05 | **§6.175** — bilingual-only ``doc_translate`` posts «перевод не требуется» ([ydb#48751](https://github.com/ydb-platform/ydb/pull/48751)) |
 | 2026-08-04 | **§6.174** — href/anchor 1:1 parity + inbound fragment check; stop remapping to EN-only ids ([ydb#48792](https://github.com/ydb-platform/ydb/pull/48792)) |

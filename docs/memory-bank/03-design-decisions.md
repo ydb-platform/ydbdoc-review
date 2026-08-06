@@ -4050,5 +4050,18 @@ The ``.pub`` damage was model/critic noise that heuristics never blocked.
 **Tests:** ``test_partial_align_rejects_heading_with_mismatched_anchor``,
 ``test_broken_inline_code_markup_blocks``.
 
+### 6.177. ``broken_inline_code`` only for path+extension split (#49059, 2026-08-06)
+
+**Problem:** Re-translate of [#48968](https://github.com/ydb-platform/ydb/pull/48968)
+produced good EN (correct ``{#create_pr_desc}`` title, intact ``.pub`` path) but
+QA 🔴 on [#49059](https://github.com/ydb-platform/ydb/pull/49059) because
+``broken_inline_code:`` matched legitimate ``**Box `workflow`**``.
+
+**Decision:** narrow the bold+backtick regex to path fragments that end with a
+backticked ``.ext`` only (``…/id_ed25519`.pub`**``). Keep empty
+``( extension)`` paren check. Valid ``**… `code` …**`` is allowed.
+
+**Tests:** ``test_broken_inline_code_allows_bold_wrapping_code``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
