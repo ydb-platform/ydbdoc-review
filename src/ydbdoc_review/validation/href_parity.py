@@ -65,6 +65,8 @@ def check_href_parity(
     source_lang: str = "ru",
     target_lang: str = "en",
     ignore_basenames: set[str] | frozenset[str] | None = None,
+    en_page_path: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> list[str]:
     """Blocking when EN internal href multiset ≠ RU (§6.174)."""
     if source_lang.lower() not in {"ru", "russian"}:
@@ -92,6 +94,20 @@ def check_href_parity(
 
     missing = sorted((src - tgt).elements())
     extra = sorted((tgt - src).elements())
+    # EN may link to toc-reachable pages that the source-PR RU snapshot lacks
+    # (post-merge main drift, #49451 self-heal). Those extras are not blockers.
+    if extra and en_page_path and en_toc_reachable is not None:
+        from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+        kept_extra: list[str] = []
+        for href in extra:
+            target = resolve_internal_md_href(en_page_path, href)
+            if target is not None and target in en_toc_reachable:
+                continue
+            kept_extra.append(href)
+        extra = kept_extra
+    if not missing and not extra:
+        return []
     parts: list[str] = []
     if missing:
         preview = ", ".join(f"`{h}`" for h in missing[:6])

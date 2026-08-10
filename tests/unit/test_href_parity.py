@@ -234,6 +234,43 @@ def test_insert_missing_skips_unreachable_en_targets():
     assert "static-group-self-heal.md" in fixed
 
 
+def test_href_parity_allows_reachable_en_extras():
+    """#49451: EN may keep self-heal when source-PR RU snapshot omits it."""
+    from ydbdoc_review.validation.href_parity import check_href_parity
+
+    ru = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](state-storage-reconfiguration.md)\n"
+        "- [{#T}](static-group-move.md)\n"
+    )
+    en = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](static-group-self-heal.md)\n"
+        "- [{#T}](static-group-move.md)\n"
+    )
+    page = (
+        "ydb/docs/en/core/devops/configuration-management/"
+        "configuration-v2/index.md"
+    )
+    reachable = frozenset(
+        {
+            f"{page.rsplit('/', 1)[0]}/state-storage-move.md",
+            f"{page.rsplit('/', 1)[0]}/static-group-self-heal.md",
+            f"{page.rsplit('/', 1)[0]}/static-group-move.md",
+        }
+    )
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            ignore_basenames={"state-storage-reconfiguration.md"},
+            en_page_path=page,
+            en_toc_reachable=reachable,
+        )
+        == []
+    )
+
+
 def test_restore_autotitle_force_exact_skips_unreachable():
     from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 

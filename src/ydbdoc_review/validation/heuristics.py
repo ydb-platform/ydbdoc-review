@@ -543,6 +543,13 @@ def _collect_raw_heuristics(
             file_path=source_file,
             reachable=en_toc_reachable,
         )
+    en_page = None
+    if source_file:
+        en_page = (
+            source_file.replace("/docs/ru/", "/docs/en/", 1)
+            if "/docs/ru/" in source_file
+            else source_file
+        )
     raw.extend(
         check_href_parity(
             source_text,
@@ -550,6 +557,8 @@ def _collect_raw_heuristics(
             source_lang=source_lang,
             target_lang=target_lang,
             ignore_basenames=href_ignore or None,
+            en_page_path=en_page,
+            en_toc_reachable=en_toc_reachable,
         )
     )
     raw.extend(

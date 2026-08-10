@@ -4142,5 +4142,18 @@ RU-only ``state-storage-reconfiguration.md``.
 ``test_inbound_ignores_frag_absent_from_ru_and_baseline``,
 ``test_restore_autotitle_force_exact_skips_unreachable``.
 
+### 6.182. Allow reachable EN-extra hrefs vs source-PR RU (#49451, 2026-08-10)
+
+**Problem:** Source PR [#45219](https://github.com/ydb-platform/ydb/pull/45219)
+merge-commit RU lacked ``static-group-self-heal.md``; ``main`` and the
+translation EN index both have it. ``doc_verify`` preferred merge RU (segment
+count match) → 🔴 ``href_parity`` «extra in EN: self-heal» while reconfig was
+already ignored as unreachable.
+
+**Decision:** ``check_href_parity`` drops EN-extra hrefs whose targets resolve
+inside ``en_toc_reachable`` (EN documents a real toc page).
+
+**Tests:** ``test_href_parity_allows_reachable_en_extras``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
