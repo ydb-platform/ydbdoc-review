@@ -464,6 +464,7 @@ def _collect_raw_heuristics(
     ignore_link_basenames: set[str] | frozenset[str] | None = None,
     docs_text_reader=None,
     docs_repo_path: str | None = None,
+    en_baseline_text: str | None = None,
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
@@ -570,6 +571,10 @@ def _collect_raw_heuristics(
                 target_text,
                 repo_path=docs_repo_path,
                 read_text=docs_text_reader,
+                ru_text=source_text
+                if source_lang.lower() in {"ru", "russian"}
+                else None,
+                en_baseline_text=en_baseline_text,
             )
         )
     raw.extend(check_fence_parity(normalized_source_text, target_text))
@@ -612,6 +617,7 @@ def run_file_heuristics_classified(
     ignore_link_basenames: set[str] | frozenset[str] | None = None,
     docs_text_reader=None,
     docs_repo_path: str | None = None,
+    en_baseline_text: str | None = None,
 ) -> ClassifiedHeuristics:
     """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
     out = ClassifiedHeuristics()
@@ -626,6 +632,7 @@ def run_file_heuristics_classified(
         ignore_link_basenames=ignore_link_basenames,
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
+        en_baseline_text=en_baseline_text,
     ):
         bucket = _classify_heuristic(message)
         getattr(out, bucket).append(message)

@@ -480,6 +480,7 @@ class HeuristicsStep:
             ),
             docs_text_reader=ctx.docs_text_reader,
             docs_repo_path=ctx.docs_repo_path,
+            en_baseline_text=state.existing_target_text,
         )
         for message in state.finalize_warnings:
             bucket = _classify_heuristic(message)

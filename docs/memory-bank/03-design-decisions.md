@@ -4122,5 +4122,25 @@ the report did not match committed text.
 
 **Tests:** ``test_insert_missing_skips_unreachable_en_targets``.
 
+### 6.181. Inbound fragment path resolve + ambient skip (#49451, 2026-08-10)
+
+**Problem:** Re-scoring heuristics after restore (§6.180) surfaced false
+``inbound_fragment`` on every ``…/index.md`` (basename-only match for
+``index.md#frag`` from unrelated sections) and ambient glossary typos
+(``#tablets`` vs RU ``{#tablet}``). Critic + ``force_exact`` also reattached
+RU-only ``state-storage-reconfiguration.md``.
+
+**Decision:**
+
+1. Resolve inbound hrefs from the linking file (no basename-only match).
+2. Flag inbound only when RU declares the id or the EN baseline dropped it
+   (§6.174 rename hole); ignore never-declared ambient typos.
+3. ``restore_autotitle_hrefs(force_exact)`` skips unreachable RU hrefs; strip
+   again after restore so critic cannot leave RU-only links.
+
+**Tests:** ``test_inbound_ignores_same_basename_other_dirs``,
+``test_inbound_ignores_frag_absent_from_ru_and_baseline``,
+``test_restore_autotitle_force_exact_skips_unreachable``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

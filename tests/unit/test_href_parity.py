@@ -53,6 +53,8 @@ def test_inbound_fragment_catches_48792_hole():
     """Translating auth to {#ldap} while classifier still has #ldap-auth-provider."""
     auth_path = "ydb/docs/en/core/security/authentication.md"
     auth_en = "## Authentication using LDAP directory {#ldap}\n"
+    auth_ru = "## Аутентификация через LDAP {#ldap}\n"
+    auth_baseline = "## Authentication using LDAP directory {#ldap-auth-provider}\n"
     files = {
         auth_path: "## old {#ldap-auth-provider}\n",  # disk stale; in-flight text wins
         "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md": (
@@ -65,10 +67,58 @@ def test_inbound_fragment_catches_48792_hole():
         auth_en,
         en_paths=list(files),
         read_text=files.get,
+        ru_text=auth_ru,
+        en_baseline_text=auth_baseline,
     )
     assert any(m.startswith("inbound_fragment:") for m in msgs)
     assert any("ldap-auth-provider" in m for m in msgs)
     assert not any("authentication.md#ldap`" in m for m in msgs)
+
+
+def test_inbound_ignores_same_basename_other_dirs():
+    """#49451: index.md#frag on another section is not inbound to config-v2."""
+    page = (
+        "ydb/docs/en/core/devops/configuration-management/"
+        "configuration-v2/index.md"
+    )
+    files = {
+        page: "# Config V2\n",
+        "ydb/docs/en/core/analyst/datasets/_includes/intro.md": (
+            "See [x](index.md#general-info).\n"
+        ),
+    }
+    assert (
+        check_inbound_fragments(
+            page,
+            files[page],
+            en_paths=list(files),
+            read_text=files.get,
+            ru_text="# Конфигурация V2\n",
+        )
+        == []
+    )
+
+
+def test_inbound_ignores_frag_absent_from_ru_and_baseline():
+    """Ambient EN typos (#tablets vs RU {#tablet}) must not block translation QA."""
+    glossary = "ydb/docs/en/core/concepts/glossary.md"
+    files = {
+        glossary: "### Tablet {#tablet}\n",
+        "ydb/docs/en/core/concepts/architecture/index.md": (
+            "See [tablet](../glossary.md#tablets).\n"
+        ),
+    }
+    assert (
+        check_inbound_fragments(
+            glossary,
+            files[glossary],
+            en_paths=list(files),
+            read_text=files.get,
+            ru_text="### Таблетка {#tablet}\n",
+            en_baseline_text="### Tablet {#tablet}\n",
+        )
+        == []
+    )
 
 
 def test_heuristics_classify_href_parity_blocking():
@@ -174,6 +224,42 @@ def test_insert_missing_skips_unreachable_en_targets():
     fixed = insert_missing_autotitle_list_items(
         en,
         ru,
+        en_page_path=(
+            "ydb/docs/en/core/devops/configuration-management/"
+            "configuration-v2/index.md"
+        ),
+        en_toc_reachable=reachable,
+    )
+    assert "state-storage-reconfiguration.md" not in fixed
+    assert "static-group-self-heal.md" in fixed
+
+
+def test_restore_autotitle_force_exact_skips_unreachable():
+    from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
+
+    ru = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](state-storage-reconfiguration.md)\n"
+        "- [{#T}](static-group-self-heal.md)\n"
+    )
+    # Critic swapped self-heal for reconfig; bare leftover from a prior strip.
+    en = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- {#T}\n"
+        "- [{#T}](static-group-self-heal.md)\n"
+    )
+    reachable = frozenset(
+        {
+            "ydb/docs/en/core/devops/configuration-management/configuration-v2/"
+            "state-storage-move.md",
+            "ydb/docs/en/core/devops/configuration-management/configuration-v2/"
+            "static-group-self-heal.md",
+        }
+    )
+    fixed = restore_autotitle_hrefs(
+        en,
+        ru,
+        force_exact=True,
         en_page_path=(
             "ydb/docs/en/core/devops/configuration-management/"
             "configuration-v2/index.md"

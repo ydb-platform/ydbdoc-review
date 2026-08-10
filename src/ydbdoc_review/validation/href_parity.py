@@ -138,22 +138,31 @@ def check_heading_anchor_parity(
     ]
 
 
-def _href_targets_page(href: str, en_page_path: str) -> str | None:
-    """Return fragment if ``href`` points at ``en_page_path``, else None."""
+def _href_targets_page(
+    href: str,
+    en_page_path: str,
+    *,
+    from_path: str,
+) -> str | None:
+    """Return fragment if ``href`` from ``from_path`` resolves to ``en_page_path``."""
     href = href.strip()
     if "#" not in href:
         return None
     path_part, frag = href.rsplit("#", 1)
     if not frag:
         return None
-    page_name = PurePosixPath(en_page_path).name
     if path_part in {"", "."}:
         # in-page — not inbound from another file
         return None
-    if path_part == page_name or path_part.endswith("/" + page_name):
-        return frag
-    # Absolute-from-docs style rarely used; also accept full repo-relative match.
-    if path_part == en_page_path or path_part.endswith(en_page_path):
+    from ydbdoc_review.validation.glossary_toc_links import (
+        normalize_repo_path,
+        resolve_internal_md_href,
+    )
+
+    resolved = resolve_internal_md_href(from_path, href)
+    if resolved is None:
+        return None
+    if normalize_repo_path(resolved) == normalize_repo_path(en_page_path):
         return frag
     return None
 
@@ -177,11 +186,16 @@ def check_inbound_fragments(
     read_text: DocsTextReader | None = None,
     en_paths: Iterable[str] | None = None,
     docs_root: str = "ydb/docs",
+    ru_text: str | None = None,
+    en_baseline_text: str | None = None,
 ) -> list[str]:
     """Blocking when other EN pages link to missing ``#frag`` on this page.
 
     Catches the #48792 hole: ``authentication.md`` anchors become ``{#ldap}``
     while ``create-resource-pool-classifier.md`` still has ``#ldap-auth-provider``.
+
+    Skips ambient EN typos that neither the RU twin nor the pre-translate EN
+    baseline ever declared (e.g. ``#tablets`` vs ``{#tablet}``, #49451).
     """
     if not en_page_path or not en_text:
         return []
@@ -191,6 +205,17 @@ def check_inbound_fragments(
         en_paths = iter_en_markdown_paths(repo_path, docs_root=docs_root)
 
     declared = set(collect_explicit_anchors(en_text))
+    ru_declared = (
+        set(collect_explicit_anchors(ru_text)) if ru_text is not None else None
+    )
+    baseline_declared = (
+        set(collect_explicit_anchors(en_baseline_text))
+        if en_baseline_text is not None
+        else None
+    )
+    removed_from_baseline = (
+        baseline_declared - declared if baseline_declared is not None else None
+    )
     # Also treat Diplodoc auto-slugs as declared via fragment_repair helper.
     from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
 
@@ -209,9 +234,17 @@ def check_inbound_fragments(
         if not other_text:
             continue
         for href in collect_internal_hrefs(other_text):
-            frag = _href_targets_page(href, en_page_path)
+            frag = _href_targets_page(href, en_page_path, from_path=other_path)
             if not frag:
                 continue
+            # Translation QA only: RU still has the id, or we dropped an EN id.
+            if ru_declared is not None or removed_from_baseline is not None:
+                ru_needs = bool(ru_declared and frag in ru_declared)
+                we_removed = bool(
+                    removed_from_baseline is not None and frag in removed_from_baseline
+                )
+                if not ru_needs and not we_removed:
+                    continue
             key = f"{other_path}::{href}"
             if key in seen:
                 continue

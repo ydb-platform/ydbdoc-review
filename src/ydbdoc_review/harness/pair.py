@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import is_dataclass, replace
 
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.profiles import TRANSLATE_PROFILE, VERIFY_PROFILE
@@ -88,6 +88,8 @@ def run_pair_plan(
         enable_critic=enable_critic,
         usage_record_start=len(ctx.client.usage_tracker.records),
         en_toc_reachable=ctx.en_toc_reachable,
+        docs_text_reader=ctx.docs_text_reader,
+        docs_repo_path=ctx.docs_repo_path,
     )
 
     try:
@@ -108,7 +110,11 @@ def run_pair_plan(
             # Also on doc_verify critic_only: critic can reintroduce stale
             # hrefs (Sessions → index.md#sessions, #47104 after 05:32 fixup).
             target_text = restore_autotitle_hrefs(
-                target_text, content.ru_text, force_exact=True
+                target_text,
+                content.ru_text,
+                force_exact=True,
+                en_page_path=plan.target_path,
+                en_toc_reachable=ctx.en_toc_reachable,
             )
             target_text = insert_missing_autotitle_list_items(
                 target_text,
@@ -117,6 +123,18 @@ def run_pair_plan(
                 en_toc_reachable=ctx.en_toc_reachable,
             )
             target_text = restore_md_link_hrefs(target_text, content.ru_text)
+            # Critic may reintroduce RU-only hrefs; strip again after restore.
+            if ctx.en_toc_reachable is not None:
+                from ydbdoc_review.validation.glossary_toc_links import (
+                    strip_unreachable_internal_links,
+                )
+
+                target_text = strip_unreachable_internal_links(
+                    target_text,
+                    file_path=plan.target_path,
+                    reachable=ctx.en_toc_reachable,
+                    target_lang=plan.target_lang,
+                )
             # §6.142: retarget missing EN fragments (stale path / ldap≠ldap-auth).
             if ctx.docs_text_reader is not None:
                 target_text = repair_en_fragments(
@@ -128,7 +146,7 @@ def run_pair_plan(
                 )
             # Restore runs after harness heuristics — refresh QA so the report
             # matches committed text (#49451).
-            if target_text != before_restore:
+            if target_text != before_restore and is_dataclass(file_result):
                 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
 
                 norm = (
@@ -146,6 +164,7 @@ def run_pair_plan(
                     en_toc_reachable=ctx.en_toc_reachable,
                     docs_text_reader=ctx.docs_text_reader,
                     docs_repo_path=ctx.docs_repo_path,
+                    en_baseline_text=content.en_text or content.en_base_text,
                 )
                 critic_verdict = compute_critic_verdict(
                     initial=file_result.critic_initial,
