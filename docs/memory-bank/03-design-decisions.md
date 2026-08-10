@@ -4080,5 +4080,28 @@ is **blocking**.
 **Tests:** ``test_merge_ru_include_only_matches_en_href_plus_include_without_duplicate``,
 ``test_validate_toc_merge_flags_duplicate_toc_entry``.
 
+### 6.179. Restore EN md / autotitle hrefs after translate (#49451, 2026-08-10)
+
+**Problem:** Translation PR [#49451](https://github.com/ydb-platform/ydb/pull/49451)
+(from [#45219](https://github.com/ydb-platform/ydb/pull/45219)) was 🔴 on
+``href_parity`` / ``md_link_parity``:
+
+1. Glossary dropped three ``architecture/metadata-services.md`` links (plain
+   ``see the section …``).
+2. ``local_indexes.md`` pointed at ``secondary_index.md#example`` instead of
+   ``min_max_index.md#example``.
+3. Critic removed ``[{#T}](static-group-self-heal.md)`` while adding
+   ``state-storage-reconfiguration.md``.
+
+**Decision:** after RU→EN translate/verify, run:
+
+1. ``restore_md_link_hrefs`` — positional href force when link counts match;
+   reinject ``see the section [Title](href).`` when RU hrefs are missing.
+2. ``insert_missing_autotitle_list_items`` — splice missing ``[{#T}](…)``
+   bullets after the previous shared neighbor.
+
+**Tests:** ``test_restore_md_link_hrefs_*``,
+``test_insert_missing_autotitle_list_items_splices_neighbor``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -230,3 +230,132 @@ def check_inbound_fragments(
                 issues.append("inbound_fragment: … further inbound misses truncated")
                 return issues
     return issues
+
+
+_SEE_SECTION_PLAIN = re.compile(
+    r"(see the section )([^.\n\[\]]+)(\.)",
+    re.IGNORECASE,
+)
+
+
+def _iter_md_links(text: str) -> list[tuple[str, str, int, int]]:
+    """``(label, href, start, end)`` for non-autotitle internal ``[]()`` links."""
+    out: list[tuple[str, str, int, int]] = []
+    for match in _MD_LINK.finditer(text or ""):
+        label, href = match.group(1), match.group(2).strip()
+        if label.strip() == "{#T}":
+            continue
+        if not _is_internal_href(href):
+            continue
+        out.append((label, href, match.start(), match.end()))
+    return out
+
+
+def restore_md_link_hrefs(translated: str, source_ru: str) -> str:
+    """Force EN ``[label](href)`` targets to match RU (§6.174 / #49451).
+
+    1. When non-autotitle internal link **counts** match, rewrite each EN href
+       to the RU twin in document order (fixes wrong path e.g.
+       ``secondary_index.md#example`` → ``min_max_index.md#example``).
+    2. When RU still has underrepresented hrefs, wrap plain
+       ``see the section Title.`` phrases with ``[Title](href)`` (glossary
+       dropped the ``architecture/metadata-services.md`` links).
+    """
+    if not translated or not source_ru:
+        return translated
+
+    ru_links = _iter_md_links(source_ru)
+    if not ru_links:
+        return translated
+
+    out = translated
+    en_links = _iter_md_links(out)
+
+    if len(en_links) == len(ru_links) and en_links:
+        # Rebuild from the end so offsets stay valid.
+        pieces: list[str] = []
+        cursor = len(out)
+        for (elabel, _ehref, start, end), (_rlabel, rhref, _rs, _re) in zip(
+            reversed(en_links), reversed(ru_links)
+        ):
+            pieces.append(out[end:cursor])
+            pieces.append(f"[{elabel}]({rhref})")
+            cursor = start
+        pieces.append(out[:cursor])
+        out = "".join(reversed(pieces))
+
+    # Reinject dropped links (counts still differ or plain-text leftovers).
+    present = Counter(
+        href for _label, href, _s, _e in _iter_md_links(out)
+    )
+    needed = Counter(href for _label, href, _s, _e in ru_links)
+    missing_hrefs: list[str] = []
+    for href, n in needed.items():
+        for _ in range(max(0, n - present.get(href, 0))):
+            missing_hrefs.append(href)
+
+    for href in missing_hrefs:
+        def _wrap(match: re.Match[str], *, _href: str = href) -> str:
+            return f"{match.group(1)}[{match.group(2).strip()}]({_href}){match.group(3)}"
+
+        new_out, n = _SEE_SECTION_PLAIN.subn(_wrap, out, count=1)
+        if n:
+            out = new_out
+            continue
+        # Fallback: no plain "see the section" — leave for critic / continue.
+    return out
+
+
+def insert_missing_autotitle_list_items(translated: str, source_ru: str) -> str:
+    """Insert missing ``[{#T}](href)`` bullet lines from RU into EN (#49451).
+
+    When RU and EN are sibling bullet lists and EN omitted a path that RU
+    still lists (e.g. critic dropped ``static-group-self-heal.md`` while
+    adding ``state-storage-reconfiguration.md``), splice the missing
+    ``- [{#T}](…)`` line after the previous shared neighbor.
+    """
+    if not translated or not source_ru:
+        return translated
+
+    ru_hrefs = [h for h in _AUTO_LINK.findall(source_ru) if _is_internal_href(h)]
+    en_hrefs = [h for h in _AUTO_LINK.findall(translated) if _is_internal_href(h)]
+    if not ru_hrefs:
+        return translated
+    missing = [h for h in ru_hrefs if h not in en_hrefs]
+    if not missing:
+        return translated
+
+    out = translated
+    for href in missing:
+        if f"[{{#T}}]({href})" in out:
+            continue
+        # Find previous RU neighbor that exists in EN; insert after that line.
+        try:
+            idx = ru_hrefs.index(href)
+        except ValueError:
+            continue
+        prev = next(
+            (ru_hrefs[i] for i in range(idx - 1, -1, -1) if ru_hrefs[i] in en_hrefs
+             or f"[{{#T}}]({ru_hrefs[i]})" in out),
+            None,
+        )
+        line = f"- [{{#T}}]({href})"
+        if prev:
+            needle = f"[{{#T}}]({prev})"
+            pos = out.find(needle)
+            if pos < 0:
+                continue
+            # End of the line containing needle.
+            eol = out.find("\n", pos)
+            if eol < 0:
+                out = out + "\n" + line + "\n"
+            else:
+                out = out[:eol] + "\n" + line + out[eol:]
+        else:
+            # No previous neighbor — insert before first EN autotitle bullet.
+            m = re.search(r"(?m)^(\s*-\s*\[\{#T\}\]\([^)]+\))", out)
+            if not m:
+                continue
+            out = out[: m.start()] + line + "\n" + out[m.start() :]
+        en_hrefs.append(href)
+    return out

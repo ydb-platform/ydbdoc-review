@@ -88,3 +88,60 @@ def test_heuristics_classify_href_parity_blocking():
 def test_collect_skips_http():
     text = "[wiki](https://en.wikipedia.org/wiki/LDAP) and [{#T}](a.md#b).\n"
     assert collect_internal_hrefs(text) == ["a.md#b"]
+
+
+def test_restore_md_link_hrefs_fixes_wrong_path_by_position():
+    """#49451: EN pointed at secondary_index.md#example instead of min_max."""
+    from ydbdoc_review.validation.href_parity import restore_md_link_hrefs
+
+    ru = (
+        "Для [таблицы `events`](../../yql/reference/syntax/create_table/"
+        "min_max_index.md#example) значения `[5, 13]`.\n"
+    )
+    en = (
+        "For the [`events` table](../../yql/reference/syntax/create_table/"
+        "secondary_index.md#example) values `[5, 13]`.\n"
+    )
+    fixed = restore_md_link_hrefs(en, ru)
+    assert "min_max_index.md#example" in fixed
+    assert "secondary_index.md#example" not in fixed
+    assert check_href_parity(ru, fixed) == []
+
+
+def test_restore_md_link_hrefs_wraps_see_the_section_plain_text():
+    """#49451: glossary dropped architecture/metadata-services.md links."""
+    from ydbdoc_review.validation.href_parity import restore_md_link_hrefs
+
+    ru = (
+        "Подробнее — в разделе "
+        "[Сервисы распространения метаданных](architecture/metadata-services.md).\n"
+    )
+    en = (
+        "For more details, see the section Metadata distribution services.\n"
+    )
+    fixed = restore_md_link_hrefs(en, ru)
+    assert (
+        "[Metadata distribution services](architecture/metadata-services.md)"
+        in fixed
+    )
+    assert check_href_parity(ru, fixed) == []
+
+
+def test_insert_missing_autotitle_list_items_splices_neighbor():
+    """#49451: critic dropped static-group-self-heal.md from the V2 index."""
+    from ydbdoc_review.validation.href_parity import (
+        insert_missing_autotitle_list_items,
+    )
+
+    ru = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](static-group-self-heal.md)\n"
+        "- [{#T}](static-group-move.md)\n"
+    )
+    en = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](static-group-move.md)\n"
+    )
+    fixed = insert_missing_autotitle_list_items(en, ru)
+    assert "static-group-self-heal.md" in fixed
+    assert check_href_parity(ru, fixed) == []
