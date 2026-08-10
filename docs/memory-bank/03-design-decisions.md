@@ -4155,5 +4155,17 @@ inside ``en_toc_reachable`` (EN documents a real toc page).
 
 **Tests:** ``test_href_parity_allows_reachable_en_extras``.
 
+### 6.183. Progress logs + LLM heartbeat for long CI runs (#45667, 2026-08-10)
+
+**Problem:** ``doc_translate`` for [#45667](https://github.com/ydb-platform/ydb/pull/45667)
+spent 40+ minutes with no visible progress via ``gh`` (logs only after job end);
+glossary timed out without knowing which step was stuck.
+
+**Decision:** log ``pair i/n start/done``, each file harness step, and LLM
+call start/done with a 30s heartbeat while the HTTP request blocks.
+
+**Tests:** ``test_llm_call_heartbeat_emits_waiting``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
+

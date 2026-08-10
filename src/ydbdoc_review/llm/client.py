@@ -183,19 +183,22 @@ class YandexLLMClient:
         last_error: BaseException | None = None
         session_retries = 0
 
+        from ydbdoc_review.llm.progress import llm_call_heartbeat
+
         for slug in chain:
             for attempt in range(1, self._llm.retries.max_attempts + 1):
                 started = time.perf_counter()
                 try:
-                    result = self._call_once(
-                        slug=slug,
-                        messages=messages,
-                        temperature=temp,
-                        max_tokens=tokens,
-                        retries=session_retries,
-                        started=started,
-                        role=role,
-                    )
+                    with llm_call_heartbeat(role=role, model=slug):
+                        result = self._call_once(
+                            slug=slug,
+                            messages=messages,
+                            temperature=temp,
+                            max_tokens=tokens,
+                            retries=session_retries,
+                            started=started,
+                            role=role,
+                        )
                     self._record_transcript(
                         role=role,
                         messages=messages,
@@ -581,6 +584,8 @@ class ElizaLLMClient(YandexLLMClient):
             }
             general_failures = 0
             rate_limit_failures = 0
+            from ydbdoc_review.llm.progress import llm_call_heartbeat
+
             while True:
                 started = time.perf_counter()
                 try:
@@ -590,12 +595,13 @@ class ElizaLLMClient(YandexLLMClient):
                         slug,
                         url,
                     )
-                    resp = self._http.post(
-                        url,
-                        headers=headers,
-                        json=payload,
-                        timeout=float(self._llm.timeout_s),
-                    )
+                    with llm_call_heartbeat(role=role, model=slug):
+                        resp = self._http.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                            timeout=float(self._llm.timeout_s),
+                        )
                     latency_ms = (time.perf_counter() - started) * 1000
 
                     if resp.status_code >= 400:
