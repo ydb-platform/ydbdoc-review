@@ -145,3 +145,40 @@ def test_insert_missing_autotitle_list_items_splices_neighbor():
     fixed = insert_missing_autotitle_list_items(en, ru)
     assert "static-group-self-heal.md" in fixed
     assert check_href_parity(ru, fixed) == []
+
+
+def test_insert_missing_skips_unreachable_en_targets():
+    """#49451: do not re-insert State Storage reconfig when EN has no page."""
+    from ydbdoc_review.validation.href_parity import (
+        insert_missing_autotitle_list_items,
+    )
+
+    ru = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](state-storage-reconfiguration.md)\n"
+        "- [{#T}](static-group-self-heal.md)\n"
+    )
+    en = (
+        "- [{#T}](state-storage-move.md)\n"
+        "- [{#T}](static-group-self-heal.md)\n"
+    )
+    # Only move + self-heal are reachable; reconfiguration is not.
+    reachable = frozenset(
+        {
+            "ydb/docs/en/core/devops/configuration-management/configuration-v2/"
+            "state-storage-move.md",
+            "ydb/docs/en/core/devops/configuration-management/configuration-v2/"
+            "static-group-self-heal.md",
+        }
+    )
+    fixed = insert_missing_autotitle_list_items(
+        en,
+        ru,
+        en_page_path=(
+            "ydb/docs/en/core/devops/configuration-management/"
+            "configuration-v2/index.md"
+        ),
+        en_toc_reachable=reachable,
+    )
+    assert "state-storage-reconfiguration.md" not in fixed
+    assert "static-group-self-heal.md" in fixed

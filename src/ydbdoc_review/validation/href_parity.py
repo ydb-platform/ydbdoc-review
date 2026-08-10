@@ -306,13 +306,23 @@ def restore_md_link_hrefs(translated: str, source_ru: str) -> str:
     return out
 
 
-def insert_missing_autotitle_list_items(translated: str, source_ru: str) -> str:
+def insert_missing_autotitle_list_items(
+    translated: str,
+    source_ru: str,
+    *,
+    en_page_path: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
+) -> str:
     """Insert missing ``[{#T}](href)`` bullet lines from RU into EN (#49451).
 
     When RU and EN are sibling bullet lists and EN omitted a path that RU
     still lists (e.g. critic dropped ``static-group-self-heal.md`` while
     adding ``state-storage-reconfiguration.md``), splice the missing
     ``- [{#T}](…)`` line after the previous shared neighbor.
+
+    Skips hrefs whose EN targets are outside the toc graph (no EN page yet)
+    so restore does not fight ``strip_unreachable`` / reintroduce 🔴
+    ``href_parity`` on the next verify.
     """
     if not translated or not source_ru:
         return translated
@@ -321,7 +331,17 @@ def insert_missing_autotitle_list_items(translated: str, source_ru: str) -> str:
     en_hrefs = [h for h in _AUTO_LINK.findall(translated) if _is_internal_href(h)]
     if not ru_hrefs:
         return translated
-    missing = [h for h in ru_hrefs if h not in en_hrefs]
+
+    skip: set[str] = set()
+    if en_toc_reachable is not None and en_page_path:
+        from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+        for href in ru_hrefs:
+            target = resolve_internal_md_href(en_page_path, href)
+            if target is not None and target not in en_toc_reachable:
+                skip.add(href)
+
+    missing = [h for h in ru_hrefs if h not in en_hrefs and h not in skip]
     if not missing:
         return translated
 
@@ -335,8 +355,11 @@ def insert_missing_autotitle_list_items(translated: str, source_ru: str) -> str:
         except ValueError:
             continue
         prev = next(
-            (ru_hrefs[i] for i in range(idx - 1, -1, -1) if ru_hrefs[i] in en_hrefs
-             or f"[{{#T}}]({ru_hrefs[i]})" in out),
+            (
+                ru_hrefs[i]
+                for i in range(idx - 1, -1, -1)
+                if ru_hrefs[i] in en_hrefs or f"[{{#T}}]({ru_hrefs[i]})" in out
+            ),
             None,
         )
         line = f"- [{{#T}}]({href})"

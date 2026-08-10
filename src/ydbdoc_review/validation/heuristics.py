@@ -527,13 +527,28 @@ def _collect_raw_heuristics(
             ignore_basenames=ignore_link_basenames,
         )
     )
+    href_ignore: set[str] = set(ignore_link_basenames or ())
+    if (
+        en_toc_reachable is not None
+        and source_file
+        and source_lang.lower() in {"ru", "russian"}
+    ):
+        from ydbdoc_review.validation.glossary_toc_links import (
+            md_link_basenames_outside_reachable,
+        )
+
+        href_ignore |= md_link_basenames_outside_reachable(
+            source_text,
+            file_path=source_file,
+            reachable=en_toc_reachable,
+        )
     raw.extend(
         check_href_parity(
             source_text,
             target_text,
             source_lang=source_lang,
             target_lang=target_lang,
-            ignore_basenames=ignore_link_basenames,
+            ignore_basenames=href_ignore or None,
         )
     )
     raw.extend(

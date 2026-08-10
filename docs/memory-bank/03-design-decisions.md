@@ -4103,5 +4103,24 @@ is **blocking**.
 **Tests:** ``test_restore_md_link_hrefs_*``,
 ``test_insert_missing_autotitle_list_items_splices_neighbor``.
 
+### 6.180. Skip unreachable EN targets on href restore (#49451, 2026-08-10)
+
+**Problem:** After §6.179, ``insert_missing_autotitle_list_items`` re-inserted
+RU-only ``state-storage-reconfiguration.md`` (no EN page / toc), while critic
+or strip dropped ``static-group-self-heal.md``. Verify then fought the manual
+fix and stayed 🔴 on ``href_parity``. Heuristics also ran *before* restore, so
+the report did not match committed text.
+
+**Decision:**
+
+1. ``insert_missing_autotitle_list_items`` — skip RU hrefs whose resolved EN
+   path is outside ``en_toc_reachable``.
+2. ``href_parity`` (via heuristics) — ignore the same unreachable basenames
+   (same as ``md_link_parity``).
+3. ``run_pair_plan`` — after restore changes text, re-run classified heuristics
+   and ``compose_file_verdict`` so the PR report matches committed EN.
+
+**Tests:** ``test_insert_missing_skips_unreachable_en_targets``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
