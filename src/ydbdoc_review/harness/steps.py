@@ -243,7 +243,6 @@ class TranslateStep:
             strategy.mode == "differential"
             and state.existing_target_text
             and state.base_source_text
-            and pending
         ):
             slim = slim_pending_for_low_magnitude_patch(
                 pending,
@@ -254,7 +253,7 @@ class TranslateStep:
                 pending, patch_analysis = slim
                 logger.info(
                     "Low-magnitude patch: LLM %d added/modified segment(s) "
-                    "(magnitude=%.2f); will splice into existing EN",
+                    "(magnitude=%.2f); splice into existing EN (no reconstruct)",
                     len(pending),
                     patch_analysis.change_magnitude,
                 )
@@ -274,6 +273,46 @@ class TranslateStep:
             state.translations = {}
             state.translated_text = state.existing_target_text or state.source_text
             state.stopped_early = True
+            return
+
+        # Low-magnitude: never reconstruct from RU. Keep EN and splice only
+        # added/modified translations (pending may be empty → unchanged EN).
+        if patch_analysis is not None and state.existing_target_text:
+            state.translations = {}
+            if pending:
+                state.translations = translate_segments(
+                    pending,
+                    ctx.client,
+                    ctx.glossary,
+                    file_path=state.file_path,
+                    source_lang=ctx.source_lang,
+                    target_lang=ctx.target_lang,
+                    max_chars=ctx.batch_chars,
+                    prompt_version=ctx.prompt_version,
+                    cache=ctx.cache,
+                    max_parallel_batches=ctx.parallel,
+                    manual_actions=state.manual_actions,
+                )
+            state.translated_text = patch_en_with_added_translations(
+                state.existing_target_text,
+                pr_segments=state.segments,
+                translations=state.translations,
+                added_segment_ids=patch_analysis.added_segment_ids,
+                modified_segment_ids=patch_analysis.modified_segment_ids,
+            )
+            if ctx.target_lang.lower() in {"en", "english"}:
+                state.translated_text = finalize_en_target(
+                    state.translated_text,
+                    state.source_text,
+                    client=ctx.client,
+                    glossary=ctx.glossary,
+                    file_path=state.file_path,
+                    source_lang=ctx.source_lang,
+                    target_lang=ctx.target_lang,
+                    prompt_version=ctx.prompt_version,
+                    out_warnings=state.finalize_warnings,
+                    en_toc_reachable=ctx.en_toc_reachable,
+                )
             return
 
         state.translations = dict(seeded)
@@ -307,28 +346,6 @@ class TranslateStep:
                 max_parallel_batches=ctx.parallel,
                 manual_actions=state.manual_actions,
             )
-        if patch_analysis is not None and state.existing_target_text:
-            state.translated_text = patch_en_with_added_translations(
-                state.existing_target_text,
-                pr_segments=state.segments,
-                translations=state.translations,
-                added_segment_ids=patch_analysis.added_segment_ids,
-                modified_segment_ids=patch_analysis.modified_segment_ids,
-            )
-            if ctx.target_lang.lower() in {"en", "english"}:
-                state.translated_text = finalize_en_target(
-                    state.translated_text,
-                    state.source_text,
-                    client=ctx.client,
-                    glossary=ctx.glossary,
-                    file_path=state.file_path,
-                    source_lang=ctx.source_lang,
-                    target_lang=ctx.target_lang,
-                    prompt_version=ctx.prompt_version,
-                    out_warnings=state.finalize_warnings,
-                    en_toc_reachable=ctx.en_toc_reachable,
-                )
-            return
         _render_translated_from_source(state, ctx)
 
 

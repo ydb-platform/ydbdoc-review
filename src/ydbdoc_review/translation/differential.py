@@ -601,14 +601,18 @@ def slim_pending_for_low_magnitude_patch(
     ru_base_text: str,
     ru_pr_text: str,
 ) -> tuple[list[Segment], RuDiffAnalysis] | None:
-    """When RU delta is tiny, LLM only added/modified — not unseeded kept (§6.184)."""
+    """When RU delta is tiny, keep existing EN and LLM only added/modified (§6.184).
+
+    Always activates below the magnitude threshold — even when ``pending`` is
+    empty or already equals the change set. Returning ``None`` in those cases
+    previously fell through to full RU→EN reconstruct and destroyed glossary
+    quality on #45667 / #49578.
+    """
     analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
     if analysis.change_magnitude >= _LOW_MAGNITUDE_PATCH:
         return None
     change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
     slim = [s for s in pending if s.id in change_ids]
-    if not slim or len(slim) >= len(pending):
-        return None
     return slim, analysis
 
 
@@ -627,20 +631,75 @@ def _preceding_heading_anchor(
     return None
 
 
-def _section_end_before_next_heading(en_text: str, anchor: str) -> int | None:
-    """Byte offset of the next heading after ``{#anchor}``, or EOF."""
+def _section_body_span(en_text: str, anchor: str) -> tuple[int, int] | None:
+    """Inclusive start / exclusive end of body after ``{#anchor}`` heading."""
     needle = "{#" + anchor + "}"
     start = en_text.find(needle)
     if start < 0:
         return None
     line_end = en_text.find("\n", start)
     if line_end < 0:
-        return len(en_text)
+        return len(en_text), len(en_text)
+    body_start = line_end + 1
     match = re.search(r"\n#{1,6} ", en_text[line_end:])
     if not match:
-        return len(en_text)
-    # Insert before the newline that precedes the next heading.
-    return line_end + match.start()
+        return body_start, len(en_text)
+    return body_start, line_end + match.start()
+
+
+def _section_end_before_next_heading(en_text: str, anchor: str) -> int | None:
+    """Byte offset of the next heading after ``{#anchor}``, or EOF."""
+    span = _section_body_span(en_text, anchor)
+    if span is None:
+        return None
+    return span[1]
+
+
+def _strip_md_links(text: str) -> str:
+    return re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+
+def _paragraphs_in_span(text: str, start: int, end: int) -> list[tuple[int, int, str]]:
+    """Return (abs_start, abs_end, paragraph) for non-empty blocks in span."""
+    body = text[start:end]
+    out: list[tuple[int, int, str]] = []
+    offset = 0
+    for part in re.split(r"(\n\s*\n)", body):
+        if re.fullmatch(r"\n\s*\n", part or ""):
+            offset += len(part)
+            continue
+        if not part.strip():
+            offset += len(part)
+            continue
+        abs_start = start + offset
+        abs_end = abs_start + len(part)
+        out.append((abs_start, abs_end, part.strip()))
+        offset += len(part)
+    return out
+
+
+def _best_paragraph_replace(
+    en_text: str, anchor: str, en_seg: str
+) -> tuple[int, int] | None:
+    """Find a section paragraph that the new EN text should replace."""
+    from difflib import SequenceMatcher
+
+    span = _section_body_span(en_text, anchor)
+    if span is None:
+        return None
+    target = _strip_md_links(en_seg).casefold()
+    best: tuple[float, int, int] | None = None
+    for abs_start, abs_end, para in _paragraphs_in_span(en_text, *span):
+        if para.startswith("#"):
+            continue
+        ratio = SequenceMatcher(
+            None, _strip_md_links(para).casefold(), target
+        ).ratio()
+        if best is None or ratio > best[0]:
+            best = (ratio, abs_start, abs_end)
+    if best is None or best[0] < 0.55:
+        return None
+    return best[1], best[2]
 
 
 def patch_en_with_added_translations(
@@ -651,31 +710,34 @@ def patch_en_with_added_translations(
     added_segment_ids: frozenset[str],
     modified_segment_ids: frozenset[str] = frozenset(),
 ) -> str:
-    """Insert newly translated paragraphs into EN under the same ``{#anchor}``.
+    """Splice newly translated paragraphs into existing EN (§6.184).
 
-    Used for low-magnitude glossary-style additions (#45667) so we do not
-    reconstruct the whole EN page from RU (which would need 100+ LLM seeds).
+    Prefer replacing a similar paragraph under the same ``{#anchor}`` (plain
+    → linked glossary cross-refs). Otherwise insert before the next heading.
 
-    ``modified_segment_ids`` are included when SequenceMatcher classifies a
-    pure insert as ``modified`` (same-kind heuristic in ``analyze_ru_diff``).
+    Never reconstructs the whole page — existing EN structure is preserved.
     """
-    insert_ids = added_segment_ids | modified_segment_ids
-    inserts: list[tuple[int, str]] = []
+    change_ids = added_segment_ids | modified_segment_ids
+    # (kind, pos_or_start, end_or_none, text) — replace uses start/end; insert uses pos.
+    ops: list[tuple[str, int, int | None, str]] = []
     for seg in pr_segments:
-        if seg.id not in insert_ids:
+        if seg.id not in change_ids:
             continue
         en_seg = (translations.get(seg.id) or "").strip()
         if not en_seg:
             continue
-        # Skip in-place edits that already exist in EN (whitespace-only, etc.).
         if en_seg in en_text:
             continue
         anchor = _preceding_heading_anchor(pr_segments, seg.id)
         if not anchor:
             logger.warning(
-                "low-magnitude patch: no preceding anchor for %s; skip insert",
+                "low-magnitude patch: no preceding anchor for %s; skip",
                 seg.id,
             )
+            continue
+        replace_at = _best_paragraph_replace(en_text, anchor, en_seg)
+        if replace_at is not None:
+            ops.append(("replace", replace_at[0], replace_at[1], en_seg))
             continue
         pos = _section_end_before_next_heading(en_text, anchor)
         if pos is None:
@@ -684,12 +746,16 @@ def patch_en_with_added_translations(
                 anchor,
             )
             continue
-        inserts.append((pos, en_seg))
+        ops.append(("insert", pos, None, en_seg))
 
-    if not inserts:
+    if not ops:
         return en_text
 
     out = en_text
-    for pos, text in sorted(inserts, key=lambda row: -row[0]):
-        out = out[:pos] + "\n" + text + "\n" + out[pos:]
+    # Apply from the end so earlier offsets stay valid.
+    for kind, a, b, text in sorted(ops, key=lambda row: -row[1]):
+        if kind == "replace" and b is not None:
+            out = out[:a] + text + out[b:]
+        else:
+            out = out[:a] + "\n" + text + "\n" + out[a:]
     return out

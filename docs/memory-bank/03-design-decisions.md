@@ -4173,7 +4173,9 @@ adds ``metadata-services.md`` plus three short glossary cross-links. Differentia
 still left **100+** unchanged glossary segments pending LLM because RU/EN
 structure drifts and §6.171 refuses weak LCS seeds. One Eliza timeout on
 ``glossary.md`` opened a §6.80 completeness gap and aborted the whole
-translation PR.
+translation PR. First ship of the patch path still **reconstructed** EN when
+``slim == pending`` or pending was empty after relaxed seed — producing
+garbled glossary on [#49578](https://github.com/ydb-platform/ydb/pull/49578).
 
 **Decision:**
 
@@ -4181,9 +4183,10 @@ translation PR.
    not ``int(0.4*n)``), allow a **relaxed** equal-opcode LCS map
    (``require_trustworthy=False``) only to reuse EN for *unchanged* RU
    segments. Weak strict maps still fall back to full (§6.163 / #48595).
-2. When RU change magnitude &lt; 5%, LLM only added/modified segments and
-   **splice** them into existing EN under the preceding ``{#anchor}``
-   (``patch_en_with_added_translations``) instead of reconstructing the page.
+2. When RU change magnitude &lt; 5%, **always** keep existing EN: LLM only
+   added/modified segments and **splice/replace** under the preceding
+   ``{#anchor}`` (``patch_en_with_added_translations``). Never reconstruct
+   the page — including when pending is empty or already equals the change set.
 3. On translate LLM failure with existing EN, **keep** the current EN so
    completeness does not kill sibling files (e.g. new ``metadata-services.md``).
 
