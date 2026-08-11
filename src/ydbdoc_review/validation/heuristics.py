@@ -409,6 +409,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "info"
     if message.startswith("glossary_verify_finalize_skipped:"):
         return "info"
+    if message.startswith("glossary_verify_critic_skipped:"):
+        return "info"
     if message.startswith("include_parity_repaired:"):
         return "info"
     if message.startswith("strip_unreachable_links:"):

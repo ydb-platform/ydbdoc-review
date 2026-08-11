@@ -457,6 +457,12 @@ class CriticLoopStep:
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
         if not ctx.enable_critic or state.segment_alignment_error:
             return
+        if state.mode == "verify" and is_glossary_file(state.file_path):
+            logger.info("Glossary verify: skip critic_loop (§6.188)")
+            state.finalize_warnings.append(
+                "glossary_verify_critic_skipped: hub page; heuristics only on verify"
+            )
+            return
         run_critic_loop(state, ctx)
 
 
