@@ -374,6 +374,11 @@ class LoadTargetStep:
             state.fence_reference_text = state.existing_target_text
 
 
+# Full verify realign retranslates every RU segment. Glossary-scale pages
+# (400+) hang CI on Eliza timeouts (#49578 / #45667). Cap and leave 🔴.
+_VERIFY_REALIGN_MAX_SEGMENTS = 80
+
+
 class RoundTripStep:
     name = "round_trip"
 
@@ -390,6 +395,19 @@ class RoundTripStep:
             state.file_path,
             state.segment_alignment_error,
         )
+        if len(state.segments) > _VERIFY_REALIGN_MAX_SEGMENTS:
+            logger.warning(
+                "verify realign skipped for %s (%d segments > %d); "
+                "keep existing EN and report alignment mismatch (§6.185)",
+                state.file_path,
+                len(state.segments),
+                _VERIFY_REALIGN_MAX_SEGMENTS,
+            )
+            state.finalize_warnings.append(
+                "verify_realign_skipped: too many segments for full retranslate; "
+                "alignment mismatch left as blocker"
+            )
+            return
         state.finalize_warnings.append(
             "verify_realign: rebuilt EN from RU due to segment alignment mismatch"
         )
