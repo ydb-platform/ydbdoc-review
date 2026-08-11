@@ -4166,6 +4166,31 @@ call start/done with a 30s heartbeat while the HTTP request blocks.
 
 **Tests:** ``test_llm_call_heartbeat_emits_waiting``.
 
+### 6.184. Low-magnitude EN patch for tiny RU glossary edits (#45667, 2026-08-11)
+
+**Problem:** Source PR [#45667](https://github.com/ydb-platform/ydb/pull/45667)
+adds ``metadata-services.md`` plus three short glossary cross-links. Differential
+still left **100+** unchanged glossary segments pending LLM because RU/EN
+structure drifts and §6.171 refuses weak LCS seeds. One Eliza timeout on
+``glossary.md`` opened a §6.80 completeness gap and aborted the whole
+translation PR.
+
+**Decision:**
+
+1. After a trustworthy partial seed covers ≥40% of base segments (real ratio,
+   not ``int(0.4*n)``), allow a **relaxed** equal-opcode LCS map
+   (``require_trustworthy=False``) only to reuse EN for *unchanged* RU
+   segments. Weak strict maps still fall back to full (§6.163 / #48595).
+2. When RU change magnitude &lt; 5%, LLM only added/modified segments and
+   **splice** them into existing EN under the preceding ``{#anchor}``
+   (``patch_en_with_added_translations``) instead of reconstructing the page.
+3. On translate LLM failure with existing EN, **keep** the current EN so
+   completeness does not kill sibling files (e.g. new ``metadata-services.md``).
+
+**Tests:** ``test_differential_low_magnitude_patch.py``,
+``test_prepare_seed_falls_back_full_on_kind_mismatch``,
+``test_run_pair_plan_keeps_existing_en_on_translate_llm_failure``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 

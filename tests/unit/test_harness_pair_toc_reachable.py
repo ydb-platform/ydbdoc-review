@@ -63,3 +63,48 @@ def test_run_pair_plan_forwards_en_toc_reachable_to_harness():
         run_pair_plan(content, plan, parent, {})
 
     assert captured["en_toc_reachable"] is reachable
+
+
+def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
+    """§6.184: glossary timeout must not leave a completeness gap for the whole PR."""
+    from ydbdoc_review.llm.errors import LLMError
+
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/concepts/glossary.md",
+        en_path="ydb/docs/en/core/concepts/glossary.md",
+        ru_changed=True,
+    )
+    content = PairContent(
+        pair=pair,
+        ru_text="# RU\n\nТекст.\n",
+        en_text="# EN\n\nText.\n",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="test",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+    )
+
+    class _BoomHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del state, ctx
+            raise LLMError("Request timed out")
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", _BoomHarness):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert result.error is None
+    assert result.target_text == "# EN\n\nText.\n"

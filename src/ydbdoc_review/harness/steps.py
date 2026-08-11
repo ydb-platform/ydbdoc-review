@@ -31,7 +31,9 @@ from ydbdoc_review.translation.critic_retranslate import (
 )
 from ydbdoc_review.translation.differential import (
     DifferentialTranslationConfig,
+    patch_en_with_added_translations,
     prepare_differential_seed,
+    slim_pending_for_low_magnitude_patch,
 )
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
@@ -236,13 +238,38 @@ class TranslateStep:
             ru_base_text=state.base_source_text,
             config=diff_cfg,
         )
+        patch_analysis = None
+        if (
+            strategy.mode == "differential"
+            and state.existing_target_text
+            and state.base_source_text
+            and pending
+        ):
+            slim = slim_pending_for_low_magnitude_patch(
+                pending,
+                ru_base_text=state.base_source_text,
+                ru_pr_text=state.source_text,
+            )
+            if slim is not None:
+                pending, patch_analysis = slim
+                logger.info(
+                    "Low-magnitude patch: LLM %d added/modified segment(s) "
+                    "(magnitude=%.2f); will splice into existing EN",
+                    len(pending),
+                    patch_analysis.change_magnitude,
+                )
         state.differential_meta = {
             "mode": strategy.mode,
             "reason": strategy.reason,
             "seeded": len(seeded),
             "pending": len(pending),
+            "low_magnitude_patch": patch_analysis is not None,
             **strategy.config,
         }
+        if patch_analysis is not None:
+            state.differential_meta["change_magnitude"] = (
+                patch_analysis.change_magnitude
+            )
         if strategy.mode == "skip":
             state.translations = {}
             state.translated_text = state.existing_target_text or state.source_text
@@ -280,6 +307,28 @@ class TranslateStep:
                 max_parallel_batches=ctx.parallel,
                 manual_actions=state.manual_actions,
             )
+        if patch_analysis is not None and state.existing_target_text:
+            state.translated_text = patch_en_with_added_translations(
+                state.existing_target_text,
+                pr_segments=state.segments,
+                translations=state.translations,
+                added_segment_ids=patch_analysis.added_segment_ids,
+                modified_segment_ids=patch_analysis.modified_segment_ids,
+            )
+            if ctx.target_lang.lower() in {"en", "english"}:
+                state.translated_text = finalize_en_target(
+                    state.translated_text,
+                    state.source_text,
+                    client=ctx.client,
+                    glossary=ctx.glossary,
+                    file_path=state.file_path,
+                    source_lang=ctx.source_lang,
+                    target_lang=ctx.target_lang,
+                    prompt_version=ctx.prompt_version,
+                    out_warnings=state.finalize_warnings,
+                    en_toc_reachable=ctx.en_toc_reachable,
+                )
+            return
         _render_translated_from_source(state, ctx)
 
 

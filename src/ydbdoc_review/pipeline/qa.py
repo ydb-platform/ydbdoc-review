@@ -176,13 +176,19 @@ def partial_seed_is_trustworthy(
 def partial_align_translations_from_target(
     source_segments: list[Segment],
     target_text: str,
+    *,
+    require_trustworthy: bool = True,
 ) -> dict[str, str]:
     """Best-effort seed map when full structural align fails (§6.168–§6.176).
 
     LCS over ``(kind, placeholder-letter signature[, heading_anchor])``. Refuse
     the whole partial map when segment-count drift is high. Keep only
     trustworthy pairs (non-V placeholder fingerprint, or short heading with
-    matching ``{#id}`` and length parity).
+    matching ``{#id}`` and length parity) when ``require_trustworthy`` is True.
+
+    When False (§6.184 / #45667), keep any LCS pair whose placeholders match
+    (and placeholder-only cells stay marker-only). Used to reuse EN for
+    *unchanged* RU segments without re-LLM.
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
     n_src = len(source_segments)
@@ -224,12 +230,20 @@ def partial_align_translations_from_target(
         tgt_one = normalize_target_segments_to_source(
             [src], [tgt_seg]
         )[0]
-        if not partial_seed_is_trustworthy(
-            src,
-            tgt_one.text,
-            target_heading_anchor=tgt_seg.heading_anchor,
-        ):
-            continue
+        if require_trustworthy:
+            if not partial_seed_is_trustworthy(
+                src,
+                tgt_one.text,
+                target_heading_anchor=tgt_seg.heading_anchor,
+            ):
+                continue
+        else:
+            if not placeholders_match(src.text, tgt_one.text):
+                continue
+            if is_placeholder_only_text(src.text) and not is_placeholder_only_text(
+                tgt_one.text
+            ):
+                continue
         seeded[src.id] = tgt_one.text
     return seeded
 

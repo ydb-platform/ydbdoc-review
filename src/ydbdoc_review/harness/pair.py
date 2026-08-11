@@ -95,6 +95,24 @@ def run_pair_plan(
     try:
         file_result = FileHarness(profile).run(state, harness_ctx)
     except (LLMError, TranslationError, ValueError) as exc:
+        # Keep existing EN so §6.80 completeness does not abort the whole PR
+        # when one large file times out (glossary on #45667).
+        if (
+            plan.action == "translate_to_en"
+            and existing_target
+            and plan.target_path == content.pair.en_path
+        ):
+            logger.warning(
+                "Translate failed for %s; keeping existing EN (%s)",
+                plan.target_path,
+                exc,
+            )
+            return PairRunResult(
+                plan=plan,
+                target_text=existing_target,
+                source_text=source_text,
+                error=None,
+            )
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))
 

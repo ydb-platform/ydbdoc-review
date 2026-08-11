@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,6 +28,10 @@ from ydbdoc_review.pipeline.qa import (
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.validation.markers import (
+    is_placeholder_only_text,
+    placeholders_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -437,6 +442,7 @@ class DifferentialTranslationAnalyzer:
 
         try:
             base_en = align_translations_from_target(base_segments, en_current_text)
+            base_en_relaxed = base_en
         except TranslationValidationError as exc:
             base_en = partial_align_translations_from_target(
                 base_segments, en_current_text
@@ -448,7 +454,12 @@ class DifferentialTranslationAnalyzer:
                 len(base_en),
                 len(base_segments),
             )
-            if not base_en:
+            # Weak partial maps (kind drift / count match only) must not drive
+            # differential — fall back to full (§6.163 / #48595).
+            # Use a real ratio (not int(0.4*n)): for n=4, int gives 1 and a
+            # single heading seed would enable relaxed LCS that mis-pairs
+            # plain paragraphs.
+            if len(base_en) < 0.4 * len(base_segments):
                 pending = frozenset(s.id for s in pr_segments)
                 return DifferentialTranslationPlan(
                     added_blocks=[_segment_to_block(s) for s in pr_segments],
@@ -458,6 +469,16 @@ class DifferentialTranslationAnalyzer:
                     seeded_translations={},
                     pending_segment_ids=pending,
                 )
+            base_en_relaxed = partial_align_translations_from_target(
+                base_segments,
+                en_current_text,
+                require_trustworthy=False,
+            )
+            logger.info(
+                "Relaxed equal-opcode map %s/%s (§6.184)",
+                len(base_en_relaxed),
+                len(base_segments),
+            )
 
         pairs = _align_pr_to_base(base_segments, pr_segments)
         seeded: dict[str, str] = {}
@@ -466,21 +487,36 @@ class DifferentialTranslationAnalyzer:
         added_blocks: list[TextBlock] = []
         modified_blocks: list[TextBlock] = []
 
+        def _keep(pr_seg: Segment, en_text: str) -> None:
+            seeded[pr_seg.id] = en_text
+            kept_en_blocks.append(
+                TextBlock(
+                    kind=pr_seg.kind.value,
+                    content=en_text,
+                    line_range=(0, 0),
+                    segment_id=pr_seg.id,
+                )
+            )
+
+        def _safe_reuse(pr_seg: Segment, en_text: str) -> bool:
+            if not placeholders_match(pr_seg.text, en_text):
+                return False
+            if is_placeholder_only_text(pr_seg.text):
+                return is_placeholder_only_text(en_text)
+            return True
+
         for pr_seg, base_seg in pairs:
             if base_seg is not None:
                 en_text = base_en.get(base_seg.id)
-                # §6.170/§6.171: never seed EN whose protect markers do not match
-                # the PR segment, or weak empty/V-only LCS pairs (meaning swap).
+                unchanged = pr_seg.text == base_seg.text
+                # Equal RU opcode: prefer strict map, then relaxed LCS (§6.184).
+                if unchanged:
+                    reuse = en_text or base_en_relaxed.get(base_seg.id)
+                    if reuse is not None and _safe_reuse(pr_seg, reuse):
+                        _keep(pr_seg, reuse)
+                        continue
                 if en_text is not None and partial_seed_is_trustworthy(pr_seg, en_text):
-                    seeded[pr_seg.id] = en_text
-                    kept_en_blocks.append(
-                        TextBlock(
-                            kind=pr_seg.kind.value,
-                            content=en_text,
-                            line_range=(0, 0),
-                            segment_id=pr_seg.id,
-                        )
-                    )
+                    _keep(pr_seg, en_text)
                     continue
             pending.add(pr_seg.id)
             added_blocks.append(_segment_to_block(pr_seg))
@@ -554,3 +590,106 @@ def prepare_differential_seed(
         strategy.config.get("change_magnitude"),
     )
     return strategy, dict(plan.seeded_translations), pending
+
+
+_LOW_MAGNITUDE_PATCH = 0.05
+
+
+def slim_pending_for_low_magnitude_patch(
+    pending: list[Segment],
+    *,
+    ru_base_text: str,
+    ru_pr_text: str,
+) -> tuple[list[Segment], RuDiffAnalysis] | None:
+    """When RU delta is tiny, LLM only added/modified — not unseeded kept (§6.184)."""
+    analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
+    if analysis.change_magnitude >= _LOW_MAGNITUDE_PATCH:
+        return None
+    change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
+    slim = [s for s in pending if s.id in change_ids]
+    if not slim or len(slim) >= len(pending):
+        return None
+    return slim, analysis
+
+
+def _preceding_heading_anchor(
+    segments: list[Segment], segment_id: str
+) -> str | None:
+    idx = next((i for i, s in enumerate(segments) if s.id == segment_id), None)
+    if idx is None:
+        return None
+    from ydbdoc_review.segmentation.types import SegmentKind
+
+    for i in range(idx - 1, -1, -1):
+        seg = segments[i]
+        if seg.kind == SegmentKind.HEADING and seg.heading_anchor:
+            return seg.heading_anchor
+    return None
+
+
+def _section_end_before_next_heading(en_text: str, anchor: str) -> int | None:
+    """Byte offset of the next heading after ``{#anchor}``, or EOF."""
+    needle = "{#" + anchor + "}"
+    start = en_text.find(needle)
+    if start < 0:
+        return None
+    line_end = en_text.find("\n", start)
+    if line_end < 0:
+        return len(en_text)
+    match = re.search(r"\n#{1,6} ", en_text[line_end:])
+    if not match:
+        return len(en_text)
+    # Insert before the newline that precedes the next heading.
+    return line_end + match.start()
+
+
+def patch_en_with_added_translations(
+    en_text: str,
+    *,
+    pr_segments: list[Segment],
+    translations: dict[str, str],
+    added_segment_ids: frozenset[str],
+    modified_segment_ids: frozenset[str] = frozenset(),
+) -> str:
+    """Insert newly translated paragraphs into EN under the same ``{#anchor}``.
+
+    Used for low-magnitude glossary-style additions (#45667) so we do not
+    reconstruct the whole EN page from RU (which would need 100+ LLM seeds).
+
+    ``modified_segment_ids`` are included when SequenceMatcher classifies a
+    pure insert as ``modified`` (same-kind heuristic in ``analyze_ru_diff``).
+    """
+    insert_ids = added_segment_ids | modified_segment_ids
+    inserts: list[tuple[int, str]] = []
+    for seg in pr_segments:
+        if seg.id not in insert_ids:
+            continue
+        en_seg = (translations.get(seg.id) or "").strip()
+        if not en_seg:
+            continue
+        # Skip in-place edits that already exist in EN (whitespace-only, etc.).
+        if en_seg in en_text:
+            continue
+        anchor = _preceding_heading_anchor(pr_segments, seg.id)
+        if not anchor:
+            logger.warning(
+                "low-magnitude patch: no preceding anchor for %s; skip insert",
+                seg.id,
+            )
+            continue
+        pos = _section_end_before_next_heading(en_text, anchor)
+        if pos is None:
+            logger.warning(
+                "low-magnitude patch: EN missing {#%s}; skip insert",
+                anchor,
+            )
+            continue
+        inserts.append((pos, en_seg))
+
+    if not inserts:
+        return en_text
+
+    out = en_text
+    for pos, text in sorted(inserts, key=lambda row: -row[0]):
+        out = out[:pos] + "\n" + text + "\n" + out[pos:]
+    return out
