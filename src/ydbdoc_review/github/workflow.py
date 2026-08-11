@@ -247,6 +247,7 @@ def _apply_results_to_disk(
     docs_root: str = "ydb/docs",
 ) -> TouchedPaths:
     """Write translated markdown, navigation YAML, locale assets, and deletes."""
+    from ydbdoc_review.translation.file_profiles import is_glossary_file
     from ydbdoc_review.validation.locale_assets import apply_locale_asset_copies
 
     written: list[str] = []
@@ -255,6 +256,13 @@ def _apply_results_to_disk(
         if run.skipped or run.error:
             continue
         rel = run.plan.target_path
+        # Glossary hub: never rewrite EN from verify (critic/finalize can
+        # hybridize 400+ segments; §6.189 / #49578).
+        if (
+            run.plan.action == "critic_only"
+            and is_glossary_file(rel)
+        ):
+            continue
         if run.deleted:
             deleted.append(rel)
             if dry_run:

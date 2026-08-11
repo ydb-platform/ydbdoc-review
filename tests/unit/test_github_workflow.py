@@ -866,6 +866,99 @@ def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
     assert result.pr_result.translated_count == 1
 
 
+def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
+    """Verify must not commit hybridized glossary EN (#49578 / §6.189)."""
+    en = Path(git_repo) / "ydb" / "docs" / "en" / "core" / "concepts"
+    en.mkdir(parents=True)
+    glossary = en / "glossary.md"
+    good_en = "Sessions: [{#T}](query_execution/execution_process.md#sessions).\n"
+    glossary.write_text(good_en, encoding="utf-8")
+
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/concepts/glossary.md",
+        en_path="ydb/docs/en/core/concepts/glossary.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="Сессии: кириллица.\n",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    pr_result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=plan,
+                target_text="Сессии: кириллица.\n",
+                file_result=fr,
+            )
+        ]
+    )
+
+    pull = {
+        "title": "Auto-translate docs from PR #45667",
+        "body": "source PR #45667",
+        "head": {
+            "ref": "ydbdoc-review/pr-45667",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "feature/docs"},
+    }
+
+    source_pull = {
+        "head": {
+            "sha": "source-head-sha",
+            "repo": {"owner": {"login": "o"}, "name": "r"},
+        }
+    }
+
+    def _get_pull(_owner: str, _repo: str, number: int) -> dict:
+        if number == 49578:
+            return pull
+        if number == 45667:
+            return source_pull
+        raise AssertionError(f"unexpected PR {number}")
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=pr_result,
+    ):
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
+            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True) as commit:
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.side_effect = _get_pull
+                        mock_gh.return_value.get_file_text.return_value = "RU.\n"
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/en/core/concepts/glossary.md", "modified")],
+                        ):
+                            run_doc_verify(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=49578,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
+
+    assert glossary.read_text(encoding="utf-8") == good_en
+    commit.assert_not_called()
+    push.assert_not_called()
+
+
 def test_run_doc_verify_bilingual_source_pr_ru_only_completeness_gap(git_repo: str):
     """Author PR that changes RU without EN mirror → completeness 🔴."""
     pull = {

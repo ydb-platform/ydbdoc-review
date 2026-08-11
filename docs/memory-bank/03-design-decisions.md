@@ -4235,6 +4235,30 @@ min) and rewrote hundreds of EN lines; push then failed locally (403).
 **Tests:** covered by ``test_glossary_verify_clears_alignment_error`` profile
 (extend if needed).
 
+### 6.188. Skip glossary critic on verify (#49578, 2026-08-11)
+
+**Problem:** even with alignment/finalize skipped, ``critic_loop`` on
+``glossary.md`` ran ~35 min over 400+ segments and hybridized EN (RU paragraphs
+mixed into EN) before auto-commit.
+
+**Decision:** on ``doc_verify`` for ``concepts/glossary.md``, skip
+``critic_loop`` — heuristics-only QA on existing EN.
+
+**Tests:** ``test_glossary_verify_clears_alignment_error`` (harness profile).
+
+### 6.189. Never write glossary EN from verify (#49578, 2026-08-11)
+
+**Problem:** ``doc_verify`` auto-commit ``0e760c73`` pushed 747-line glossary
+diff (170+ Cyrillic lines) after critic/finalize hybridized ``target_text``;
+§6.188 stopped new hybridization but disk write could still commit stale
+``PairRunResult.target_text``.
+
+**Decision:** in ``_apply_results_to_disk``, skip writing ``concepts/glossary.md``
+when ``plan.action == critic_only`` (verify path). Glossary fixes belong in
+``doc_translate``, not verify auto-push.
+
+**Tests:** ``test_run_doc_verify_skips_glossary_disk_write``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 
