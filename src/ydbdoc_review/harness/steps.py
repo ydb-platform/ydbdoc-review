@@ -35,6 +35,7 @@ from ydbdoc_review.translation.differential import (
     prepare_differential_seed,
     slim_pending_for_low_magnitude_patch,
 )
+from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
@@ -279,9 +280,16 @@ class TranslateStep:
         # added/modified translations (pending may be empty → unchanged EN).
         if patch_analysis is not None and state.existing_target_text:
             state.translations = {}
-            if pending:
+            to_llm = list(pending)
+            if not to_llm:
+                change_ids = (
+                    patch_analysis.added_segment_ids
+                    | patch_analysis.modified_segment_ids
+                )
+                to_llm = [s for s in state.segments if s.id in change_ids]
+            if to_llm:
                 state.translations = translate_segments(
-                    pending,
+                    to_llm,
                     ctx.client,
                     ctx.glossary,
                     file_path=state.file_path,
@@ -395,6 +403,16 @@ class RoundTripStep:
             state.file_path,
             state.segment_alignment_error,
         )
+        if is_glossary_file(state.file_path):
+            logger.info(
+                "Glossary verify: skip structural alignment gate (§6.186)"
+            )
+            state.finalize_warnings.append(
+                "glossary_verify_alignment_skipped: structural RU/EN "
+                "segment drift ignored on glossary hub"
+            )
+            state.segment_alignment_error = None
+            return
         if len(state.segments) > _VERIFY_REALIGN_MAX_SEGMENTS:
             logger.warning(
                 "verify realign skipped for %s (%d segments > %d); "

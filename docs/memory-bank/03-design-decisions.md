@@ -4208,5 +4208,21 @@ can finish and post the report. Small pages still realign as in §6.147.
 **Tests:** ``test_verify_realign_skips_full_retranslate_for_large_files``.
 
 
+### 6.186. Skip glossary structural alignment on verify (#49578, 2026-08-11)
+
+**Problem:** ``glossary.md`` hub pages have long-standing RU/EN segment drift
+(heading vs paragraph at the same index). ``gate_round_trip`` always failed →
+🔴 alignment blocked merge even when content was fine. §6.185 skipped full
+realign but still left the error as blocker.
+
+**Decision:** on ``doc_verify``, for ``concepts/glossary.md`` clear
+``segment_alignment_error`` after logging; run critic/heuristics on existing
+EN. Also extend Cyrillic auto-translate to `` ```mermaid `` fences (labels
+were copied from RU via ``enforce_source_fenced_blocks`` but never translated).
+
+**Tests:** ``test_glossary_verify_clears_alignment_error``,
+``test_collect_cyrillic_mermaid_fence_lines`` (in ``test_fence_comments``).
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
 

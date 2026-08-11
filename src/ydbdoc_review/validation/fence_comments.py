@@ -350,6 +350,14 @@ def _text_fence_lang(info: str) -> str:
     return parts[0].lower() if parts else ""
 
 
+def _diagram_fence_lang(info: str) -> str | None:
+    """Fence languages whose inline labels are translated (``text``, ``mermaid``)."""
+    lang = _text_fence_lang(info)
+    if lang in {"text", "mermaid"}:
+        return lang
+    return None
+
+
 def _preserve_leading_indent(original_line: str, new_content: str) -> str:
     m = re.match(r"^(\s*)", original_line)
     prefix = m.group(1) if m else ""
@@ -357,13 +365,13 @@ def _preserve_leading_indent(original_line: str, new_content: str) -> str:
 
 
 def collect_cyrillic_text_fence_lines(text: str) -> list[FenceCommentLine]:
-    """Cyrillic lines inside `` ```text `` fenced diagram blocks."""
+    """Cyrillic lines inside `` ```text `` / `` ```mermaid `` diagram blocks."""
     blocks = collect_code_blocks(parse_markdown(text))
     found: list[FenceCommentLine] = []
     for block_index, block in enumerate(blocks, start=1):
         if not isinstance(block, FencedCode):
             continue
-        if _text_fence_lang(block.info) != "text":
+        if _diagram_fence_lang(block.info) is None:
             continue
         for line_index, line in enumerate(block.content.splitlines()):
             if _CYRILLIC.search(line):

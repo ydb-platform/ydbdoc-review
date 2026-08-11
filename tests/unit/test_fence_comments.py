@@ -94,6 +94,18 @@ def test_collect_cyrillic_text_fence_lines_increment_chain():
     assert "Инкремент₁" in items[0].body
 
 
+def test_collect_cyrillic_mermaid_fence_lines():
+    md = """\
+```mermaid
+graph LR
+    Client["Клиент\\n(любой узел)"]
+```
+"""
+    items = collect_cyrillic_text_fence_lines(md)
+    assert len(items) == 1
+    assert "Клиент" in items[0].body
+
+
 def test_check_cyrillic_in_en_text_fences_warns_on_increment_chain():
     warnings = check_cyrillic_in_en_text_fences(TEXT_FENCE_INCREMENT_CHAIN, target_lang="en")
     assert warnings

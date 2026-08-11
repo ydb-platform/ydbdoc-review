@@ -1,4 +1,4 @@
-"""§6.185: skip full verify realign on large files (glossary hang)."""
+"""§6.186: glossary verify skips structural alignment gate."""
 
 from __future__ import annotations
 
@@ -13,18 +13,13 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
 
 
-def test_verify_realign_skips_full_retranslate_for_large_files(monkeypatch):
-    """449-segment glossary must not call translate_segments during verify."""
-    # Build a RU with many short paragraphs so segment count exceeds the cap.
-    ru_parts = [f"## H{i} {{#h{i}}}\n\nPara {i}.\n" for i in range(90)]
-    ru = "# Title\n\n" + "\n".join(ru_parts)
-    en = "# Title\n\nDifferent structure only.\n"
+def test_glossary_verify_clears_alignment_error(monkeypatch):
+    ru = "# Glossary\n\n## Actor {#actor}\n\nText.\n\n## Tablet {#tablet}\n\nMore.\n"
+    en = "# Glossary\n\nDifferent.\n"
     segs = extract_segments(parse_markdown(ru))
-    assert len(segs) > 80
-
     state = FileRunState(
         mode="verify",
-        file_path="ydb/docs/ru/core/dev/large-guide.md",
+        file_path="ydb/docs/ru/core/concepts/glossary.md",
         raw_source_text=ru,
         source_text=ru,
         existing_target_text=en,
@@ -39,17 +34,14 @@ def test_verify_realign_skips_full_retranslate_for_large_files(monkeypatch):
         config=cfg,
     )
 
-    called = {"n": 0}
-
     def _boom(*_a, **_k):
-        called["n"] += 1
-        raise AssertionError("translate_segments must not run for large realign")
+        raise AssertionError("translate_segments must not run for glossary verify")
 
     monkeypatch.setattr(
         "ydbdoc_review.harness.steps.translate_segments", _boom
     )
     RoundTripStep().run(state, ctx)
-    assert called["n"] == 0
-    assert state.segment_alignment_error
-    assert any("verify_realign_skipped" in w for w in state.finalize_warnings)
-    assert state.translated_text == en
+    assert state.segment_alignment_error is None
+    assert any(
+        "glossary_verify_alignment_skipped" in w for w in state.finalize_warnings
+    )

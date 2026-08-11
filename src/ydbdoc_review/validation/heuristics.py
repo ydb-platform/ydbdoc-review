@@ -403,6 +403,10 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
     if message.startswith("verify_realign:"):
         # Informational: EN was rebuilt from RU so critic could run (§6.147).
         return "info"
+    if message.startswith("verify_realign_skipped:"):
+        return "info"
+    if message.startswith("glossary_verify_alignment_skipped:"):
+        return "info"
     if message.startswith("include_parity_repaired:"):
         return "info"
     if message.startswith("strip_unreachable_links:"):
