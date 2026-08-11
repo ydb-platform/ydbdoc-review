@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-11  
-**Current focus:** §6.189 — verify must not auto-commit glossary EN (#49578 / #45667).
+**Current focus:** §6.190 — mermaid quoted-label fence parity (#49578 → 🟢).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-11 | **§6.190** — mermaid ``["…"]`` labels ignore hyphen/word-count drift in fence_body_copy (#49578) |
 | 2026-08-11 | **§6.189** — verify skips writing ``glossary.md`` EN to disk (no hybrid auto-commit); **§6.188** skip glossary critic on verify (#49578) |
 | 2026-08-06 | **§6.177** — `broken_inline_code` only path+``.ext`` split; allow ``**Box `workflow`**`` ([ydb#49059](https://github.com/ydb-platform/ydb/pull/49059)) |
 | 2026-08-05 | **§6.176** — heading LCS seed requires matching `{#anchor}`; block mangled bold/backtick / `( extension)` ([ydb#49040](https://github.com/ydb-platform/ydb/pull/49040) / [#48968](https://github.com/ydb-platform/ydb/pull/48968)) |

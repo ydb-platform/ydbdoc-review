@@ -60,6 +60,11 @@ _MERMAID_START = re.compile(
 _MERMAID_ARROW = re.compile(r"(--x|->>|->|--)")
 # Collapse label tokens; keep arrows, punctuation, and mermaid keywords.
 _MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")
+# Quoted node/subgraph labels: RU hyphens vs EN spaces must not differ
+# structurally («Дата-центр» → ``*-*`` vs «Data center» → ``* *``; #49578).
+_MERMAID_QUOTED_LABEL = re.compile(
+    r"""\["(?:\\.|[^"\\])*"\]|\['(?:\\.|[^'\\])*'\]"""
+)
 
 
 def _is_mermaid_fence(content: str) -> bool:
@@ -74,6 +79,8 @@ def _mermaid_structure_line(line: str) -> str:
         return ""
     if _MERMAID_START.match(stripped):
         return stripped.split()[0].lower()
+    # Whole quoted label → one token (word count / hyphens inside must not matter).
+    stripped = _MERMAID_QUOTED_LABEL.sub("[*]", stripped)
     if stripped.startswith("participant "):
         rest = stripped[len("participant ") :]
         if " as " in rest:

@@ -4259,6 +4259,19 @@ when ``plan.action == critic_only`` (verify path). Glossary fixes belong in
 
 **Tests:** ``test_run_doc_verify_skips_glossary_disk_write``.
 
+### 6.190. Mermaid quoted labels: ignore hyphen/word-count drift (#49578, 2026-08-11)
+
+**Problem:** After translating mermaid node labels, ``fence_body_copy`` still
+warned: RU ``["Дата-центр …"]`` / ``["Хеш-функция\\n…"]`` normalize to
+``*-*`` while EN ``["Data center …"]`` / ``["Hash function\\n…"]`` normalize
+to ``* *`` (different token count). Yellow-blocked [#49578](https://github.com/ydb-platform/ydb/pull/49578)
+despite intentional label translation (§6.186).
+
+**Decision:** in ``_mermaid_structure_line``, collapse whole ``["…"]`` /
+``['…']`` quoted labels to ``[*]`` before word tokenization.
+
+**Tests:** ``test_fence_content_allows_mermaid_quoted_hyphen_vs_space_labels``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 

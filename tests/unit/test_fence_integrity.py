@@ -177,6 +177,28 @@ def test_fence_content_allows_mermaid_label_translation():
     )
 
 
+def test_fence_content_allows_mermaid_quoted_hyphen_vs_space_labels():
+    """#49578: RU «Дата-центр» vs EN «Data center» must not fence_body_copy."""
+    ru = (
+        "graph TD\n"
+        '    subgraph DC1["Дата-центр 1 (Fail realm 1)"]\n'
+        '        Hash["Хеш-функция\\nот ID записи"]\n'
+        "    end\n"
+    )
+    en = (
+        "graph TD\n"
+        '    subgraph DC1["Data center 1 (Fail realm 1)"]\n'
+        '        Hash["Hash function\\nfrom record ID"]\n'
+        "    end\n"
+    )
+    assert fence_content_matches_source(ru, en, fence_info="mermaid")
+    assert not check_fence_body_copy(
+        f"```mermaid\n{ru}```",
+        f"```mermaid\n{en}```",
+        source_lang="ru",
+    )
+
+
 def test_fence_content_allows_mermaid_note_and_message_translation():
     """Regression #41206: Note/arrow message text may be shorter in EN."""
     ru = (
