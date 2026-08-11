@@ -4194,6 +4194,19 @@ garbled glossary on [#49578](https://github.com/ydb-platform/ydb/pull/49578).
 ``test_prepare_seed_falls_back_full_on_kind_mismatch``,
 ``test_run_pair_plan_keeps_existing_en_on_translate_llm_failure``.
 
+### 6.185. Cap verify realign on large files (#49578, 2026-08-11)
+
+**Problem:** Inline / label ``doc_verify`` on [#49578](https://github.com/ydb-platform/ydb/pull/49578)
+hung 30+ minutes with no QA report. After translate, verify hit
+``glossary.md`` segment mismatch (449 vs 448) and §6.147 **retranslated all
+RU segments** via Eliza; individual calls timed out at ~362s with retries.
+
+**Decision:** skip full verify realign when ``len(segments) > 80``. Keep
+existing EN, leave ``segment_alignment_error`` so the file is 🔴 and the job
+can finish and post the report. Small pages still realign as in §6.147.
+
+**Tests:** ``test_verify_realign_skips_full_retranslate_for_large_files``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 
