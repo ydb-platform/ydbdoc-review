@@ -477,6 +477,12 @@ class FinalizeEnStep:
             return
         if not state.translated_text:
             return
+        if state.mode == "verify" and is_glossary_file(state.file_path):
+            logger.info("Glossary verify: skip finalize_en (§6.187)")
+            state.finalize_warnings.append(
+                "glossary_verify_finalize_skipped: hub page; keep EN as-is on verify"
+            )
+            return
         # Prefer EN self-reference on verify so enforce_source does not copy RU
         # fence bodies over the target (LoadTargetStep sets fence_reference_text).
         fence_ref = state.fence_reference_text or state.translated_text

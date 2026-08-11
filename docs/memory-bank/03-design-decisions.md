@@ -4223,6 +4223,18 @@ were copied from RU via ``enforce_source_fenced_blocks`` but never translated).
 **Tests:** ``test_glossary_verify_clears_alignment_error``,
 ``test_collect_cyrillic_mermaid_fence_lines`` (in ``test_fence_comments``).
 
+### 6.187. Skip glossary finalize on verify (#49578, 2026-08-11)
+
+**Problem:** ``finalize_en`` on ``glossary.md`` during ``doc_verify`` ran
+``enforce_source_fenced_blocks`` + prose/Cyrillic LLM over 400+ segments (~35
+min) and rewrote hundreds of EN lines; push then failed locally (403).
+
+**Decision:** on ``doc_verify`` for ``concepts/glossary.md``, skip
+``finalize_en`` — keep existing EN; heuristics + critic suffice.
+
+**Tests:** covered by ``test_glossary_verify_clears_alignment_error`` profile
+(extend if needed).
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 
