@@ -4303,7 +4303,8 @@ tech writer fixed three files manually (commits ``4f3c077``, ``798979a``):
    from RU structure; then fall back to §6.147 full realign or §6.185 skip.
 
 **Tests:** ``tests/unit/test_structural_repair.py``,
-``tests/unit/test_verify_partial_realign.py``.
+``tests/unit/test_verify_partial_realign.py``,
+``test_run_pair_plan_restores_missing_heading_anchor_after_translate``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
