@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-11  
-**Current focus:** §6.190 — mermaid quoted-label fence parity (#49578 → 🟢).
+**Last updated:** 2026-08-18  
+**Current focus:** §6.191 — structural EN repair + partial verify realign (#49957).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-18 | **§6.191** — restore heading anchors + signature blocks; partial verify realign for large files (#49957) |
 | 2026-08-11 | **§6.190** — mermaid ``["…"]`` labels ignore hyphen/word-count drift in fence_body_copy (#49578) |
 | 2026-08-11 | **§6.189** — verify skips writing ``glossary.md`` EN to disk (no hybrid auto-commit); **§6.188** skip glossary critic on verify (#49578) |
 | 2026-08-06 | **§6.177** — `broken_inline_code` only path+``.ext`` split; allow ``**Box `workflow`**`` ([ydb#49059](https://github.com/ydb-platform/ydb/pull/49059)) |

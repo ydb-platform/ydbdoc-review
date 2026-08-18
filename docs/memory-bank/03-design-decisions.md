@@ -4273,5 +4273,38 @@ despite intentional label translation (§6.186).
 **Tests:** ``test_fence_content_allows_mermaid_quoted_hyphen_vs_space_labels``.
 
 
+### 6.191. Structural EN repair + partial verify realign (#49957, 2026-08-18)
+
+**Problem:** Translation PR [#49957](https://github.com/ydb-platform/ydb/pull/49957)
+(source [#49800](https://github.com/ydb-platform/ydb/pull/49800)) stayed 🔴 until a
+tech writer fixed three files manually (commits ``4f3c077``, ``798979a``):
+
+1. ``example-dotnet.md`` — RU ``{#csharp-app}`` dropped from EN H1.
+2. ``permissions_list.md`` — missing table section row
+   ``**Rights based on other rights**`` (81 RU vs 80 EN segments).
+3. ``aggregation.md`` — ~27 missing ``### Signature`` + `` ```yql`` blocks; verify
+   realign skipped (180 segments > §6.185 cap).
+
+**Root cause:**
+
+- Low-magnitude **differential patch** (§6.184) splices changed paragraphs into
+  stale EN but does not insert new structural blocks (signature headings + YQL
+  fences, table divider rows).
+- ``anchor_parity`` detected missing ``{#csharp-app}`` but did not repair.
+- §6.185 skipped **full** verify realign on large files; no gap-only fallback.
+
+**Decision:**
+
+1. ``repair_en_structure_from_ru`` after translate / restore / verify load:
+   ``restore_explicit_heading_anchors`` (AST ``heading.anchor`` → EN line),
+   ``sync_missing_signature_sections`` (copy language-neutral `` ```yql`` blocks).
+2. On verify alignment mismatch: try **partial realign** first — LCS-seed
+   existing EN, LLM-translate only unmatched RU segments (cap 80 pending), render
+   from RU structure; then fall back to §6.147 full realign or §6.185 skip.
+
+**Tests:** ``tests/unit/test_structural_repair.py``,
+``tests/unit/test_verify_partial_realign.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
 

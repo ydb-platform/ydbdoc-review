@@ -108,3 +108,50 @@ def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
 
     assert result.error is None
     assert result.target_text == "# EN\n\nText.\n"
+
+
+def test_run_pair_plan_restores_missing_heading_anchor_after_translate():
+    """§6.191 / #49957: pair post-pass copies RU {#id} onto EN H1."""
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/dev/example-app/_includes/example-dotnet.md",
+        en_path="ydb/docs/en/core/dev/example-app/_includes/example-dotnet.md",
+        ru_changed=True,
+    )
+    content = PairContent(
+        pair=pair,
+        ru_text="# Приложение на C# {#csharp-app}\n\nТело.\n",
+        en_text="# Example app in C# (.NET)\n\nBody.\n",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="test",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+    )
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del state, ctx
+            result = MagicMock()
+            result.final_text = "# Example app in C# (.NET)\n\nBody.\n"
+            return result
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert result.error is None
+    assert result.target_text is not None
+    assert "{#csharp-app}" in result.target_text
+
