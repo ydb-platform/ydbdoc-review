@@ -4357,6 +4357,34 @@ diverge (or a prior bad EN is short), missing panes stay missing.
 
 **Tests:** ``tests/unit/test_low_magnitude_structure_gate.py``.
 
+### 6.194. Parse ``group=…`` tabs; toc-queue EN orphans (#37673, 2026-08-21)
+
+**Problem:** Re-analysis of [#50684](https://github.com/ydb-platform/ydb/pull/50684)
+🔴 after §6.192–§6.193 showed two remaining root causes:
+
+1. ``{% list tabs group=lang %}`` (and ``group=manual-systemd``, …) did **not**
+   match the YFM tabs plugin (regex only allowed a bare ``\w+`` token). Health-check
+   / ``topic.md`` tabs became ordinary ``BulletList`` + literal ``{% list tabs %}``
+   paragraphs → wrong segmentation, pane gate always ``0``, mangled EN after
+   low-magnitude splice.
+2. ``debug.md`` overview: EN **file** still exists on main (orphan) while EN
+   **toc** dropped the Diagnostics section. §6.192 ``_add_doc_if_en_absent``
+   skipped it → children (``debug-logs.md``, …) entered toc scope from the diff
+   but the overview href did not → ``only_ru_hrefs=['debug.md']`` /
+   ``scope_not_applied``.
+
+**Decision:**
+
+1. Tabs open regex accepts ``key=value`` suffixes after ``tabs``; variant
+   ``tabs group=lang`` round-trips via the renderer.
+2. Sibling queue (§6.192 loop): if RU toc lists ``href`` missing from EN toc,
+   add the RU page to ``doc_ru`` even when the EN markdown file already exists,
+   so ``planned_toc_extras_for_pair`` gap-fills the menu entry.
+
+**Tests:** ``test_tabs_group_lang_variant_roundtrip``,
+``test_tabs_group_hyphenated_value``,
+``test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 

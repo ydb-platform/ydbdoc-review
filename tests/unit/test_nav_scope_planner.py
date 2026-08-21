@@ -462,3 +462,47 @@ def test_pr_37673_queues_en_absent_toc_sibling_debug_md():
     assert "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md" in plan.doc_ru_paths
     assert "ydb/docs/ru/core/recipes/ydb-sdk/debug.md" in plan.doc_ru_paths
     assert "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml" in plan.nav_ru_paths
+
+
+def test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists():
+    """§6.194: orphan EN debug.md on disk still queues when EN toc dropped it."""
+    ru_toc = (
+        "items:\n"
+        "- name: Overview\n"
+        "  href: index.md\n"
+        "- name: Diagnostics\n"
+        "  items:\n"
+        "  - name: Overview\n"
+        "    href: debug.md\n"
+        "  - name: Logs\n"
+        "    href: debug-logs.md\n"
+    )
+    en_toc = (
+        "items:\n"
+        "- name: Overview\n"
+        "  href: index.md\n"
+    )
+    files = {
+        "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": ru_toc,
+        "ydb/docs/en/core/recipes/ydb-sdk/toc_i.yaml": en_toc,
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md": "# Logs\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/index.md": "# Index\n",
+        "ydb/docs/en/core/recipes/ydb-sdk/index.md": "# Index\n",
+        # Orphan EN page still on main — §6.192 file-absent check would skip.
+        "ydb/docs/en/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
+    }
+
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md", "modified")],
+        read_ru=files.get,
+        read_en_base=files.get,
+        read_ru_base=files.get,
+    )
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug.md" in plan.doc_ru_paths
+    extras, _ = planned_toc_extras_for_pair(
+        plan,
+        "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml",
+        ru_toc,
+    )
+    assert "debug.md" in extras

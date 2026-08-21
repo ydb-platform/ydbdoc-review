@@ -8,8 +8,11 @@ from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
 
-# Opening: {% list tabs %} or {% list tabs accordion %} or {% list tabs radio %}
-_TABS_OPEN_RE = re.compile(r"^\{%\s*list\s+tabs(?:\s+(\w+))?\s*%\}\s*$")
+# Opening: {% list tabs %}, {% list tabs accordion %}, {% list tabs group=lang %}
+# (Diplodoc allows bare tokens or key=value after ``tabs`` — §6.194 / #37673).
+_TABS_OPEN_RE = re.compile(
+    r"^\{%\s*list\s+tabs(?P<rest>(?:\s+(?:\w+=[^\s%]+|\w+))*)\s*%\}\s*$"
+)
 # Closing: {% endlist %}
 _TABS_CLOSE_RE = re.compile(r"^\{%\s*endlist\s*%\}\s*$")
 
@@ -32,8 +35,8 @@ def _yfm_tabs_rule(
     if silent:
         return True
 
-    variant_suffix = m_open.group(1)
-    variant = "tabs" if not variant_suffix else f"tabs {variant_suffix}"
+    rest = (m_open.group("rest") or "").strip()
+    variant = "tabs" if not rest else f"tabs {rest}"
 
     # Find the matching {% endlist %}, supporting nested tabs.
     nesting = 1

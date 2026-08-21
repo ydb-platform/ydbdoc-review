@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-21  
-**Current focus:** §6.193 — refuse low-magnitude EN patch when fence/tab panes diverge (#37673 / #50684).
+**Current focus:** §6.194 — parse ``group=lang`` tabs; toc-queue orphans missing from EN toc (#37673 / #50684).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-21 | **§6.194** — parse ``{% list tabs group=… %}`` as YfmTabs; queue toc siblings when EN file exists but EN toc dropped the href (#37673 / #50684) |
 | 2026-08-21 | **§6.193** — refuse low-magnitude EN patch on fence/tab-pane drift; ``verify_realign_partial`` info; alt tab whitelist (#37673 / #50684) |
 | 2026-08-21 | **§6.192** — keep RU `{#id}` on EN; restore glued code markers; queue EN-absent toc siblings (#37673 / #50684) |
 | 2026-08-18 | **§6.191** — restore heading anchors + signature blocks; partial verify realign for large files (#49957) |

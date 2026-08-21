@@ -384,10 +384,12 @@ def plan_translation_scope(
         docs_root=docs_root,
     )
 
-    # §6.192 / #37673: when a sidebar is queued because a diff page is listed in
-    # RU toc but missing from EN toc, also queue **EN-absent siblings** from that
-    # same RU toc (e.g. ``debug.md`` overview next to ``debug-logs.md``). Otherwise
-    # nav merge puts children in scope but skips the overview → ``scope_not_applied``.
+    # §6.192 / §6.194 / #37673: when a sidebar is queued because a diff page is
+    # listed in RU toc, also queue **siblings missing from EN toc** (e.g.
+    # ``debug.md`` overview next to ``debug-logs.md``). EN *file* may already
+    # exist as an orphan on main while the href was dropped from EN toc —
+    # ``_add_doc_if_en_absent`` alone skips those and nav merge never gap-fills
+    # → ``scope_not_applied`` / ``only_ru_hrefs=['debug.md']``.
     for ru_toc in sorted(nav_ru):
         ru_text = read_ru(ru_toc)
         if not ru_text:
@@ -395,6 +397,9 @@ def plan_translation_scope(
         toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
         if not any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md):
             continue
+        en_toc = counterpart(ru_toc, docs_root)
+        en_toc_text = (read_en_base(en_toc) or "") if en_toc else ""
+        en_toc_hrefs = _toc_md_hrefs(en_toc_text)
         for rel in _toc_md_hrefs(ru_text):
             ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
             _add_doc_if_en_absent(
@@ -404,6 +409,16 @@ def plan_translation_scope(
                 read_en_base=read_en_base,
                 docs_root=docs_root,
             )
+            if rel in en_toc_hrefs or ru_md in doc_ru:
+                continue
+            if read_ru(ru_md) is None:
+                continue
+            en_md = counterpart(ru_md, docs_root)
+            if en_md is None:
+                continue
+            # EN markdown exists but EN toc lacks the href — still queue so
+            # ``planned_toc_extras_for_pair`` puts it in translate scope.
+            doc_ru.add(ru_md)
 
     # Absent EN **sibling** sidebars are full-mirrored (§6.85). Queue every RU
     # href in that toc that lacks an EN mirror so the new menu does not point at
