@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-21  
-**Current focus:** §6.195 — harden legacy YFM alignment and critic filters (#37673 / #50729).
+**Current focus:** §6.196 — enforce Memory Bank updates before Codex commits.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-21 | **§6.196** — project Codex hook blocks staged commits unless both the Memory Bank index and a detailed Memory Bank note are staged |
 | 2026-08-21 | **§6.195** — reject unsafe low-magnitude splices on technical tab/segment drift; ignore fallback YFM controls and exact SDK labels; exclude stable anchors and identical English source from false critic blockers (#37673 / #50729) |
 | 2026-08-21 | **§6.194** — parse ``{% list tabs group=… %}`` as YfmTabs; queue toc siblings when EN file exists but EN toc dropped the href (#37673 / #50684) |
 | 2026-08-21 | **§6.193** — refuse low-magnitude EN patch on fence/tab-pane drift; ``verify_realign_partial`` info; alt tab whitelist (#37673 / #50684) |

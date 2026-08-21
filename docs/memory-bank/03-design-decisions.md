@@ -4415,5 +4415,22 @@ the toc were green, but three files still blocked the report:
 ``tests/unit/test_segmentation.py``, ``tests/unit/test_validation_heuristics.py``,
 ``tests/unit/test_placeholder_drift.py``.
 
+### 6.196. Memory Bank is a commit precondition (2026-08-21)
+
+**Problem:** The written rule in ``.cursor/rules/memory-bank-before-commit.mdc``
+could be overlooked during a long incident loop. A code fix could therefore be
+committed before its production finding and design decision were made durable.
+
+**Decision:** A project-level Codex ``beforeShellExecution`` hook matches
+``git commit`` and fails closed. If the index is non-empty, it permits the
+commit only when both ``MEMORY_BANK.md`` and at least one file under
+``docs/memory-bank/`` are staged. The deterministic command hook lives in
+``.cursor/hooks/require-memory-bank-before-commit.py`` and is shared through
+``.cursor/hooks.json``.
+
+**Verification:** Tested against a temporary git repository: a staged code-only
+commit receives ``permission=deny``; staging the index and detailed decision
+changes the result to ``permission=allow``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
