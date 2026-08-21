@@ -185,6 +185,9 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
     if target_lang.lower() != "en":
         return []
     body = _strip_fenced_blocks(target_text)
+    # Explicit YFM anchors are stable identifiers copied byte-for-byte from RU
+    # (§6.192). Cyrillic inside ``{#id}`` is therefore not untranslated prose.
+    body = re.sub(r"\{#[^}\s]+\}", "", body)
     matches = list(_CYRILLIC.finditer(body))
     if not matches:
         return []

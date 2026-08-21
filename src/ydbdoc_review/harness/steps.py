@@ -67,17 +67,25 @@ def _en_structure_safe_for_low_magnitude_patch(ru_text: str, en_text: str) -> bo
         return False
     # Pane count: same number of ``{% list tabs %}`` can still hide missing
     # ``- Go`` / ``- Rust`` children.
-    from ydbdoc_review.parsing.ast_types import YfmIf, YfmTab
+    import re
 
-    def count_panes(text: str) -> int:
+    from ydbdoc_review.parsing.ast_types import YfmIf, YfmTab
+    from ydbdoc_review.segmentation.extractor import (
+        DEFAULT_TAB_TITLE_WHITELIST,
+        extract_segments,
+    )
+    from ydbdoc_review.validation.homoglyphs import normalize_confusable_cyrillic
+
+    def pane_titles(text: str) -> list[str]:
         doc = parse_markdown(text)
-        n = 0
+        titles: list[str] = []
 
         def walk(blocks: list) -> None:
-            nonlocal n
             for block in blocks:
                 if isinstance(block, YfmTab):
-                    n += 1
+                    titles.append(
+                        "".join(getattr(node, "content", "") for node in block.title)
+                    )
                 if isinstance(block, YfmIf):
                     for branch in block.branches:
                         walk(branch.children)
@@ -87,9 +95,39 @@ def _en_structure_safe_for_low_magnitude_patch(ru_text: str, en_text: str) -> bo
                     walk(children)
 
         walk(doc.children)
-        return n
+        return titles
 
-    return count_panes(ru_text) == count_panes(en_text)
+    def language_key(title: str) -> str | None:
+        raw = title.strip()
+        normalized = normalize_confusable_cyrillic(raw).lower()
+        if normalized in DEFAULT_TAB_TITLE_WHITELIST:
+            return normalized
+        match = re.match(
+            r"^(.+?)\s*\((?:alternative|альтернативный)\)$",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            base = normalize_confusable_cyrillic(match.group(1).strip()).lower()
+            if base in DEFAULT_TAB_TITLE_WHITELIST:
+                return f"{base} (alternative)"
+        return None
+
+    ru_titles = pane_titles(ru_text)
+    en_titles = pane_titles(en_text)
+    if len(ru_titles) != len(en_titles):
+        return False
+    if len(extract_segments(parse_markdown(ru_text))) != len(
+        extract_segments(parse_markdown(en_text))
+    ):
+        return False
+    # Technical language pane names are structure, not prose. A legacy EN
+    # ``With#`` opposite RU ``С#`` means the old target is unsafe to splice.
+    for ru_title, en_title in zip(ru_titles, en_titles, strict=True):
+        ru_key = language_key(ru_title)
+        if ru_key is not None and language_key(en_title) != ru_key:
+            return False
+    return True
 
 
 class HarnessStep(Protocol):

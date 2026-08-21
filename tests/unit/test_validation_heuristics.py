@@ -262,6 +262,11 @@ def test_cyrillic_skipped_for_ru_target():
     assert check_cyrillic_in_en("привет", target_lang="ru") == []
 
 
+def test_cyrillic_in_explicit_anchor_is_not_untranslated_prose():
+    text = "### Field descriptions {#fields-Описание}\n"
+    assert check_cyrillic_in_en(text, target_lang="en") == []
+
+
 def test_fence_parity_mismatch():
     src = "A\n\n```\ncode\n```\n"
     tgt = "A\n"

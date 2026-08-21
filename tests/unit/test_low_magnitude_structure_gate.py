@@ -54,3 +54,15 @@ def test_refuse_patch_when_en_missing_sdk_tab_panes():
 """
     assert _en_structure_safe_for_low_magnitude_patch(ru, en) is False
     assert _en_structure_safe_for_low_magnitude_patch(ru, ru) is True
+
+
+def test_refuse_patch_when_technical_tab_title_was_mangled():
+    ru = "{% list tabs %}\n\n- С#\n\n  Body.\n\n{% endlist %}\n"
+    en = "{% list tabs %}\n\n- With#\n\n  Body.\n\n{% endlist %}\n"
+    assert _en_structure_safe_for_low_magnitude_patch(ru, en) is False
+
+
+def test_refuse_patch_when_segment_counts_drift_without_fence_drift():
+    ru = "{% list tabs %}\n\n- Python\n\n  Body.\n\n{% endlist %}\n"
+    en = ru + "\nUnexpected legacy paragraph.\n"
+    assert _en_structure_safe_for_low_magnitude_patch(ru, en) is False

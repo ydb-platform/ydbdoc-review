@@ -59,6 +59,7 @@ _MISSING_LINK_ISSUE = re.compile(
 )
 _MD_HREF = re.compile(r"\[[^\]]*\]\(([^)]+)\)|\(([^)]+\.md(?:#[^)]*)?)\)")
 _U_PLACEHOLDER = re.compile(r"⟦(U\d+)⟧")
+_CYRILLIC_TEXT = re.compile(r"[А-Яа-яЁё]")
 
 
 def critic_issue_dedupe_key(issue: CriticIssueOut) -> tuple:
@@ -375,6 +376,20 @@ def drop_spurious_placeholder_issues(
     for issue in issues:
         seg = by_id.get(issue.segment_id) if issue.segment_id else None
         trans = translations.get(issue.segment_id) if issue.segment_id else None
+        if (
+            seg is not None
+            and trans is not None
+            and seg.text.strip() == trans.strip()
+            and not _CYRILLIC_TEXT.search(seg.text)
+        ):
+            # Some RU docs contain already-English labels/sentences. Copying
+            # them verbatim is correct; the critic must not invent missing
+            # context and block the file (#37673 / #50729 s0152).
+            logger.info(
+                "Ignoring critic issue for identical non-Cyrillic segment %s",
+                issue.segment_id,
+            )
+            continue
         if is_intentionally_stripped_link_issue(
             issue,
             ignore_basenames=ignore_basenames,

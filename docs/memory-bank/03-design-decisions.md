@@ -4385,6 +4385,35 @@ diverge (or a prior bad EN is short), missing panes stay missing.
 ``test_tabs_group_hyphenated_value``,
 ``test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists``.
 
+### 6.195. Legacy YFM structure and critic false positives (#37673 / #50729, 2026-08-21)
+
+**Problem:** Attempt 1 after §6.194 produced
+[#50729](https://github.com/ydb-platform/ydb/pull/50729). Twenty-five files and
+the toc were green, but three files still blocked the report:
+
+1. ``vector-search.md`` had one extra EN segment from legacy YFM fallback.
+2. ``topic.md`` retained three corrupt old EN tab titles, ``With#`` opposite RU
+   ``С#``, because equal pane counts let the low-magnitude splice proceed.
+3. ``health-check-api.md`` was blocked by two critic false positives: Cyrillic
+   in the required stable anchor ``{#fields-Описание}``, and a complaint about
+   an already-English source sentence copied unchanged.
+
+**Decision:**
+
+1. Low-magnitude reuse now requires equal extracted segment counts and matching
+   canonical technical pane titles. ``С#`` is normalized as the structural
+   language label ``C#``; a corrupt ``With#`` target forces reconstruction.
+2. Exact fallback YFM control markers and exact SDK/language labels inside
+   malformed legacy tab lists are structural, not translation segments.
+3. The residual-Cyrillic heuristic excludes explicit ``{#id}`` anchors, whose
+   byte-for-byte preservation is required by §6.192.
+4. Critic findings for an identical non-Cyrillic source/translation segment are
+   discarded: there is no translation delta to repair, so such a finding cannot
+   establish meaning drift.
+
+**Tests:** ``tests/unit/test_low_magnitude_structure_gate.py``,
+``tests/unit/test_segmentation.py``, ``tests/unit/test_validation_heuristics.py``,
+``tests/unit/test_placeholder_drift.py``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
-
