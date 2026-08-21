@@ -335,8 +335,17 @@ def _count_fenced_code_blocks(text: str) -> int:
     return count
 
 
-def check_fence_parity(source_text: str, target_text: str) -> list[str]:
-    src = _count_fenced_code_blocks(source_text)
+def check_fence_parity(
+    source_text: str, target_text: str, *, source_lang: str = "ru"
+) -> list[str]:
+    from ydbdoc_review.validation.fence_integrity import (
+        canonical_source_for_fence_validation,
+    )
+
+    canonical_source = canonical_source_for_fence_validation(
+        source_text, source_lang=source_lang
+    )
+    src = _count_fenced_code_blocks(canonical_source)
     tgt = _count_fenced_code_blocks(target_text)
     if src == tgt:
         return []
@@ -600,7 +609,11 @@ def _collect_raw_heuristics(
                 en_baseline_text=en_baseline_text,
             )
         )
-    raw.extend(check_fence_parity(normalized_source_text, target_text))
+    raw.extend(
+        check_fence_parity(
+            normalized_source_text, target_text, source_lang=source_lang
+        )
+    )
     raw.extend(
         check_fence_body_copy(
             source_text,

@@ -4432,5 +4432,28 @@ commit only when both ``MEMORY_BANK.md`` and at least one file under
 commit receives ``permission=deny``; staging the index and detailed decision
 changes the result to ``permission=allow``.
 
+### 6.197. Fence validation uses canonical legacy source structure (#37673 / #50741, 2026-08-21)
+
+**Problem:** Attempt 2 produced
+[#50741](https://github.com/ydb-platform/ydb/pull/50741) with 27 green files and
+one red ``vector-search.md``. Raw RU parsing counted 44 fenced blocks, while EN
+contained 46. The RU file itself has malformed legacy nested fences around the
+Python ``add_vector_index`` examples. Parsing and rendering that same RU source
+normalizes it to 46 blocks, exactly the structure emitted by translation.
+``fence_parity`` and ``fence_body_copy`` compared the rendered target against
+the unstable raw-source parse, so both reported false blockers.
+
+**Decision:** Fence validation first normalizes known RU source defects and
+parses the source. If parse→render changes the code-block count, the canonical
+rendered source becomes the comparison authority for both fence count and body
+alignment. Stable source files retain their normalized raw form. This mirrors
+the actual translation contract: EN is reconstructed from the parsed source
+AST, not from an impossible byte-preserving interpretation of malformed markup.
+
+**Verification:** The exact RU merge-commit file and EN head from #50741 now
+produce no ``fence_parity`` or ``fence_body_copy`` findings. Unit tests cover a
+minimal malformed nested-tabs/cut fixture. Re-run only ``doc_verify`` on the
+existing translation PR; do not spend a third full translation attempt.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

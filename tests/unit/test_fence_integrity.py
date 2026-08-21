@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import _finalize_en_target
+from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.fence_integrity import (
+    canonical_source_for_fence_validation,
     check_fence_body_copy,
     enforce_source_fenced_blocks,
     fence_content_matches_source,
@@ -54,6 +57,42 @@ def test_check_fence_body_copy_detects_pipeline_change():
     warnings = check_fence_body_copy(ru, en)
     assert warnings
     assert "fence_body_copy" in warnings[0]
+
+
+def test_fence_body_copy_uses_canonical_malformed_source_structure():
+    source = """{% list tabs %}
+
+- Python
+
+    {% cut "asyncio" %}
+
+    ```python
+    A
+
+      ```python
+      B
+
+    {% endcut %}
+
+    ```python
+    C
+
+      ```
+
+    - Native SDK (Asyncio)
+
+      ```python
+      D
+      ```
+
+    {% endlist %}
+
+{% endlist %}
+"""
+    canonical = canonical_source_for_fence_validation(source)
+    assert canonical != source
+    target = render_markdown(parse_markdown(source), target_lang="en")
+    assert check_fence_body_copy(source, target) == []
 
 
 def test_normalize_ru_config_dir_before_translate():

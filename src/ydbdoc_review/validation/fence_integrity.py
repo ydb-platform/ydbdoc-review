@@ -46,6 +46,24 @@ def code_blocks_from_text(text: str) -> list[FencedCode | IndentedCode]:
     return collect_code_blocks(parse_markdown(text))
 
 
+def canonical_source_for_fence_validation(
+    source_text: str, *, source_lang: str = "ru"
+) -> str:
+    """Use the renderer's fence structure when legacy source markup is unstable.
+
+    Translation reconstructs the target from the parsed source AST. If malformed
+    legacy nesting changes the number of code blocks on parse→render, validating
+    the rendered target against the raw parse is a false mismatch (#37673).
+    """
+    normalized = _source_text_for_fence_compare(source_text, source_lang=source_lang)
+    parsed = parse_markdown(normalized)
+    raw_count = len(collect_code_blocks(parsed))
+    rendered = render_markdown(parsed, target_lang=source_lang)
+    if len(code_blocks_from_text(rendered)) != raw_count:
+        return rendered
+    return normalized
+
+
 def _normalize_fence_content_for_compare(text: str) -> str:
     """Normalize fence body for compare: angle placeholders + YAML homoglyphs."""
     inner = fix_russian_angle_placeholders_in_en_fences(f"```\n{text}\n```")
@@ -306,7 +324,9 @@ def check_fence_body_copy(
     source_text: str, target_text: str, *, source_lang: str = "ru"
 ) -> list[str]:
     """Warn when any fenced/indented block body differs from source (pipeline corruption)."""
-    source_text = _source_text_for_fence_compare(source_text, source_lang=source_lang)
+    source_text = canonical_source_for_fence_validation(
+        source_text, source_lang=source_lang
+    )
     src_blocks = code_blocks_from_text(source_text)
     tgt_blocks = code_blocks_from_text(target_text)
     if len(src_blocks) != len(tgt_blocks):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.heuristics import (
     bump_verdict_for_blocking_heuristics,
     bump_verdict_for_heuristics,
@@ -277,6 +279,40 @@ def test_fence_parity_mismatch():
 def test_fence_parity_ignores_triple_backticks_inside_block_body():
     block = "```bash\necho '```'\nmore\n```\n"
     assert check_fence_parity(block, block) == []
+
+
+def test_fence_parity_uses_canonical_source_for_malformed_legacy_nesting():
+    source = """{% list tabs %}
+
+- Python
+
+    {% cut "asyncio" %}
+
+    ```python
+    A
+
+      ```python
+      B
+
+    {% endcut %}
+
+    ```python
+    C
+
+      ```
+
+    - Native SDK (Asyncio)
+
+      ```python
+      D
+      ```
+
+    {% endlist %}
+
+{% endlist %}
+"""
+    rendered = render_markdown(parse_markdown(source), target_lang="en")
+    assert check_fence_parity(source, rendered) == []
 
 
 def test_heading_parity():
