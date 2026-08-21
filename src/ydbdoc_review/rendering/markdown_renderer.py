@@ -225,13 +225,13 @@ def _render_paragraph(p: Paragraph, indent: str) -> str:
 
 
 def _render_heading(h: Heading, indent: str) -> str:
-    from ydbdoc_review.validation.yfm_anchor import english_yfm_anchor
-
+    # Keep explicit ``{#id}`` identical to RU (§6.174 / #48792). Do not map
+    # Cyrillic ids through ``english_yfm_anchor`` — that produced
+    # ``{#fields-Response}`` vs RU ``{#fields-Описание}`` and failed
+    # ``anchor_parity`` (#37673 / #50684).
     prefix = "#" * h.level
     text = _render_inline(h.children)
     anchor_id = h.anchor
-    if anchor_id and _render_target_lang.get() == "en":
-        anchor_id = english_yfm_anchor(anchor_id, text) or anchor_id
     anchor = f" {{#{anchor_id}}}" if anchor_id else ""
     return f"{indent}{prefix} {text}{anchor}\n"
 

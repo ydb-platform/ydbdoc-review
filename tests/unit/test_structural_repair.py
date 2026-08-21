@@ -56,6 +56,15 @@ def test_repair_en_structure_from_ru_combined():
     assert "MIN(T)->T?" in fixed
 
 
+def test_restore_explicit_heading_anchors_overwrites_mismatched_en_id():
+    """§6.192: EN-only ids must be replaced with the RU twin (#37673)."""
+    ru = "### Описание полей в ответе {#fields-Описание}\n\nBody.\n"
+    en = "### Response field descriptions {#fields-Response}\n\nBody.\n"
+    fixed = restore_explicit_heading_anchors(en, ru)
+    assert "{#fields-Описание}" in fixed
+    assert "{#fields-Response}" not in fixed
+
+
 def test_restore_explicit_heading_anchors_empty_or_already_present():
     assert restore_explicit_heading_anchors("", "# A {#a}\n") == ""
     assert restore_explicit_heading_anchors("# A {#a}\n", "") == "# A {#a}\n"

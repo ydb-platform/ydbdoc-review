@@ -384,6 +384,27 @@ def plan_translation_scope(
         docs_root=docs_root,
     )
 
+    # §6.192 / #37673: when a sidebar is queued because a diff page is listed in
+    # RU toc but missing from EN toc, also queue **EN-absent siblings** from that
+    # same RU toc (e.g. ``debug.md`` overview next to ``debug-logs.md``). Otherwise
+    # nav merge puts children in scope but skips the overview → ``scope_not_applied``.
+    for ru_toc in sorted(nav_ru):
+        ru_text = read_ru(ru_toc)
+        if not ru_text:
+            continue
+        toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
+        if not any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md):
+            continue
+        for rel in _toc_md_hrefs(ru_text):
+            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
+            _add_doc_if_en_absent(
+                ru_md,
+                doc_ru=doc_ru,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+            )
+
     # Absent EN **sibling** sidebars are full-mirrored (§6.85). Queue every RU
     # href in that toc that lacks an EN mirror so the new menu does not point at
     # missing files. Do **not** expand ancestor hubs (``reference/toc_p``) —

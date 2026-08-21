@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from ydbdoc_review.parsing.ast_types import (
     Document,
     Heading,
+    InlineCode,
     InlineImage,
     InlineLink,
     InlineNode,
@@ -173,12 +174,65 @@ def _substitute_placeholders(
             continue
         if isinstance(node, InlineText):
             out.extend(_split_text_by_placeholders(node.content, mapping))
+        elif isinstance(node, InlineCode):
+            # LLM sometimes glues prose onto a code atom inside backticks
+            # (``⟦C3⟧_subscriber::fmt``). Expand markers in ``content`` so
+            # leftover protect markers do not survive into EN (#37673 / #50684).
+            node.content = _expand_placeholders_in_plain(node.content, mapping)
+            out.append(node)
         elif hasattr(node, "children") and isinstance(node.children, list):
             node.children = _substitute_placeholders(node.children, mapping)
             out.append(node)
         else:
             out.append(node)
     return out
+
+
+def _expand_placeholders_in_plain(text: str, mapping: dict[str, InlineNode]) -> str:
+    """Replace ``⟦…⟧`` / percent-encoded markers inside a plain string (code body).
+
+    When the model glues a tail onto a full code atom (``⟦C3⟧_subscriber::fmt``
+    while C3 already is ``tracing_subscriber::fmt``), drop the duplicated
+    suffix instead of concatenating (#37673 / #50684).
+    """
+    if not text or not mapping:
+        return text
+    from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
+
+    out = text
+    for key in sorted(mapping.keys(), key=len, reverse=True):
+        replacement = _plain_atom_text(mapping[key], _render_inline_node)
+        candidates = [key]
+        inner = key[1:-1]
+        candidates.extend(
+            (
+                f"%E2%9F%A6{inner}%E2%9F%A7",
+                f"%e2%9f%a6{inner}%e2%9f%a7",
+            )
+        )
+        for needle in candidates:
+            idx = out.find(needle)
+            if idx < 0:
+                continue
+            suffix = out[idx + len(needle) :]
+            # Duplicated tail after a whole-atom marker.
+            if suffix and (
+                replacement.endswith(suffix)
+                or replacement.endswith(suffix.lstrip("_"))
+            ):
+                out = out[:idx] + replacement
+            else:
+                out = out[:idx] + replacement + suffix
+            break
+    return out
+
+
+def _plain_atom_text(node: InlineNode, render) -> str:
+    if isinstance(node, InlineCode):
+        return node.content
+    if isinstance(node, InlineText):
+        return node.content
+    return render(node)
 
 
 def _split_text_by_placeholders(

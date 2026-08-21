@@ -31,3 +31,23 @@ def test_split_restores_literal_variable_placeholder():
 def test_decode_percent_encoded_protect_markers():
     raw = "![diag](%E2%9F%A6S1%E2%9F%A7) and [x](%e2%9f%a6U2%e2%9f%a7)"
     assert decode_percent_encoded_protect_markers(raw) == "![diag](⟦S1⟧) and [x](⟦U2⟧)"
+
+
+def test_substitute_expands_glued_marker_inside_inline_code():
+    """§6.192: glued tails on code atoms must restore (#37673)."""
+    from ydbdoc_review.parsing.ast_types import InlineCode
+    from ydbdoc_review.segmentation.reinsert import _substitute_placeholders
+
+    # Prefix atom (model treated marker as ``tracing`` only).
+    nodes = _substitute_placeholders(
+        [InlineCode(content="⟦C3⟧_subscriber::fmt")],
+        {"⟦C3⟧": InlineCode(content="tracing")},
+    )
+    assert nodes[0].content == "tracing_subscriber::fmt"
+
+    # Full atom + duplicated tail after the marker.
+    nodes = _substitute_placeholders(
+        [InlineCode(content="⟦C3⟧_subscriber::fmt")],
+        {"⟦C3⟧": InlineCode(content="tracing_subscriber::fmt")},
+    )
+    assert nodes[0].content == "tracing_subscriber::fmt"

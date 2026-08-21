@@ -418,3 +418,47 @@ def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
     assert "ydb/docs/ru/core/concepts/streaming-query/index.md" in plan.doc_from_main
     assert "ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml" in plan.nav_ru_paths
     assert "ydb/docs/ru/core/concepts/toc_i.yaml" in plan.nav_from_main
+
+
+def test_pr_37673_queues_en_absent_toc_sibling_debug_md():
+    """§6.192: debug-logs in diff must also queue EN-absent debug.md overview."""
+    ru_toc = (
+        "items:\n"
+        "- name: Overview\n"
+        "  href: index.md\n"
+        "- name: Diagnostics\n"
+        "  items:\n"
+        "  - name: Overview\n"
+        "    href: debug.md\n"
+        "  - name: Logs\n"
+        "    href: debug-logs.md\n"
+    )
+    en_toc = (
+        "items:\n"
+        "- name: Overview\n"
+        "  href: index.md\n"
+    )
+    files = {
+        "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": ru_toc,
+        "ydb/docs/en/core/recipes/ydb-sdk/toc_i.yaml": en_toc,
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md": "# Logs\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/index.md": "# Index\n",
+        "ydb/docs/en/core/recipes/ydb-sdk/index.md": "# Index\n",
+    }
+
+    def read_ru(path: str) -> str | None:
+        return files.get(path)
+
+    def read_en(path: str) -> str | None:
+        return files.get(path)
+
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md", "modified")],
+        read_ru=read_ru,
+        read_en_base=read_en,
+        read_ru_base=lambda _p: files.get(_p),
+    )
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md" in plan.doc_ru_paths
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug.md" in plan.doc_ru_paths
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml" in plan.nav_ru_paths

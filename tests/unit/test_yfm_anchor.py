@@ -44,7 +44,8 @@ def test_cyrillic_anchor_parsed_and_rendered_in_english():
         {heading_seg.id: "Description of fields in the response"},
     )
     out = render_markdown(new_doc, target_lang="en")
-    assert "### Description of fields in the response {#fields-Description}" in out
+    # §6.174 / §6.192: keep RU explicit ids on EN headings (no english_yfm_anchor).
+    assert "### Description of fields in the response {#fields-Описание}" in out
 
 
 def test_build_heading_anchor_map_auto_and_explicit():

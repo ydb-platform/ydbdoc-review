@@ -46,17 +46,29 @@ def restore_explicit_heading_anchors(translated: str, source: str) -> str:
     for ru_h, en_h in zip(ru_heads, en_heads, strict=False):
         ru_anchor = ru_h.anchor
         en_anchor = en_h.anchor
-        if not ru_anchor or en_anchor:
+        if not ru_anchor:
             continue
         if ru_h.level != en_h.level:
             continue
+        if en_anchor == ru_anchor:
+            continue
         en_title = _heading_plain(en_h)
         en_title, _ = split_heading_anchor_suffix(en_title)
-        pattern = re.compile(
-            rf"^(#{{{ru_h.level}}}\s+{re.escape(en_title)})\s*$",
-            re.MULTILINE,
-        )
-        repl = rf"\1 {{#{ru_anchor}}}"
+        if en_anchor:
+            # §6.174 / #37673: overwrite EN-only ids (e.g. fields-Response)
+            # with the RU twin (fields-Описание).
+            pattern = re.compile(
+                rf"^(#{{{ru_h.level}}}\s+{re.escape(en_title)})\s*"
+                rf"\{{#{re.escape(en_anchor)}\}}\s*$",
+                re.MULTILINE,
+            )
+            repl = rf"\1 {{#{ru_anchor}}}"
+        else:
+            pattern = re.compile(
+                rf"^(#{{{ru_h.level}}}\s+{re.escape(en_title)})\s*$",
+                re.MULTILINE,
+            )
+            repl = rf"\1 {{#{ru_anchor}}}"
         new_out, n = pattern.subn(repl, out, count=1)
         if n:
             out = new_out

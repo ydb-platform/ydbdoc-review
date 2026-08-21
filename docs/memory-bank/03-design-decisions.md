@@ -4306,6 +4306,33 @@ tech writer fixed three files manually (commits ``4f3c077``, ``798979a``):
 ``tests/unit/test_verify_partial_realign.py``,
 ``test_run_pair_plan_restores_missing_heading_anchor_after_translate``.
 
+### 6.192. Keep RU ``{#id}``; restore glued code markers; toc EN-absent siblings (#37673, 2026-08-21)
+
+**Problem:** ``doc_translate`` on merged [#37673](https://github.com/ydb-platform/ydb/pull/37673)
+produced [#50684](https://github.com/ydb-platform/ydb/pull/50684) 🔴:
+
+1. ``anchor_parity`` — EN ``{#fields-Response}`` vs RU ``{#fields-Описание}``
+   (``english_yfm_anchor`` on render, conflicting with §6.174).
+2. Leftover ``⟦C3⟧`` inside inline code
+   (``[`⟦C3⟧_subscriber::fmt`](…)``) — reinsert skipped ``InlineCode.content``.
+3. Toc ``scope_not_applied`` for ``debug.md`` — diff had ``debug-logs.md`` etc.,
+   scope planner did not queue the EN-absent overview sibling, so nav merge
+   emitted children without ``debug.md``.
+
+**Decision:**
+
+1. EN heading render keeps explicit ``{#id}`` as on the RU twin (no
+   ``english_yfm_anchor`` rewrite). ``restore_explicit_heading_anchors`` also
+   **overwrites** mismatched EN ids.
+2. ``_substitute_placeholders`` expands markers inside ``InlineCode``, including
+   glued tails / duplicated suffixes after a whole-atom marker.
+3. When a sidebar is in ``nav_ru`` next to a diff page, queue every EN-absent
+   ``href`` from that RU toc (``debug.md`` next to ``debug-logs.md``).
+
+**Tests:** ``test_cyrillic_anchor_parsed_and_rendered_in_english``,
+``test_restore_explicit_heading_anchors_overwrites_mismatched_en_id``,
+``test_substitute_expands_glued_marker_inside_inline_code``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 
