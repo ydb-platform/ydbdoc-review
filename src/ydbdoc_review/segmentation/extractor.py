@@ -256,5 +256,21 @@ def _short_inline_preview(children: Iterable) -> str:
 
 
 def _is_whitelisted_tab_title(title: str, whitelist: frozenset[str]) -> bool:
-    normalized = normalize_confusable_cyrillic(title.strip()).lower()
-    return normalized in whitelist
+    import re
+
+    raw = title.strip()
+    normalized = normalize_confusable_cyrillic(raw).lower()
+    if normalized in whitelist:
+        return True
+    # "Python (alternative)" / "Python (альтернативный)" — same pane as lang
+    # (§6.193). Match on raw title: confusable normalize mangles Cyrillic words.
+    m = re.match(
+        r"^(.+?)\s*\((?:alternative|альтернативный)\)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        base = normalize_confusable_cyrillic(m.group(1).strip()).lower()
+        if base in whitelist:
+            return True
+    return False

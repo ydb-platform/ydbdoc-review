@@ -39,6 +39,8 @@ from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
+    check_fence_parity,
+    check_list_tab_parity,
     run_file_heuristics_classified,
 )
 from ydbdoc_review.validation.include_targets import repair_missing_includes
@@ -50,6 +52,44 @@ from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_tran
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
 
 logger = logging.getLogger(__name__)
+
+
+def _en_structure_safe_for_low_magnitude_patch(ru_text: str, en_text: str) -> bool:
+    """Refuse EN splice when fence/tab-container counts already diverge (§6.193).
+
+    Low-magnitude patch keeps the existing EN tree. If EN is missing SDK language
+    panes (RU 6 fences vs EN 2), splicing paragraphs cannot restore them — force
+    full reconstruct from RU instead (#37673 / #50684).
+    """
+    if check_fence_parity(ru_text, en_text):
+        return False
+    if check_list_tab_parity(ru_text, en_text):
+        return False
+    # Pane count: same number of ``{% list tabs %}`` can still hide missing
+    # ``- Go`` / ``- Rust`` children.
+    from ydbdoc_review.parsing.ast_types import YfmIf, YfmTab
+
+    def count_panes(text: str) -> int:
+        doc = parse_markdown(text)
+        n = 0
+
+        def walk(blocks: list) -> None:
+            nonlocal n
+            for block in blocks:
+                if isinstance(block, YfmTab):
+                    n += 1
+                if isinstance(block, YfmIf):
+                    for branch in block.branches:
+                        walk(branch.children)
+                    continue
+                children = getattr(block, "children", None)
+                if children:
+                    walk(children)
+
+        walk(doc.children)
+        return n
+
+    return count_panes(ru_text) == count_panes(en_text)
 
 
 class HarnessStep(Protocol):
@@ -246,19 +286,27 @@ class TranslateStep:
             and state.existing_target_text
             and state.base_source_text
         ):
-            slim = slim_pending_for_low_magnitude_patch(
-                pending,
-                ru_base_text=state.base_source_text,
-                ru_pr_text=state.source_text,
-            )
-            if slim is not None:
-                pending, patch_analysis = slim
+            if not _en_structure_safe_for_low_magnitude_patch(
+                state.source_text, state.existing_target_text
+            ):
                 logger.info(
-                    "Low-magnitude patch: LLM %d added/modified segment(s) "
-                    "(magnitude=%.2f); splice into existing EN (no reconstruct)",
-                    len(pending),
-                    patch_analysis.change_magnitude,
+                    "Skip low-magnitude EN patch: fence/tab structure diverges "
+                    "from RU — full reconstruct (§6.193)"
                 )
+            else:
+                slim = slim_pending_for_low_magnitude_patch(
+                    pending,
+                    ru_base_text=state.base_source_text,
+                    ru_pr_text=state.source_text,
+                )
+                if slim is not None:
+                    pending, patch_analysis = slim
+                    logger.info(
+                        "Low-magnitude patch: LLM %d added/modified segment(s) "
+                        "(magnitude=%.2f); splice into existing EN (no reconstruct)",
+                        len(pending),
+                        patch_analysis.change_magnitude,
+                    )
         state.differential_meta = {
             "mode": strategy.mode,
             "reason": strategy.reason,

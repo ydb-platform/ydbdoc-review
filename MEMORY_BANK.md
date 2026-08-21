@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-21  
-**Current focus:** §6.192 — #37673 translate red (#50684): RU anchors, glued ``⟦C⟧``, toc siblings.
+**Current focus:** §6.193 — refuse low-magnitude EN patch when fence/tab panes diverge (#37673 / #50684).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-21 | **§6.193** — refuse low-magnitude EN patch on fence/tab-pane drift; ``verify_realign_partial`` info; alt tab whitelist (#37673 / #50684) |
 | 2026-08-21 | **§6.192** — keep RU `{#id}` on EN; restore glued code markers; queue EN-absent toc siblings (#37673 / #50684) |
 | 2026-08-18 | **§6.191** — restore heading anchors + signature blocks; partial verify realign for large files (#49957) |
 | 2026-08-11 | **§6.190** — mermaid ``["…"]`` labels ignore hyphen/word-count drift in fence_body_copy (#49578) |

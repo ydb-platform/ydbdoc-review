@@ -403,6 +403,9 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
     if message.startswith("verify_realign:"):
         # Informational: EN was rebuilt from RU so critic could run (§6.147).
         return "info"
+    if message.startswith("verify_realign_partial:"):
+        # Same family as verify_realign — gap fill already applied (§6.192 / #37673).
+        return "info"
     if message.startswith("verify_realign_skipped:"):
         return "info"
     if message.startswith("glossary_verify_alignment_skipped:"):

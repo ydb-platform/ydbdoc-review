@@ -4333,6 +4333,30 @@ produced [#50684](https://github.com/ydb-platform/ydb/pull/50684) 🔴:
 ``test_restore_explicit_heading_anchors_overwrites_mismatched_en_id``,
 ``test_substitute_expands_glued_marker_inside_inline_code``.
 
+### 6.193. Refuse low-magnitude EN patch on fence/tab drift (#37673 / #50684, 2026-08-21)
+
+**Problem:** Re-translate of [#37673](https://github.com/ydb-platform/ydb/pull/37673)
+→ [#50684](https://github.com/ydb-platform/ydb/pull/50684) left SDK recipes
+truncated: ``distributed-lock.md`` EN kept 2 language panes while RU had 6;
+``health-check-api.md`` nested broken tabs; ``topic.md`` / ``vector-search.md``
+alignment 🔴. ``verify_realign_partial:`` was also treated as blocking.
+
+**Root cause:** §6.184 low-magnitude patch **splices into existing EN** and never
+reconstructs the RU ``{% list tabs %}`` tree. When main EN and merge-commit RU
+diverge (or a prior bad EN is short), missing panes stay missing.
+``list_tab_parity`` only counts containers, not panes.
+
+**Decision:**
+
+1. Before low-magnitude patch: if ``fence_parity``, ``list_tab_parity``, or
+   YfmTab pane counts differ RU↔existing EN → **skip patch**, full reconstruct
+   from RU AST.
+2. ``verify_realign_partial:`` → info (same family as ``verify_realign:``).
+3. Whitelist ``Python (alternative)`` / ``Python (альтернативный)`` as lang
+   panes so they do not emit ``tab_title`` segments (§6.79-style).
+
+**Tests:** ``tests/unit/test_low_magnitude_structure_gate.py``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
 
