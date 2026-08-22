@@ -26,7 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-08-22 | **§6.198** — supersede §6.197: repair RU-governed legacy layout before verify round-trip; exact raw markers govern unstable fence QA and Diplodoc remains final gate (#37673 / #50741) |
+| 2026-08-22 | **§6.198** — supersede §6.197: AST structural repair first, RU-governed raw layout repair last before verify gate; exact markers govern unstable fence QA (#37673 / #50741) |
 | 2026-08-21 | **§6.197** — fence parity/body validation uses canonical parse→render source when malformed legacy RU changes its block count; enables verify-only recovery of #50741 |
 | 2026-08-21 | **§6.196** — project Codex hook blocks staged commits unless both the Memory Bank index and a detailed Memory Bank note are staged |
 | 2026-08-21 | **§6.195** — reject unsafe low-magnitude splices on technical tab/segment drift; ignore fallback YFM controls and exact SDK labels; exclude stable anchors and identical English source from false critic blockers (#37673 / #50729) |

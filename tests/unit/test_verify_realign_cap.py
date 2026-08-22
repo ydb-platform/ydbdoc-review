@@ -39,6 +39,13 @@ def test_verify_repairs_legacy_layout_before_round_trip_gate(monkeypatch):
         seen.append(text)
         return {}, None
 
+    def _structural_repair(current_state, _ctx):
+        current_state.translated_text += "```\n"
+
+    monkeypatch.setattr(
+        "ydbdoc_review.harness.steps._apply_en_structural_repair",
+        _structural_repair,
+    )
     monkeypatch.setattr("ydbdoc_review.harness.steps.gate_round_trip", _gate)
     RoundTripStep().run(state, ctx)
     assert len(seen) == 1

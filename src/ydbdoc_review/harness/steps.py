@@ -531,13 +531,13 @@ class RoundTripStep:
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
         if state.mode == "verify" and ctx.target_lang.lower() in {"en", "english"}:
+            _apply_en_structural_repair(state, ctx)
             # Repair renderer-added legacy markers before parsing/alignment.
-            # Otherwise segment_alignment_error skips FinalizeEnStep, leaving
-            # the malformed incoming EN untouched (#50741).
+            # This must run *after* AST structural repair, which can itself add
+            # synthetic closers for malformed legacy nesting (#50741).
             state.translated_text = repair_generated_markdown_layout(
                 state.source_text, state.translated_text
             )
-            _apply_en_structural_repair(state, ctx)
         state.translations, state.segment_alignment_error = gate_round_trip(
             state.segments, state.translated_text
         )
