@@ -4492,6 +4492,11 @@ input. Repair must therefore happen before the first round-trip gate.
 The third verify narrowed this further: layout repair ran first, but the
 following ``_apply_en_structural_repair`` reparsed legacy YFM and reintroduced
 three synthetic closers. The final pre-gate operation must be raw layout repair.
+The next verify exposed the second post-gate entry point: actionable critic
+fixes call ``finalize_en_target`` inside ``run_critic_loop``. That call, and the
+later ``FinalizeEnStep``, still supplied only the EN fence reference, allowing
+91 markers to survive. Every verify finalize call must pass RU layout authority
+explicitly even when its fence-body authority is EN.
 
 **Decision:** ``finalize_en_target`` now performs source-aware structural
 repair after all prose/link processing:
@@ -4516,6 +4521,8 @@ repair after all prose/link processing:
 8. In verify mode, run source-aware markdown layout repair at the start of
    ``RoundTripStep``, after AST structural repair and immediately before the
    gate. Finalize remains an idempotent post-critic safety pass.
+9. Both post-critic finalize paths pass ``layout_source_text=state.source_text``.
+   This is independent of ``fence_reference_text`` by design.
 
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
@@ -4525,6 +4532,8 @@ Fence-parity tests cover equal raw markers with different internal AST counts.
 ``test_verify_realign_cap.py`` asserts repair runs before ``gate_round_trip``.
 Its structural-repair stub deliberately adds a fence and proves the following
 layout pass removes it.
+The FinalizeEnStep regression asserts EN body reference and RU layout reference
+are passed simultaneously.
 ``tests/unit/test_fence_integrity.py`` covers the exact
 raw-marker contract for unstable sources. The exact #50741 files pass fence
 parity/body validation; external markdownlint reports no ``MD009``, ``MD022``,

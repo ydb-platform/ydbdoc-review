@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.state import FileRunState
-from ydbdoc_review.harness.steps import RoundTripStep
+from ydbdoc_review.harness.steps import FinalizeEnStep, RoundTripStep
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
@@ -52,6 +52,42 @@ def test_verify_repairs_legacy_layout_before_round_trip_gate(monkeypatch):
     assert seen[0].count("```") == source.count("```")
     assert "    ```python" in seen[0]
     assert "      ```" in seen[0]
+
+
+def test_verify_finalize_keeps_en_body_ref_but_passes_ru_layout_ref(monkeypatch):
+    source = "- item\n\n    ```python\n    source()\n      ```\n"
+    target = "- item\n\n  ```python\n  translated()\n    ```\n  ```\n"
+    state = FileRunState(
+        mode="verify",
+        file_path="ydb/docs/ru/core/legacy.md",
+        raw_source_text=source,
+        source_text=source,
+        existing_target_text=target,
+        translated_text=target,
+        fence_reference_text=target,
+        segments=extract_segments(parse_markdown(source)),
+        source_doc=parse_markdown(source),
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    ctx = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+    )
+    seen: dict[str, str] = {}
+
+    def _finalize(text, fence_ref, **kwargs):
+        seen["fence_ref"] = fence_ref
+        seen["layout_ref"] = kwargs["layout_source_text"]
+        return text
+
+    monkeypatch.setattr("ydbdoc_review.harness.steps.finalize_en_target", _finalize)
+    monkeypatch.setattr(
+        "ydbdoc_review.harness.steps.repair_missing_includes",
+        lambda _source, text, **_kwargs: text,
+    )
+    FinalizeEnStep().run(state, ctx)
+    assert seen == {"fence_ref": target, "layout_ref": source}
 
 
 def test_verify_realign_skips_full_retranslate_for_large_files(monkeypatch):
