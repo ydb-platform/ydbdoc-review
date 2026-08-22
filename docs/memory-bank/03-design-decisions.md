@@ -4542,6 +4542,27 @@ repair after all prose/link processing:
     equal-count files such as ``ttl.md`` therefore kept renderer indentation
     and still changed Diplodoc nesting.
 
+> [!warning] Remaining boundary after the two authorized retries
+> Global sequence-based indentation repair is too broad. It fixed code bodies
+> and production YFM errors, but also matched the structural label ``Native
+> SDK`` and moved it into a different tab context. The resulting report on
+> #50741 was red with RU 92 versus EN 93 segments. The next implementation must
+> restrict unchanged-line indentation recovery to proven code-body intervals;
+> list labels and translated prose must be excluded.
+
+For the next bounded attempt, sequence indentation explicitly excludes Markdown
+structural lines: bullet/numbered list items, tab labels, headings, blockquotes,
+and table rows. This preserves the EN tab tree while still restoring unchanged
+technical code indentation.
+
+The current bad EN already contained four-space tab-label indentation, so
+exclusion alone could not undo it. List-item indentation is now normalized from
+parse→render of the EN target itself. This changes the failing ``Native SDK``
+labels from four to two spaces without borrowing RU nesting.
+Because legacy rendering can add/drop placeholder list items, synchronization
+uses matching blocks of ``(marker, text)`` rather than requiring the complete
+list-item sequence to be identical.
+
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
 translated cut-title preservation, MD022, and hard breaks.

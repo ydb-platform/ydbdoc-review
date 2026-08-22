@@ -15,6 +15,8 @@ _YFM_CONTAINER_LINE = re.compile(
     r"^(\s*)(\{%\s*(?:list\b[^%]*|endlist|cut\b[^%]*|endcut|if\b[^%]*|endif)\s*%\})\s*$"
 )
 _HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_MARKDOWN_STRUCTURE_LINE = re.compile(r"^\s*(?:[-+*]\s+|\d+[.)]\s+|#{1,6}\s+|>\s*|\|)")
+_LIST_ITEM_LINE = re.compile(r"^([ \t]*)([-+*]|\d+[.)])([ \t]+)(.*)$")
 
 
 def _is_closing_fence_line(line: str) -> bool:
@@ -146,10 +148,45 @@ def _sync_unchanged_line_indentation(source_lines: list[str], target_lines: list
                 target_lines[target_i]
             ):
                 continue
+            if _MARKDOWN_STRUCTURE_LINE.match(
+                source_lines[source_i]
+            ) or _MARKDOWN_STRUCTURE_LINE.match(target_lines[target_i]):
+                continue
             source_indent = source_lines[source_i][
                 : len(source_lines[source_i]) - len(source_lines[source_i].lstrip())
             ]
             target_lines[target_i] = source_indent + target_lines[target_i].lstrip()
+
+
+def _normalize_target_list_indentation(target_lines: list[str]) -> None:
+    """Use the target AST itself to normalize list/tab label indentation."""
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.rendering.markdown_renderer import render_markdown
+
+    rendered_lines = render_markdown(
+        parse_markdown("\n".join(target_lines)), target_lang="en"
+    ).splitlines()
+    target_items = [
+        (i, m.group(2), m.group(3), m.group(4))
+        for i, line in enumerate(target_lines)
+        if (m := _LIST_ITEM_LINE.match(line))
+    ]
+    rendered_items = [
+        (m.group(1), m.group(2), m.group(3), m.group(4))
+        for line in rendered_lines
+        if (m := _LIST_ITEM_LINE.match(line))
+    ]
+    matcher = SequenceMatcher(
+        None,
+        [(marker, text) for _, marker, _, text in target_items],
+        [(marker, text) for _, marker, _, text in rendered_items],
+        autojunk=False,
+    )
+    for target_start, rendered_start, size in matcher.get_matching_blocks():
+        for offset in range(size):
+            target_i, marker, spacing, text = target_items[target_start + offset]
+            indent, _, _, _ = rendered_items[rendered_start + offset]
+            target_lines[target_i] = indent + marker + spacing + text
 
 
 def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
@@ -165,6 +202,7 @@ def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
         _YFM_CONTAINER_LINE,
         token_key=lambda token: token.split(maxsplit=2)[1],
     )
+    _normalize_target_list_indentation(target_lines)
     _sync_unchanged_line_indentation(source_lines, target_lines)
 
     # The fallback list renderer can emit ``- `` placeholders for structural

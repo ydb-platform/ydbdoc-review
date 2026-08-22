@@ -188,7 +188,22 @@ def test_repair_syncs_equal_yfm_directive_sequence_indentation():
 
 
 def test_repair_restores_indentation_of_unchanged_technical_lines():
-    source = "Intro RU.\n\n    code()\n        nested()\n"
-    target = "Translated intro.\n\n  code()\n  nested()\n"
+    source = (
+        "- Python\n\n"
+        "    {% list tabs %}\n"
+        "    - Native SDK\n\n"
+        "      code()\n"
+        "          nested()\n"
+        "    {% endlist %}\n"
+    )
+    target = (
+        "- Python\n\n"
+        "    {% list tabs %}\n"
+        "    - Native SDK\n\n"
+        "    code()\n"
+        "    nested()\n"
+        "    {% endlist %}\n"
+    )
     fixed = repair_generated_markdown_layout(source, target)
-    assert "    code()\n        nested()" in fixed
+    assert "  - Native SDK\n" in fixed
+    assert "      code()\n          nested()" in fixed
