@@ -4455,5 +4455,51 @@ produce no ``fence_parity`` or ``fence_body_copy`` findings. Unit tests cover a
 minimal malformed nested-tabs/cut fixture. Re-run only ``doc_verify`` on the
 existing translation PR; do not spend a third full translation attempt.
 
+> [!warning] Superseded by §6.198
+> Canonical comparison made the critic green while the real Diplodoc build was
+> red. Canonical renderer output is not a valid authority for malformed legacy
+> YFM because our parser is more permissive than the production builder.
+
+### 6.198. Restore buildable legacy YFM before QA (#37673 / #50741, 2026-08-22)
+
+**Problem:** The green verify report after §6.197 did not make #50741
+merge-ready. Both ``build-docs`` and PR-check failed on generated EN:
+
+- ``vector-search.md``: four ``YFM005`` unexpected ``endlist/endcut`` errors
+  and ``MD040`` from renderer-added fence closers;
+- ``ttl.md``: unexpected ``endlist`` plus many ``MD009`` errors;
+- ``health-check-api.md``: ``MD022`` below a heading;
+- ``debug-logs.md``: whitespace-only list artifacts (``MD009``).
+
+**Root cause:** Full reconstruction renders a permissively parsed legacy AST.
+The renderer balances malformed nested fences, reduces YFM container
+indentation, and emits empty ``- `` list items for structural labels excluded
+from translation segments. Production Diplodoc interprets the rewritten
+nesting differently and rejects it. Internal AST parity therefore cannot stand
+in for buildability.
+
+**Decision:** ``finalize_en_target`` now performs source-aware structural
+repair after all prose/link processing:
+
+1. When the source fence-token sequence is a subsequence of EN, delete only
+   renderer-inserted markers and restore source marker indentation.
+2. When ordered ``list/endlist/cut/endcut`` tokens match, restore their exact RU
+   indentation. Match by directive kind, not full text: translated ``cut`` titles
+   must remain English while their structural indentation follows RU.
+3. Remove empty list-item artifacts and whitespace-only indentation; preserve
+   intentional two-space hard breaks on non-empty lines.
+4. Insert a blank line below headings for ``MD022``.
+5. For round-trip-unstable legacy sources, require the final raw fence-marker
+   sequence to match exactly. Do not run AST body enforcement that would
+   reintroduce synthetic closers.
+
+**Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
+deletion, stable-fence preservation, directive indentation, empty-list/MD009,
+translated cut-title preservation, MD022, and hard breaks.
+``tests/unit/test_fence_integrity.py`` covers the exact
+raw-marker contract for unstable sources. The exact #50741 files pass fence
+parity/body validation; external markdownlint reports no ``MD009``, ``MD022``,
+or ``MD040``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

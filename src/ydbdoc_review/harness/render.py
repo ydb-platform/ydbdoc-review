@@ -17,7 +17,10 @@ from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_fence_comments_with_client,
     translate_cyrillic_text_fences_with_client,
 )
-from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
+from ydbdoc_review.validation.fence_integrity import (
+    enforce_source_fenced_blocks,
+    fence_structure_is_round_trip_stable,
+)
 from ydbdoc_review.validation.glossary_toc_links import (
     en_mirror_path,
     strip_unreachable_internal_links,
@@ -27,6 +30,7 @@ from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
 )
+from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
 )
@@ -78,7 +82,8 @@ def finalize_en_target(
     en_toc_reachable: frozenset[str] | None = None,
 ) -> str:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
-    text = enforce_source_fenced_blocks(text, normalized_source_text)
+    if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
+        text = enforce_source_fenced_blocks(text, normalized_source_text)
     if client is not None and glossary is not None:
         text = translate_cyrillic_fence_comments_with_client(
             text,
@@ -111,10 +116,7 @@ def finalize_en_target(
             out_warnings=out_warnings,
         )
     text = localize_links_in_text(text, target_lang="en")
-    if (
-        en_toc_reachable is not None
-        and target_lang.lower() in {"en", "english"}
-    ):
+    if en_toc_reachable is not None and target_lang.lower() in {"en", "english"}:
         stripped: list[str] = []
         try:
             text = strip_unreachable_internal_links(
@@ -131,18 +133,16 @@ def finalize_en_target(
                 exc,
             )
             if out_warnings is not None:
-                out_warnings.append(
-                    f"strip_unreachable_links_failed: {type(exc).__name__}: {exc}"
-                )
+                out_warnings.append(f"strip_unreachable_links_failed: {type(exc).__name__}: {exc}")
         else:
             if stripped and out_warnings is not None:
                 names = ", ".join(
-                    f"`{PurePosixPath(h.split('#', 1)[0]).name}`"
-                    for h in stripped[:8]
+                    f"`{PurePosixPath(h.split('#', 1)[0]).name}`" for h in stripped[:8]
                 )
                 extra = f", … (+{len(stripped) - 8})" if len(stripped) > 8 else ""
                 out_warnings.append(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
-    return postprocess_en_target_markdown(text)
+    text = postprocess_en_target_markdown(text)
+    return repair_generated_markdown_layout(normalized_source_text, text)

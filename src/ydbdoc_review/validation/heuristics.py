@@ -24,9 +24,7 @@ _PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
 # Any leftover protect markers (literal or URL-encoded). Letter+digit is the
 # normal form (C/L/I/H/V/T/U/S); broad ⟦…⟧ still blocks odd survivors (§6.164).
 _UNRESTORED_PLACEHOLDER = re.compile(r"⟦[^⟧]+⟧")
-_UNRESTORED_PLACEHOLDER_ENCODED = re.compile(
-    r"%E2%9F%A6[^%]*%E2%9F%A7", re.IGNORECASE
-)
+_UNRESTORED_PLACEHOLDER_ENCODED = re.compile(r"%E2%9F%A6[^%]*%E2%9F%A7", re.IGNORECASE)
 # Parser URL stand-ins from link_with_variable; must be restored to ``{{ var }}``
 # before publish (#47995 / #48812 left ``yfmvar-0-yfmvarend`` in EN hrefs).
 _UNRESTORED_YFMVAR = re.compile(r"yfmvar-\d+-yfmvarend", re.IGNORECASE)
@@ -34,9 +32,7 @@ _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 # Path split by a mid-bold backtick that only wraps the extension:
 # ``**/home/…/id_ed25519`.pub`**`` (#49040 / #48968). Do NOT match legitimate
 # ``**Box `workflow`**`` / ``**`flag`**`` (§6.177 / #49059 false positive).
-_BROKEN_BOLD_INLINE_CODE = re.compile(
-    r"\*\*[^*`\n]*/[^*`\n]+`\.[A-Za-z0-9]+`\*\*"
-)
+_BROKEN_BOLD_INLINE_CODE = re.compile(r"\*\*[^*`\n]*/[^*`\n]+`\.[A-Za-z0-9]+`\*\*")
 # Dropped inline code left an empty parenthetical: ``( extension)`` vs
 # ``(расширение `.pub`)``.
 _EMPTY_EXTENSION_PAREN = re.compile(r"\(\s+extension\s*\)", re.IGNORECASE)
@@ -96,9 +92,7 @@ def check_length_ratio(
     return [f"length_ratio: {label} ratio {ratio:.2f} outside sane bounds"]
 
 
-def check_unrestored_placeholders(
-    target_text: str, *, target_lang: str
-) -> list[str]:
+def check_unrestored_placeholders(target_text: str, *, target_lang: str) -> list[str]:
     """Protect markers left in the final EN page (literal or percent-encoded)."""
     if target_lang.lower() not in {"en", "english"}:
         return []
@@ -120,14 +114,11 @@ def check_unrestored_placeholders(
     preview = ", ".join(f"`{t}`" for t in unique[:8])
     extra = f", … (+{len(unique) - 8})" if len(unique) > 8 else ""
     return [
-        f"unrestored_placeholder: {len(found)} leftover protect marker(s) in EN: "
-        f"{preview}{extra}"
+        f"unrestored_placeholder: {len(found)} leftover protect marker(s) in EN: {preview}{extra}"
     ]
 
 
-def check_unrestored_yfmvar_placeholders(
-    target_text: str, *, target_lang: str
-) -> list[str]:
+def check_unrestored_yfmvar_placeholders(target_text: str, *, target_lang: str) -> list[str]:
     """``yfmvar-N-yfmvarend`` left in EN (link_with_variable failed to restore).
 
     These are parse-time stand-ins for ``{{ var }}`` inside markdown hrefs.
@@ -149,14 +140,11 @@ def check_unrestored_yfmvar_placeholders(
     preview = ", ".join(f"`{t}`" for t in unique[:8])
     extra = f", … (+{len(unique) - 8})" if len(unique) > 8 else ""
     return [
-        f"unrestored_yfmvar: {len(found)} leftover yfmvar placeholder(s) in EN: "
-        f"{preview}{extra}"
+        f"unrestored_yfmvar: {len(found)} leftover yfmvar placeholder(s) in EN: {preview}{extra}"
     ]
 
 
-def check_broken_inline_code_markup(
-    target_text: str, *, target_lang: str
-) -> list[str]:
+def check_broken_inline_code_markup(target_text: str, *, target_lang: str) -> list[str]:
     """Mangled path+``.ext`` bold/backtick or empty ``( extension)`` (§6.176–§6.177).
 
     Catches ``**/…/id_ed25519`.pub`**`` after the model drops `` `.pub` `` from a
@@ -201,20 +189,15 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
             continue
         seen_snippets.add(snippet)
         line = body.count("\n", 0, match.start()) + 1
-        warnings.append(
-            f"Кириллица в EN-тексте (строка ~{line}): «{snippet}»"
-        )
+        warnings.append(f"Кириллица в EN-тексте (строка ~{line}): «{snippet}»")
     if len(matches) > 12:
         warnings.append(
-            f"… и ещё {len(matches) - 12} вхождений кириллицы "
-            f"(всего {len(matches)} символов)"
+            f"… и ещё {len(matches) - 12} вхождений кириллицы (всего {len(matches)} символов)"
         )
     return warnings
 
 
-def check_cyrillic_in_en_all_fences(
-    target_text: str, *, target_lang: str
-) -> list[str]:
+def check_cyrillic_in_en_all_fences(target_text: str, *, target_lang: str) -> list[str]:
     """Cyrillic inside **any** fenced code block in EN (yaml/yql/go/text/…).
 
     Prose Cyrillic is covered by ``check_cyrillic_in_en`` (fences stripped).
@@ -248,8 +231,7 @@ def check_cyrillic_in_en_all_fences(
     out = found[:12]
     if len(found) > 12:
         out.append(
-            f"cyrillic_in_code_fence: … и ещё {len(found) - 12} строк "
-            "с кириллицей в code fence"
+            f"cyrillic_in_code_fence: … и ещё {len(found) - 12} строк с кириллицей в code fence"
         )
     return out
 
@@ -288,11 +270,7 @@ def check_md_link_parity(
         missing.discard(PurePosixPath(source_file).name)
     if ignore_basenames:
         missing -= set(ignore_basenames)
-    if (
-        missing
-        and en_toc_reachable is not None
-        and source_file
-    ):
+    if missing and en_toc_reachable is not None and source_file:
         from ydbdoc_review.validation.glossary_toc_links import (
             md_link_basenames_outside_reachable,
         )
@@ -335,17 +313,8 @@ def _count_fenced_code_blocks(text: str) -> int:
     return count
 
 
-def check_fence_parity(
-    source_text: str, target_text: str, *, source_lang: str = "ru"
-) -> list[str]:
-    from ydbdoc_review.validation.fence_integrity import (
-        canonical_source_for_fence_validation,
-    )
-
-    canonical_source = canonical_source_for_fence_validation(
-        source_text, source_lang=source_lang
-    )
-    src = _count_fenced_code_blocks(canonical_source)
+def check_fence_parity(source_text: str, target_text: str) -> list[str]:
+    src = _count_fenced_code_blocks(source_text)
     tgt = _count_fenced_code_blocks(target_text)
     if src == tgt:
         return []
@@ -517,29 +486,17 @@ def _collect_raw_heuristics(
         )
     )
     raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
-    raw.extend(
-        check_unrestored_placeholders(target_text, target_lang=target_lang)
-    )
-    raw.extend(
-        check_unrestored_yfmvar_placeholders(target_text, target_lang=target_lang)
-    )
-    raw.extend(
-        check_broken_inline_code_markup(target_text, target_lang=target_lang)
-    )
+    raw.extend(check_unrestored_placeholders(target_text, target_lang=target_lang))
+    raw.extend(check_unrestored_yfmvar_placeholders(target_text, target_lang=target_lang))
+    raw.extend(check_broken_inline_code_markup(target_text, target_lang=target_lang))
     # Any fence language (yaml/yql/go/text/…) — hard gate for residual RU (§6.164).
     # Comment / text-fence helpers still auto-translate; this catches leftovers
     # those paths miss (e.g. ``<SID по умолчанию>`` in yaml examples).
-    raw.extend(
-        check_cyrillic_in_en_all_fences(target_text, target_lang=target_lang)
-    )
+    raw.extend(check_cyrillic_in_en_all_fences(target_text, target_lang=target_lang))
     # Keep specialized detectors for messaging parity with older reports; they
     # may overlap with all-fences — duplicate messages are acceptable vs silent miss.
-    raw.extend(
-        check_cyrillic_in_en_fence_comments(target_text, target_lang=target_lang)
-    )
-    raw.extend(
-        check_cyrillic_in_en_text_fences(target_text, target_lang=target_lang)
-    )
+    raw.extend(check_cyrillic_in_en_fence_comments(target_text, target_lang=target_lang))
+    raw.extend(check_cyrillic_in_en_text_fences(target_text, target_lang=target_lang))
     raw.extend(
         check_md_link_parity(
             source_text,
@@ -552,11 +509,7 @@ def _collect_raw_heuristics(
         )
     )
     href_ignore: set[str] = set(ignore_link_basenames or ())
-    if (
-        en_toc_reachable is not None
-        and source_file
-        and source_lang.lower() in {"ru", "russian"}
-    ):
+    if en_toc_reachable is not None and source_file and source_lang.lower() in {"ru", "russian"}:
         from ydbdoc_review.validation.glossary_toc_links import (
             md_link_basenames_outside_reachable,
         )
@@ -603,17 +556,11 @@ def _collect_raw_heuristics(
                 target_text,
                 repo_path=docs_repo_path,
                 read_text=docs_text_reader,
-                ru_text=source_text
-                if source_lang.lower() in {"ru", "russian"}
-                else None,
+                ru_text=source_text if source_lang.lower() in {"ru", "russian"} else None,
                 en_baseline_text=en_baseline_text,
             )
         )
-    raw.extend(
-        check_fence_parity(
-            normalized_source_text, target_text, source_lang=source_lang
-        )
-    )
+    raw.extend(check_fence_parity(normalized_source_text, target_text))
     raw.extend(
         check_fence_body_copy(
             source_text,
@@ -621,9 +568,7 @@ def _collect_raw_heuristics(
             source_lang=source_lang,
         )
     )
-    raw.extend(
-        check_absolute_paths_in_fences(normalized_source_text, target_text)
-    )
+    raw.extend(check_absolute_paths_in_fences(normalized_source_text, target_text))
     raw.extend(check_required_anchor_lines(source_text, target_text))
     raw.extend(check_heading_parity(normalized_source_text, target_text))
     raw.extend(check_list_tab_parity(normalized_source_text, target_text))
@@ -787,7 +732,9 @@ def validate_navigation_merge_warnings(
     return []
 
 
-def bump_verdict_for_heuristics(verdict: Literal["ok", "warnings", "blocked"], warnings: list[str]) -> Literal["ok", "warnings", "blocked"]:
+def bump_verdict_for_heuristics(
+    verdict: Literal["ok", "warnings", "blocked"], warnings: list[str]
+) -> Literal["ok", "warnings", "blocked"]:
     if warnings and verdict == "ok":
         return "warnings"
     return verdict

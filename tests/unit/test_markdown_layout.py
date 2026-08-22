@@ -9,6 +9,7 @@ from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.markdown_layout import (
     fix_blanks_around_fences,
     fix_image_bang_spacing,
+    repair_generated_markdown_layout,
 )
 
 
@@ -23,12 +24,7 @@ def _md031_after_close_violations(text: str) -> list[int]:
 
 
 def test_fix_blanks_after_indented_close_fence():
-    text = (
-        "  ```yaml\n"
-        "  key: value\n"
-        "  ```\n"
-        "- Next section\n"
-    )
+    text = "  ```yaml\n  key: value\n  ```\n- Next section\n"
     fixed = fix_blanks_around_fences(text)
     assert fixed.splitlines()[3] == ""
     assert "- Next section" in fixed
@@ -54,10 +50,7 @@ def test_render_tight_list_with_fence_keeps_blank_before_next_item():
 
 
 def test_postprocess_fixes_existing_en_pattern():
-    bad = (
-        "  ```\n"
-        "- Section `blob_storage_config`:\n"
-    )
+    bad = "  ```\n- Section `blob_storage_config`:\n"
     fixed = fix_blanks_around_fences(bad)
     assert _md031_after_close_violations(fixed) == []
 
@@ -73,26 +66,14 @@ def test_fix_blanks_before_opening_fence():
 
 def test_render_fence_inside_list_item_before_paragraph():
     """Fence then prose inside one list item (paragraph after fenced_code)."""
-    text = (
-        "- Item\n"
-        "\n"
-        "  ```yaml\n"
-        "  x: 1\n"
-        "  ```\n"
-        "\n"
-        "  Continuation text.\n"
-    )
+    text = "- Item\n\n  ```yaml\n  x: 1\n  ```\n\n  Continuation text.\n"
     out = render_markdown(parse_markdown(text))
     assert _md031_after_close_violations(out) == []
 
 
 def test_regression_numbered_list_after_indented_fence():
     """PR #42404 deployment-configuration-v1.md ~810: ``` then '4. Set account'."""
-    bad = (
-        "   ydb yql -s 'CREATE USER user1'\n"
-        "   ```\n"
-        "4. Set account permissions:\n"
-    )
+    bad = "   ydb yql -s 'CREATE USER user1'\n   ```\n4. Set account permissions:\n"
     fixed = fix_blanks_around_fences(bad)
     assert _md031_after_close_violations(fixed) == []
     idx = fixed.splitlines().index("   ```")
@@ -101,11 +82,7 @@ def test_regression_numbered_list_after_indented_fence():
 
 def test_regression_systemd_item_after_fence():
     """PR #42404 deployment-configuration-v1.md ~611: ``` then '- Using systemd'."""
-    bad = (
-        "      --node static &\n"
-        "  ```\n"
-        "- Using systemd\n"
-    )
+    bad = "      --node static &\n  ```\n- Using systemd\n"
     fixed = fix_blanks_around_fences(bad)
     assert _md031_after_close_violations(fixed) == []
 
@@ -113,15 +90,7 @@ def test_regression_systemd_item_after_fence():
 def test_postprocess_en_pipeline_clears_multiple_violations():
     from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
 
-    bad = (
-        "  ```\n"
-        "- Section `blob_storage_config`:\n"
-        "\n"
-        "  ```yaml\n"
-        "  x: 1\n"
-        "  ```\n"
-        "- Using systemd\n"
-    )
+    bad = "  ```\n- Section `blob_storage_config`:\n\n  ```yaml\n  x: 1\n  ```\n- Using systemd\n"
     fixed = postprocess_en_target_markdown(bad)
     assert _md031_after_close_violations(fixed) == []
 
@@ -129,3 +98,69 @@ def test_postprocess_en_pipeline_clears_multiple_violations():
 def test_fix_image_bang_spacing():
     assert fix_image_bang_spacing("! [alt](img.png)") == "![alt](img.png)"
     assert fix_image_bang_spacing("![ok](img.png)") == "![ok](img.png)"
+
+
+def test_repair_drops_only_renderer_inserted_fence_markers():
+    source = (
+        "- Python\n\n"
+        '    {% cut "asyncio" %}\n\n'
+        "    ```python\n    async_code()\n"
+        "      ```python\n      import ydb\n"
+        "    {% endcut %}\n\n"
+        "    ```python\n    sync_code()\n      ```\n\n"
+        "    {% endlist %}\n"
+    )
+    rendered = (
+        "- Python\n\n"
+        '  {% cut "asyncio" %}\n\n'
+        "  ```python\n  async_code()\n"
+        "    ```python\n    import ydb\n  ```\n"
+        "  {% endcut %}\n\n"
+        "  ```python\n  sync_code()\n    ```\n  ```\n\n"
+        "  {% endlist %}\n"
+    )
+    fixed = repair_generated_markdown_layout(source, rendered)
+    fence = re.compile(r"^\s*(`{3,}|~{3,})(.*)$", re.MULTILINE)
+    assert [m.group(1) + m.group(2).strip() for m in fence.finditer(fixed)] == [
+        m.group(1) + m.group(2).strip() for m in fence.finditer(source)
+    ]
+    assert "    {% endcut %}" in fixed
+    assert "    {% endlist %}" in fixed
+
+
+def test_repair_generated_layout_fixes_md009_and_md022():
+    source = "### Source heading\n\nSource text.\n"
+    target = "### Heading\nText.\n \n- \nNext.\n"
+    fixed = repair_generated_markdown_layout(source, target)
+    assert "### Heading\n\nText." in fixed
+    assert all(not line or line == line.rstrip() for line in fixed.splitlines())
+    assert "\n- \n" not in fixed
+
+
+def test_repair_preserves_intentional_nonblank_hard_break():
+    text = "Line with hard break.  \nNext.\n"
+    assert repair_generated_markdown_layout(text, text) == text
+
+
+def test_repair_does_not_reindent_stable_fences():
+    source = "    ```python\n    source()\n    ```\n"
+    target = "  ```python\n  translated()\n  ```\n"
+    fixed = repair_generated_markdown_layout(source, target)
+    assert fixed == target
+
+
+def test_repair_syncs_equal_yfm_directive_sequence_indentation():
+    source = (
+        "    {% list tabs group=tool %}\n"
+        '    {% cut "Source title" %}\n'
+        "    {% endcut %}\n"
+        "    {% endlist %}\n"
+    )
+    target = (
+        "  {% list tabs group=tool %}\n"
+        '  {% cut "Translated title" %}\n'
+        "{% endcut %}\n"
+        "{% endlist %}\n"
+    )
+    fixed = repair_generated_markdown_layout(source, target)
+    assert fixed == target.replace("  {%", "    {%").replace("\n{%", "\n    {%")

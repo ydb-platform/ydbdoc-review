@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import _finalize_en_target
-from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.fence_integrity import (
-    canonical_source_for_fence_validation,
     check_fence_body_copy,
     enforce_source_fenced_blocks,
     fence_content_matches_source,
@@ -59,7 +56,7 @@ def test_check_fence_body_copy_detects_pipeline_change():
     assert "fence_body_copy" in warnings[0]
 
 
-def test_fence_body_copy_uses_canonical_malformed_source_structure():
+def test_malformed_legacy_source_requires_exact_raw_marker_sequence():
     source = """{% list tabs %}
 
 - Python
@@ -89,10 +86,11 @@ def test_fence_body_copy_uses_canonical_malformed_source_structure():
 
 {% endlist %}
 """
-    canonical = canonical_source_for_fence_validation(source)
-    assert canonical != source
-    target = render_markdown(parse_markdown(source), target_lang="en")
-    assert check_fence_body_copy(source, target) == []
+    same_markers = source.replace("    A\n", "    translated comment\n")
+    assert check_fence_body_copy(source, same_markers) == []
+
+    extra_marker = same_markers + "```\n"
+    assert check_fence_body_copy(source, extra_marker)
 
 
 def test_normalize_ru_config_dir_before_translate():
@@ -303,16 +301,8 @@ def test_fence_content_rejects_text_diagram_structure_change():
 
 
 def test_fence_content_rejects_mermaid_structure_change():
-    ru = (
-        "sequenceDiagram\n"
-        "    participant Топик\n"
-        "    Топик->>Приемник: событие\n"
-    )
-    en = (
-        "sequenceDiagram\n"
-        "    participant Topic\n"
-        "    Topic->Sink: event\n"
-    )
+    ru = "sequenceDiagram\n    participant Топик\n    Топик->>Приемник: событие\n"
+    en = "sequenceDiagram\n    participant Topic\n    Topic->Sink: event\n"
     assert not fence_content_matches_source(ru, en)
 
 
@@ -346,19 +336,6 @@ def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
 
 def test_fence_body_allows_comment_translation_with_trailing_blank_line():
     """§6.156: RU fence often keeps a trailing blank line EN drops."""
-    ru = (
-        "```yql\n"
-        "SELECT\n"
-        "   x,  -- ОК: колонка\n"
-        "FROM t\n"
-        "\n"
-        "```\n"
-    )
-    en = (
-        "```yql\n"
-        "SELECT\n"
-        "   x,  -- OK: column\n"
-        "FROM t\n"
-        "```\n"
-    )
+    ru = "```yql\nSELECT\n   x,  -- ОК: колонка\nFROM t\n\n```\n"
+    en = "```yql\nSELECT\n   x,  -- OK: column\nFROM t\n```\n"
     assert check_fence_body_copy(ru, en, source_lang="ru") == []

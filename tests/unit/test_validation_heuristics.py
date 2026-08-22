@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from textwrap import dedent
 
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.validation.heuristics import (
     bump_verdict_for_blocking_heuristics,
     bump_verdict_for_heuristics,
@@ -34,9 +32,7 @@ def test_cyrillic_in_en_detects_prose():
 
 def test_unrestored_placeholder_blocks():
     """§6.163: leftover protect markers in final EN are blocking."""
-    text = (
-        "The ⟦V1⟧ cluster uses [SIDs](%E2%9F%A6U1%E2%9F%A7) and ⟦C1⟧ code.\n"
-    )
+    text = "The ⟦V1⟧ cluster uses [SIDs](%E2%9F%A6U1%E2%9F%A7) and ⟦C1⟧ code.\n"
     msgs = check_unrestored_placeholders(text, target_lang="en")
     assert len(msgs) == 1
     assert msgs[0].startswith("unrestored_placeholder:")
@@ -97,7 +93,7 @@ def test_broken_inline_code_allows_bold_wrapping_code():
     """§6.177 / #49059: ``**Box `workflow`**`` is valid, not a merge blocker."""
     text = (
         "* **Box `workflow`**\n"
-        "* Three others: \"repo\", \"admin:public_key\" and \"read:org\".\n"
+        '* Three others: "repo", "admin:public_key" and "read:org".\n'
         "Use **/home/user/.ssh/id_ed25519.pub** as the key file.\n"
     )
     assert check_broken_inline_code_markup(text, target_lang="en") == []
@@ -113,9 +109,7 @@ def test_broken_inline_code_allows_bold_wrapping_code():
 
 def test_unrestored_placeholder_blocks_glossary_v2():
     """§6.164 / #48595: glossary leftover ``⟦V2⟧`` must block merge."""
-    text = (
-        "A **client certificate** confirms identity when interacting with ⟦V2⟧.\n"
-    )
+    text = "A **client certificate** confirms identity when interacting with ⟦V2⟧.\n"
     msgs = check_unrestored_placeholders(text, target_lang="en")
     assert any("⟦V2⟧" in m for m in msgs)
     classified = run_file_heuristics_classified(
@@ -179,9 +173,7 @@ def test_verify_realign_message_is_info_not_blocking():
     from ydbdoc_review.validation.heuristics import _classify_heuristic
 
     assert (
-        _classify_heuristic(
-            "verify_realign: rebuilt EN from RU due to segment alignment mismatch"
-        )
+        _classify_heuristic("verify_realign: rebuilt EN from RU due to segment alignment mismatch")
         == "info"
     )
 
@@ -196,12 +188,7 @@ def test_strip_unreachable_links_message_is_info_not_blocking():
         )
         == "info"
     )
-    assert (
-        _classify_heuristic(
-            "strip_unreachable_links_failed: AttributeError: boom"
-        )
-        == "warnings"
-    )
+    assert _classify_heuristic("strip_unreachable_links_failed: AttributeError: boom") == "warnings"
 
 
 def test_md_link_parity_flags_missing_en_link():
@@ -215,9 +202,7 @@ def test_md_link_parity_flags_missing_en_link():
 
 def test_md_link_parity_ignores_links_outside_en_toc_reachable():
     """Strip (§6.107) drops unreachable EN links; parity must not fail QA (§6.114)."""
-    ru = (
-        "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
-    )
+    ru = "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
     en = "See watermarks and [patterns](patterns.md).\n"
     reachable = frozenset(
         {
@@ -281,40 +266,6 @@ def test_fence_parity_ignores_triple_backticks_inside_block_body():
     assert check_fence_parity(block, block) == []
 
 
-def test_fence_parity_uses_canonical_source_for_malformed_legacy_nesting():
-    source = """{% list tabs %}
-
-- Python
-
-    {% cut "asyncio" %}
-
-    ```python
-    A
-
-      ```python
-      B
-
-    {% endcut %}
-
-    ```python
-    C
-
-      ```
-
-    - Native SDK (Asyncio)
-
-      ```python
-      D
-      ```
-
-    {% endlist %}
-
-{% endlist %}
-"""
-    rendered = render_markdown(parse_markdown(source), target_lang="en")
-    assert check_fence_parity(source, rendered) == []
-
-
 def test_heading_parity():
     src = "# One\n\n## Two\n"
     tgt = "# One\n"
@@ -347,10 +298,7 @@ def test_length_ratio_out_of_bounds():
 
 
 def test_run_file_heuristics_flags_broken_wikipedia_link():
-    src = (
-        "См. [CoW](https://ru.wikipedia.org/wiki/Копирование_при_записи).\n"
-        + "Текст. " * 30
-    )
+    src = "См. [CoW](https://ru.wikipedia.org/wiki/Копирование_при_записи).\n" + "Текст. " * 30
     tgt = (
         "See [CoW](https://en.wikipedia.org/wiki/%D0%9A%D0%BE%D0%BF%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5_%D0%BF%D1%80%D0%B8_%D0%B7%D0%B0%D0%BF%D0%B8%D1%81%D0%B8).\n"
         + "Text. " * 30
@@ -381,7 +329,9 @@ def test_bump_verdict_for_blocking_heuristics():
 def test_run_file_heuristics_classified_ru_source_is_info():
     ru = "x --config-dir/opt/ydb/cfg\n"
     norm = normalize_ru_source_for_translation(ru)
-    c = run_file_heuristics_classified(ru, "x --config-dir /opt/ydb/cfg\n", normalized_source_text=norm)
+    c = run_file_heuristics_classified(
+        ru, "x --config-dir /opt/ydb/cfg\n", normalized_source_text=norm
+    )
     assert c.info and not c.blocking
 
 
@@ -441,18 +391,8 @@ def test_validate_navigation_merge_warnings_redirect():
 
 def test_heading_parity_counts_indented_headings_inside_yfm_if():
     """§6.156: RU headings indented in ``{% if %}`` must still count."""
-    ru = (
-        "{% if feature_group_by_rollup_cube %}\n"
-        "  ## ROLLUP {#rollup}\n"
-        "{% endif %}\n"
-        "## Other\n"
-    )
-    en = (
-        "{% if feature_group_by_rollup_cube %}\n"
-        "## ROLLUP {#rollup}\n"
-        "{% endif %}\n"
-        "## Other\n"
-    )
+    ru = "{% if feature_group_by_rollup_cube %}\n  ## ROLLUP {#rollup}\n{% endif %}\n## Other\n"
+    en = "{% if feature_group_by_rollup_cube %}\n## ROLLUP {#rollup}\n{% endif %}\n## Other\n"
     assert check_heading_parity(ru, en) == []
 
 
@@ -460,11 +400,14 @@ def test_md_link_parity_ignores_stripped_basenames():
     """§6.156: intentional strip must not re-block via md_link_parity."""
     ru = "See [t](table.md) and [c](create-resource-pool-classifier.md).\n"
     en = "See t and c.\n"
-    assert check_md_link_parity(
-        ru,
-        en,
-        source_lang="ru",
-        target_lang="en",
-        source_file="ydb/docs/ru/core/dev/system-views.md",
-        ignore_basenames={"table.md", "create-resource-pool-classifier.md"},
-    ) == []
+    assert (
+        check_md_link_parity(
+            ru,
+            en,
+            source_lang="ru",
+            target_lang="en",
+            source_file="ydb/docs/ru/core/dev/system-views.md",
+            ignore_basenames={"table.md", "create-resource-pool-classifier.md"},
+        )
+        == []
+    )
