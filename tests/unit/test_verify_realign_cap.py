@@ -13,6 +13,40 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
 
 
+def test_verify_repairs_legacy_layout_before_round_trip_gate(monkeypatch):
+    source = "- item\n\n    ```python\n    source()\n      ```\n"
+    target = "- item\n\n  ```python\n  translated()\n    ```\n  ```\n"
+    state = FileRunState(
+        mode="verify",
+        file_path="ydb/docs/ru/core/legacy.md",
+        raw_source_text=source,
+        source_text=source,
+        existing_target_text=target,
+        translated_text=target,
+        segments=extract_segments(parse_markdown(source)),
+        source_doc=parse_markdown(source),
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    ctx = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+    )
+
+    seen: list[str] = []
+
+    def _gate(_segments, text):
+        seen.append(text)
+        return {}, None
+
+    monkeypatch.setattr("ydbdoc_review.harness.steps.gate_round_trip", _gate)
+    RoundTripStep().run(state, ctx)
+    assert len(seen) == 1
+    assert seen[0].count("```") == source.count("```")
+    assert "    ```python" in seen[0]
+    assert "      ```" in seen[0]
+
+
 def test_verify_realign_skips_full_retranslate_for_large_files(monkeypatch):
     """449-segment glossary must not call translate_segments during verify."""
     # Build a RU with many short paragraphs so segment count exceeds the cap.
@@ -45,9 +79,7 @@ def test_verify_realign_skips_full_retranslate_for_large_files(monkeypatch):
         called["n"] += 1
         raise AssertionError("translate_segments must not run for large realign")
 
-    monkeypatch.setattr(
-        "ydbdoc_review.harness.steps.translate_segments", _boom
-    )
+    monkeypatch.setattr("ydbdoc_review.harness.steps.translate_segments", _boom)
     RoundTripStep().run(state, ctx)
     assert called["n"] == 0
     assert state.segment_alignment_error

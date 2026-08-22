@@ -4485,6 +4485,10 @@ no-op; the next critic therefore still saw 49 EN blocks against 44 RU blocks.
 After separating those authorities, exact raw markers still parsed as 41 EN
 blocks versus 44 RU because translated surrounding list prose changes how the
 permissive internal parser groups malformed indentation.
+The second verify then showed the ordering consequence: ``RoundTripStep`` set
+``segment_alignment_error`` on the unrepaired 101-marker EN, so
+``FinalizeEnStep`` deliberately skipped the file and heuristics saw the dirty
+input. Repair must therefore happen before the first round-trip gate.
 
 **Decision:** ``finalize_en_target`` now performs source-aware structural
 repair after all prose/link processing:
@@ -4506,12 +4510,15 @@ repair after all prose/link processing:
    ``fence_body_copy``: exact ordered raw markers suppress ambiguous AST-count
    drift. A missing or extra marker remains blocking. Production Diplodoc build
    is still the final validity gate.
+8. In verify mode, run source-aware markdown layout repair at the start of
+   ``RoundTripStep``. Finalize remains an idempotent post-critic safety pass.
 
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
 translated cut-title preservation, MD022, and hard breaks.
 The verify regression explicitly covers EN self-reference plus RU layout repair.
 Fence-parity tests cover equal raw markers with different internal AST counts.
+``test_verify_realign_cap.py`` asserts repair runs before ``gate_round_trip``.
 ``tests/unit/test_fence_integrity.py`` covers the exact
 raw-marker contract for unstable sources. The exact #50741 files pass fence
 parity/body validation; external markdownlint reports no ``MD009``, ``MD022``,

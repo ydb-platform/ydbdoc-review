@@ -48,6 +48,7 @@ from ydbdoc_review.validation.heuristics import (
     run_file_heuristics_classified,
 )
 from ydbdoc_review.validation.include_targets import repair_missing_includes
+from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.placeholder_drift import (
     drop_spurious_placeholder_issues,
     filter_critic_response,
@@ -530,6 +531,12 @@ class RoundTripStep:
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
         if state.mode == "verify" and ctx.target_lang.lower() in {"en", "english"}:
+            # Repair renderer-added legacy markers before parsing/alignment.
+            # Otherwise segment_alignment_error skips FinalizeEnStep, leaving
+            # the malformed incoming EN untouched (#50741).
+            state.translated_text = repair_generated_markdown_layout(
+                state.source_text, state.translated_text
+            )
             _apply_en_structural_repair(state, ctx)
         state.translations, state.segment_alignment_error = gate_round_trip(
             state.segments, state.translated_text
