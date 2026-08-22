@@ -10,6 +10,7 @@ from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.validation.fence_integrity import fence_marker_tokens
 
 
 def test_run_pair_plan_forwards_en_toc_reachable_to_harness():
@@ -155,3 +156,51 @@ def test_run_pair_plan_restores_missing_heading_anchor_after_translate():
     assert result.target_text is not None
     assert "{#csharp-app}" in result.target_text
 
+
+def test_pair_postprocess_repairs_fences_after_structural_repair():
+    source = "- item\n\n    ```python\n    source()\n      ```\n"
+    target = "- item\n\n    ```python\n    translated()\n      ```\n"
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/legacy.md",
+        en_path="ydb/docs/en/core/legacy.md",
+        ru_changed=True,
+        en_changed=True,
+    )
+    content = PairContent(pair=pair, ru_text=source, en_text=target)
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="test",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+    )
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del state, ctx
+            result = MagicMock()
+            result.final_text = target
+            return result
+
+    with (
+        patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
+        patch(
+            "ydbdoc_review.harness.pair.repair_en_structure_from_ru",
+            side_effect=lambda text, _source: text + "```\n",
+        ),
+    ):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert result.target_text is not None
+    assert fence_marker_tokens(result.target_text) == fence_marker_tokens(source)

@@ -21,6 +21,7 @@ from ydbdoc_review.validation.href_parity import (
     insert_missing_autotitle_list_items,
     restore_md_link_hrefs,
 )
+from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
 
@@ -164,6 +165,12 @@ def run_pair_plan(
                     en_baseline=content.en_text or content.en_base_text,
                 )
             target_text = repair_en_structure_from_ru(target_text, content.ru_text)
+            # Pair-level structural repair reparses legacy YFM after the file
+            # harness and can reintroduce synthetic fence closers. Raw RU layout
+            # must remain the last structural authority before QA/commit (#50741).
+            target_text = repair_generated_markdown_layout(
+                normalize_ru_source_for_translation(source_text), target_text
+            )
             # Restore runs after harness heuristics — refresh QA so the report
             # matches committed text (#49451).
             if target_text != before_restore and is_dataclass(file_result):

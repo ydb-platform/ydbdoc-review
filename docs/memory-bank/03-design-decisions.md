@@ -4497,6 +4497,10 @@ fixes call ``finalize_en_target`` inside ``run_critic_loop``. That call, and the
 later ``FinalizeEnStep``, still supplied only the EN fence reference, allowing
 91 markers to survive. Every verify finalize call must pass RU layout authority
 explicitly even when its fence-body authority is EN.
+The full run log finally exposed a later owner outside the file harness:
+``run_pair_plan`` always calls ``repair_en_structure_from_ru`` again after
+``file_result.final_text``. It then refreshes heuristics against that mutated
+text. This was the actual source of the persistent 91-marker report.
 
 **Decision:** ``finalize_en_target`` now performs source-aware structural
 repair after all prose/link processing:
@@ -4523,6 +4527,9 @@ repair after all prose/link processing:
    gate. Finalize remains an idempotent post-critic safety pass.
 9. Both post-critic finalize paths pass ``layout_source_text=state.source_text``.
    This is independent of ``fence_reference_text`` by design.
+10. Pair-level postprocessing also ends with
+    ``repair_generated_markdown_layout(normalized RU, target)`` immediately
+    after ``repair_en_structure_from_ru`` and before refreshed QA.
 
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
@@ -4534,6 +4541,8 @@ Its structural-repair stub deliberately adds a fence and proves the following
 layout pass removes it.
 The FinalizeEnStep regression asserts EN body reference and RU layout reference
 are passed simultaneously.
+The pair regression stubs structural repair to append a synthetic closer and
+asserts that ``run_pair_plan`` returns the exact RU marker sequence.
 ``tests/unit/test_fence_integrity.py`` covers the exact
 raw-marker contract for unstable sources. The exact #50741 files pass fence
 parity/body validation; external markdownlint reports no ``MD009``, ``MD022``,
