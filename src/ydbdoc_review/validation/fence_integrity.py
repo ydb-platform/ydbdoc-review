@@ -53,7 +53,7 @@ def fence_structure_is_round_trip_stable(text: str, *, lang: str = "ru") -> bool
     return len(code_blocks_from_text(rendered)) == raw
 
 
-def _fence_marker_tokens(text: str) -> list[str]:
+def fence_marker_tokens(text: str) -> list[str]:
     marker = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
     return [
         match.group(1) + match.group(2).strip()
@@ -322,7 +322,7 @@ def check_fence_body_copy(
     source_text = _source_text_for_fence_compare(source_text, source_lang=source_lang)
     if not fence_structure_is_round_trip_stable(
         source_text, lang=source_lang
-    ) and _fence_marker_tokens(source_text) == _fence_marker_tokens(target_text):
+    ) and fence_marker_tokens(source_text) == fence_marker_tokens(target_text):
         # The target preserves the only unambiguous contract available for a
         # malformed legacy file: the exact ordered marker sequence. Our AST
         # cannot reliably pair bodies in that case; Diplodoc build is the gate.

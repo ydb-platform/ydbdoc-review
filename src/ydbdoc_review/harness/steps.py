@@ -11,7 +11,11 @@ from ydbdoc_review.harness.render import finalize_en_target, render_with_transla
 from ydbdoc_review.harness.render import remap_translations_by_position
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.pipeline.qa import compose_file_verdict, gate_round_trip, partial_align_translations_from_target
+from ydbdoc_review.pipeline.qa import (
+    compose_file_verdict,
+    gate_round_trip,
+    partial_align_translations_from_target,
+)
 from ydbdoc_review.reporting.locations import (
     build_segment_excerpts,
     build_segment_line_map,
@@ -83,9 +87,7 @@ def _en_structure_safe_for_low_magnitude_patch(ru_text: str, en_text: str) -> bo
         def walk(blocks: list) -> None:
             for block in blocks:
                 if isinstance(block, YfmTab):
-                    titles.append(
-                        "".join(getattr(node, "content", "") for node in block.title)
-                    )
+                    titles.append("".join(getattr(node, "content", "") for node in block.title))
                 if isinstance(block, YfmIf):
                     for branch in block.branches:
                         walk(branch.children)
@@ -162,6 +164,9 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
             prompt_version=ctx.prompt_version,
             out_warnings=state.finalize_warnings,
             en_toc_reachable=ctx.en_toc_reachable,
+            # Verify uses EN as the fence-body authority, but layout repair must
+            # still restore the raw RU marker/container structure (#50741).
+            layout_source_text=state.source_text,
         )
         state.translated_text = repair_missing_includes(
             state.source_text,
@@ -176,11 +181,7 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
 def _unresolved_retry_segment_ids(state: FileRunState) -> set[str]:
     if state.critic_unresolved is None:
         return set()
-    return {
-        issue.segment_id
-        for issue in state.critic_unresolved.issues
-        if issue.segment_id
-    }
+    return {issue.segment_id for issue in state.critic_unresolved.issues if issue.segment_id}
 
 
 def _needs_critic_feedback_retranslate(state: FileRunState) -> bool:
@@ -354,9 +355,7 @@ class TranslateStep:
             **strategy.config,
         }
         if patch_analysis is not None:
-            state.differential_meta["change_magnitude"] = (
-                patch_analysis.change_magnitude
-            )
+            state.differential_meta["change_magnitude"] = patch_analysis.change_magnitude
         if strategy.mode == "skip":
             state.translations = {}
             state.translated_text = state.existing_target_text or state.source_text
@@ -369,10 +368,7 @@ class TranslateStep:
             state.translations = {}
             to_llm = list(pending)
             if not to_llm:
-                change_ids = (
-                    patch_analysis.added_segment_ids
-                    | patch_analysis.modified_segment_ids
-                )
+                change_ids = patch_analysis.added_segment_ids | patch_analysis.modified_segment_ids
                 to_llm = [s for s in state.segments if s.id in change_ids]
             if to_llm:
                 state.translations = translate_segments(
@@ -464,9 +460,7 @@ class LoadTargetStep:
             target_doc = state.source_doc
             target_segments = state.segments
         if len(target_segments) == len(state.segments):
-            target_segments = normalize_target_segments_to_source(
-                state.segments, target_segments
-            )
+            target_segments = normalize_target_segments_to_source(state.segments, target_segments)
             state.render_base_doc = target_doc
             state.render_base_segments = target_segments
             state.fence_reference_text = state.existing_target_text
@@ -550,9 +544,7 @@ class RoundTripStep:
             state.segment_alignment_error,
         )
         if is_glossary_file(state.file_path):
-            logger.info(
-                "Glossary verify: skip structural alignment gate (§6.186)"
-            )
+            logger.info("Glossary verify: skip structural alignment gate (§6.186)")
             state.finalize_warnings.append(
                 "glossary_verify_alignment_skipped: structural RU/EN "
                 "segment drift ignored on glossary hub"
@@ -668,14 +660,10 @@ class FinalizeEnStep:
         )
         if state.translated_text == before or not state.segments:
             return
-        state.translations, align_err = gate_round_trip(
-            state.segments, state.translated_text
-        )
+        state.translations, align_err = gate_round_trip(state.segments, state.translated_text)
         if align_err:
             # Fence/include-only edits should not fail the whole verify; keep text.
-            state.finalize_warnings.append(
-                f"finalize_en_round_trip: {align_err}"
-            )
+            state.finalize_warnings.append(f"finalize_en_round_trip: {align_err}")
 
 
 class CriticFeedbackRetryStep:
@@ -741,9 +729,7 @@ class HeuristicsStep:
             target_lang=ctx.target_lang,
             source_file=state.file_path,
             en_toc_reachable=ctx.en_toc_reachable,
-            ignore_link_basenames=stripped_link_basenames_from_warnings(
-                state.finalize_warnings
-            ),
+            ignore_link_basenames=stripped_link_basenames_from_warnings(state.finalize_warnings),
             docs_text_reader=ctx.docs_text_reader,
             docs_repo_path=ctx.docs_repo_path,
             en_baseline_text=state.existing_target_text,

@@ -313,7 +313,24 @@ def _count_fenced_code_blocks(text: str) -> int:
     return count
 
 
-def check_fence_parity(source_text: str, target_text: str) -> list[str]:
+def check_fence_parity(source_text: str, target_text: str, *, source_lang: str = "ru") -> list[str]:
+    from ydbdoc_review.validation.fence_integrity import (
+        fence_marker_tokens,
+        fence_structure_is_round_trip_stable,
+    )
+
+    if not fence_structure_is_round_trip_stable(source_text, lang=source_lang):
+        # Translated surrounding list prose can change how our permissive parser
+        # groups malformed legacy fences. Exact raw markers plus Diplodoc build
+        # are the reliable contract in this narrow case (#50741).
+        source_markers = fence_marker_tokens(source_text)
+        target_markers = fence_marker_tokens(target_text)
+        if source_markers == target_markers:
+            return []
+        return [
+            "fence_parity: unstable source marker sequence differs "
+            f"(source {len(source_markers)} vs target {len(target_markers)})"
+        ]
     src = _count_fenced_code_blocks(source_text)
     tgt = _count_fenced_code_blocks(target_text)
     if src == tgt:
@@ -560,7 +577,7 @@ def _collect_raw_heuristics(
                 en_baseline_text=en_baseline_text,
             )
         )
-    raw.extend(check_fence_parity(normalized_source_text, target_text))
+    raw.extend(check_fence_parity(normalized_source_text, target_text, source_lang=source_lang))
     raw.extend(
         check_fence_body_copy(
             source_text,

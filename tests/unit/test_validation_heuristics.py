@@ -266,6 +266,35 @@ def test_fence_parity_ignores_triple_backticks_inside_block_body():
     assert check_fence_parity(block, block) == []
 
 
+def test_fence_parity_uses_exact_markers_for_unstable_legacy_layout():
+    source = """{% list tabs %}
+
+- Python
+
+    ```python
+    A
+
+      ```python
+      B
+
+    ```python
+    C
+
+      ```
+
+    - Native SDK
+
+      ```python
+      D
+      ```
+
+{% endlist %}
+"""
+    target = source.replace("- Python", "Translated paragraph")
+    assert check_fence_parity(source, target) == []
+    assert check_fence_parity(source, target + "```\n")
+
+
 def test_heading_parity():
     src = "# One\n\n## Two\n"
     tgt = "# One\n"

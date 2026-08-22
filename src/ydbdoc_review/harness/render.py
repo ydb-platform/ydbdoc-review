@@ -80,6 +80,7 @@ def finalize_en_target(
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     out_warnings: list[str] | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    layout_source_text: str | None = None,
 ) -> str:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
     if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
@@ -145,4 +146,4 @@ def finalize_en_target(
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
     text = postprocess_en_target_markdown(text)
-    return repair_generated_markdown_layout(normalized_source_text, text)
+    return repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)

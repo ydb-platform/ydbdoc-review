@@ -4478,6 +4478,14 @@ from translation segments. Production Diplodoc interprets the rewritten
 nesting differently and rejects it. Internal AST parity therefore cannot stand
 in for buildability.
 
+The first verify after this change exposed a second authority bug: verify uses
+the existing EN text as ``fence_reference_text`` so fenced bodies are not copied
+back from RU. Passing that same EN reference to layout repair made repair a
+no-op; the next critic therefore still saw 49 EN blocks against 44 RU blocks.
+After separating those authorities, exact raw markers still parsed as 41 EN
+blocks versus 44 RU because translated surrounding list prose changes how the
+permissive internal parser groups malformed indentation.
+
 **Decision:** ``finalize_en_target`` now performs source-aware structural
 repair after all prose/link processing:
 
@@ -4492,10 +4500,18 @@ repair after all prose/link processing:
 5. For round-trip-unstable legacy sources, require the final raw fence-marker
    sequence to match exactly. Do not run AST body enforcement that would
    reintroduce synthetic closers.
+6. Keep fence-body and layout authorities separate on verify: EN remains the
+   body reference, while raw normalized RU is passed as ``layout_source_text``.
+7. ``fence_parity`` uses the same narrow unstable-source contract as
+   ``fence_body_copy``: exact ordered raw markers suppress ambiguous AST-count
+   drift. A missing or extra marker remains blocking. Production Diplodoc build
+   is still the final validity gate.
 
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
 translated cut-title preservation, MD022, and hard breaks.
+The verify regression explicitly covers EN self-reference plus RU layout repair.
+Fence-parity tests cover equal raw markers with different internal AST counts.
 ``tests/unit/test_fence_integrity.py`` covers the exact
 raw-marker contract for unstable sources. The exact #50741 files pass fence
 parity/body validation; external markdownlint reports no ``MD009``, ``MD022``,
