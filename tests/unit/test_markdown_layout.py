@@ -154,11 +154,16 @@ def test_repair_preserves_intentional_nonblank_hard_break():
     assert repair_generated_markdown_layout(text, text) == text
 
 
-def test_repair_does_not_reindent_stable_fences():
+def test_repair_removes_four_space_trailing_whitespace():
+    target = "Text.    \nNext.\n"
+    assert repair_generated_markdown_layout(target, target) == "Text.\nNext.\n"
+
+
+def test_repair_restores_source_fence_indentation_when_markers_match():
     source = "    ```python\n    source()\n    ```\n"
     target = "  ```python\n  translated()\n  ```\n"
     fixed = repair_generated_markdown_layout(source, target)
-    assert fixed == target
+    assert fixed == "    ```python\n  translated()\n    ```\n"
 
 
 def test_repair_syncs_equal_yfm_directive_sequence_indentation():
@@ -166,13 +171,24 @@ def test_repair_syncs_equal_yfm_directive_sequence_indentation():
         "    {% list tabs group=tool %}\n"
         '    {% cut "Source title" %}\n'
         "    {% endcut %}\n"
+        "    {% if oss == true %}\n"
+        "    {% endif %}\n"
         "    {% endlist %}\n"
     )
     target = (
         "  {% list tabs group=tool %}\n"
         '  {% cut "Translated title" %}\n'
         "{% endcut %}\n"
+        "  {% if oss == true %}\n"
+        "{% endif %}\n"
         "{% endlist %}\n"
     )
     fixed = repair_generated_markdown_layout(source, target)
     assert fixed == target.replace("  {%", "    {%").replace("\n{%", "\n    {%")
+
+
+def test_repair_restores_indentation_of_unchanged_technical_lines():
+    source = "Intro RU.\n\n    code()\n        nested()\n"
+    target = "Translated intro.\n\n  code()\n  nested()\n"
+    fixed = repair_generated_markdown_layout(source, target)
+    assert "    code()\n        nested()" in fixed

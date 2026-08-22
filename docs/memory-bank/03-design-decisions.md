@@ -4530,10 +4530,23 @@ repair after all prose/link processing:
 10. Pair-level postprocessing also ends with
     ``repair_generated_markdown_layout(normalized RU, target)`` immediately
     after ``repair_en_structure_from_ru`` and before refreshed QA.
+11. The first green critic report still failed production Diplodoc. Raw marker
+    parity was insufficient: ``ttl.md`` lost ``if/endif`` indentation,
+    ``vector-search.md`` lost indentation on unchanged code lines, and
+    ``debug-logs.md`` retained invalid four-space line endings. The final pass
+    now synchronizes ``if/endif``, restores indentation only for unchanged lines
+    selected by sequence matching, and permits only zero or exactly two trailing
+    spaces.
+12. Equal marker sequences also restore source fence indentation. The earlier
+    implementation restored marker indentation only while deleting extras;
+    equal-count files such as ``ttl.md`` therefore kept renderer indentation
+    and still changed Diplodoc nesting.
 
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
 translated cut-title preservation, MD022, and hard breaks.
+It also covers ``if/endif``, unchanged technical-line indentation, and MD009
+four-space endings, plus equal-sequence fence indentation.
 The verify regression explicitly covers EN self-reference plus RU layout repair.
 Fence-parity tests cover equal raw markers with different internal AST counts.
 ``test_verify_realign_cap.py`` asserts repair runs before ``gate_round_trip``.

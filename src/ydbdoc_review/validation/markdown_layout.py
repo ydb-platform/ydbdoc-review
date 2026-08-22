@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from difflib import SequenceMatcher
 
 _FENCE_LINE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 # Glossary-style bold links: ``** [text](url)**`` → ``**[text](url)**`` (MD037).
@@ -11,7 +12,7 @@ _BOLD_LINK_OPEN = re.compile(r"\*\* \[")
 # LLM sometimes emits ``! [alt](src)`` instead of ``![alt](src)``.
 _IMAGE_BANG_SPACE = re.compile(r"!(\s+)\[")
 _YFM_CONTAINER_LINE = re.compile(
-    r"^(\s*)(\{%\s*(?:list\b[^%]*|endlist|cut\b[^%]*|endcut)\s*%\})\s*$"
+    r"^(\s*)(\{%\s*(?:list\b[^%]*|endlist|cut\b[^%]*|endcut|if\b[^%]*|endif)\s*%\})\s*$"
 )
 _HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 
@@ -102,6 +103,10 @@ def _drop_renderer_inserted_fence_markers(source_lines: list[str], target_lines:
     ]
     src_tokens = [token for _, _, token in src]
     tgt_tokens = [token for _, _, token in tgt]
+    if tgt_tokens == src_tokens:
+        for (_, indent, _), (target_i, _, target_token) in zip(src, tgt, strict=True):
+            target_lines[target_i] = indent + target_token
+        return
     if len(tgt_tokens) <= len(src_tokens):
         return
     source_i = 0
@@ -123,6 +128,30 @@ def _drop_renderer_inserted_fence_markers(source_lines: list[str], target_lines:
             target_lines[target_i] = indent + token
 
 
+def _sync_unchanged_line_indentation(source_lines: list[str], target_lines: list[str]) -> None:
+    """Restore RU indentation for unchanged technical lines."""
+    source = [(i, line.strip()) for i, line in enumerate(source_lines) if line.strip()]
+    target = [(i, line.strip()) for i, line in enumerate(target_lines) if line.strip()]
+    matcher = SequenceMatcher(
+        None,
+        [text for _, text in source],
+        [text for _, text in target],
+        autojunk=False,
+    )
+    for source_start, target_start, size in matcher.get_matching_blocks():
+        for offset in range(size):
+            source_i, _ = source[source_start + offset]
+            target_i, _ = target[target_start + offset]
+            if _FENCE_LINE.match(target_lines[target_i]) or _YFM_CONTAINER_LINE.match(
+                target_lines[target_i]
+            ):
+                continue
+            source_indent = source_lines[source_i][
+                : len(source_lines[source_i]) - len(source_lines[source_i].lstrip())
+            ]
+            target_lines[target_i] = source_indent + target_lines[target_i].lstrip()
+
+
 def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
     """Make generated EN preserve legacy YFM structure and lint-safe spacing."""
     had_final_newline = target_text.endswith("\n")
@@ -136,13 +165,21 @@ def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
         _YFM_CONTAINER_LINE,
         token_key=lambda token: token.split(maxsplit=2)[1],
     )
+    _sync_unchanged_line_indentation(source_lines, target_lines)
 
     # The fallback list renderer can emit ``- `` placeholders for structural
     # tab labels that segmentation intentionally excludes. They are empty list
     # items, invalid under MD009, and have no source content (#50741).
     target_lines = [line for line in target_lines if line.strip() not in {"-", "*", "+"}]
-    # MD009: renderer prefixes blank lines inside lists with one/four spaces.
-    target_lines = ["" if not line.strip() else line for line in target_lines]
+    # MD009: keep only intentional two-space Markdown hard breaks.
+    target_lines = [
+        ""
+        if not line.strip()
+        else line
+        if line.endswith("  ") and not line.endswith("   ")
+        else line.rstrip()
+        for line in target_lines
+    ]
 
     # MD022: ensure a heading is separated from the following block.
     out: list[str] = []

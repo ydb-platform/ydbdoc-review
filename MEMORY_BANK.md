@@ -26,7 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-08-22 | **§6.198** — supersede §6.197: RU raw layout repair runs after both file-harness and pair-level AST structural repair, before refreshed QA/commit; exact markers govern unstable QA (#37673 / #50741) |
+| 2026-08-22 | **§6.198** — final pair-level repair restores matching fence indentation, YFM (`if` included), unchanged technical-line indentation, and MD009-safe whitespace (#37673 / #50741) |
 | 2026-08-21 | **§6.197** — fence parity/body validation uses canonical parse→render source when malformed legacy RU changes its block count; enables verify-only recovery of #50741 |
 | 2026-08-21 | **§6.196** — project Codex hook blocks staged commits unless both the Memory Bank index and a detailed Memory Bank note are staged |
 | 2026-08-21 | **§6.195** — reject unsafe low-magnitude splices on technical tab/segment drift; ignore fallback YFM controls and exact SDK labels; exclude stable anchors and identical English source from false critic blockers (#37673 / #50729) |
