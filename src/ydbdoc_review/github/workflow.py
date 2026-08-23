@@ -37,6 +37,7 @@ from ydbdoc_review.github.pr import (
     is_translation_pr_branch,
     is_verify_fixup_branch,
     source_pr_number_from_branch,
+    source_pr_scope_changes,
     translate_ru_content_ref,
     translation_branch_base,
     translation_pr_base,
@@ -68,7 +69,11 @@ from ydbdoc_review.pipeline.analyze import (
     PairContent,
     PairPlan,
 )
-from ydbdoc_review.pipeline.completeness import bilingual_en_mirrors, completeness_gaps
+from ydbdoc_review.pipeline.completeness import (
+    bilingual_en_mirrors,
+    completeness_gaps,
+    translation_pr_scope_gaps,
+)
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
@@ -390,7 +395,8 @@ def run_doc_translate(
             )
             ru_ref = None
 
-    changes = merge_pr_file_changes(
+    changes = source_pr_scope_changes(
+        ctx,
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
@@ -851,6 +857,8 @@ def run_doc_verify(
         source_changes=source_changes,
     )
     scope_plan = None
+    expected_scope_pairs: list[DocPair] = []
+    source_bilingual_skip: frozenset[str] = frozenset()
     if source_changes:
         read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
         scope_plan = plan_translation_scope(
@@ -876,6 +884,16 @@ def run_doc_verify(
             navigation_pairs_from_plan(scope_plan, docs_root=cfg.paths.docs_root),
             nav_pairs,
         )
+        source_bilingual_skip = frozenset(
+            bilingual_en_mirrors(
+                source_changes, docs_root=cfg.paths.docs_root
+            )
+        )
+        expected_scope_pairs = doc_pairs_from_plan(
+            scope_plan,
+            docs_root=cfg.paths.docs_root,
+            skip_en_paths=source_bilingual_skip,
+        )
     job = DocJobResult(
         mode="doc_verify",
         pr_number=pr_number,
@@ -893,14 +911,21 @@ def run_doc_verify(
             pr_number,
         )
 
+    translation_scope_missing: list[str] = []
     if translation_pr:
+        translation_scope_missing = translation_pr_scope_gaps(
+            expected_scope_pairs,
+            nav_pairs,
+            changes,
+            already_satisfied=source_bilingual_skip,
+        )
         pairs, nav_pairs = filter_translation_pr_verify_scope(
             pairs,
             nav_pairs,
             changes,
             docs_root=cfg.paths.docs_root,
         )
-        if not pairs and not nav_pairs:
+        if not pairs and not nav_pairs and not translation_scope_missing:
             logger.info(
                 "No scoped doc/navigation pairs for translation PR verify on #%s",
                 pr_number,
@@ -1046,6 +1071,17 @@ def run_doc_verify(
             dict.fromkeys([*inherited_completeness_gaps, *pr_result.completeness_gaps])
         )
         pr_result.completeness_gaps = merged_gaps
+    if translation_scope_missing:
+        logger.error(
+            "Translation PR #%s is missing source-scope EN paths: %s",
+            pr_number,
+            translation_scope_missing,
+        )
+        pr_result.completeness_gaps = list(
+            dict.fromkeys(
+                [*pr_result.completeness_gaps, *translation_scope_missing]
+            )
+        )
 
     job.pr_result = pr_result
 

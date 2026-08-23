@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
-from ydbdoc_review.pipeline.pairs import ChangeKind, counterpart, is_docs_markdown
+from ydbdoc_review.pipeline.pairs import (
+    ChangeKind,
+    DocPair,
+    NavigationPair,
+    counterpart,
+    is_docs_markdown,
+)
 from ydbdoc_review.pipeline.types import PRTranslationResult
 
 
@@ -119,6 +125,26 @@ def completeness_gaps(
     }
     committed = committed_en_paths(result)
     return sorted(expected - committed)
+
+
+def translation_pr_scope_gaps(
+    expected_pairs: list[DocPair],
+    expected_nav_pairs: list[NavigationPair],
+    translation_changes: list[tuple[str, ChangeKind]],
+    *,
+    already_satisfied: frozenset[str] | None = None,
+) -> list[str]:
+    """Expected source-scope EN paths absent from a translation PR diff.
+
+    This is deliberately independent of the critic result: a critic cannot
+    approve a file it was never given.  ``supplement_only`` navigation files are
+    context for merging and are not required in the resulting commit.
+    """
+    changed = {_norm(path) for path, _ in translation_changes}
+    expected = {pair.en_path for pair in expected_pairs}
+    expected.update(nav.en_path for nav in expected_nav_pairs if not nav.supplement_only)
+    expected -= already_satisfied or frozenset()
+    return sorted(expected - changed)
 
 
 def gap_label(en_path: str, *, docs_root: str = "ydb/docs") -> str:

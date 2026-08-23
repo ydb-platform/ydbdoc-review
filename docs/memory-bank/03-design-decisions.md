@@ -4775,5 +4775,48 @@ translation PR fails a build because of an unrelated inherited file, fix that
 repository defect at its source or on the affected branch, but do not call it a
 critic failure and do not fold it into the critic verdict.
 
+The clean #40385 rerun created #50838 at ``f86ef65d2edd`` and immediately
+reported green, but independent completeness review proved the verdict false.
+The translation PR changes only ``en/core/reference/configuration/tls.md``.
+Current main RU ``monitoring_config.md`` contains the full TLS/mTLS section,
+including ``monitoring_certificate``, ``monitoring_certificate_file``,
+``monitoring_private_key_file``, ``monitoring_ca_file``,
+``client_certificate_required``, and two YAML examples. Current main EN still
+ends after the authentication table and contains none of that material. The
+source PR also restructures ``security/index.md`` under the authentication and
+authorization parent, while current EN retains device authentication as a
+separate top-level item. This is a translation-scope false green, independent
+of build status and distinct from §6.208 href ownership. Do not merge #50838;
+the merged-source rerun must include every still-divergent RU/EN pair from the
+source PR rather than only files selected by the narrow current diff.
+
+
+### §6.209 A green critic requires source-scope completeness
+
+The #40385 → #50838 false green had two cooperating causes. For a merged source
+PR, ``doc_translate`` unioned GitHub's authoritative PR file list with a local
+diff between the historical merge checkout and the current ``origin/main``.
+That second diff is repository drift, not source-PR scope. Its unrelated EN
+paths could enter ``bilingual_en_mirrors`` and suppress their RU counterparts.
+Merged PR translation now uses only the GitHub API file list for scope. Open PRs
+retain the Git plus API union because their checkout can be newer than the API.
+
+The critic had a separate trust-boundary bug. ``doc_verify`` narrowed its work
+to EN files present in the translation PR diff, but never compared that narrow
+set with the complete scope derived from the original source PR. A missing file
+was therefore invisible rather than red. Translation-PR verification now
+computes the expected Markdown and non-supplemental navigation EN paths from the
+source scope before narrowing critic work. Every expected path absent from the
+translation diff becomes a blocking ``completeness_gap``. Bilingual source EN
+files remain intentionally satisfied and supplemental ancestor tocs remain
+context-only. Consequently “можно мержить” means both: every committed file
+passed bilingual QA, and no expected source-scope file was omitted.
+
+Regression tests encode the exact #40385 shape: historical drift contains EN
+``monitoring_config.md`` and ``security/toc_p.yaml``, while the official source
+PR list contains their RU mirrors. The merged-scope selector rejects the drift,
+and a translation diff containing only ``tls.md`` is explicitly red for the two
+missing EN paths.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

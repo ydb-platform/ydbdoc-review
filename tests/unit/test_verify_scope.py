@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ydbdoc_review.pipeline.completeness import translation_pr_scope_gaps
 from ydbdoc_review.pipeline.pairs import (
     DocPair,
     NavigationPair,
@@ -45,3 +46,60 @@ def test_filter_translation_pr_verify_scope_keeps_en_diff_only():
     scoped_pairs, scoped_nav = filter_translation_pr_verify_scope(pairs, nav_pairs, changes)
     assert [p.en_path for p in scoped_pairs] == ["ydb/docs/en/a.md"]
     assert [n.en_path for n in scoped_nav] == ["ydb/docs/en/x/toc_i.yaml"]
+
+
+def test_translation_pr_scope_gaps_block_false_green_for_missing_source_files():
+    """Regression for #40385 -> #50838: critic saw one file and missed two."""
+    expected_pairs = [
+        DocPair(
+            ru_path="ydb/docs/ru/core/reference/configuration/monitoring_config.md",
+            en_path="ydb/docs/en/core/reference/configuration/monitoring_config.md",
+            ru_changed=True,
+        ),
+        DocPair(
+            ru_path="ydb/docs/ru/core/reference/configuration/tls.md",
+            en_path="ydb/docs/en/core/reference/configuration/tls.md",
+            ru_changed=True,
+        ),
+    ]
+    expected_nav = [
+        NavigationPair(
+            ru_path="ydb/docs/ru/core/security/toc_p.yaml",
+            en_path="ydb/docs/en/core/security/toc_p.yaml",
+            ru_changed=True,
+        ),
+        NavigationPair(
+            ru_path="ydb/docs/ru/core/toc_p.yaml",
+            en_path="ydb/docs/en/core/toc_p.yaml",
+            ru_changed=True,
+            supplement_only=True,
+        ),
+    ]
+    translation_changes = [
+        ("ydb/docs/en/core/reference/configuration/tls.md", "modified"),
+    ]
+
+    assert translation_pr_scope_gaps(expected_pairs, expected_nav, translation_changes) == [
+        "ydb/docs/en/core/reference/configuration/monitoring_config.md",
+        "ydb/docs/en/core/security/toc_p.yaml",
+    ]
+
+
+def test_translation_pr_scope_gaps_ignore_bilingual_source_navigation():
+    expected_nav = [
+        NavigationPair(
+            ru_path="ydb/docs/ru/core/toc_p.yaml",
+            en_path="ydb/docs/en/core/toc_p.yaml",
+            ru_changed=True,
+        )
+    ]
+
+    assert (
+        translation_pr_scope_gaps(
+            [],
+            expected_nav,
+            [],
+            already_satisfied=frozenset({"ydb/docs/en/core/toc_p.yaml"}),
+        )
+        == []
+    )

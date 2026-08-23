@@ -100,6 +100,24 @@ def translate_ru_content_ref(ctx: PullRequestContext) -> str | None:
     return None
 
 
+def source_pr_scope_changes(
+    ctx: PullRequestContext,
+    git_changes: list[tuple[str, ChangeKind]],
+    api_changes: list[tuple[str, ChangeKind]],
+) -> list[tuple[str, ChangeKind]]:
+    """Return the authoritative source-PR change list for translation scope.
+
+    For an open PR the checkout diff can contain changes not yet visible through
+    the API, so both sources are merged. For a merged PR the checkout can be its
+    historical merge commit while ``merge_base_with`` points at today's main.
+    That diff contains unrelated repository drift and must not expand the PR
+    scope (or falsely mark EN mirrors as bilingual).
+    """
+    if ctx.merged:
+        return merge_pr_file_changes(api_changes)
+    return merge_pr_file_changes(git_changes, api_changes)
+
+
 def repo_https_clone_url(owner: str, repo: str) -> str:
     """HTTPS clone URL for the upstream (target) repository."""
     return f"https://github.com/{owner}/{repo}.git"
