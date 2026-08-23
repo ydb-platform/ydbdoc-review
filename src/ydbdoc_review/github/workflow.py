@@ -50,7 +50,9 @@ from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
 from ydbdoc_review.ops.lifecycle import (
     append_retention_footer,
     begin_ops_job,
+    compose_continue_feedback,
     finish_ops_job,
+    load_parent_run_context,
 )
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
@@ -373,6 +375,15 @@ def run_doc_translate(
             dry_run=dry_run,
         )
 
+    effective_continue_feedback = continue_feedback or (
+        ops_ctx.continue_feedback if ops_ctx else None
+    )
+    if ops_mode == "continue" and ops_ctx is not None:
+        effective_continue_feedback = compose_continue_feedback(
+            effective_continue_feedback,
+            load_parent_run_context(ops_ctx),
+        )
+
     ctx = pull_request_context(gh, owner, repo, pr_number)
     branch = f"{cfg.paths.translation_branch_prefix}{pr_number}"
     upstream_url = repo_https_clone_url(owner, repo)
@@ -501,9 +512,7 @@ def run_doc_translate(
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
 
-    with continue_feedback_scope(
-        continue_feedback or (ops_ctx.continue_feedback if ops_ctx else None)
-    ):
+    with continue_feedback_scope(effective_continue_feedback):
         pending_en_md = {p.en_path for p in pairs}
         pending_en_tocs = {nav.en_path for nav in nav_pairs}
 
@@ -697,6 +706,7 @@ def run_doc_translate(
             no_commit=no_commit,
             config=cfg,
             inherited_completeness_gaps=pr_result.completeness_gaps,
+            continue_feedback=effective_continue_feedback,
             skip_ops_gates=True,
         )
         job.translation_comment_url = verify_job.translation_comment_url

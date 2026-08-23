@@ -1,6 +1,11 @@
 """Lifecycle begin/finish with in-memory backends."""
 
-from ydbdoc_review.ops.lifecycle import begin_ops_job, finish_ops_job
+from ydbdoc_review.ops.lifecycle import (
+    begin_ops_job,
+    compose_continue_feedback,
+    finish_ops_job,
+    load_parent_run_context,
+)
 from ydbdoc_review.ops.runs import InMemoryRunsLedger
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 
@@ -100,3 +105,44 @@ def test_continue_store_unavailable_is_not_ttl_message():
     assert "не" in comment and "TTL" in comment
     assert "хранилищ" in comment
     assert "14 дней" not in comment
+
+
+def test_continue_loads_parent_transcript_into_prompt_context():
+    ledger = InMemoryRunsLedger()
+    store = InMemoryTranscriptStore()
+    parent, gate, _ = begin_ops_job(
+        mode="translate",
+        repo="o/r",
+        source_pr=40385,
+        env={"YDBDOC_SKIP_OPS_GATES": "1"},
+        ledger=ledger,
+        store=store,
+    )
+    assert gate.ok and parent is not None
+    parent.recorder.record(
+        role="critic",
+        messages=[{"role": "user", "content": "Check security/index.md hierarchy"}],
+        content="Device authentication must be nested under authentication.",
+        model_slug="critic",
+    )
+    parent.continue_feedback = "Keep semantic link ownership"
+    finish_ops_job(parent, status="ok", cost_rub=1.0)
+
+    child = type(parent)(
+        **{
+            **parent.__dict__,
+            "run_id": "child",
+            "mode": "continue",
+            "parent_run_id": parent.run_id,
+        }
+    )
+    context = load_parent_run_context(child)
+    prompt_feedback = compose_continue_feedback(
+        "Translate files that are still missing", context
+    )
+
+    assert "Translate files that are still missing" in prompt_feedback
+    assert "Keep semantic link ownership" in prompt_feedback
+    assert "Check security/index.md hierarchy" in prompt_feedback
+    assert "Device authentication must be nested" in prompt_feedback
+    assert "historical reference" in prompt_feedback

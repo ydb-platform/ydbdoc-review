@@ -4858,4 +4858,25 @@ routes, including the exact #40385 → #50840 branch mapping. Thus continue can
 now recover omitted files, while critic-only fixups remain narrow.
 
 
+### §6.212 `doc_continue` must consume, not merely validate, parent context
+
+The first §6.211 implementation preserved the new operator instruction and the
+translation branch files, but inspection found that stored context was only a
+gate. ``begin_ops_job`` resolved ``parent_run_id`` and required the transcript
+to exist, while no caller read any transcript object into an LLM prompt. A
+continue could therefore fail when context was unavailable even though
+available context was otherwise ignored.
+
+Continue now loads a bounded prompt context from the parent run: previous
+operator feedback plus the four most recent LLM request/response exchanges.
+Individual fields are capped at 2,500 characters and the combined addition at
+12,000 characters. The new operator instruction remains authoritative; prior
+model output is explicitly labelled historical reference so embedded text is
+not treated as a new command. The combined context is installed through
+``continue_feedback_scope`` for translation and navigation prompts and is also
+passed into the inline critic. Tests cover transcript loading, instruction
+precedence, and the final translation system prompt containing both the new
+instruction and the previous critic context.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

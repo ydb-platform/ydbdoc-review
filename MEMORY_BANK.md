@@ -74,6 +74,7 @@ stable cross-references — use them when linking between files.
 | 2026-07-28 | **§6.149** — fence QA: trailing YAML `#` + angle placeholder translation (#47164 host_configs) |
 | 2026-07-28 | **§6.148** — include_parity blocking + auto-insert missing ``{% include %}`` (#48103 career) |
 | 2026-08-23 | **§6.211** — ``doc_continue`` on translation PRs rebuilds complete source scope; verify fixups stay inline (#50840) |
+| 2026-08-23 | **§6.212** — doc_continue loads bounded parent transcript into translation and inline-critic prompts; context is consumed, not only existence-checked |
 | 2026-08-23 | **§6.210** — old merged PR differential uses merge parent as RU base; prevents zero-delta no-op omissions (#40385 / #50840) |
 | 2026-08-23 | **§6.209** — green critic requires complete source scope; merged PRs use API-only changes and verify blocks omitted EN files (#40385 / #50838) |
 | 2026-08-23 | **§6.208** — preserve semantic href ownership when translated list items reorder; #50797 critic false-negative regression |
