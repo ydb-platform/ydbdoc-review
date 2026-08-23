@@ -10,7 +10,12 @@ import pytest
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
-from ydbdoc_review.github.workflow import DocJobResult, run_doc_translate, run_doc_verify
+from ydbdoc_review.github.workflow import (
+    DocJobResult,
+    run_doc_continue,
+    run_doc_translate,
+    run_doc_verify,
+)
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
@@ -75,6 +80,80 @@ def _fake_pr_result() -> PRTranslationResult:
     return PRTranslationResult(
         pair_results=[PairRunResult(plan=plan, target_text="Hello.\n", file_result=fr)]
     )
+
+
+def test_run_doc_continue_retranslates_translation_pr_scope(git_repo: str):
+    pull = {
+        "title": "Auto-translate docs from PR #40385",
+        "head": {
+            "ref": "ydbdoc-review/pr-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    translated = DocJobResult(mode="doc_continue", pr_number=40385)
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with patch(
+            "ydbdoc_review.github.workflow.run_doc_translate",
+            return_value=translated,
+        ) as translate:
+            with patch("ydbdoc_review.github.workflow.run_doc_verify") as verify:
+                result = run_doc_continue(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=50840,
+                    merge_base_with="HEAD",
+                    dry_run=True,
+                    config=load_config(env=_env()),
+                    instruction="Переводи те файлы, которые не переведены",
+                )
+
+    assert result is translated
+    translate.assert_called_once()
+    assert translate.call_args.kwargs["pr_number"] == 40385
+    assert translate.call_args.kwargs["continue_feedback"] == (
+        "Переводи те файлы, которые не переведены"
+    )
+    verify.assert_not_called()
+
+
+def test_run_doc_continue_verifies_non_translation_pr(git_repo: str):
+    pull = {
+        "title": "Critic fixup",
+        "head": {
+            "ref": "ydbdoc-review/verify-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    verified = DocJobResult(mode="doc_continue", pr_number=50840)
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with patch("ydbdoc_review.github.workflow.run_doc_translate") as translate:
+            with patch(
+                "ydbdoc_review.github.workflow.run_doc_verify",
+                return_value=verified,
+            ) as verify:
+                result = run_doc_continue(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=50840,
+                    merge_base_with="HEAD",
+                    dry_run=True,
+                    config=load_config(env=_env()),
+                    instruction="Исправь замечания критика",
+                )
+
+    assert result is verified
+    verify.assert_called_once()
+    assert verify.call_args.kwargs["pr_number"] == 50840
+    assert verify.call_args.kwargs["continue_feedback"] == "Исправь замечания критика"
+    translate.assert_not_called()
 
 
 def test_run_doc_translate_dry_run(git_repo: str):
@@ -1001,4 +1080,3 @@ def test_run_doc_verify_bilingual_source_pr_ru_only_completeness_gap(git_repo: s
 
     assert result.source_pr_number is None
     assert result.pr_result.completeness_gaps == ["ydb/docs/en/a.md"]
-

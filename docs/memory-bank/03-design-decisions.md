@@ -4837,4 +4837,25 @@ two-commit repository and proves that merged RU content is paired with the
 parent commit's RU base, so additions cannot disappear as zero-delta no-ops.
 
 
+### §6.211 `doc_continue` on a translation PR rebuilds source scope
+
+PR #50840 exposed that ``/ydbdoc continue …`` did not mean what its operator
+contract promised. The handler always called ``run_doc_verify`` on the current
+translation PR. Verification can repair files already present in that PR's
+diff, but it cannot discover or create a source-scope EN mirror omitted by the
+original translation. Therefore the instruction “Переводи те файлы, которые
+не переведены” reached the model only for the two existing files and could
+never add the missing three.
+
+``run_doc_continue`` now classifies the target by its head branch. For
+``ydbdoc-review/pr-N`` it extracts source PR ``N`` and re-enters the complete
+``run_doc_translate`` workflow with the operator instruction as continue
+feedback. That workflow replans the authoritative source scope, regenerates the
+translation branch, force-pushes it, and runs the usual inline critic. For
+``ydbdoc-review/verify-N`` and other non-translation targets, continue retains
+the existing inline ``run_doc_verify`` behavior. Regression tests assert both
+routes, including the exact #40385 → #50840 branch mapping. Thus continue can
+now recover omitted files, while critic-only fixups remain narrow.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

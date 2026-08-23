@@ -387,6 +387,10 @@ def run_doc_translate(
                 pr_number,
                 ru_ref[:12],
             )
+            # A merged PR's original RU delta is merge_commit^..merge_commit.
+            # Comparing it with current main makes old source changes look like
+            # no-ops and silently preserves stale EN (§6.210 / #40385).
+            ru_base_ref = f"{ru_ref}^"
         else:
             logger.warning(
                 "Merged source PR #%s: merge commit %s not fetchable; "
@@ -395,11 +399,6 @@ def run_doc_translate(
                 ru_ref[:12],
             )
             ru_ref = None
-        else:
-            # A merged PR's original RU delta is merge_commit^..merge_commit.
-            # Comparing it with current main makes old source changes look like
-            # no-ops and silently preserves stale EN (§6.210 / #40385).
-            ru_base_ref = f"{ru_ref}^"
 
     changes = source_pr_scope_changes(
         ctx,
@@ -1272,6 +1271,7 @@ def run_doc_continue(
     api_token, _push = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
+    ctx = pull_request_context(gh, owner, repo, pr_number)
 
     feedback = (instruction or "").strip()
     if not feedback:
@@ -1296,17 +1296,38 @@ def run_doc_continue(
             )
         feedback = found
 
-    # Re-run verify with operator feedback (critic + heuristics + optional repair).
-    job = run_doc_verify(
-        repo_path=repo_path,
-        github_repo=github_repo,
-        pr_number=pr_number,
-        merge_base_with=merge_base_with,
-        dry_run=dry_run,
-        no_commit=no_commit,
-        config=cfg,
-        continue_feedback=feedback,
-        ops_mode="continue",
+    source_pr = source_pr_number_from_branch(
+        ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
+    if source_pr is not None:
+        # A translation PR may be incomplete. Re-running verify can only edit
+        # files already present in its diff, so it can never create an omitted
+        # source-scope mirror (#50840). Continue must re-run translation from
+        # the source PR, then perform its normal inline verify.
+        job = run_doc_translate(
+            repo_path=repo_path,
+            github_repo=github_repo,
+            pr_number=source_pr,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+            config=cfg,
+            continue_feedback=feedback,
+            ops_mode="continue",
+        )
+    else:
+        # Verify-fixup PRs have all source-scope files already; critic feedback
+        # is applied inline without rebuilding a translation branch.
+        job = run_doc_verify(
+            repo_path=repo_path,
+            github_repo=github_repo,
+            pr_number=pr_number,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+            config=cfg,
+            continue_feedback=feedback,
+            ops_mode="continue",
+        )
     job.mode = "doc_continue"
     return job
