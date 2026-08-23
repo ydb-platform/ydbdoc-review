@@ -4930,4 +4930,21 @@ RU link correction on the translation branch followed by a documentation-build
 rerun; future merge decisions consume critic and build as independent signals.
 
 
+### §6.216 «Проверка перевода» is a three-signal merge gate
+
+The project skill ``proverka-perevoda`` formalizes the translation-review
+procedure established on #50788. A merge recommendation requires three
+independent signals on the current translation-PR head: a human-style semantic
+comparison against the real source scope, a green ``doc_verify`` report, and
+green required CI. The skill also checks GitHub mergeability.
+
+Source scope is semantic rather than a raw file-count equality: an already
+bilingual source PR can contain dozens of RU/EN files while the follow-up needs
+only a navigation correction. Conversely, a missing RU-only counterpart is a
+blocker. Critic and CI remain separate; a green critic does not excuse a failed
+build, and a build failure does not retroactively make translation QA red.
+Every status must belong to the current head SHA, so a new commit invalidates
+older green evidence.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
