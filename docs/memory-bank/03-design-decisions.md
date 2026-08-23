@@ -4900,4 +4900,18 @@ returns the old file. Regression tests reproduce the exact #40385 inline-code
 change and prove both non-zero change detection and the anchorless fallback.
 
 
+### §6.214 Href parity compares URL semantics, not percent-encoding spelling
+
+The complete five-file #40385 translation was created as #50854, but its
+critic stayed red because Markdown rendering percent-encoded a Cyrillic anchor
+fragment in ``authentication.md``. RU contained
+``#информация-о-пользователях-users`` and EN contained its equivalent
+``#%D0%B8...`` URL representation. Browsers resolve both to the same fragment.
+
+``check_href_parity`` now URL-decodes internal hrefs before multiset comparison.
+Real path or anchor changes remain blocking, while raw Unicode and percent-
+encoded spellings compare equal. A regression test covers the exact #50854
+fragment.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

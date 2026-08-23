@@ -11,6 +11,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
 
@@ -74,8 +75,10 @@ def check_href_parity(
     if target_lang.lower() not in {"en", "english"}:
         return []
 
-    src = Counter(collect_internal_hrefs(source_text))
-    tgt = Counter(collect_internal_hrefs(target_text))
+    # Markdown renderers may percent-encode Unicode fragments. URL decoding is
+    # semantics-preserving and avoids false mismatches such as #50854.
+    src = Counter(unquote(href) for href in collect_internal_hrefs(source_text))
+    tgt = Counter(unquote(href) for href in collect_internal_hrefs(target_text))
     if ignore_basenames:
         def _kept(counter: Counter[str]) -> Counter[str]:
             out: Counter[str] = Counter()

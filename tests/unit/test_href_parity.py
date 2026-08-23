@@ -40,6 +40,16 @@ def test_href_parity_flags_extra_en_link():
     assert "bar.md#b" in msgs[0]
 
 
+def test_href_parity_accepts_percent_encoded_unicode_fragment():
+    ru = "[users](../dev/system-views.md#информация-о-пользователях-users)\n"
+    en = (
+        "[users](../dev/system-views.md#%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D1%8F-"
+        "%D0%BE-%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8F%D1%85-users)\n"
+    )
+
+    assert check_href_parity(ru, en) == []
+
+
 def test_anchor_parity_blocks_renamed_heading_id():
     ru = "## LDAP {#ldap}\n\n### TLS {#ldap-tls}\n"
     en = "## LDAP {#ldap-auth-provider}\n\n### TLS {#ldap-tls}\n"
