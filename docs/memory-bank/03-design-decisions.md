@@ -4947,4 +4947,22 @@ Every status must belong to the current head SHA, so a new commit invalidates
 older green evidence.
 
 
+### §6.217 Formatting-only RU diffs cannot trigger EN regeneration
+
+Independent review of #50789 found that source PR #49933 only removed trailing
+spaces from two RU include files, while the generated EN diff removed the
+useful ``create-secret.md`` links. The decision order was wrong:
+``analyze_file_state`` evaluated incomplete/stale EN heuristics before asking
+whether the raw RU edit changed any parsed Markdown segment. A short include
+could therefore fall into full translation even though its semantic RU delta
+was empty.
+
+When base and current RU bytes differ but ``analyze_ru_diff`` reports no added,
+modified, or removed segments, the strategy now returns ``skip`` before all
+full-regeneration heuristics. Exact no-diff calls retain the historical
+stale/incomplete behavior used by explicit refresh flows. Tests reproduce the
+two #49933 properties: trailing-space removal is a semantic no-op, and dropping
+the protected ``create-secret.md`` link is still rejected by href parity.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

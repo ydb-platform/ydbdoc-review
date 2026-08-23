@@ -379,6 +379,24 @@ class DifferentialTranslationAnalyzer:
                 config={"is_new_file": True},
             )
 
+        # A formatting-only RU change must never trigger EN regeneration.  Do
+        # this before incomplete/stale heuristics: those describe existing EN,
+        # but cannot create translation work when the source has no semantic
+        # segment delta (#49933 / #50789).
+        analysis: RuDiffAnalysis | None = None
+        if ru_base_text is not None and ru_base_text.strip():
+            analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
+            if ru_base_text != ru_pr_text and not (
+                analysis.added_segment_ids
+                or analysis.modified_segment_ids
+                or analysis.removed_blocks
+            ):
+                return TranslationStrategy(
+                    mode="skip",
+                    reason="RU diff has no semantic segment changes",
+                    config={"semantic_noop": True, "change_magnitude": 0.0},
+                )
+
         if is_en_file_incomplete(
             en_current_text,
             ru_pr_text,
@@ -414,7 +432,7 @@ class DifferentialTranslationAnalyzer:
                 config={"missing_ru_base": True},
             )
 
-        analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
+        analysis = analysis or analyze_ru_diff(ru_base_text, ru_pr_text)
         if is_change_magnitude_high(analysis, cfg.change_magnitude_threshold):
             return TranslationStrategy(
                 mode="full",
