@@ -158,6 +158,27 @@ def test_restore_md_link_hrefs_fixes_wrong_path_by_position():
     assert check_href_parity(ru, fixed) == []
 
 
+def test_restore_md_link_hrefs_preserves_semantic_links_after_reorder():
+    """#50797: equal href multisets may move with their translated list items."""
+    from ydbdoc_review.validation.href_parity import restore_md_link_hrefs
+
+    ru = (
+        "- [Authentication](authentication.md) and "
+        "[authorization](authorization.md).\n"
+        "  - [Device authentication](authentication.md#device-auth) uses a "
+        "[client certificate](../concepts/glossary.md#client-certificate).\n"
+    )
+    en = (
+        "- [Device authentication](authentication.md#device-auth) uses a "
+        "[client certificate](../concepts/glossary.md#client-certificate).\n"
+        "- [Authentication](authentication.md) and "
+        "[authorization](authorization.md).\n"
+    )
+
+    assert restore_md_link_hrefs(en, ru) == en
+    assert check_href_parity(ru, en) == []
+
+
 def test_restore_md_link_hrefs_wraps_see_the_section_plain_text():
     """#49451: glossary dropped architecture/metadata-services.md links."""
     from ydbdoc_review.validation.href_parity import restore_md_link_hrefs

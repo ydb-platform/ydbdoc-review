@@ -320,7 +320,14 @@ def restore_md_link_hrefs(translated: str, source_ru: str) -> str:
     out = translated
     en_links = _iter_md_links(out)
 
-    if len(en_links) == len(ru_links) and en_links:
+    ru_href_counts = Counter(href for _label, href, _s, _e in ru_links)
+    en_href_counts = Counter(href for _label, href, _s, _e in en_links)
+
+    if (
+        len(en_links) == len(ru_links)
+        and en_links
+        and en_href_counts != ru_href_counts
+    ):
         # Rebuild from the end so offsets stay valid.
         pieces: list[str] = []
         cursor = len(out)
@@ -337,7 +344,7 @@ def restore_md_link_hrefs(translated: str, source_ru: str) -> str:
     present = Counter(
         href for _label, href, _s, _e in _iter_md_links(out)
     )
-    needed = Counter(href for _label, href, _s, _e in ru_links)
+    needed = ru_href_counts
     missing_hrefs: list[str] = []
     for href, n in needed.items():
         for _ in range(max(0, n - present.get(href, 0))):

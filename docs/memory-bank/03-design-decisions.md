@@ -4723,5 +4723,57 @@ before stripping fenced blocks. The focused suite passes 105 tests. The new
 regression uses an info-bearing RU closer and proves a long identical code body
 cannot create a false short-translation warning.
 
+Production confirmation on #50741 is fully green. Verify run ``32641577486``
+published a 🟢 “можно мержить” report with no open findings. The bot-produced
+head required manual approval for the pull-request docs workflow; after
+approval, ``Build documentation`` run ``32641358187`` passed. PR-check run
+``32641921564`` also passed: both ``release-asan`` and ``relwithdebinfo`` were
+green, as was the integrated status job. Final translation head is
+``12293d94a76e``. The benign relwithdebinfo checkout-cleanup annotations did not
+change the successful job or workflow conclusions.
+
+The same dual-build compatibility defect recurred on translation PRs #50788,
+#50789, and #50797. Their critics were green on the current heads, while every
+head-only ``Build documentation`` run failed at
+``ru/security/authentication.md:267`` because the legacy
+``devops/deployment-options/manual/node-authorization.md`` target is not in the
+TOC. Apply the compatibility path from #50741,
+``devops/configuration-management/configuration-v1/node-authorization.md``,
+before rerunning verification. Their earlier full PR-check failures are a
+separate shared CI incident: ``ya make`` raised ``IndexError`` before producing
+``ydb/apps/ydbd/ydbd``, and the reporting step then failed while processing the
+missing binary. That failure occurred identically across unrelated translation
+heads and is not evidence of a translation defect.
+
+### §6.208 Link parity must not reassign valid hrefs after prose reorder
+
+Independent semantic review of #50797 found a critic false negative in
+``en/core/security/index.md``. The translated device-authentication bullet was
+moved above its parent authentication-and-authorization bullet, while link
+placeholders were restored by position instead of meaning. The resulting
+English prose remained fluent, but six links pointed to unrelated targets and
+the nested client-authentication heading stayed generic. A green critic is not
+sufficient when source list items move: compare hierarchy and link intent
+directly, then restore the source order and semantic destinations.
+
+The root cause was ``restore_md_link_hrefs``: whenever RU and EN contained the
+same number of links, it reassigned RU hrefs to EN labels by document position.
+That is only safe while list items remain in the same order. If the LLM moves a
+complete item with its valid links, positional restoration silently transfers
+those hrefs to unrelated English labels while the overall href multiset still
+looks perfect. Restoration now leaves EN untouched when RU and EN already have
+equal href multisets. Positional repair remains available when the multisets
+differ, preserving the #49451 wrong-path recovery. The regression reproduces
+the authentication/device-authentication reorder from #50797 and asserts both
+semantic link ownership and href parity.
+
+Keep translation QA and repository build health as separate contracts.
+``doc_verify`` reports only bilingual quality and completeness; it must not
+inspect, absorb, or downgrade the Diplodoc/PR-check result. Build checks remain
+independent merge signals for the human merging the PR. When a green
+translation PR fails a build because of an unrelated inherited file, fix that
+repository defect at its source or on the affected branch, but do not call it a
+critic failure and do not fold it into the critic verdict.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
