@@ -4879,4 +4879,25 @@ precedence, and the final translation system prompt containing both the new
 instruction and the previous critic context.
 
 
+### §6.213 Differential keys include inline atoms; unsafe tiny patches reconstruct
+
+The #40385 → #50852 run translated four of five files and correctly stayed red
+for ``client_certificate_authorization.md``. The source PR's entire change in
+that file was inline code inside a table cell:
+``client_certificate_required=true`` became
+``client_certificate_required: true``. Segmentation replaced both values with
+the same ``⟦C…⟧`` marker, while ``_segment_key`` compared only segment kind and
+placeholder-bearing text. The differential analyzer therefore classified the
+changed table cell as unchanged and produced no EN target.
+
+Differential identity now includes deterministic descriptions of every
+protected inline atom, covering code, links, variables, images, and inline
+HTML while ignoring irrelevant placeholder numbering. A second guard handles
+the low-magnitude splice path: if any changed segment has no preceding explicit
+``{#anchor}``, the pipeline performs its normal full reconstruction instead of
+entering a splice mode that cannot locate the EN replacement and silently
+returns the old file. Regression tests reproduce the exact #40385 inline-code
+change and prove both non-zero change detection and the anchorless fallback.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

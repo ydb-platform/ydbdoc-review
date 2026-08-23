@@ -35,6 +35,7 @@ from ydbdoc_review.translation.critic_retranslate import (
 )
 from ydbdoc_review.translation.differential import (
     DifferentialTranslationConfig,
+    low_magnitude_patch_has_anchors,
     patch_en_with_added_translations,
     prepare_differential_seed,
     slim_pending_for_low_magnitude_patch,
@@ -341,13 +342,24 @@ class TranslateStep:
                     ru_pr_text=state.source_text,
                 )
                 if slim is not None:
-                    pending, patch_analysis = slim
-                    logger.info(
-                        "Low-magnitude patch: LLM %d added/modified segment(s) "
-                        "(magnitude=%.2f); splice into existing EN (no reconstruct)",
-                        len(pending),
-                        patch_analysis.change_magnitude,
+                    slim_pending, slim_analysis = slim
+                    change_ids = slim_analysis.added_segment_ids | slim_analysis.modified_segment_ids
+                    patch_has_anchors = low_magnitude_patch_has_anchors(
+                        state.segments, slim_analysis
                     )
+                    if patch_has_anchors:
+                        pending, patch_analysis = slim_pending, slim_analysis
+                        logger.info(
+                            "Low-magnitude patch: LLM %d added/modified segment(s) "
+                            "(magnitude=%.2f); splice into existing EN (no reconstruct)",
+                            len(pending),
+                            patch_analysis.change_magnitude,
+                        )
+                    elif change_ids:
+                        logger.info(
+                            "Skip low-magnitude EN patch: changed segment has no "
+                            "explicit heading anchor — full reconstruct (§6.213)"
+                        )
         state.differential_meta = {
             "mode": strategy.mode,
             "reason": strategy.reason,

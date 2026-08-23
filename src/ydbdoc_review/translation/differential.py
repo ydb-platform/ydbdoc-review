@@ -26,6 +26,7 @@ from ydbdoc_review.pipeline.qa import (
     partial_seed_is_trustworthy,
 )
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.segmentation.placeholder_align import describe_atom
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.validation.markers import (
@@ -136,8 +137,17 @@ def _segment_to_block(seg: Segment) -> TextBlock:
     )
 
 
-def _segment_key(seg: Segment) -> tuple[str, str]:
-    return (seg.kind.value, seg.text)
+def _segment_key(seg: Segment) -> tuple[str, str, tuple[str, ...]]:
+    """Semantic differential key including protected inline atom payloads.
+
+    Segment text contains placeholders such as ``⟦C1⟧``. Comparing only that
+    text makes two different inline-code values look equal, which hid the
+    ``client_certificate_required=true`` → ``: true`` edit in #40385.
+    Placeholder numbering is intentionally excluded; atom descriptions carry
+    the actual code, URL, variable, or HTML payload.
+    """
+    atoms = tuple(describe_atom(item.node) for item in seg.placeholders)
+    return (seg.kind.value, seg.text, atoms)
 
 
 def is_change_magnitude_high(
@@ -614,6 +624,26 @@ def slim_pending_for_low_magnitude_patch(
     change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
     slim = [s for s in pending if s.id in change_ids]
     return slim, analysis
+
+
+def low_magnitude_patch_has_anchors(
+    segments: list[Segment], analysis: RuDiffAnalysis
+) -> bool:
+    """Whether every changed segment can be safely located in existing EN."""
+    change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
+    if not change_ids:
+        return True
+    by_id = {segment.id: index for index, segment in enumerate(segments)}
+    for segment_id in change_ids:
+        index = by_id.get(segment_id)
+        if index is None:
+            return False
+        if not any(
+            segment.kind.value == "heading" and segment.heading_anchor
+            for segment in segments[:index]
+        ):
+            return False
+    return True
 
 
 def _preceding_heading_anchor(
