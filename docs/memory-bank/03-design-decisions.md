@@ -4914,4 +4914,20 @@ encoded spellings compare equal. A regression test covers the exact #50854
 fragment.
 
 
+### §6.215 Translation QA and documentation build remain separate signals
+
+The five-file #40385 translation in #50854 received a green critic report but
+the public documentation build failed in the already-merged RU source page
+``security/authentication.md``. Line 267 linked to the moved, toc-unreachable
+``devops/deployment-options/manual/node-authorization.md`` instead of
+``devops/concepts/node-authorization.md``. The redirect did not save the build:
+Diplodoc rejects a target absent from toc before applying that redirect.
+
+This is a source-document build defect, not a translation completeness or
+quality defect. ``doc_verify`` must continue reporting translation QA without
+folding CI status into its verdict (§6.191). The operational repair is a small
+RU link correction on the translation branch followed by a documentation-build
+rerun; future merge decisions consume critic and build as independent signals.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

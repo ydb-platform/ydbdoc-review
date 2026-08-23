@@ -76,6 +76,7 @@ stable cross-references — use them when linking between files.
 | 2026-08-23 | **§6.211** — ``doc_continue`` on translation PRs rebuilds complete source scope; verify fixups stay inline (#50840) |
 | 2026-08-23 | **§6.213** — differential segment keys include inline atom payloads; anchorless tiny changes fall back to full reconstruction (#40385 / #50852) |
 | 2026-08-23 | **§6.214** — href parity treats raw Unicode and percent-encoded internal fragments as URL-equivalent (#50854) |
+| 2026-08-23 | **§6.215** — green translation QA remains separate from source-document build failures; #50854 exposed a stale RU node-authorization link |
 | 2026-08-23 | **§6.212** — doc_continue loads bounded parent transcript into translation and inline-critic prompts; context is consumed, not only existence-checked |
 | 2026-08-23 | **§6.210** — old merged PR differential uses merge parent as RU base; prevents zero-delta no-op omissions (#40385 / #50840) |
 | 2026-08-23 | **§6.209** — green critic requires complete source scope; merged PRs use API-only changes and verify blocks omitted EN files (#40385 / #50838) |
