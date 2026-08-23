@@ -190,6 +190,61 @@ def _sync_stable_fence_body_indentation(
             target_lines[target_start + offset] = indent + target_line.lstrip()
 
 
+def _repair_empty_fence_body_displacement(
+    source_lines: list[str], target_lines: list[str]
+) -> None:
+    """Move a premature empty-fence closer past its unchanged code body.
+
+    A legacy parse/render cycle can emit an empty fenced block and leave the
+    original, untranslated code immediately after it.  Pair fences by ordinal
+    and repair only when every nonblank source body line occurs contiguously
+    (blank lines ignored) after the empty target closer and before the next
+    fence.  This keeps the operation source-authoritative and avoids guessing
+    about intentionally empty examples.
+    """
+    source_markers = [i for i, line in enumerate(source_lines) if _FENCE_LINE.match(line)]
+    target_markers = [i for i, line in enumerate(target_lines) if _FENCE_LINE.match(line)]
+    if (
+        len(source_markers) != len(target_markers)
+        or len(source_markers) % 2
+        or not source_markers
+    ):
+        return
+
+    moves: list[tuple[int, int, str]] = []
+    for marker_i in range(0, len(source_markers), 2):
+        source_start, source_end = source_markers[marker_i : marker_i + 2]
+        target_start, target_end = target_markers[marker_i : marker_i + 2]
+        source_body = [line.strip() for line in source_lines[source_start + 1 : source_end] if line.strip()]
+        target_body = target_lines[target_start + 1 : target_end]
+        if not source_body or any(line.strip() for line in target_body):
+            continue
+
+        next_marker = (
+            target_markers[marker_i + 2]
+            if marker_i + 2 < len(target_markers)
+            else len(target_lines)
+        )
+        candidates = [
+            (i, line.strip())
+            for i, line in enumerate(target_lines[target_end + 1 : next_marker], target_end + 1)
+            if line.strip()
+        ]
+        if len(candidates) < len(source_body):
+            continue
+        for start in range(len(candidates) - len(source_body) + 1):
+            window = candidates[start : start + len(source_body)]
+            if [text for _, text in window] != source_body:
+                continue
+            source_closer = source_lines[source_end]
+            moves.append((target_end, window[-1][0], source_closer))
+            break
+
+    for old_closer, last_body_line, source_closer in reversed(moves):
+        del target_lines[old_closer]
+        target_lines.insert(last_body_line, source_closer)
+
+
 def _normalize_target_list_indentation(target_lines: list[str]) -> None:
     """Use the target AST itself to normalize list/tab label indentation."""
     from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -233,6 +288,7 @@ def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
         "\n".join(target_lines) + ("\n" if had_final_newline else "")
     )
     target_lines = target_text.splitlines()
+    _repair_empty_fence_body_displacement(source_lines, target_lines)
     _sync_structural_line_indentation(
         source_lines,
         target_lines,

@@ -230,3 +230,31 @@ def test_repair_restores_indentation_of_translated_fence_comment():
     fixed = repair_generated_markdown_layout(source, target)
 
     assert '    "/path/to/mynode", // Coordination Node name' in fixed
+
+
+def test_repair_moves_premature_empty_fence_closer_after_unchanged_code():
+    source = (
+        "    {% list tabs %}\n"
+        "    - Native SDK (Asyncio)\n\n"
+        "      ```python\n"
+        "      import ydb\n\n"
+        "      async def create_index():\n"
+        "          await run()\n"
+        "      ```\n\n"
+        "    {% endlist %}\n"
+    )
+    target = (
+        "    {% list tabs %}\n"
+        "  - Native SDK (Asyncio)\n\n"
+        "      ```python\n\n"
+        "      ```\n\n"
+        "      import ydb\n\n"
+        "      async def create_index():\n"
+        "          await run()\n\n"
+        "    {% endlist %}\n"
+    )
+
+    fixed = repair_generated_markdown_layout(source, target)
+
+    assert "```python\n\n      ```" not in fixed
+    assert "          await run()\n      ```\n\n    {% endlist %}" in fixed

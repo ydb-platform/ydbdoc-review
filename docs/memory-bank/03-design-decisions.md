@@ -4653,5 +4653,60 @@ or ``MD040``.
 ``test_repair_restores_indentation_of_translated_fence_comment`` covers the
 translated-comment case from ``coordination.md`` block 9.
 
+### §6.205 Build the GitHub merge ref, not only the translation head
+
+Verify run ``32637228620`` used ``eab2db1`` and completed all 27 pairs with
+``status=ok``. It pushed translation head ``c333bf1``. Production PR-check
+``32637507581`` confirmed that all previously failing translated EN files are
+clean: TTL, vector-search, and debug-logs no longer appear in either matrix's
+failure summary.
+
+Both matrices still failed on one file outside the translation diff:
+``ru/security/authentication.md`` links to the removed legacy path
+``devops/deployment-options/manual/node-authorization.md``. The target exists
+only under the current configuration-management and devops-concepts TOCs, so
+Diplodoc reports YFM003, “File is not declared in toc”. The same broken link is
+present in current YDB ``main``. A head-only local build missed it because CI
+builds GitHub's synthetic merge commit. For production diagnosis, always fetch
+and build ``refs/pull/<translation-pr>/merge``. A green critic proves bilingual
+pair quality, not repository-wide base health.
+
+This is not a translation-normalizer responsibility: silently rewriting an
+unrelated RU file would broaden doc_translate's scope and hide an upstream
+regression. The incident can be unblocked in #50741 with a scoped RU link fix,
+while the general correction belongs in YDB main/its originating PR.
+
+The first replacement used ``devops/concepts/node-authorization.md``. That
+page is reachable on current main, so the synthetic merge build passed, but it
+is not declared in the older TOC stored in the translation branch head. The
+separate ``Build documentation`` workflow builds the PR head rather than the
+merge ref and rejected it. The compatibility target must exist in both trees;
+``devops/configuration-management/configuration-v1/node-authorization.md`` is
+declared in both the old head and current main. This incident therefore needs
+two preflight builds: branch head for ``Build documentation`` and merge ref for
+``PR-check``.
+
+### §6.206 Source-authoritative repair for displaced fence bodies
+
+The green Diplodoc build did not imply green bilingual alignment. On #50741,
+``vector-search.md`` still had 94 EN segments versus 92 normalized RU segments.
+The two extras were Python code parsed as prose. Parse/render had produced an
+empty ``python`` fence, placed its closer immediately after the opener, and
+left the unchanged code body outside the fence. The large-file realign cap then
+correctly refused an expensive full retranslation, leaving a red report.
+
+``repair_generated_markdown_layout`` now pairs source and target fences by
+ordinal after legacy normalization. When a target fence is empty, it moves the
+closer only if every nonblank source body line occurs as one contiguous
+unchanged sequence immediately after that closer and before the next fence.
+The exact-match requirement makes the repair source-authoritative and avoids
+guessing about intentionally empty examples or translated code comments.
+
+On the production #50741 files, the repair moves the closer past the complete
+``add_vector_index`` body, removes the two prose segments, and changes alignment
+from 92/94 to 92/92. The focused normalization/layout/fence/harness suite passes
+104 tests, including a regression with an empty rendered fence followed by its
+unchanged indented Python body.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
