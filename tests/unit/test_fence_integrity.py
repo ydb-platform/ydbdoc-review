@@ -56,7 +56,7 @@ def test_check_fence_body_copy_detects_pipeline_change():
     assert "fence_body_copy" in warnings[0]
 
 
-def test_malformed_legacy_source_requires_exact_raw_marker_sequence():
+def test_malformed_legacy_source_is_normalized_before_body_validation():
     source = """{% list tabs %}
 
 - Python
@@ -87,7 +87,7 @@ def test_malformed_legacy_source_requires_exact_raw_marker_sequence():
 {% endlist %}
 """
     same_markers = source.replace("    A\n", "    translated comment\n")
-    assert check_fence_body_copy(source, same_markers) == []
+    assert check_fence_body_copy(source, same_markers)
 
     extra_marker = same_markers + "```\n"
     assert check_fence_body_copy(source, extra_marker)

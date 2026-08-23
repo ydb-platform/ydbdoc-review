@@ -6,6 +6,8 @@ import re
 from collections.abc import Callable
 from difflib import SequenceMatcher
 
+from ydbdoc_review.validation.ru_source_bugs import normalize_legacy_markdown_structure
+
 _FENCE_LINE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 # Glossary-style bold links: ``** [text](url)**`` → ``**[text](url)**`` (MD037).
 _BOLD_LINK_OPEN = re.compile(r"\*\* \[")
@@ -221,11 +223,16 @@ def _normalize_target_list_indentation(target_lines: list[str]) -> None:
 
 def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
     """Make generated EN preserve legacy YFM structure and lint-safe spacing."""
+    source_text = normalize_legacy_markdown_structure(source_text)
     had_final_newline = target_text.endswith("\n")
     source_lines = source_text.splitlines()
     target_lines = target_text.splitlines()
 
     _drop_renderer_inserted_fence_markers(source_lines, target_lines)
+    target_text = normalize_legacy_markdown_structure(
+        "\n".join(target_lines) + ("\n" if had_final_newline else "")
+    )
+    target_lines = target_text.splitlines()
     _sync_structural_line_indentation(
         source_lines,
         target_lines,

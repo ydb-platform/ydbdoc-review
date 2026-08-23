@@ -51,7 +51,7 @@ def test_verify_repairs_legacy_layout_before_round_trip_gate(monkeypatch):
     assert len(seen) == 1
     assert seen[0].count("```") == source.count("```")
     assert "    ```python" in seen[0]
-    assert "      ```" in seen[0]
+    assert "    ```" in seen[0]
 
 
 def test_verify_finalize_keeps_en_body_ref_but_passes_ru_layout_ref(monkeypatch):

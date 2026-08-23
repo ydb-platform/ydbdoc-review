@@ -26,7 +26,9 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-23 | **§6.204** — buildable legacy-source normalization: canonical fence closers, missing peer-tab closers, unmatched YFM closers, empty overlay include indentation; exact #50741 `./ya make ydb/docs` is green |
 | 2026-08-23 | **§6.203** — preserve per-line RU indentation inside stable translated fenced blocks (#37673 / #50741) |
+| 2026-08-23 | **#50741 verify outcome** — critic 27/27 green at `c7d4fca`; production still rejects legacy TTL/vector YFM and debug-logs MD009, plus unrelated RU YFM003 |
 | 2026-08-22 | **§6.198** — final pair-level repair restores matching fence indentation, YFM (`if` included), unchanged technical-line indentation, and MD009-safe whitespace (#37673 / #50741) |
 | 2026-08-22 | **§6.198 follow-up** — sequence indentation must be code-body-only: global matching moved `Native SDK` into the wrong tab and caused 92↔93 segment alignment after the final authorized retry |
 | 2026-08-22 | **§6.198 bounded retry** — exclude Markdown structural lines, especially tab/list labels, from unchanged-line indentation repair |

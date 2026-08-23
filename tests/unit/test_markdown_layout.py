@@ -12,6 +12,7 @@ from ydbdoc_review.validation.markdown_layout import (
     fix_image_bang_spacing,
     repair_generated_markdown_layout,
 )
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 
 def _md031_after_close_violations(text: str) -> list[int]:
@@ -122,11 +123,12 @@ def test_repair_drops_only_renderer_inserted_fence_markers():
     )
     fixed = repair_generated_markdown_layout(source, rendered)
     fence = re.compile(r"^\s*(`{3,}|~{3,})(.*)$", re.MULTILINE)
+    normalized_source = normalize_ru_source_for_translation(source)
     assert [m.group(1) + m.group(2).strip() for m in fence.finditer(fixed)] == [
-        m.group(1) + m.group(2).strip() for m in fence.finditer(source)
+        m.group(1) + m.group(2).strip() for m in fence.finditer(normalized_source)
     ]
     assert "    {% endcut %}" in fixed
-    assert "    {% endlist %}" in fixed
+    assert "{% endlist %}" not in fixed
 
 
 def test_verify_finalize_uses_ru_layout_with_en_fence_body_authority():
@@ -137,7 +139,7 @@ def test_verify_finalize_uses_ru_layout_with_en_fence_body_authority():
         existing_en,
         layout_source_text=source,
     )
-    assert fixed == "    ```python\n    translated()\n      ```\n\n"
+    assert fixed == "    ```python\n    translated()\n    ```\n"
 
 
 def test_repair_generated_layout_fixes_md009_and_md022():

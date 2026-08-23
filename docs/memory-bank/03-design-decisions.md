@@ -4581,6 +4581,57 @@ their translated content. It deliberately skips unstable legacy sources and
 blocks whose body line counts differ. The exact #50741 RU/EN files now produce
 no ``fence_body_copy`` warnings after repair.
 
+The production result separates critic correctness from buildability. Verify
+run ``32631513956`` used action commit ``ef615b1`` and completed all 27 pairs
+with ``status=ok``; it pushed translation head ``c7d4fca``. PR-check
+``32631826129`` nevertheless failed with the same Diplodoc diagnostics:
+unexpected final ``endlist`` in ``ttl.md``, an unclosed/interleaved asyncio
+``cut`` in ``vector-search.md``, and four trailing spaces at two
+``debug-logs.md`` lines. The RU ``authentication.md`` unreachable-link error is
+outside the translation diff. Therefore green critic is achieved, but the
+translation is not production-green; raw parity repair preserves malformed
+legacy source structures that EN Diplodoc parses differently.
+
+### §6.204 Buildability supersedes raw RU parity
+
+The root architectural bug was treating malformed historical RU markdown as an
+exact structural oracle. Critic could be green while EN reproduced syntax that
+Diplodoc rejects. ``normalize_legacy_markdown_structure`` is now part of both
+RU source normalization and the final EN layout pass. It applies only
+deterministic repairs observed in #50741:
+
+1. A fence marker with an info string encountered as the matching closer is
+   rewritten as a bare closer at the opener indentation.
+2. An unmatched ``endcut`` encountered inside a fence is treated as the missing
+   fence closer. A peer tab/list item at or above the opener indentation also
+   closes a missing fence before the item.
+3. YFM closers are tracked outside fences. Unmatched/interleaved ``endlist``
+   markers are removed instead of copied from malformed RU.
+4. Indented ``[overlay]`` includes are limited to two spaces. Empty public
+   overlay files otherwise expand to four-space whitespace-only lines and fail
+   MD009.
+5. Trailing blank lines introduced by removing a terminal directive are
+   collapsed to the standard single final newline.
+
+The order matters: source is normalized first, renderer-only target markers are
+removed against that authority, and target legacy syntax is normalized after
+marker deletion. Normalizing the dirty target first misclassified synthetic
+markers and created new MD040 errors.
+
+Validation used a shallow sparse clone of the actual translation branch
+``c7d4fca``. The three repaired EN files were generated through the production
+pair-level layout function, then ``./ya make ydb/docs`` completed with ``Ok``.
+This eliminated TTL YFM005, both vector YFM005 errors, and both debug MD009
+errors. The earlier RU ``authentication.md`` YFM003 did not reproduce on the
+current PR head; it was stale base state, not a translation or internal-overlay
+problem.
+
+**Tests:** focused layout/fence/source-normalization and harness suites pass
+103 tests. New cases cover info-bearing closers, unmatched/interleaved YFM,
+missing closers before peer tab items, ``endcut`` used as a fence closer, empty
+overlay includes, and the updated pre-round-trip contract. Ruff passes on all
+changed source and focused test files.
+
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
 translated cut-title preservation, MD022, and hard breaks.
