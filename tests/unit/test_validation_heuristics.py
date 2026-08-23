@@ -319,6 +319,23 @@ def test_length_ratio_short_text_skipped():
     assert check_length_ratio("Hi", "Hello", source_lang="ru", target_lang="en") == []
 
 
+def test_length_ratio_normalizes_legacy_fences_before_counting_prose():
+    source = (
+        ("Русский текст для проверки объёма перевода. " * 4)
+        + "\n```python\n"
+        + ("very_long_code_line()\n" * 30)
+        + "```python\n"
+    )
+    target = (
+        ("English text used to verify translation volume. " * 4)
+        + "\n```python\n"
+        + ("very_long_code_line()\n" * 30)
+        + "```\n"
+    )
+
+    assert check_length_ratio(source, target, source_lang="ru", target_lang="en") == []
+
+
 def test_length_ratio_out_of_bounds():
     src = "word " * 50
     tgt = "x" * 45

@@ -73,6 +73,7 @@ stable cross-references — use them when linking between files.
 | 2026-07-28 | **§6.150** — mirror RU toc reshuffles into EN; EN page on disk fills missing toc slot (#47856) |
 | 2026-07-28 | **§6.149** — fence QA: trailing YAML `#` + angle placeholder translation (#47164 host_configs) |
 | 2026-07-28 | **§6.148** — include_parity blocking + auto-insert missing ``{% include %}`` (#48103 career) |
+| 2026-08-23 | **§6.207** — length ratio normalizes legacy fences first; removes #50741 false 0.51 warning after buildability repair |
 | 2026-08-23 | **§6.206** — #50741 vector: move premature empty-fence closer after unchanged code body; 92/92 segments and buildable markdown |
 | 2026-08-23 | **§6.205** — #50741 exact merge-ref build: translated EN is clean; current YDB `main` independently breaks RU authentication with an unreachable legacy node-authorization link |
 | 2026-07-28 | **§6.147** — verify: odd toc indent, self-link parity, YFM tables, verify realign (#46742) |

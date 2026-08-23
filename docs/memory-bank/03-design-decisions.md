@@ -4708,5 +4708,20 @@ from 92/94 to 92/92. The focused normalization/layout/fence/harness suite passes
 104 tests, including a regression with an empty rendered fence followed by its
 unchanged indented Python body.
 
+### §6.207 Length ratio must compare normalized fence structure
+
+After §6.206 removed the alignment blocker, #50741 became yellow with
+``length_ratio 0.51`` for vector-search. This was not missing translation.
+``check_length_ratio`` stripped fences with a raw line-state regex. The
+malformed RU info-bearing closer reopened a fence at the wrong point, so the
+heuristic counted roughly 17,302 RU non-whitespace characters versus 8,760 EN.
+After the same legacy normalization used by translation, the prose-like counts
+are 8,971 RU versus 8,760 EN and no warning is warranted.
+
+Length-ratio validation now normalizes both source and target legacy Markdown
+before stripping fenced blocks. The focused suite passes 105 tests. The new
+regression uses an info-bearing RU closer and proves a long identical code body
+cannot create a false short-translation warning.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -7,14 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Literal
 
-from ydbdoc_review.parsing.ast_types import FencedCode
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.redirects import (
     RedirectValidationIssue,
     validate_redirect_merge,
 )
 from ydbdoc_review.navigation.toc import TocValidationIssue, validate_toc_merge
+from ydbdoc_review.parsing.ast_types import FencedCode
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.validation.ru_source_bugs import normalize_legacy_markdown_structure
 
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 _FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
@@ -77,6 +78,12 @@ def check_length_ratio(
     target_lang: str,
 ) -> list[str]:
     """RU↔EN length ratio on prose-like content (fences stripped)."""
+    # Raw legacy RU may contain info-bearing closers or a missing closer.  The
+    # regex fence stripper then counts code as prose on only one side and emits
+    # a false short-translation warning.  Compare the same buildable structure
+    # used by translation/layout validation.
+    source_text = normalize_legacy_markdown_structure(source_text)
+    target_text = normalize_legacy_markdown_structure(target_text)
     src_len = _plain_text_length(source_text)
     tgt_len = _plain_text_length(target_text)
     if src_len < 40 or tgt_len < 40:
