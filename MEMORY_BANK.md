@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-21  
-**Current focus:** §6.198 — restore buildable legacy YFM structure before QA (#37673 / #50741).
+**Last updated:** 2026-08-23
+**Current focus:** §6.203 — preserve translated fence-body indentation (#37673 / #50741).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,10 +26,12 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-23 | **§6.203** — preserve per-line RU indentation inside stable translated fenced blocks (#37673 / #50741) |
 | 2026-08-22 | **§6.198** — final pair-level repair restores matching fence indentation, YFM (`if` included), unchanged technical-line indentation, and MD009-safe whitespace (#37673 / #50741) |
 | 2026-08-22 | **§6.198 follow-up** — sequence indentation must be code-body-only: global matching moved `Native SDK` into the wrong tab and caused 92↔93 segment alignment after the final authorized retry |
 | 2026-08-22 | **§6.198 bounded retry** — exclude Markdown structural lines, especially tab/list labels, from unchanged-line indentation repair |
 | 2026-08-22 | **§6.198 bounded retry** — normalize list/tab-label indentation from canonical EN parse→render, independently of RU technical-line indentation |
+| 2026-08-22 | **#50741 outcome** — legacy layout/alignment files green; report now 🟡 only on one `coordination.md` Go fence-body difference |
 | 2026-08-21 | **§6.197** — fence parity/body validation uses canonical parse→render source when malformed legacy RU changes its block count; enables verify-only recovery of #50741 |
 | 2026-08-21 | **§6.196** — project Codex hook blocks staged commits unless both the Memory Bank index and a detailed Memory Bank note are staged |
 | 2026-08-21 | **§6.195** — reject unsafe low-magnitude splices on technical tab/segment drift; ignore fallback YFM controls and exact SDK labels; exclude stable anchors and identical English source from false critic blockers (#37673 / #50729) |

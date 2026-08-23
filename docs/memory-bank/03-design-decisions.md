@@ -4563,6 +4563,24 @@ Because legacy rendering can add/drop placeholder list items, synchronization
 uses matching blocks of ``(marker, text)`` rather than requiring the complete
 list-item sequence to be identical.
 
+The bounded retry succeeded for the target incident: ``vector-search.md``
+returned to green with no alignment error, while ``ttl.md`` and
+``debug-logs.md`` remained green. The overall report is yellow only because
+``coordination.md`` reports one differing Go fence body, outside the legacy
+layout/alignment failure fixed here.
+
+### §6.203 Translated fence lines keep source indentation
+
+The remaining ``coordination.md`` warning was an indentation-only corruption
+inside block 9. Translating the inline Go comment changed the whole line, so
+the exact-line ``SequenceMatcher`` could not associate it with the RU line and
+left ``"/path/to/mynode"`` at column zero instead of four spaces. For
+round-trip-stable sources, layout repair now pairs raw fence intervals and
+copies leading whitespace for corresponding non-empty body lines while keeping
+their translated content. It deliberately skips unstable legacy sources and
+blocks whose body line counts differ. The exact #50741 RU/EN files now produce
+no ``fence_body_copy`` warnings after repair.
+
 **Tests:** ``tests/unit/test_markdown_layout.py`` covers inserted-marker
 deletion, stable-fence preservation, directive indentation, empty-list/MD009,
 translated cut-title preservation, MD022, and hard breaks.
@@ -4581,6 +4599,8 @@ asserts that ``run_pair_plan`` returns the exact RU marker sequence.
 raw-marker contract for unstable sources. The exact #50741 files pass fence
 parity/body validation; external markdownlint reports no ``MD009``, ``MD022``,
 or ``MD040``.
+``test_repair_restores_indentation_of_translated_fence_comment`` covers the
+translated-comment case from ``coordination.md`` block 9.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)

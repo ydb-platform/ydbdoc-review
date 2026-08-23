@@ -158,6 +158,36 @@ def _sync_unchanged_line_indentation(source_lines: list[str], target_lines: list
             target_lines[target_i] = source_indent + target_lines[target_i].lstrip()
 
 
+def _sync_stable_fence_body_indentation(
+    source_text: str, source_lines: list[str], target_lines: list[str]
+) -> None:
+    """Preserve source indentation when comments inside code are translated."""
+    from ydbdoc_review.validation.fence_integrity import (
+        fence_structure_is_round_trip_stable,
+    )
+
+    if not fence_structure_is_round_trip_stable(source_text):
+        return
+    source_markers = [i for i, line in enumerate(source_lines) if _FENCE_LINE.match(line)]
+    target_markers = [i for i, line in enumerate(target_lines) if _FENCE_LINE.match(line)]
+    if len(source_markers) != len(target_markers) or len(source_markers) % 2:
+        return
+    for marker_i in range(0, len(source_markers), 2):
+        source_start, source_end = source_markers[marker_i : marker_i + 2]
+        target_start, target_end = target_markers[marker_i : marker_i + 2]
+        source_body = source_lines[source_start + 1 : source_end]
+        target_body = target_lines[target_start + 1 : target_end]
+        if len(source_body) != len(target_body):
+            continue
+        for offset, (source_line, target_line) in enumerate(
+            zip(source_body, target_body, strict=True), start=1
+        ):
+            if not target_line.strip():
+                continue
+            indent = source_line[: len(source_line) - len(source_line.lstrip())]
+            target_lines[target_start + offset] = indent + target_line.lstrip()
+
+
 def _normalize_target_list_indentation(target_lines: list[str]) -> None:
     """Use the target AST itself to normalize list/tab label indentation."""
     from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -204,6 +234,7 @@ def repair_generated_markdown_layout(source_text: str, target_text: str) -> str:
     )
     _normalize_target_list_indentation(target_lines)
     _sync_unchanged_line_indentation(source_lines, target_lines)
+    _sync_stable_fence_body_indentation(source_text, source_lines, target_lines)
 
     # The fallback list renderer can emit ``- `` placeholders for structural
     # tab labels that segmentation intentionally excludes. They are empty list

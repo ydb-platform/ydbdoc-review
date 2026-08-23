@@ -137,7 +137,7 @@ def test_verify_finalize_uses_ru_layout_with_en_fence_body_authority():
         existing_en,
         layout_source_text=source,
     )
-    assert fixed == "    ```python\n  translated()\n      ```\n\n"
+    assert fixed == "    ```python\n    translated()\n      ```\n\n"
 
 
 def test_repair_generated_layout_fixes_md009_and_md022():
@@ -163,7 +163,7 @@ def test_repair_restores_source_fence_indentation_when_markers_match():
     source = "    ```python\n    source()\n    ```\n"
     target = "  ```python\n  translated()\n  ```\n"
     fixed = repair_generated_markdown_layout(source, target)
-    assert fixed == "    ```python\n  translated()\n    ```\n"
+    assert fixed == "    ```python\n    translated()\n    ```\n"
 
 
 def test_repair_syncs_equal_yfm_directive_sequence_indentation():
@@ -207,3 +207,24 @@ def test_repair_restores_indentation_of_unchanged_technical_lines():
     fixed = repair_generated_markdown_layout(source, target)
     assert "  - Native SDK\n" in fixed
     assert "      code()\n          nested()" in fixed
+
+
+def test_repair_restores_indentation_of_translated_fence_comment():
+    source = (
+        "```go\n"
+        "session, err := db.Coordination().CreateSession(ctx,\n"
+        '    "/path/to/mynode", // имя Coordination Node в базе\n'
+        ")\n"
+        "```\n"
+    )
+    target = (
+        "```go\n"
+        "session, err := db.Coordination().CreateSession(ctx,\n"
+        '"/path/to/mynode", // Coordination Node name in the database\n'
+        ")\n"
+        "```\n"
+    )
+
+    fixed = repair_generated_markdown_layout(source, target)
+
+    assert '    "/path/to/mynode", // Coordination Node name' in fixed
