@@ -231,3 +231,40 @@ def test_translate_step_skipped_in_verify_profile():
     with patch("ydbdoc_review.harness.steps.translate_segments") as mock_tr:
         TranslateStep().run(state, ctx)
         mock_tr.assert_not_called()
+
+
+def test_translate_semantic_noop_preserves_existing_en_link_exactly():
+    base = (
+        "{% note warning %}\n\n"
+        "Секреты необходимо [создавать](../../create-secret.md). \n\n"
+        "{% endnote %}\n"
+    )
+    source = base.replace(". \n", ".\n")
+    existing = (
+        "{% note warning %}\n\n"
+        "Secrets must be [created](../../create-secret.md).\n\n"
+        "{% endnote %}\n"
+    )
+    state = FileRunState(
+        mode="translate",
+        file_path="ydb/docs/ru/core/limitation-dump-secrets.md",
+        raw_source_text=source,
+        source_text=source,
+        existing_target_text=existing,
+        # Production #49933 currently resolves the same normalized base text;
+        # the low-magnitude analysis must still preserve EN exactly.
+        base_source_text=source,
+    )
+    ctx = HarnessContext.from_options(
+        _mock_client([]),
+        config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"}),
+    )
+    ParseStep().run(state, ctx)
+
+    with patch("ydbdoc_review.harness.steps.finalize_en_target") as finalize:
+        TranslateStep().run(state, ctx)
+
+    assert state.stopped_early is True
+    assert state.differential_meta["semantic_noop"] is True
+    assert state.translated_text == existing
+    finalize.assert_not_called()

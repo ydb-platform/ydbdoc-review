@@ -323,6 +323,7 @@ class TranslateStep:
             config=diff_cfg,
         )
         patch_analysis = None
+        semantic_noop = False
         if (
             strategy.mode == "differential"
             and state.existing_target_text
@@ -344,10 +345,16 @@ class TranslateStep:
                 if slim is not None:
                     slim_pending, slim_analysis = slim
                     change_ids = slim_analysis.added_segment_ids | slim_analysis.modified_segment_ids
+                    if not change_ids and not slim_analysis.removed_blocks:
+                        semantic_noop = True
+                        pending = []
+                        logger.info(
+                            "Semantic no-op RU diff: preserve existing EN exactly (§6.217)"
+                        )
                     patch_has_anchors = low_magnitude_patch_has_anchors(
                         state.segments, slim_analysis
                     )
-                    if patch_has_anchors:
+                    if patch_has_anchors and not semantic_noop:
                         pending, patch_analysis = slim_pending, slim_analysis
                         logger.info(
                             "Low-magnitude patch: LLM %d added/modified segment(s) "
@@ -366,6 +373,7 @@ class TranslateStep:
             "seeded": len(seeded),
             "pending": len(pending),
             "low_magnitude_patch": patch_analysis is not None,
+            "semantic_noop": semantic_noop,
             **strategy.config,
         }
         if patch_analysis is not None:
@@ -373,6 +381,11 @@ class TranslateStep:
         if strategy.mode == "skip":
             state.translations = {}
             state.translated_text = state.existing_target_text or state.source_text
+            state.stopped_early = True
+            return
+        if semantic_noop and state.existing_target_text:
+            state.translations = {}
+            state.translated_text = state.existing_target_text
             state.stopped_early = True
             return
 

@@ -4964,5 +4964,15 @@ stale/incomplete behavior used by explicit refresh flows. Tests reproduce the
 two #49933 properties: trailing-space removal is a semantic no-op, and dropping
 the protected ``create-secret.md`` link is still rejected by href parity.
 
+The first guard was insufficient in production: the merged-PR resolver can
+provide an already normalized ``base_source_text`` equal to current RU. The
+low-magnitude path still correctly found zero changed segments, but then sent
+the existing EN through ``finalize_en_target``; that unrelated normalization
+removed both links in #50861. Therefore zero added/modified segments and zero
+removed blocks is a second, authoritative semantic-no-op guard inside
+``TranslateStep``. It returns the existing EN text byte-for-byte and never calls
+the LLM, reconstruction, or finalization. The harness regression models this
+exact production shape and asserts that ``finalize_en_target`` is not called.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
