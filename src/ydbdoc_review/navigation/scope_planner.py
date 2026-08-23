@@ -517,10 +517,13 @@ def make_repo_scope_readers(
     merge_base_with: str,
     *,
     ru_content_ref: str | None = None,
+    ru_base_ref: str | None = None,
 ) -> tuple[ReadFn, ReadFn, ReadFn]:
     """Build scope readers for ``plan_translation_scope`` in CI.
 
     ``ru_content_ref`` — optional git ref for RU (merged PR → merge commit, §6.120).
+    ``ru_base_ref`` — its pre-merge parent, used to recover the original RU
+    delta when translating an old merged PR (§6.210).
 
     EN baseline is the **translation-branch tip** (``merge_base_with``, usually
     ``origin/main``), not ``merge-base(HEAD, main)``. For merged source PRs HEAD
@@ -560,6 +563,10 @@ def make_repo_scope_readers(
         return read_text_at_ref(repo_path, mb, path)
 
     def read_ru_base(path: str) -> str | None:
+        if ru_base_ref:
+            text = read_text_at_ref(repo_path, ru_base_ref, path)
+            if text is not None:
+                return text
         text = read_text_at_ref(repo_path, mb, path)
         if text is not None:
             return text

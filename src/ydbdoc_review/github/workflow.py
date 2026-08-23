@@ -379,6 +379,7 @@ def run_doc_translate(
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
     ru_ref = translate_ru_content_ref(ctx)
+    ru_base_ref: str | None = None
     if ru_ref is not None:
         if ensure_commit(repo_path, ru_ref):
             logger.info(
@@ -394,6 +395,11 @@ def run_doc_translate(
                 ru_ref[:12],
             )
             ru_ref = None
+        else:
+            # A merged PR's original RU delta is merge_commit^..merge_commit.
+            # Comparing it with current main makes old source changes look like
+            # no-ops and silently preserves stale EN (§6.210 / #40385).
+            ru_base_ref = f"{ru_ref}^"
 
     changes = source_pr_scope_changes(
         ctx,
@@ -403,7 +409,10 @@ def run_doc_translate(
     changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
     read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
-        repo_path, merge_base_with, ru_content_ref=ru_ref
+        repo_path,
+        merge_base_with,
+        ru_content_ref=ru_ref,
+        ru_base_ref=ru_base_ref,
     )
     scope_plan = plan_translation_scope(
         changes,
@@ -528,6 +537,7 @@ def run_doc_translate(
                 pairs,
                 merge_base_with=merge_base_with,
                 ru_content_ref=ru_ref,
+                ru_base_ref=ru_base_ref,
             )
             pr_result = run_pr_translation(
                 contents,

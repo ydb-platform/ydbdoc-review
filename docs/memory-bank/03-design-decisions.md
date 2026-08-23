@@ -4819,4 +4819,22 @@ and a translation diff containing only ``tls.md`` is explicitly red for the two
 missing EN paths.
 
 
+### §6.210 Old merged PR differential base is the merge parent
+
+After §6.209, the clean #40385 rerun correctly planned five RU documents and
+created #50840, but only wrote ``monitoring_config.md`` and ``tls.md``. The
+other three pairs reported ``status=ok`` in under one second without producing
+an EN diff. Their translator base was wrong: RU content came from the source
+merge commit, while ``ru_base_text`` came from current main, where that same RU
+change had already landed. Differential translation therefore saw no RU delta
+and treated stale EN as a valid no-op.
+
+For a merged source PR, the content and differential refs are now explicit:
+``merge_commit`` is the authoritative RU result and ``merge_commit^`` is the RU
+state before that PR landed. Both the scope planner and pair-content loader use
+the pre-merge ref. Open PR behavior is unchanged. A regression creates a
+two-commit repository and proves that merged RU content is paired with the
+parent commit's RU base, so additions cannot disappear as zero-delta no-ops.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

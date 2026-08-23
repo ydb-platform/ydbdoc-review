@@ -485,6 +485,7 @@ def load_pair_contents(
     *,
     merge_base_with: str,
     ru_content_ref: str | None = None,
+    ru_base_ref: str | None = None,
 ) -> list[PairContent]:
     """Load RU/EN bodies and diffs for each pair from the local checkout.
 
@@ -525,7 +526,9 @@ def load_pair_contents(
             if pair.en_changed
             else None
         )
-        ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        ru_base_text = read_text_at_ref(
+            repo_path, ru_base_ref or merge_base_with, pair.ru_path
+        )
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         contents.append(
             PairContent(

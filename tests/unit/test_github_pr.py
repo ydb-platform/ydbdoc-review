@@ -223,6 +223,33 @@ def test_load_pair_contents(git_repo: str):
     assert contents[0].ru_text and "RU" in contents[0].ru_text
 
 
+def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
+    ru = Path(git_repo) / "ydb" / "docs" / "ru" / "a.md"
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    ru.write_text("# RU\n\nНовый раздел.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "merged source"], cwd=git_repo, check=True)
+    merge_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    pairs = build_pairs_from_changes(
+        [("ydb/docs/ru/a.md", "modified")], docs_root="ydb/docs"
+    )
+
+    content = load_pair_contents(
+        git_repo,
+        pairs,
+        merge_base_with=merge_sha,
+        ru_content_ref=merge_sha,
+        ru_base_ref=base_sha,
+    )[0]
+
+    assert content.ru_text == "# RU\n\nНовый раздел.\n"
+    assert content.ru_base_text == "# RU\n"
+
+
 def test_pull_request_context():
     class FakeClient:
         def get_pull(self, owner, repo, pr_number):
