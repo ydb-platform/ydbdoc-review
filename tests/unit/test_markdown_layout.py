@@ -3,16 +3,66 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from ydbdoc_review.harness.render import finalize_en_target
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
+from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.validation.markdown_layout import (
     fix_blanks_around_fences,
     fix_image_bang_spacing,
     repair_generated_markdown_layout,
 )
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
+
+_PR_50980_FIXTURES = Path(__file__).parents[1] / "fixtures" / "pr_50980"
+
+
+def test_pr_50980_normalizes_legacy_indented_bullets_before_segmentation():
+    ru = (_PR_50980_FIXTURES / "state-storage-v1.ru.md").read_text()
+    en = (_PR_50980_FIXTURES / "state-storage-v1.en.md").read_text()
+
+    raw_ru_segments = extract_segments(parse_markdown(ru))
+    normalized = normalize_ru_source_for_translation(ru)
+    normalized_segments = extract_segments(parse_markdown(normalized))
+    en_segments = extract_segments(parse_markdown(en))
+
+    assert len(raw_ru_segments) + 4 == len(normalized_segments)
+    assert len(normalized_segments) == len(en_segments)
+    assert [segment.kind for segment in normalized_segments] == [
+        segment.kind for segment in en_segments
+    ]
+    assert "   - Добавляем новую группу" in normalized
+    assert normalize_ru_source_for_translation(normalized) == normalized
+
+
+def test_pr_50980_normalizer_does_not_touch_list_markers_inside_fences():
+    source = """1. Пункт
+
+     Продолжение.
+
+```yaml
+    - ring: 1
+    - ring: 2
+```
+
+## Далее
+"""
+    assert normalize_ru_source_for_translation(source) == source
+
+
+def test_pr_50980_normalizer_refuses_ambiguous_indented_code_example():
+    source = """1. Пункт.
+
+     Пример конфигурации:
+
+    - literal one
+    - literal two
+
+## Далее
+"""
+    assert normalize_ru_source_for_translation(source) == source
 
 
 def _md031_after_close_violations(text: str) -> list[int]:

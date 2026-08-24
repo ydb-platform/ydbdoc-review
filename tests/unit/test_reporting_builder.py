@@ -9,16 +9,16 @@ from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     ManualAction,
     NavigationRunResult,
-    PRTranslationResult,
     PairRunResult,
+    PRTranslationResult,
 )
-from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
     build_full_report,
     build_source_pr_comment,
 )
+from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 
@@ -416,6 +416,46 @@ def test_full_report_shows_alignment_error():
     assert "отчёт #1" not in body
     assert "(alignment)" in body
     assert "не мержить" in body or "требует правок" in body
+
+
+def test_full_report_does_not_hide_alignment_error_behind_completeness_gap():
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="EN",
+        segments_count=2,
+        verdict="blocked",
+        segment_alignment_error="segment count mismatch: source 2 vs target 1",
+        prompt_version="v1",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, file_result=fr)],
+        completeness_gaps=["ydb/docs/en/missing.md"],
+    )
+
+    body = build_full_report(
+        result,
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+
+    assert "отсутствующие EN-зеркала" in body
+    assert "missing.md" in body
+    assert "(alignment)" in body
+    assert "segment count mismatch" in body
 
 
 def test_full_report_includes_info_section():

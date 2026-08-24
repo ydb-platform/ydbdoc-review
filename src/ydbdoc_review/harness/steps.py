@@ -7,8 +7,11 @@ from typing import Protocol
 
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
-from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
-from ydbdoc_review.harness.render import remap_translations_by_position
+from ydbdoc_review.harness.render import (
+    finalize_en_target,
+    remap_translations_by_position,
+    render_with_translations,
+)
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import (
@@ -25,10 +28,11 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.placeholder_align import normalize_target_segments_to_source
 from ydbdoc_review.translation.critic import (
     apply_critic_fixes,
-    run_critic as run_critic_pass,
     run_verify,
 )
-from ydbdoc_review.translation.schemas import CriticResponse
+from ydbdoc_review.translation.critic import (
+    run_critic as run_critic_pass,
+)
 from ydbdoc_review.translation.critic_retranslate import (
     issues_by_segment_id,
     retranslate_segments_with_critic_feedback,
@@ -41,6 +45,7 @@ from ydbdoc_review.translation.differential import (
     slim_pending_for_low_magnitude_patch,
 )
 from ydbdoc_review.translation.file_profiles import is_glossary_file
+from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
@@ -582,6 +587,12 @@ class RoundTripStep:
             state.file_path,
             state.segment_alignment_error,
         )
+        if not ctx.allow_verify_realign:
+            logger.info(
+                "verify realign disabled for diagnostic critic-only run: %s",
+                state.file_path,
+            )
+            return
         if is_glossary_file(state.file_path):
             logger.info("Glossary verify: skip structural alignment gate (§6.186)")
             state.finalize_warnings.append(

@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from ydbdoc_review.config.loader import Config
 from ydbdoc_review.harness import (
-    FileHarness,
-    FileRunState,
-    HarnessContext,
     TRANSLATE_PROFILE,
     TRANSLATE_WITH_QA_PROFILE,
     VERIFY_PROFILE,
+    FileHarness,
+    FileRunState,
+    HarnessContext,
 )
 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
-from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
-from ydbdoc_review.harness.render import remap_translations_by_position
+from ydbdoc_review.harness.render import (
+    finalize_en_target,
+    remap_translations_by_position,
+    render_with_translations,
+)
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.pipeline.types import FileTranslationResult
 from ydbdoc_review.translation.glossary import Glossary
@@ -62,6 +65,10 @@ def translate_file(
         cache=cache,
         max_parallel_batches=max_parallel_batches,
         enable_critic=critic_on,
+        # The single-file critic-only API is diagnostic and must not silently
+        # turn an alignment failure into an unrequested translation LLM call.
+        # PR doc_verify explicitly keeps realignment enabled via PRHarness.
+        allow_verify_realign=enable_translate,
     )
     if enable_translate:
         profile = TRANSLATE_WITH_QA_PROFILE if enable_critic else TRANSLATE_PROFILE

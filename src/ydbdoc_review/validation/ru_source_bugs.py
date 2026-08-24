@@ -14,10 +14,80 @@ _OVERLAY_INCLUDE_LINE = re.compile(r"^(\s+)(?=\{%\s*include\s+\[overlay])")
 _MARKDOWN_CONTAINER_BOUNDARY = re.compile(r"^(\s*)[-+*]\s+")
 _YFM_OPEN = {"list": "endlist", "cut": "endcut", "if": "endif"}
 _YFM_CLOSE = {closer: opener for opener, closer in _YFM_OPEN.items()}
+_ORDERED_LIST_LINE = re.compile(r"^\s*\d+[.)]\s+")
+_LEGACY_INDENTED_BULLET = re.compile(r"^ {4}([-+*]\s+.*)$")
+
+
+def _normalize_pr_23186_indented_bullet_run(text: str) -> str:
+    """Recover the four nested bullets from source PR #23186 / translation #50980.
+
+    The source of #23186 has a run of four-space bullet lines immediately after
+    continuation paragraphs in an ordered list.  Markdown-it classifies that
+    run as ``IndentedCode``; after AST rendering it becomes a nested list and
+    changes the segment count from 28 to 32.  Only normalize the unambiguous
+    exact source actions seen there, outside fences and directly before a
+    heading.  This is intentionally a named compatibility repair, not a generic
+    guess: generic four-space bullet examples are valid indented code and must
+    stay byte-for-byte unchanged.
+    """
+    lines = text.splitlines()
+    in_fence: tuple[str, int] | None = None
+    candidates: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        fence = _FENCE_LINE.match(lines[i])
+        if fence:
+            marker = fence.group(2)
+            if in_fence is None:
+                in_fence = (marker[0], len(marker))
+            elif marker[0] == in_fence[0] and len(marker) >= in_fence[1]:
+                in_fence = None
+            i += 1
+            continue
+        if in_fence is not None or _LEGACY_INDENTED_BULLET.match(lines[i]) is None:
+            i += 1
+            continue
+
+        start = i
+        while i < len(lines) and _LEGACY_INDENTED_BULLET.match(lines[i]):
+            i += 1
+        end = i
+        prev = start - 1
+        while prev >= 0 and not lines[prev].strip():
+            prev -= 1
+        nxt = end
+        while nxt < len(lines) and not lines[nxt].strip():
+            nxt += 1
+        ordered_before = any(
+            _ORDERED_LIST_LINE.match(lines[j])
+            for j in range(max(0, prev - 12), prev + 1)
+        )
+        prev_indent = len(lines[prev]) - len(lines[prev].lstrip()) if prev >= 0 else 0
+        heading_after = nxt < len(lines) and lines[nxt].startswith("#")
+        actions = [lines[idx][4:].lower() for idx in range(start, end)]
+        pr_23186_signature = end - start == 4 and all(
+            needle in action
+            for needle, action in zip(
+                ("добавляем новую группу колец", "снимаем флаг", "выставляем флаг", "удаляем старую группу колец"),
+                actions,
+                strict=True,
+            )
+        )
+        if ordered_before and prev_indent >= 5 and heading_after and pr_23186_signature:
+            candidates.append((start, end))
+
+    for start, end in candidates:
+        for idx in range(start, end):
+            # Three spaces keep the bullets inside the preceding ordered item,
+            # matching the structure produced by the Markdown renderer.
+            lines[idx] = lines[idx][1:]
+    result = "\n".join(lines)
+    return result + "\n" if text.endswith("\n") else result
 
 
 def normalize_legacy_markdown_structure(text: str) -> str:
     """Canonicalize unambiguous legacy syntax that Diplodoc rejects."""
+    text = _normalize_pr_23186_indented_bullet_run(text)
     had_final_newline = text.endswith("\n")
     out: list[str] = []
     open_fence: tuple[str, int, str] | None = None
