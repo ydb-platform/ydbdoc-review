@@ -108,6 +108,28 @@ def test_parse_critic_response_ok():
     assert out.issues[0].segment_id == "s1"
 
 
+def test_parse_critic_response_fills_omitted_issue_metadata():
+    raw = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "description": "The translation is incomplete.",
+                    "suggested_text": "Complete translation.",
+                }
+            ],
+        }
+    )
+
+    out = parse_critic_response(raw)
+
+    assert out.verdict == "blocked"
+    assert out.issues[0].severity == "blocked"
+    assert out.issues[0].category == "translation_quality"
+    assert out.issues[0].comment == "The translation is incomplete."
+
+
 def test_apply_critic_fixes_applies_valid_suggestion():
     seg = _segment("s1", "Use ⟦C1⟧ flag")
     translations = {"s1": "Bad text"}

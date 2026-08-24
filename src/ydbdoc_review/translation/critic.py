@@ -167,10 +167,32 @@ def parse_critic_response(raw: str) -> CriticResponse:
     data = parse_json_content(raw)
     if isinstance(data, dict):
         verdict_raw = data.get("verdict")
+        normalized_verdict: CriticVerdict | None = None
         if isinstance(verdict_raw, str):
-            normalized = normalize_critic_verdict_value(verdict_raw)
-            if normalized is not None:
-                data = {**data, "verdict": normalized}
+            normalized_verdict = normalize_critic_verdict_value(verdict_raw)
+            if normalized_verdict is not None:
+                data = {**data, "verdict": normalized_verdict}
+        issues = data.get("issues")
+        if isinstance(issues, list):
+            default_severity = (
+                "blocked" if normalized_verdict == "blocked" else "warning"
+            )
+            normalized_issues: list[object] = []
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    normalized_issues.append(issue)
+                    continue
+                normalized_issue = dict(issue)
+                normalized_issue.setdefault("severity", default_severity)
+                normalized_issue.setdefault("category", "translation_quality")
+                if not normalized_issue.get("comment"):
+                    normalized_issue["comment"] = (
+                        normalized_issue.get("description")
+                        or normalized_issue.get("suggested_text")
+                        or "Critic reported a translation issue."
+                    )
+                normalized_issues.append(normalized_issue)
+            data = {**data, "issues": normalized_issues}
     try:
         return CriticResponse.model_validate(data)
     except Exception as exc:
