@@ -130,6 +130,25 @@ def test_parse_critic_response_fills_omitted_issue_metadata():
     assert out.issues[0].comment == "The translation is incomplete."
 
 
+def test_parse_critic_response_ignores_bare_rewrite_without_diagnosis():
+    raw = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "suggested_text": "The current translation.",
+                }
+            ],
+        }
+    )
+
+    out = parse_critic_response(raw)
+
+    assert out.verdict == "ok"
+    assert out.issues == []
+
+
 def test_apply_critic_fixes_applies_valid_suggestion():
     seg = _segment("s1", "Use ⟦C1⟧ flag")
     translations = {"s1": "Bad text"}

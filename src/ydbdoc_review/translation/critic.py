@@ -182,6 +182,18 @@ def parse_critic_response(raw: str) -> CriticResponse:
                 if not isinstance(issue, dict):
                     normalized_issues.append(issue)
                     continue
+                # Some critic models emit a bare rewrite with no diagnosis.
+                # It is not an actionable issue and often repeats the current
+                # translation verbatim, so treating it as blocked creates a
+                # false failure and an endless fixup loop.
+                if (
+                    issue.get("suggested_text")
+                    and not issue.get("severity")
+                    and not issue.get("category")
+                    and not issue.get("comment")
+                    and not issue.get("description")
+                ):
+                    continue
                 normalized_issue = dict(issue)
                 normalized_issue.setdefault("severity", default_severity)
                 normalized_issue.setdefault("category", "translation_quality")
@@ -193,6 +205,8 @@ def parse_critic_response(raw: str) -> CriticResponse:
                     )
                 normalized_issues.append(normalized_issue)
             data = {**data, "issues": normalized_issues}
+            if issues and not normalized_issues:
+                data["verdict"] = "ok"
     try:
         return CriticResponse.model_validate(data)
     except Exception as exc:
