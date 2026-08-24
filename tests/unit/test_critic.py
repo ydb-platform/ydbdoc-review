@@ -149,6 +149,23 @@ def test_parse_critic_response_ignores_bare_rewrite_without_diagnosis():
     assert out.issues == []
 
 
+def test_apply_critic_fixes_skips_cyrillic_suggestion():
+    seg = _segment("s1", "Name in `Name=Value,...@<domain>` notation.")
+    issues = [
+        CriticIssueOut(
+            segment_id="s1",
+            severity="blocked",
+            category="residual_cyrillic",
+            comment="Cyrillic in EN",
+            suggested_text="Name in `Имя=Значение,...@<domain>` notation.",
+        )
+    ]
+    updated, applied, skipped = apply_critic_fixes({"s1": seg.text}, [seg], issues)
+    assert applied == []
+    assert skipped == issues
+    assert updated["s1"] == seg.text
+
+
 def test_apply_critic_fixes_applies_valid_suggestion():
     seg = _segment("s1", "Use ⟦C1⟧ flag")
     translations = {"s1": "Bad text"}

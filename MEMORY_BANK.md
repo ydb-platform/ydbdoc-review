@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-24
-**Current focus:** §6.220 — resilient critic JSON repair and model fallback (#50904).
+**Current focus:** §6.221 — EN fragment/notation repair; block critic Cyrillic rewrites (#40385 / #50976).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-24 | **§6.221** — remap RU autogen link fragments to EN explicit anchors; fix ``Имя=Значение`` notation; reject critic EN fixes that reintroduce Cyrillic (#40385 / #50976) |
 | 2026-08-24 | **§6.220** — critic malformed JSON: repair once on primary, then retry original prompt on configured fallback; retain fail-closed verdict (#50904) |
 | 2026-08-23 | **§6.204** — buildable legacy-source normalization: canonical fence closers, missing peer-tab closers, unmatched YFM closers, empty overlay include indentation; exact #50741 `./ya make ydb/docs` is green |
 | 2026-08-23 | **§6.203** — preserve per-line RU indentation inside stable translated fenced blocks (#37673 / #50741) |

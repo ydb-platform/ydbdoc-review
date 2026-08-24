@@ -118,4 +118,8 @@ def build_heading_anchor_map(source: Document, target: Document) -> dict[str, st
                 decoded = unquote(src_h.anchor)
                 if decoded != src_h.anchor:
                     mapping[decoded] = en_explicit
+                # RU links often use Diplodoc auto-slugs while the heading keeps
+                # an explicit ``{#id}`` (e.g. ``#информация-…-users`` → ``#users``).
+                if ru_auto and en_explicit:
+                    mapping[ru_auto] = en_explicit
     return mapping

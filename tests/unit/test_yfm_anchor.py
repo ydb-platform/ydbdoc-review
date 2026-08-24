@@ -48,6 +48,13 @@ def test_cyrillic_anchor_parsed_and_rendered_in_english():
     assert "### Description of fields in the response {#fields-Описание}" in out
 
 
+def test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit():
+    ru = parse_markdown("### Информация о пользователях {#users}\n")
+    en = parse_markdown("### Information about users {#users}\n")
+    mapping = build_heading_anchor_map(ru, en)
+    assert mapping["информация-о-пользователях"] == "users"
+
+
 def test_build_heading_anchor_map_auto_and_explicit():
     ru = parse_markdown(
         "## Векторный поиск\n\n"

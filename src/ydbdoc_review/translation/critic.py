@@ -387,6 +387,15 @@ def apply_critic_fixes(
             logger.warning("Skipping critic fix for %s: %s", issue.segment_id, exc)
             skipped.append(issue)
             continue
+        from ydbdoc_review.validation.heuristics import check_cyrillic_in_en
+
+        if check_cyrillic_in_en(issue.suggested_text, target_lang="en"):
+            logger.warning(
+                "Skipping critic fix for %s: suggested_text introduces Cyrillic in EN",
+                issue.segment_id,
+            )
+            skipped.append(issue)
+            continue
         updated[issue.segment_id] = issue.suggested_text
         applied.append(issue)
 

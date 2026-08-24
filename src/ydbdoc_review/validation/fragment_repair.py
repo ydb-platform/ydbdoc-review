@@ -19,6 +19,8 @@ import re
 from collections.abc import Callable
 from pathlib import PurePosixPath
 
+from urllib.parse import unquote
+
 from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.ast_types import Heading
 from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
@@ -33,6 +35,7 @@ from ydbdoc_review.validation.yfm_anchor import _iter_headings
 DocsReader = Callable[[str], str | None]
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+_CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 
 
 def _resolve_href_path(page_path: str, href_path: str) -> str | None:
@@ -203,6 +206,49 @@ def _find_href_declaring_frag_via_toc(
     return None
 
 
+def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | None:
+    """When a Cyrillic/auto slug is missing on EN, map via paired headings."""
+    from urllib.parse import unquote
+
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.validation.yfm_anchor import (
+        _heading_plain_text,
+        _iter_headings,
+        build_heading_anchor_map,
+        diplodoc_auto_slug,
+    )
+
+    decoded = unquote(frag)
+    ru_doc = parse_markdown(ru_md)
+    en_doc = parse_markdown(en_md)
+    anchor_map = build_heading_anchor_map(ru_doc, en_doc)
+    if decoded in anchor_map:
+        return anchor_map[decoded]
+    if frag in anchor_map:
+        return anchor_map[frag]
+
+    ru_heads = list(_iter_headings(ru_doc.children))
+    en_heads = list(_iter_headings(en_doc.children))
+    for src_h, tgt_h in zip(ru_heads, en_heads, strict=False):
+        ru_text = _heading_plain_text(src_h)
+        ru_auto = diplodoc_auto_slug(ru_text)
+        en_anchor = tgt_h.anchor
+        en_auto = diplodoc_auto_slug(_heading_plain_text(tgt_h))
+        if ru_auto and (decoded == ru_auto or decoded.startswith(f"{ru_auto}-")):
+            if en_anchor and en_anchor.isascii():
+                return en_anchor
+            if en_auto:
+                return en_auto
+        if src_h.anchor and (
+            decoded == src_h.anchor or decoded.startswith(f"{src_h.anchor}-")
+        ):
+            if en_anchor:
+                return en_anchor
+            if en_auto:
+                return en_auto
+    return None
+
+
 def repair_en_fragments(
     en_text: str,
     *,
@@ -254,6 +300,24 @@ def repair_en_fragments(
             read_text=read_text,
         ):
             continue
+
+        # 0) Remap stale RU auto-slugs to EN explicit anchors on the target page.
+        ru_abs = abs_path.replace("/docs/en/", "/docs/ru/", 1)
+        ru_target = read_text(ru_abs)
+        if en_target and ru_target and _CYRILLIC.search(unquote(frag)):
+            new_frag = _remap_fragment_via_ru_en_pages(frag, ru_target, en_target)
+            if (
+                new_frag
+                and new_frag != frag
+                and fragment_declared_in_markdown(
+                    en_target,
+                    new_frag,
+                    page_path=abs_path,
+                    read_text=read_text,
+                )
+            ):
+                out = _rewrite_href(out, href, f"{path_part}#{new_frag}")
+                continue
 
         # 1) Prefer EN baseline autotitle path when it actually declares the frag.
         base_href = en_base_by_frag.get(frag) or ""

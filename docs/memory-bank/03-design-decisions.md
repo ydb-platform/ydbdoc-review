@@ -5075,4 +5075,32 @@ empty completions. Exhaustion remains fail-closed as
 selection, original-prompt restoration for fallback, and blocking exhaustion.
 
 
+### §6.221 EN fragment and notation repair; reject Cyrillic critic rewrites (#40385 / #50976, 2026-08-24)
+
+**Problem:** Translation PR [#50976](https://github.com/ydb-platform/ydb/pull/50976)
+for merged source [#40385](https://github.com/ydb-platform/ydb/pull/40385) stayed
+🔴 after multiple critic fixup rounds. Independent review found EN
+``authentication.md`` still containing Cyrillic ``Имя=Значение`` inside inline
+code and a system-view link
+``../dev/system-views.md#информация-о-пользователях-users`` while the EN target
+page declares ``{#users}``. A critic fixup commit explicitly reverted a good
+``Name=Value`` translation back to the RU atom.
+
+**Decision:**
+
+1. ``build_heading_anchor_map`` maps RU Diplodoc auto-slugs to the paired EN
+   explicit ``{#id}`` when present (overrides generic EN auto-slug).
+2. ``repair_en_fragments`` step 0 remaps unresolved cross-page fragments via the
+   RU/EN target page pair before baseline/RU autotitle fallbacks.
+3. ``postprocess_en_target_markdown`` deterministically maps
+   ``Имя=Значение`` → ``Name=Value`` inside inline backticks.
+4. ``apply_critic_fixes`` rejects ``suggested_text`` that introduces Cyrillic
+   into EN segments (prevents “align with source atom” regressions).
+
+**Tests:** ``test_pr_40385_system_views_users_fragment``,
+``test_postprocess_fixes_certificate_notation_in_backticks``,
+``test_apply_critic_fixes_skips_cyrillic_suggestion``,
+``test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
