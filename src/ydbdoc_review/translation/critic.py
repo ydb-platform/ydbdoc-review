@@ -105,24 +105,60 @@ def _fetch_critic_response(
     pass_label: str,
     max_tokens: int | None = None,
 ) -> CriticResponse:
-    """Call critic model with parse retries; fallback instead of raising."""
+    """Call critic with JSON repair and a model fallback before failing closed."""
     last_exc: LLMParseError | None = None
+    original_messages = list(messages)
+    retry_messages = original_messages
+    model_chain = client.model_chain_for_role("critic")
     for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
+        content = ""
+        # First retry asks the primary model to repair its malformed response.
+        # The final retry uses the configured fallback with the original prompt,
+        # avoiding a deterministic loop on the same model and payload.
+        model = model_chain[0]
+        if attempt == _MAX_CRITIC_ATTEMPTS and len(model_chain) > 1:
+            model = model_chain[1]
+            retry_messages = original_messages
         try:
-            result = client.chat(messages, role="critic", max_tokens=max_tokens)
+            result = client.chat(
+                retry_messages,
+                model=model,
+                max_tokens=max_tokens,
+            )
             content = (result.content or "").strip()
             if not content:
                 raise LLMParseError("Empty LLM response")
             return parse_critic_response(content)
         except LLMParseError as exc:
             last_exc = exc
+            preview = content[:200]
             logger.warning(
-                "%s parse attempt %s/%s failed: %s",
+                "%s parse attempt %s/%s failed: %s; model=%s "
+                "response_chars=%s response_preview=%r",
                 pass_label,
                 attempt,
                 _MAX_CRITIC_ATTEMPTS,
                 exc,
+                model,
+                len(content),
+                preview,
             )
+            if attempt == 1 and content:
+                retry_messages = [
+                    *original_messages,
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON. Return the same "
+                            "critic result as one valid JSON object matching the requested "
+                            "schema. Return JSON only, without Markdown fences or prose."
+                        ),
+                    },
+                ]
     return _fallback_critic_response(reason=str(last_exc or "unknown parse error"))
 
 

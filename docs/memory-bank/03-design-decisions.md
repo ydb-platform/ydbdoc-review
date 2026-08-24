@@ -5053,4 +5053,26 @@ Embedded UI redirects. Both cases have regression coverage and retain exact
 semantic changes only.
 
 
+### §6.220 Critic JSON failures use repair and a different model
+
+Production verify of #50904 called ``yandexgpt-5.1`` three times for the first
+``node-authorization.md`` batch. Every request returned HTTP 200, but all three
+responses were non-JSON and together contained only 48 completion tokens. A
+direct CLI smoke test proved that credentials, folder quota, ordinary generation,
+and JSON generation on the same model were healthy. Repeating an identical
+request against one model therefore hid a response-specific failure rather than
+improving availability.
+
+Critic parsing now has a bounded, heterogeneous recovery sequence. The initial
+request uses the configured primary critic. After malformed non-empty output,
+the second request includes that output and explicitly asks the primary model to
+repair it into the required JSON schema. If parsing still fails, the third request
+uses the configured critic fallback with the original prompt. Empty and malformed
+responses log model, character count, and a bounded response preview; the LLM
+client already logs finish reason, usage, request size, and completion id for
+empty completions. Exhaustion remains fail-closed as
+``critic_execution_failed``. Unit regressions prove repair success, fallback
+selection, original-prompt restoration for fallback, and blocking exhaustion.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

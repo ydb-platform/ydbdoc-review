@@ -287,6 +287,45 @@ def test_run_critic_retries_then_parses():
     assert out.verdict == "ok"
 
 
+def test_run_critic_repairs_invalid_json_then_parses():
+    raw = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(["not json", raw])
+    seg = _segment("s1", "x")
+
+    out = run_critic(
+        client,
+        segments=[seg],
+        translations={"s1": "EN x"},
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+
+    assert out.verdict == "ok"
+    calls = client._client.chat.completions.create.call_args_list
+    repair_prompt = calls[1].kwargs["messages"][-1]["content"]
+    assert "previous response was not valid JSON" in repair_prompt
+
+
+def test_run_critic_uses_fallback_model_after_two_parse_failures():
+    raw = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(["not json", "still not json", raw])
+    seg = _segment("s1", "x")
+
+    out = run_critic(
+        client,
+        segments=[seg],
+        translations={"s1": "EN x"},
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+
+    assert out.verdict == "ok"
+    calls = client._client.chat.completions.create.call_args_list
+    assert calls[0].kwargs["model"].endswith("/yandexgpt-5.1")
+    assert calls[2].kwargs["model"].endswith("/yandexgpt-5-lite")
+    assert calls[2].kwargs["messages"] == calls[0].kwargs["messages"]
+
+
 def test_run_critic_merges_multiple_batches():
     long_text = "x" * 3000
     seg1 = _segment("s1", long_text)
