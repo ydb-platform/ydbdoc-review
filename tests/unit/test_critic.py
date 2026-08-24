@@ -10,6 +10,7 @@ from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.critic import (
+    _fallback_critic_response,
     apply_critic_fixes,
     merge_critic_responses,
     merge_verdicts,
@@ -21,6 +22,13 @@ from ydbdoc_review.translation.critic import (
 )
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
+
+
+def test_critic_parse_failure_is_blocking():
+    response = _fallback_critic_response(reason="invalid JSON")
+
+    assert response.verdict == "blocked"
+    assert response.issues[0].category == "critic_execution_failed"
 
 
 def _segment(seg_id: str, text: str) -> Segment:
@@ -261,8 +269,8 @@ def test_run_critic_empty_response_fallback():
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
-    assert out.verdict == "warnings"
-    assert out.issues == []
+    assert out.verdict == "blocked"
+    assert out.issues[0].category == "critic_execution_failed"
 
 
 def test_run_critic_retries_then_parses():
@@ -348,8 +356,8 @@ def test_run_verify_empty_response_fallback():
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
-    assert out.verdict == "warnings"
-    assert out.issues == []
+    assert out.verdict == "blocked"
+    assert out.issues[0].category == "critic_execution_failed"
 
 
 def test_run_verify_calls_llm():

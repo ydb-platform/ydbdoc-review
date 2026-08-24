@@ -80,6 +80,7 @@ stable cross-references — use them when linking between files.
 | 2026-08-23 | **§6.216** — project skill «Проверка перевода»: independent semantic review + current-SHA green critic + green CI + mergeability |
 | 2026-08-24 | **§6.217** — formatting-only RU diffs preserve EN through every pipeline boundary; production #49933 rerun creates no branch/PR |
 | 2026-08-24 | **§6.218** — #45949 incremental href repair changes only RU-delta positions; merged-PR TOC uses historical RU base and honors removals |
+| 2026-08-24 | **§6.219** — structural href/redirect changes bypass LLM; redirect impact closure; critic fail-closed; post-fixup verify reruns on current SHA |
 | 2026-08-23 | **§6.212** — doc_continue loads bounded parent transcript into translation and inline-critic prompts; context is consumed, not only existence-checked |
 | 2026-08-23 | **§6.210** — old merged PR differential uses merge parent as RU base; prevents zero-delta no-op omissions (#40385 / #50840) |
 | 2026-08-23 | **§6.209** — green critic requires complete source scope; merged PRs use API-only changes and verify blocks omitted EN files (#40385 / #50838) |

@@ -417,7 +417,7 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
     assert result.heuristic_blocking or result.heuristic_warnings
 
 
-def test_translate_file_survives_empty_critic_response():
+def test_translate_file_blocks_on_empty_critic_response():
     source = "Привет.\n"
     segments = extract_segments(parse_markdown(source))
     seg_id = segments[0].id
@@ -434,6 +434,6 @@ def test_translate_file_survives_empty_critic_response():
     )
 
     assert "Hello." in result.final_text
-    assert result.verdict == "ok"
+    assert result.verdict == "blocked"
     assert result.critic_initial is not None
-    assert result.critic_initial.issues == []
+    assert result.critic_initial.issues[0].category == "critic_execution_failed"

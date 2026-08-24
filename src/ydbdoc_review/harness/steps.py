@@ -205,6 +205,12 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         prompt_version=ctx.prompt_version,
         max_chars=ctx.batch_chars,
     )
+    if any(
+        issue.category == "critic_execution_failed"
+        for issue in state.critic_initial.issues
+    ):
+        state.critic_unresolved = state.critic_initial
+        return
     actionable_issues = drop_spurious_placeholder_issues(
         state.critic_initial.issues,
         state.segments,

@@ -106,6 +106,11 @@ from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
     apply_include_target_checks,
 )
+from ydbdoc_review.validation.redirect_impacts import (
+    added_redirects,
+    mirror_redirects_to_en,
+    retarget_redirect_inbound_links,
+)
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
@@ -616,6 +621,37 @@ def run_doc_translate(
             dry_run=dry_run,
             docs_root=cfg.paths.docs_root,
         )
+        redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
+        if any(path == redirects_path for path, _kind in changes):
+            redirects_current = (
+                read_text_at_ref(repo_path, ru_ref, redirects_path)
+                if ru_ref
+                else read_text(repo_path, redirects_path)
+            ) or ""
+            redirects_base = read_text_at_ref(
+                repo_path, ru_base_ref or merge_base_with, redirects_path
+            ) or ""
+            redirect_mappings = added_redirects(redirects_base, redirects_current)
+            impact_paths = retarget_redirect_inbound_links(
+                repo_path,
+                redirect_mappings,
+                docs_root=cfg.paths.docs_root,
+                dry_run=dry_run,
+            )
+            redirects_worktree = (
+                read_text(repo_path, redirects_path) or redirects_current
+            )
+            mirrored_redirects = mirror_redirects_to_en(
+                redirects_worktree, redirect_mappings
+            )
+            if mirrored_redirects != redirects_worktree:
+                impact_paths.append(redirects_path)
+                if not dry_run:
+                    write_text(repo_path, redirects_path, mirrored_redirects)
+            touched = TouchedPaths(
+                list(dict.fromkeys([*touched.written, *impact_paths])),
+                touched.deleted,
+            )
 
     committed = pushed = False
     if touched and not dry_run and not no_commit:
@@ -766,6 +802,7 @@ def run_doc_verify(
     continue_feedback: str | None = None,
     skip_ops_gates: bool = False,
     ops_mode: str = "verify",
+    _fixup_rerun_depth: int = 0,
 ) -> DocJobResult:
     """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
@@ -1106,13 +1143,14 @@ def run_doc_verify(
     job.pr_result = pr_result
 
     touched = _apply_results_to_disk(
-            repo_path,
-            pr_result,
-            dry_run=dry_run,
-            docs_root=cfg.paths.docs_root,
-        )
+        repo_path,
+        pr_result,
+        dry_run=dry_run,
+        docs_root=cfg.paths.docs_root,
+    )
 
     committed = pushed = False
+    inline_head_changed = False
     fixup_pr_number: int | None = None
     fixup_pr_url: str | None = None
     if touched and not dry_run and not no_commit:
@@ -1137,6 +1175,7 @@ def run_doc_verify(
             paths=touched.written,
             deleted_paths=touched.deleted,
         )
+        head_before_fixup = git_head_sha(repo_path)
         committed = git_commit_paths(
             repo_path,
             touched.written,
@@ -1145,6 +1184,7 @@ def run_doc_verify(
             _GITHUB_ACTOR_EMAIL,
             deleted_paths=touched.deleted,
         )
+        inline_head_changed = committed and git_head_sha(repo_path) != head_before_fixup
         if committed:
             if not inline_fixup_push:
                 _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
@@ -1177,6 +1217,37 @@ def run_doc_verify(
             pushed = True
     job.committed = committed
     job.pushed = pushed
+
+    # A report is evidence about one immutable checkout. Inline critic fixes
+    # change the translation PR head, so the old result must never be posted as
+    # current. Re-run verify on the new head and report that result (§6.219).
+    if pushed and inline_fixup_push and inline_head_changed and not dry_run:
+        if _fixup_rerun_depth >= 2:
+            pr_result.completeness_gaps = list(
+                dict.fromkeys(
+                    [*pr_result.completeness_gaps, "critic_fixup_did_not_stabilize"]
+                )
+            )
+        else:
+            logger.info(
+                "Inline critic fix changed PR #%s head; re-running doc_verify (%s/2)",
+                pr_number,
+                _fixup_rerun_depth + 1,
+            )
+            return run_doc_verify(
+                repo_path=repo_path,
+                github_repo=github_repo,
+                pr_number=pr_number,
+                merge_base_with=merge_base_with,
+                dry_run=False,
+                no_commit=no_commit,
+                config=cfg,
+                inherited_completeness_gaps=inherited_completeness_gaps,
+                continue_feedback=continue_feedback,
+                skip_ops_gates=True,
+                ops_mode=ops_mode,
+                _fixup_rerun_depth=_fixup_rerun_depth + 1,
+            )
 
     elapsed = time.monotonic() - started
     if dry_run:

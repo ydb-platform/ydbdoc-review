@@ -22,6 +22,30 @@ _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
 _HTTP = re.compile(r"^https?://", re.IGNORECASE)
 
 
+def _link_skeleton(text: str, links: list[re.Match[str]]) -> str:
+    out: list[str] = []
+    cursor = 0
+    for match in links:
+        out.append(text[cursor : match.start()])
+        out.append(f"[{match.group(1)}](<href>)")
+        cursor = match.end()
+    out.append(text[cursor:])
+    return "".join(out)
+
+
+def is_href_only_change(base: str | None, current: str | None) -> bool:
+    """True when two Markdown texts differ only in link destinations."""
+    if base is None or current is None or base == current:
+        return False
+    base_links = list(_MD_LINK.finditer(base))
+    current_links = list(_MD_LINK.finditer(current))
+    return (
+        bool(base_links)
+        and len(base_links) == len(current_links)
+        and _link_skeleton(base, base_links) == _link_skeleton(current, current_links)
+    )
+
+
 def _is_internal_href(href: str) -> bool:
     href = href.strip()
     if not href or href.startswith("mailto:") or _HTTP.match(href):
@@ -303,6 +327,53 @@ def _iter_md_links(text: str) -> list[tuple[str, str, int, int]]:
     return out
 
 
+def apply_href_only_delta(
+    source_base: str | None,
+    source_current: str,
+    target_baseline: str | None,
+) -> str | None:
+    """Apply a pure RU Markdown-link target delta to EN without an LLM.
+
+    Returns ``None`` when the source edit contains anything except href
+    replacements or when an old target cannot be matched unambiguously.
+    """
+    if not source_base or target_baseline is None:
+        return None
+    base_links = list(_MD_LINK.finditer(source_base))
+    current_links = list(_MD_LINK.finditer(source_current))
+    if len(base_links) != len(current_links) or not base_links:
+        return None
+
+    if not is_href_only_change(source_base, source_current):
+        return None
+    changes = [
+        (before.group(2).strip(), after.group(2).strip())
+        for before, after in zip(base_links, current_links, strict=True)
+        if before.group(2).strip() != after.group(2).strip()
+    ]
+    if not changes:
+        return None
+
+    out = target_baseline
+    for old_href, new_href in changes:
+        target_links = list(_MD_LINK.finditer(out))
+        old_matches = [m for m in target_links if m.group(2).strip() == old_href]
+        if len(old_matches) == 1:
+            match = old_matches[0]
+            out = (
+                out[: match.start()]
+                + f"[{match.group(1)}]({new_href})"
+                + out[match.end() :]
+            )
+            continue
+        if not old_matches and any(
+            m.group(2).strip() == new_href for m in target_links
+        ):
+            continue  # Proven accepted no-op: EN main already has the target.
+        return None
+    return out
+
+
 def restore_md_link_hrefs(
     translated: str,
     source_ru: str,
@@ -371,7 +442,7 @@ def restore_md_link_hrefs(
         pieces: list[str] = []
         cursor = len(out)
         for (elabel, _ehref, start, end), (_rlabel, rhref, _rs, _re) in zip(
-            reversed(en_links), reversed(ru_links)
+            reversed(en_links), reversed(ru_links), strict=True
         ):
             pieces.append(out[end:cursor])
             pieces.append(f"[{elabel}]({rhref})")

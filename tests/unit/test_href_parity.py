@@ -4,12 +4,33 @@ from __future__ import annotations
 
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
+    apply_href_only_delta,
     check_heading_anchor_parity,
     check_href_parity,
     check_inbound_fragments,
     collect_internal_hrefs,
+    is_href_only_change,
     restore_md_link_hrefs,
 )
+
+
+def test_apply_href_only_delta_preserves_target_bytes_except_changed_href():
+    ru_base = "Before. [Авторизация](../manual/node.md). After. [CMS](cms.md).\n"
+    ru_now = "Before. [Авторизация](../concepts/node.md). After. [CMS](cms.md).\n"
+    en = "Before. [Authorization](../manual/node.md). After. [CMS](cms.md).\n"
+
+    assert apply_href_only_delta(ru_base, ru_now, en) == (
+        "Before. [Authorization](../concepts/node.md). After. [CMS](cms.md).\n"
+    )
+
+
+def test_apply_href_only_delta_rejects_ambiguous_target():
+    ru_base = "[A](old.md)\n"
+    ru_now = "[A](new.md)\n"
+    en = "[One](old.md) and [Two](old.md)\n"
+
+    assert apply_href_only_delta(ru_base, ru_now, en) is None
+    assert is_href_only_change(ru_base, ru_now)
 
 
 def test_restore_md_link_hrefs_applies_only_ru_delta():

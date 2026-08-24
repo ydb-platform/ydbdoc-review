@@ -18,7 +18,9 @@ from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
+    apply_href_only_delta,
     insert_missing_autotitle_list_items,
+    is_href_only_change,
     restore_md_link_hrefs,
 )
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
@@ -61,6 +63,35 @@ def run_pair_plan(
         )
 
     existing_target = _read_target_text(content, plan)
+    if (
+        plan.action == "critic_only"
+        and is_href_only_change(content.en_base_text, existing_target)
+    ):
+        logger.info(
+            "Deterministic href-only target %s; critic is read-only/bypassed",
+            plan.target_path,
+        )
+        return PairRunResult(
+            plan=plan,
+            target_text=existing_target,
+            source_text=source_text,
+        )
+    if plan.action == "translate_to_en" and existing_target is not None:
+        deterministic = apply_href_only_delta(
+            content.ru_base_text,
+            source_text,
+            content.en_base_text or existing_target,
+        )
+        if deterministic is not None:
+            logger.info(
+                "Deterministic href-only translation for %s; bypassing LLM and repairs",
+                plan.target_path,
+            )
+            return PairRunResult(
+                plan=plan,
+                target_text=deterministic,
+                source_text=source_text,
+            )
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
     enable_critic = plan.action != "skip"
     profile = TRANSLATE_PROFILE if enable_translate else VERIFY_PROFILE

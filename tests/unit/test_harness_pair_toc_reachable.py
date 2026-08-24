@@ -111,6 +111,44 @@ def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
     assert result.target_text == "# EN\n\nText.\n"
 
 
+def test_href_only_pair_bypasses_llm_and_repairs():
+    """#45949: href-only source deltas are deterministic and byte-preserving."""
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+        en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+        ru_changed=True,
+    )
+    content = PairContent(
+        pair=pair,
+        ru_base_text="До [узлы](../manual/node.md).\n",
+        ru_text="До [узлы](../concepts/node.md).\n",
+        en_base_text="Before [nodes](../manual/node.md).\n",
+        en_text="Before [nodes](../manual/node.md).\n",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="href-only",
+    )
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=load_config(
+            env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}
+        ),
+    )
+
+    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        result = run_pair_plan(content, plan, parent, {})
+
+    harness.assert_not_called()
+    assert result.target_text == "Before [nodes](../concepts/node.md).\n"
+
+
 def test_semantic_noop_bypasses_pair_link_stripping_exactly():
     """#49933/#50888: pair post-pass must not mutate byte-preserved EN."""
     pair = DocPair(

@@ -5014,4 +5014,35 @@ the four-link permutation from #45949 and deletion of the stale manual TOC
 entry.
 
 
+### §6.219 Structural documentation changes are deterministic and SHA-safe
+
+Production rerun #45949 → #50895 proved that post-hoc href repair is not a
+safe substitute for classifying the source delta. Both href-only files were
+processed in zero seconds and silently kept stale EN. Inline ``doc_verify``
+then removed the old link from ``dynamic-config.md`` and reformatted unrelated
+lists and fences. Its report described the pre-fixup SHA, while the branch had
+already advanced. The critic also failed JSON parsing three times and the old
+fallback treated that execution failure as a warning with no issues.
+
+Pure Markdown href deltas now take a deterministic path before ``FileHarness``:
+the byte-exact current EN baseline is patched only where a unique old href
+matches. LLM translation, critic editing, finalization, structural repair, and
+layout repair are bypassed. A matching new href with no old href is a proved
+accepted no-op. Ambiguous matches fall back to blocking QA rather than global
+positional rewriting. ``doc_verify`` likewise treats a translation-branch diff
+that is href-only as immutable input, preventing critic formatting churn.
+
+New redirects create an impact closure. Exact relative Markdown links in both
+RU and EN that resolve to the redirected old path are retargeted before branch
+creation, and a missing EN redirect is mirrored deterministically. This closes
+the three YFM003 failures exposed by #50895 after the old page was removed from
+toc. Critic parse exhaustion is now fail-closed with a blocking
+``critic_execution_failed`` issue.
+
+Finally, an inline critic-fixup commit invalidates the result that produced it.
+``doc_verify`` re-runs on the new head (at most twice) and only the stable pass
+publishes the final report. Failure to stabilize is an explicit completeness
+blocker, never stale green evidence.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

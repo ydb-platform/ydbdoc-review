@@ -84,9 +84,18 @@ def merge_critic_responses(responses: list[CriticResponse]) -> CriticResponse:
 
 
 def _fallback_critic_response(*, reason: str) -> CriticResponse:
-    """Safe default when critic JSON cannot be parsed after retries."""
-    logger.error("Critic skipped (%s); treating as warnings with no issues", reason)
-    return CriticResponse(verdict="warnings", issues=[])
+    """Fail closed when critic JSON cannot be parsed after retries."""
+    logger.error("Critic failed (%s); blocking verification", reason)
+    return CriticResponse(
+        verdict="blocked",
+        issues=[
+            CriticIssueOut(
+                severity="blocked",
+                category="critic_execution_failed",
+                comment=f"Critic execution failed: {reason}",
+            )
+        ],
+    )
 
 
 def _fetch_critic_response(
