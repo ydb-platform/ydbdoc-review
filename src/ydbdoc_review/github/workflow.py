@@ -638,8 +638,13 @@ def run_doc_translate(
                 docs_root=cfg.paths.docs_root,
                 dry_run=dry_run,
             )
+            # Translation branches start from current upstream main. Never
+            # write the historical source-merge copy of this global file:
+            # doing so reverted unrelated redirects in #50901.
             redirects_worktree = (
-                read_text(repo_path, redirects_path) or redirects_current
+                read_text_at_ref(repo_path, merge_base_with, redirects_path)
+                or read_text(repo_path, redirects_path)
+                or redirects_current
             )
             mirrored_redirects = mirror_redirects_to_en(
                 redirects_worktree, redirect_mappings

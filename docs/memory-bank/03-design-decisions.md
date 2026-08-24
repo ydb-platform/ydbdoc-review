@@ -5044,5 +5044,13 @@ Finally, an inline critic-fixup commit invalidates the result that produced it.
 publishes the final report. Failure to stabilize is an explicit completeness
 blocker, never stale green evidence.
 
+First production acceptance #50901 exposed two boundary details. Repository
+``write_text`` canonicalizes trailing blank lines, so href-only recognition now
+ignores trailing whitespace when deciding whether critic editing is forbidden.
+Also, redirect mirroring must patch the current upstream-main ``redirects.yaml``
+rather than the historical source merge snapshot; the latter reverted unrelated
+Embedded UI redirects. Both cases have regression coverage and retain exact
+semantic changes only.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

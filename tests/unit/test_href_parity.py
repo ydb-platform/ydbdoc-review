@@ -33,6 +33,13 @@ def test_apply_href_only_delta_rejects_ambiguous_target():
     assert is_href_only_change(ru_base, ru_now)
 
 
+def test_href_only_change_ignores_writer_trailing_blank_normalization():
+    before = "See [node](old.md).\n\n"
+    after = "See [node](new.md).\n"
+
+    assert is_href_only_change(before, after)
+
+
 def test_restore_md_link_hrefs_applies_only_ru_delta():
     """#45949: one RU href edit must not permute unrelated EN links."""
     ru_base = (

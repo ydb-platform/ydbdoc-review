@@ -42,7 +42,8 @@ def is_href_only_change(base: str | None, current: str | None) -> bool:
     return (
         bool(base_links)
         and len(base_links) == len(current_links)
-        and _link_skeleton(base, base_links) == _link_skeleton(current, current_links)
+        and _link_skeleton(base, base_links).rstrip()
+        == _link_skeleton(current, current_links).rstrip()
     )
 
 
