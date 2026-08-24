@@ -1147,12 +1147,21 @@ def run_doc_verify(
 
     job.pr_result = pr_result
 
-    touched = _apply_results_to_disk(
-        repo_path,
-        pr_result,
-        dry_run=dry_run,
-        docs_root=cfg.paths.docs_root,
-    )
+    final_read_only_verify = _fixup_rerun_depth >= 3 and inline_fixup_push
+    if final_read_only_verify:
+        logger.info(
+            "Final read-only doc_verify for PR #%s: reporting the current head "
+            "without applying further critic suggestions",
+            pr_number,
+        )
+        touched = None
+    else:
+        touched = _apply_results_to_disk(
+            repo_path,
+            pr_result,
+            dry_run=dry_run,
+            docs_root=cfg.paths.docs_root,
+        )
 
     committed = pushed = False
     inline_head_changed = False
@@ -1239,7 +1248,7 @@ def run_doc_verify(
                 pr_number=pr_number,
                 merge_base_with=merge_base_with,
                 dry_run=False,
-                no_commit=True,
+                no_commit=no_commit,
                 config=cfg,
                 inherited_completeness_gaps=inherited_completeness_gaps,
                 continue_feedback=continue_feedback,
