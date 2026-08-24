@@ -206,6 +206,89 @@ def _find_href_declaring_frag_via_toc(
     return None
 
 
+def _ru_fragment_for_same_target(
+    ru_source: str,
+    *,
+    ru_page_path: str,
+    href_path: str,
+) -> str | None:
+    """Return the RU source ``#fragment`` for the same relative ``.md`` target."""
+    ru_abs = _resolve_href_path(ru_page_path, href_path)
+    if ru_abs is None:
+        return None
+
+    def _match_href(raw_href: str) -> str | None:
+        href = raw_href.strip()
+        if "#" not in href:
+            return None
+        path_part, frag = href.rsplit("#", 1)
+        if not frag or not path_part.endswith(".md"):
+            return None
+        if _resolve_href_path(ru_page_path, path_part) == ru_abs:
+            return frag
+        return None
+
+    for match in _MD_LINK.finditer(ru_source or ""):
+        found = _match_href(match.group(2))
+        if found:
+            return found
+    for href in _AUTO_LINK.findall(ru_source or ""):
+        found = _match_href(href)
+        if found:
+            return found
+    return None
+
+
+def _try_remap_missing_fragment_via_ru_en(
+    *,
+    frag: str,
+    path_part: str,
+    en_page_path: str,
+    ru_source: str | None,
+    en_target: str,
+    read_text: DocsReader,
+) -> str | None:
+    """Map a missing EN fragment via the paired RU/EN target pages."""
+    ru_abs = _resolve_href_path(
+        en_page_path.replace("/docs/en/", "/docs/ru/", 1), path_part
+    )
+    if ru_abs is None:
+        return None
+    ru_target = read_text(ru_abs)
+    if not ru_target:
+        return None
+    ru_page_path = en_page_path.replace("/docs/en/", "/docs/ru/", 1)
+    ru_frag = _ru_fragment_for_same_target(
+        ru_source or "", ru_page_path=ru_page_path, href_path=path_part
+    )
+    # §6.174: keep RU explicit anchors on EN links (#ldap); do not retarget to
+    # EN-only ids when the link already matches the RU source fragment.
+    if ru_frag and ru_frag == frag and not _CYRILLIC.search(unquote(frag)):
+        return None
+
+    candidates: list[str] = []
+    if ru_frag:
+        candidates.append(ru_frag)
+    if _CYRILLIC.search(unquote(frag)) and frag not in candidates:
+        candidates.append(frag)
+    if not candidates:
+        return None
+    for candidate in candidates:
+        new_frag = _remap_fragment_via_ru_en_pages(candidate, ru_target, en_target)
+        if (
+            new_frag
+            and new_frag != frag
+            and fragment_declared_in_markdown(
+                en_target,
+                new_frag,
+                page_path=_resolve_href_path(en_page_path, path_part),
+                read_text=read_text,
+            )
+        ):
+            return new_frag
+    return None
+
+
 def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | None:
     """When a Cyrillic/auto slug is missing on EN, map via paired headings."""
     from urllib.parse import unquote
@@ -301,21 +384,18 @@ def repair_en_fragments(
         ):
             continue
 
-        # 0) Remap stale RU auto-slugs to EN explicit anchors on the target page.
-        ru_abs = abs_path.replace("/docs/en/", "/docs/ru/", 1)
-        ru_target = read_text(ru_abs)
-        if en_target and ru_target and _CYRILLIC.search(unquote(frag)):
-            new_frag = _remap_fragment_via_ru_en_pages(frag, ru_target, en_target)
-            if (
-                new_frag
-                and new_frag != frag
-                and fragment_declared_in_markdown(
-                    en_target,
-                    new_frag,
-                    page_path=abs_path,
-                    read_text=read_text,
-                )
-            ):
+        # 0) Remap missing fragments via the paired RU/EN target page. Covers
+        # Cyrillic auto-slugs and LLM-invented ASCII slugs (#40385 system-view).
+        if en_target:
+            new_frag = _try_remap_missing_fragment_via_ru_en(
+                frag=frag,
+                path_part=path_part,
+                en_page_path=en_page_path,
+                ru_source=ru_source,
+                en_target=en_target,
+                read_text=read_text,
+            )
+            if new_frag:
                 out = _rewrite_href(out, href, f"{path_part}#{new_frag}")
                 continue
 

@@ -5103,4 +5103,20 @@ page declares ``{#users}``. A critic fixup commit explicitly reverted a good
 ``test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit``.
 
 
+### §6.222 Remap LLM-invented EN link fragments via RU source (#40385 / #50976, 2026-08-24)
+
+**Problem:** After §6.221, ``doc_translate`` still left
+``authentication.md`` linking to ``system-views.md#system-view`` — the LLM
+invented an ASCII Diplodoc auto-slug from link text instead of preserving the
+RU fragment or mapping to EN ``{#users}``. Step 0 only ran when the fragment
+still contained Cyrillic, so the broken ASCII slug slipped through.
+
+**Decision:** When an EN cross-page ``#fragment`` is missing on the target
+page, ``repair_en_fragments`` looks up the paired RU source link to the same
+``.md`` path and remaps via ``_remap_fragment_via_ru_en_pages``. Skip when the
+EN link already matches the RU source fragment (§6.174 ``#ldap`` case).
+
+**Tests:** ``test_pr_40385_system_views_llm_invented_ascii_fragment``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

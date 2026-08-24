@@ -145,6 +145,34 @@ def test_pr_40385_system_views_users_fragment():
     assert "информация-о-пользователях" not in fixed
 
 
+def test_pr_40385_system_views_llm_invented_ascii_fragment():
+    """§6.222: LLM ``#system-view`` slug → EN explicit ``{#users}`` via RU source."""
+    en_page = "ydb/docs/en/core/security/authentication.md"
+    ru_source = (
+        "См. [системного представления](../dev/system-views.md"
+        "#информация-о-пользователях-users).\n"
+    )
+    en_bad = (
+        "See the [system view](../dev/system-views.md#system-view).\n"
+    )
+    files = {
+        "ydb/docs/en/core/dev/system-views.md": (
+            "### Information about users {#users}\n\nBody.\n"
+        ),
+        "ydb/docs/ru/core/dev/system-views.md": (
+            "### Информация о пользователях {#users}\n\nТело.\n"
+        ),
+    }
+    fixed = repair_en_fragments(
+        en_bad,
+        en_page_path=en_page,
+        read_text=files.get,
+        ru_source=ru_source,
+    )
+    assert "system-views.md#users)" in fixed
+    assert "#system-view" not in fixed
+
+
 def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
     """§6.158 / #48223: existing table.md / classifier.md must not become
     unreachable ``topic.md`` / ``create-resource-pool.md`` under ``en/core/dev/``.
