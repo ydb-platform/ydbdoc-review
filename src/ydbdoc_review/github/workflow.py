@@ -1228,10 +1228,24 @@ def run_doc_verify(
     # current. Re-run verify on the new head and report that result (§6.219).
     if pushed and inline_fixup_push and inline_head_changed and not dry_run:
         if _fixup_rerun_depth >= 2:
-            pr_result.completeness_gaps = list(
-                dict.fromkeys(
-                    [*pr_result.completeness_gaps, "critic_fixup_did_not_stabilize"]
-                )
+            logger.info(
+                "Inline critic fix changed PR #%s after the automatic rerun limit; "
+                "running one final read-only doc_verify on the new head",
+                pr_number,
+            )
+            return run_doc_verify(
+                repo_path=repo_path,
+                github_repo=github_repo,
+                pr_number=pr_number,
+                merge_base_with=merge_base_with,
+                dry_run=False,
+                no_commit=True,
+                config=cfg,
+                inherited_completeness_gaps=inherited_completeness_gaps,
+                continue_feedback=continue_feedback,
+                skip_ops_gates=True,
+                ops_mode=ops_mode,
+                _fixup_rerun_depth=_fixup_rerun_depth + 1,
             )
         else:
             logger.info(
