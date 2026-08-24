@@ -4983,5 +4983,11 @@ metadata. When ``semantic_noop`` is true, the pair runner takes
 post-pass. The pair regression uses an empty reachable set and proves that the
 pre-existing ``create-secret.md`` link still survives exactly.
 
+Production acceptance: after ``v0.1.0`` moved to ``84017d1``, clean rerun
+[32692825256](https://github.com/ydb-platform/ydb/actions/runs/32692825256)
+logged the semantic-no-op guard for both #49933 files, completed successfully,
+created neither ``ydbdoc-review/pr-49933`` nor a Translation PR, and posted
+[the expected “перевод не требуется” result](https://github.com/ydb-platform/ydb/pull/49933#issuecomment-5391050223).
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
