@@ -40,7 +40,9 @@ EN_MAIN = dedent("""
 
 def test_merge_navigation_pair_inline_toc():
     client = MagicMock()
-    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    cfg = load_config(
+        env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}
+    )
     glossary = load_glossary()
     pair = NavigationPair(
         ru_path="ydb/docs/ru/core/alter_table/toc_i.yaml",
@@ -482,6 +484,51 @@ def test_merge_navigation_pair_uses_scope_plan_for_toc_extras():
     assert "auth.md" not in result.target_text
 
 
+def test_merge_navigation_pair_removes_ru_deleted_existing_en_entry():
+    """#45949: a removed RU toc item must not be preserved as ambient EN."""
+    client = MagicMock()
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml",
+        en_path="ydb/docs/en/core/devops/deployment-options/manual/toc_p.yaml",
+        ru_changed=True,
+    )
+    ru_base = "items:\n- name: Node authorization\n  href: node-authorization.md\n"
+    ru_now = "items:\n- name: Other\n  href: other.md\n"
+    en_main = (
+        "items:\n- name: Other\n  href: other.md\n"
+        "- name: Node authorization\n  href: node-authorization.md\n"
+    )
+
+    with (
+        patch("ydbdoc_review.pipeline.navigation_merge.read_text", return_value=ru_now),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._read_navigation_baselines",
+            return_value=(ru_base, en_main),
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip",
+            return_value="page exists",
+        ),
+        patch(
+            "ydbdoc_review.pipeline.navigation_merge._translate_menu_labels",
+            return_value={},
+        ),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/tmp/repo",
+            merge_base_with="origin/main",
+            client=client,
+            glossary=load_glossary(),
+            config=cfg,
+        )
+
+    assert result.target_text is not None
+    assert "other.md" in result.target_text
+    assert "node-authorization.md" not in result.target_text
+
+
 def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
     """#41271 / #47104: EN toc reorder must not skip merge that adds json-indexes.
 
@@ -765,4 +812,3 @@ def test_pr_47856_reorder_adds_en_page_missing_from_toc():
     assert result.target_text is not None
     hrefs = [it["href"] for it in parse_toc_items(result.target_text) if it.get("href")]
     assert hrefs == ["from_select.md", "topics.md", "folder.md"]
-

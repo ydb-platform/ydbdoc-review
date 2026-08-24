@@ -303,7 +303,13 @@ def _iter_md_links(text: str) -> list[tuple[str, str, int, int]]:
     return out
 
 
-def restore_md_link_hrefs(translated: str, source_ru: str) -> str:
+def restore_md_link_hrefs(
+    translated: str,
+    source_ru: str,
+    *,
+    source_ru_base: str | None = None,
+    target_baseline: str | None = None,
+) -> str:
     """Force EN ``[label](href)`` targets to match RU (§6.174 / #49451).
 
     1. When non-autotitle internal link **counts** match, rewrite each EN href
@@ -322,6 +328,36 @@ def restore_md_link_hrefs(translated: str, source_ru: str) -> str:
 
     out = translated
     en_links = _iter_md_links(out)
+
+    # A translated page is not required to have historically identical hrefs
+    # to its RU twin.  For an incremental source change, mirror only the RU
+    # href positions that actually changed.  Rewriting every EN link by
+    # position corrupted unrelated links in #45949.
+    if source_ru_base is not None and target_baseline is not None:
+        ru_base_links = _iter_md_links(source_ru_base)
+        baseline_links = _iter_md_links(target_baseline)
+        if (
+            len(ru_base_links) == len(ru_links)
+            and len(baseline_links) == len(ru_links)
+            and len(en_links) == len(ru_links)
+        ):
+            replacements: dict[int, str] = {}
+            for idx, (before, after) in enumerate(
+                zip(ru_base_links, ru_links, strict=True)
+            ):
+                if before[1] != after[1]:
+                    replacements[idx] = after[1]
+            if replacements:
+                pieces: list[str] = []
+                cursor = len(out)
+                for idx in reversed(range(len(en_links))):
+                    label, href, start, end = en_links[idx]
+                    pieces.append(out[end:cursor])
+                    pieces.append(f"[{label}]({replacements.get(idx, href)})")
+                    cursor = start
+                pieces.append(out[:cursor])
+                return "".join(reversed(pieces))
+            return out
 
     ru_href_counts = Counter(href for _label, href, _s, _e in ru_links)
     en_href_counts = Counter(href for _label, href, _s, _e in en_links)

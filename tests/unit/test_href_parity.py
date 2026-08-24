@@ -8,7 +8,33 @@ from ydbdoc_review.validation.href_parity import (
     check_href_parity,
     check_inbound_fragments,
     collect_internal_hrefs,
+    restore_md_link_hrefs,
 )
+
+
+def test_restore_md_link_hrefs_applies_only_ru_delta():
+    """#45949: one RU href edit must not permute unrelated EN links."""
+    ru_base = (
+        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../manual/auth.md) "
+        "[CMS](glossary.md#cms)"
+    )
+    ru_now = (
+        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../concepts/auth.md) "
+        "[CMS](glossary.md#cms)"
+    )
+    en_base = ru_base
+
+    fixed = restore_md_link_hrefs(
+        en_base,
+        ru_now,
+        source_ru_base=ru_base,
+        target_baseline=en_base,
+    )
+
+    assert fixed == (
+        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../concepts/auth.md) "
+        "[CMS](glossary.md#cms)"
+    )
 
 
 def test_href_parity_requires_exact_same_links():

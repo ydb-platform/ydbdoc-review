@@ -576,6 +576,7 @@ def run_doc_translate(
                 config=cfg,
                 scope_plan=scope_plan,
                 ru_content_ref=ru_ref,
+                ru_base_ref=ru_base_ref,
                 active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
 

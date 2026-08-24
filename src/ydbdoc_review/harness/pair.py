@@ -149,7 +149,12 @@ def run_pair_plan(
                 en_page_path=plan.target_path,
                 en_toc_reachable=ctx.en_toc_reachable,
             )
-            target_text = restore_md_link_hrefs(target_text, content.ru_text)
+            target_text = restore_md_link_hrefs(
+                target_text,
+                content.ru_text,
+                source_ru_base=content.ru_base_text,
+                target_baseline=content.en_text or content.en_base_text,
+            )
             # Critic may reintroduce RU-only hrefs; strip again after restore.
             if ctx.en_toc_reachable is not None:
                 from ydbdoc_review.validation.glossary_toc_links import (

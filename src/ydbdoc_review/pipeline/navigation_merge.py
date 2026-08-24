@@ -88,6 +88,7 @@ def _read_navigation_baselines(
     *,
     ru_path: str,
     en_path: str,
+    ru_base_ref: str | None = None,
 ) -> tuple[str, str]:
     """RU at PR merge-base; EN from current upstream main (§6.44, §6.111).
 
@@ -98,7 +99,7 @@ def _read_navigation_baselines(
     EN baseline drops those entries (YFM003 / #46845). Fall back to merge-base
     EN only when the file is still absent on upstream main (new sidebar).
     """
-    mb = merge_base(repo_path, merge_base_with, "HEAD")
+    mb = ru_base_ref or merge_base(repo_path, merge_base_with, "HEAD")
     ru_text = read_text_at_ref(repo_path, mb, ru_path)
     ru_base = ru_text if ru_text is not None else ""
     en_text = read_text_at_upstream_tip(repo_path, merge_base_with, en_path)
@@ -287,6 +288,7 @@ def merge_navigation_pair(
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
+    ru_base_ref: str | None = None,
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> NavigationRunResult:
     """Produce merged EN navigation YAML for one RU/EN pair."""
@@ -330,6 +332,7 @@ def merge_navigation_pair(
         merge_base_with,
         ru_path=pair.ru_path,
         en_path=pair.en_path,
+        ru_base_ref=ru_base_ref,
     )
 
     if kind == "toc":
@@ -397,9 +400,15 @@ def merge_navigation_pair(
         name_map = _translate_menu_labels(
             client, labels, glossary, config=config
         )
-        # Keep EN-main hrefs whose .md still exists on upstream (§6.112 / #46846).
+        # Keep ambient EN-main hrefs whose page still exists, but never retain
+        # an entry explicitly removed by this RU source change (#45949).
+        removed_ru_hrefs = ru_base_hrefs - {
+            it["href"] for it in parse_toc_items(ru_pr) if it.get("href")
+        }
         keep_en_hrefs: set[str] = set()
         for href in en_main_hrefs:
+            if href in removed_ru_hrefs:
+                continue
             target = resolve_toc_target_path(pair.en_path, href)
             if (
                 read_text_at_upstream_tip(repo_path, merge_base_with, target)
@@ -656,6 +665,7 @@ def run_navigation_merges(
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
+    ru_base_ref: str | None = None,
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> list[NavigationRunResult]:
     """Merge all navigation YAML pairs with a RU change in the source PR.
@@ -685,6 +695,7 @@ def run_navigation_merges(
                 scope_plan=scope_plan,
                 extra_toc_hrefs=extra_toc_hrefs,
                 ru_content_ref=ru_content_ref,
+                ru_base_ref=ru_base_ref,
                 active_doc_ru_paths=active_doc_ru_paths,
             )
         )

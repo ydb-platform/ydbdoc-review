@@ -4990,4 +4990,28 @@ created neither ``ydbdoc-review/pr-49933`` nor a Translation PR, and posted
 [the expected “перевод не требуется” result](https://github.com/ydb-platform/ydb/pull/49933#issuecomment-5391050223).
 
 
+### §6.218 Incremental href and TOC repair must use the historical RU delta
+
+The first clean rerun of source PR #45949 produced translation PR #50891, but
+the deterministic post-pass corrupted ``dynamic-config.md``. A single RU href
+change caused every ordinary EN Markdown link to be replaced by the RU link at
+the same document position. The same run omitted the required
+``client_certificate_authorization.md`` change. Separately, the old manual TOC
+kept ``node-authorization.md`` even though the source PR explicitly removed it.
+
+For incremental translation, ``restore_md_link_hrefs`` now compares historical
+RU base with source RU and applies only href positions that actually changed.
+Existing EN links at all other positions remain byte-for-byte intact. The
+legacy whole-document repair remains available only when no baseline pair is
+provided. This also turns href-only source edits into a concrete EN change when
+the differential translator otherwise preserves the existing file.
+
+Navigation merging now receives the merged source PR's pre-merge parent as
+``ru_base_ref``. Current upstream main remains the EN baseline, but explicit RU
+removals are computed from historical RU base to source RU and are excluded
+from ``keep_en_hrefs`` even when the old EN page still exists. Regressions cover
+the four-link permutation from #45949 and deletion of the stale manual TOC
+entry.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
