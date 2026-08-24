@@ -78,7 +78,7 @@ stable cross-references — use them when linking between files.
 | 2026-08-23 | **§6.214** — href parity treats raw Unicode and percent-encoded internal fragments as URL-equivalent (#50854) |
 | 2026-08-23 | **§6.215** — green translation QA remains separate from source-document build failures; #50854 exposed a stale RU node-authorization link |
 | 2026-08-23 | **§6.216** — project skill «Проверка перевода»: independent semantic review + current-SHA green critic + green CI + mergeability |
-| 2026-08-24 | **§6.217** — formatting-only RU diffs preserve existing EN byte-for-byte at both strategy and low-magnitude harness gates (#49933 / #50789 / #50861) |
+| 2026-08-24 | **§6.217** — formatting-only RU diffs preserve existing EN through strategy, harness, and pair post-pass boundaries (#49933 / #50789 / #50861 / #50888) |
 | 2026-08-23 | **§6.212** — doc_continue loads bounded parent transcript into translation and inline-critic prompts; context is consumed, not only existence-checked |
 | 2026-08-23 | **§6.210** — old merged PR differential uses merge parent as RU base; prevents zero-delta no-op omissions (#40385 / #50840) |
 | 2026-08-23 | **§6.209** — green critic requires complete source scope; merged PRs use API-only changes and verify blocks omitted EN files (#40385 / #50838) |

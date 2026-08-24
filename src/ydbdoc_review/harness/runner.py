@@ -69,4 +69,5 @@ class FileHarness:
             segment_excerpts=state.segment_excerpts,
             segment_source_excerpts=state.segment_source_excerpts,
             segment_alignment_error=state.segment_alignment_error,
+            differential_meta=state.differential_meta,
         )

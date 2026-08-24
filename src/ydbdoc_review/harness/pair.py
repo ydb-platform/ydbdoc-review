@@ -118,8 +118,15 @@ def run_pair_plan(
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))
 
-    target_text = file_result.final_text
-    if target_text and content.ru_text:
+    differential_meta = getattr(file_result, "differential_meta", {})
+    semantic_noop = (
+        plan.action == "translate_to_en"
+        and existing_target is not None
+        and isinstance(differential_meta, dict)
+        and differential_meta.get("semantic_noop") is True
+    )
+    target_text = existing_target if semantic_noop else file_result.final_text
+    if target_text and content.ru_text and not semantic_noop:
         if plan.action == "translate_to_ru":
             target_text = restore_autotitle_hrefs(target_text, content.ru_text)
         elif plan.action in ("translate_to_en", "critic_only") and (

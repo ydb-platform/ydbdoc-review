@@ -43,6 +43,7 @@ class FileTranslationResult:
     segment_excerpts: dict[str, str] = field(default_factory=dict)
     segment_source_excerpts: dict[str, str] = field(default_factory=dict)
     segment_alignment_error: str | None = None
+    differential_meta: dict[str, object] = field(default_factory=dict)
     models_used: list[str] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0

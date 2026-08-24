@@ -111,6 +111,61 @@ def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
     assert result.target_text == "# EN\n\nText.\n"
 
 
+def test_semantic_noop_bypasses_pair_link_stripping_exactly():
+    """#49933/#50888: pair post-pass must not mutate byte-preserved EN."""
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/export/_includes/limitations.md",
+        en_path="ydb/docs/en/core/reference/export/_includes/limitations.md",
+        ru_changed=True,
+    )
+    source = "Секреты надо [создавать](../../create-secret.md).\n"
+    existing = "Secrets must be [created](../../create-secret.md).\n"
+    content = PairContent(
+        pair=pair,
+        ru_text=source,
+        en_text=existing,
+        ru_base_text=source,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="formatting-only",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+        en_toc_reachable=frozenset(),
+    )
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del state, ctx
+            result = MagicMock()
+            result.final_text = existing
+            result.differential_meta = {"semantic_noop": True}
+            return result
+
+    with (
+        patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
+        patch(
+            "ydbdoc_review.validation.glossary_toc_links.strip_unreachable_internal_links"
+        ) as strip,
+    ):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert result.target_text == existing
+    strip.assert_not_called()
+
+
 def test_run_pair_plan_restores_missing_heading_anchor_after_translate():
     """§6.191 / #49957: pair post-pass copies RU {#id} onto EN H1."""
     pair = DocPair(

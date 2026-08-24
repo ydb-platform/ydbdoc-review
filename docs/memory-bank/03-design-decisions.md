@@ -4974,5 +4974,14 @@ removed blocks is a second, authoritative semantic-no-op guard inside
 the LLM, reconstruction, or finalization. The harness regression models this
 exact production shape and asserts that ``finalize_en_target`` is not called.
 
+#50888 exposed the final boundary: ``FileHarness`` returned the preserved text,
+but discarded ``differential_meta``. ``run_pair_plan`` then unconditionally ran
+href restore and unreachable-link stripping, recreating the same destructive
+diff before the commit. ``FileTranslationResult`` now carries the differential
+metadata. When ``semantic_noop`` is true, the pair runner takes
+``existing_target`` as the authoritative result and bypasses every pair-level
+post-pass. The pair regression uses an empty reachable set and proves that the
+pre-existing ``create-secret.md`` link still survives exactly.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
