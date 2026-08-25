@@ -120,3 +120,14 @@ def test_href_only_source_noop_satisfied_for_pr_50976():
     assert not href_only_source_noop_satisfied(
         source_base, source_head, current_ru, "[YDB Monitoring](broken.md)\n"
     )
+
+
+def test_superseded_source_snapshot_is_not_forced_back_into_en():
+    source_base = "Old short monitoring page.\n"
+    source_head = "Historical expanded monitoring page.\n"
+    current_ru = "[Мониторинг](../ydb-ui/ydb-monitoring.md)\n"
+    current_en = "[Monitoring](../ydb-ui/ydb-monitoring.md)\n"
+
+    assert href_only_source_noop_satisfied(
+        source_base, source_head, current_ru, current_en
+    )
