@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.pipeline.completeness import translation_pr_scope_gaps
+from ydbdoc_review.pipeline.completeness import (
+    href_only_source_noop_satisfied,
+    translation_pr_scope_gaps,
+)
 from ydbdoc_review.pipeline.pairs import (
     DocPair,
     NavigationPair,
@@ -102,4 +105,18 @@ def test_translation_pr_scope_gaps_ignore_bilingual_source_navigation():
             already_satisfied=frozenset({"ydb/docs/en/core/toc_p.yaml"}),
         )
         == []
+    )
+
+
+def test_href_only_source_noop_satisfied_for_pr_50976():
+    source_base = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
+    source_head = "[YDB Monitoring](../embedded-ui/ydb-monitoring.md)\n"
+    current_ru = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
+    current_en = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
+
+    assert href_only_source_noop_satisfied(
+        source_base, source_head, current_ru, current_en
+    )
+    assert not href_only_source_noop_satisfied(
+        source_base, source_head, current_ru, "[YDB Monitoring](broken.md)\n"
     )

@@ -74,6 +74,7 @@ from ydbdoc_review.pipeline.analyze import (
 from ydbdoc_review.pipeline.completeness import (
     bilingual_en_mirrors,
     completeness_gaps,
+    href_only_source_noop_satisfied,
     translation_pr_scope_gaps,
 )
 from ydbdoc_review.pipeline.navigation_merge import (
@@ -975,11 +976,27 @@ def run_doc_verify(
 
     translation_scope_missing: list[str] = []
     if translation_pr:
+        noop_satisfied: set[str] = set()
+        if source_pr is not None:
+            source_pull = gh.get_pull(owner, repo, source_pr)
+            source_base_sha = str(source_pull.get("base", {}).get("sha") or "")
+            source_head_sha = str(source_pull.get("head", {}).get("sha") or "")
+            changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
+            for pair in expected_scope_pairs:
+                if pair.en_path in changed_en_paths:
+                    continue
+                if href_only_source_noop_satisfied(
+                    gh.get_file_text(owner, repo, pair.ru_path, source_base_sha),
+                    gh.get_file_text(owner, repo, pair.ru_path, source_head_sha),
+                    read_text(repo_path, pair.ru_path),
+                    read_text(repo_path, pair.en_path),
+                ):
+                    noop_satisfied.add(pair.en_path)
         translation_scope_missing = translation_pr_scope_gaps(
             expected_scope_pairs,
             nav_pairs,
             changes,
-            already_satisfied=source_bilingual_skip,
+            already_satisfied=source_bilingual_skip | frozenset(noop_satisfied),
         )
         pairs, nav_pairs = filter_translation_pr_verify_scope(
             pairs,

@@ -11,6 +11,7 @@ from ydbdoc_review.pipeline.pairs import (
     is_docs_markdown,
 )
 from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.validation.href_parity import check_href_parity, is_href_only_change
 
 
 def _norm(path: str) -> str:
@@ -145,6 +146,26 @@ def translation_pr_scope_gaps(
     expected.update(nav.en_path for nav in expected_nav_pairs if not nav.supplement_only)
     expected -= already_satisfied or frozenset()
     return sorted(expected - changed)
+
+
+def href_only_source_noop_satisfied(
+    source_base: str | None,
+    source_head: str | None,
+    current_ru: str | None,
+    current_en: str | None,
+) -> bool:
+    """Whether a historical href-only RU edit is already reflected in main.
+
+    A later RU move can supersede the source PR before its translation runs.
+    In that case forcing the historical href into EN can create an unreachable
+    link (#50976). Treat the file as covered only when the source edit was
+    href-only and current RU/EN internal links already match.
+    """
+    if not is_href_only_change(source_base, source_head):
+        return False
+    if current_ru is None or current_en is None:
+        return False
+    return not check_href_parity(current_ru, current_en)
 
 
 def gap_label(en_path: str, *, docs_root: str = "ydb/docs") -> str:
