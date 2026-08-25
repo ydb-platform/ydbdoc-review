@@ -80,6 +80,14 @@ def run_pair_plan(
             content.en_base_text or existing_target,
         )
         if deterministic is not None:
+            if ctx.docs_text_reader is not None:
+                deterministic = repair_en_fragments(
+                    deterministic,
+                    en_page_path=plan.target_path,
+                    read_text=ctx.docs_text_reader,
+                    ru_source=source_text,
+                    en_baseline=content.en_base_text or existing_target,
+                )
             logger.info(
                 "Deterministic href-only translation for %s; bypassing LLM and repairs",
                 plan.target_path,

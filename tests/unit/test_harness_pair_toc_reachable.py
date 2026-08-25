@@ -254,6 +254,53 @@ def test_semantic_noop_bypasses_pair_link_stripping_exactly():
     strip.assert_not_called()
 
 
+def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/client.md",
+        en_path="ydb/docs/en/core/reference/configuration/client.md",
+        ru_changed=True,
+    )
+    fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    old = f"../../devops/deployment-options/manual/node.md#{fragment}"
+    new = f"../../devops/concepts/node.md#{fragment}"
+    content = PairContent(
+        pair=pair,
+        ru_base_text=f"[регистрации динамических узлов]({old})\n",
+        ru_text=f"[регистрации динамических узлов]({new})\n",
+        en_base_text=f"[registering dynamic nodes]({old})\n",
+        en_text=f"[registering dynamic nodes]({old})\n",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="href-only",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    target = "ydb/docs/en/core/devops/concepts/node.md"
+    ru_target = "ydb/docs/ru/core/devops/concepts/node.md"
+    files = {
+        target: "## Enabling node authentication and authorization mode\n",
+        ru_target: "## Включение режима аутентификации и авторизации узлов\n",
+    }
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=cfg,
+        docs_text_reader=files.get,
+    )
+
+    result = run_pair_plan(content, plan, parent, {})
+
+    assert result.target_text == (
+        "[registering dynamic nodes](../../devops/concepts/node.md"
+        "#enabling-node-authentication-and-authorization-mode)\n"
+    )
+
+
 def test_run_pair_plan_restores_missing_heading_anchor_after_translate():
     """§6.191 / #49957: pair post-pass copies RU {#id} onto EN H1."""
     pair = DocPair(
