@@ -569,16 +569,27 @@ def run_doc_translate(
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
             )
-            pr_result = run_pr_translation(
-                contents,
-                client,
-                glossary,
-                config=cfg,
-                use_analyze_llm=False,
-                en_toc_reachable=en_toc_reachable,
-                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
-                docs_repo_path=repo_path,
-            )
+            pair_runner = _run_verify_pairs if ctx.merged else run_pr_translation
+            runner_kwargs = {
+                "config": cfg,
+                "en_toc_reachable": en_toc_reachable,
+                "docs_text_reader": _docs_text_reader(repo_path, merge_base_with),
+                "docs_repo_path": repo_path,
+            }
+            if ctx.merged:
+                # Historical merged PRs must preserve the EN text at current
+                # main and translate only RU gaps from the immutable merge
+                # commit.  A full translate rewrites whole files from the old
+                # RU snapshot and reverts later EN work (PR #50741).
+                pr_result = pair_runner(contents, client, glossary, **runner_kwargs)
+            else:
+                pr_result = pair_runner(
+                    contents,
+                    client,
+                    glossary,
+                    use_analyze_llm=False,
+                    **runner_kwargs,
+                )
         else:
             pr_result = PRTranslationResult()
 

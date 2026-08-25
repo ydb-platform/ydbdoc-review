@@ -209,6 +209,58 @@ def test_run_doc_translate_dry_run(git_repo: str):
     assert not Path(git_repo, "ydb/docs/en/a.md").exists()
 
 
+def test_run_doc_translate_merged_pr_preserves_existing_en(git_repo: str):
+    Path(git_repo, "ydb/docs/ru/a.md").write_text("Привет, мир.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "docs"], cwd=git_repo, check=True)
+    merge_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    pull = {
+        "title": "historical docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": merge_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+        "merged": True,
+        "state": "closed",
+        "merge_commit_sha": merge_sha,
+    }
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ) as verify_pairs:
+        with patch("ydbdoc_review.github.workflow.run_pr_translation") as translate_pairs:
+            with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                mock_gh.return_value.get_pull.return_value = pull
+                with patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                    return_value=[("ydb/docs/ru/a.md", "modified")],
+                ), patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                    return_value=[("ydb/docs/ru/a.md", "modified")],
+                ):
+                    result = run_doc_translate(
+                        repo_path=git_repo,
+                        github_repo="o/r",
+                        pr_number=50741,
+                        merge_base_with="HEAD",
+                        dry_run=True,
+                        config=load_config(env=_env()),
+                    )
+
+    assert result.pr_result.translated_count == 1
+    verify_pairs.assert_called_once()
+    translate_pairs.assert_not_called()
+
+
 def test_run_doc_translate_missing_github_token(git_repo: str):
     env = {"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}
     with pytest.raises(GitHubConfigError):
