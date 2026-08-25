@@ -258,6 +258,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
             out_warnings=state.finalize_warnings,
             en_toc_reachable=ctx.en_toc_reachable,
             layout_source_text=state.source_text,
+            protected_source_text=state.source_text,
         )
     state.translations, state.segment_alignment_error = gate_round_trip(
         state.segments, state.translated_text

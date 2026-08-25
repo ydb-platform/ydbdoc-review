@@ -107,6 +107,7 @@ def finalize_en_target(
     out_warnings: list[str] | None = None,
     en_toc_reachable: frozenset[str] | None = None,
     layout_source_text: str | None = None,
+    protected_source_text: str | None = None,
 ) -> str:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
     if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
@@ -145,8 +146,9 @@ def finalize_en_target(
     text = localize_links_in_text(text, target_lang="en")
     text = postprocess_en_target_markdown(text)
     text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
-    text = restore_md_link_hrefs(text, normalized_source_text)
-    text = _restore_cyrillic_source_code_atoms(text, normalized_source_text)
+    protected = protected_source_text or normalized_source_text
+    text = restore_md_link_hrefs(text, protected)
+    text = _restore_cyrillic_source_code_atoms(text, protected)
     if en_toc_reachable is not None and target_lang.lower() in {"en", "english"}:
         stripped: list[str] = []
         try:

@@ -198,6 +198,21 @@ def test_finalize_runs_despite_stale_alignment_error():
     assert state.translated_text == exact
 
 
+def test_finalize_uses_ru_for_protected_href_and_en_for_fence_reference():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    ru = "See [SID](authorization.md#sid).\n"
+    en_fence_reference = "See [SID](authorization.md#user).\n"
+
+    result = finalize_en_target(
+        en_fence_reference,
+        en_fence_reference,
+        protected_source_text=ru,
+    )
+
+    assert result == ru
+
+
 def test_harness_translate_matches_translate_file():
     source = "Привет.\n"
     segments = extract_segments(parse_markdown(source))
