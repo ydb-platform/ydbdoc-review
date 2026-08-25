@@ -122,6 +122,35 @@ def check_href_parity(
 
     missing = sorted((src - tgt).elements())
     extra = sorted((tgt - src).elements())
+    # A section can be moved independently in RU and EN. Accept a localized EN
+    # destination when the RU path is unreachable in the EN toc, the EN path is
+    # reachable, and both links keep the same basename and fragment (#50976).
+    if missing and extra and en_page_path and en_toc_reachable is not None:
+        from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+        paired_missing: set[int] = set()
+        paired_extra: set[int] = set()
+        for missing_idx, source_href in enumerate(missing):
+            source_target = resolve_internal_md_href(en_page_path, source_href)
+            if source_target is not None and source_target in en_toc_reachable:
+                continue
+            source_path, _, source_fragment = source_href.partition("#")
+            for extra_idx, target_href in enumerate(extra):
+                if extra_idx in paired_extra:
+                    continue
+                target_path, _, target_fragment = target_href.partition("#")
+                if source_fragment != target_fragment:
+                    continue
+                if PurePosixPath(source_path).name != PurePosixPath(target_path).name:
+                    continue
+                target = resolve_internal_md_href(en_page_path, target_href)
+                if target is not None and target in en_toc_reachable:
+                    paired_missing.add(missing_idx)
+                    paired_extra.add(extra_idx)
+                    break
+        missing = [href for idx, href in enumerate(missing) if idx not in paired_missing]
+        extra = [href for idx, href in enumerate(extra) if idx not in paired_extra]
+
     # EN may link to toc-reachable pages that the source-PR RU snapshot lacks
     # (post-merge main drift, #49451 self-heal). Those extras are not blockers.
     if extra and en_page_path and en_toc_reachable is not None:

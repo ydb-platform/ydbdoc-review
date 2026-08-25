@@ -104,6 +104,35 @@ def test_href_parity_accepts_percent_encoded_unicode_fragment():
     assert check_href_parity(ru, en) == []
 
 
+def test_href_parity_accepts_pr_50976_localized_reachable_path():
+    """#50976: RU moved embedded UI before EN; keep the reachable EN twin."""
+    page = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
+    ru = "[YDB Monitoring](../embedded-ui/ydb-monitoring.md)\n"
+    en = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
+
+    assert check_href_parity(
+        ru,
+        en,
+        en_page_path=page,
+        en_toc_reachable=frozenset(
+            {"ydb/docs/en/core/reference/ydb-ui/ydb-monitoring.md"}
+        ),
+    ) == []
+
+
+def test_href_parity_rejects_localized_path_when_en_target_is_unreachable():
+    page = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
+    ru = "[YDB Monitoring](../embedded-ui/ydb-monitoring.md)\n"
+    en = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
+
+    assert check_href_parity(
+        ru,
+        en,
+        en_page_path=page,
+        en_toc_reachable=frozenset(),
+    )
+
+
 def test_anchor_parity_blocks_renamed_heading_id():
     ru = "## LDAP {#ldap}\n\n### TLS {#ldap-tls}\n"
     en = "## LDAP {#ldap-auth-provider}\n\n### TLS {#ldap-tls}\n"
