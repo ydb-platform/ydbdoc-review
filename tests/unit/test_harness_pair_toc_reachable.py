@@ -296,4 +296,5 @@ def test_pair_postprocess_repairs_fences_after_structural_repair():
         result = run_pair_plan(content, plan, parent, {})
 
     assert result.target_text is not None
+    assert result.target_text == target
     assert fence_marker_tokens(result.target_text) == fence_marker_tokens(source)

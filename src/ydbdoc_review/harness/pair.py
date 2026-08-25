@@ -211,6 +211,11 @@ def run_pair_plan(
             target_text = repair_generated_markdown_layout(
                 normalize_ru_source_for_translation(source_text), target_text
             )
+            # Verification must describe the immutable checkout, never a
+            # repaired in-memory candidate. Keep the critic findings, then
+            # recompute deterministic QA below against the exact PR bytes.
+            if plan.action == "critic_only" and existing_target is not None:
+                target_text = existing_target
             # Restore runs after harness heuristics — refresh QA so the report
             # matches committed text (#49451).
             if target_text != before_restore and is_dataclass(file_result):
