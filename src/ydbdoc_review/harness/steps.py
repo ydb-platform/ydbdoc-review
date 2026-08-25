@@ -699,6 +699,7 @@ class FinalizeEnStep:
             out_warnings=state.finalize_warnings,
             en_toc_reachable=ctx.en_toc_reachable,
             layout_source_text=state.source_text,
+            protected_source_text=state.source_text,
         )
         # RU→EN include parity repair (§6.148): must use RU source, not fence_ref.
         state.translated_text = repair_missing_includes(

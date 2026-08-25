@@ -185,7 +185,7 @@ def test_finalize_runs_despite_stale_alignment_error():
         raw_source_text=exact,
         source_text=exact,
         translated_text="See [SID](authorization.md#user).\n",
-        fence_reference_text=exact,
+        fence_reference_text="See [SID](authorization.md#user).\n",
         segment_alignment_error="stale critic alignment",
     )
     ctx = HarnessContext.from_options(
