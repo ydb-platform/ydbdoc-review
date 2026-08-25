@@ -11,6 +11,7 @@ from ydbdoc_review.validation.href_parity import (
     collect_internal_hrefs,
     is_href_only_change,
     restore_md_link_hrefs,
+    restore_unique_same_path_fragments,
 )
 
 
@@ -79,6 +80,21 @@ def test_href_parity_requires_exact_same_links():
     assert msgs[0].startswith("href_parity:")
     assert "ldap-auth-provider" in msgs[0]
     assert "authentication.md#ldap" in msgs[0]
+
+
+def test_restore_unique_same_path_fragments_pr_50976():
+    ru = (
+        "[users](../dev/system-views.md#информация-о-пользователях-users) "
+        "[SID](./authorization.md#sid)\n"
+    )
+    en = "[users](../dev/system-views.md#users) [SID](./authorization.md#user)\n"
+    assert restore_unique_same_path_fragments(en, ru) == ru
+
+
+def test_restore_unique_same_path_fragments_keeps_localized_path():
+    ru = "[Monitoring](../embedded-ui/ydb-monitoring.md#overview)\n"
+    en = "[Monitoring](../ydb-ui/ydb-monitoring.md#overview-en)\n"
+    assert restore_unique_same_path_fragments(en, ru) == en
 
 
 def test_href_parity_flags_extra_en_link():

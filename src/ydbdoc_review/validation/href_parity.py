@@ -84,6 +84,39 @@ def collect_explicit_anchors(text: str) -> list[str]:
     return out
 
 
+def restore_unique_same_path_fragments(target_text: str, source_text: str) -> str:
+    """Restore source fragments only for unique links with an unchanged path."""
+    source_by_path: dict[str, list[str]] = {}
+    for match in _MD_LINK.finditer(source_text or ""):
+        href = match.group(2).strip()
+        if "#" not in href:
+            continue
+        path, fragment = href.rsplit("#", 1)
+        if path.endswith(".md") and fragment:
+            source_by_path.setdefault(path, []).append(fragment)
+
+    target_links = list(_MD_LINK.finditer(target_text or ""))
+    target_by_path: dict[str, list[re.Match[str]]] = {}
+    for match in target_links:
+        href = match.group(2).strip()
+        if "#" not in href:
+            continue
+        path, fragment = href.rsplit("#", 1)
+        if path.endswith(".md") and fragment:
+            target_by_path.setdefault(path, []).append(match)
+
+    replacements: list[tuple[re.Match[str], str]] = []
+    for path, source_fragments in source_by_path.items():
+        targets = target_by_path.get(path, [])
+        if len(source_fragments) == len(targets) == 1:
+            replacements.append((targets[0], f"{path}#{source_fragments[0]}"))
+
+    out = target_text
+    for match, href in sorted(replacements, key=lambda item: item[0].start(), reverse=True):
+        out = out[: match.start(2)] + href + out[match.end(2) :]
+    return out
+
+
 def check_href_parity(
     source_text: str,
     target_text: str,
@@ -105,6 +138,7 @@ def check_href_parity(
     src = Counter(unquote(href) for href in collect_internal_hrefs(source_text))
     tgt = Counter(unquote(href) for href in collect_internal_hrefs(target_text))
     if ignore_basenames:
+
         def _kept(counter: Counter[str]) -> Counter[str]:
             out: Counter[str] = Counter()
             for href, n in counter.items():
@@ -206,9 +240,7 @@ def check_heading_anchor_parity(
         preview = ", ".join(f"`{{#{a}}}`" for a in extra[:8])
         more = f", … (+{len(extra) - 8})" if len(extra) > 8 else ""
         parts.append(f"extra in EN: {preview}{more}")
-    return [
-        f"anchor_parity: RU/EN explicit {{#id}} differ — {'; '.join(parts)}"
-    ]
+    return [f"anchor_parity: RU/EN explicit {{#id}} differ — {'; '.join(parts)}"]
 
 
 def _href_targets_page(
@@ -278,17 +310,11 @@ def check_inbound_fragments(
         en_paths = iter_en_markdown_paths(repo_path, docs_root=docs_root)
 
     declared = set(collect_explicit_anchors(en_text))
-    ru_declared = (
-        set(collect_explicit_anchors(ru_text)) if ru_text is not None else None
-    )
+    ru_declared = set(collect_explicit_anchors(ru_text)) if ru_text is not None else None
     baseline_declared = (
-        set(collect_explicit_anchors(en_baseline_text))
-        if en_baseline_text is not None
-        else None
+        set(collect_explicit_anchors(en_baseline_text)) if en_baseline_text is not None else None
     )
-    removed_from_baseline = (
-        baseline_declared - declared if baseline_declared is not None else None
-    )
+    removed_from_baseline = baseline_declared - declared if baseline_declared is not None else None
     # Also treat Diplodoc auto-slugs as declared via fragment_repair helper.
     from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
 
@@ -390,15 +416,9 @@ def apply_href_only_delta(
         old_matches = [m for m in target_links if m.group(2).strip() == old_href]
         if len(old_matches) == 1:
             match = old_matches[0]
-            out = (
-                out[: match.start()]
-                + f"[{match.group(1)}]({new_href})"
-                + out[match.end() :]
-            )
+            out = out[: match.start()] + f"[{match.group(1)}]({new_href})" + out[match.end() :]
             continue
-        if not old_matches and any(
-            m.group(2).strip() == new_href for m in target_links
-        ):
+        if not old_matches and any(m.group(2).strip() == new_href for m in target_links):
             continue  # Proven accepted no-op: EN main already has the target.
         return None
     return out
@@ -443,9 +463,7 @@ def restore_md_link_hrefs(
             and len(en_links) == len(ru_links)
         ):
             replacements: dict[int, str] = {}
-            for idx, (before, after) in enumerate(
-                zip(ru_base_links, ru_links, strict=True)
-            ):
+            for idx, (before, after) in enumerate(zip(ru_base_links, ru_links, strict=True)):
                 if before[1] != after[1]:
                     replacements[idx] = after[1]
             if replacements:
@@ -463,11 +481,7 @@ def restore_md_link_hrefs(
     ru_href_counts = Counter(href for _label, href, _s, _e in ru_links)
     en_href_counts = Counter(href for _label, href, _s, _e in en_links)
 
-    if (
-        len(en_links) == len(ru_links)
-        and en_links
-        and en_href_counts != ru_href_counts
-    ):
+    if len(en_links) == len(ru_links) and en_links and en_href_counts != ru_href_counts:
         # Rebuild from the end so offsets stay valid.
         pieces: list[str] = []
         cursor = len(out)
@@ -481,9 +495,7 @@ def restore_md_link_hrefs(
         out = "".join(reversed(pieces))
 
     # Reinject dropped links (counts still differ or plain-text leftovers).
-    present = Counter(
-        href for _label, href, _s, _e in _iter_md_links(out)
-    )
+    present = Counter(href for _label, href, _s, _e in _iter_md_links(out))
     needed = ru_href_counts
     missing_hrefs: list[str] = []
     for href, n in needed.items():
@@ -491,6 +503,7 @@ def restore_md_link_hrefs(
             missing_hrefs.append(href)
 
     for href in missing_hrefs:
+
         def _wrap(match: re.Match[str], *, _href: str = href) -> str:
             return f"{match.group(1)}[{match.group(2).strip()}]({_href}){match.group(3)}"
 
