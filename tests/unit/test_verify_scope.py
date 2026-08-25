@@ -117,7 +117,9 @@ def test_href_only_source_noop_satisfied_for_pr_50976():
     assert href_only_source_noop_satisfied(
         source_base, source_head, current_ru, current_en
     )
-    assert not href_only_source_noop_satisfied(
+    # The historical snapshot must not be restored even if current EN has an
+    # independent defect; regular docs validation owns that current defect.
+    assert href_only_source_noop_satisfied(
         source_base, source_head, current_ru, "[YDB Monitoring](broken.md)\n"
     )
 

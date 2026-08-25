@@ -158,14 +158,16 @@ def href_only_source_noop_satisfied(
 
     A later RU move can supersede the source PR before its translation runs.
     In that case forcing historical content into EN can restore deleted sections
-    or create unreachable links (#50976). Treat the file as covered only when
-    the source edit was href-only or superseded, and current RU/EN links match.
+    or create unreachable links (#50976). A superseded snapshot is out of scope;
+    a still-current href-only edit is covered only when RU/EN links match.
     """
     if source_head is None or current_ru is None or current_en is None:
         return False
     source_was_href_only = is_href_only_change(source_base, source_head)
     source_was_superseded = source_head != current_ru
-    if not source_was_href_only and not source_was_superseded:
+    if source_was_superseded:
+        return True
+    if not source_was_href_only:
         return False
     return not check_href_parity(current_ru, current_en)
 
