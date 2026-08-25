@@ -10,6 +10,7 @@ from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.critic import (
+    _drop_impossible_code_link_issues,
     _fallback_critic_response,
     apply_critic_fixes,
     merge_critic_responses,
@@ -21,7 +22,7 @@ from ydbdoc_review.translation.critic import (
     run_verify,
 )
 from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.translation.schemas import CriticIssueOut
+from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 
 def test_critic_parse_failure_is_blocking():
@@ -546,6 +547,44 @@ def test_review_50976_ignores_impossible_code_only_link_rewrite():
     assert result.initial.issues == []
     assert result.translations["s1"] == current
     assert client._client.chat.completions.create.call_count == 1
+
+
+def test_50976_filter_requires_exact_code_only_link_in_source():
+    issue = _issue(
+        segment_id="s1",
+        category="link",
+        comment="Link anchor contains only the code placeholder.",
+        suggested_text="See ⟦U1⟧.",
+    )
+    response = CriticResponse(verdict="warnings", issues=[issue])
+    source = _segment("s1", "See [⟦C1⟧ descriptive text](⟦U1⟧).")
+
+    filtered = _drop_impossible_code_link_issues(
+        response,
+        {"s1": "See [⟦C1⟧ descriptive text](⟦U1⟧)."},
+        [source],
+    )
+
+    assert filtered.issues == [issue]
+    assert filtered.verdict == "warnings"
+
+
+def test_50976_filter_checks_each_source_code_only_link():
+    issue = _issue(
+        segment_id="s1",
+        category="link",
+        comment="The second link anchor is invalid.",
+        suggested_text="Keep [⟦C1⟧](⟦U1⟧), replace second with ⟦U2⟧.",
+    )
+    response = CriticResponse(verdict="warnings", issues=[issue])
+    text = "[⟦C1⟧](⟦U1⟧) and [⟦C2⟧](⟦U2⟧)"
+
+    filtered = _drop_impossible_code_link_issues(
+        response, {"s1": text}, [_segment("s1", text)]
+    )
+
+    assert filtered.verdict == "ok"
+    assert filtered.issues == []
 
 
 def test_review_with_critic_skips_verify_when_no_issues():

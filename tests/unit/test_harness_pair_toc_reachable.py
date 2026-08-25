@@ -298,3 +298,40 @@ def test_pair_postprocess_repairs_fences_after_structural_repair():
     assert result.target_text is not None
     assert result.target_text == target
     assert fence_marker_tokens(result.target_text) == fence_marker_tokens(source)
+
+
+def test_critic_only_empty_ru_still_returns_exact_checkout_bytes():
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/empty.md",
+        en_path="ydb/docs/en/core/empty.md",
+        ru_changed=True,
+        en_changed=True,
+    )
+    target = "Checkout bytes.\n"
+    content = PairContent(pair=pair, ru_text="", en_text=target)
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="test",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(MagicMock(), glossary=load_glossary(), config=cfg)
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del state, ctx
+            result = MagicMock()
+            result.final_text = "Mutated in memory.\n"
+            return result
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert result.target_text == target

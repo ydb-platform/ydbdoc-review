@@ -321,26 +321,36 @@ def _critic_fix_would_regress(
     return None
 
 
-_CODE_ONLY_LINK = re.compile(r"\[(⟦C\d+⟧)[^\]]*\]\((⟦U\d+⟧)\)")
+_CODE_ONLY_LINK = re.compile(r"\[(⟦C\d+⟧)\]\((⟦U\d+⟧)\)")
 
 
 def _drop_impossible_code_link_issues(
     response: CriticResponse,
     translations: dict[str, str],
+    segments: list[Segment],
 ) -> CriticResponse:
     """Ignore link advice that contradicts a source-preserved code-only label."""
     kept: list[CriticIssueOut] = []
+    source_by_id = _segments_by_id(segments)
     for issue in response.issues:
         current = translations.get(issue.segment_id or "", "")
+        source = source_by_id.get(issue.segment_id or "")
         suggested = issue.suggested_text or ""
-        link_match = _CODE_ONLY_LINK.search(current)
+        link_matches = list(
+            _CODE_ONLY_LINK.finditer(source.text if source is not None else "")
+        )
         haystack = f"{issue.category} {issue.comment}"
-        if (
-            link_match
-            and re.search(r"link|anchor", haystack, re.IGNORECASE)
-            and link_match.group(2) in suggested
-            and link_match.group(1) not in suggested
-        ):
+        impossible = re.search(r"link|anchor", haystack, re.IGNORECASE) and any(
+            re.search(
+                rf"\[[^\]]*{re.escape(match.group(1))}[^\]]*\]"
+                rf"\({re.escape(match.group(2))}\)",
+                current,
+            )
+            and match.group(2) in suggested
+            and match.group(1) not in suggested
+            for match in link_matches
+        )
+        if impossible:
             logger.warning(
                 "Ignoring critic issue for %s: suggestion removes a source-preserved "
                 "code-only link label",
@@ -554,7 +564,7 @@ def review_with_critic(
         max_tokens=max_tokens,
         translated_text=translated_text,
     )
-    initial = _drop_impossible_code_link_issues(initial, translations)
+    initial = _drop_impossible_code_link_issues(initial, translations, segments)
     fixed, applied, skipped = apply_critic_fixes(translations, segments, initial.issues)
 
     unresolved: CriticResponse | None = None
@@ -573,6 +583,7 @@ def review_with_critic(
             max_tokens=max_tokens,
             translated_text=translated_text,
         )
+        unresolved = _drop_impossible_code_link_issues(unresolved, fixed, segments)
 
     return CriticReviewResult(
         initial=initial,

@@ -257,6 +257,11 @@ def run_pair_plan(
                     verdict=verdict,
                 )
 
+    if plan.action == "critic_only" and existing_target is not None:
+        # Also cover an empty (but valid) RU document, which skips the repair
+        # branch above. The report byte guard must remain unconditional.
+        target_text = existing_target
+
     return PairRunResult(
         plan=plan,
         target_text=target_text,
