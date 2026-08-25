@@ -41,6 +41,7 @@ from ydbdoc_review.translation.differential import (
     DifferentialTranslationConfig,
     low_magnitude_patch_has_anchors,
     patch_en_with_added_translations,
+    patch_en_with_source_added_autotitle_lines,
     prepare_differential_seed,
     slim_pending_for_low_magnitude_patch,
 )
@@ -318,6 +319,23 @@ class TranslateStep:
             return
         assert state.source_doc is not None
         cfg = ctx.config.translation
+        if state.existing_target_text and state.base_source_text:
+            deterministic_index_patch = patch_en_with_source_added_autotitle_lines(
+                state.base_source_text,
+                state.source_text,
+                state.existing_target_text,
+            )
+            if deterministic_index_patch is not None:
+                state.translations = {}
+                state.translated_text = deterministic_index_patch
+                state.stopped_early = True
+                state.differential_meta = {
+                    "mode": "differential",
+                    "reason": "source_added_autotitle_lines",
+                    "deterministic_autotitle_patch": True,
+                }
+                logger.info("Deterministic autotitle-list insertion: preserve existing EN bytes")
+                return
         diff_cfg = DifferentialTranslationConfig.from_env_and_defaults(
             enabled=cfg.differential_enabled,
             stale_days_threshold=cfg.differential_stale_days,

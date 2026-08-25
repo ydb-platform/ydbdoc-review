@@ -9,9 +9,40 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.differential import (
     analyze_ru_diff,
     patch_en_with_added_translations,
+    patch_en_with_source_added_autotitle_lines,
     prepare_differential_seed,
     slim_pending_for_low_magnitude_patch,
 )
+
+
+def test_pr_50904_autotitle_addition_preserves_unrelated_en_bytes():
+    ru_base = dedent(
+        """\
+        # Концепции администрирования кластеров
+
+        * [{#T}](./maintenance-without-downtime.md)
+
+        * [{#T}](../backup-and-recovery/index.md)
+        """
+    )
+    ru_pr = ru_base.replace(
+        "* [{#T}](./maintenance-without-downtime.md)\n",
+        "* [{#T}](./maintenance-without-downtime.md)\n* [{#T}](./node-authorization.md)\n",
+    )
+    en = dedent(
+        """\
+        # Concepts for Cluster Administration
+
+        * [{#T}](./maintenance-without-downtime.md)
+
+        * [{#T}](../backup-and-recovery.md)
+        """
+    )
+
+    assert patch_en_with_source_added_autotitle_lines(ru_base, ru_pr, en) == en.replace(
+        "* [{#T}](./maintenance-without-downtime.md)\n",
+        "* [{#T}](./maintenance-without-downtime.md)\n* [{#T}](./node-authorization.md)\n",
+    )
 
 
 def test_glossary_zero_diff_seeds_most_segments():
@@ -40,8 +71,7 @@ def test_slim_pending_activates_even_when_pending_equals_changes():
     en = (root / "en/core/concepts/glossary.md").read_text(encoding="utf-8")
     ru_pr = ru_base.replace(
         "### Board {#board}",
-        "Подробнее — в разделе [Сервисы](architecture/metadata-services.md).\n\n"
-        "### Board {#board}",
+        "Подробнее — в разделе [Сервисы](architecture/metadata-services.md).\n\n### Board {#board}",
         1,
     )
     segs = extract_segments(parse_markdown(ru_pr))
@@ -74,8 +104,7 @@ def test_slim_pending_keeps_only_added_for_tiny_glossary_edit():
     # Mimic #45667: three new cross-links under StateStorage / Board / SchemeBoard.
     ru_pr = ru_base.replace(
         "### Board {#board}",
-        "Подробнее — в разделе [Сервисы](architecture/metadata-services.md).\n\n"
-        "### Board {#board}",
+        "Подробнее — в разделе [Сервисы](architecture/metadata-services.md).\n\n### Board {#board}",
         1,
     )
     segs = extract_segments(parse_markdown(ru_pr))
@@ -85,9 +114,7 @@ def test_slim_pending_keeps_only_added_for_tiny_glossary_edit():
         en_current_text=en,
         ru_base_text=ru_base,
     )
-    slim = slim_pending_for_low_magnitude_patch(
-        pending, ru_base_text=ru_base, ru_pr_text=ru_pr
-    )
+    slim = slim_pending_for_low_magnitude_patch(pending, ru_base_text=ru_base, ru_pr_text=ru_pr)
     assert slim is not None
     slim_pending, analysis = slim
     assert analysis.change_magnitude < 0.05

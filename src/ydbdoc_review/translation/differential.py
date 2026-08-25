@@ -41,6 +41,88 @@ ChangeType = Literal["new_file", "deleted_file", "modified"]
 MergeStrategy = Literal["reconstruct", "patch"]
 
 _ENV_ENABLE = "YDBDOC_DIFFERENTIAL_TRANSLATION"
+_AUTOTITLE_LIST_LINE = re.compile(r"^\s*[-*+]\s+\[\{#T\}\]\(([^)]+)\)\s*(?:\r?\n)?$")
+
+
+def patch_en_with_source_added_autotitle_lines(
+    ru_base_text: str,
+    ru_pr_text: str,
+    en_text: str,
+) -> str | None:
+    """Apply a source-only autotitle list insertion without rewriting EN bytes.
+
+    This handles tiny index changes such as #45949/#50904. Only insert opcodes
+    containing ``[{#T}](...)`` list items are accepted; any removal or modified
+    source line fails closed to the regular translation path.
+    """
+    base_lines = ru_base_text.splitlines(keepends=True)
+    pr_lines = ru_pr_text.splitlines(keepends=True)
+    en_lines = en_text.splitlines(keepends=True)
+    insertions: list[tuple[str | None, str | None, list[str]]] = []
+
+    for tag, i1, _i2, j1, j2 in SequenceMatcher(
+        None, base_lines, pr_lines, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        added = pr_lines[j1:j2]
+        if (
+            tag != "insert"
+            or not added
+            or any(_AUTOTITLE_LIST_LINE.fullmatch(line) is None for line in added)
+        ):
+            return None
+
+        previous = next(
+            (
+                match.group(1)
+                for line in reversed(base_lines[:i1])
+                if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+            ),
+            None,
+        )
+        following = next(
+            (
+                match.group(1)
+                for line in base_lines[i1:]
+                if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+            ),
+            None,
+        )
+        insertions.append((previous, following, added))
+
+    if not insertions:
+        return None
+
+    for previous, following, added in insertions:
+        if any(line in en_lines for line in added):
+            continue
+        index: int | None = None
+        if previous is not None:
+            index = next(
+                (
+                    pos + 1
+                    for pos, line in enumerate(en_lines)
+                    if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+                    and match.group(1) == previous
+                ),
+                None,
+            )
+        if index is None and following is not None:
+            index = next(
+                (
+                    pos
+                    for pos, line in enumerate(en_lines)
+                    if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+                    and match.group(1) == following
+                ),
+                None,
+            )
+        if index is None:
+            return None
+        en_lines[index:index] = added
+
+    return "".join(en_lines)
 
 
 @dataclass(frozen=True)
@@ -277,9 +359,10 @@ def analyze_ru_diff(
             kept_ids.add(pr_seg.id)
             continue
         # Heuristic: if a similar-length equal-kind segment existed, call modified
-        if any(
-            s.kind == pr_seg.kind and s.text != pr_seg.text for s in base_segments
-        ) and _segment_key(pr_seg) not in base_keys:
+        if (
+            any(s.kind == pr_seg.kind and s.text != pr_seg.text for s in base_segments)
+            and _segment_key(pr_seg) not in base_keys
+        ):
             modified.append(block)
             modified_ids.add(pr_seg.id)
         else:
@@ -288,9 +371,7 @@ def analyze_ru_diff(
 
     # Removed: base segments with no equal PR counterpart
     pr_keys = {_segment_key(s) for s in pr_segments}
-    removed = [
-        _segment_to_block(s) for s in base_segments if _segment_key(s) not in pr_keys
-    ]
+    removed = [_segment_to_block(s) for s in base_segments if _segment_key(s) not in pr_keys]
 
     changed = len(added_ids) + len(modified_ids)
     denom = max(len(pr_segments), 1)
@@ -406,8 +487,7 @@ class DifferentialTranslationAnalyzer:
             return TranslationStrategy(
                 mode="full",
                 reason=(
-                    f"EN file too small (~{ratio:.0%} of RU), likely incomplete; "
-                    "full translation"
+                    f"EN file too small (~{ratio:.0%} of RU), likely incomplete; full translation"
                 ),
                 config={"en_file_incomplete": True, "en_to_ru_ratio": ratio},
             )
@@ -472,9 +552,7 @@ class DifferentialTranslationAnalyzer:
             base_en = align_translations_from_target(base_segments, en_current_text)
             base_en_relaxed = base_en
         except TranslationValidationError as exc:
-            base_en = partial_align_translations_from_target(
-                base_segments, en_current_text
-            )
+            base_en = partial_align_translations_from_target(base_segments, en_current_text)
             logger.info(
                 "Cannot fully align existing EN to base RU (%s) — "
                 "partial seed for %s/%s base segments (§6.168)",
@@ -551,9 +629,7 @@ class DifferentialTranslationAnalyzer:
 
         analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
         # Prefer analysis classification for modified vs added labels
-        modified_blocks = [
-            b for b in added_blocks if b.segment_id in analysis.modified_segment_ids
-        ]
+        modified_blocks = [b for b in added_blocks if b.segment_id in analysis.modified_segment_ids]
         added_blocks = [
             b for b in added_blocks if b.segment_id not in analysis.modified_segment_ids
         ]
@@ -644,9 +720,7 @@ def slim_pending_for_low_magnitude_patch(
     return slim, analysis
 
 
-def low_magnitude_patch_has_anchors(
-    segments: list[Segment], analysis: RuDiffAnalysis
-) -> bool:
+def low_magnitude_patch_has_anchors(segments: list[Segment], analysis: RuDiffAnalysis) -> bool:
     """Whether every changed segment can be safely located in existing EN."""
     change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
     if not change_ids:
@@ -664,9 +738,7 @@ def low_magnitude_patch_has_anchors(
     return True
 
 
-def _preceding_heading_anchor(
-    segments: list[Segment], segment_id: str
-) -> str | None:
+def _preceding_heading_anchor(segments: list[Segment], segment_id: str) -> str | None:
     idx = next((i for i, s in enumerate(segments) if s.id == segment_id), None)
     if idx is None:
         return None
@@ -726,9 +798,7 @@ def _paragraphs_in_span(text: str, start: int, end: int) -> list[tuple[int, int,
     return out
 
 
-def _best_paragraph_replace(
-    en_text: str, anchor: str, en_seg: str
-) -> tuple[int, int] | None:
+def _best_paragraph_replace(en_text: str, anchor: str, en_seg: str) -> tuple[int, int] | None:
     """Find a section paragraph that the new EN text should replace."""
     from difflib import SequenceMatcher
 
@@ -740,9 +810,7 @@ def _best_paragraph_replace(
     for abs_start, abs_end, para in _paragraphs_in_span(en_text, *span):
         if para.startswith("#"):
             continue
-        ratio = SequenceMatcher(
-            None, _strip_md_links(para).casefold(), target
-        ).ratio()
+        ratio = SequenceMatcher(None, _strip_md_links(para).casefold(), target).ratio()
         if best is None or ratio > best[0]:
             best = (ratio, abs_start, abs_end)
     if best is None or best[0] < 0.55:
