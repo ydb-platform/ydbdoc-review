@@ -13,6 +13,7 @@ from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.parsing.ast_types import FencedCode
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
+from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
 from ydbdoc_review.validation.fence_integrity import collect_code_blocks
@@ -235,8 +236,14 @@ def _parse_batch_translate_response(
         if isinstance(entry_id, str) and isinstance(body, str):
             out[entry_id] = body.strip()
     missing = expected_ids - set(out)
-    if missing:
-        raise LLMParseError(f"{error_label}: missing ids {sorted(missing)}")
+    extra = set(out) - expected_ids
+    if missing or extra:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing ids {sorted(missing)}")
+        if extra:
+            details.append(f"extra ids {sorted(extra)}")
+        raise LLMParseError(f"{error_label}: {'; '.join(details)}")
     return out
 
 
@@ -245,12 +252,21 @@ def _parse_comment_translate_response(
     *,
     expected_ids: set[str],
 ) -> dict[str, str]:
-    return _parse_batch_translate_response(
+    mapping = _parse_batch_translate_response(
         raw,
         array_key="comments",
         expected_ids=expected_ids,
         error_label="fence comment translate",
     )
+    invalid = sorted(
+        entry_id for entry_id, body in mapping.items() if _CYRILLIC.search(body)
+    )
+    if invalid:
+        raise TranslationValidationError(
+            "fence comment translate: Cyrillic remains in EN comments "
+            f"{invalid}"
+        )
+    return mapping
 
 
 def translate_cyrillic_fence_comments_with_client(
@@ -293,30 +309,55 @@ def translate_cyrillic_fence_comments_with_client(
     )
     model_chain = client.model_chain_for_role("translate")
     last_exc: Exception | None = None
+    last_validation_exc: LLMParseError | TranslationValidationError | None = None
+    mapping: dict[str, str] | None = None
     for model in model_chain:
-        try:
-            result = client.chat(
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                model=model,
-                role="translate",
-            )
-            mapping = _parse_comment_translate_response(
-                result.content,
-                expected_ids=expected_ids,
-            )
+        for attempt in range(1, 4):
+            try:
+                result = client.chat(
+                    [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    model=model,
+                    role="translate",
+                )
+                mapping = _parse_comment_translate_response(
+                    result.content,
+                    expected_ids=expected_ids,
+                )
+                break
+            except (LLMParseError, TranslationValidationError) as exc:
+                last_exc = last_validation_exc = exc
+                logger.warning(
+                    "Fence comment translate validation failed "
+                    "(model=%s, attempt=%s/3): %s",
+                    model,
+                    attempt,
+                    exc,
+                )
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Fence comment translate failed (model=%s): %s",
+                    model,
+                    exc,
+                )
+                break
+        else:
+            continue
+        if mapping is not None:
             break
-        except (LLMParseError, Exception) as exc:  # noqa: BLE001
-            last_exc = exc
-            logger.warning(
-                "Fence comment translate failed (model=%s): %s",
-                model,
-                exc,
-            )
     else:
-        warning = finalize_translate_skip_warning("fence_comment", last_exc or RuntimeError("unknown"))
+        if last_validation_exc is not None:
+            if isinstance(last_validation_exc, TranslationValidationError):
+                raise last_validation_exc
+            raise TranslationValidationError(
+                str(last_validation_exc)
+            ) from last_validation_exc
+        warning = finalize_translate_skip_warning(
+            "fence_comment", last_exc or RuntimeError("unknown")
+        )
         logger.warning("Fence comment translate skipped: %s", warning)
         if out_warnings is not None:
             out_warnings.append(warning)

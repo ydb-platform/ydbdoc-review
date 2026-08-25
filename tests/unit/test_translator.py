@@ -188,16 +188,19 @@ def test_translate_segments_keeps_ru_table_on_placeholder_failure():
     bad = _json_response([{"id": "s1", "text": "Value stdin only"}])
     client = _mock_client([bad, bad, bad, bad, bad])
     notes: list[str] = []
+    cache: dict[str, str] = {}
     out = translate_segments(
         [seg],
         client,
         load_glossary(),
         file_path="docs/ru/x.md",
+        cache=cache,
         manual_actions=notes,
     )
     assert out == {"s1": seg.text}
     assert notes
     assert "Переведите вручную" in notes[0].message
+    assert cache == {}
 
 
 def test_translate_batch_placeholder_mismatch_tries_fallback_model():
@@ -212,6 +215,39 @@ def test_translate_batch_placeholder_mismatch_tries_fallback_model():
         client, batch, load_glossary(), file_path="docs/ru/x.md"
     )
     assert out == {"s1": "Use ⟦C1⟧ flag"}
+
+
+def test_translate_batch_retries_homoglyph_cyrillic_then_accepts_clean_en():
+    seg = _segment("s1", "Это можно сделать")
+    batch = Batch(index=0, segments=[seg])
+    bad = _json_response([{"id": "s1", "text": "This сould be done"}])
+    good = _json_response([{"id": "s1", "text": "This could be done"}])
+    client = _mock_client([bad, good])
+
+    out = translate_batch(
+        client, batch, load_glossary(), file_path="docs/ru/x.md"
+    )
+
+    assert out == {"s1": "This could be done"}
+
+
+def test_translate_batch_all_models_with_cyrillic_fail_closed():
+    seg = _segment("s1", "Привет")
+    batch = Batch(index=0, segments=[seg])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.return_value = SimpleNamespace(
+        content=_json_response([{"id": "s1", "text": "Hello мир"}])
+    )
+
+    with pytest.raises(TranslationValidationError, match="Cyrillic remains"):
+        translate_batch(
+            client, batch, load_glossary(), file_path="docs/ru/x.md"
+        )
+
+    # Three batch attempts plus the existing per-segment repair path. No bad
+    # candidate may be accepted from either model.
+    assert client.chat.call_count >= 6
 
 
 def test_translate_batch_rate_limit_tries_fallback_model():
