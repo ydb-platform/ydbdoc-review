@@ -112,9 +112,7 @@ def fragment_declared_in_markdown(
     if not page_path or read_text is None:
         return False
     for inc in collect_yfm_includes(md):
-        resolved = resolve_locale_md_path(
-            page_path, inc.path, docs_root=docs_root
-        )
+        resolved = resolve_locale_md_path(page_path, inc.path, docs_root=docs_root)
         if resolved is None:
             continue
         included = read_text(resolved)
@@ -249,9 +247,7 @@ def _try_remap_missing_fragment_via_ru_en(
     read_text: DocsReader,
 ) -> str | None:
     """Map a missing EN fragment via the paired RU/EN target pages."""
-    ru_abs = _resolve_href_path(
-        en_page_path.replace("/docs/en/", "/docs/ru/", 1), path_part
-    )
+    ru_abs = _resolve_href_path(en_page_path.replace("/docs/en/", "/docs/ru/", 1), path_part)
     if ru_abs is None:
         return None
     ru_target = read_text(ru_abs)
@@ -261,9 +257,10 @@ def _try_remap_missing_fragment_via_ru_en(
     ru_frag = _ru_fragment_for_same_target(
         ru_source or "", ru_page_path=ru_page_path, href_path=path_part
     )
-    # §6.174: keep RU explicit anchors on EN links (#ldap); do not retarget to
-    # EN-only ids when the link already matches the RU source fragment.
-    if ru_frag and ru_frag == frag and not _CYRILLIC.search(unquote(frag)):
+    # §6.174 / #50976: when the link already matches the immutable RU source,
+    # exact href parity wins even for Cyrillic auto-slugs. Do not retarget it
+    # to an EN-only id; the docs build is the authority for link validity.
+    if ru_frag and ru_frag == frag:
         return None
 
     candidates: list[str] = []
@@ -322,9 +319,7 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
                 return en_anchor
             if en_auto:
                 return en_auto
-        if src_h.anchor and (
-            decoded == src_h.anchor or decoded.startswith(f"{src_h.anchor}-")
-        ):
+        if src_h.anchor and (decoded == src_h.anchor or decoded.startswith(f"{src_h.anchor}-")):
             if en_anchor:
                 return en_anchor
             if en_auto:

@@ -16,18 +16,11 @@ def test_fragment_declared_in_markdown():
 def test_pr_48047_sessions_prefers_en_baseline_path():
     """Stale RU/force_exact left index.md#sessions; EN baseline + target page win."""
     en_page = "ydb/docs/en/core/concepts/glossary.md"
-    en_bad = (
-        "Sessions are described in "
-        "[{#T}](query_execution/index.md#sessions).\n"
-    )
+    en_bad = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
     en_baseline = (
-        "Sessions are described in "
-        "[{#T}](query_execution/execution_process.md#sessions).\n"
+        "Sessions are described in [{#T}](query_execution/execution_process.md#sessions).\n"
     )
-    ru_stale = (
-        "Сессии описаны в "
-        "[{#T}](query_execution/index.md#sessions).\n"
-    )
+    ru_stale = "Сессии описаны в [{#T}](query_execution/index.md#sessions).\n"
     files = {
         "ydb/docs/en/core/concepts/query_execution/index.md": (
             "# Query execution\n\n## Tables {#tables}\n"
@@ -50,14 +43,8 @@ def test_pr_48047_sessions_prefers_en_baseline_path():
 def test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares():
     """RU source already points at execution_process; retarget EN."""
     en_page = "ydb/docs/en/core/concepts/glossary.md"
-    en_bad = (
-        "Sessions are described in "
-        "[{#T}](query_execution/index.md#sessions).\n"
-    )
-    ru_ok = (
-        "Сессии описаны в "
-        "[{#T}](query_execution/execution_process.md#sessions).\n"
-    )
+    en_bad = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
+    ru_ok = "Сессии описаны в [{#T}](query_execution/execution_process.md#sessions).\n"
     files = {
         "ydb/docs/en/core/concepts/query_execution/index.md": (
             "# Query execution\n\n## Tables {#tables}\n"
@@ -79,21 +66,14 @@ def test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares():
 
 def test_pr_48047_ldap_does_not_remap_to_en_only_fragment():
     """§6.174: keep RU ``#ldap``; do not invent ``#ldap-auth-provider``."""
-    en_page = (
-        "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md"
-    )
-    en_text = (
-        "For more information, see "
-        "[{#T}](../../../security/authentication.md#ldap).\n"
-    )
+    en_page = "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md"
+    en_text = "For more information, see [{#T}](../../../security/authentication.md#ldap).\n"
     files = {
         "ydb/docs/en/core/security/authentication.md": (
-            "## LDAP directory integration {#ldap-auth-provider}\n\n"
-            "### TLS {#ldap-tls}\n"
+            "## LDAP directory integration {#ldap-auth-provider}\n\n### TLS {#ldap-tls}\n"
         ),
         "ydb/docs/ru/core/security/authentication.md": (
-            "## Аутентификация с использованием LDAP-каталога {#ldap}\n\n"
-            "### TLS {#ldap-tls}\n"
+            "## Аутентификация с использованием LDAP-каталога {#ldap}\n\n### TLS {#ldap-tls}\n"
         ),
     }
     fixed = repair_en_fragments(
@@ -124,14 +104,9 @@ def test_repair_keeps_valid_fragment():
 def test_pr_40385_system_views_users_fragment():
     """§6.221: RU autogen slug in link → EN explicit ``{#users}``."""
     en_page = "ydb/docs/en/core/security/authentication.md"
-    en_bad = (
-        "See the [system view](../dev/system-views.md"
-        "#информация-о-пользователях-users).\n"
-    )
+    en_bad = "See the [system view](../dev/system-views.md#информация-о-пользователях-users).\n"
     files = {
-        "ydb/docs/en/core/dev/system-views.md": (
-            "### Information about users {#users}\n\nBody.\n"
-        ),
+        "ydb/docs/en/core/dev/system-views.md": ("### Information about users {#users}\n\nBody.\n"),
         "ydb/docs/ru/core/dev/system-views.md": (
             "### Информация о пользователях {#users}\n\nТело.\n"
         ),
@@ -145,20 +120,15 @@ def test_pr_40385_system_views_users_fragment():
     assert "информация-о-пользователях" not in fixed
 
 
-def test_pr_40385_system_views_llm_invented_ascii_fragment():
-    """§6.222: LLM ``#system-view`` slug → EN explicit ``{#users}`` via RU source."""
+def test_pr_40385_system_views_restores_exact_ru_fragment():
+    """#50976: a source-exact Cyrillic fragment must not become EN-only."""
     en_page = "ydb/docs/en/core/security/authentication.md"
     ru_source = (
-        "См. [системного представления](../dev/system-views.md"
-        "#информация-о-пользователях-users).\n"
+        "См. [системного представления](../dev/system-views.md#информация-о-пользователях-users).\n"
     )
-    en_bad = (
-        "See the [system view](../dev/system-views.md#system-view).\n"
-    )
+    en_bad = "See the [system view](../dev/system-views.md#информация-о-пользователях-users).\n"
     files = {
-        "ydb/docs/en/core/dev/system-views.md": (
-            "### Information about users {#users}\n\nBody.\n"
-        ),
+        "ydb/docs/en/core/dev/system-views.md": ("### Information about users {#users}\n\nBody.\n"),
         "ydb/docs/ru/core/dev/system-views.md": (
             "### Информация о пользователях {#users}\n\nТело.\n"
         ),
@@ -169,8 +139,27 @@ def test_pr_40385_system_views_llm_invented_ascii_fragment():
         read_text=files.get,
         ru_source=ru_source,
     )
-    assert "system-views.md#users)" in fixed
-    assert "#system-view" not in fixed
+    assert fixed == en_bad
+
+
+def test_pr_50976_sid_fragment_stays_source_exact():
+    en_page = "ydb/docs/en/core/security/index.md"
+    ru_source = "См. [SID](./authorization.md#sid).\n"
+    en_exact = "See [SID](./authorization.md#sid).\n"
+    files = {
+        "ydb/docs/en/core/security/authorization.md": "## User {#user}\n",
+        "ydb/docs/ru/core/security/authorization.md": "## SID {#sid}\n",
+    }
+
+    assert (
+        repair_en_fragments(
+            en_exact,
+            en_page_path=en_page,
+            read_text=files.get,
+            ru_source=ru_source,
+        )
+        == en_exact
+    )
 
 
 def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
@@ -190,13 +179,9 @@ def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
         "ydb/docs/en/core/concepts/datamodel/_includes/table.md": (
             "### Partitioning Row-Oriented Tables {#partitioning_row_table}\n"
         ),
-        "ydb/docs/en/core/concepts/datamodel/topic.md": (
-            "## Partitioning {#partitioning}\n"
-        ),
+        "ydb/docs/en/core/concepts/datamodel/topic.md": ("## Partitioning {#partitioning}\n"),
         "ydb/docs/en/core/concepts/datamodel/toc_i.yaml": (
-            "items:\n"
-            "- { name: Tables, href: table.md }\n"
-            "- { name: Topics, href: topic.md }\n"
+            "items:\n- { name: Tables, href: table.md }\n- { name: Topics, href: topic.md }\n"
         ),
         "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md": (
             "### Parameters\n\nRank and pool.\n"
@@ -234,10 +219,7 @@ def test_fragment_declared_accepts_diplodoc_auto_slug():
 def test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale():
     """§6.153 / #48012: both RU and EN still say index.md#sessions — use toc sibling."""
     en_page = "ydb/docs/en/core/concepts/glossary.md"
-    stale = (
-        "Sessions are described in "
-        "[{#T}](query_execution/index.md#sessions).\n"
-    )
+    stale = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
     files = {
         "ydb/docs/en/core/concepts/query_execution/index.md": (
             "# Query execution\n\nSee [{#T}](execution_process.md).\n"
