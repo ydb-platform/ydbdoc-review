@@ -133,6 +133,21 @@ def test_href_parity_rejects_localized_path_when_en_target_is_unreachable():
     )
 
 
+def test_finalize_restores_exact_source_links_and_cyrillic_code_atoms():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    source = (
+        "See [SID](authorization.md#sid) in "
+        "`Имя=Значение,...@<domain>` notation.\n"
+    )
+    translated = (
+        "See [SID](authorization.md#user) in "
+        "`Name=Value,...@<domain>` notation.\n"
+    )
+
+    assert finalize_en_target(translated, source) == source
+
+
 def test_anchor_parity_blocks_renamed_heading_id():
     ru = "## LDAP {#ldap}\n\n### TLS {#ldap-tls}\n"
     en = "## LDAP {#ldap-auth-provider}\n\n### TLS {#ldap-tls}\n"

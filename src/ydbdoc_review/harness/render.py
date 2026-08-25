@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from pathlib import PurePosixPath
 
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -26,6 +27,7 @@ from ydbdoc_review.validation.glossary_toc_links import (
     strip_unreachable_internal_links,
 )
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
+from ydbdoc_review.validation.href_parity import restore_md_link_hrefs
 from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
@@ -36,6 +38,23 @@ from ydbdoc_review.validation.prose_cyrillic import (
 )
 
 logger = logging.getLogger(__name__)
+
+_INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
+_CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+
+
+def _restore_cyrillic_source_code_atoms(text: str, source_text: str) -> str:
+    """Keep protected source inline-code atoms exact after prose cleanup."""
+    source_atoms = list(_INLINE_CODE.finditer(source_text))
+    target_atoms = list(_INLINE_CODE.finditer(text))
+    if len(source_atoms) != len(target_atoms):
+        return text
+    out = text
+    for source, target in reversed(list(zip(source_atoms, target_atoms, strict=True))):
+        if not _CYRILLIC.search(source.group(1)):
+            continue
+        out = out[: target.start()] + source.group(0) + out[target.end() :]
+    return out
 
 
 def render_with_translations(
@@ -146,4 +165,6 @@ def finalize_en_target(
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
     text = postprocess_en_target_markdown(text)
-    return repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
+    text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
+    text = restore_md_link_hrefs(text, normalized_source_text)
+    return _restore_cyrillic_source_code_atoms(text, normalized_source_text)
