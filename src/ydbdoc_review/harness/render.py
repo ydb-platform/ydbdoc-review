@@ -44,16 +44,31 @@ _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
 
 def _restore_cyrillic_source_code_atoms(text: str, source_text: str) -> str:
-    """Keep protected source inline-code atoms exact after prose cleanup."""
+    """Restore only uniquely identifiable structured source code atoms."""
     source_atoms = list(_INLINE_CODE.finditer(source_text))
     target_atoms = list(_INLINE_CODE.finditer(text))
-    if len(source_atoms) != len(target_atoms):
-        return text
+    def signature(value: str) -> str:
+        return "".join(ch for ch in value if not ch.isalnum() and not ch.isspace())
+
+    source_by_signature: dict[str, list[re.Match[str]]] = {}
+    target_by_signature: dict[str, list[re.Match[str]]] = {}
+    for atom in source_atoms:
+        sig = signature(atom.group(1))
+        if sig and _CYRILLIC.search(atom.group(1)):
+            source_by_signature.setdefault(sig, []).append(atom)
+    for atom in target_atoms:
+        sig = signature(atom.group(1))
+        if sig:
+            target_by_signature.setdefault(sig, []).append(atom)
+
+    replacements: list[tuple[re.Match[str], str]] = []
+    for sig, sources in source_by_signature.items():
+        targets = target_by_signature.get(sig, [])
+        if len(sources) == len(targets) == 1:
+            replacements.append((targets[0], sources[0].group(0)))
     out = text
-    for source, target in reversed(list(zip(source_atoms, target_atoms, strict=True))):
-        if not _CYRILLIC.search(source.group(1)):
-            continue
-        out = out[: target.start()] + source.group(0) + out[target.end() :]
+    for target, source_value in sorted(replacements, key=lambda item: item[0].start(), reverse=True):
+        out = out[: target.start()] + source_value + out[target.end() :]
     return out
 
 
@@ -136,6 +151,10 @@ def finalize_en_target(
             out_warnings=out_warnings,
         )
     text = localize_links_in_text(text, target_lang="en")
+    text = postprocess_en_target_markdown(text)
+    text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
+    text = restore_md_link_hrefs(text, normalized_source_text)
+    text = _restore_cyrillic_source_code_atoms(text, normalized_source_text)
     if en_toc_reachable is not None and target_lang.lower() in {"en", "english"}:
         stripped: list[str] = []
         try:
@@ -164,7 +183,4 @@ def finalize_en_target(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
-    text = postprocess_en_target_markdown(text)
-    text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
-    text = restore_md_link_hrefs(text, normalized_source_text)
-    return _restore_cyrillic_source_code_atoms(text, normalized_source_text)
+    return text

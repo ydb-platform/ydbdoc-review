@@ -148,6 +148,42 @@ def test_finalize_restores_exact_source_links_and_cyrillic_code_atoms():
     assert finalize_en_target(translated, source) == source
 
 
+def test_finalize_does_not_restore_unreachable_source_href():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    warnings: list[str] = []
+    result = finalize_en_target(
+        "See the section [Missing](missing.md).\n",
+        "См. раздел [Missing](missing.md).\n",
+        file_path="ydb/docs/ru/core/a.md",
+        en_toc_reachable=frozenset(),
+        out_warnings=warnings,
+    )
+
+    assert "missing.md" not in result
+    assert any("removed 1" in warning for warning in warnings)
+
+
+def test_finalize_does_not_restore_reordered_plain_code_atoms():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    source = "Используйте `первый` перед `второй`.\n"
+    translated = "Use `second` after `first`.\n"
+
+    assert finalize_en_target(translated, source) == translated
+
+
+def test_finalize_restores_unique_structured_atom_despite_count_drift():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    source = "Задайте `Имя=Значение,...@<domain>` и `режим`.\n"
+    translated = "Set `Name=Value,...@<domain>`.\n"
+
+    assert finalize_en_target(translated, source) == (
+        "Set `Имя=Значение,...@<domain>`.\n"
+    )
+
+
 def test_anchor_parity_blocks_renamed_heading_id():
     ru = "## LDAP {#ldap}\n\n### TLS {#ldap-tls}\n"
     en = "## LDAP {#ldap-auth-provider}\n\n### TLS {#ldap-tls}\n"
