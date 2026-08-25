@@ -161,6 +161,49 @@ def test_pr_50904_deterministic_index_patch_skips_unrelated_href_repairs():
     restore.assert_not_called()
 
 
+def test_pr_50904_critic_only_receives_ru_merge_base():
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/devops/concepts/index.md",
+        en_path="ydb/docs/en/core/devops/concepts/index.md",
+        ru_changed=True,
+    )
+    content = PairContent(
+        pair=pair,
+        ru_text="# Концепции\n",
+        ru_base_text="# Старые концепции\n",
+        en_text="# Concepts\n",
+        en_base_text="# Old concepts\n",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="verify",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(MagicMock(), glossary=load_glossary(), config=cfg)
+    captured = {}
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del ctx
+            captured["base_source_text"] = state.base_source_text
+            result = MagicMock()
+            result.final_text = content.en_text
+            return result
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness):
+        run_pair_plan(content, plan, parent, {})
+
+    assert captured["base_source_text"] == content.ru_base_text
+
+
 def test_href_only_pair_bypasses_llm_and_repairs():
     """#45949: href-only source deltas are deterministic and byte-preserving."""
     pair = DocPair(

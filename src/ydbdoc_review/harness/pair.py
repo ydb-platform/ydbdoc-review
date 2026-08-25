@@ -103,7 +103,10 @@ def run_pair_plan(
 
     # §6.132: pass existing EN + base RU into translate so differential can seed.
     base_source: str | None = None
-    if enable_translate and plan.action == "translate_to_en":
+    if plan.action in {"translate_to_en", "critic_only"} and (
+        plan.target_lang.lower() in {"en", "english"}
+        or plan.target_path == content.pair.en_path
+    ):
         base_source = content.ru_base_text
     elif enable_translate and plan.action == "translate_to_ru":
         base_source = content.en_base_text
@@ -119,7 +122,7 @@ def run_pair_plan(
             if plan.action == "translate_to_en"
             else content.ru_base_text
         ),
-        base_source_text=base_source if enable_translate else None,
+        base_source_text=base_source,
     )
     harness_ctx = HarnessContext.from_options(
         ctx.client,
