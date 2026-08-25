@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from textwrap import dedent
+
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
     apply_href_only_delta,
+    apply_localized_mirror_delta,
     check_heading_anchor_parity,
     check_href_parity,
     check_inbound_fragments,
     check_outbound_fragments,
     collect_internal_hrefs,
     is_href_only_change,
+    is_localized_mirror_delta,
     restore_md_link_hrefs,
 )
 
@@ -59,6 +63,63 @@ def test_href_only_change_ignores_writer_trailing_blank_normalization():
     after = "See [node](new.md).\n"
 
     assert is_href_only_change(before, after)
+
+
+def test_pr_50839_localized_mirror_delta_href_and_fence_info():
+    ru_base = dedent(
+        """\
+        DecommitStatus | [Состояние](#decommit-progress).
+
+        ```
+        $ dstool list
+        ```
+        """
+    )
+    ru_now = dedent(
+        """\
+        DecommitStatus | [Состояние](blobdepot_decommit.md#decommit-progress).
+
+        ```bash
+        $ dstool list
+        ```
+        """
+    )
+    en = dedent(
+        """\
+        DecommitStatus | [State](blobdepot_decommit.md#decommit-progress).
+
+        ```bash
+        $ dstool list
+        ```
+        """
+    )
+
+    assert is_localized_mirror_delta(ru_base, ru_now)
+    assert apply_localized_mirror_delta(ru_base, ru_now, en) == en
+
+
+def test_pr_50839_autotitle_delta_already_in_en():
+    from ydbdoc_review.translation.differential import autotitle_delta_satisfied_in_en
+
+    ru_base = dedent(
+        """\
+        * Обслуживание:
+
+          * [{#T}](moving_vdisks.md).
+        """
+    )
+    ru_pr = ru_base + "  * [{#T}](blobdepot.md).\n  * [{#T}](blobdepot_decommit.md).\n"
+    en = dedent(
+        """\
+        Main topics:
+
+        * [{#T}](moving_vdisks.md).
+        * [{#T}](blobdepot.md).
+        * [{#T}](blobdepot_decommit.md).
+        """
+    )
+
+    assert autotitle_delta_satisfied_in_en(ru_base, ru_pr, en)
 
 
 def test_pr_50904_outbound_fragment_blocks_ru_slug_on_en_target():

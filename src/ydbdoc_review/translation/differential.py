@@ -41,7 +41,42 @@ ChangeType = Literal["new_file", "deleted_file", "modified"]
 MergeStrategy = Literal["reconstruct", "patch"]
 
 _ENV_ENABLE = "YDBDOC_DIFFERENTIAL_TRANSLATION"
-_AUTOTITLE_LIST_LINE = re.compile(r"^\s*[-*+]\s+\[\{#T\}\]\(([^)]+)\)\s*(?:\r?\n)?$")
+_AUTOTITLE_LIST_LINE = re.compile(r"^\s*[-*+]\s+\[\{#T\}\]\(([^)]+)\)\.?\s*$")
+
+
+def _autotitle_href_from_line(line: str) -> str | None:
+    match = _AUTOTITLE_LIST_LINE.fullmatch(line.rstrip("\r\n"))
+    return match.group(1) if match else None
+
+
+def autotitle_delta_satisfied_in_en(ru_base_text: str, ru_pr_text: str, en_text: str) -> bool:
+    """True when a source-only autotitle list insertion is already present in EN."""
+    base_lines = ru_base_text.splitlines(keepends=True)
+    pr_lines = ru_pr_text.splitlines(keepends=True)
+    added_hrefs: list[str] = []
+    en_hrefs = {
+        href
+        for line in en_text.splitlines(keepends=True)
+        if (href := _autotitle_href_from_line(line)) is not None
+    }
+    for tag, _i1, _i2, j1, j2 in SequenceMatcher(
+        None, base_lines, pr_lines, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "insert":
+            return False
+        added = pr_lines[j1:j2]
+        if not added:
+            continue
+        for line in added:
+            href = _autotitle_href_from_line(line)
+            if href is None:
+                return False
+            added_hrefs.append(href)
+    if not added_hrefs:
+        return False
+    return all(href in en_hrefs for href in added_hrefs)
 
 
 def patch_en_with_source_added_autotitle_lines(
@@ -95,7 +130,16 @@ def patch_en_with_source_added_autotitle_lines(
         return None
 
     for previous, following, added in insertions:
-        if any(line in en_lines for line in added):
+        added_hrefs = [_autotitle_href_from_line(line) for line in added]
+        if added_hrefs and all(
+            href in {
+                h
+                for line in en_lines
+                if (h := _autotitle_href_from_line(line)) is not None
+            }
+            for href in added_hrefs
+            if href is not None
+        ):
             continue
         index: int | None = None
         if previous is not None:

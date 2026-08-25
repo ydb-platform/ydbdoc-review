@@ -105,6 +105,78 @@ def is_href_only_change(base: str | None, current: str | None) -> bool:
     )
 
 
+def _localized_content_skeleton(text: str) -> str:
+    """Compare skeleton ignoring link targets and fenced-code info strings."""
+    masked = _mask_link_protected_ranges(text)
+    normalized_lines: list[str] = []
+    for line in masked.splitlines():
+        logical = re.sub(r"^ {0,3}(?:> ?)+", "", line.rstrip("\r\n"))
+        opening = _FENCE_OPEN.match(logical)
+        if opening:
+            normalized_lines.append(f"{opening.group(1)[:3]}")
+        else:
+            normalized_lines.append(line)
+    skeleton = "\n".join(normalized_lines)
+    links = list(_MD_LINK.finditer(skeleton))
+    return _link_skeleton(skeleton, links).rstrip()
+
+
+def is_localized_mirror_delta(base: str | None, current: str | None) -> bool:
+    """True when texts differ only in internal hrefs and/or fence info strings."""
+    if base is None or current is None or base == current:
+        return False
+    return _localized_content_skeleton(base) == _localized_content_skeleton(current)
+
+
+def _sync_fence_openers_from_ru(ru_text: str, en_text: str) -> str:
+    """Copy RU fence openers onto EN blocks with identical fenced bodies."""
+    from ydbdoc_review.parsing.ast_types import FencedCode
+    from ydbdoc_review.validation.fence_integrity import code_blocks_from_text
+
+    ru_blocks = code_blocks_from_text(ru_text)
+    en_blocks = code_blocks_from_text(en_text)
+    if not ru_blocks or len(ru_blocks) != len(en_blocks):
+        return en_text
+    if any(ru.content != en.content for ru, en in zip(ru_blocks, en_blocks, strict=True)):
+        return en_text
+
+    out = en_text
+    for ru_block, en_block in zip(ru_blocks, en_blocks, strict=True):
+        if not isinstance(ru_block, FencedCode) or not isinstance(en_block, FencedCode):
+            continue
+        if ru_block.info.strip() == en_block.info.strip():
+            continue
+        ru_open = f"{ru_block.fence_char * ru_block.fence_len}{ru_block.info}"
+        en_open = f"{en_block.fence_char * en_block.fence_len}{en_block.info}"
+        if ru_open == en_open:
+            continue
+        idx = out.find(en_open)
+        if idx == -1:
+            return en_text
+        out = out[:idx] + ru_open + out[idx + len(en_open) :]
+    return out
+
+
+def apply_localized_mirror_delta(
+    source_base: str | None,
+    source_current: str,
+    target_baseline: str | None,
+) -> str | None:
+    """Apply href and fence-opener deltas from RU to EN without an LLM."""
+    if not source_base or target_baseline is None:
+        return None
+    if not is_localized_mirror_delta(source_base, source_current):
+        return None
+    out = target_baseline
+    if is_href_only_change(source_base, source_current):
+        href_applied = apply_href_only_delta(source_base, source_current, target_baseline)
+        if href_applied is None:
+            return None
+        out = href_applied
+    out = _sync_fence_openers_from_ru(source_current, out)
+    return out
+
+
 def _is_internal_href(href: str) -> bool:
     href = href.strip()
     if not href or href.startswith("mailto:") or _HTTP.match(href):

@@ -17,8 +17,14 @@ from ydbdoc_review.translation.errors import TranslationError
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
+from ydbdoc_review.translation.differential import (
+    autotitle_delta_satisfied_in_en,
+)
 from ydbdoc_review.validation.href_parity import (
     apply_href_only_delta,
+    apply_localized_mirror_delta,
+    check_href_parity,
+    collect_internal_hrefs,
     insert_missing_autotitle_list_items,
     is_href_only_change,
     restore_md_link_hrefs,
@@ -28,6 +34,55 @@ from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_tran
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
 
 logger = logging.getLogger(__name__)
+
+
+def _try_deterministic_en_preserve(
+    content: PairContent,
+    plan: PairPlan,
+    source_text: str,
+    existing_target: str | None,
+    ctx: HarnessContext,
+) -> str | None:
+    """Return preserved/patched EN when the RU merge delta is already satisfied."""
+    if existing_target is None or plan.target_path != content.pair.en_path:
+        return None
+    ru_base = content.ru_base_text
+    if not ru_base or ru_base == source_text:
+        return None
+
+    localized = apply_localized_mirror_delta(ru_base, source_text, existing_target)
+    if localized is not None:
+        if ctx.docs_text_reader is not None:
+            localized = repair_en_fragments(
+                localized,
+                en_page_path=plan.target_path,
+                read_text=ctx.docs_text_reader,
+                ru_source=source_text,
+                en_baseline=content.en_base_text or existing_target,
+            )
+        logger.info(
+            "Deterministic localized mirror delta for %s; bypassing LLM and repairs",
+            plan.target_path,
+        )
+        return localized
+
+    if autotitle_delta_satisfied_in_en(ru_base, source_text, existing_target):
+        logger.info(
+            "RU autotitle delta already satisfied in EN for %s; preserving bytes",
+            plan.target_path,
+        )
+        return existing_target
+
+    if collect_internal_hrefs(source_text) and not check_href_parity(
+        source_text, existing_target
+    ):
+        logger.info(
+            "RU/EN href parity OK for %s despite structural drift; preserving EN",
+            plan.target_path,
+        )
+        return existing_target
+
+    return None
 
 
 def _read_source_text(content: PairContent, plan: PairPlan) -> str | None:
@@ -63,6 +118,16 @@ def run_pair_plan(
         )
 
     existing_target = _read_target_text(content, plan)
+    if plan.action in {"translate_to_en", "critic_only"}:
+        preserved = _try_deterministic_en_preserve(
+            content, plan, source_text, existing_target, ctx
+        )
+        if preserved is not None:
+            return PairRunResult(
+                plan=plan,
+                target_text=preserved,
+                source_text=source_text,
+            )
     if plan.action == "critic_only" and is_href_only_change(content.en_base_text, existing_target):
         logger.info(
             "Deterministic href-only target %s; critic is read-only/bypassed",

@@ -54,6 +54,7 @@ from ydbdoc_review.validation.heuristics import (
     check_list_tab_parity,
     run_file_heuristics_classified,
 )
+from ydbdoc_review.validation.href_parity import check_href_parity, collect_internal_hrefs
 from ydbdoc_review.validation.include_targets import repair_missing_includes
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.placeholder_drift import (
@@ -608,6 +609,17 @@ class RoundTripStep:
                 "verify realign disabled for diagnostic critic-only run: %s",
                 state.file_path,
             )
+            return
+        if (
+            state.translated_text
+            and collect_internal_hrefs(state.source_text)
+            and not check_href_parity(state.source_text, state.translated_text)
+        ):
+            logger.info(
+                "verify realign skipped: RU/EN href parity OK for %s",
+                state.file_path,
+            )
+            state.segment_alignment_error = None
             return
         if is_glossary_file(state.file_path):
             logger.info("Glossary verify: skip structural alignment gate (§6.186)")
