@@ -321,6 +321,38 @@ def _critic_fix_would_regress(
     return None
 
 
+_CODE_ONLY_LINK = re.compile(r"\[(⟦C\d+⟧)[^\]]*\]\((⟦U\d+⟧)\)")
+
+
+def _drop_impossible_code_link_issues(
+    response: CriticResponse,
+    translations: dict[str, str],
+) -> CriticResponse:
+    """Ignore link advice that contradicts a source-preserved code-only label."""
+    kept: list[CriticIssueOut] = []
+    for issue in response.issues:
+        current = translations.get(issue.segment_id or "", "")
+        suggested = issue.suggested_text or ""
+        link_match = _CODE_ONLY_LINK.search(current)
+        haystack = f"{issue.category} {issue.comment}"
+        if (
+            link_match
+            and re.search(r"link|anchor", haystack, re.IGNORECASE)
+            and link_match.group(2) in suggested
+            and link_match.group(1) not in suggested
+        ):
+            logger.warning(
+                "Ignoring critic issue for %s: suggestion removes a source-preserved "
+                "code-only link label",
+                issue.segment_id,
+            )
+            continue
+        kept.append(issue)
+    if len(kept) == len(response.issues):
+        return response
+    return CriticResponse(verdict="ok" if not kept else response.verdict, issues=kept)
+
+
 def apply_critic_fixes(
     translations: dict[str, str],
     segments: list[Segment],
@@ -522,6 +554,7 @@ def review_with_critic(
         max_tokens=max_tokens,
         translated_text=translated_text,
     )
+    initial = _drop_impossible_code_link_issues(initial, translations)
     fixed, applied, skipped = apply_critic_fixes(translations, segments, initial.issues)
 
     unresolved: CriticResponse | None = None

@@ -157,7 +157,7 @@ def test_apply_critic_fixes_skips_cyrillic_suggestion():
             severity="blocked",
             category="residual_cyrillic",
             comment="Cyrillic in EN",
-            suggested_text="Name in `Имя=Значение,...@<domain>` notation.",
+            suggested_text="Name in `Привет` notation.",
         )
     ]
     updated, applied, skipped = apply_critic_fixes({"s1": seg.text}, [seg], issues)
@@ -512,6 +512,40 @@ def test_review_with_critic_full_flow():
     assert len(result.applied) == 1
     assert result.unresolved is not None
     assert result.unresolved.verdict == "ok"
+
+
+def test_review_50976_ignores_impossible_code_only_link_rewrite():
+    current = "See the [⟦C1⟧ command](⟦U1⟧)."
+    critic_raw = json.dumps(
+        {
+            "verdict": "warnings",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "severity": "warning",
+                    "category": "link",
+                    "comment": "Link anchor contains only the code placeholder.",
+                    "suggested_text": "See the command description at ⟦U1⟧.",
+                }
+            ],
+        }
+    )
+    client = _mock_client([critic_raw])
+
+    result = review_with_critic(
+        client,
+        source_text="См. команду.",
+        translated_text=current,
+        segments=[_segment("s1", "См. [⟦C1⟧](⟦U1⟧).")],
+        translations={"s1": current},
+        glossary=load_glossary(),
+        file_path="ydb/docs/en/core/security/authentication.md",
+    )
+
+    assert result.initial.verdict == "ok"
+    assert result.initial.issues == []
+    assert result.translations["s1"] == current
+    assert client._client.chat.completions.create.call_count == 1
 
 
 def test_review_with_critic_skips_verify_when_no_issues():
