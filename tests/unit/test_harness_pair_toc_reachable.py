@@ -111,7 +111,7 @@ def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
     assert result.target_text == "# EN\n\nText.\n"
 
 
-def test_pr_50904_deterministic_index_patch_skips_unrelated_href_repairs():
+def test_pr_50904_deterministic_index_patch_syncs_autotitle_hrefs_only():
     pair = DocPair(
         ru_path="ydb/docs/ru/core/devops/concepts/index.md",
         en_path="ydb/docs/en/core/devops/concepts/index.md",
@@ -119,9 +119,14 @@ def test_pr_50904_deterministic_index_patch_skips_unrelated_href_repairs():
     )
     clean = "# Concepts\n\n* [{#T}](../backup-and-recovery.md)\n"
     patched = clean + "* [{#T}](./node-authorization.md)\n"
+    ru = (
+        "# Концепции\n\n"
+        "* [{#T}](../backup-and-recovery/index.md)\n"
+        "* [{#T}](./node-authorization.md)\n"
+    )
     content = PairContent(
         pair=pair,
-        ru_text="# Концепции\n\n* [{#T}](./node-authorization.md)\n",
+        ru_text=ru,
         ru_base_text="# Концепции\n",
         en_text=clean,
         en_base_text=clean,
@@ -153,12 +158,15 @@ def test_pr_50904_deterministic_index_patch_skips_unrelated_href_repairs():
 
     with (
         patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
-        patch("ydbdoc_review.harness.pair.restore_autotitle_hrefs") as restore,
+        patch("ydbdoc_review.harness.pair.restore_md_link_hrefs") as restore_md,
+        patch("ydbdoc_review.harness.pair.repair_en_fragments") as repair_fragments,
     ):
         result = run_pair_plan(content, plan, parent, {})
 
-    assert result.target_text == patched
-    restore.assert_not_called()
+    assert "../backup-and-recovery/index.md" in result.target_text
+    assert "../backup-and-recovery.md" not in result.target_text
+    restore_md.assert_not_called()
+    repair_fragments.assert_not_called()
 
 
 def test_pr_50904_critic_only_receives_ru_merge_base():

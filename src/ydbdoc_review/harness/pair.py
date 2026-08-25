@@ -174,21 +174,20 @@ def run_pair_plan(
         and differential_meta.get("deterministic_autotitle_patch") is True
     )
     target_text = existing_target if semantic_noop else file_result.final_text
-    if (
-        target_text
-        and content.ru_text
-        and not semantic_noop
-        and not deterministic_autotitle_patch
-    ):
+    is_en_target = plan.action in ("translate_to_en", "critic_only") and (
+        plan.target_lang.lower() in {"en", "english"}
+        or plan.target_path == content.pair.en_path
+    )
+    before_pair_repairs: str | None = None
+    if target_text and content.ru_text and not semantic_noop:
         if plan.action == "translate_to_ru":
             target_text = restore_autotitle_hrefs(target_text, content.ru_text)
-        elif plan.action in ("translate_to_en", "critic_only") and (
-            plan.target_lang.lower() in {"en", "english"}
-            or plan.target_path == content.pair.en_path
-        ):
-            before_restore = target_text
+        elif is_en_target:
+            before_pair_repairs = target_text
             # Also on doc_verify critic_only: critic can reintroduce stale
             # hrefs (Sessions → index.md#sessions, #47104 after 05:32 fixup).
+            # Always sync ``[{#T}](href)`` from RU, including after deterministic
+            # autotitle-list insertion (#50904: backup-and-recovery/index.md).
             target_text = restore_autotitle_hrefs(
                 target_text,
                 content.ru_text,
@@ -196,6 +195,10 @@ def run_pair_plan(
                 en_page_path=plan.target_path,
                 en_toc_reachable=ctx.en_toc_reachable,
             )
+        if (
+            not deterministic_autotitle_patch
+            and is_en_target
+        ):
             target_text = insert_missing_autotitle_list_items(
                 target_text,
                 content.ru_text,
@@ -241,47 +244,53 @@ def run_pair_plan(
             # recompute deterministic QA below against the exact PR bytes.
             if plan.action == "critic_only" and existing_target is not None:
                 target_text = existing_target
+        if (
+            is_en_target
+            and before_pair_repairs is not None
+            and target_text != before_pair_repairs
+            and is_dataclass(file_result)
+        ):
             # Restore runs after harness heuristics — refresh QA so the report
-            # matches committed text (#49451).
-            if target_text != before_restore and is_dataclass(file_result):
-                from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
+            # matches committed text (#49451), including deterministic autotitle
+            # href sync (#50904).
+            from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
 
-                norm = (
-                    normalize_ru_source_for_translation(source_text)
-                    if plan.source_lang.lower() in {"ru", "russian"}
-                    else source_text
-                )
-                classified = run_file_heuristics_classified(
-                    source_text,
-                    target_text,
-                    normalized_source_text=norm,
-                    source_lang=plan.source_lang,
-                    target_lang=plan.target_lang,
-                    source_file=plan.source_path,
-                    en_toc_reachable=ctx.en_toc_reachable,
-                    docs_text_reader=ctx.docs_text_reader,
-                    docs_repo_path=ctx.docs_repo_path,
-                    en_baseline_text=content.en_text or content.en_base_text,
-                    source_baseline_text=content.ru_base_text,
-                )
-                critic_verdict = compute_critic_verdict(
-                    initial=file_result.critic_initial,
-                    unresolved=file_result.critic_unresolved,
-                )
-                verdict = compose_file_verdict(
-                    critic_verdict=critic_verdict,
-                    alignment_error=file_result.segment_alignment_error,
-                    heuristics=classified,
-                    manual_actions=bool(file_result.manual_actions),
-                )
-                file_result = replace(
-                    file_result,
-                    final_text=target_text,
-                    heuristic_blocking=list(classified.blocking),
-                    heuristic_warnings=list(classified.warnings),
-                    heuristic_info=list(classified.info),
-                    verdict=verdict,
-                )
+            norm = (
+                normalize_ru_source_for_translation(source_text)
+                if plan.source_lang.lower() in {"ru", "russian"}
+                else source_text
+            )
+            classified = run_file_heuristics_classified(
+                source_text,
+                target_text,
+                normalized_source_text=norm,
+                source_lang=plan.source_lang,
+                target_lang=plan.target_lang,
+                source_file=plan.source_path,
+                en_toc_reachable=ctx.en_toc_reachable,
+                docs_text_reader=ctx.docs_text_reader,
+                docs_repo_path=ctx.docs_repo_path,
+                en_baseline_text=content.en_text or content.en_base_text,
+                source_baseline_text=content.ru_base_text,
+            )
+            critic_verdict = compute_critic_verdict(
+                initial=file_result.critic_initial,
+                unresolved=file_result.critic_unresolved,
+            )
+            verdict = compose_file_verdict(
+                critic_verdict=critic_verdict,
+                alignment_error=file_result.segment_alignment_error,
+                heuristics=classified,
+                manual_actions=bool(file_result.manual_actions),
+            )
+            file_result = replace(
+                file_result,
+                final_text=target_text,
+                heuristic_blocking=list(classified.blocking),
+                heuristic_warnings=list(classified.warnings),
+                heuristic_info=list(classified.info),
+                verdict=verdict,
+            )
 
     if plan.action == "critic_only" and existing_target is not None:
         # Also cover an empty (but valid) RU document, which skips the repair
