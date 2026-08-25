@@ -41,35 +41,27 @@ logger = logging.getLogger(__name__)
 
 _INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+_SOURCE_CERTIFICATE_SUBJECT_NOTATION = "Имя=Значение,...@<domain>"
+_TARGET_CERTIFICATE_SUBJECT_NOTATION = "Name=Value,...@<domain>"
 
 
 def _restore_cyrillic_source_code_atoms(text: str, source_text: str) -> str:
-    """Restore only uniquely identifiable structured source code atoms."""
-    source_atoms = list(_INLINE_CODE.finditer(source_text))
-    target_atoms = list(_INLINE_CODE.finditer(text))
-    def signature(value: str) -> str:
-        return "".join(ch for ch in value if not ch.isalnum() and not ch.isspace())
-
-    source_by_signature: dict[str, list[re.Match[str]]] = {}
-    target_by_signature: dict[str, list[re.Match[str]]] = {}
-    for atom in source_atoms:
-        sig = signature(atom.group(1))
-        if sig and _CYRILLIC.search(atom.group(1)):
-            source_by_signature.setdefault(sig, []).append(atom)
-    for atom in target_atoms:
-        sig = signature(atom.group(1))
-        if sig:
-            target_by_signature.setdefault(sig, []).append(atom)
-
-    replacements: list[tuple[re.Match[str], str]] = []
-    for sig, sources in source_by_signature.items():
-        targets = target_by_signature.get(sig, [])
-        if len(sources) == len(targets) == 1:
-            replacements.append((targets[0], sources[0].group(0)))
-    out = text
-    for target, source_value in sorted(replacements, key=lambda item: item[0].start(), reverse=True):
-        out = out[: target.start()] + source_value + out[target.end() :]
-    return out
+    """Restore the unique certificate-subject notation protected by #50976."""
+    source_atoms = [
+        atom
+        for atom in _INLINE_CODE.finditer(source_text)
+        if atom.group(1) == _SOURCE_CERTIFICATE_SUBJECT_NOTATION
+    ]
+    target_atoms = [
+        atom
+        for atom in _INLINE_CODE.finditer(text)
+        if atom.group(1) == _TARGET_CERTIFICATE_SUBJECT_NOTATION
+    ]
+    if len(source_atoms) != 1 or len(target_atoms) != 1:
+        return text
+    source = source_atoms[0]
+    target = target_atoms[0]
+    return text[: target.start()] + source.group(0) + text[target.end() :]
 
 
 def render_with_translations(

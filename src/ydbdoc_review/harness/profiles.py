@@ -42,8 +42,10 @@ _TRANSLATE_QA_TAIL: tuple[HarnessStep, ...] = (
 
 _VERIFY_QA_TAIL: tuple[HarnessStep, ...] = (
     RoundTripStep(),
+    # Critic must inspect finalized bytes, not the mutable pre-finalize text.
+    FinalizeEnStep(),
     CriticLoopStep(),
-    # Finalize first, then heuristics/verdict on the *outcome* text (§6.138).
+    # Re-apply deterministic protections after any critic suggestions.
     # Recommendation must match what we would commit / what already sits on
     # main after auto-fix — not the dirty incoming tip.
     FinalizeEnStep(),

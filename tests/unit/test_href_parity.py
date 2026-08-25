@@ -42,13 +42,9 @@ def test_href_only_change_ignores_writer_trailing_blank_normalization():
 
 def test_restore_md_link_hrefs_applies_only_ru_delta():
     """#45949: one RU href edit must not permute unrelated EN links."""
-    ru_base = (
-        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../manual/auth.md) "
-        "[CMS](glossary.md#cms)"
-    )
+    ru_base = "[DSL](selectors.md) [Kinds](#kinds) [Auth](../manual/auth.md) [CMS](glossary.md#cms)"
     ru_now = (
-        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../concepts/auth.md) "
-        "[CMS](glossary.md#cms)"
+        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../concepts/auth.md) [CMS](glossary.md#cms)"
     )
     en_base = ru_base
 
@@ -60,8 +56,7 @@ def test_restore_md_link_hrefs_applies_only_ru_delta():
     )
 
     assert fixed == (
-        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../concepts/auth.md) "
-        "[CMS](glossary.md#cms)"
+        "[DSL](selectors.md) [Kinds](#kinds) [Auth](../concepts/auth.md) [CMS](glossary.md#cms)"
     )
 
 
@@ -110,14 +105,15 @@ def test_href_parity_accepts_pr_50976_localized_reachable_path():
     ru = "[YDB Monitoring](../embedded-ui/ydb-monitoring.md)\n"
     en = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
 
-    assert check_href_parity(
-        ru,
-        en,
-        en_page_path=page,
-        en_toc_reachable=frozenset(
-            {"ydb/docs/en/core/reference/ydb-ui/ydb-monitoring.md"}
-        ),
-    ) == []
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            en_toc_reachable=frozenset({"ydb/docs/en/core/reference/ydb-ui/ydb-monitoring.md"}),
+        )
+        == []
+    )
 
 
 def test_href_parity_rejects_localized_path_when_en_target_is_unreachable():
@@ -136,14 +132,8 @@ def test_href_parity_rejects_localized_path_when_en_target_is_unreachable():
 def test_finalize_restores_exact_source_links_and_cyrillic_code_atoms():
     from ydbdoc_review.harness.render import finalize_en_target
 
-    source = (
-        "See [SID](authorization.md#sid) in "
-        "`Имя=Значение,...@<domain>` notation.\n"
-    )
-    translated = (
-        "See [SID](authorization.md#user) in "
-        "`Name=Value,...@<domain>` notation.\n"
-    )
+    source = "See [SID](authorization.md#sid) in `Имя=Значение,...@<domain>` notation.\n"
+    translated = "See [SID](authorization.md#user) in `Name=Value,...@<domain>` notation.\n"
 
     assert finalize_en_target(translated, source) == source
 
@@ -179,9 +169,49 @@ def test_finalize_restores_unique_structured_atom_despite_count_drift():
     source = "Задайте `Имя=Значение,...@<domain>` и `режим`.\n"
     translated = "Set `Name=Value,...@<domain>`.\n"
 
-    assert finalize_en_target(translated, source) == (
-        "Set `Имя=Значение,...@<domain>`.\n"
+    assert finalize_en_target(translated, source) == ("Set `Имя=Значение,...@<domain>`.\n")
+
+
+def test_finalize_does_not_match_unrelated_assignment_atoms():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    assert (
+        finalize_en_target(
+            "Use port `x=y`.\n",
+            "Используйте `режим=строгий` и `порт`.\n",
+        )
+        == "Use port `x=y`.\n"
     )
+
+
+def test_finalize_does_not_match_unrelated_colon_atoms():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    assert (
+        finalize_en_target(
+            "Use `key:value`.\n",
+            "Используйте `имя:значение`.\n",
+        )
+        == "Use `key:value`.\n"
+    )
+
+
+def test_finalize_refuses_ambiguous_certificate_notation_atoms():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    source = "Use `Имя=Значение,...@<domain>` or `Имя=Значение,...@<domain>`.\n"
+    translated = "Use `Name=Value,...@<domain>` or `Name=Value,...@<domain>`.\n"
+
+    assert finalize_en_target(translated, source) == translated
+
+
+def test_finalize_refuses_different_certificate_shaped_target_atom():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    source = "Use `Имя=Значение,...@<domain>`.\n"
+    translated = "Use `Subject=Issuer,...@<domain>`.\n"
+
+    assert finalize_en_target(translated, source) == translated
 
 
 def test_anchor_parity_blocks_renamed_heading_id():
@@ -221,10 +251,7 @@ def test_inbound_fragment_catches_48792_hole():
 
 def test_inbound_ignores_same_basename_other_dirs():
     """#49451: index.md#frag on another section is not inbound to config-v2."""
-    page = (
-        "ydb/docs/en/core/devops/configuration-management/"
-        "configuration-v2/index.md"
-    )
+    page = "ydb/docs/en/core/devops/configuration-management/configuration-v2/index.md"
     files = {
         page: "# Config V2\n",
         "ydb/docs/en/core/analyst/datasets/_includes/intro.md": (
@@ -331,14 +358,9 @@ def test_restore_md_link_hrefs_wraps_see_the_section_plain_text():
         "Подробнее — в разделе "
         "[Сервисы распространения метаданных](architecture/metadata-services.md).\n"
     )
-    en = (
-        "For more details, see the section Metadata distribution services.\n"
-    )
+    en = "For more details, see the section Metadata distribution services.\n"
     fixed = restore_md_link_hrefs(en, ru)
-    assert (
-        "[Metadata distribution services](architecture/metadata-services.md)"
-        in fixed
-    )
+    assert "[Metadata distribution services](architecture/metadata-services.md)" in fixed
     assert check_href_parity(ru, fixed) == []
 
 
@@ -353,10 +375,7 @@ def test_insert_missing_autotitle_list_items_splices_neighbor():
         "- [{#T}](static-group-self-heal.md)\n"
         "- [{#T}](static-group-move.md)\n"
     )
-    en = (
-        "- [{#T}](state-storage-move.md)\n"
-        "- [{#T}](static-group-move.md)\n"
-    )
+    en = "- [{#T}](state-storage-move.md)\n- [{#T}](static-group-move.md)\n"
     fixed = insert_missing_autotitle_list_items(en, ru)
     assert "static-group-self-heal.md" in fixed
     assert check_href_parity(ru, fixed) == []
@@ -373,10 +392,7 @@ def test_insert_missing_skips_unreachable_en_targets():
         "- [{#T}](state-storage-reconfiguration.md)\n"
         "- [{#T}](static-group-self-heal.md)\n"
     )
-    en = (
-        "- [{#T}](state-storage-move.md)\n"
-        "- [{#T}](static-group-self-heal.md)\n"
-    )
+    en = "- [{#T}](state-storage-move.md)\n- [{#T}](static-group-self-heal.md)\n"
     # Only move + self-heal are reachable; reconfiguration is not.
     reachable = frozenset(
         {
@@ -389,10 +405,7 @@ def test_insert_missing_skips_unreachable_en_targets():
     fixed = insert_missing_autotitle_list_items(
         en,
         ru,
-        en_page_path=(
-            "ydb/docs/en/core/devops/configuration-management/"
-            "configuration-v2/index.md"
-        ),
+        en_page_path=("ydb/docs/en/core/devops/configuration-management/configuration-v2/index.md"),
         en_toc_reachable=reachable,
     )
     assert "state-storage-reconfiguration.md" not in fixed
@@ -413,10 +426,7 @@ def test_href_parity_allows_reachable_en_extras():
         "- [{#T}](static-group-self-heal.md)\n"
         "- [{#T}](static-group-move.md)\n"
     )
-    page = (
-        "ydb/docs/en/core/devops/configuration-management/"
-        "configuration-v2/index.md"
-    )
+    page = "ydb/docs/en/core/devops/configuration-management/configuration-v2/index.md"
     reachable = frozenset(
         {
             f"{page.rsplit('/', 1)[0]}/state-storage-move.md",
@@ -445,11 +455,7 @@ def test_restore_autotitle_force_exact_skips_unreachable():
         "- [{#T}](static-group-self-heal.md)\n"
     )
     # Critic swapped self-heal for reconfig; bare leftover from a prior strip.
-    en = (
-        "- [{#T}](state-storage-move.md)\n"
-        "- {#T}\n"
-        "- [{#T}](static-group-self-heal.md)\n"
-    )
+    en = "- [{#T}](state-storage-move.md)\n- {#T}\n- [{#T}](static-group-self-heal.md)\n"
     reachable = frozenset(
         {
             "ydb/docs/en/core/devops/configuration-management/configuration-v2/"
@@ -462,10 +468,7 @@ def test_restore_autotitle_force_exact_skips_unreachable():
         en,
         ru,
         force_exact=True,
-        en_page_path=(
-            "ydb/docs/en/core/devops/configuration-management/"
-            "configuration-v2/index.md"
-        ),
+        en_page_path=("ydb/docs/en/core/devops/configuration-management/configuration-v2/index.md"),
         en_toc_reachable=reachable,
     )
     assert "state-storage-reconfiguration.md" not in fixed

@@ -32,9 +32,7 @@ def _completion(content: str):
 
 def _mock_client(responses: list[str]) -> YandexLLMClient:
     mock_openai = MagicMock()
-    mock_openai.chat.completions.create.side_effect = [
-        _completion(r) for r in responses
-    ]
+    mock_openai.chat.completions.create.side_effect = [_completion(r) for r in responses]
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
     return YandexLLMClient(
         folder_id="b1x",
@@ -46,10 +44,7 @@ def _mock_client(responses: list[str]) -> YandexLLMClient:
 
 def _translate_json(segments, mapping: dict[str, str]) -> str:
     payload = {
-        "segments": [
-            {"id": seg.id, "text": mapping.get(seg.id, seg.text)}
-            for seg in segments
-        ]
+        "segments": [{"id": seg.id, "text": mapping.get(seg.id, seg.text)} for seg in segments]
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -60,12 +55,14 @@ def test_profiles_translate_only_verify_has_qa():
     assert translate_names == ["parse", "translate"]
     assert verify_names[0] == "parse"
     assert verify_names[1] == "load_target"
-    assert "finalize_en" in verify_names
+    assert verify_names.count("finalize_en") == 2
+    assert verify_names.index("finalize_en") < verify_names.index("critic_loop")
     assert verify_names.index("finalize_en") < verify_names.index("heuristics")
     assert verify_names.index("heuristics") < verify_names.index("verdict")
     assert verify_names.index("verdict") < verify_names.index("report_artifacts")
     shared_qa = [
         "round_trip",
+        "finalize_en",
         "critic_loop",
         "finalize_en",
         "heuristics",
@@ -124,11 +121,7 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
             "comments": [
                 {
                     "id": f"b{it.block_index}-l{it.line_index}",
-                    "text": (
-                        "Query"
-                        if "Запрос" in it.body
-                        else "Pool ID"
-                    ),
+                    "text": ("Query" if "Запрос" in it.body else "Pool ID"),
                 }
                 for it in items
             ]
@@ -147,7 +140,7 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
     result = FileHarness(VERIFY_PROFILE).run(
         state,
         HarnessContext.from_options(
-            _mock_client([critic_ok, fence_json]),
+            _mock_client([fence_json, critic_ok]),
             glossary=glossary,
             config=cfg,
         ),

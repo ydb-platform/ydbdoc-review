@@ -210,10 +210,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         prompt_version=ctx.prompt_version,
         max_chars=ctx.batch_chars,
     )
-    if any(
-        issue.category == "critic_execution_failed"
-        for issue in state.critic_initial.issues
-    ):
+    if any(issue.category == "critic_execution_failed" for issue in state.critic_initial.issues):
         state.critic_unresolved = state.critic_initial
         return
     actionable_issues = drop_spurious_placeholder_issues(
@@ -355,13 +352,13 @@ class TranslateStep:
                 )
                 if slim is not None:
                     slim_pending, slim_analysis = slim
-                    change_ids = slim_analysis.added_segment_ids | slim_analysis.modified_segment_ids
+                    change_ids = (
+                        slim_analysis.added_segment_ids | slim_analysis.modified_segment_ids
+                    )
                     if not change_ids and not slim_analysis.removed_blocks:
                         semantic_noop = True
                         pending = []
-                        logger.info(
-                            "Semantic no-op RU diff: preserve existing EN exactly (§6.217)"
-                        )
+                        logger.info("Semantic no-op RU diff: preserve existing EN exactly (§6.217)")
                     patch_has_anchors = low_magnitude_patch_has_anchors(
                         state.segments, slim_analysis
                     )
@@ -709,6 +706,9 @@ class FinalizeEnStep:
             docs_text_reader=ctx.docs_text_reader,
             out_warnings=state.finalize_warnings,
         )
+        # A subsequent post-critic finalize must preserve this finalized fence
+        # body instead of restoring the stale pre-finalize verify input.
+        state.fence_reference_text = state.translated_text
         if state.translated_text == before or not state.segments:
             return
         state.translations, align_err = gate_round_trip(state.segments, state.translated_text)

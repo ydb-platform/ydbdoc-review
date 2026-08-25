@@ -254,6 +254,11 @@ def test_cyrillic_in_explicit_anchor_is_not_untranslated_prose():
     assert check_cyrillic_in_en(text, target_lang="en") == []
 
 
+def test_cyrillic_in_protected_certificate_notation_is_not_prose():
+    text = "Use the exact `Имя=Значение,...@<domain>` notation.\n"
+    assert check_cyrillic_in_en(text, target_lang="en") == []
+
+
 def test_fence_parity_mismatch():
     src = "A\n\n```\ncode\n```\n"
     tgt = "A\n"

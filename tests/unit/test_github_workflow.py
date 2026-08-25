@@ -12,6 +12,7 @@ from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.workflow import (
     DocJobResult,
+    _enforce_report_checkout_bytes,
     run_doc_continue,
     run_doc_translate,
     run_doc_verify,
@@ -79,6 +80,24 @@ def _fake_pr_result() -> PRTranslationResult:
     )
     return PRTranslationResult(
         pair_results=[PairRunResult(plan=plan, target_text="Hello.\n", file_result=fr)]
+    )
+
+
+def test_report_checkout_guard_blocks_in_memory_drift():
+    result = _fake_pr_result()
+    with patch(
+        "ydbdoc_review.github.workflow.read_text_at_ref",
+        return_value="Different committed bytes.\n",
+    ):
+        mismatches = _enforce_report_checkout_bytes("/repo", "abc123", result)
+
+    assert mismatches == ["ydb/docs/en/a.md"]
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    assert file_result.verdict == "blocked"
+    assert any(
+        message.startswith("report_checkout_mismatch:")
+        for message in file_result.heuristic_blocking
     )
 
 
@@ -313,9 +332,7 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
         client = mock_gh.return_value
         client.get_pull.return_value = pull
-        client.post_issue_comment.return_value = (
-            "https://github.com/o/r/pull/48751#issuecomment-1"
-        )
+        client.post_issue_comment.return_value = "https://github.com/o/r/pull/48751#issuecomment-1"
         with patch(
             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
             return_value=changes,
@@ -390,9 +407,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
                                 )
 
     assert result.translation_pr_number == 99
-    assert result.translation_comment_url == (
-        "https://github.com/o/r/pull/99#issuecomment-verify"
-    )
+    assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
     assert result.committed is True
     assert result.pushed is True
     mock_verify.assert_called_once()
@@ -401,9 +416,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     comment_calls = mock_gh.return_value.post_issue_comment.call_args_list
     assert comment_calls[0][0][2] == 7
     mock_gh.return_value.create_pull.assert_called_once()
-    mock_gh.return_value.add_issue_labels.assert_called_once_with(
-        "o", "r", 99, ["documentation"]
-    )
+    mock_gh.return_value.add_issue_labels.assert_called_once_with("o", "r", 99, ["documentation"])
     _, kwargs = mock_gh.return_value.create_pull.call_args
     assert kwargs["head"] == "ydbdoc-review/pr-7"
     assert kwargs["base"] == "feature/docs"
@@ -453,9 +466,7 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
                                     config=load_config(env=_env()),
                                 )
 
-    assert result.translation_comment_url == (
-        "https://github.com/o/r/pull/99#issuecomment-verify"
-    )
+    assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
     assert result.source_comment_url is None
     mock_gh.return_value.post_issue_comment.assert_called_once()
     assert mock_gh.return_value.post_issue_comment.call_args[0][2] == 7
@@ -570,9 +581,7 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     prep.assert_called_once()
     assert prep.call_args.kwargs["translation_branch"] == "ydbdoc-review/verify-11"
     assert prep.call_args.kwargs["base_branch"] == "main"
-    mock_gh.return_value.delete_branch.assert_called_with(
-        "o", "r", "ydbdoc-review/verify-11"
-    )
+    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-11")
     assert mock_gh.return_value.delete_branch.call_count >= 1
     mock_gh.return_value.create_pull.assert_called_once()
     create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
@@ -580,9 +589,7 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     assert create_kwargs["base"] == "main"
     assert result.translation_pr_number == 99
     assert result.source_comment_url == "url"
-    posted_bodies = [
-        c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list
-    ]
+    posted_bodies = [c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list]
     assert any("#99" in body for body in posted_bodies)
 
 
@@ -637,9 +644,7 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
                                 config=load_config(env=_env()),
                             )
 
-    mock_gh.return_value.delete_branch.assert_called_with(
-        "o", "r", "ydbdoc-review/verify-11"
-    )
+    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-11")
     assert mock_gh.return_value.delete_branch.call_count >= 2
     push.assert_called_once()
     assert push.call_args.args[2] == "ydbdoc-review/verify-11"
@@ -694,9 +699,7 @@ def test_run_doc_verify_deletes_stale_fixup_branch_at_start(git_repo: str):
                         config=load_config(env=_env()),
                     )
 
-    mock_gh.return_value.delete_branch.assert_called_with(
-        "o", "r", "ydbdoc-review/verify-47233"
-    )
+    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-47233")
 
 
 def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
@@ -752,9 +755,7 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
     mock_gh.return_value.delete_branch.assert_not_called()
     mock_gh.return_value.create_pull.assert_not_called()
     assert result.translation_pr_number == 11
-    posted_bodies = [
-        c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list
-    ]
+    posted_bodies = [c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list]
     assert len(posted_bodies) == 1
     assert "коммитом в эту ветку" not in posted_bodies[0]
 
@@ -1013,7 +1014,9 @@ def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
         return_value=pr_result,
     ):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
-            with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True) as commit:
+            with patch(
+                "ydbdoc_review.github.workflow.git_commit_paths", return_value=True
+            ) as commit:
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                         mock_gh.return_value.get_pull.side_effect = _get_pull
