@@ -167,6 +167,27 @@ def test_completeness_ok_when_bilingual_skip():
     assert completeness_gaps(changes, result) == []
 
 
+def test_completeness_ok_when_existing_en_pair_is_skipped():
+    changes = [("ydb/docs/ru/a/compact.md", "modified")]
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a/compact.md",
+        en_path="ydb/docs/en/a/compact.md",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="skip",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, skipped=True)],
+    )
+
+    assert completeness_gaps(changes, result) == []
+
+
 def test_completeness_ignores_misresolved_shared_include_mirror():
     changes = [
         (

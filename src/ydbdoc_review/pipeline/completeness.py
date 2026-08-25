@@ -98,7 +98,14 @@ def committed_en_paths(result: PRTranslationResult) -> set[str]:
     """
     paths: set[str] = set()
     for run in result.pair_results:
-        if run.deleted or run.skipped or run.error:
+        if run.deleted or run.error:
+            continue
+        if run.skipped:
+            # ``skip`` means the EN side at the selected baseline already
+            # satisfies this pair.  This is common when translating an old
+            # merged PR against current main (#50741), and must count exactly
+            # like a navigation no-op below.
+            paths.add(run.plan.target_path)
             continue
         if run.target_text is not None:
             paths.add(run.plan.target_path)
