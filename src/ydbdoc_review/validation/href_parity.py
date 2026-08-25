@@ -153,6 +153,7 @@ def check_href_parity(
     en_toc_reachable: frozenset[str] | None = None,
     docs_text_reader: DocsTextReader | None = None,
     en_baseline_text: str | None = None,
+    source_baseline_text: str | None = None,
 ) -> list[str]:
     """Blocking when EN internal href multiset ≠ RU (§6.174)."""
     if source_lang.lower() not in {"ru", "russian"}:
@@ -242,6 +243,24 @@ def check_href_parity(
 
     missing = sorted((src - tgt).elements())
     extra = sorted((tgt - src).elements())
+    # Preserve pre-existing RU/EN divergence outside the source PR scope.  A
+    # newly added RU href is not grandfathered because it is absent from the
+    # source baseline (#45949/#50904).
+    if source_baseline_text is not None and en_baseline_text is not None:
+        src_base = Counter(
+            unquote(href) for href in collect_internal_hrefs(source_baseline_text)
+        )
+        en_base = Counter(
+            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
+        )
+        old_missing = src_base - en_base
+        old_extra = en_base - src_base
+        current_missing = Counter(missing)
+        current_extra = Counter(extra)
+        missing = sorted((current_missing - old_missing).elements())
+        extra = sorted((current_extra - old_extra).elements())
+        if not missing and not extra:
+            return []
     # #50976: accept a same-page EN-localized fragment only when the source
     # fragment is absent and the target fragment is physically declared.
     if missing and extra and en_page_path and docs_text_reader is not None:

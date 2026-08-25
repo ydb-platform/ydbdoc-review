@@ -34,6 +34,26 @@ def test_apply_href_only_delta_rejects_ambiguous_target():
     assert is_href_only_change(ru_base, ru_now)
 
 
+def test_pr_50904_href_parity_grandfathers_only_preexisting_baseline_gap():
+    ru_base = "* [{#T}](../backup-and-recovery/index.md)\n"
+    ru_now = ru_base + "* [{#T}](./node-authorization.md)\n"
+    en_base = "* [{#T}](../backup-and-recovery.md)\n"
+    en_now = en_base + "* [{#T}](./node-authorization.md)\n"
+
+    assert check_href_parity(
+        ru_now,
+        en_now,
+        source_baseline_text=ru_base,
+        en_baseline_text=en_base,
+    ) == []
+    assert check_href_parity(
+        ru_now,
+        en_base,
+        source_baseline_text=ru_base,
+        en_baseline_text=en_base,
+    )
+
+
 def test_href_only_change_ignores_writer_trailing_blank_normalization():
     before = "See [node](old.md).\n\n"
     after = "See [node](new.md).\n"

@@ -259,6 +259,7 @@ def run_pair_plan(
                     docs_text_reader=ctx.docs_text_reader,
                     docs_repo_path=ctx.docs_repo_path,
                     en_baseline_text=content.en_text or content.en_base_text,
+                    source_baseline_text=content.ru_base_text,
                 )
                 critic_verdict = compute_critic_verdict(
                     initial=file_result.critic_initial,

@@ -483,6 +483,7 @@ def _collect_raw_heuristics(
     docs_text_reader=None,
     docs_repo_path: str | None = None,
     en_baseline_text: str | None = None,
+    source_baseline_text: str | None = None,
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
@@ -564,6 +565,7 @@ def _collect_raw_heuristics(
             en_toc_reachable=en_toc_reachable,
             docs_text_reader=docs_text_reader,
             en_baseline_text=en_baseline_text,
+            source_baseline_text=source_baseline_text,
         )
     )
     raw.extend(
@@ -636,6 +638,7 @@ def run_file_heuristics_classified(
     docs_text_reader=None,
     docs_repo_path: str | None = None,
     en_baseline_text: str | None = None,
+    source_baseline_text: str | None = None,
 ) -> ClassifiedHeuristics:
     """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
     out = ClassifiedHeuristics()
@@ -651,6 +654,7 @@ def run_file_heuristics_classified(
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
         en_baseline_text=en_baseline_text,
+        source_baseline_text=source_baseline_text,
     ):
         bucket = _classify_heuristic(message)
         getattr(out, bucket).append(message)
