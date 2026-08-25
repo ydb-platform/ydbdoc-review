@@ -11,7 +11,6 @@ from ydbdoc_review.validation.href_parity import (
     collect_internal_hrefs,
     is_href_only_change,
     restore_md_link_hrefs,
-    restore_unique_same_path_fragments,
 )
 
 
@@ -82,19 +81,81 @@ def test_href_parity_requires_exact_same_links():
     assert "authentication.md#ldap" in msgs[0]
 
 
-def test_restore_unique_same_path_fragments_pr_50976():
-    ru = (
-        "[users](../dev/system-views.md#информация-о-пользователях-users) "
-        "[SID](./authorization.md#sid)\n"
+def test_href_parity_ignores_fenced_example_as_real_link():
+    ru = "See [real](foo.md#ru).\n"
+    en = "See real.\n\n```md\n[example](foo.md#en)\n```\n"
+    assert check_href_parity(ru, en)
+
+
+def test_href_parity_ignores_inline_code_and_images():
+    ru = "See [real](foo.md#ru).\n"
+    en = "Literal `[x](foo.md#ru)` and ![image](foo.md#ru).\n"
+    assert check_href_parity(ru, en)
+
+
+def test_href_parity_ignores_fenced_autotitle_example():
+    ru = "See [{#T}](foo.md#ru).\n"
+    en = "See real.\n\n```md\n[{#T}](foo.md#ru)\n```\n"
+    assert check_href_parity(ru, en)
+
+
+def test_href_parity_ignores_blockquoted_fence_and_indented_code():
+    ru = "See [real](foo.md#x).\n"
+    blockquote = "See real.\n\n> ```md\n> [example](foo.md#x)\n> ```\n"
+    indented = "See real.\n\n    [example](foo.md#x)\n"
+    assert check_href_parity(ru, blockquote)
+    assert check_href_parity(ru, indented)
+
+
+def test_href_parity_accepts_pr_50976_declared_en_fragments():
+    page = "ydb/docs/en/core/security/index.md"
+    ru = "[SID](./authorization.md#sid)\n"
+    en = "[SID](./authorization.md#user)\n"
+    files = {
+        "ydb/docs/en/core/security/authorization.md": "## User {#user}\n",
+    }
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            docs_text_reader=files.get,
+            en_baseline_text=en,
+        )
+        == []
     )
-    en = "[users](../dev/system-views.md#users) [SID](./authorization.md#user)\n"
-    assert restore_unique_same_path_fragments(en, ru) == ru
 
 
-def test_restore_unique_same_path_fragments_keeps_localized_path():
-    ru = "[Monitoring](../embedded-ui/ydb-monitoring.md#overview)\n"
-    en = "[Monitoring](../ydb-ui/ydb-monitoring.md#overview-en)\n"
-    assert restore_unique_same_path_fragments(en, ru) == en
+def test_href_parity_rejects_reordered_duplicate_path_fragments():
+    ru = "[First](foo.md#a) [Second](foo.md#b)\n"
+    en = "[First](foo.md#b) [Second](foo.md#a)\n"
+    assert check_href_parity(ru, en) == [
+        "href_parity: same link label points to a different internal href"
+    ]
+
+
+def test_href_parity_rejects_duplicate_swap_with_translated_labels():
+    ru = "[First](foo.md#a) [Second](foo.md#b)\n"
+    en = "[Первый](foo.md#b) [Второй](foo.md#a)\n"
+    assert check_href_parity(ru, en) == ["href_parity: repeated-path links have different order"]
+
+
+def test_href_parity_rejects_declared_but_unrelated_en_fragment():
+    page = "ydb/docs/en/core/security/index.md"
+    ru = "[SID](./authorization.md#sid)\n"
+    en = "[SID](./authorization.md#permissions)\n"
+    files = {
+        "ydb/docs/en/core/security/authorization.md": (
+            "## User {#user}\n## Permissions {#permissions}\n"
+        ),
+    }
+    assert check_href_parity(
+        ru,
+        en,
+        en_page_path=page,
+        docs_text_reader=files.get,
+        en_baseline_text="[SID](./authorization.md#user)\n",
+    )
 
 
 def test_href_parity_flags_extra_en_link():

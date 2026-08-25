@@ -561,6 +561,8 @@ def _collect_raw_heuristics(
             ignore_basenames=href_ignore or None,
             en_page_path=en_page,
             en_toc_reachable=en_toc_reachable,
+            docs_text_reader=docs_text_reader,
+            en_baseline_text=en_baseline_text,
         )
     )
     raw.extend(

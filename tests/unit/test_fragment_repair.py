@@ -120,8 +120,7 @@ def test_pr_40385_system_views_users_fragment():
     assert "информация-о-пользователях" not in fixed
 
 
-def test_pr_40385_system_views_restores_exact_ru_fragment():
-    """#50976: a source-exact Cyrillic fragment must not become EN-only."""
+def test_pr_40385_system_views_localizes_to_declared_en_fragment():
     en_page = "ydb/docs/en/core/security/authentication.md"
     ru_source = (
         "См. [системного представления](../dev/system-views.md#информация-о-пользователях-users).\n"
@@ -139,10 +138,10 @@ def test_pr_40385_system_views_restores_exact_ru_fragment():
         read_text=files.get,
         ru_source=ru_source,
     )
-    assert fixed == en_bad
+    assert "system-views.md#users)" in fixed
 
 
-def test_pr_50976_sid_fragment_stays_source_exact():
+def test_pr_50976_sid_fragment_localizes_to_declared_en_fragment():
     en_page = "ydb/docs/en/core/security/index.md"
     ru_source = "См. [SID](./authorization.md#sid).\n"
     en_exact = "See [SID](./authorization.md#sid).\n"
@@ -158,7 +157,7 @@ def test_pr_50976_sid_fragment_stays_source_exact():
             read_text=files.get,
             ru_source=ru_source,
         )
-        == en_exact
+        == "See [SID](./authorization.md#user).\n"
     )
 
 

@@ -257,12 +257,6 @@ def _try_remap_missing_fragment_via_ru_en(
     ru_frag = _ru_fragment_for_same_target(
         ru_source or "", ru_page_path=ru_page_path, href_path=path_part
     )
-    # §6.174 / #50976: when the link already matches the immutable RU source,
-    # exact href parity wins even for Cyrillic auto-slugs. Do not retarget it
-    # to an EN-only id; the docs build is the authority for link validity.
-    if ru_frag and ru_frag == frag:
-        return None
-
     candidates: list[str] = []
     if ru_frag:
         candidates.append(ru_frag)

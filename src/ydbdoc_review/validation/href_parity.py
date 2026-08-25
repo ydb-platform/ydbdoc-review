@@ -20,6 +20,64 @@ DocsTextReader = Callable[[str], str | None]
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
 _HTTP = re.compile(r"^https?://", re.IGNORECASE)
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_INLINE_CODE = re.compile(r"(?<!`)`+[^`\n]*`+(?!`)")
+_HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
+
+
+def _mask_link_protected_ranges(text: str) -> str:
+    chars = list(text)
+
+    def mask(start: int, end: int) -> None:
+        for idx in range(start, end):
+            if chars[idx] != "\n":
+                chars[idx] = " "
+
+    offset = 0
+    fence_char = ""
+    fence_len = 0
+    fence_start = 0
+    previous_blank = True
+    indented_start: int | None = None
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        logical = re.sub(r"^ {0,3}(?:> ?)+", "", stripped)
+        if not fence_char:
+            opening = _FENCE_OPEN.match(logical)
+            if opening:
+                marker = opening.group(1)
+                fence_char, fence_len, fence_start = marker[0], len(marker), offset
+            elif stripped.startswith("    ") and previous_blank:
+                indented_start = offset
+            elif indented_start is not None and not stripped.startswith("    "):
+                mask(indented_start, offset)
+                indented_start = None
+        elif re.match(rf"^ {{0,3}}{re.escape(fence_char)}{{{fence_len},}}\s*$", logical):
+            mask(fence_start, offset + len(line))
+            fence_char = ""
+        offset += len(line)
+        previous_blank = not stripped.strip()
+    if fence_char:
+        mask(fence_start, len(text))
+    if indented_start is not None:
+        mask(indented_start, len(text))
+
+    masked = "".join(chars)
+    for pattern in (_INLINE_CODE, _HTML_COMMENT):
+        for match in pattern.finditer(masked):
+            mask(match.start(), match.end())
+        masked = "".join(chars)
+    return masked
+
+
+def _iter_visible_md_link_matches(text: str) -> Iterable[re.Match[str]]:
+    masked = _mask_link_protected_ranges(text)
+    for match in _MD_LINK.finditer(masked):
+        if match.start() > 0 and text[match.start() - 1] == "!":
+            continue
+        original = _MD_LINK.match(text, match.start())
+        if original is not None:
+            yield original
 
 
 def _link_skeleton(text: str, links: list[re.Match[str]]) -> str:
@@ -61,10 +119,10 @@ def _is_internal_href(href: str) -> bool:
 def collect_internal_hrefs(text: str) -> list[str]:
     """Internal docs hrefs in document order (autotitle + ``[]()``)."""
     found: list[str] = []
-    for href in _AUTO_LINK.findall(text or ""):
+    for href in _AUTO_LINK.findall(_mask_link_protected_ranges(text or "")):
         if _is_internal_href(href):
             found.append(href.strip())
-    for match in _MD_LINK.finditer(text or ""):
+    for match in _iter_visible_md_link_matches(text or ""):
         label, href = match.group(1), match.group(2).strip()
         if label.strip() == "{#T}":
             continue  # already counted via _AUTO_LINK
@@ -84,39 +142,6 @@ def collect_explicit_anchors(text: str) -> list[str]:
     return out
 
 
-def restore_unique_same_path_fragments(target_text: str, source_text: str) -> str:
-    """Restore source fragments only for unique links with an unchanged path."""
-    source_by_path: dict[str, list[str]] = {}
-    for match in _MD_LINK.finditer(source_text or ""):
-        href = match.group(2).strip()
-        if "#" not in href:
-            continue
-        path, fragment = href.rsplit("#", 1)
-        if path.endswith(".md") and fragment:
-            source_by_path.setdefault(path, []).append(fragment)
-
-    target_links = list(_MD_LINK.finditer(target_text or ""))
-    target_by_path: dict[str, list[re.Match[str]]] = {}
-    for match in target_links:
-        href = match.group(2).strip()
-        if "#" not in href:
-            continue
-        path, fragment = href.rsplit("#", 1)
-        if path.endswith(".md") and fragment:
-            target_by_path.setdefault(path, []).append(match)
-
-    replacements: list[tuple[re.Match[str], str]] = []
-    for path, source_fragments in source_by_path.items():
-        targets = target_by_path.get(path, [])
-        if len(source_fragments) == len(targets) == 1:
-            replacements.append((targets[0], f"{path}#{source_fragments[0]}"))
-
-    out = target_text
-    for match, href in sorted(replacements, key=lambda item: item[0].start(), reverse=True):
-        out = out[: match.start(2)] + href + out[match.end(2) :]
-    return out
-
-
 def check_href_parity(
     source_text: str,
     target_text: str,
@@ -126,6 +151,8 @@ def check_href_parity(
     ignore_basenames: set[str] | frozenset[str] | None = None,
     en_page_path: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    docs_text_reader: DocsTextReader | None = None,
+    en_baseline_text: str | None = None,
 ) -> list[str]:
     """Blocking when EN internal href multiset ≠ RU (§6.174)."""
     if source_lang.lower() not in {"ru", "russian"}:
@@ -135,8 +162,10 @@ def check_href_parity(
 
     # Markdown renderers may percent-encode Unicode fragments. URL decoding is
     # semantics-preserving and avoids false mismatches such as #50854.
-    src = Counter(unquote(href) for href in collect_internal_hrefs(source_text))
-    tgt = Counter(unquote(href) for href in collect_internal_hrefs(target_text))
+    src_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
+    tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
+    src = Counter(src_ordered)
+    tgt = Counter(tgt_ordered)
     if ignore_basenames:
 
         def _kept(counter: Counter[str]) -> Counter[str]:
@@ -150,12 +179,107 @@ def check_href_parity(
 
         src = _kept(src)
         tgt = _kept(tgt)
+        src_ordered = [
+            href
+            for href in src_ordered
+            if PurePosixPath(href.split("#", 1)[0]).name not in ignore_basenames
+        ]
+        tgt_ordered = [
+            href
+            for href in tgt_ordered
+            if PurePosixPath(href.split("#", 1)[0]).name not in ignore_basenames
+        ]
 
     if src == tgt:
+        source_label_map = {
+            match.group(1): unquote(match.group(2).strip())
+            for match in _iter_visible_md_link_matches(source_text)
+            if match.group(1) and match.group(1) != "{#T}"
+        }
+        target_label_map = {
+            match.group(1): unquote(match.group(2).strip())
+            for match in _iter_visible_md_link_matches(target_text)
+            if match.group(1) and match.group(1) != "{#T}"
+        }
+        shared_labels = source_label_map.keys() & target_label_map.keys()
+        if any(source_label_map[label] != target_label_map[label] for label in shared_labels):
+            return ["href_parity: same link label points to a different internal href"]
+        duplicate_paths = {
+            href.split("#", 1)[0]
+            for href in src_ordered
+            if sum(item.split("#", 1)[0] == href.split("#", 1)[0] for item in src_ordered) > 1
+        }
+        for path in duplicate_paths:
+            src_path_order = [href for href in src_ordered if href.split("#", 1)[0] == path]
+            tgt_path_order = [href for href in tgt_ordered if href.split("#", 1)[0] == path]
+            if src_path_order == tgt_path_order:
+                continue
+            source_pairs = {
+                match.group(1): unquote(match.group(2).strip())
+                for match in _iter_visible_md_link_matches(source_text)
+                if match.group(2).strip().split("#", 1)[0] == path
+            }
+            target_pairs = {
+                match.group(1): unquote(match.group(2).strip())
+                for match in _iter_visible_md_link_matches(target_text)
+                if match.group(2).strip().split("#", 1)[0] == path
+            }
+            if source_pairs != target_pairs:
+                return ["href_parity: repeated-path links have different order"]
         return []
 
     missing = sorted((src - tgt).elements())
     extra = sorted((tgt - src).elements())
+    # #50976: accept a same-page EN-localized fragment only when the source
+    # fragment is absent and the target fragment is physically declared.
+    if missing and extra and en_page_path and docs_text_reader is not None:
+        from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+        from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+        used_extra: set[int] = set()
+        kept_missing: list[str] = []
+        baseline_ordered = [
+            unquote(href) for href in collect_internal_hrefs(en_baseline_text or "")
+        ]
+        for source_href in missing:
+            source_path, _, source_fragment = source_href.partition("#")
+            matched = False
+            for idx, target_href in enumerate(extra):
+                if idx in used_extra:
+                    continue
+                target_path, _, target_fragment = target_href.partition("#")
+                if source_path != target_path or not source_fragment or not target_fragment:
+                    continue
+                source_positions = [
+                    pos for pos, value in enumerate(src_ordered) if value == source_href
+                ]
+                target_positions = [
+                    pos for pos, value in enumerate(tgt_ordered) if value == target_href
+                ]
+                if len(source_positions) != 1 or len(target_positions) != 1:
+                    continue
+                position = source_positions[0]
+                if target_positions[0] != position:
+                    continue
+                if position >= len(baseline_ordered) or baseline_ordered[position] != target_href:
+                    continue
+                target_abs = resolve_internal_md_href(en_page_path, target_href)
+                target_md = docs_text_reader(target_abs) if target_abs else None
+                if not target_md:
+                    continue
+                if fragment_declared_in_markdown(target_md, source_fragment):
+                    continue
+                if not fragment_declared_in_markdown(target_md, target_fragment):
+                    continue
+                used_extra.add(idx)
+                matched = True
+                break
+            if not matched:
+                kept_missing.append(source_href)
+        missing = kept_missing
+        extra = [href for idx, href in enumerate(extra) if idx not in used_extra]
+        if not missing and not extra:
+            return []
     # A section can be moved independently in RU and EN. Accept a localized EN
     # destination when the RU path is unreachable in the EN toc, the EN path is
     # reachable, and both links keep the same basename and fragment (#50976).

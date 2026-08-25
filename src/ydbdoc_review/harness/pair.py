@@ -22,7 +22,6 @@ from ydbdoc_review.validation.href_parity import (
     insert_missing_autotitle_list_items,
     is_href_only_change,
     restore_md_link_hrefs,
-    restore_unique_same_path_fragments,
 )
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -212,10 +211,6 @@ def run_pair_plan(
             target_text = repair_generated_markdown_layout(
                 normalize_ru_source_for_translation(source_text), target_text
             )
-            # Last href invariant before final QA: later structural/fragment
-            # repairs may not replace a source-exact fragment when the .md path
-            # itself is unchanged (#50976). Localized paths remain untouched.
-            target_text = restore_unique_same_path_fragments(target_text, content.ru_text)
             # Restore runs after harness heuristics — refresh QA so the report
             # matches committed text (#49451).
             if target_text != before_restore and is_dataclass(file_result):
