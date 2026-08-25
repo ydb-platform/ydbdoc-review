@@ -533,6 +533,44 @@ def test_merge_recommendation_green_for_nav_only_ok():
     assert "нет обработанных файлов" not in body
 
 
+def test_merge_recommendation_red_when_scope_file_missing_despite_green_files():
+    """#50976: completeness gaps must block green even if scoped files pass QA."""
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/tls.md",
+        en_path="ydb/docs/en/core/reference/configuration/tls.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="EN",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(
+            pair_results=[PairRunResult(plan=plan, file_result=fr)],
+            completeness_gaps=[
+                "ydb/docs/en/core/reference/configuration/monitoring_config.md",
+            ],
+        ),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "не мержить — не все файлы source PR переведены" in body
+    assert "monitoring_config.md" in body
+    assert "🟢" not in body.split("Рекомендация:")[1].split("\n", 1)[0]
+
+
 def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
     """Regression: verdict warnings + empty issue list must not yield yellow header."""
     cfg = _cfg()

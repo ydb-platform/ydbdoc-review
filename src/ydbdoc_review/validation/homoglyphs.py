@@ -143,7 +143,7 @@ _INLINE_NOTATION_EN: tuple[tuple[str, str], ...] = (
 
 def fix_russian_inline_notation_in_en(text: str) -> str:
     """Map known RU notation labels inside backticks to EN (#40385 / #50976)."""
-    if not _CYRILLIC_IN_ANGLE.search(text):
+    if not any(src in text for src, _tgt in _INLINE_NOTATION_EN):
         return text
     lines = text.splitlines(keepends=True)
     out: list[str] = []

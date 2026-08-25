@@ -117,10 +117,29 @@ def test_href_only_source_noop_satisfied_for_pr_50976():
     assert href_only_source_noop_satisfied(
         source_base, source_head, current_ru, current_en
     )
-    # The historical snapshot must not be restored even if current EN has an
-    # independent defect; regular docs validation owns that current defect.
-    assert href_only_source_noop_satisfied(
+    # Superseded href-only noop applies only while current EN links still match RU.
+    assert not href_only_source_noop_satisfied(
         source_base, source_head, current_ru, "[YDB Monitoring](broken.md)\n"
+    )
+
+
+def test_superseded_ru_with_stale_en_is_not_noop_satisfied():
+    """#50976: a post-merge RU tweak must not hide a missing EN mirror."""
+    source_base = "Short legacy RU page.\n"
+    source_head = (
+        "## TLS на страницах мониторинга {#tls}\n\n"
+        "См. [Embedded UI](../../reference/embedded-ui/index.md).\n"
+        "Параметр `monitoring_ca_file`.\n"
+    )
+    current_ru = (
+        "## TLS на страницах мониторинга {#tls}\n\n"
+        "См. [Embedded UI](../../reference/embedded-ui/index.md).\n"
+        "Параметр `monitoring_ca_file` (уточнение).\n"
+    )
+    current_en = "Legacy EN page without the TLS section.\n"
+
+    assert not href_only_source_noop_satisfied(
+        source_base, source_head, current_ru, current_en
     )
 
 

@@ -166,7 +166,10 @@ def href_only_source_noop_satisfied(
     source_was_href_only = is_href_only_change(source_base, source_head)
     source_was_superseded = source_head != current_ru
     if source_was_superseded:
-        return True
+        # RU moved on main after the source PR landed. Do not replay the
+        # historical snapshot into EN, but skip the scope gap only when current
+        # EN already matches current RU internal links (#50976).
+        return not check_href_parity(current_ru, current_en)
     if not source_was_href_only:
         return False
     return not check_href_parity(current_ru, current_en)
