@@ -106,6 +106,11 @@ def run_pair_plan(
         raw_source_text=source_text,
         source_text=source_text,
         existing_target_text=existing_target,
+        base_target_text=(
+            content.en_base_text
+            if plan.action == "translate_to_en"
+            else content.ru_base_text
+        ),
         base_source_text=base_source if enable_translate else None,
     )
     harness_ctx = HarnessContext.from_options(

@@ -24,6 +24,10 @@ class FileRunState:
     raw_source_text: str
     source_text: str
     existing_target_text: str | None = None
+    # Merge-base target (EN) used by source-only deterministic patches.  This
+    # must not come from a previously generated translation branch because a
+    # retry needs to remove accidental rewrites from an earlier run.
+    base_target_text: str | None = None
     # Merge-base source (RU) for differential translate (§6.132).
     base_source_text: str | None = None
 

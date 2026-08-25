@@ -323,7 +323,7 @@ class TranslateStep:
             deterministic_index_patch = patch_en_with_source_added_autotitle_lines(
                 state.base_source_text,
                 state.source_text,
-                state.existing_target_text,
+                state.base_target_text or state.existing_target_text,
             )
             if deterministic_index_patch is not None:
                 state.translations = {}

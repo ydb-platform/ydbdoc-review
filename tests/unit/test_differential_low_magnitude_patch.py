@@ -45,6 +45,19 @@ def test_pr_50904_autotitle_addition_preserves_unrelated_en_bytes():
     )
 
 
+def test_pr_50904_retry_rebuilds_patch_from_clean_en_base():
+    """A retry must discard unrelated rewrites left by an earlier run."""
+    ru_base = "# Концепции\n\n* [{#T}](./old.md)\n"
+    ru_pr = ru_base + "* [{#T}](./node-authorization.md)\n"
+    en_base = "# Concepts for Cluster Administration\n\n* [{#T}](./old.md)\n"
+    polluted_en = "# Concepts for DevOps engineers\n\n* [{#T}](./old.md)\n"
+
+    result = patch_en_with_source_added_autotitle_lines(ru_base, ru_pr, en_base)
+
+    assert polluted_en not in result
+    assert result == en_base + "* [{#T}](./node-authorization.md)\n"
+
+
 def test_glossary_zero_diff_seeds_most_segments():
     from pathlib import Path
 
