@@ -140,6 +140,12 @@ def test_href_parity_rejects_duplicate_swap_with_translated_labels():
     assert check_href_parity(ru, en) == ["href_parity: repeated-path links have different order"]
 
 
+def test_href_parity_does_not_collapse_duplicate_labels():
+    ru = "[Config](a.md) [Config](b.md)\n"
+    en = "[Config](b.md) [Config](a.md)\n"
+    assert check_href_parity(ru, en) == []
+
+
 def test_href_parity_rejects_declared_but_unrelated_en_fragment():
     page = "ydb/docs/en/core/security/index.md"
     ru = "[SID](./authorization.md#sid)\n"

@@ -191,15 +191,25 @@ def check_href_parity(
         ]
 
     if src == tgt:
+        source_visible = list(_iter_visible_md_link_matches(source_text))
+        target_visible = list(_iter_visible_md_link_matches(target_text))
+        source_label_counts = Counter(match.group(1) for match in source_visible)
+        target_label_counts = Counter(match.group(1) for match in target_visible)
         source_label_map = {
             match.group(1): unquote(match.group(2).strip())
-            for match in _iter_visible_md_link_matches(source_text)
-            if match.group(1) and match.group(1) != "{#T}"
+            for match in source_visible
+            if match.group(1)
+            and match.group(1) != "{#T}"
+            and source_label_counts[match.group(1)] == 1
+            and target_label_counts[match.group(1)] == 1
         }
         target_label_map = {
             match.group(1): unquote(match.group(2).strip())
-            for match in _iter_visible_md_link_matches(target_text)
-            if match.group(1) and match.group(1) != "{#T}"
+            for match in target_visible
+            if match.group(1)
+            and match.group(1) != "{#T}"
+            and source_label_counts[match.group(1)] == 1
+            and target_label_counts[match.group(1)] == 1
         }
         shared_labels = source_label_map.keys() & target_label_map.keys()
         if any(source_label_map[label] != target_label_map[label] for label in shared_labels):
