@@ -111,6 +111,56 @@ def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
     assert result.target_text == "# EN\n\nText.\n"
 
 
+def test_pr_50904_deterministic_index_patch_skips_unrelated_href_repairs():
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/devops/concepts/index.md",
+        en_path="ydb/docs/en/core/devops/concepts/index.md",
+        ru_changed=True,
+    )
+    clean = "# Concepts\n\n* [{#T}](../backup-and-recovery.md)\n"
+    patched = clean + "* [{#T}](./node-authorization.md)\n"
+    content = PairContent(
+        pair=pair,
+        ru_text="# Концепции\n\n* [{#T}](./node-authorization.md)\n",
+        ru_base_text="# Концепции\n",
+        en_text=clean,
+        en_base_text=clean,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="source-only list insertion",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    parent = HarnessContext.from_options(
+        MagicMock(), glossary=load_glossary(), config=cfg
+    )
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del state, ctx
+            result = MagicMock()
+            result.final_text = patched
+            result.differential_meta = {"deterministic_autotitle_patch": True}
+            return result
+
+    with (
+        patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
+        patch("ydbdoc_review.harness.pair.restore_autotitle_hrefs") as restore,
+    ):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert result.target_text == patched
+    restore.assert_not_called()
+
+
 def test_href_only_pair_bypasses_llm_and_repairs():
     """#45949: href-only source deltas are deterministic and byte-preserving."""
     pair = DocPair(

@@ -158,8 +158,17 @@ def run_pair_plan(
         and isinstance(differential_meta, dict)
         and differential_meta.get("semantic_noop") is True
     )
+    deterministic_autotitle_patch = (
+        isinstance(differential_meta, dict)
+        and differential_meta.get("deterministic_autotitle_patch") is True
+    )
     target_text = existing_target if semantic_noop else file_result.final_text
-    if target_text and content.ru_text and not semantic_noop:
+    if (
+        target_text
+        and content.ru_text
+        and not semantic_noop
+        and not deterministic_autotitle_patch
+    ):
         if plan.action == "translate_to_ru":
             target_text = restore_autotitle_hrefs(target_text, content.ru_text)
         elif plan.action in ("translate_to_en", "critic_only") and (
