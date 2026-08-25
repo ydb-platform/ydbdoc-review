@@ -175,6 +175,29 @@ def test_parse_step_empty_file_stops_early():
     assert state.segments == []
 
 
+def test_finalize_runs_despite_stale_alignment_error():
+    from ydbdoc_review.harness.steps import FinalizeEnStep
+
+    exact = "See [SID](authorization.md#sid).\n"
+    state = FileRunState(
+        mode="verify",
+        file_path="ydb/docs/ru/core/security/index.md",
+        raw_source_text=exact,
+        source_text=exact,
+        translated_text="See [SID](authorization.md#user).\n",
+        fence_reference_text=exact,
+        segment_alignment_error="stale critic alignment",
+    )
+    ctx = HarnessContext.from_options(
+        _mock_client([]),
+        config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"}),
+    )
+
+    FinalizeEnStep().run(state, ctx)
+
+    assert state.translated_text == exact
+
+
 def test_harness_translate_matches_translate_file():
     source = "Привет.\n"
     segments = extract_segments(parse_markdown(source))

@@ -668,7 +668,9 @@ class FinalizeEnStep:
     name = "finalize_en"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
-        if state.stopped_early or state.segment_alignment_error:
+        # Deterministic href/code protections must still run after critic leaves
+        # a stale alignment error; otherwise the report sees critic-mutated bytes.
+        if state.stopped_early:
             return
         if ctx.target_lang.lower() not in {"en", "english"}:
             return
