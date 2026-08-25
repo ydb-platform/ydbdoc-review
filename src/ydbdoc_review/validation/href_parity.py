@@ -200,6 +200,7 @@ def check_href_parity(
             for match in source_visible
             if match.group(1)
             and match.group(1) != "{#T}"
+            and _is_internal_href(match.group(2))
             and source_label_counts[match.group(1)] == 1
             and target_label_counts[match.group(1)] == 1
         }
@@ -208,6 +209,7 @@ def check_href_parity(
             for match in target_visible
             if match.group(1)
             and match.group(1) != "{#T}"
+            and _is_internal_href(match.group(2))
             and source_label_counts[match.group(1)] == 1
             and target_label_counts[match.group(1)] == 1
         }

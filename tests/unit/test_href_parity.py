@@ -126,6 +126,19 @@ def test_href_parity_accepts_pr_50976_declared_en_fragments():
     )
 
 
+def test_href_parity_50976_ignores_localized_external_link_with_same_label():
+    ru = (
+        "[TLS](https://ru.wikipedia.org/wiki/Transport_Layer_Security) "
+        "и [интерфейс](../../reference/ydb-ui/index.md).\n"
+    )
+    en = (
+        "[TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security) "
+        "and [Embedded UI](../../reference/ydb-ui/index.md).\n"
+    )
+
+    assert check_href_parity(ru, en) == []
+
+
 def test_href_parity_rejects_reordered_duplicate_path_fragments():
     ru = "[First](foo.md#a) [Second](foo.md#b)\n"
     en = "[First](foo.md#b) [Second](foo.md#a)\n"
