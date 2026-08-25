@@ -24,6 +24,8 @@ from ydbdoc_review.github.git_ops import (
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    is_translation_pr_branch,
+    is_verify_fixup_branch,
     list_pr_file_changes_api,
     list_pr_file_changes_git,
     load_pair_contents,
@@ -34,8 +36,6 @@ from ydbdoc_review.github.pr import (
     parse_source_pr_from_text,
     pull_request_context,
     repo_https_clone_url,
-    is_translation_pr_branch,
-    is_verify_fixup_branch,
     source_pr_number_from_branch,
     source_pr_scope_changes,
     translate_ru_content_ref,
@@ -44,7 +44,19 @@ from ydbdoc_review.github.pr import (
     verify_fixup_branch,
     verify_fixup_pr_base,
 )
+from ydbdoc_review.harness.pr_context import PRHarnessContext
+from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
+from ydbdoc_review.harness.pr_runner import PRHarness
+from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.llm.client import create_llm_client
+from ydbdoc_review.navigation.scope_planner import (
+    doc_pairs_from_plan,
+    make_repo_scope_readers,
+    merge_navigation_pair_lists,
+    navigation_pairs_from_plan,
+    plan_translation_scope,
+    synthetic_changes_from_plan,
+)
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
 from ydbdoc_review.ops.lifecycle import (
@@ -53,18 +65,6 @@ from ydbdoc_review.ops.lifecycle import (
     compose_continue_feedback,
     finish_ops_job,
     load_parent_run_context,
-)
-from ydbdoc_review.harness.pr_context import PRHarnessContext
-from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
-from ydbdoc_review.harness.pr_runner import PRHarness
-from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.navigation.scope_planner import (
-    doc_pairs_from_plan,
-    make_repo_scope_readers,
-    merge_navigation_pair_lists,
-    navigation_pairs_from_plan,
-    plan_translation_scope,
-    synthetic_changes_from_plan,
 )
 from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
@@ -103,6 +103,7 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
     apply_include_target_checks,
@@ -112,7 +113,6 @@ from ydbdoc_review.validation.redirect_impacts import (
     mirror_redirects_to_en,
     retarget_redirect_inbound_links,
 )
-from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
     apply_toc_target_checks,
@@ -462,6 +462,7 @@ def run_doc_translate(
             nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
             nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
             nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
+            doc_deleted=filter_path_set(scope_plan.doc_deleted, skip_globs),
         )
     logger.info(
         "Scope plan for PR #%s: %s doc paths (%s diff + %s main), %s nav paths",
@@ -480,6 +481,15 @@ def run_doc_translate(
     nav_pairs = merge_navigation_pair_lists(
         navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
         build_navigation_pairs(changes, docs_root=docs_root),
+    )
+    # Redirect retargeting is authorized only for EN mirrors of files changed
+    # by the source PR, never synthetic dependency pages added by scope closure.
+    redirect_impact_scope = frozenset(
+        en_path
+        for path, kind in changes
+        if kind != "deleted"
+        and (en_path := counterpart(path, docs_root)) is not None
+        and en_path.endswith(".md")
     )
     changes = merge_pr_file_changes(changes, synthetic_changes_from_plan(scope_plan))
     job = DocJobResult(
@@ -643,6 +653,7 @@ def run_doc_translate(
                 redirect_mappings,
                 docs_root=cfg.paths.docs_root,
                 dry_run=dry_run,
+                allowed_paths=redirect_impact_scope,
             )
             # Translation branches start from current upstream main. Never
             # write the historical source-merge copy of this global file:

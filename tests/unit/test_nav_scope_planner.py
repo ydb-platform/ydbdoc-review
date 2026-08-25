@@ -19,6 +19,7 @@ from ydbdoc_review.navigation.scope_planner import (
     plan_translation_scope,
     planned_toc_extras_for_pair,
 )
+from ydbdoc_review.pipeline.analyze import PairContent, plan_pair_heuristic
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "nav_cases"
 
@@ -112,9 +113,7 @@ def test_doc_pairs_from_plan_skips_bilingual_en():
     )
     pairs = doc_pairs_from_plan(
         plan,
-        skip_en_paths=frozenset(
-            {"ydb/docs/en/core/reference/ydb-sdk/topic.md"}
-        ),
+        skip_en_paths=frozenset({"ydb/docs/en/core/reference/ydb-sdk/topic.md"}),
     )
     assert pairs == []
 
@@ -205,6 +204,25 @@ def test_planned_toc_extras_for_pair_case_45181():
     )
     assert sdk_hrefs == {"topic.md"}
     assert sdk_includes == set()
+
+
+def test_pr_50904_deleted_ru_page_queues_delete_en_pair():
+    ru = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    en = "ydb/docs/en/core/devops/deployment-options/manual/node-authorization.md"
+    plan = plan_translation_scope(
+        [(ru, "deleted")],
+        read_ru=lambda _path: None,
+        read_en_base=lambda path: "# stale EN\n" if path == en else None,
+    )
+
+    assert plan.doc_from_diff == frozenset({ru})
+    pairs = doc_pairs_from_plan(plan)
+    assert [pair.en_path for pair in pairs] == [en]
+    assert pairs[0].ru_deleted is True
+    assert (
+        plan_pair_heuristic(PairContent(pair=pairs[0], ru_text=None, en_text="# stale EN\n")).action
+        == "delete_en"
+    )
 
 
 def test_case_44820_plans_sqs_from_direct_diff():
@@ -301,9 +319,7 @@ def test_case_46569_queues_parent_toc_that_includes_needed_child():
         "ydb/docs/ru/core/concepts/streaming-query/watermarks.md": "# RU WM\n",
         "ydb/docs/ru/core/concepts/streaming-query/index.md": "# RU index\n",
         "ydb/docs/en/core/concepts/toc_i.yaml": (
-            "items:\n"
-            "- name: Streaming queries\n"
-            "  href: streaming-query.md\n"
+            "items:\n- name: Streaming queries\n  href: streaming-query.md\n"
         ),
     }
 
@@ -394,9 +410,7 @@ def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
         "ydb/docs/ru/core/concepts/streaming-query/watermarks.md": "# RU WM\n",
         "ydb/docs/ru/core/concepts/streaming-query/index.md": "# RU index\n",
         "ydb/docs/en/core/concepts/toc_i.yaml": (
-            "items:\n"
-            "- name: Streaming queries\n"
-            "  href: streaming-query.md\n"
+            "items:\n- name: Streaming queries\n  href: streaming-query.md\n"
         ),
         "ydb/docs/en/core/concepts/streaming-query.md": "# EN flat SQ\n",
     }
@@ -433,11 +447,7 @@ def test_pr_37673_queues_en_absent_toc_sibling_debug_md():
         "  - name: Logs\n"
         "    href: debug-logs.md\n"
     )
-    en_toc = (
-        "items:\n"
-        "- name: Overview\n"
-        "  href: index.md\n"
-    )
+    en_toc = "items:\n- name: Overview\n  href: index.md\n"
     files = {
         "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": ru_toc,
         "ydb/docs/en/core/recipes/ydb-sdk/toc_i.yaml": en_toc,
@@ -477,11 +487,7 @@ def test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists():
         "  - name: Logs\n"
         "    href: debug-logs.md\n"
     )
-    en_toc = (
-        "items:\n"
-        "- name: Overview\n"
-        "  href: index.md\n"
-    )
+    en_toc = "items:\n- name: Overview\n  href: index.md\n"
     files = {
         "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": ru_toc,
         "ydb/docs/en/core/recipes/ydb-sdk/toc_i.yaml": en_toc,

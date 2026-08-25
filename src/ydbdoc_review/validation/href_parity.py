@@ -500,6 +500,53 @@ def check_inbound_fragments(
     return issues
 
 
+def check_outbound_fragments(
+    en_page_path: str,
+    en_text: str,
+    *,
+    read_text: DocsTextReader | None,
+    en_baseline_text: str | None = None,
+) -> list[str]:
+    """Block newly introduced EN links whose target fragment is undeclared."""
+    if not en_page_path or not en_text or read_text is None:
+        return []
+    baseline_hrefs = set(collect_internal_hrefs(en_baseline_text or ""))
+    from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+    issues: list[str] = []
+    for href in collect_internal_hrefs(en_text):
+        if href in baseline_hrefs or "#" not in href:
+            continue
+        path_part, fragment = href.split("#", 1)
+        if not fragment:
+            continue
+        target_path = (
+            en_page_path if not path_part else resolve_internal_md_href(en_page_path, href)
+        )
+        if target_path is None:
+            continue
+        target_md = en_text if target_path == en_page_path else read_text(target_path)
+        if not target_md:
+            issues.append(
+                f"outbound_fragment: `{href}` points to missing EN target "
+                f"`{PurePosixPath(target_path).name}`"
+            )
+            continue
+        if fragment_declared_in_markdown(
+            target_md,
+            fragment,
+            page_path=target_path,
+            read_text=read_text,
+        ):
+            continue
+        issues.append(
+            f"outbound_fragment: `{href}` points to missing EN anchor "
+            f"`{PurePosixPath(target_path).name}#{fragment}`"
+        )
+    return issues
+
+
 _SEE_SECTION_PLAIN = re.compile(
     r"(see the section )([^.\n\[\]]+)(\.)",
     re.IGNORECASE,

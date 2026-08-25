@@ -57,18 +57,21 @@ def test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit():
 
 def test_build_heading_anchor_map_auto_and_explicit():
     ru = parse_markdown(
-        "## Векторный поиск\n\n"
-        "[jump](#векторный-поиск)\n\n"
-        "### Поля {#fields-Описание}\n"
+        "## Векторный поиск\n\n[jump](#векторный-поиск)\n\n### Поля {#fields-Описание}\n"
     )
     en = parse_markdown(
-        "## Vector search\n\n"
-        "[jump](#векторный-поиск)\n\n"
-        "### Fields {#fields-Description}\n"
+        "## Vector search\n\n[jump](#векторный-поиск)\n\n### Fields {#fields-Description}\n"
     )
     mapping = build_heading_anchor_map(ru, en)
     assert mapping["векторный-поиск"] == "vector-search"
     assert mapping["fields-Описание"] == "fields-Description"
+
+
+def test_build_heading_anchor_map_refuses_drifted_outline():
+    ru = parse_markdown("## Intro\n\n### Лишний раздел\n\n## Настройка\n")
+    en = parse_markdown("## Intro\n\n## Configuration\n")
+
+    assert build_heading_anchor_map(ru, en) == {}
 
 
 def test_localize_links_remaps_in_page_fragment_from_heading_map():

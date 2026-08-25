@@ -496,6 +496,7 @@ def _collect_raw_heuristics(
         check_heading_anchor_parity,
         check_href_parity,
         check_inbound_fragments,
+        check_outbound_fragments,
     )
     from ydbdoc_review.validation.link_locale import check_link_locale_in_en
     from ydbdoc_review.validation.ru_source_bugs import (
@@ -585,6 +586,14 @@ def _collect_raw_heuristics(
                 repo_path=docs_repo_path,
                 read_text=docs_text_reader,
                 ru_text=source_text if source_lang.lower() in {"ru", "russian"} else None,
+                en_baseline_text=en_baseline_text,
+            )
+        )
+        raw.extend(
+            check_outbound_fragments(
+                en_page,
+                target_text,
+                read_text=docs_text_reader,
                 en_baseline_text=en_baseline_text,
             )
         )

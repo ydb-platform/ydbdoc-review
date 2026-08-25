@@ -5,6 +5,7 @@ from __future__ import annotations
 import posixpath
 import re
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 
 import yaml
 
@@ -13,21 +14,17 @@ _LINK = re.compile(r"(\[[^\]]*\]\()([^)#]+)(#[^)]*)?(\))")
 
 def added_redirects(base_text: str, current_text: str) -> dict[str, str]:
     """Return redirect mappings introduced by the source change."""
+
     def _rows(text: str) -> list[dict[str, str]]:
         data = yaml.safe_load(text) or {}
         out: list[dict[str, str]] = []
         for locale in ("ru", "en"):
             for row in data.get(locale, []) or []:
                 if isinstance(row, dict) and row.get("from") and row.get("to"):
-                    out.append(
-                        {"from_path": str(row["from"]), "to_path": str(row["to"])}
-                    )
+                    out.append({"from_path": str(row["from"]), "to_path": str(row["to"])})
         return out
 
-    base = {
-        (row["from_path"], row["to_path"])
-        for row in _rows(base_text)
-    }
+    base = {(row["from_path"], row["to_path"]) for row in _rows(base_text)}
     return {
         row["from_path"]: row["to_path"]
         for row in _rows(current_text)
@@ -41,8 +38,9 @@ def retarget_redirect_inbound_links(
     *,
     docs_root: str = "ydb/docs",
     dry_run: bool = False,
+    allowed_paths: frozenset[str] | None = None,
 ) -> list[str]:
-    """Retarget relative RU/EN Markdown links covered by new redirects."""
+    """Retarget source-scoped links covered by new redirects."""
     root = Path(repo_path) / docs_root
     changed: list[str] = []
     for locale in ("ru", "en"):
@@ -50,31 +48,47 @@ def retarget_redirect_inbound_links(
         if not locale_root.is_dir():
             continue
         for path in sorted(locale_root.rglob("*.md")):
+            rel = path.relative_to(repo_path).as_posix()
+            if allowed_paths is not None and rel not in allowed_paths:
+                continue
             text = path.read_text(encoding="utf-8")
             rel_dir = PurePosixPath(path.relative_to(locale_root).as_posix()).parent
 
             def _replace(
-                match: re.Match[str], *, _rel_dir: PurePosixPath = rel_dir
+                match: re.Match[str],
+                *,
+                _rel_dir: PurePosixPath = rel_dir,
+                _locale: str = locale,
             ) -> str:
                 href = match.group(2)
                 if href.startswith(("/", "http://", "https://")):
                     return match.group(0)
                 resolved = "/" + posixpath.normpath((_rel_dir / href).as_posix())
-                target = mappings.get(resolved) or mappings.get(
-                    resolved.removesuffix(".md")
-                )
+                target = mappings.get(resolved) or mappings.get(resolved.removesuffix(".md"))
                 if target is None:
                     return match.group(0)
                 target_md = target if target.endswith(".md") else f"{target}.md"
-                new_href = posixpath.relpath(
-                    target_md.lstrip("/"), _rel_dir.as_posix()
-                )
-                return f"{match.group(1)}{new_href}{match.group(3) or ''}{match.group(4)}"
+                new_href = posixpath.relpath(target_md.lstrip("/"), _rel_dir.as_posix())
+                fragment = match.group(3) or ""
+                if _locale == "en" and fragment:
+                    ru_target = root / "ru" / "core" / target_md.lstrip("/")
+                    en_target = root / "en" / "core" / target_md.lstrip("/")
+                    if ru_target.is_file() and en_target.is_file():
+                        from ydbdoc_review.parsing.markdown_parser import parse_markdown
+                        from ydbdoc_review.validation.yfm_anchor import build_heading_anchor_map
+
+                        anchor_map = build_heading_anchor_map(
+                            parse_markdown(ru_target.read_text(encoding="utf-8")),
+                            parse_markdown(en_target.read_text(encoding="utf-8")),
+                        )
+                        localized = anchor_map.get(unquote(fragment[1:]))
+                        if localized:
+                            fragment = f"#{localized}"
+                return f"{match.group(1)}{new_href}{fragment}{match.group(4)}"
 
             updated = _LINK.sub(_replace, text)
             if updated == text:
                 continue
-            rel = path.relative_to(repo_path).as_posix()
             changed.append(rel)
             if not dry_run:
                 path.write_text(updated, encoding="utf-8", newline="")
@@ -93,7 +107,5 @@ def mirror_redirects_to_en(text: str, mappings: dict[str, str]) -> str:
     if not missing:
         return text
     suffix = "" if text.endswith("\n") else "\n"
-    blocks = "".join(
-        f"  - from: {old}\n    to: {new}\n" for old, new in missing
-    )
+    blocks = "".join(f"  - from: {old}\n    to: {new}\n" for old, new in missing)
     return text + suffix + blocks

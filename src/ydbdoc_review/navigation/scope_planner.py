@@ -7,8 +7,8 @@ markdown + navigation YAML files that ``doc_translate`` must produce.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
 from ydbdoc_review.navigation.toc import (
@@ -19,7 +19,13 @@ from ydbdoc_review.navigation.toc import (
     toc_entry_paths,
 )
 from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
-from ydbdoc_review.pipeline.pairs import ChangeKind, DocPair, NavigationPair, counterpart, is_docs_markdown
+from ydbdoc_review.pipeline.pairs import (
+    ChangeKind,
+    DocPair,
+    NavigationPair,
+    counterpart,
+    is_docs_markdown,
+)
 
 ReadFn = Callable[[str], str | None]
 
@@ -48,6 +54,7 @@ class TranslationScopePlan:
     nav_ru_paths: frozenset[str]
     nav_from_diff: frozenset[str]
     nav_from_main: frozenset[str]
+    doc_deleted: frozenset[str] = frozenset()
 
     @property
     def all_ru_paths(self) -> frozenset[str]:
@@ -75,9 +82,7 @@ def _ancestor_ru_tocs(ru_md_path: str, *, docs_root: str) -> list[str]:
     return out
 
 
-def _ru_include_md_targets(
-    ru_md_path: str, ru_text: str, *, docs_root: str
-) -> set[str]:
+def _ru_include_md_targets(ru_md_path: str, ru_text: str, *, docs_root: str) -> set[str]:
     targets: set[str] = set()
     for inc in collect_yfm_includes(ru_text):
         resolved = resolve_locale_md_path(ru_md_path, inc.path, docs_root=docs_root)
@@ -305,14 +310,18 @@ def plan_translation_scope(
     """
     root = docs_root.strip("/")
     diff_ru_md: set[str] = set()
+    deleted_ru_md: set[str] = set()
     diff_ru_nav: set[str] = set()
 
     for raw_path, kind in changes:
-        if kind == "deleted":
-            continue
         path = _norm(raw_path)
         if path.startswith(f"{root}/ru/") and is_docs_markdown(path, docs_root):
-            diff_ru_md.add(path)
+            if kind == "deleted":
+                deleted_ru_md.add(path)
+            else:
+                diff_ru_md.add(path)
+        elif kind == "deleted":
+            continue
         elif path.startswith(f"{root}/ru/") and is_navigation_yaml(path):
             diff_ru_nav.add(path)
 
@@ -323,7 +332,9 @@ def plan_translation_scope(
         diff_paths=diff_ru_md | diff_ru_nav,
     )
 
-    doc_ru: set[str] = set(diff_ru_md)
+    # Deleted RU pages are translation actions too: their existing EN mirrors
+    # must enter the pair pipeline as ``delete_en`` (#50904).
+    doc_ru: set[str] = set(diff_ru_md | deleted_ru_md)
 
     for ru_toc in sorted(discovered_tocs):
         ru_toc_text = read_ru(ru_toc)
@@ -347,9 +358,7 @@ def plan_translation_scope(
         ru_text = read_ru(ru_md)
         if not ru_text:
             continue
-        for target in sorted(
-            _ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)
-        ):
+        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
             if target in doc_ru:
                 continue
             en_md = counterpart(target, docs_root)
@@ -433,9 +442,7 @@ def plan_translation_scope(
         en_toc = counterpart(ru_toc, docs_root)
         en_text = (read_en_base(en_toc) or "") if en_toc else ""
         toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
-        sibling_of_diff = any(
-            _norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md
-        )
+        sibling_of_diff = any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md)
         if en_toc_is_absent(en_text) and sibling_of_diff:
             for rel in _toc_md_hrefs(ru_text):
                 ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
@@ -456,9 +463,7 @@ def plan_translation_scope(
                 continue
             # Only when the included child sidebar sits next to a diff page.
             child_dir = child.rsplit("/", 1)[0]
-            if not any(
-                _norm(p).rsplit("/", 1)[0] == child_dir for p in diff_ru_md
-            ):
+            if not any(_norm(p).rsplit("/", 1)[0] == child_dir for p in diff_ru_md):
                 continue
             ru_md = _norm(resolve_toc_target_path(ru_toc, href))
             _add_doc_if_en_absent(
@@ -477,9 +482,7 @@ def plan_translation_scope(
         ru_text = read_ru(ru_md)
         if not ru_text:
             continue
-        for target in sorted(
-            _ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)
-        ):
+        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
             if target in seen_close:
                 continue
             en_md = counterpart(target, docs_root)
@@ -490,14 +493,15 @@ def plan_translation_scope(
                 seen_close.add(target)
                 queue.append(target)
 
-    doc_from_diff = frozenset(diff_ru_md)
-    doc_from_main = frozenset(doc_ru - diff_ru_md)
+    doc_from_diff = frozenset(diff_ru_md | deleted_ru_md)
+    doc_from_main = frozenset(doc_ru - diff_ru_md - deleted_ru_md)
     nav_from_main = frozenset(nav_ru - nav_from_diff)
 
     return TranslationScopePlan(
         doc_ru_paths=frozenset(doc_ru),
         doc_from_diff=doc_from_diff,
         doc_from_main=doc_from_main,
+        doc_deleted=frozenset(deleted_ru_md),
         nav_ru_paths=frozenset(nav_ru),
         nav_from_diff=frozenset(nav_from_diff),
         nav_from_main=nav_from_main,
@@ -593,6 +597,7 @@ def doc_pairs_from_plan(
                 ru_path=ru_path,
                 en_path=en_path,
                 ru_changed=True,
+                ru_deleted=ru_path in plan.doc_deleted,
             )
         )
     return pairs
@@ -625,9 +630,7 @@ def merge_navigation_pair_lists(
     extra: list[NavigationPair],
 ) -> list[NavigationPair]:
     """Union nav pairs; ``extra`` wins on ``ru_changed`` / clears ``supplement_only``."""
-    by_key: dict[tuple[str, str], NavigationPair] = {
-        (p.ru_path, p.en_path): p for p in primary
-    }
+    by_key: dict[tuple[str, str], NavigationPair] = {(p.ru_path, p.en_path): p for p in primary}
     for pair in extra:
         key = (pair.ru_path, pair.en_path)
         prev = by_key.get(key)

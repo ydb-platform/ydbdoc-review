@@ -8,6 +8,7 @@ from ydbdoc_review.validation.href_parity import (
     check_heading_anchor_parity,
     check_href_parity,
     check_inbound_fragments,
+    check_outbound_fragments,
     collect_internal_hrefs,
     is_href_only_change,
     restore_md_link_hrefs,
@@ -38,6 +39,35 @@ def test_href_only_change_ignores_writer_trailing_blank_normalization():
     after = "See [node](new.md).\n"
 
     assert is_href_only_change(before, after)
+
+
+def test_pr_50904_outbound_fragment_blocks_ru_slug_on_en_target():
+    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    target = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    href = "../../devops/concepts/node-authorization.md#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    files = {target: "## Enabling node authentication and authorization\n"}
+
+    assert check_outbound_fragments(
+        page,
+        f"See [nodes]({href}).\n",
+        read_text=files.get,
+        en_baseline_text="See [nodes](../../devops/deployment-options/manual/node-authorization.md#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov).\n",
+    ) == [
+        "outbound_fragment: `"
+        + href
+        + "` points to missing EN anchor `node-authorization.md#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov`"
+    ]
+
+
+def test_outbound_fragment_blocks_missing_target():
+    page = "ydb/docs/en/core/reference/client.md"
+    href = "../missing.md#anchor"
+
+    assert check_outbound_fragments(
+        page,
+        f"See [missing]({href}).\n",
+        read_text=lambda _path: None,
+    ) == ["outbound_fragment: `../missing.md#anchor` points to missing EN target `missing.md`"]
 
 
 def test_restore_md_link_hrefs_applies_only_ru_delta():

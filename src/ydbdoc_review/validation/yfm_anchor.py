@@ -23,6 +23,43 @@ from ydbdoc_review.parsing.ast_types import (
 )
 
 _HEADING_ANCHOR_SUFFIX = re.compile(r"\s*\{#([^}]+)\}\s*$")
+_RU_TRANSLITERATION = str.maketrans(
+    {
+        "а": "a",
+        "б": "b",
+        "в": "v",
+        "г": "g",
+        "д": "d",
+        "е": "e",
+        "ё": "e",
+        "ж": "zh",
+        "з": "z",
+        "и": "i",
+        "й": "y",
+        "к": "k",
+        "л": "l",
+        "м": "m",
+        "н": "n",
+        "о": "o",
+        "п": "p",
+        "р": "r",
+        "с": "s",
+        "т": "t",
+        "у": "u",
+        "ф": "f",
+        "х": "h",
+        "ц": "c",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "sch",
+        "ъ": "",
+        "ы": "y",
+        "ь": "",
+        "э": "e",
+        "ю": "yu",
+        "я": "ya",
+    }
+)
 
 
 def split_heading_anchor_suffix(text: str) -> tuple[str, str | None]:
@@ -40,11 +77,16 @@ def diplodoc_auto_slug(text: str) -> str:
     return slug
 
 
+def _legacy_transliterated_slug(text: str) -> str:
+    """Return the ASCII slug used by older RU documentation links."""
+    return diplodoc_auto_slug(text.lower().translate(_RU_TRANSLITERATION))
+
+
 def english_yfm_anchor(ru_anchor: str | None, english_heading: str) -> str | None:
     """Map a RU/Cyrillic YFM anchor to an English id for EN output.
 
-  Examples: ``fields-Описание`` + "Description of fields…" → ``fields-Description``.
-  ASCII anchors are returned unchanged.
+    Examples: ``fields-Описание`` + "Description of fields…" → ``fields-Description``.
+    ASCII anchors are returned unchanged.
     """
     if not ru_anchor:
         return None
@@ -97,17 +139,25 @@ def _iter_headings(blocks: list[BlockNode]) -> Iterator[Heading]:
 def build_heading_anchor_map(source: Document, target: Document) -> dict[str, str]:
     """Map RU heading slugs/explicit anchors to EN counterparts."""
     mapping: dict[str, str] = {}
-    for src_h, tgt_h in zip(
-        list(_iter_headings(source.children)),
-        list(_iter_headings(target.children)),
-        strict=False,
+    source_headings = list(_iter_headings(source.children))
+    target_headings = list(_iter_headings(target.children))
+    # Positional pairing is safe only while the translated outline is aligned.
+    # Otherwise a valid but unrelated EN anchor is worse than leaving the
+    # fragment for the outbound validator to reject.
+    if len(source_headings) != len(target_headings) or any(
+        src.level != tgt.level for src, tgt in zip(source_headings, target_headings, strict=True)
     ):
+        return mapping
+    for src_h, tgt_h in zip(source_headings, target_headings, strict=True):
         ru_text = _heading_plain_text(src_h)
         en_text = _heading_plain_text(tgt_h)
         ru_auto = diplodoc_auto_slug(ru_text)
         en_auto = diplodoc_auto_slug(en_text)
         if ru_auto and en_auto and ru_auto != en_auto:
             mapping[ru_auto] = en_auto
+            legacy_ru_auto = _legacy_transliterated_slug(ru_text)
+            if legacy_ru_auto and legacy_ru_auto != ru_auto:
+                mapping[legacy_ru_auto] = en_auto
         if src_h.anchor:
             if tgt_h.anchor and tgt_h.anchor.isascii():
                 en_explicit = tgt_h.anchor
