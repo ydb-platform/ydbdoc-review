@@ -275,6 +275,39 @@ def _delete_stale_verify_fixup(
         )
 
 
+def _postpass_localize_en_fragments(
+    repo_path: str,
+    md_paths: list[str],
+    *,
+    merge_base_with: str,
+    docs_root: str = "ydb/docs",
+) -> list[str]:
+    """Second pass: localize EN ``#fragment`` after all target pages exist on disk."""
+    from ydbdoc_review.validation.fragment_repair import repair_en_fragments
+
+    reader = _docs_text_reader(repo_path, merge_base_with)
+    prefix = f"{docs_root}/en/"
+    changed: list[str] = []
+    for rel in md_paths:
+        if not rel.endswith(".md") or not rel.startswith(prefix):
+            continue
+        text = read_text(repo_path, rel)
+        if not text:
+            continue
+        fixed = repair_en_fragments(text, en_page_path=rel, read_text=reader)
+        if fixed == text:
+            continue
+        write_text(repo_path, rel, fixed)
+        changed.append(rel)
+    if changed:
+        logger.info(
+            "Post-pass localized EN fragments in %d file(s): %s",
+            len(changed),
+            ", ".join(changed[:8]) + ("…" if len(changed) > 8 else ""),
+        )
+    return changed
+
+
 def _apply_results_to_disk(
     repo_path: str,
     result: PRTranslationResult,
@@ -597,33 +630,21 @@ def run_doc_translate(
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
             )
-            pair_runner = _run_verify_pairs if ctx.merged else run_pr_translation
+            pair_runner = run_pr_translation
             runner_kwargs = {
                 "config": cfg,
                 "en_toc_reachable": en_toc_reachable,
                 "docs_text_reader": _docs_text_reader(repo_path, merge_base_with),
                 "docs_repo_path": repo_path,
             }
-            if ctx.merged:
-                # Historical merged PRs must preserve the EN text at current
-                # main and translate only RU gaps from the immutable merge
-                # commit.  A full translate rewrites whole files from the old
-                # RU snapshot and reverts later EN work (PR #50741).
-                pr_result = pair_runner(
-                    contents,
-                    client,
-                    glossary,
-                    historical_merged_provenance=True,
-                    **runner_kwargs,
-                )
-            else:
-                pr_result = pair_runner(
-                    contents,
-                    client,
-                    glossary,
-                    use_analyze_llm=False,
-                    **runner_kwargs,
-                )
+            pr_result = pair_runner(
+                contents,
+                client,
+                glossary,
+                use_analyze_llm=False,
+                historical_merged_provenance=ctx.merged,
+                **runner_kwargs,
+            )
         else:
             pr_result = PRTranslationResult()
 
