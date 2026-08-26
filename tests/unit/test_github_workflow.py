@@ -57,6 +57,15 @@ def git_repo(tmp_path: Path) -> str:
     return str(repo)
 
 
+def _make_en_a_reachable(repo_path: str) -> None:
+    """Give intended-valid workflow mocks a current EN toc for their target."""
+    en_core = Path(repo_path) / "ydb" / "docs" / "en" / "core"
+    en_core.mkdir(parents=True, exist_ok=True)
+    (en_core / "toc_p.yaml").write_text(
+        "items:\n- name: A\n  href: ../a.md\n", encoding="utf-8"
+    )
+
+
 def _fake_pr_result() -> PRTranslationResult:
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -70,6 +79,7 @@ def _fake_pr_result() -> PRTranslationResult:
         target_path=pair.en_path,
         source_lang="ru",
         target_lang="en",
+        authoritative_source_text="Привет.\n",
     )
     fr = FileTranslationResult(
         file_path=pair.en_path,
@@ -419,6 +429,7 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
 
 
 def test_run_doc_translate_posts_comments(git_repo: str):
+    _make_en_a_reachable(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -476,6 +487,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
 
 def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str):
     """Source PR comment failure must not abort after inline verify succeeded."""
+    _make_en_a_reachable(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -526,6 +538,7 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
 
 def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
     """Fork PR: branch from upstream main, push translation branch, PR targets main."""
+    _make_en_a_reachable(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -759,6 +772,7 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
 
     pull = {
         "title": "Auto-translate docs from PR #3",
@@ -873,6 +887,7 @@ def test_run_doc_verify_posts_comment(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
     content_sha = subprocess.check_output(
         ["git", "-C", git_repo, "rev-parse", "HEAD"], text=True
     ).strip()
