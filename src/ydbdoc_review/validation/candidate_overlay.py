@@ -81,20 +81,14 @@ def validate_candidate_overlay(
             elif target.endswith(".md") and target not in seen:
                 queue.append(target)
 
-    all_md = {
-        str(path.relative_to(repo_path)).replace("\\", "/")
-        for path in Path(repo_path).joinpath(docs_root).rglob("*.md")
-    } | {path for path in writes if path.endswith(".md")}
-    for page in sorted(all_md - deletes):
+    # Outbound markdown links from pending writes only. A full-repo scan
+    # false-positives on template placeholders in style guides and ruler files.
+    for page in sorted(seen):
         text = read_overlay(page)
         if text is None:
             continue
         includes = collect_yfm_includes(text)
         include_hrefs = {include.path for include in includes}
-        for include in includes:
-            target = resolve_locale_md_path(page, include.path, docs_root=docs_root)
-            if target in deletes:
-                errors.append(f"candidate_overlay_delete_inbound_include: {page} -> {target}")
         for href in re.findall(r"\]\(([^)\s]+)(?:\s+['\"][^)]*['\"])?\)", text):
             if href.strip().strip("<>") in include_hrefs:
                 continue
@@ -106,14 +100,32 @@ def validate_candidate_overlay(
             elif not overlay_exists(target):
                 errors.append(f"candidate_overlay_missing_markdown_target: {page} -> {target}")
 
-    yaml_paths = {
-        str(path.relative_to(repo_path)).replace("\\", "/")
-        for path in Path(repo_path).joinpath(docs_root).rglob("*.yaml")
-    } | {
-        str(path.relative_to(repo_path)).replace("\\", "/")
-        for path in Path(repo_path).joinpath(docs_root).rglob("*.yml")
-    } | {path for path in writes if path.endswith((".yaml", ".yml"))}
-    for toc_path in sorted(yaml_paths - deletes):
+    if deletes:
+        all_md = {
+            str(path.relative_to(repo_path)).replace("\\", "/")
+            for path in Path(repo_path).joinpath(docs_root).rglob("*.md")
+        }
+        for page in sorted(all_md - deletes):
+            text = read_overlay(page)
+            if text is None:
+                continue
+            includes = collect_yfm_includes(text)
+            include_hrefs = {include.path for include in includes}
+            for include in includes:
+                target = resolve_locale_md_path(page, include.path, docs_root=docs_root)
+                if target in deletes:
+                    errors.append(f"candidate_overlay_delete_inbound_include: {page} -> {target}")
+            for href in re.findall(r"\]\(([^)\s]+)(?:\s+['\"][^)]*['\"])?\)", text):
+                if href.strip().strip("<>") in include_hrefs:
+                    continue
+                target = resolve_local(page, href)
+                if target is None or not target.lower().endswith(".md"):
+                    continue
+                if target in deletes:
+                    errors.append(f"candidate_overlay_delete_markdown_reference: {page} -> {target}")
+
+    yaml_writes = {path for path in writes if path.endswith((".yaml", ".yml"))}
+    for toc_path in sorted(yaml_writes - deletes):
         text = read_overlay(toc_path)
         if text is None:
             continue
@@ -125,4 +137,23 @@ def validate_candidate_overlay(
                 errors.append(f"candidate_overlay_delete_toc_dependency: {toc_path} -> {target}")
             elif not overlay_exists(target):
                 errors.append(f"candidate_overlay_missing_toc_target: {toc_path} -> {target}")
+
+    if deletes:
+        all_yaml = {
+            str(path.relative_to(repo_path)).replace("\\", "/")
+            for path in Path(repo_path).joinpath(docs_root).rglob("*.yaml")
+        } | {
+            str(path.relative_to(repo_path)).replace("\\", "/")
+            for path in Path(repo_path).joinpath(docs_root).rglob("*.yml")
+        }
+        for toc_path in sorted(all_yaml - deletes):
+            text = read_overlay(toc_path)
+            if text is None:
+                continue
+            for href in re.findall(r"(?:href|path):\s*['\"]?([^'\"\s]+)", text):
+                target = resolve_local(toc_path, href)
+                if target is None:
+                    continue
+                if target in deletes:
+                    errors.append(f"candidate_overlay_delete_toc_dependency: {toc_path} -> {target}")
     return sorted(set(errors))

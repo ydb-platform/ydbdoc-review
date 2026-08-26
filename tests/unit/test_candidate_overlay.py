@@ -37,3 +37,11 @@ def test_delete_with_inbound_reference_blocks(tmp_path: Path):
     plan = PairPlan(pair, "delete_en", pair.ru_path, pair.en_path, "ru", "en")
     result = PRTranslationResult(pair_results=[PairRunResult(plan, deleted=True)])
     assert any("delete_markdown" in error for error in validate_candidate_overlay(str(tmp_path), result))
+
+
+def test_preexisting_template_links_do_not_block_pending_writes(tmp_path: Path):
+    root = tmp_path / "ydb/docs/en/core"
+    root.mkdir(parents=True)
+    (root / "style-guide.md").write_text("[tpl](./path/to/an/article.md)\n", encoding="utf-8")
+    result = _result("ydb/docs/en/core/new-page.md", "# New\n")
+    assert validate_candidate_overlay(str(tmp_path), result) == []
