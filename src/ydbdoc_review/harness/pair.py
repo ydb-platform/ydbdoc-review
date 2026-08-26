@@ -10,12 +10,28 @@ from ydbdoc_review.harness.runner import FileHarness
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
-from ydbdoc_review.pipeline.types import PairRunResult
+from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult
 from ydbdoc_review.translation.errors import TranslationError
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
+from ydbdoc_review.validation.link_locale import check_link_locale_in_en
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_postprocess_link_checks(
+    target_text: str,
+    file_result: FileTranslationResult,
+    *,
+    target_lang: str,
+) -> None:
+    """Block link-locale defects introduced after the harness QA pass."""
+    issues = check_link_locale_in_en(target_text, target_lang=target_lang)
+    for issue in issues:
+        if issue not in file_result.heuristic_blocking:
+            file_result.heuristic_blocking.append(issue)
+    if issues:
+        file_result.verdict = "blocked"
 
 
 def _read_source_text(content: PairContent, plan: PairPlan) -> str | None:
@@ -110,6 +126,12 @@ def run_pair_plan(
                     ru_source=content.ru_text,
                     en_baseline=content.en_text or content.en_base_text,
                 )
+    if target_text and plan.target_lang.lower() in {"en", "english"}:
+        _apply_postprocess_link_checks(
+            target_text,
+            file_result,
+            target_lang=plan.target_lang,
+        )
 
     return PairRunResult(
         plan=plan,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 from urllib.parse import unquote, urlparse
 
 from ydbdoc_review.parsing.ast_types import (
@@ -59,7 +59,7 @@ _PATH_REPLACEMENTS_RU: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)index\.html"), "json-ru.html"),
 )
 
-_CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
+_CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")  # noqa: RUF001
 _HTTP_HREF = re.compile(r"^https?://", re.I)
 _RU_LOCALE_IN_HREF = (
     re.compile(r"(?i)ru\.wikipedia\.org"),
@@ -85,7 +85,9 @@ def _is_relative_href(href: str) -> bool:
         return False
     if _HTTP_HREF.match(href) or href.startswith("mailto:"):
         return False
-    return bool(_RELATIVE_HREF.match(href) or "/" in href and "://" not in href)
+    return bool(
+        _RELATIVE_HREF.match(href) or ("/" in href and "://" not in href)
+    )
 
 
 def _mirror_relative_asset_path(href: str, *, target_lang: str) -> str:
@@ -401,6 +403,10 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
         if _relative_path_has_ru_asset_suffix(href):
             issues.append(
                 f"link_locale: RU asset suffix in EN relative path: {href}"
+            )
+        if _fragment_has_cyrillic(href):
+            issues.append(
+                f"link_locale: Cyrillic anchor fragment in EN document: {href}"
             )
     for href in collect_fragment_hrefs(doc):
         if href in seen:

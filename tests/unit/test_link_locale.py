@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+from urllib.parse import unquote
+
 import pytest
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
-from ydbdoc_review.segmentation.reinsert import reinsert_segments
-from ydbdoc_review.segmentation.extractor import extract_segments
-from unittest.mock import MagicMock
-
+from ydbdoc_review.validation import wikipedia_links
 from ydbdoc_review.validation.link_locale import (
     check_link_locale_in_en,
     localize_links_in_document,
     localize_links_in_text,
     mirror_link_href,
 )
-from ydbdoc_review.validation import wikipedia_links
 
 
 def test_mirror_link_href_wikipedia_resolves_ru_slug(monkeypatch):
@@ -131,6 +130,18 @@ def test_check_link_locale_flags_cyrillic_anchor_fragment():
     issues = check_link_locale_in_en(md)
     assert len(issues) == 1
     assert "Cyrillic anchor fragment in EN document" in issues[0]
+
+
+def test_check_link_locale_flags_relative_path_with_cyrillic_fragment():
+    md = (
+        "[Users](../dev/system-views.md#информация-о-пользователях-users)\n"  # noqa: RUF001
+    )
+    issues = check_link_locale_in_en(md)
+    assert len(issues) == 1
+    assert unquote(issues[0]) == (
+        "link_locale: Cyrillic anchor fragment in EN document: "
+        "../dev/system-views.md#информация-о-пользователях-users"  # noqa: RUF001
+    )
 
 
 def test_check_link_locale_accepts_english_anchor_fragment():

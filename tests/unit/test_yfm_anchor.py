@@ -63,6 +63,15 @@ def test_build_heading_anchor_map_auto_and_explicit():
     assert mapping["fields-Описание"] == "fields-Description"
 
 
+def test_build_heading_anchor_map_combined_auto_and_explicit():
+    ru = parse_markdown("### Информация о пользователях {#users}\n")  # noqa: RUF001
+    en = parse_markdown("### Information about users {#users}\n")
+
+    mapping = build_heading_anchor_map(ru, en)
+
+    assert mapping["информация-о-пользователях-users"] == "users"  # noqa: RUF001
+
+
 def test_localize_links_remaps_in_page_fragment_from_heading_map():
     ru = parse_markdown("## Векторный поиск\n\n[Vector search](#векторный-поиск)\n")
     en = parse_markdown("## Vector search\n\n[Vector search](#векторный-поиск)\n")

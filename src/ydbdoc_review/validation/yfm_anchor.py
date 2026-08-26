@@ -115,6 +115,10 @@ def build_heading_anchor_map(source: Document, target: Document) -> dict[str, st
                 en_explicit = english_yfm_anchor(src_h.anchor, en_text) or en_auto
             if en_explicit:
                 mapping[src_h.anchor] = en_explicit
+                if ru_auto:
+                    # Diplodoc accepts links that combine the visible heading slug
+                    # and its explicit anchor: ``<source-auto-slug>-<anchor>``.
+                    mapping[f"{ru_auto}-{src_h.anchor}"] = en_explicit
                 decoded = unquote(src_h.anchor)
                 if decoded != src_h.anchor:
                     mapping[decoded] = en_explicit

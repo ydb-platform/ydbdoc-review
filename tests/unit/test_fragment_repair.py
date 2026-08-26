@@ -92,7 +92,7 @@ def test_pr_48047_ldap_remaps_via_heading_map():
             "### TLS {#ldap-tls}\n"
         ),
         "ydb/docs/ru/core/security/authentication.md": (
-            "## Аутентификация с использованием LDAP-каталога {#ldap}\n\n"
+            "## Аутентификация с использованием LDAP-каталога {#ldap}\n\n"  # noqa: RUF001
             "### TLS {#ldap-tls}\n"
         ),
     }
@@ -104,6 +104,30 @@ def test_pr_48047_ldap_remaps_via_heading_map():
     assert "authentication.md#ldap-auth-provider" in fixed
     assert "authentication.md#ldap." not in fixed
     assert "authentication.md#ldap)" not in fixed
+
+
+def test_pr_50976_remaps_combined_cyrillic_and_explicit_fragment():
+    en_page = "ydb/docs/en/core/security/authentication.md"
+    en_text = (
+        "See the [system view]"
+        "(../dev/system-views.md#информация-о-пользователях-users).\n"  # noqa: RUF001
+    )
+    files = {
+        "ydb/docs/en/core/dev/system-views.md": (
+            "### Information about users {#users}\n"
+        ),
+        "ydb/docs/ru/core/dev/system-views.md": (
+            "### Информация о пользователях {#users}\n"  # noqa: RUF001
+        ),
+    }
+
+    fixed = repair_en_fragments(
+        en_text,
+        en_page_path=en_page,
+        read_text=files.get,
+    )
+
+    assert fixed == "See the [system view](../dev/system-views.md#users).\n"
 
 
 def test_repair_keeps_valid_fragment():

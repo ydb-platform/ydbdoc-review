@@ -3695,5 +3695,44 @@ while ``doc_translate`` stayed allowlisted (``sintjuri`` only).
 3. Deploy via ydb [#48518](https://github.com/ydb-platform/ydb/pull/48518)
    (``ydbdoc-verify.yml``); example already matched.
 
+### 6.163. Combined RU heading slug and explicit anchor in EN links (#50976, 2026-08-26)
+
+**Problem:** [ydb #50976](https://github.com/ydb-platform/ydb/pull/50976)
+copied the RU link
+``system-views.md#информация-о-пользователях-users`` into the EN page. The
+target heading is ``### Information about users {#users}``, so the reviewer
+expected ``#users`` and the EN Cyrillic heuristic blocked the copied fragment.
+
+The fragment is a Diplodoc combination of the RU heading's automatic slug and
+its explicit anchor: ``информация-о-пользователях`` + ``users``. The heading
+map contained both parts separately, but not the combined form, so
+``repair_en_fragments`` could not resolve it.
+
+**Decision:** When a source heading has an automatic slug and an explicit
+anchor, map ``<source-auto-slug>-<source-explicit-anchor>`` to the target
+explicit anchor. Cross-file fragment repair then rewrites the combined RU
+fragment deterministically without asking the LLM to translate URL text.
+
+Pair-level post-processing runs after the harness heuristic pass and can
+restore RU hrefs via ``force_exact``. Therefore, run
+``check_link_locale_in_en`` once more on the final pair text and mark the file
+blocked if a Cyrillic or otherwise wrong-locale fragment remains.
+
+The validator previously added relative hrefs to a shared ``seen`` set before
+its fragment pass, so it checked bare ``#fragment`` links but silently skipped
+``path.md#fragment`` links. Check Cyrillic fragments during the relative-link
+pass as well.
+
+**Tests:** ``test_build_heading_anchor_map_combined_auto_and_explicit``,
+``test_pr_50976_remaps_combined_cyrillic_and_explicit_fragment``,
+``test_check_link_locale_flags_relative_path_with_cyrillic_fragment``,
+``test_run_pair_plan_checks_links_after_pair_postprocessing``.
+
+**Deployment:** ydb workflows still use ``@v0.1.0``. At diagnosis time the tag
+pointed to ``9ee48d7`` (2026-06-24), 119 commits behind ``main`` and before
+``repair_en_fragments``. Move the release tag after merging this fix; otherwise
+both the existing cross-file repair and this combined-fragment case remain
+absent from production.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
