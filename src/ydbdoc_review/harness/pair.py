@@ -72,7 +72,13 @@ def _try_deterministic_en_preserve(
             f"overwriting later target structure: {structural.reason}"
         )
 
-    localized = apply_localized_mirror_delta(ru_base, source_text, existing_target)
+    localized = apply_localized_mirror_delta(
+        ru_base,
+        source_text,
+        existing_target,
+        en_page_path=plan.target_path,
+        docs_text_reader=ctx.docs_text_reader,
+    )
     if localized is not None:
         if ctx.docs_text_reader is not None:
             localized = repair_en_fragments(
@@ -95,14 +101,26 @@ def _try_deterministic_en_preserve(
         )
         return existing_target
 
+    parity_target = existing_target
+    if ctx.docs_text_reader is not None:
+        parity_target = repair_en_fragments(
+            parity_target,
+            en_page_path=plan.target_path,
+            read_text=ctx.docs_text_reader,
+            ru_source=source_text,
+            en_baseline=content.en_base_text or existing_target,
+        )
     if collect_internal_hrefs(source_text) and not check_href_parity(
-        source_text, existing_target
+        source_text,
+        parity_target,
+        en_page_path=plan.target_path,
+        docs_text_reader=ctx.docs_text_reader,
     ):
         logger.info(
             "RU/EN href parity OK for %s despite structural drift; preserving EN",
             plan.target_path,
         )
-        return existing_target
+        return parity_target
 
     return None
 
@@ -167,13 +185,22 @@ def run_pair_plan(
                 source_text=source_text,
             )
     if plan.action == "critic_only" and is_href_only_change(content.en_base_text, existing_target):
+        href_only_target = existing_target
+        if ctx.docs_text_reader is not None and existing_target is not None:
+            href_only_target = repair_en_fragments(
+                existing_target,
+                en_page_path=plan.target_path,
+                read_text=ctx.docs_text_reader,
+                ru_source=source_text,
+                en_baseline=content.en_base_text or existing_target,
+            )
         logger.info(
             "Deterministic href-only target %s; critic is read-only/bypassed",
             plan.target_path,
         )
         return PairRunResult(
             plan=plan,
-            target_text=existing_target,
+            target_text=href_only_target,
             source_text=source_text,
         )
     if plan.action == "translate_to_en" and existing_target is not None:
@@ -181,6 +208,8 @@ def run_pair_plan(
             content.ru_base_text,
             source_text,
             content.en_base_text or existing_target,
+            en_page_path=plan.target_path,
+            docs_text_reader=ctx.docs_text_reader,
         )
         if deterministic is not None:
             if ctx.docs_text_reader is not None:
@@ -313,6 +342,8 @@ def run_pair_plan(
                 content.ru_text,
                 source_ru_base=content.ru_base_text,
                 target_baseline=content.en_text or content.en_base_text,
+                en_page_path=plan.target_path,
+                docs_text_reader=ctx.docs_text_reader,
             )
             # Critic may reintroduce RU-only hrefs; strip again after restore.
             if ctx.en_toc_reachable is not None:
@@ -342,11 +373,6 @@ def run_pair_plan(
             target_text = repair_generated_markdown_layout(
                 normalize_ru_source_for_translation(source_text), target_text
             )
-            # Verification must describe the immutable checkout, never a
-            # repaired in-memory candidate. Keep the critic findings, then
-            # recompute deterministic QA below against the exact PR bytes.
-            if plan.action == "critic_only" and existing_target is not None:
-                target_text = existing_target
         if (
             is_en_target
             and before_pair_repairs is not None
@@ -399,6 +425,14 @@ def run_pair_plan(
         # Also cover an empty (but valid) RU document, which skips the repair
         # branch above. The report byte guard must remain unconditional.
         target_text = existing_target
+        if ctx.docs_text_reader is not None:
+            target_text = repair_en_fragments(
+                target_text,
+                en_page_path=plan.target_path,
+                read_text=ctx.docs_text_reader,
+                ru_source=content.ru_text,
+                en_baseline=content.en_text or content.en_base_text,
+            )
 
     return PairRunResult(
         plan=plan,

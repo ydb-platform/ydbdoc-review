@@ -161,6 +161,9 @@ def apply_localized_mirror_delta(
     source_base: str | None,
     source_current: str,
     target_baseline: str | None,
+    *,
+    en_page_path: str | None = None,
+    docs_text_reader: DocsTextReader | None = None,
 ) -> str | None:
     """Apply href and fence-opener deltas from RU to EN without an LLM."""
     if not source_base or target_baseline is None:
@@ -169,7 +172,13 @@ def apply_localized_mirror_delta(
         return None
     out = target_baseline
     if is_href_only_change(source_base, source_current):
-        href_applied = apply_href_only_delta(source_base, source_current, target_baseline)
+        href_applied = apply_href_only_delta(
+            source_base,
+            source_current,
+            target_baseline,
+            en_page_path=en_page_path,
+            docs_text_reader=docs_text_reader,
+        )
         if href_applied is None:
             return None
         out = href_applied
@@ -214,6 +223,45 @@ def collect_explicit_anchors(text: str) -> list[str]:
     return out
 
 
+def _href_fragments_are_localized_equivalent(
+    source_href: str,
+    target_href: str,
+    *,
+    en_page_path: str,
+    docs_text_reader: DocsTextReader,
+) -> bool:
+    """True when ``target_href`` is the EN slug for the same section as ``source_href``."""
+    source_path, _, source_fragment = source_href.partition("#")
+    target_path, _, target_fragment = target_href.partition("#")
+    if source_path != target_path or not source_fragment or not target_fragment:
+        return source_href == target_href
+    if source_fragment == target_fragment:
+        return True
+    from ydbdoc_review.validation.fragment_repair import (
+        _remap_fragment_via_ru_en_pages,
+        _resolve_href_path,
+        fragment_declared_in_markdown,
+    )
+
+    abs_path = _resolve_href_path(en_page_path, source_path)
+    if abs_path is None:
+        return False
+    ru_abs = abs_path.replace("/docs/en/", "/docs/ru/", 1)
+    ru_target = docs_text_reader(ru_abs)
+    en_target = docs_text_reader(abs_path)
+    if not ru_target or not en_target:
+        return False
+    mapped = _remap_fragment_via_ru_en_pages(source_fragment, ru_target, en_target)
+    if mapped != target_fragment:
+        return False
+    return fragment_declared_in_markdown(
+        en_target,
+        target_fragment,
+        page_path=abs_path,
+        read_text=docs_text_reader,
+    )
+
+
 def check_href_parity(
     source_text: str,
     target_text: str,
@@ -237,6 +285,18 @@ def check_href_parity(
     # semantics-preserving and avoids false mismatches such as #50854.
     src_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
     tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
+    if en_page_path and docs_text_reader is not None:
+        src_ordered = [
+            unquote(
+                _maybe_localize_en_href(
+                    href,
+                    en_page_path=en_page_path,
+                    docs_text_reader=docs_text_reader,
+                    ru_source=source_text,
+                )
+            )
+            for href in src_ordered
+        ]
     src = Counter(src_ordered)
     tgt = Counter(tgt_ordered)
     if ignore_basenames:
@@ -269,7 +329,14 @@ def check_href_parity(
         source_label_counts = Counter(match.group(1) for match in source_visible)
         target_label_counts = Counter(match.group(1) for match in target_visible)
         source_label_map = {
-            match.group(1): unquote(match.group(2).strip())
+            match.group(1): unquote(
+                _maybe_localize_en_href(
+                    match.group(2).strip(),
+                    en_page_path=en_page_path,
+                    docs_text_reader=docs_text_reader,
+                    ru_source=source_text,
+                )
+            )
             for match in source_visible
             if match.group(1)
             and match.group(1) != "{#T}"
@@ -300,7 +367,14 @@ def check_href_parity(
             if src_path_order == tgt_path_order:
                 continue
             source_pairs = {
-                match.group(1): unquote(match.group(2).strip())
+                match.group(1): unquote(
+                    _maybe_localize_en_href(
+                        match.group(2).strip(),
+                        en_page_path=en_page_path,
+                        docs_text_reader=docs_text_reader,
+                        ru_source=source_text,
+                    )
+                )
                 for match in _iter_visible_md_link_matches(source_text)
                 if match.group(2).strip().split("#", 1)[0] == path
             }
@@ -331,6 +405,30 @@ def check_href_parity(
         current_extra = Counter(extra)
         missing = sorted((current_missing - old_missing).elements())
         extra = sorted((current_extra - old_extra).elements())
+        if not missing and not extra:
+            return []
+    # #51078: RU transliterated Diplodoc slugs vs EN auto-slugs for the same section.
+    if missing and extra and en_page_path and docs_text_reader is not None:
+        used_extra: set[int] = set()
+        kept_missing: list[str] = []
+        for source_href in missing:
+            matched = False
+            for idx, target_href in enumerate(extra):
+                if idx in used_extra:
+                    continue
+                if _href_fragments_are_localized_equivalent(
+                    source_href,
+                    target_href,
+                    en_page_path=en_page_path,
+                    docs_text_reader=docs_text_reader,
+                ):
+                    used_extra.add(idx)
+                    matched = True
+                    break
+            if not matched:
+                kept_missing.append(source_href)
+        missing = kept_missing
+        extra = [href for idx, href in enumerate(extra) if idx not in used_extra]
         if not missing and not extra:
             return []
     # #50976: accept a same-page EN-localized fragment only when the source
@@ -661,6 +759,9 @@ def apply_href_only_delta(
     source_base: str | None,
     source_current: str,
     target_baseline: str | None,
+    *,
+    en_page_path: str | None = None,
+    docs_text_reader: DocsTextReader | None = None,
 ) -> str | None:
     """Apply a pure RU Markdown-link target delta to EN without an LLM.
 
@@ -686,15 +787,67 @@ def apply_href_only_delta(
 
     out = target_baseline
     for old_href, new_href in changes:
+        localized_href = _maybe_localize_en_href(
+            new_href,
+            en_page_path=en_page_path,
+            docs_text_reader=docs_text_reader,
+            ru_source=source_current,
+        )
         target_links = list(_MD_LINK.finditer(out))
         old_matches = [m for m in target_links if m.group(2).strip() == old_href]
         if len(old_matches) == 1:
             match = old_matches[0]
-            out = out[: match.start()] + f"[{match.group(1)}]({new_href})" + out[match.end() :]
+            out = (
+                out[: match.start()]
+                + f"[{match.group(1)}]({localized_href})"
+                + out[match.end() :]
+            )
             continue
         if not old_matches and any(m.group(2).strip() == new_href for m in target_links):
             continue  # Proven accepted no-op: EN main already has the target.
         return None
+    return out
+
+
+def _maybe_localize_en_href(
+    href: str,
+    *,
+    en_page_path: str | None,
+    docs_text_reader: DocsTextReader | None,
+    ru_source: str | None,
+) -> str:
+    if not en_page_path or docs_text_reader is None:
+        return href
+    from ydbdoc_review.validation.fragment_repair import localize_en_internal_href
+
+    return localize_en_internal_href(
+        href,
+        en_page_path=en_page_path,
+        read_text=docs_text_reader,
+        ru_source=ru_source,
+    )
+
+
+def _localize_md_hrefs(
+    text: str,
+    *,
+    en_page_path: str | None,
+    docs_text_reader: DocsTextReader | None,
+    ru_source: str,
+) -> str:
+    if not en_page_path or docs_text_reader is None:
+        return text
+    out = text
+    for match in reversed(list(_iter_visible_md_link_matches(text))):
+        localized = _maybe_localize_en_href(
+            match.group(2).strip(),
+            en_page_path=en_page_path,
+            docs_text_reader=docs_text_reader,
+            ru_source=ru_source,
+        )
+        if localized == match.group(2).strip():
+            continue
+        out = out[: match.start()] + f"[{match.group(1)}]({localized})" + out[match.end() :]
     return out
 
 
@@ -704,6 +857,8 @@ def restore_md_link_hrefs(
     *,
     source_ru_base: str | None = None,
     target_baseline: str | None = None,
+    en_page_path: str | None = None,
+    docs_text_reader: DocsTextReader | None = None,
 ) -> str:
     """Force EN ``[label](href)`` targets to match RU (§6.174 / #49451).
 
@@ -746,11 +901,22 @@ def restore_md_link_hrefs(
                 for idx in reversed(range(len(en_links))):
                     label, href, start, end = en_links[idx]
                     pieces.append(out[end:cursor])
-                    pieces.append(f"[{label}]({replacements.get(idx, href)})")
+                    replacement = _maybe_localize_en_href(
+                        replacements.get(idx, href),
+                        en_page_path=en_page_path,
+                        docs_text_reader=docs_text_reader,
+                        ru_source=source_ru,
+                    )
+                    pieces.append(f"[{label}]({replacement})")
                     cursor = start
                 pieces.append(out[:cursor])
                 return "".join(reversed(pieces))
-            return out
+            return _localize_md_hrefs(
+                out,
+                en_page_path=en_page_path,
+                docs_text_reader=docs_text_reader,
+                ru_source=source_ru,
+            )
 
     ru_href_counts = Counter(href for _label, href, _s, _e in ru_links)
     en_href_counts = Counter(href for _label, href, _s, _e in en_links)
@@ -763,7 +929,13 @@ def restore_md_link_hrefs(
             reversed(en_links), reversed(ru_links), strict=True
         ):
             pieces.append(out[end:cursor])
-            pieces.append(f"[{elabel}]({rhref})")
+            localized = _maybe_localize_en_href(
+                rhref,
+                en_page_path=en_page_path,
+                docs_text_reader=docs_text_reader,
+                ru_source=source_ru,
+            )
+            pieces.append(f"[{elabel}]({localized})")
             cursor = start
         pieces.append(out[:cursor])
         out = "".join(reversed(pieces))

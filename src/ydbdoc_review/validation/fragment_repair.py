@@ -237,6 +237,33 @@ def _ru_fragment_for_same_target(
     return None
 
 
+def _is_transliterated_ru_auto_slug(frag: str, ru_md: str) -> bool:
+    """True when ``frag`` is the legacy transliterated slug of exactly one RU heading."""
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.rendering.markdown_renderer import _render_inline
+    from ydbdoc_review.validation.yfm_anchor import (
+        _iter_headings,
+        _legacy_transliterated_slug,
+        diplodoc_auto_slug,
+        split_heading_anchor_suffix,
+    )
+
+    matches = 0
+    doc = parse_markdown(ru_md)
+    for heading in _iter_headings(doc.children):
+        plain = _render_inline(heading.children).strip()
+        title, explicit = split_heading_anchor_suffix(plain)
+        if explicit == frag:
+            return False
+        legacy = _legacy_transliterated_slug(title)
+        if legacy == frag:
+            matches += 1
+            continue
+        if not title.isascii() and diplodoc_auto_slug(title) == frag:
+            matches += 1
+    return matches == 1
+
+
 def _try_remap_missing_fragment_via_ru_en(
     *,
     frag: str,
@@ -260,7 +287,9 @@ def _try_remap_missing_fragment_via_ru_en(
     candidates: list[str] = []
     if ru_frag:
         candidates.append(ru_frag)
-    if _CYRILLIC.search(unquote(frag)) and frag not in candidates:
+    if _CYRILLIC.search(unquote(frag)):
+        candidates.append(frag)
+    elif _is_transliterated_ru_auto_slug(frag, ru_target):
         candidates.append(frag)
     if not candidates:
         return None
@@ -319,6 +348,46 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
             if en_auto:
                 return en_auto
     return None
+
+
+def localize_en_internal_href(
+    href: str,
+    *,
+    en_page_path: str,
+    read_text: DocsReader,
+    ru_source: str | None = None,
+) -> str:
+    """Return ``href`` with ``#fragment`` localized for the EN target page."""
+    href = href.strip()
+    if "#" not in href:
+        return href
+    path_part, frag = href.rsplit("#", 1)
+    if not frag or not path_part.endswith(".md"):
+        return href
+    abs_path = _resolve_href_path(en_page_path, path_part)
+    if abs_path is None:
+        return href
+    en_target = read_text(abs_path)
+    if en_target is None:
+        return href
+    if fragment_declared_in_markdown(
+        en_target,
+        frag,
+        page_path=abs_path,
+        read_text=read_text,
+    ):
+        return href
+    new_frag = _try_remap_missing_fragment_via_ru_en(
+        frag=frag,
+        path_part=path_part,
+        en_page_path=en_page_path,
+        ru_source=ru_source,
+        en_target=en_target,
+        read_text=read_text,
+    )
+    if new_frag:
+        return f"{path_part}#{new_frag}"
+    return href
 
 
 def repair_en_fragments(
