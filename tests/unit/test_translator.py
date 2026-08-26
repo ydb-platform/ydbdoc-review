@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from openai import APITimeoutError
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -43,9 +44,7 @@ def _completion(content: str):
 
 def _mock_client(responses: list[str]) -> YandexLLMClient:
     mock_openai = MagicMock()
-    mock_openai.chat.completions.create.side_effect = [
-        _completion(r) for r in responses
-    ]
+    mock_openai.chat.completions.create.side_effect = [_completion(r) for r in responses]
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
     return YandexLLMClient(
         folder_id="b1x",
@@ -99,9 +98,7 @@ def test_translate_batch_success():
     seg = _segment("s1", "Привет")
     batch = Batch(index=0, segments=[seg])
     client = _mock_client([_json_response([{"id": "s1", "text": "Hello"}])])
-    out = translate_batch(
-        client, batch, load_glossary(), file_path="docs/ru/x.md"
-    )
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
     assert out == {"s1": "Hello"}
 
 
@@ -119,9 +116,7 @@ def test_translate_batch_falls_back_to_single_segment():
             _json_response([{"id": "s2", "text": "Beta"}]),
         ]
     )
-    out = translate_batch(
-        client, batch, load_glossary(), file_path="docs/ru/x.md"
-    )
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
     assert out == {"s1": "Alpha", "s2": "Beta"}
 
 
@@ -155,24 +150,16 @@ def test_translate_segments_uses_cache():
 def test_translate_batch_rejects_dropped_cli_flag():
     seg = _segment("s1", "Use --yaml-config here")
     batch = Batch(index=0, segments=[seg])
-    client = _mock_client(
-        [_json_response([{"id": "s1", "text": "Use yaml-config here"}])] * 3
-    )
+    client = _mock_client([_json_response([{"id": "s1", "text": "Use yaml-config here"}])] * 3)
     with pytest.raises(TranslationValidationError, match="CLI"):
-        translate_batch(
-            client, batch, load_glossary(), file_path="docs/ru/x.md"
-        )
+        translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
 
 
 def test_translate_batch_realigns_renumbered_placeholders():
     seg = _segment("s1", "Use ⟦C1⟧ flag")
     batch = Batch(index=0, segments=[seg])
-    client = _mock_client(
-        [_json_response([{"id": "s1", "text": "Use ⟦C99⟧ flag"}])]
-    )
-    out = translate_batch(
-        client, batch, load_glossary(), file_path="docs/ru/x.md"
-    )
+    client = _mock_client([_json_response([{"id": "s1", "text": "Use ⟦C99⟧ flag"}])])
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
     assert out == {"s1": "Use ⟦C1⟧ flag"}
 
 
@@ -211,9 +198,7 @@ def test_translate_batch_placeholder_mismatch_tries_fallback_model():
     # First fallback returns valid output.
     good = _json_response([{"id": "s1", "text": "Use ⟦C1⟧ flag"}])
     client = _mock_client([bad, bad, bad, good])
-    out = translate_batch(
-        client, batch, load_glossary(), file_path="docs/ru/x.md"
-    )
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
     assert out == {"s1": "Use ⟦C1⟧ flag"}
 
 
@@ -224,9 +209,7 @@ def test_translate_batch_retries_homoglyph_cyrillic_then_accepts_clean_en():
     good = _json_response([{"id": "s1", "text": "This could be done"}])
     client = _mock_client([bad, good])
 
-    out = translate_batch(
-        client, batch, load_glossary(), file_path="docs/ru/x.md"
-    )
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
 
     assert out == {"s1": "This could be done"}
 
@@ -241,9 +224,7 @@ def test_translate_batch_all_models_with_cyrillic_fail_closed():
     )
 
     with pytest.raises(TranslationValidationError, match="Cyrillic remains"):
-        translate_batch(
-            client, batch, load_glossary(), file_path="docs/ru/x.md"
-        )
+        translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
 
     # Three batch attempts plus the existing per-segment repair path. No bad
     # candidate may be accepted from either model.
@@ -267,8 +248,28 @@ def test_translate_batch_rate_limit_tries_fallback_model():
         return SimpleNamespace(content=good)
 
     client.chat.side_effect = chat_side_effect
-    out = translate_batch(
-        client, batch, load_glossary(), file_path="docs/ru/x.md"
-    )
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
+    assert out == {"s1": "Hello"}
+    assert client.chat.call_count == 2
+
+
+def test_translate_batch_timeout_tries_fallback_model_immediately():
+    seg = _segment("s1", "Привет")
+    batch = Batch(index=0, segments=[seg])
+    good = _json_response([{"id": "s1", "text": "Hello"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["slow", "fast"]
+    timeout = APITimeoutError(request=MagicMock())
+    exhausted = LLMRetryExhaustedError("All models exhausted (slow): timeout")
+    exhausted.__cause__ = timeout
+
+    def chat_side_effect(*_args, **kwargs):
+        if kwargs.get("model") == "slow":
+            raise exhausted
+        return SimpleNamespace(content=good)
+
+    client.chat.side_effect = chat_side_effect
+    out = translate_batch(client, batch, load_glossary(), file_path="docs/ru/x.md")
+
     assert out == {"s1": "Hello"}
     assert client.chat.call_count == 2

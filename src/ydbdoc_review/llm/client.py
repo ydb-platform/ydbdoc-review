@@ -14,8 +14,8 @@ import time
 from dataclasses import dataclass
 from typing import Literal
 
-from openai import OpenAI
 import requests
+from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from ydbdoc_review.config.loader import Config, LLMConfig
@@ -25,7 +25,6 @@ from ydbdoc_review.llm.errors import (
     LLMRetryableRequestError,
     LLMRetryExhaustedError,
 )
-from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV
 from ydbdoc_review.llm.retry import (
     HTTP_RATE_LIMIT,
     classify_api_error,
@@ -34,19 +33,19 @@ from ydbdoc_review.llm.retry import (
     is_model_unavailable,
     is_requests_ssl_error,
     is_retryable,
+    is_timeout_error,
     parse_retry_after_s,
     retry_delay_s,
     should_advance_eliza_model_chain,
 )
 from ydbdoc_review.llm.role_chains import ensure_disjoint_translate_critic_chains
-from ydbdoc_review.shutdown import interruptible_sleep
+from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV, eliza_tls_verify
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
+from ydbdoc_review.shutdown import interruptible_sleep
 
 logger = logging.getLogger(__name__)
 
 LLMRole = Literal["analyze", "translate", "critic"]
-
-from ydbdoc_review.llm.tls import eliza_tls_verify
 
 
 def _message_char_count(messages: list[ChatCompletionMessageParam]) -> tuple[int, int]:
@@ -130,6 +129,7 @@ class YandexLLMClient:
             api_key=api_key,
             base_url=llm.base_url,
             timeout=float(llm.timeout_s),
+            max_retries=0,
         )
         self._usage = usage_tracker or UsageTracker()
         self.transcript_recorder: object | None = None
@@ -221,6 +221,14 @@ class YandexLLMClient:
                             role=role,
                         )
                     )
+                    if is_timeout_error(exc):
+                        logger.warning(
+                            "Model %s timed out; trying fallback without retrying "
+                            "the same model: %s",
+                            slug,
+                            exc,
+                        )
+                        break
                     if is_model_unavailable(exc):
                         logger.warning(
                             "Model %s unavailable, trying fallback: %s",
@@ -401,37 +409,27 @@ class ElizaLLMClient(YandexLLMClient):
     def _parse_eliza_completion_content(data: object) -> str:
         """Extract assistant text from Eliza chat completion JSON."""
         if not isinstance(data, dict):
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: response is not a JSON object"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: response is not a JSON object")
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise LLMRetryableRequestError("Eliza HTTP 200: empty choices")
         first = choices[0]
         if not isinstance(first, dict):
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: invalid choice entry"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: invalid choice entry")
         message = first.get("message")
         if not isinstance(message, dict):
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: missing message in choice"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: missing message in choice")
         if "content" not in message:
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: missing content in message"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: missing content in message")
         content = str(message.get("content") or "")
         if not content.strip():
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: empty content in message"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: empty content in message")
         return content
 
     def _model_chain_for_role(self, role: LLMRole) -> list[str]:
         if role == "analyze":
             raise LLMConfigError(
-                f'role "analyze" has no internal Eliza model '
+                'role "analyze" has no internal Eliza model '
                 "(doc_translate uses deterministic planning — §6.30); "
                 "pass model= explicitly or use yandex_cloud provider"
             )
@@ -605,9 +603,7 @@ class ElizaLLMClient(YandexLLMClient):
                     latency_ms = (time.perf_counter() - started) * 1000
 
                     if resp.status_code >= 400:
-                        http_err = self._eliza_http_error(
-                            resp, oauth_token=self._oauth_token
-                        )
+                        http_err = self._eliza_http_error(resp, oauth_token=self._oauth_token)
                         raise http_err
 
                     data = resp.json()
@@ -644,22 +640,18 @@ class ElizaLLMClient(YandexLLMClient):
                     last_error = exc
                 except requests.exceptions.SSLError as exc:
                     raise LLMRequestError(
-                        "Eliza TLS verification failed "
-                        f"(set {ELIZA_CA_BUNDLE_ENV}): {exc}"
+                        f"Eliza TLS verification failed (set {ELIZA_CA_BUNDLE_ENV}): {exc}"
                     ) from exc
                 except requests.exceptions.Timeout as exc:
                     last_error = exc
                 except requests.exceptions.ConnectionError as exc:
                     if is_requests_ssl_error(exc):
                         raise LLMRequestError(
-                            "Eliza TLS verification failed "
-                            f"(set {ELIZA_CA_BUNDLE_ENV}): {exc}"
+                            f"Eliza TLS verification failed (set {ELIZA_CA_BUNDLE_ENV}): {exc}"
                         ) from exc
                     last_error = exc
                 except ValueError as exc:
-                    raise LLMRequestError(
-                        f"Eliza response is not valid JSON: {exc}"
-                    ) from exc
+                    raise LLMRequestError(f"Eliza response is not valid JSON: {exc}") from exc
 
                 latency_ms = (time.perf_counter() - started) * 1000
                 self._usage.add(
@@ -701,10 +693,7 @@ class ElizaLLMClient(YandexLLMClient):
                     )
 
                 if failure_no >= max_tries:
-                    if (
-                        model_idx + 1 < len(chain)
-                        and should_advance_eliza_model_chain(last_error)
-                    ):
+                    if model_idx + 1 < len(chain) and should_advance_eliza_model_chain(last_error):
                         logger.warning(
                             "Eliza model %s exhausted retries, trying next model in chain: %s",
                             slug,
@@ -768,6 +757,4 @@ def create_llm_client(
         return YandexLLMClient.from_config(config, usage_tracker=usage_tracker)
     if provider == "eliza":
         return ElizaLLMClient.from_config(config, usage_tracker=usage_tracker)
-    raise LLMConfigError(
-        "Unknown YDBDOC_MODEL_PROVIDER. Expected 'yandex_cloud' or 'eliza'."
-    )
+    raise LLMConfigError("Unknown YDBDOC_MODEL_PROVIDER. Expected 'yandex_cloud' or 'eliza'.")

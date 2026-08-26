@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from openai import APIStatusError
+from openai import APIStatusError, APITimeoutError
 
 from ydbdoc_review.config.loader import RetriesConfig
 from ydbdoc_review.llm.errors import LLMModelUnavailableError
@@ -14,6 +15,7 @@ from ydbdoc_review.llm.retry import (
     is_model_unavailable,
     is_requests_ssl_error,
     is_retryable,
+    is_timeout_error,
 )
 
 
@@ -69,6 +71,16 @@ def test_is_retryable_400_not_retryable():
     assert not is_retryable(err)
 
 
+def test_is_timeout_error_finds_nested_api_timeout():
+    timeout = APITimeoutError(request=MagicMock())
+    wrapped = RuntimeError("outer")
+    wrapped.__cause__ = timeout
+
+    assert is_timeout_error(timeout)
+    assert is_timeout_error(wrapped)
+    assert not is_timeout_error(RuntimeError("ordinary failure"))
+
+
 def test_is_requests_ssl_error_direct_and_wrapped():
     import requests
 
@@ -95,18 +107,24 @@ def test_parse_retry_after_seconds_and_rate_limit_backoff():
     assert compute_rate_limit_backoff_s(1, rl) == 5.0
     assert compute_rate_limit_backoff_s(2, rl) == 10.0
     retries = RetriesConfig(rate_limit=rl)
-    assert retry_delay_s(
-        attempt=1,
-        retries=retries,
-        status_code=429,
-        retry_after_s=7.0,
-    ) == 7.0
-    assert retry_delay_s(
-        attempt=2,
-        retries=retries,
-        status_code=429,
-        retry_after_s=None,
-    ) == 10.0
+    assert (
+        retry_delay_s(
+            attempt=1,
+            retries=retries,
+            status_code=429,
+            retry_after_s=7.0,
+        )
+        == 7.0
+    )
+    assert (
+        retry_delay_s(
+            attempt=2,
+            retries=retries,
+            status_code=429,
+            retry_after_s=None,
+        )
+        == 10.0
+    )
 
 
 def test_build_eliza_http_error_classifies_retryable_and_fail_fast():
@@ -131,9 +149,7 @@ def test_should_advance_eliza_model_chain():
         should_advance_eliza_model_chain,
     )
 
-    overloaded = LLMRetryableRequestError(
-        "Eliza HTTP 429: overloaded", status_code=429
-    )
+    overloaded = LLMRetryableRequestError("Eliza HTTP 429: overloaded", status_code=429)
     server = LLMRetryableRequestError("Eliza HTTP 503: down", status_code=503)
     parse_err = LLMRetryableRequestError("Eliza HTTP 200: empty choices")
     client_err = LLMRequestError("Eliza HTTP 403 (forbidden)")
@@ -151,27 +167,19 @@ def test_is_transient_requests_error():
     from ydbdoc_review.llm.retry import is_transient_requests_error
 
     assert is_transient_requests_error(requests.exceptions.Timeout("t"))
-    assert is_transient_requests_error(
-        requests.exceptions.ConnectionError("reset")
-    )
+    assert is_transient_requests_error(requests.exceptions.ConnectionError("reset"))
     ssl_exc = requests.exceptions.SSLError("cert verify failed")
     assert not is_transient_requests_error(ssl_exc)
-    assert not is_transient_requests_error(
-        requests.exceptions.ConnectionError(ssl_exc)
-    )
+    assert not is_transient_requests_error(requests.exceptions.ConnectionError(ssl_exc))
     import requests
 
     from ydbdoc_review.llm.retry import is_transient_requests_error
 
     assert is_transient_requests_error(requests.exceptions.Timeout("t"))
-    assert is_transient_requests_error(
-        requests.exceptions.ConnectionError("reset")
-    )
+    assert is_transient_requests_error(requests.exceptions.ConnectionError("reset"))
     ssl_exc = requests.exceptions.SSLError("cert verify failed")
     assert not is_transient_requests_error(ssl_exc)
-    assert not is_transient_requests_error(
-        requests.exceptions.ConnectionError(ssl_exc)
-    )
+    assert not is_transient_requests_error(requests.exceptions.ConnectionError(ssl_exc))
 
 
 def _fake_response(status_code: int) -> SimpleNamespace:

@@ -8,7 +8,11 @@ from email.utils import parsedate_to_datetime
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from ydbdoc_review.config.loader import RateLimitRetriesConfig, RetriesConfig
-from ydbdoc_review.llm.errors import LLMModelUnavailableError, LLMRequestError, LLMRetryableRequestError
+from ydbdoc_review.llm.errors import (
+    LLMModelUnavailableError,
+    LLMRequestError,
+    LLMRetryableRequestError,
+)
 
 HTTP_RATE_LIMIT = 429
 
@@ -76,9 +80,7 @@ def compute_backoff_s(attempt: int, cfg: RetriesConfig) -> float:
     return cfg.backoff_initial_s * (cfg.backoff_factor ** (attempt - 1))
 
 
-def compute_rate_limit_backoff_s(
-    attempt: int, cfg: RateLimitRetriesConfig
-) -> float:
+def compute_rate_limit_backoff_s(attempt: int, cfg: RateLimitRetriesConfig) -> float:
     """Backoff for HTTP 429 when ``Retry-After`` header is absent."""
     delay = cfg.backoff_initial_s * (cfg.backoff_factor ** (attempt - 1))
     return min(delay, cfg.max_backoff_s)
@@ -154,6 +156,29 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     return "429" in msg or "rate limit" in msg or "rate-limit" in msg
 
 
+def is_timeout_error(exc: BaseException) -> bool:
+    """True when an error or one of its causes is an API timeout."""
+    to_visit: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while to_visit:
+        current = to_visit.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, APITimeoutError):
+            return True
+        if isinstance(current, LLMRetryableRequestError) and current.status_code == 408:
+            return True
+        if current.__cause__ is not None:
+            to_visit.append(current.__cause__)
+        if current.__context__ is not None:
+            to_visit.append(current.__context__)
+        for arg in getattr(current, "args", ()):
+            if isinstance(arg, BaseException):
+                to_visit.append(arg)
+    return False
+
+
 def is_eliza_model_overloaded(exc: BaseException) -> bool:
     """True when Eliza returns 429 because the model pool is saturated."""
     if not is_rate_limit_error(exc):
@@ -182,9 +207,7 @@ def is_eliza_model_unavailable(exc: BaseException) -> bool:
         return True
     msg = str(exc).lower()
     return (
-        "model not available" in msg
-        or "model unavailable" in msg
-        or "model is unavailable" in msg
+        "model not available" in msg or "model unavailable" in msg or "model is unavailable" in msg
     )
 
 

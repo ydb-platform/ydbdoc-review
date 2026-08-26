@@ -13,7 +13,7 @@ llm:
 
   temperature: 0.1
   max_tokens: 8000
-  timeout_s: 120
+  timeout_s: 90
 
   retries:
     max_attempts: 3
@@ -93,4 +93,3 @@ reporting:
   include_token_usage: true
   include_heuristics: true
   include_skipped_critic: true
-

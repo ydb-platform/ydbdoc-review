@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from openai import APIStatusError
+from openai import APIStatusError, APITimeoutError
 
 from ydbdoc_review.config.loader import (
     LLMConfig,
@@ -69,9 +69,7 @@ def test_model_uri():
 
 
 def test_from_config():
-    cfg = load_config(
-        env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "AQVN_x"}
-    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "AQVN_x"})
     client = YandexLLMClient.from_config(cfg)
     assert client.model_uri("yandexgpt-5.1") == "gpt://b1x/yandexgpt-5.1"
 
@@ -79,17 +77,31 @@ def test_from_config():
 def test_from_config_uses_shared_usage_tracker():
     from ydbdoc_review.llm.usage import UsageTracker
 
-    cfg = load_config(
-        env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "AQVN_x"}
-    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "AQVN_x"})
     shared = UsageTracker()
     client = YandexLLMClient.from_config(cfg, usage_tracker=shared)
     assert client.usage_tracker is shared
 
 
+def test_default_openai_transport_disables_hidden_sdk_retries():
+    llm = _llm_config(timeout_s=73)
+
+    with patch("ydbdoc_review.llm.client.OpenAI") as openai_cls:
+        YandexLLMClient(folder_id="b1test", api_key="AQVN_test", llm=llm)
+
+    openai_cls.assert_called_once_with(
+        api_key="AQVN_test",
+        base_url=llm.base_url,
+        timeout=73.0,
+        max_retries=0,
+    )
+
+
 def test_chat_success_records_usage():
     client, mock = _client_with_mock()
-    mock.chat.completions.create.return_value = _completion("hello", prompt_tokens=12, completion_tokens=3)
+    mock.chat.completions.create.return_value = _completion(
+        "hello", prompt_tokens=12, completion_tokens=3
+    )
 
     result = client.chat(
         [{"role": "user", "content": "hi"}],
@@ -107,7 +119,9 @@ def test_chat_success_records_usage():
 def test_chat_success_null_completion_tokens():
     client, mock = _client_with_mock()
     mock.chat.completions.create.return_value = _completion(
-        "hello", prompt_tokens=12, completion_tokens=None  # type: ignore[arg-type]
+        "hello",
+        prompt_tokens=12,
+        completion_tokens=None,  # type: ignore[arg-type]
     )
 
     result = client.chat(
@@ -177,8 +191,34 @@ def test_chat_model_fallback_on_unavailable():
     assert mock.chat.completions.create.call_count == 2
 
 
+def test_chat_timeout_immediately_tries_fallback_without_primary_retry():
+    llm = _llm_config(
+        models=ModelsConfig(
+            analyze=ModelChoice(primary="a", fallbacks=[]),
+            translate=ModelChoice(primary="slow", fallbacks=["fast"]),
+            critic=ModelChoice(primary="c", fallbacks=[]),
+        ),
+        retries=RetriesConfig(max_attempts=3, backoff_initial_s=0.0, backoff_factor=1.0),
+    )
+    client, mock = _client_with_mock(llm)
+    mock.chat.completions.create.side_effect = [
+        APITimeoutError(request=MagicMock()),
+        _completion("fallback ok"),
+    ]
+
+    result = client.chat([{"role": "user", "content": "x"}], role="translate")
+
+    assert result.content == "fallback ok"
+    assert result.model_slug == "fast"
+    assert mock.chat.completions.create.call_count == 2
+    models = [call.kwargs["model"] for call in mock.chat.completions.create.call_args_list]
+    assert models == ["gpt://b1test/slow", "gpt://b1test/fast"]
+
+
 def test_chat_retries_transient_then_succeeds(monkeypatch: pytest.MonkeyPatch):
-    llm = _llm_config(retries=RetriesConfig(max_attempts=3, backoff_initial_s=0.0, backoff_factor=1.0))
+    llm = _llm_config(
+        retries=RetriesConfig(max_attempts=3, backoff_initial_s=0.0, backoff_factor=1.0)
+    )
     client, mock = _client_with_mock(llm)
     err = APIStatusError("server", response=_fake_response(503), body=None)
     mock.chat.completions.create.side_effect = [err, _completion("recovered")]

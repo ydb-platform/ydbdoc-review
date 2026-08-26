@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
-from ydbdoc_review.llm.retry import is_rate_limit_error
+from ydbdoc_review.llm.retry import is_rate_limit_error, is_timeout_error
 from ydbdoc_review.llm.structured import parse_json_model
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
@@ -64,13 +64,10 @@ def validate_segment_translation(
     target_lang: str = "en",
 ) -> None:
     """Structural checks for one segment translation."""
-    cyrillic_issues = check_cyrillic_in_en(
-        translated_text, target_lang=target_lang
-    )
+    cyrillic_issues = check_cyrillic_in_en(translated_text, target_lang=target_lang)
     if cyrillic_issues:
         raise TranslationValidationError(
-            f"Cyrillic remains in EN translation for {source.id!r}: "
-            f"{cyrillic_issues[0]}",
+            f"Cyrillic remains in EN translation for {source.id!r}: {cyrillic_issues[0]}",
             segment_id=source.id,
         )
     if not placeholders_match(source.text, translated_text):
@@ -79,9 +76,7 @@ def validate_segment_translation(
             f"expected placeholders from source in same order",
             segment_id=source.id,
         )
-    if is_placeholder_only_text(source.text) and not is_placeholder_only_text(
-        translated_text
-    ):
+    if is_placeholder_only_text(source.text) and not is_placeholder_only_text(translated_text):
         raise TranslationValidationError(
             f"placeholder-only segment {source.id!r} must stay marker-only "
             f"(no prose around ⟦…⟧); got elaboration",
@@ -121,9 +116,7 @@ def validate_batch_translations(
                 f"missing translation for {seg.id!r}",
                 segment_id=seg.id,
             )
-        validate_segment_translation(
-            seg, translations[seg.id], target_lang=target_lang
-        )
+        validate_segment_translation(seg, translations[seg.id], target_lang=target_lang)
 
 
 def _cache_key(seg: Segment, *, target_lang: str) -> str:
@@ -135,9 +128,7 @@ def _cache_key(seg: Segment, *, target_lang: str) -> str:
     return hashlib.sha256(payload.encode()).digest().hex()
 
 
-def _apply_placeholder_realignment(
-    batch: Batch, translations: dict[str, str]
-) -> None:
+def _apply_placeholder_realignment(batch: Batch, translations: dict[str, str]) -> None:
     """In-place: fix renumbered or exposed atoms before validation."""
     for seg in batch.segments:
         text = translations[seg.id]
@@ -175,16 +166,12 @@ def _translate_batch_with_model(
             )
             result = client.chat(messages, model=model, role="translate")
             expected = {seg.id for seg in batch.segments}
-            translations = parse_translate_response(
-                result.content, expected_ids=expected
-            )
+            translations = parse_translate_response(result.content, expected_ids=expected)
             _apply_placeholder_realignment(batch, translations)
             if last_attempt is not None:
                 last_attempt.clear()
                 last_attempt.update(translations)
-            validate_batch_translations(
-                batch, translations, target_lang=target_lang
-            )
+            validate_batch_translations(batch, translations, target_lang=target_lang)
             return translations
         except (LLMParseError, TranslationValidationError) as exc:
             last_exc = exc
@@ -232,9 +219,11 @@ def _translate_batch_once(
             )
         except LLMRetryExhaustedError as exc:
             last_infra_exc = exc
-            if model_idx + 1 < len(model_chain) and is_rate_limit_error(exc):
+            if model_idx + 1 < len(model_chain) and (
+                is_rate_limit_error(exc) or is_timeout_error(exc)
+            ):
                 logger.warning(
-                    "Translate batch %s model %s rate-limited, trying fallback %s: %s",
+                    "Translate batch %s model %s unavailable, trying fallback %s: %s",
                     batch.index,
                     model,
                     model_chain[model_idx + 1],
@@ -244,10 +233,7 @@ def _translate_batch_once(
             raise
         except (LLMParseError, TranslationValidationError) as exc:
             last_validation_exc = exc
-            if (
-                model_idx + 1 < len(model_chain)
-                and _PLACEHOLDER_MISMATCH_HINT in str(exc)
-            ):
+            if model_idx + 1 < len(model_chain) and _PLACEHOLDER_MISMATCH_HINT in str(exc):
                 logger.warning(
                     "Translate batch %s retry with fallback model %s: %s",
                     batch.index,
@@ -278,8 +264,7 @@ def _record_manual_action(
         message=message,
     )
     if not any(
-        a.segment_id == action.segment_id and a.message == action.message
-        for a in manual_actions
+        a.segment_id == action.segment_id and a.message == action.message for a in manual_actions
     ):
         manual_actions.append(action)
 
@@ -448,9 +433,7 @@ def translate_segments(
             key = _cache_key(seg, target_lang=target_lang)
             cached = cache.get(key)
             if cached is not None:
-                validate_segment_translation(
-                    seg, cached, target_lang=target_lang
-                )
+                validate_segment_translation(seg, cached, target_lang=target_lang)
                 translations[seg.id] = cached
                 continue
         pending.append(seg)
@@ -499,9 +482,7 @@ def translate_segments(
             translations[seg.id] = text
             if cache is not None:
                 try:
-                    validate_segment_translation(
-                        seg, text, target_lang=target_lang
-                    )
+                    validate_segment_translation(seg, text, target_lang=target_lang)
                 except TranslationValidationError:
                     # Recovery may deliberately return the RU source together
                     # with a blocking manual action. It is safe for the current
