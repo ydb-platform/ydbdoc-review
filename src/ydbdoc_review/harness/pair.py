@@ -58,25 +58,25 @@ def _try_deterministic_en_preserve(
     if not historical_merged_provenance:
         return None
 
+    if (
+        content.current_ru_text is not None
+        and content.current_ru_text != source_text
+        and content.historical_en_text is not None
+        and content.historical_en_text != existing_target
+    ):
+        logger.info(
+            "Historical delta for %s was superseded by a newer "
+            "RU/EN pair; preserving current EN byte-for-byte",
+            plan.target_path,
+        )
+        return existing_target, HistoricalDeltaStatus.SUPERSEDED.value
+
     structural = structural_delta_satisfied(
         ru_base,
         source_text,
         existing_target,
         current_source=content.current_ru_text,
     )
-    if (
-        structural.status is HistoricalDeltaStatus.NO_RELEVANT_DELTA
-        and content.current_ru_text is not None
-        and content.current_ru_text != source_text
-        and content.historical_en_text is not None
-        and content.historical_en_text != existing_target
-    ):
-        logger.info(
-            "Historical non-structural delta for %s was superseded by a newer "
-            "RU/EN pair; preserving current EN byte-for-byte",
-            plan.target_path,
-        )
-        return existing_target, HistoricalDeltaStatus.SUPERSEDED.value
     if structural.satisfied:
         logger.info(
             "Historical structural delta already satisfied for %s; "

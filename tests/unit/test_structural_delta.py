@@ -120,6 +120,42 @@ def test_prose_only_historical_delta_skips_when_both_current_blobs_advanced():
     ctx.client.chat.assert_not_called()
 
 
+def test_pr_37673_structural_delta_skips_when_current_pair_advanced():
+    def read(name: str) -> str:
+        return (FIXTURES / name).read_text(encoding="utf-8")
+
+    pair = DocPair(
+        "ydb/docs/ru/core/recipes/ydb-sdk/bulk-upsert.md",
+        "ydb/docs/en/core/recipes/ydb-sdk/bulk-upsert.md",
+        ru_changed=True,
+    )
+    current_en = read("en_current.md")
+    content = PairContent(
+        pair=pair,
+        ru_base_text=read("ru_before.md"),
+        ru_text=read("ru_after.md"),
+        current_ru_text=read("ru_current.md"),
+        historical_en_text="Historical EN before the current paired rewrite.\n",
+        en_text=current_en,
+    )
+    plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
+    ctx = SimpleNamespace(docs_text_reader=None, client=MagicMock())
+
+    result = run_pair_plan(
+        content,
+        plan,
+        ctx,
+        {},
+        historical_merged_provenance=True,
+    )
+
+    assert result.error is None
+    assert result.skipped
+    assert result.historical_disposition == "superseded"
+    assert result.target_text == current_en
+    ctx.client.chat.assert_not_called()
+
+
 def test_structural_delta_fails_closed_when_later_target_misses_one_op():
     target = """{% list tabs %}
 

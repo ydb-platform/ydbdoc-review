@@ -250,6 +250,50 @@ def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
     assert content.ru_base_text == "# RU\n"
 
 
+def test_load_pair_contents_merged_pr_uses_current_en_as_target(git_repo: str):
+    repo = Path(git_repo)
+    ru = repo / "ydb" / "docs" / "ru" / "a.md"
+    en = repo / "ydb" / "docs" / "en" / "a.md"
+    en.parent.mkdir(parents=True)
+    en.write_text("Historical EN.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "historical en"], cwd=git_repo, check=True)
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+
+    ru.write_text("# RU\n\nHistorical source change.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "merged source"], cwd=git_repo, check=True)
+    merge_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+
+    ru.write_text("# RU\n\nCurrent source version.\n", encoding="utf-8")
+    en.write_text("Current paired EN.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "advance current pair"], cwd=git_repo, check=True)
+    current_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+
+    pair = build_pairs_from_changes(
+        [("ydb/docs/ru/a.md", "modified")], docs_root="ydb/docs"
+    )[0]
+    content = load_pair_contents(
+        git_repo,
+        [pair],
+        merge_base_with=current_sha,
+        ru_content_ref=merge_sha,
+        ru_base_ref=base_sha,
+    )[0]
+
+    assert content.ru_text == "# RU\n\nHistorical source change.\n"
+    assert content.current_ru_text == "# RU\n\nCurrent source version.\n"
+    assert content.historical_en_text == "Historical EN.\n"
+    assert content.en_text == "Current paired EN.\n"
+
+
 def test_pull_request_context():
     class FakeClient:
         def get_pull(self, owner, repo, pr_number):

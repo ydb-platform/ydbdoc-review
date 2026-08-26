@@ -515,6 +515,12 @@ def load_pair_contents(
         en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+        if ru_content_ref and current_en is not None:
+            # A merged historical PR is checked out at its old merge commit,
+            # while the translation branch is based on current main.  Current
+            # EN is therefore the target authority; the checkout EN is only
+            # historical evidence used to prove that the pair advanced.
+            en_text = current_en
 
         ru_diff = (
             file_diff_range(repo_path, merge_base_with, pair.ru_path) if pair.ru_changed else None
