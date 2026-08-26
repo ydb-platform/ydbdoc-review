@@ -5143,4 +5143,25 @@ not declared on the EN target page (``## Enabling node authentication…`` →
 **Tests:** ``tests/unit/test_pr_51078_en_fragment_localization.py``.
 
 
+### §6.224 Merged PR translate + scoped overlay gate (#45949, 2026-08-26)
+
+**Problem:** Historical merged ``doc_translate`` used verify-only pairs, so
+missing EN mirrors (e.g. ``concepts/node-authorization.md``) were skipped.
+Fragment repair on ``client_certificate_authorization.md`` ran before the EN
+target page existed on disk. ``validate_candidate_overlay`` scanned the entire
+``ydb/docs`` tree and blocked commits on pre-existing template placeholder links
+(``путь/к/файлу.md``, ``path/to/an/article.md``).
+
+**Decision:**
+
+1. Merged source PRs always run ``run_pr_translation`` with
+   ``historical_merged_provenance=True``.
+2. After writing touched EN pages, ``_postpass_localize_en_fragments`` runs
+   ``repair_en_fragments`` so cross-page anchors resolve once all targets exist.
+3. Candidate overlay validates outbound links from **pending writes** (plus
+   inbound refs to deleted paths), not every markdown file on disk.
+
+**Tags:** v0.2.4 (orchestrator provenance + post-pass hook), v0.2.5 (overlay scope).
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
