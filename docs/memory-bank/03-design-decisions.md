@@ -5161,7 +5161,7 @@ target page existed on disk. ``validate_candidate_overlay`` scanned the entire
 3. Candidate overlay validates outbound links from **pending writes** (plus
    inbound refs to deleted paths), not every markdown file on disk.
 
-**Tags:** v0.2.4 (orchestrator provenance + post-pass hook), v0.2.5 (overlay scope).
+**Tags:** force-update ``v0.1.0`` (merged PR translate + overlay scope).
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
