@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import Protocol
 
 from ydbdoc_review.harness.context import HarnessContext
@@ -54,7 +55,11 @@ from ydbdoc_review.validation.heuristics import (
     check_list_tab_parity,
     run_file_heuristics_classified,
 )
-from ydbdoc_review.validation.href_parity import check_href_parity, collect_internal_hrefs
+from ydbdoc_review.validation.href_parity import (
+    check_href_parity,
+    collect_explicit_anchors,
+    collect_internal_hrefs,
+)
 from ydbdoc_review.validation.include_targets import repair_missing_includes
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.placeholder_drift import (
@@ -540,7 +545,7 @@ def _apply_en_structural_repair(state: FileRunState, ctx: HarnessContext) -> Non
         )
 
 
-def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> bool:
+def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> str:
     """Translate only RU segments missing from EN (§6.191 / #49957)."""
     assert state.source_doc is not None
     seeded = partial_align_translations_from_target(
@@ -550,7 +555,7 @@ def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> boo
     )
     pending = [seg for seg in state.segments if seg.id not in seeded]
     if not pending or len(pending) > _PARTIAL_VERIFY_REALIGN_MAX_PENDING:
-        return False
+        return "not_applicable"
     logger.info(
         "partial verify realign for %s: translate %d gap segment(s)",
         state.file_path,
@@ -569,15 +574,38 @@ def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> boo
         max_parallel_batches=ctx.parallel,
         manual_actions=state.manual_actions,
     )
+    original_text = state.translated_text
+    original_translations = state.translations
+    original_render_base_doc = state.render_base_doc
+    original_render_base_segments = state.render_base_segments
+    original_fence_reference_text = state.fence_reference_text
     state.translations = {**seeded, **new_trans}
     state.render_base_doc = state.source_doc
     state.render_base_segments = state.segments
     state.fence_reference_text = state.source_text
     _render_translated_from_source(state, ctx)
+    # Permissive partial alignment may omit EN-only atoms. Never let a
+    # reconstructed in-memory candidate erase immutable checkout links or
+    # explicit anchors merely to repair a segment-count mismatch.
+    old_hrefs = Counter(collect_internal_hrefs(original_text))
+    new_hrefs = Counter(collect_internal_hrefs(state.translated_text))
+    old_anchors = Counter(collect_explicit_anchors(original_text))
+    new_anchors = Counter(collect_explicit_anchors(state.translated_text))
+    if old_hrefs - new_hrefs or old_anchors - new_anchors:
+        state.translated_text = original_text
+        state.translations = original_translations
+        state.render_base_doc = original_render_base_doc
+        state.render_base_segments = original_render_base_segments
+        state.fence_reference_text = original_fence_reference_text
+        state.finalize_warnings.append(
+            "verify_realign_preserved_checkout: rebuilt candidate would drop "
+            "existing EN links or explicit anchors"
+        )
+        return "unsafe"
     state.finalize_warnings.append(
         f"verify_realign_partial: translated {len(pending)} gap segment(s) from RU"
     )
-    return True
+    return "applied"
 
 
 class RoundTripStep:
@@ -629,7 +657,10 @@ class RoundTripStep:
             )
             state.segment_alignment_error = None
             return
-        if _try_partial_verify_realign(state, ctx):
+        partial_realign = _try_partial_verify_realign(state, ctx)
+        if partial_realign == "unsafe":
+            return
+        if partial_realign == "applied":
             state.translations, state.segment_alignment_error = gate_round_trip(
                 state.segments, state.translated_text
             )

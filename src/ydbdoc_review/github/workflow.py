@@ -109,6 +109,7 @@ from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.candidate_overlay import validate_candidate_overlay
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.hard_file_validator import validate_whole_file
+from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
     apply_include_target_checks,
@@ -118,6 +119,7 @@ from ydbdoc_review.validation.redirect_impacts import (
     mirror_redirects_to_en,
     retarget_redirect_inbound_links,
 )
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
     apply_toc_target_checks,
@@ -195,6 +197,27 @@ def _enforce_report_checkout_bytes(
             continue
         mismatches.append(pair.plan.target_path)
         if pair.file_result is not None:
+            # The transaction gate has already rejected this candidate. The
+            # report advertises checkout_ref, so replace candidate-only QA with
+            # deterministic QA of the immutable bytes before publishing it.
+            source = pair.source_text or pair.plan.authoritative_source_text or ""
+            normalized_source = (
+                normalize_ru_source_for_translation(source)
+                if pair.plan.source_lang.lower() in {"ru", "russian"}
+                else source
+            )
+            classified = run_file_heuristics_classified(
+                source,
+                committed or "",
+                normalized_source_text=normalized_source,
+                source_lang=pair.plan.source_lang,
+                target_lang=pair.plan.target_lang,
+                source_file=pair.plan.source_path,
+            )
+            pair.file_result.heuristic_blocking = list(classified.blocking)
+            pair.file_result.heuristic_warnings = list(classified.warnings)
+            pair.file_result.heuristic_info = list(classified.info)
+            pair.file_result.final_text = committed or ""
             pair.file_result.verdict = "blocked"
             pair.file_result.heuristic_blocking.append(
                 "report_checkout_mismatch: final QA text differs from immutable "

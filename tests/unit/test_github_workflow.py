@@ -97,6 +97,11 @@ def _fake_pr_result() -> PRTranslationResult:
 
 def test_report_checkout_guard_blocks_in_memory_drift():
     result = _fake_pr_result()
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    file_result.heuristic_blocking.append(
+        "md_link_parity: EN missing RU links: candidate-only.md"
+    )
     with patch(
         "ydbdoc_review.github.workflow.read_text_at_ref",
         return_value="Different committed bytes.\n",
@@ -104,12 +109,35 @@ def test_report_checkout_guard_blocks_in_memory_drift():
         mismatches = _enforce_report_checkout_bytes("/repo", "abc123", result)
 
     assert mismatches == ["ydb/docs/en/a.md"]
-    file_result = result.pair_results[0].file_result
-    assert file_result is not None
     assert file_result.verdict == "blocked"
+    assert file_result.final_text == "Different committed bytes.\n"
+    assert not any(
+        "candidate-only.md" in message for message in file_result.heuristic_blocking
+    )
     assert any(
         message.startswith("report_checkout_mismatch:")
         for message in file_result.heuristic_blocking
+    )
+
+
+def test_report_checkout_guard_keeps_real_checkout_link_issue():
+    result = _fake_pr_result()
+    pair = result.pair_results[0]
+    pair.source_text = "See [required](required.md).\n"
+    file_result = pair.file_result
+    assert file_result is not None
+    file_result.heuristic_blocking.append("candidate-only issue")
+    with patch(
+        "ydbdoc_review.github.workflow.read_text_at_ref",
+        return_value="Committed text without the required link.\n",
+    ):
+        mismatches = _enforce_report_checkout_bytes("/repo", "abc123", result)
+
+    assert mismatches == [pair.plan.target_path]
+    assert not any("candidate-only" in item for item in file_result.heuristic_blocking)
+    assert any(
+        "required.md" in item and "missing" in item
+        for item in file_result.heuristic_blocking
     )
 
 
