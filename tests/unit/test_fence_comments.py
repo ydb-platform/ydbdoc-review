@@ -10,31 +10,31 @@ from unittest.mock import MagicMock
 import pytest
 
 from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.segmentation.extractor import extract_segments
-from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.translation.errors import TranslationValidationError
-from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
+from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.pipeline.translate_file import translate_file
+from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.validation.fence_comments import (
+    _parse_comment_translate_response,
     check_cyrillic_in_en_fence_comments,
     check_cyrillic_in_en_text_fences,
     collect_cyrillic_fence_comment_lines,
     collect_cyrillic_text_fence_lines,
+    collect_raw_fence_comment_spans,
     translate_cyrillic_fence_comments,
     translate_cyrillic_fence_comments_with_client,
     translate_cyrillic_text_fences,
     translate_cyrillic_text_fences_with_client,
 )
-from ydbdoc_review.llm.errors import LLMParseError
-from ydbdoc_review.validation.fence_comments import _parse_comment_translate_response
 from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
     run_file_heuristics_classified,
 )
-
 
 YQL_SAMPLE = dedent("""
     Data enrichment example with enough English prose for length heuristics here.
@@ -378,6 +378,48 @@ def test_fence_comment_retries_mostly_english_cyrillic_suffix_and_preserves_byte
     assert output_code.split("//", 1)[0] == source_code.split("//", 1)[0]
     assert out.count("```") == source.count("```")
     assert client.chat.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("language", "line", "expected"),
+    [
+        ("python", "value = 1  # комментарий", "комментарий"),
+        ("go", "value := 1 // комментарий", "комментарий"),
+        ("cpp", "value++; /* комментарий */", " комментарий "),
+        ("html", "<div><!-- комментарий --></div>", " комментарий "),
+        ("yql", "SELECT 1; -- комментарий", "комментарий"),
+    ],
+)
+def test_raw_comment_spans_are_language_aware(language, line, expected):
+    source = f"```{language}\n{line}\n```\n"
+    spans = collect_raw_fence_comment_spans(source)
+    assert [span.body for span in spans] == [expected]
+
+
+@pytest.mark.parametrize(
+    ("language", "line"),
+    [
+        ("go", 'fmt.Println("// комментарий в строке")'),
+        ("python", 'print("# комментарий в строке")'),
+        ("yql", "SELECT '-- комментарий в строке';"),
+        ("go", 'url := "https://пример.рф/path"'),
+        ("cpp", 'printf("/* не комментарий */");'),
+        ("html", '<div data-value="<!-- не комментарий -->"></div>'),
+    ],
+)
+def test_comment_markers_inside_strings_are_not_spans(language, line):
+    assert collect_raw_fence_comment_spans(f"```{language}\n{line}\n```\n") == []
+
+
+def test_unknown_fence_language_with_cyrillic_comment_fails_closed():
+    with pytest.raises(TranslationValidationError, match=r"block=1.*language=wat"):
+        collect_raw_fence_comment_spans("```wat\nvalue // комментарий\n```\n")
+
+
+def test_shell_heredoc_comment_markers_are_literal_data():
+    source = "```bash\ncat <<'EOF'\n# не комментарий\nEOF\n# комментарий\n```\n"
+    spans = collect_raw_fence_comment_spans(source)
+    assert [span.body for span in spans] == ["комментарий"]
 
 
 def test_fence_comment_all_validation_attempts_fail_closed():

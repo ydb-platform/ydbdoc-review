@@ -19,6 +19,18 @@ from ydbdoc_review.validation.structural_delta import (
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "pr_37673_bulk_upsert"
 
+
+def _translation_ctx() -> HarnessContext:
+    client = MagicMock()
+    client.usage_tracker.records = []
+    return HarnessContext.from_options(
+        client,
+        glossary=load_glossary(),
+        config=load_config(
+            env={"YDBDOC_YC_FOLDER_ID": "folder", "YDBDOC_YC_API_KEY": "key"}
+        ),
+    )
+
 BEFORE = """{% list tabs %}
 
 - JavaScript
@@ -99,7 +111,7 @@ def test_surviving_operation_missing_from_en_remains_blocking():
     assert decision.status is HistoricalDeltaStatus.MISSING_CURRENT_DELTA
 
 
-def test_prose_only_historical_delta_superseded_when_source_op_was_removed():
+def test_prose_only_historical_delta_does_not_suppress_full_translation():
     pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True)
     content = PairContent(
         pair=pair,
@@ -110,23 +122,22 @@ def test_prose_only_historical_delta_superseded_when_source_op_was_removed():
         en_text="Newer English text.\n",
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
-    ctx = SimpleNamespace(docs_text_reader=None, client=MagicMock())
+    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        harness.return_value.run.return_value = SimpleNamespace(
+            final_text="Translated PR snapshot.\n", differential_meta={}
+        )
+        result = run_pair_plan(
+            content, plan, _translation_ctx(), {}, historical_merged_provenance=True
+        )
 
-    result = run_pair_plan(
-        content,
-        plan,
-        ctx,
-        {},
-        historical_merged_provenance=True,
-    )
-
-    assert result.skipped
-    assert result.historical_disposition == "superseded"
-    assert result.target_text == "Newer English text.\n"
-    ctx.client.chat.assert_not_called()
+    state = harness.return_value.run.call_args.args[0]
+    assert state.source_text == "Исторический текст.\n"
+    assert state.existing_target_text is None
+    assert result.target_text == "Translated PR snapshot.\n"
+    assert not result.skipped
 
 
-def test_pr_37673_structural_delta_skips_when_current_pair_advanced():
+def test_pr_37673_historical_delta_does_not_seed_full_translation():
     def read(name: str) -> str:
         return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -145,21 +156,19 @@ def test_pr_37673_structural_delta_skips_when_current_pair_advanced():
         en_text=current_en,
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
-    ctx = SimpleNamespace(docs_text_reader=None, client=MagicMock())
+    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        harness.return_value.run.return_value = SimpleNamespace(
+            final_text="Fresh full translation.\n", differential_meta={}
+        )
+        result = run_pair_plan(
+            content, plan, _translation_ctx(), {}, historical_merged_provenance=True
+        )
 
-    result = run_pair_plan(
-        content,
-        plan,
-        ctx,
-        {},
-        historical_merged_provenance=True,
-    )
-
-    assert result.error is None
-    assert result.skipped
-    assert result.historical_disposition == "already_translated"
-    assert result.target_text == current_en
-    ctx.client.chat.assert_not_called()
+    state = harness.return_value.run.call_args.args[0]
+    assert state.source_text == read("ru_after.md")
+    assert state.existing_target_text is None
+    assert state.base_source_text is None
+    assert result.target_text == "Fresh full translation.\n"
 
 
 def test_surviving_prose_op_is_not_coarsely_preserved_when_both_blobs_changed():
@@ -314,7 +323,7 @@ def test_pr_50976_monitoring_missing_historical_op_translates_from_current_ru():
     assert not result.skipped
 
 
-def test_missing_historical_structure_without_distinct_current_authority_fails_closed():
+def test_missing_historical_structure_uses_official_snapshot_full_translation():
     pair = DocPair("ydb/docs/ru/monitoring.md", "ydb/docs/en/monitoring.md", ru_changed=True)
     historical_base = "# Мониторинг\n\nСтарое описание.\n"
     historical_head = (
@@ -337,20 +346,18 @@ def test_missing_historical_structure_without_distinct_current_authority_fails_c
         "en",
         authoritative_source_text=historical_head,
     )
-    ctx = SimpleNamespace(docs_text_reader=None, client=MagicMock())
-
     with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        harness.return_value.run.return_value = SimpleNamespace(
+            final_text="# Monitoring\n\nRequired operation.\n", differential_meta={}
+        )
         result = run_pair_plan(
-            content,
-            plan,
-            ctx,
-            {},
-            historical_merged_provenance=True,
+            content, plan, _translation_ctx(), {}, historical_merged_provenance=True
         )
 
-    assert result.error is not None
-    assert "surviving historical operation" in result.error
-    harness.assert_not_called()
+    state = harness.return_value.run.call_args.args[0]
+    assert state.source_text == historical_head
+    assert state.existing_target_text is None
+    assert result.error is None
 
 
 def test_both_blobs_advanced_but_required_operation_missing_is_update_required():
@@ -504,7 +511,7 @@ def test_structural_delta_missing_php_with_later_structure_fails_closed():
     assert ("pane", "php") in decision.additions
 
 
-def test_missing_php_fail_closed_preserves_target_and_never_calls_writer():
+def test_missing_php_in_old_target_does_not_seed_full_translation():
     target = AFTER.replace(
         "- PHP\n\n  ```php\n  echo 1;\n  ```\n\n", ""
     ) + "\n{% list tabs %}\n\n- Java\n\n  later bytes\n\n{% endlist %}\n"
@@ -518,17 +525,18 @@ def test_missing_php_fail_closed_preserves_target_and_never_calls_writer():
     plan = PairPlan(
         pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en"
     )
-    client = MagicMock()
-    ctx = SimpleNamespace(docs_text_reader=None, client=client)
+    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        harness.return_value.run.return_value = SimpleNamespace(
+            final_text="Complete fresh translation.\n", differential_meta={}
+        )
+        result = run_pair_plan(
+            content, plan, _translation_ctx(), {}, historical_merged_provenance=True
+        )
 
-    result = run_pair_plan(
-        content, plan, ctx, {}, historical_merged_provenance=True
-    )
-
-    assert result.error and "Refusing" not in result.error
-    assert "historical structural delta" in result.error
-    assert result.target_text == target
-    client.chat.assert_not_called()
+    state = harness.return_value.run.call_args.args[0]
+    assert state.source_text == AFTER
+    assert state.existing_target_text is None
+    assert result.target_text == "Complete fresh translation.\n"
 
 
 def test_structural_delta_respects_atom_multiplicity():
@@ -672,13 +680,17 @@ def test_run_pair_plan_does_not_invent_historical_merged_provenance():
     plan = PairPlan(
         pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en"
     )
-    ctx = SimpleNamespace()
-
     with patch(
         "ydbdoc_review.harness.pair._try_deterministic_en_preserve",
         return_value=content.en_text,
     ) as preserve:
-        result = run_pair_plan(content, plan, ctx, {})
+        with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+            harness.return_value.run.return_value = SimpleNamespace(
+                final_text="Fresh translation.\n", differential_meta={}
+            )
+            result = run_pair_plan(content, plan, _translation_ctx(), {})
 
     assert result.error is None
-    assert preserve.call_args.kwargs["historical_merged_provenance"] is False
+    preserve.assert_not_called()
+    state = harness.return_value.run.call_args.args[0]
+    assert state.existing_target_text is None

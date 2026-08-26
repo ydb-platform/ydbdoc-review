@@ -484,6 +484,7 @@ def load_pair_contents(
     ru_content_ref: str | None = None,
     ru_base_ref: str | None = None,
     historical_ru_paths: frozenset[str] | set[str] | None = None,
+    strict_source_snapshot: bool = False,
 ) -> list[PairContent]:
     """Load RU/EN bodies and diffs for each pair from the local checkout.
 
@@ -495,13 +496,28 @@ def load_pair_contents(
     """
     contents: list[PairContent] = []
     for pair in pairs:
+        if strict_source_snapshot:
+            if not ru_content_ref:
+                raise ValueError("strict source snapshot requires ru_content_ref")
+            ru_text = None
+            en_text = None
+            if pair.ru_changed and not pair.ru_deleted:
+                ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
+            if pair.en_changed and not pair.en_deleted:
+                en_text = read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
+            contents.append(PairContent(pair=pair, ru_text=ru_text, en_text=en_text))
+            continue
         use_historical = bool(
             ru_content_ref
             and (historical_ru_paths is None or pair.ru_path in historical_ru_paths)
         )
         current_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
         current_en = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
-        provenance = derive_pair_provenance(current_ru=current_ru, current_en=current_en) if use_historical else PairProvenance.CURRENT_PAIR
+        provenance = (
+            derive_pair_provenance(current_ru=current_ru, current_en=current_en)
+            if use_historical
+            else PairProvenance.CURRENT_PAIR
+        )
         ru_text: str | None = None
         if use_historical:
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)

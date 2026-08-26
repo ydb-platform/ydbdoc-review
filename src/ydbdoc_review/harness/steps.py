@@ -195,7 +195,12 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
 def _unresolved_retry_segment_ids(state: FileRunState) -> set[str]:
     if state.critic_unresolved is None:
         return set()
-    return {issue.segment_id for issue in state.critic_unresolved.issues if issue.segment_id}
+    ids = {issue.segment_id for issue in state.critic_unresolved.issues if issue.segment_id}
+    if any(issue.segment_id is None for issue in state.critic_unresolved.issues):
+        # A file-level/structural finding cannot be safely patched. Re-run the
+        # complete translation, segment by segment, then ask the critic again.
+        ids.update(segment.id for segment in state.segments)
+    return ids
 
 
 def _needs_critic_feedback_retranslate(state: FileRunState) -> bool:
@@ -233,6 +238,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         state.segments,
         actionable_issues,
         strict_placeholder_order=(state.mode == "verify"),
+        target_lang=ctx.target_lang,
     )
     if not actionable_issues:
         state.critic_unresolved = CriticResponse(verdict="ok", issues=[])
@@ -802,6 +808,12 @@ class CriticFeedbackRetryStep:
                 break
 
             grouped = issues_by_segment_id(state.critic_unresolved.issues)
+            file_issues = [
+                issue for issue in state.critic_unresolved.issues if issue.segment_id is None
+            ]
+            if file_issues:
+                for segment_id in segment_ids:
+                    grouped.setdefault(segment_id, []).extend(file_issues)
             state.translations = retranslate_segments_with_critic_feedback(
                 state.segments,
                 segment_ids,

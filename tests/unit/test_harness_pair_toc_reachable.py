@@ -13,8 +13,8 @@ from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.validation.fence_integrity import fence_marker_tokens
 
 
-def test_run_pair_plan_forwards_en_toc_reachable_to_harness():
-    """Bug #46846: strip never ran because pair rebuilt HarnessContext without reachable."""
+def test_translate_does_not_pass_current_toc_reachability_to_harness():
+    """Full source-snapshot translation must not strip links using current TOC."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/dev/streaming-query/index.md",
         en_path="ydb/docs/en/core/dev/streaming-query/index.md",
@@ -63,11 +63,11 @@ def test_run_pair_plan_forwards_en_toc_reachable_to_harness():
     with patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness):
         run_pair_plan(content, plan, parent, {})
 
-    assert captured["en_toc_reachable"] is reachable
+    assert captured["en_toc_reachable"] is None
 
 
-def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
-    """§6.184: glossary timeout must not leave a completeness gap for the whole PR."""
+def test_run_pair_plan_reports_translate_llm_failure():
+    """A failed full translation must never masquerade as preserved EN success."""
     from ydbdoc_review.llm.errors import LLMError
 
     pair = DocPair(
@@ -107,8 +107,8 @@ def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
     with patch("ydbdoc_review.harness.pair.FileHarness", _BoomHarness):
         result = run_pair_plan(content, plan, parent, {})
 
-    assert result.error is None
-    assert result.target_text == "# EN\n\nText.\n"
+    assert result.error == "Request timed out"
+    assert result.target_text is None
 
 
 def test_pr_50904_deterministic_index_patch_syncs_autotitle_hrefs_only():
@@ -212,8 +212,7 @@ def test_pr_50904_critic_only_receives_ru_merge_base():
     assert captured["base_source_text"] == content.ru_base_text
 
 
-def test_href_only_pair_bypasses_llm_and_repairs():
-    """#45949: href-only source deltas are deterministic and byte-preserving."""
+def test_href_only_pair_is_fully_translated_without_baseline_seed():
     pair = DocPair(
         ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
         en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
@@ -244,14 +243,20 @@ def test_href_only_pair_bypasses_llm_and_repairs():
     )
 
     with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        result_obj = MagicMock()
+        result_obj.final_text = "Before [nodes](../concepts/node.md).\n"
+        result_obj.differential_meta = {}
+        harness.return_value.run.return_value = result_obj
         result = run_pair_plan(content, plan, parent, {})
 
-    harness.assert_not_called()
+    state = harness.return_value.run.call_args.args[0]
+    assert state.existing_target_text is None
+    assert state.base_source_text is None
+    assert state.base_target_text is None
     assert result.target_text == "Before [nodes](../concepts/node.md).\n"
 
 
-def test_semantic_noop_bypasses_pair_link_stripping_exactly():
-    """#49933/#50888: pair post-pass must not mutate byte-preserved EN."""
+def test_translate_ignores_semantic_noop_from_legacy_differential_metadata():
     pair = DocPair(
         ru_path="ydb/docs/ru/core/reference/export/_includes/limitations.md",
         en_path="ydb/docs/en/core/reference/export/_includes/limitations.md",
@@ -275,12 +280,7 @@ def test_semantic_noop_bypasses_pair_link_stripping_exactly():
         summary="formatting-only",
     )
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
-    parent = HarnessContext.from_options(
-        MagicMock(),
-        glossary=load_glossary(),
-        config=cfg,
-        en_toc_reachable=frozenset(),
-    )
+    parent = HarnessContext.from_options(MagicMock(), glossary=load_glossary(), config=cfg)
 
     class _FakeHarness:
         def __init__(self, _profile):
@@ -293,16 +293,10 @@ def test_semantic_noop_bypasses_pair_link_stripping_exactly():
             result.differential_meta = {"semantic_noop": True}
             return result
 
-    with (
-        patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
-        patch(
-            "ydbdoc_review.validation.glossary_toc_links.strip_unreachable_internal_links"
-        ) as strip,
-    ):
+    with patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness):
         result = run_pair_plan(content, plan, parent, {})
 
     assert result.target_text == existing
-    strip.assert_not_called()
 
 
 def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
@@ -344,12 +338,15 @@ def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
         docs_text_reader=files.get,
     )
 
-    result = run_pair_plan(content, plan, parent, {})
+    translated = f"[registering dynamic nodes]({new})\n"
+    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        result_obj = MagicMock()
+        result_obj.final_text = translated
+        result_obj.differential_meta = {}
+        harness.return_value.run.return_value = result_obj
+        result = run_pair_plan(content, plan, parent, {})
 
-    assert result.target_text == (
-        "[registering dynamic nodes](../../devops/concepts/node.md"
-        "#enabling-node-authentication-and-authorization-mode)\n"
-    )
+    assert result.target_text == translated
 
 
 def test_run_pair_plan_restores_missing_heading_anchor_after_translate():

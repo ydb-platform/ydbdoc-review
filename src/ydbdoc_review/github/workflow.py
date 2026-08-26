@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import posixpath
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,12 +52,12 @@ from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
 from ydbdoc_review.navigation.scope_planner import (
+    TranslationScopePlan,
     doc_pairs_from_plan,
     make_repo_scope_readers,
     merge_navigation_pair_lists,
     navigation_pairs_from_plan,
     plan_translation_scope,
-    synthetic_changes_from_plan,
 )
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
@@ -130,6 +132,9 @@ logger = logging.getLogger(__name__)
 _GITHUB_ACTOR_NAME = "github-actions[bot]"
 _GITHUB_ACTOR_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 _REPORT_MARKER = "ydbdoc-review — отчёт"
+_INCLUDE_MD = re.compile(r"\{%\s*include\s+\[[^\]]*\]\(([^)]+\.md(?:#[^)]*)?)\)\s*%\}")
+_LINK_MD = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+\.md(?:#[^)]*)?)\)")
+_DEPENDENCY_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -141,6 +146,87 @@ class TouchedPaths:
 
     def __bool__(self) -> bool:
         return bool(self.written or self.deleted)
+
+
+def _expand_missing_markdown_dependencies(
+    repo_path: str,
+    *,
+    source_ref: str,
+    target_ref: str,
+    source_pairs: list[DocPair],
+    docs_root: str,
+    limit: int = _DEPENDENCY_LIMIT,
+) -> tuple[list[DocPair], dict[str, tuple[str, ...]]]:
+    """Close scope only over referenced Markdown with a missing locale mirror."""
+    queue: list[tuple[str, str, tuple[str, ...]]] = []
+    seen_source = {pair.ru_path for pair in source_pairs if pair.ru_changed}
+    seen_source |= {pair.en_path for pair in source_pairs if pair.en_changed}
+    for pair in source_pairs:
+        if pair.ru_changed and pair.en_changed:
+            continue
+        if pair.ru_changed and not pair.ru_deleted:
+            queue.append((pair.ru_path, "ru", (pair.ru_path,)))
+        if pair.en_changed and not pair.en_deleted:
+            queue.append((pair.en_path, "en", (pair.en_path,)))
+    dependencies: list[DocPair] = []
+    chains: dict[str, tuple[str, ...]] = {}
+    index = 0
+    while index < len(queue):
+        referring, locale, chain = queue[index]
+        index += 1
+        body = read_text_at_ref(repo_path, source_ref, referring)
+        if body is None:
+            raise RuntimeError(
+                f"dependency preflight cannot read {referring!r} at {source_ref!r}; "
+                f"chain={' -> '.join(chain)}"
+            )
+        hrefs = [*_INCLUDE_MD.findall(body), *_LINK_MD.findall(body)]
+        for raw_href in hrefs:
+            href = raw_href.split("#", 1)[0].split("?", 1)[0].strip()
+            if not href or href.startswith(("/", "http://", "https://")):
+                continue
+            dependency = posixpath.normpath(
+                posixpath.join(posixpath.dirname(referring), href)
+            )
+            locale_root = f"{docs_root.strip('/')}/{locale}/"
+            if not dependency.startswith(locale_root) or not dependency.endswith(".md"):
+                continue
+            mirror = counterpart(dependency, docs_root)
+            if mirror is None or read_text_at_ref(repo_path, target_ref, mirror) is not None:
+                continue
+            if dependency in seen_source:
+                continue
+            dependency_body = read_text_at_ref(repo_path, source_ref, dependency)
+            next_chain = (*chain, dependency)
+            if dependency_body is None:
+                raise RuntimeError(
+                    "dependency preflight missing source: "
+                    f"referrer={referring}, href={raw_href}, resolved={dependency}, "
+                    f"chain={' -> '.join(next_chain)}"
+                )
+            seen_source.add(dependency)
+            chains[dependency] = next_chain
+            dependencies.append(
+                DocPair(
+                    dependency if locale == "ru" else mirror,
+                    mirror if locale == "ru" else dependency,
+                    ru_changed=locale == "ru",
+                    en_changed=locale == "en",
+                    dependency=True,
+                )
+            )
+            queue.append((dependency, locale, next_chain))
+            if len(dependencies) > limit:
+                preview = "; ".join(
+                    " -> ".join(chains[path]) for path in list(chains)[:limit]
+                )
+                raise RuntimeError(
+                    f"dependency preflight found {len(dependencies)} files, limit {limit}; "
+                    f"missing target mirrors include {mirror}; chains: {preview}; "
+                    f"remaining={len(dependencies) - limit}. Split the PR or translate "
+                    "the dependency set first."
+                )
+    return dependencies, chains
 
 
 @dataclass
@@ -405,23 +491,58 @@ def _hard_validation_errors(result: PRTranslationResult) -> list[str]:
             "translated_now",
         }:
             continue
-        if run.skipped or run.deleted or run.error or run.target_text is None or run.plan.target_lang.lower() not in {"en", "english"}:
+        if (
+            run.skipped
+            or run.deleted
+            or run.error
+            or run.target_text is None
+            or run.plan.target_lang.lower() not in {"en", "english"}
+        ):
             continue
         authority = run.plan.authoritative_source_text or run.source_text
         if authority is None:
             errors.append(f"hard_validation_missing_authority: {run.plan.target_path}")
             continue
-        errors.extend(f"hard_validation:{item.path}:{item.code.value}:{item.detail}" for item in validate_whole_file(path=run.plan.target_path, authoritative_ru=authority, candidate_en=run.target_text))
+        errors.extend(
+            f"hard_validation:{item.path}:{item.code.value}:{item.detail}"
+            for item in validate_whole_file(
+                path=run.plan.target_path,
+                authoritative_ru=authority,
+                candidate_en=run.target_text,
+            )
+        )
     return errors
 
 
-def _apply_transaction_gates(repo_path: str, result: PRTranslationResult, *, docs_root: str) -> None:
+def _apply_transaction_gates(
+    repo_path: str, result: PRTranslationResult, *, docs_root: str
+) -> None:
     hard = _hard_validation_errors(result)
     overlay = validate_candidate_overlay(repo_path, result, docs_root=docs_root)
-    blocked = {run.plan.target_path for run in result.pair_results if any(run.plan.target_path in error for error in (*hard, *overlay))}
+    qa_blocked = {
+        run.plan.target_path
+        for run in result.pair_results
+        if run.file_result is not None and run.file_result.verdict == "blocked"
+    }
+    blocked = {
+        run.plan.target_path
+        for run in result.pair_results
+        if any(run.plan.target_path in error for error in (*hard, *overlay))
+    } | qa_blocked
     states = evaluate_completeness_states(result, blocked_paths=blocked)
     result.completeness_states = {path: state.value for path, state in states.items()}
-    result.completeness_gaps = list(dict.fromkeys([*result.completeness_gaps, *hard, *overlay, *completeness_state_gaps(states)]))
+    qa_errors = [f"qa_blocked:{path}" for path in sorted(qa_blocked)]
+    result.completeness_gaps = list(
+        dict.fromkeys(
+            [
+                *result.completeness_gaps,
+                *hard,
+                *overlay,
+                *qa_errors,
+                *completeness_state_gaps(states),
+            ]
+        )
+    )
 
 
 def _run_verify_pairs(
@@ -500,7 +621,9 @@ def run_doc_translate(
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
-    ru_ref = translate_ru_content_ref(ctx)
+    # One explicit source snapshot. Merged PRs use the landed merge tree;
+    # open PRs use the already checked-out PR HEAD. No per-file fallback.
+    ru_ref = translate_ru_content_ref(ctx) or "HEAD"
     ru_base_ref: str | None = None
     if ru_ref is not None:
         if ensure_commit(repo_path, ru_ref):
@@ -514,13 +637,9 @@ def run_doc_translate(
             # no-ops and silently preserves stale EN (§6.210 / #40385).
             ru_base_ref = f"{ru_ref}^"
         else:
-            logger.warning(
-                "Merged source PR #%s: merge commit %s not fetchable; "
-                "falling back to checkout HEAD for RU",
-                pr_number,
-                ru_ref[:12],
+            raise RuntimeError(
+                f"source PR snapshot {ru_ref!r} is not available locally"
             )
-            ru_ref = None
 
     changes = source_pr_scope_changes(
         ctx,
@@ -529,23 +648,38 @@ def run_doc_translate(
     )
     changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
-    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
+    official_pairs = build_pairs_from_changes(changes, docs_root=docs_root)
+    dependency_pairs, dependency_chains = _expand_missing_markdown_dependencies(
         repo_path,
-        merge_base_with,
-        ru_content_ref=ru_ref,
-        ru_base_ref=ru_base_ref,
-    )
-    scope_plan = plan_translation_scope(
-        changes,
-        read_ru=read_ru,
-        read_en_base=read_en_base,
-        read_ru_base=read_ru_base,
+        source_ref=ru_ref,
+        target_ref=merge_base_with,
+        source_pairs=official_pairs,
         docs_root=docs_root,
+    )
+    if dependency_pairs:
+        logger.info(
+            "Dependency closure for PR #%s: %d missing mirror(s): %s",
+            pr_number,
+            len(dependency_pairs),
+            "; ".join(" -> ".join(chain) for chain in dependency_chains.values()),
+        )
+    official_pairs = [*official_pairs, *dependency_pairs]
+    official_nav = [
+        pair
+        for pair in build_navigation_pairs(changes, docs_root=docs_root)
+        if pair.ru_changed
+    ]
+    scope_plan = TranslationScopePlan(
+        doc_ru_paths=frozenset(pair.ru_path for pair in official_pairs),
+        doc_from_diff=frozenset(pair.ru_path for pair in official_pairs),
+        doc_from_main=frozenset(),
+        nav_ru_paths=frozenset(pair.ru_path for pair in official_nav),
+        nav_from_diff=frozenset(pair.ru_path for pair in official_nav),
+        nav_from_main=frozenset(),
+        doc_deleted=frozenset(pair.ru_path for pair in official_pairs if pair.ru_deleted),
     )
     skip_globs = cfg.paths.translate_skip_globs
     if skip_globs:
-        from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
-
         scope_plan = TranslationScopePlan(
             doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
             doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
@@ -563,16 +697,8 @@ def run_doc_translate(
         len(scope_plan.doc_from_main),
         len(scope_plan.nav_ru_paths),
     )
-    bilingual_skip = frozenset(bilingual_en_mirrors(changes, docs_root=docs_root))
-    pairs = doc_pairs_from_plan(
-        scope_plan,
-        docs_root=docs_root,
-        skip_en_paths=bilingual_skip,
-    )
-    nav_pairs = merge_navigation_pair_lists(
-        navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
-        build_navigation_pairs(changes, docs_root=docs_root),
-    )
+    pairs = official_pairs
+    nav_pairs = official_nav
     # Redirect retargeting is authorized only for EN mirrors of files changed
     # by the source PR, never synthetic dependency pages added by scope closure.
     redirect_impact_scope = frozenset(
@@ -582,7 +708,6 @@ def run_doc_translate(
         and (en_path := counterpart(path, docs_root)) is not None
         and en_path.endswith(".md")
     )
-    changes = merge_pr_file_changes(changes, synthetic_changes_from_plan(scope_plan))
     job = DocJobResult(
         mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
         pr_number=pr_number,
@@ -595,7 +720,7 @@ def run_doc_translate(
         # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
         # ``skip_en_paths`` before analyze — still post «перевод не требуется»
         # (§6.76 / #48751). Without this early path the comment never appeared.
-        pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
+        pr_result = PRTranslationResult(completeness_gaps=["empty_source_scope"])
         job.pr_result = pr_result
         if pr_result.pair_results and not dry_run:
             elapsed = time.monotonic() - started
@@ -617,7 +742,7 @@ def run_doc_translate(
                 label="source PR summary",
             )
         if ops_ctx is not None:
-            finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
+            finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
         return job
 
     client = create_llm_client(cfg)
@@ -634,6 +759,7 @@ def run_doc_translate(
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
                 historical_ru_paths=(scope_plan.doc_from_diff if scope_plan else None),
+                strict_source_snapshot=True,
             )
             if pairs
             else []
@@ -723,7 +849,7 @@ def run_doc_translate(
         baseline_ref=merge_base_with,
     )
     pr_result.completeness_gaps = completeness_gaps(
-        changes, pr_result, docs_root=cfg.paths.docs_root
+        changes, pr_result, docs_root=cfg.paths.docs_root, bidirectional=True
     )
     if orphan_paths:
         logger.error(
@@ -786,13 +912,6 @@ def run_doc_translate(
             touched = TouchedPaths(
                 list(dict.fromkeys([*touched.written, *impact_paths])),
                 touched.deleted,
-            )
-        if not dry_run and touched.written:
-            _postpass_localize_en_fragments(
-                repo_path,
-                touched.written,
-                merge_base_with=merge_base_with,
-                docs_root=cfg.paths.docs_root,
             )
 
     committed = pushed = False
@@ -913,9 +1032,19 @@ def run_doc_translate(
 
     if ops_ctx is not None:
         usage = client.usage_tracker
+        verify_failed = bool(
+            verify_result
+            and (verify_result.failed_count or verify_result.completeness_gaps)
+        )
         finish_ops_job(
             ops_ctx,
-            status="ok" if not pr_result.failed_count else "failed",
+            status=(
+                "failed"
+                if pr_result.failed_count
+                or pr_result.completeness_gaps
+                or verify_failed
+                else "ok"
+            ),
             cost_rub=usage.estimate_cost_rub(),
             input_tokens=sum((r.input_tokens or 0) for r in usage.records if r.success),
             output_tokens=sum((r.output_tokens or 0) for r in usage.records if r.success),
@@ -1187,7 +1316,10 @@ def run_doc_verify(
                 docs_repo_path=repo_path,
             )
             if source_pr is None:
-                authority = {item.pair.ru_path: item.current_ru_text or item.ru_text for item in contents}
+                authority = {
+                    item.pair.ru_path: item.current_ru_text or item.ru_text
+                    for item in contents
+                }
                 for run in pr_result.pair_results:
                     if run.source_text is None:
                         run.source_text = authority.get(run.plan.pair.ru_path)

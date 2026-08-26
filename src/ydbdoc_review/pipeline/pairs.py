@@ -89,6 +89,7 @@ class DocPair:
     en_changed: bool = False
     ru_deleted: bool = False
     en_deleted: bool = False
+    dependency: bool = False
 
 
 def build_doc_pairs(

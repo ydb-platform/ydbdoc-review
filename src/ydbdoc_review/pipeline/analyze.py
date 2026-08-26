@@ -19,6 +19,7 @@ PairAction = Literal[
     "critic_only",
     "skip",
     "delete_en",
+    "delete_target",
     "blocked",
 ]
 
@@ -87,33 +88,14 @@ def _non_trivial(text: str | None) -> bool:
 
 
 def plan_pair_heuristic(content: PairContent) -> PairPlan:
-    """Deterministic plan: translate from PR source language (§6.30 + §6.132).
+    """Translate every RU file changed by the source PR from that PR snapshot.
 
-    ``doc_translate`` still renders the target from the source AST. When base RU
-    and existing EN are available, ``TranslateStep`` may **differentially** seed
-    unchanged segments (§6.132) instead of calling the LLM for every segment.
-
-    Source language: whichever side the PR authors edited. RU→EN when only RU
-    changed; EN→RU when only EN changed. When **both** sides changed in the
-    source PR, skip auto-translate (§6.76) — authors updated the bilingual pair.
+    Existing/current EN and later changes on ``main`` never suppress or seed
+    ``doc_translate``.  A source PR is the translation unit: if it changed RU,
+    render that complete RU file to EN again.
     """
     pair = content.pair
-    # Explicit source deletion owns the decision even though current existence
-    # alone classifies the remaining EN as an orphan.
     if pair.ru_deleted:
-        if not _non_trivial(content.current_ru_text):
-            if not _non_trivial(content.en_text):
-                return PairPlan(
-                    pair, "skip", pair.ru_path, pair.en_path, "ru", "en",
-                    "RU deletion already satisfied", PairProvenance.SUPERSEDED_ABSENT,
-                )
-            deletion_en_baseline = content.historical_en_text or content.en_base_text
-            if deletion_en_baseline is None or content.en_text != deletion_en_baseline:
-                return PairPlan(
-                    pair, "blocked", pair.ru_path, pair.en_path, "ru", "en",
-                    "current EN orphan changed after source deletion; refuse delete",
-                    PairProvenance.CURRENT_EN_ORPHAN,
-                )
         return PairPlan(
             pair=pair,
             action="delete_en",
@@ -123,13 +105,17 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             target_lang="en",
             summary="RU file deleted in PR — remove EN mirror",
         )
+    if pair.en_deleted:
+        return PairPlan(
+            pair=pair,
+            action="delete_target",
+            source_path=pair.en_path,
+            target_path=pair.ru_path,
+            source_lang="en",
+            target_lang="ru",
+            summary="EN file deleted in PR — remove RU mirror",
+        )
 
-    if content.provenance is PairProvenance.SUPERSEDED_ABSENT:
-        return PairPlan(pair, "skip", pair.ru_path, pair.en_path, "ru", "en", "absent on current main", content.provenance)
-    if content.provenance is PairProvenance.CURRENT_EN_ORPHAN:
-        return PairPlan(pair, "blocked", pair.ru_path, pair.en_path, "ru", "en", "current EN orphan; fail closed", content.provenance)
-    if content.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
-        return PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en", "current RU missing EN; full translation", content.provenance, content.current_ru_text or content.ru_text)
     ru_ok = _non_trivial(content.ru_text)
     en_ok = _non_trivial(content.en_text)
 
@@ -142,6 +128,55 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             source_lang="ru",
             target_lang="en",
             summary=BILINGUAL_SKIP_SUMMARY,
+        )
+
+    # The source PR owns this decision.  Do this before current-main
+    # provenance checks so later/reformatted/absent main files cannot turn a
+    # requested translation into a preserve, skip, or bilingual no-op.
+    if pair.ru_changed and ru_ok:
+        return PairPlan(
+            pair=pair,
+            action="translate_to_en",
+            source_path=pair.ru_path,
+            target_path=pair.en_path,
+            source_lang="ru",
+            target_lang="en",
+            summary="RU changed in source PR — full re-translate to EN",
+        )
+
+    if content.provenance is PairProvenance.SUPERSEDED_ABSENT:
+        return PairPlan(
+            pair,
+            "skip",
+            pair.ru_path,
+            pair.en_path,
+            "ru",
+            "en",
+            "absent on current main",
+            content.provenance,
+        )
+    if content.provenance is PairProvenance.CURRENT_EN_ORPHAN:
+        return PairPlan(
+            pair,
+            "blocked",
+            pair.ru_path,
+            pair.en_path,
+            "ru",
+            "en",
+            "current EN orphan; fail closed",
+            content.provenance,
+        )
+    if content.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
+        return PairPlan(
+            pair,
+            "translate_to_en",
+            pair.ru_path,
+            pair.en_path,
+            "ru",
+            "en",
+            "current RU missing EN; full translation",
+            content.provenance,
+            content.ru_text or content.current_ru_text,
         )
 
     if not ru_ok and not en_ok:

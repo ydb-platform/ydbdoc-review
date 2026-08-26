@@ -12,7 +12,6 @@ from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.translation.repair import repair_segment_translation
 from ydbdoc_review.translation.translator import translate_batch, translate_segments
 from ydbdoc_review.segmentation.chunker import Batch
-from ydbdoc_review.pipeline.types import ManualAction
 
 
 def _json_response(segments: list[dict]) -> MagicMock:
@@ -88,15 +87,13 @@ def test_translate_segments_manual_action_when_repair_fails():
     )
     bad = _json_response([{"id": "s1", "text": "Value only"}])
     client = _mock_client([bad] * 8)
-    notes: list[ManualAction] = []
-    out = translate_segments(
-        [seg],
-        client,
-        load_glossary(),
-        file_path="docs/ru/x.md",
-        manual_actions=notes,
-    )
-    assert out == {"s1": seg.text}
-    assert len(notes) == 1
-    assert notes[0].segment_id == "s1"
-    assert "Переведите вручную" in notes[0].message
+    notes = []
+    with pytest.raises(TranslationValidationError, match="placeholder mismatch"):
+        translate_segments(
+            [seg],
+            client,
+            load_glossary(),
+            file_path="docs/ru/x.md",
+            manual_actions=notes,
+        )
+    assert notes == []

@@ -10,6 +10,7 @@ from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
     DocPair,
     NavigationPair,
+    build_doc_pairs,
     counterpart,
     is_docs_markdown,
 )
@@ -34,7 +35,11 @@ class CompletenessState(str, Enum):
     BLOCKED = "blocked"
 
 
-def evaluate_completeness_states(result: PRTranslationResult, *, blocked_paths: set[str] | None = None) -> dict[str, CompletenessState]:
+def evaluate_completeness_states(
+    result: PRTranslationResult,
+    *,
+    blocked_paths: set[str] | None = None,
+) -> dict[str, CompletenessState]:
     blocked_paths = blocked_paths or set()
     states: dict[str, CompletenessState] = {}
     for run in result.pair_results:
@@ -51,7 +56,11 @@ def evaluate_completeness_states(result: PRTranslationResult, *, blocked_paths: 
         elif disposition in {"already_translated", "existing_satisfied"}:
             states[path] = CompletenessState.EXISTING_SATISFIED
         elif run.target_text is not None:
-            states[path] = CompletenessState.ADDED if run.plan.provenance.value == "current_ru_missing_en" else CompletenessState.UPDATED
+            states[path] = (
+                CompletenessState.ADDED
+                if run.plan.provenance.value == "current_ru_missing_en"
+                else CompletenessState.UPDATED
+            )
         else:
             states[path] = CompletenessState.BLOCKED
     return states
@@ -145,7 +154,10 @@ def committed_en_paths(result: PRTranslationResult) -> set[str]:
     """
     paths: set[str] = set()
     for run in result.pair_results:
-        if run.deleted or run.error:
+        if run.error:
+            continue
+        if run.deleted:
+            paths.add(run.plan.target_path)
             continue
         if run.skipped and run.historical_disposition in {
             "already_translated",
@@ -171,10 +183,21 @@ def completeness_gaps(
     result: PRTranslationResult,
     *,
     docs_root: str = "ydb/docs",
+    bidirectional: bool = False,
 ) -> list[str]:
-    """Sorted EN mirror paths missing from the translation run."""
-    expected = expected_en_mirrors(changes, docs_root=docs_root)
-    expected -= bilingual_en_mirrors(changes, docs_root=docs_root)
+    """Sorted opposite-locale targets missing from the translation run."""
+    if bidirectional:
+        expected: set[str] = set()
+        for pair in build_doc_pairs(changes, docs_root=docs_root):
+            if pair.ru_changed and pair.en_changed:
+                continue
+            if pair.ru_changed:
+                expected.add(pair.en_path)
+            elif pair.en_changed:
+                expected.add(pair.ru_path)
+    else:
+        expected = expected_en_mirrors(changes, docs_root=docs_root)
+        expected -= bilingual_en_mirrors(changes, docs_root=docs_root)
     expected = {
         path
         for path in expected

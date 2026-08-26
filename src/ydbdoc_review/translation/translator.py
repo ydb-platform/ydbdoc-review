@@ -12,7 +12,7 @@ from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
 from ydbdoc_review.llm.retry import is_rate_limit_error, is_timeout_error
 from ydbdoc_review.llm.structured import parse_json_model
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
-from ydbdoc_review.segmentation.types import Segment, SegmentKind
+from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.shutdown import check_shutdown
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary
@@ -250,25 +250,6 @@ def _translate_batch_once(
     raise RuntimeError("translate batch finished without result or error")
 
 
-def _record_manual_action(
-    manual_actions: list[ManualAction] | None,
-    seg: Segment,
-    *,
-    message: str,
-) -> None:
-    if manual_actions is None:
-        return
-    action = ManualAction(
-        segment_id=seg.id,
-        location=_segment_location(seg),
-        message=message,
-    )
-    if not any(
-        a.segment_id == action.segment_id and a.message == action.message for a in manual_actions
-    ):
-        manual_actions.append(action)
-
-
 def _recover_or_fallback_segment(
     seg: Segment,
     exc: Exception,
@@ -282,7 +263,7 @@ def _recover_or_fallback_segment(
     failed_attempt: str | None,
     manual_actions: list[ManualAction] | None,
 ) -> dict[str, str]:
-    """Repair-pass, then table fail-soft; otherwise re-raise."""
+    """Attempt one validated repair, then fail the file without source fallback."""
     if isinstance(exc, TranslationValidationError):
         repaired = repair_segment_translation(
             client,
@@ -297,23 +278,6 @@ def _recover_or_fallback_segment(
         )
         if repaired is not None:
             return {seg.id: repaired}
-
-    if seg.kind in {
-        SegmentKind.TABLE_HEADER_CELL,
-        SegmentKind.TABLE_BODY_CELL,
-    }:
-        where = _segment_location(seg)
-        message = (
-            f"Таблица не переведена автоматически ({where}, `{seg.id}`); "
-            "оставлена на русском. Переведите вручную."
-        )
-        _record_manual_action(manual_actions, seg, message=message)
-        logger.warning(
-            "Translate kept source table segment %s after validation failure: %s",
-            seg.id,
-            exc,
-        )
-        return {seg.id: seg.text}
 
     raise exc
 

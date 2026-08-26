@@ -44,7 +44,7 @@ def test_heuristic_delete_en():
     assert plan.action == "delete_en"
 
 
-def test_heuristic_both_changed_skip_bilingual():
+def test_heuristic_both_changed_skips_bilingual_snapshot():
     plan = plan_pair_heuristic(
         _content(
             ru_text="RU",
@@ -70,7 +70,7 @@ def test_plan_from_analyze_critic_only():
     assert plan.action == "critic_only"
 
 
-def test_plan_pairs_skip_when_both_changed():
+def test_plan_pairs_skips_when_both_changed():
     content = _content(
         ru_text="RU body",
         en_text="EN body",
@@ -121,7 +121,6 @@ def test_heuristic_both_changed_en_only_text():
         )
     )
     assert plan.action == "skip"
-    assert "§6.76" in plan.summary
 
 
 def test_heuristic_skip_when_unchanged():

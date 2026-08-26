@@ -456,7 +456,7 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
                 ):
                     with patch(
                         "ydbdoc_review.github.workflow.ensure_commit",
-                        return_value=False,
+                        return_value=True,
                     ):
                         result = run_doc_translate(
                             repo_path=git_repo,
@@ -642,7 +642,10 @@ def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
 def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
-    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    # The mocked verifier returns ``Hello.\n``.  Keep the checkout distinct so
+    # this test exercises a real fixup rather than the no-op writer contract.
+    (en / "a.md").write_text("Stale translation.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
 
     pull = {
         "title": "YDBDOCS-943: ...",
@@ -676,7 +679,10 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
                         )
                         with patch(
                             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                            return_value=[("ydb/docs/en/a.md", "modified")],
+                            return_value=[
+                                ("ydb/docs/ru/a.md", "modified"),
+                                ("ydb/docs/en/a.md", "modified"),
+                            ],
                         ):
                             result = run_doc_verify(
                                 repo_path=git_repo,
@@ -709,7 +715,8 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
     """Second run on a fork PR: stale remote fixup branch is deleted before push."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
-    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    (en / "a.md").write_text("Stale translation.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
 
     pull = {
         "title": "YDBDOCS-943: ...",
@@ -745,7 +752,10 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
                         )
                         with patch(
                             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                            return_value=[("ydb/docs/en/a.md", "modified")],
+                            return_value=[
+                                ("ydb/docs/ru/a.md", "modified"),
+                                ("ydb/docs/en/a.md", "modified"),
+                            ],
                         ):
                             result = run_doc_verify(
                                 repo_path=git_repo,
@@ -877,7 +887,8 @@ def test_run_doc_verify_same_repo_author_pr_opens_fixup_pr(git_repo: str):
     """Unmerged same-repo PR: never push critic fixes to the author's head branch."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
-    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    (en / "a.md").write_text("Stale translation.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
 
     pull = {
         "title": "docs: feature",
@@ -911,7 +922,10 @@ def test_run_doc_verify_same_repo_author_pr_opens_fixup_pr(git_repo: str):
                         )
                         with patch(
                             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                            return_value=[("ydb/docs/en/a.md", "modified")],
+                            return_value=[
+                                ("ydb/docs/ru/a.md", "modified"),
+                                ("ydb/docs/en/a.md", "modified"),
+                            ],
                         ):
                             result = run_doc_verify(
                                 repo_path=git_repo,

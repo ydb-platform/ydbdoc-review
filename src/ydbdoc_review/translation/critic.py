@@ -369,6 +369,7 @@ def apply_critic_fixes(
     issues: list[CriticIssueOut],
     *,
     strict_placeholder_order: bool = False,
+    target_lang: str = "en",
 ) -> tuple[dict[str, str], list[CriticIssueOut], list[CriticIssueOut]]:
     """Apply ``suggested_text`` fixes that pass structural validation.
 
@@ -424,14 +425,14 @@ def apply_critic_fixes(
                 continue
             # same multiset, possibly reordered — apply
         try:
-            validate_segment_translation(seg, issue.suggested_text)
+            validate_segment_translation(seg, issue.suggested_text, target_lang=target_lang)
         except TranslationValidationError as exc:
             logger.warning("Skipping critic fix for %s: %s", issue.segment_id, exc)
             skipped.append(issue)
             continue
         from ydbdoc_review.validation.heuristics import check_cyrillic_in_en
 
-        if check_cyrillic_in_en(issue.suggested_text, target_lang="en"):
+        if check_cyrillic_in_en(issue.suggested_text, target_lang=target_lang):
             logger.warning(
                 "Skipping critic fix for %s: suggested_text introduces Cyrillic in EN",
                 issue.segment_id,

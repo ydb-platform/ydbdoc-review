@@ -63,7 +63,7 @@ def retranslate_segment_with_critic_feedback(
                     result.content, expected_ids={segment.id}
                 )
                 text = translations[segment.id]
-                validate_segment_translation(segment, text)
+                validate_segment_translation(segment, text, target_lang=target_lang)
                 logger.info(
                     "Critic-feedback retranslate succeeded for %s (model=%s, attempt=%s)",
                     segment.id,

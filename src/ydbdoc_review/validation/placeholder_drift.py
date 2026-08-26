@@ -489,7 +489,9 @@ def filter_critic_response(
         source_file=source_file,
         en_toc_reachable=en_toc_reachable,
     )
-    filtered = exclude_skipped_issues(filtered, skipped or [])
+    # A rejected/absent suggestion is not evidence that the finding is fixed.
+    # Keep it unresolved so the bounded critic-feedback retranslation loop runs
+    # and only a subsequent critic pass can clear it.
     if filtered == response.issues:
         return response
     return CriticResponse(verdict=_verdict_from_issues(filtered), issues=filtered)

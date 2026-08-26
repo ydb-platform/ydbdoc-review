@@ -163,7 +163,7 @@ def test_translate_batch_realigns_renumbered_placeholders():
     assert out == {"s1": "Use ⟦C1⟧ flag"}
 
 
-def test_translate_segments_keeps_ru_table_on_placeholder_failure():
+def test_translate_segments_fails_table_on_placeholder_exhaustion():
     seg = Segment(
         id="s1",
         kind=SegmentKind.TABLE_BODY_CELL,
@@ -176,17 +176,16 @@ def test_translate_segments_keeps_ru_table_on_placeholder_failure():
     client = _mock_client([bad, bad, bad, bad, bad])
     notes: list[str] = []
     cache: dict[str, str] = {}
-    out = translate_segments(
-        [seg],
-        client,
-        load_glossary(),
-        file_path="docs/ru/x.md",
-        cache=cache,
-        manual_actions=notes,
-    )
-    assert out == {"s1": seg.text}
-    assert notes
-    assert "Переведите вручную" in notes[0].message
+    with pytest.raises(TranslationValidationError, match="placeholder mismatch"):
+        translate_segments(
+            [seg],
+            client,
+            load_glossary(),
+            file_path="docs/ru/x.md",
+            cache=cache,
+            manual_actions=notes,
+        )
+    assert notes == []
     assert cache == {}
 
 

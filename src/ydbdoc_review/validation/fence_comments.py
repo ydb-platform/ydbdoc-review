@@ -45,6 +45,190 @@ class FenceCommentLine:
     body: str
 
 
+@dataclass(frozen=True)
+class RawFenceCommentSpan:
+    id: str
+    block_index: int
+    line_index: int
+    language: str
+    start: int
+    end: int
+    body: str
+
+
+_HASH_LANGS = {"python", "py", "bash", "sh", "shell", "yaml", "yml", "toml"}
+_SLASH_LANGS = {
+    "c", "cc", "cpp", "cxx", "csharp", "cs", "go", "java", "javascript",
+    "js", "kotlin", "rust", "swift", "typescript", "ts",
+}
+_DASH_LANGS = {"sql", "yql", "postgresql", "mysql"}
+_HTML_LANGS = {"html", "xml"}
+
+
+def _line_comment_offset(line: str, marker: str) -> int | None:
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index <= len(line) - len(marker):
+        char = line[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and quote is not None:
+            escaped = True
+            index += 1
+            continue
+        if char in {'"', "'", "`"}:
+            if quote is None:
+                quote = char
+            elif quote == char:
+                quote = None
+            index += 1
+            continue
+        if quote is None and line.startswith(marker, index):
+            if marker in {"#", "--"} and index > 0 and not line[index - 1].isspace():
+                index += len(marker)
+                continue
+            return index
+        index += 1
+    return None
+
+
+def _raw_fence_regions(text: str) -> list[tuple[int, str, int, int]]:
+    """(block index, info language, content start, content end)."""
+    regions: list[tuple[int, str, int, int]] = []
+    lines = text.splitlines(keepends=True)
+    offset = 0
+    opening: tuple[str, int, str, int] | None = None
+    block_index = 0
+    for raw in lines:
+        bare = raw.rstrip("\r\n")
+        match = re.match(r"^(\s*)(`{3,}|~{3,})(.*)$", bare)
+        if match is not None:
+            marker = match.group(2)
+            if opening is None:
+                block_index += 1
+                language = match.group(3).strip().split(maxsplit=1)[0].lower()
+                opening = (marker[0], len(marker), language, offset + len(raw))
+            elif marker[0] == opening[0] and len(marker) >= opening[1]:
+                regions.append((block_index, opening[2], opening[3], offset))
+                opening = None
+        offset += len(raw)
+    return regions
+
+
+def collect_raw_fence_comment_spans(text: str) -> list[RawFenceCommentSpan]:
+    """Language-aware exact comment body spans in raw fenced Markdown."""
+    spans: list[RawFenceCommentSpan] = []
+    for block_index, language, start, end in _raw_fence_regions(text):
+        content = text[start:end]
+        supported = language in (_HASH_LANGS | _SLASH_LANGS | _DASH_LANGS | _HTML_LANGS)
+        if not supported:
+            for line_no, line in enumerate(content.splitlines()):
+                if _CYRILLIC.search(line) and re.search(r"(?:#|//|/\*|<!--|--)", line):
+                    raise TranslationValidationError(
+                        "ambiguous Cyrillic fence comment: "
+                        f"block={block_index} language={language or '(none)'} line={line_no + 1}"
+                    )
+            continue
+        line_offsets: list[int] = []
+        cursor = 0
+        for raw_line in content.splitlines(keepends=True):
+            line_offsets.append(cursor)
+            cursor += len(raw_line)
+        if content and (not line_offsets or cursor < len(content)):
+            line_offsets.append(cursor)
+
+        candidates: list[tuple[int, int, int]] = []
+        if language in _SLASH_LANGS:
+            # C-style block comments, including multiline bodies.
+            for match in re.finditer(r"/\*(.*?)\*/", content, re.DOTALL):
+                prefix = content[: match.start()]
+                line_no = prefix.count("\n")
+                line_start = prefix.rfind("\n") + 1
+                marker_at = _line_comment_offset(
+                    content[line_start : match.start() + 2], "/*"
+                )
+                if marker_at != match.start() - line_start:
+                    continue
+                candidates.append((match.start(1), match.end(1), line_no))
+        if language in _HTML_LANGS:
+            for match in re.finditer(r"<!--(.*?)-->", content, re.DOTALL):
+                prefix = content[: match.start()]
+                line_start = prefix.rfind("\n") + 1
+                marker_at = _line_comment_offset(
+                    content[line_start : match.start() + 4], "<!--"
+                )
+                if marker_at != match.start() - line_start:
+                    continue
+                candidates.append(
+                    (
+                        match.start(1),
+                        match.end(1),
+                        content[: match.start()].count("\n"),
+                    )
+                )
+
+        marker = (
+            "#" if language in _HASH_LANGS else
+            "//" if language in _SLASH_LANGS else
+            "--" if language in _DASH_LANGS else None
+        )
+        if marker is not None:
+            relative = 0
+            heredoc_end: str | None = None
+            for line_no, raw_line in enumerate(content.splitlines(keepends=True)):
+                line = raw_line.rstrip("\r\n")
+                if heredoc_end is not None:
+                    if line.strip() == heredoc_end:
+                        heredoc_end = None
+                    relative += len(raw_line)
+                    continue
+                if language in {"bash", "sh", "shell"}:
+                    heredoc = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)", line)
+                    if heredoc is not None:
+                        heredoc_end = heredoc.group(1)
+                marker_at = _line_comment_offset(line, marker)
+                if marker_at is not None:
+                    body_start = marker_at + len(marker)
+                    while body_start < len(line) and line[body_start] in " \t":
+                        body_start += 1
+                    candidates.append((relative + body_start, relative + len(line), line_no))
+                relative += len(raw_line)
+        candidates.sort()
+        last_end = -1
+        for span_start, span_end, line_no in candidates:
+            if span_start < last_end:
+                continue
+            body = content[span_start:span_end]
+            last_end = span_end
+            if not _CYRILLIC.search(body):
+                continue
+            spans.append(
+                RawFenceCommentSpan(
+                    id=f"b{block_index}-l{line_no}",
+                    block_index=block_index,
+                    line_index=line_no,
+                    language=language,
+                    start=start + span_start,
+                    end=start + span_end,
+                    body=body,
+                )
+            )
+    return spans
+
+
+def _masked_comment_skeleton(text: str, spans: list[RawFenceCommentSpan]) -> str:
+    out: list[str] = []
+    cursor = 0
+    for span in spans:
+        out.extend((text[cursor:span.start], f"<COMMENT:{span.id}>"))
+        cursor = span.end
+    out.append(text[cursor:])
+    return "".join(out)
+
+
 def _trailing_comment_match(line: str) -> re.Match[str] | None:
     for trail_re in (
         _SQL_TRAILING_COMMENT,
@@ -52,9 +236,28 @@ def _trailing_comment_match(line: str) -> re.Match[str] | None:
         _HASH_TRAILING_COMMENT,
     ):
         m = trail_re.match(line)
-        if m is not None:
+        if m is not None and _outside_quoted_literal(line, m.start("marker")):
             return m
     return None
+
+
+def _outside_quoted_literal(line: str, marker_start: int) -> bool:
+    """Conservatively reject comment-looking markers inside string literals."""
+    quote: str | None = None
+    escaped = False
+    for char in line[:marker_start]:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote is not None:
+            escaped = True
+            continue
+        if char in {'"', "'"}:
+            if quote is None:
+                quote = char
+            elif quote == char:
+                quote = None
+    return quote is None
 
 
 def trailing_comment_code_prefix(line: str) -> str | None:
@@ -281,14 +484,14 @@ def translate_cyrillic_fence_comments_with_client(
     out_warnings: list[str] | None = None,
 ) -> str:
     """LLM batch translate for Cyrillic ``//`` / ``#`` / ``--`` lines inside fences."""
-    items = collect_cyrillic_fence_comment_lines(text)
+    items = collect_raw_fence_comment_spans(text)
     if not items:
         return text
 
     payload = {
         "comments": [
             {
-                "id": f"b{item.block_index}-l{item.line_index}",
+                "id": item.id,
                 "text": item.body.strip(),
             }
             for item in items
@@ -363,27 +566,42 @@ def translate_cyrillic_fence_comments_with_client(
             out_warnings.append(warning)
         return text
 
-    def _lookup(body: str, item: FenceCommentLine) -> str:
-        key = f"b{item.block_index}-l{item.line_index}"
-        return mapping.get(key, body.strip())
-
-    doc = parse_markdown(text)
-    blocks = collect_code_blocks(doc)
-    changed = False
+    source_skeleton = _masked_comment_skeleton(text, items)
+    output = text
+    for item in reversed(items):
+        translated = mapping[item.id].strip()
+        output = output[: item.start] + translated + output[item.end :]
+    output_spans = collect_raw_fence_comment_spans(output)
+    # Recreate spans for every recognized comment, including those now free of
+    # Cyrillic, so the masked byte skeleton can be compared deterministically.
+    # Positions shift after translation. Locate each replacement in order
+    # between unchanged surrounding bytes rather than trusting model lengths.
+    relocated: list[RawFenceCommentSpan] = []
+    delta = 0
     for item in items:
-        block = blocks[item.block_index - 1]
-        lines = block.content.splitlines()
-        if item.line_index >= len(lines):
-            continue
-        translated = _lookup(item.body, item)
-        new_line = _replace_comment_body(
-            lines[item.line_index], translated, old_body=item.body
+        translated = mapping[item.id].strip()
+        relocated.append(
+            RawFenceCommentSpan(
+                id=item.id,
+                block_index=item.block_index,
+                line_index=item.line_index,
+                language=item.language,
+                start=item.start + delta,
+                end=item.start + delta + len(translated),
+                body=translated,
+            )
         )
-        if new_line != lines[item.line_index]:
-            lines[item.line_index] = new_line
-            block.content = "\n".join(lines)
-            changed = True
-    return render_markdown(doc) if changed else text
+        delta += len(translated) - (item.end - item.start)
+    if _masked_comment_skeleton(output, relocated) != source_skeleton:
+        raise TranslationValidationError(
+            "fence comment translate: non-comment byte skeleton changed"
+        )
+    remaining = output_spans
+    if remaining:
+        raise TranslationValidationError(
+            "fence comment translate: Cyrillic remains after insertion"
+        )
+    return output
 
 
 def _text_fence_lang(info: str) -> str:

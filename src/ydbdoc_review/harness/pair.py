@@ -6,7 +6,7 @@ import logging
 from dataclasses import is_dataclass, replace
 
 from ydbdoc_review.harness.context import HarnessContext
-from ydbdoc_review.harness.profiles import TRANSLATE_PROFILE, VERIFY_PROFILE
+from ydbdoc_review.harness.profiles import TRANSLATE_WITH_QA_PROFILE, VERIFY_PROFILE
 from ydbdoc_review.harness.runner import FileHarness
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.llm.errors import LLMError
@@ -21,7 +21,6 @@ from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
-    apply_href_only_delta,
     apply_localized_mirror_delta,
     check_href_parity,
     insert_missing_autotitle_list_items,
@@ -222,7 +221,7 @@ def run_pair_plan(
             historical_disposition="blocked",
         )
 
-    if plan.action == "delete_en":
+    if plan.action in {"delete_en", "delete_target"}:
         return PairRunResult(plan=plan, deleted=True, target_text=None)
 
     source_text = _read_source_text(content, plan)
@@ -236,7 +235,7 @@ def run_pair_plan(
     if plan.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
         existing_target = None
         content = replace(content, ru_base_text=None, en_base_text=None, en_text=None)
-    if plan.action in {"translate_to_en", "critic_only"}:
+    if plan.action == "critic_only":
         try:
             preserved = _try_deterministic_en_preserve(
                 content,
@@ -271,16 +270,6 @@ def run_pair_plan(
                 },
                 historical_disposition=disposition,
             )
-        if (
-            historical_merged_provenance
-            and content.current_ru_text is not None
-            and source_text == content.current_ru_text
-            and content.ru_text != source_text
-        ):
-            # Historical base/head served only as operation evidence above.
-            # The fallback must be a genuine current-RU translation, never a
-            # differential render seeded by the historical snapshot.
-            content = replace(content, ru_base_text=None, en_base_text=None)
     if plan.action == "critic_only" and is_href_only_change(content.en_base_text, existing_target):
         href_only_target = existing_target
         if ctx.docs_text_reader is not None and existing_target is not None:
@@ -300,39 +289,14 @@ def run_pair_plan(
             target_text=href_only_target,
             source_text=source_text,
         )
-    if plan.action == "translate_to_en" and existing_target is not None:
-        deterministic = apply_href_only_delta(
-            content.ru_base_text,
-            source_text,
-            content.en_base_text or existing_target,
-            en_page_path=plan.target_path,
-            docs_text_reader=ctx.docs_text_reader,
-        )
-        if deterministic is not None:
-            if ctx.docs_text_reader is not None:
-                deterministic = repair_en_fragments(
-                    deterministic,
-                    en_page_path=plan.target_path,
-                    read_text=ctx.docs_text_reader,
-                    ru_source=source_text,
-                    en_baseline=content.en_base_text or existing_target,
-                )
-            logger.info(
-                "Deterministic href-only translation for %s; bypassing LLM and repairs",
-                plan.target_path,
-            )
-            return PairRunResult(
-                plan=plan,
-                target_text=deterministic,
-                source_text=source_text,
-            )
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
     enable_critic = plan.action != "skip"
-    profile = TRANSLATE_PROFILE if enable_translate else VERIFY_PROFILE
+    profile = TRANSLATE_WITH_QA_PROFILE if enable_translate else VERIFY_PROFILE
 
-    # §6.132: pass existing EN + base RU into translate so differential can seed.
+    # A source PR is the translation unit.  Full translation must not use the
+    # current target or historical baselines as differential seeds.
     base_source: str | None = None
-    if plan.action in {"translate_to_en", "critic_only"} and (
+    if not enable_translate and plan.action == "critic_only" and (
         plan.target_lang.lower() in {"en", "english"}
         or plan.target_path == content.pair.en_path
     ):
@@ -345,9 +309,11 @@ def run_pair_plan(
         file_path=plan.source_path,
         raw_source_text=source_text,
         source_text=source_text,
-        existing_target_text=existing_target,
+        existing_target_text=None if enable_translate else existing_target,
         base_target_text=(
-            content.en_base_text
+            None
+            if enable_translate
+            else content.en_base_text
             if plan.action == "translate_to_en"
             else content.ru_base_text
         ),
@@ -362,38 +328,21 @@ def run_pair_plan(
         cache=cache,
         enable_critic=enable_critic,
         usage_record_start=len(ctx.client.usage_tracker.records),
-        en_toc_reachable=ctx.en_toc_reachable,
-        docs_text_reader=ctx.docs_text_reader,
-        docs_repo_path=ctx.docs_repo_path,
+        en_toc_reachable=None if enable_translate else ctx.en_toc_reachable,
+        docs_text_reader=None if enable_translate else ctx.docs_text_reader,
+        docs_repo_path=None if enable_translate else ctx.docs_repo_path,
     )
 
     try:
         file_result = FileHarness(profile).run(state, harness_ctx)
     except (LLMError, TranslationError, ValueError) as exc:
-        # Keep existing EN so §6.80 completeness does not abort the whole PR
-        # when one large file times out (glossary on #45667).
-        if (
-            plan.action == "translate_to_en"
-            and existing_target
-            and plan.target_path == content.pair.en_path
-        ):
-            logger.warning(
-                "Translate failed for %s; keeping existing EN (%s)",
-                plan.target_path,
-                exc,
-            )
-            return PairRunResult(
-                plan=plan,
-                target_text=existing_target,
-                source_text=source_text,
-                error=None,
-            )
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))
 
     differential_meta = getattr(file_result, "differential_meta", {})
     semantic_noop = (
-        plan.action == "translate_to_en"
+        not enable_translate
+        and plan.action == "translate_to_en"
         and existing_target is not None
         and isinstance(differential_meta, dict)
         and differential_meta.get("semantic_noop") is True
@@ -408,7 +357,7 @@ def run_pair_plan(
         or plan.target_path == content.pair.en_path
     )
     before_pair_repairs: str | None = None
-    if target_text and content.ru_text and not semantic_noop:
+    if target_text and source_text and not semantic_noop:
         if plan.action == "translate_to_ru":
             target_text = restore_autotitle_hrefs(target_text, content.ru_text)
         elif is_en_target:
@@ -419,7 +368,7 @@ def run_pair_plan(
             # autotitle-list insertion (#50904: backup-and-recovery/index.md).
             target_text = restore_autotitle_hrefs(
                 target_text,
-                content.ru_text,
+                source_text,
                 force_exact=True,
                 en_page_path=plan.target_path,
                 en_toc_reachable=ctx.en_toc_reachable,
@@ -427,18 +376,23 @@ def run_pair_plan(
         if (
             not deterministic_autotitle_patch
             and is_en_target
+            and not enable_translate
         ):
             target_text = insert_missing_autotitle_list_items(
                 target_text,
-                content.ru_text,
+                source_text,
                 en_page_path=plan.target_path,
                 en_toc_reachable=ctx.en_toc_reachable,
             )
             target_text = restore_md_link_hrefs(
                 target_text,
-                content.ru_text,
-                source_ru_base=content.ru_base_text,
-                target_baseline=content.en_text or content.en_base_text,
+                source_text,
+                source_ru_base=None if enable_translate else content.ru_base_text,
+                target_baseline=(
+                    None
+                    if enable_translate
+                    else content.en_text or content.en_base_text
+                ),
                 en_page_path=plan.target_path,
                 docs_text_reader=ctx.docs_text_reader,
             )
@@ -460,13 +414,20 @@ def run_pair_plan(
                     target_text,
                     en_page_path=plan.target_path,
                     read_text=ctx.docs_text_reader,
-                    ru_source=content.ru_text,
+                    ru_source=source_text,
                     en_baseline=content.en_text or content.en_base_text,
                 )
-            target_text = repair_en_structure_from_ru(target_text, content.ru_text)
+            target_text = repair_en_structure_from_ru(target_text, source_text)
             # Pair-level structural repair reparses legacy YFM after the file
             # harness and can reintroduce synthetic fence closers. Raw RU layout
             # must remain the last structural authority before QA/commit (#50741).
+            target_text = repair_generated_markdown_layout(
+                normalize_ru_source_for_translation(source_text), target_text
+            )
+        elif enable_translate and is_en_target:
+            # Source-controlled structure is safe to restore. Do not consult
+            # current EN, TOC reachability, or repository-wide link guesses.
+            target_text = repair_en_structure_from_ru(target_text, source_text)
             target_text = repair_generated_markdown_layout(
                 normalize_ru_source_for_translation(source_text), target_text
             )
