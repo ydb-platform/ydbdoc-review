@@ -5119,4 +5119,28 @@ EN link already matches the RU source fragment (§6.174 ``#ldap`` case).
 **Tests:** ``test_pr_40385_system_views_llm_invented_ascii_fragment``.
 
 
+### §6.223 Localize RU transliterated auto-slugs on EN cross-page links (#51078, 2026-08-26)
+
+**Problem:** Source PR #45949 retargeted
+``client_certificate_authorization.md`` to
+``node-authorization.md#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov``.
+``doc_translate`` preserved EN byte-for-byte because RU and EN source twins
+shared the same href (href parity OK). The transliterated RU Diplodoc slug is
+not declared on the EN target page (``## Enabling node authentication…`` →
+``#enabling-node-authentication-and-authorization-mode``).
+
+**Decision:**
+
+1. ``localize_en_internal_href`` remaps missing EN ``#fragment`` values via the
+   paired RU/EN target pages.
+2. Remap only for Cyrillic fragments, explicit RU source twins, or legacy
+   transliterated auto-slugs from **exactly one** RU heading (§6.174 ``#ldap``
+   explicit ids stay untouched).
+3. ``apply_href_only_delta`` / ``restore_md_link_hrefs`` / href-parity preserve
+   call localization; ``check_href_parity`` accepts EN-localized fragments as
+   equivalent to RU transliterated slugs.
+
+**Tests:** ``tests/unit/test_pr_51078_en_fragment_localization.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
