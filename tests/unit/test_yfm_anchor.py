@@ -44,19 +44,23 @@ def test_cyrillic_anchor_parsed_and_rendered_in_english():
         {heading_seg.id: "Description of fields in the response"},
     )
     out = render_markdown(new_doc, target_lang="en")
-    assert "### Description of fields in the response {#fields-Description}" in out
+    # §6.174 / §6.192: keep RU explicit ids on EN headings (no english_yfm_anchor).
+    assert "### Description of fields in the response {#fields-Описание}" in out
+
+
+def test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit():
+    ru = parse_markdown("### Информация о пользователях {#users}\n")
+    en = parse_markdown("### Information about users {#users}\n")
+    mapping = build_heading_anchor_map(ru, en)
+    assert mapping["информация-о-пользователях"] == "users"
 
 
 def test_build_heading_anchor_map_auto_and_explicit():
     ru = parse_markdown(
-        "## Векторный поиск\n\n"
-        "[jump](#векторный-поиск)\n\n"
-        "### Поля {#fields-Описание}\n"
+        "## Векторный поиск\n\n[jump](#векторный-поиск)\n\n### Поля {#fields-Описание}\n"
     )
     en = parse_markdown(
-        "## Vector search\n\n"
-        "[jump](#векторный-поиск)\n\n"
-        "### Fields {#fields-Description}\n"
+        "## Vector search\n\n[jump](#векторный-поиск)\n\n### Fields {#fields-Description}\n"
     )
     mapping = build_heading_anchor_map(ru, en)
     assert mapping["векторный-поиск"] == "vector-search"

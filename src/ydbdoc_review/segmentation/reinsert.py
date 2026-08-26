@@ -7,6 +7,7 @@ from urllib.parse import unquote
 from ydbdoc_review.parsing.ast_types import (
     Document,
     Heading,
+    InlineCode,
     InlineImage,
     InlineLink,
     InlineNode,
@@ -173,6 +174,12 @@ def _substitute_placeholders(
             continue
         if isinstance(node, InlineText):
             out.extend(_split_text_by_placeholders(node.content, mapping))
+        elif isinstance(node, InlineCode):
+            # LLM sometimes glues prose onto a code atom inside backticks
+            # (``⟦C3⟧_subscriber::fmt``). Expand markers in ``content`` so
+            # leftover protect markers do not survive into EN (#37673 / #50684).
+            node.content = _expand_placeholders_in_plain(node.content, mapping)
+            out.append(node)
         elif hasattr(node, "children") and isinstance(node.children, list):
             node.children = _substitute_placeholders(node.children, mapping)
             out.append(node)
@@ -181,31 +188,103 @@ def _substitute_placeholders(
     return out
 
 
+def _expand_placeholders_in_plain(text: str, mapping: dict[str, InlineNode]) -> str:
+    """Replace ``⟦…⟧`` / percent-encoded markers inside a plain string (code body).
+
+    When the model glues a tail onto a full code atom (``⟦C3⟧_subscriber::fmt``
+    while C3 already is ``tracing_subscriber::fmt``), drop the duplicated
+    suffix instead of concatenating (#37673 / #50684).
+    """
+    if not text or not mapping:
+        return text
+    from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
+
+    out = text
+    for key in sorted(mapping.keys(), key=len, reverse=True):
+        replacement = _plain_atom_text(mapping[key], _render_inline_node)
+        candidates = [key]
+        inner = key[1:-1]
+        candidates.extend(
+            (
+                f"%E2%9F%A6{inner}%E2%9F%A7",
+                f"%e2%9f%a6{inner}%e2%9f%a7",
+            )
+        )
+        for needle in candidates:
+            idx = out.find(needle)
+            if idx < 0:
+                continue
+            suffix = out[idx + len(needle) :]
+            # Duplicated tail after a whole-atom marker.
+            if suffix and (
+                replacement.endswith(suffix)
+                or replacement.endswith(suffix.lstrip("_"))
+            ):
+                out = out[:idx] + replacement
+            else:
+                out = out[:idx] + replacement + suffix
+            break
+    return out
+
+
+def _plain_atom_text(node: InlineNode, render) -> str:
+    if isinstance(node, InlineCode):
+        return node.content
+    if isinstance(node, InlineText):
+        return node.content
+    return render(node)
+
+
 def _split_text_by_placeholders(
     text: str, mapping: dict[str, InlineNode]
 ) -> list[InlineNode]:
-    """Split a text string at placeholder markers and substitute originals."""
+    """Split a text string at placeholder markers and substitute originals.
+
+    Also recognizes percent-encoded markers (``%E2%9F%A6U1%E2%9F%A7``) that
+    markdown/link rendering sometimes emits when substitute missed a pass
+    (#48764).
+    """
     if not mapping:
         return [InlineText(content=text)] if text else []
 
-    # Build a single regex over placeholder strings.
     import re
 
-    if not mapping:
-        return [InlineText(content=text)]
     # Sort by length descending so longer placeholders match first
     # (defensive; in practice all placeholders are short and unique).
     keys_sorted = sorted(mapping.keys(), key=len, reverse=True)
-    pattern = "|".join(re.escape(k) for k in keys_sorted)
+    literal = "|".join(re.escape(k) for k in keys_sorted)
+    # Percent-encoded ⟦X⟧ → %E2%9F%A6X%E2%9F%A7 (UTF-8 of U+27E6 / U+27E7)
+    encoded_alts: list[str] = []
+    for k in keys_sorted:
+        inner = k[1:-1]  # e.g. U1
+        encoded_alts.append(
+            re.escape(f"%E2%9F%A6{inner}%E2%9F%A7")
+        )
+        encoded_alts.append(
+            re.escape(f"%e2%9f%a6{inner}%e2%9f%a7")
+        )
+    pattern = literal
+    if encoded_alts:
+        pattern = f"{literal}|{'|'.join(encoded_alts)}"
     parts = re.split(f"({pattern})", text)
 
     out: list[InlineNode] = []
     for part in parts:
         if not part:
             continue
-        if part in mapping:
-            out.append(mapping[part])
+        key = part if part in mapping else unquote(part)
+        if key in mapping:
+            out.append(mapping[key])
         else:
+            # Normalize encoded form to ⟦…⟧ then lookup
+            m = re.fullmatch(
+                r"%E2%9F%A6([CLIHVTUS]\d+)%E2%9F%A7", part, flags=re.IGNORECASE
+            )
+            if m:
+                key = f"⟦{m.group(1)}⟧"
+                if key in mapping:
+                    out.append(mapping[key])
+                    continue
             out.append(InlineText(content=part))
     return out
 

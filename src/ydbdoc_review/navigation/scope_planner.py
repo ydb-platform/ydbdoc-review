@@ -7,8 +7,8 @@ markdown + navigation YAML files that ``doc_translate`` must produce.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
 from ydbdoc_review.navigation.toc import (
@@ -19,7 +19,13 @@ from ydbdoc_review.navigation.toc import (
     toc_entry_paths,
 )
 from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
-from ydbdoc_review.pipeline.pairs import ChangeKind, DocPair, NavigationPair, counterpart, is_docs_markdown
+from ydbdoc_review.pipeline.pairs import (
+    ChangeKind,
+    DocPair,
+    NavigationPair,
+    counterpart,
+    is_docs_markdown,
+)
 
 ReadFn = Callable[[str], str | None]
 
@@ -48,6 +54,7 @@ class TranslationScopePlan:
     nav_ru_paths: frozenset[str]
     nav_from_diff: frozenset[str]
     nav_from_main: frozenset[str]
+    doc_deleted: frozenset[str] = frozenset()
 
     @property
     def all_ru_paths(self) -> frozenset[str]:
@@ -75,9 +82,7 @@ def _ancestor_ru_tocs(ru_md_path: str, *, docs_root: str) -> list[str]:
     return out
 
 
-def _ru_include_md_targets(
-    ru_md_path: str, ru_text: str, *, docs_root: str
-) -> set[str]:
+def _ru_include_md_targets(ru_md_path: str, ru_text: str, *, docs_root: str) -> set[str]:
     targets: set[str] = set()
     for inc in collect_yfm_includes(ru_text):
         resolved = resolve_locale_md_path(ru_md_path, inc.path, docs_root=docs_root)
@@ -305,14 +310,18 @@ def plan_translation_scope(
     """
     root = docs_root.strip("/")
     diff_ru_md: set[str] = set()
+    deleted_ru_md: set[str] = set()
     diff_ru_nav: set[str] = set()
 
     for raw_path, kind in changes:
-        if kind == "deleted":
-            continue
         path = _norm(raw_path)
         if path.startswith(f"{root}/ru/") and is_docs_markdown(path, docs_root):
-            diff_ru_md.add(path)
+            if kind == "deleted":
+                deleted_ru_md.add(path)
+            else:
+                diff_ru_md.add(path)
+        elif kind == "deleted":
+            continue
         elif path.startswith(f"{root}/ru/") and is_navigation_yaml(path):
             diff_ru_nav.add(path)
 
@@ -323,7 +332,9 @@ def plan_translation_scope(
         diff_paths=diff_ru_md | diff_ru_nav,
     )
 
-    doc_ru: set[str] = set(diff_ru_md)
+    # Deleted RU pages are translation actions too: their existing EN mirrors
+    # must enter the pair pipeline as ``delete_en`` (#50904).
+    doc_ru: set[str] = set(diff_ru_md | deleted_ru_md)
 
     for ru_toc in sorted(discovered_tocs):
         ru_toc_text = read_ru(ru_toc)
@@ -347,9 +358,7 @@ def plan_translation_scope(
         ru_text = read_ru(ru_md)
         if not ru_text:
             continue
-        for target in sorted(
-            _ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)
-        ):
+        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
             if target in doc_ru:
                 continue
             en_md = counterpart(target, docs_root)
@@ -384,6 +393,42 @@ def plan_translation_scope(
         docs_root=docs_root,
     )
 
+    # §6.192 / §6.194 / #37673: when a sidebar is queued because a diff page is
+    # listed in RU toc, also queue **siblings missing from EN toc** (e.g.
+    # ``debug.md`` overview next to ``debug-logs.md``). EN *file* may already
+    # exist as an orphan on main while the href was dropped from EN toc —
+    # ``_add_doc_if_en_absent`` alone skips those and nav merge never gap-fills
+    # → ``scope_not_applied`` / ``only_ru_hrefs=['debug.md']``.
+    for ru_toc in sorted(nav_ru):
+        ru_text = read_ru(ru_toc)
+        if not ru_text:
+            continue
+        toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
+        if not any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md):
+            continue
+        en_toc = counterpart(ru_toc, docs_root)
+        en_toc_text = (read_en_base(en_toc) or "") if en_toc else ""
+        en_toc_hrefs = _toc_md_hrefs(en_toc_text)
+        for rel in _toc_md_hrefs(ru_text):
+            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
+            _add_doc_if_en_absent(
+                ru_md,
+                doc_ru=doc_ru,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+            )
+            if rel in en_toc_hrefs or ru_md in doc_ru:
+                continue
+            if read_ru(ru_md) is None:
+                continue
+            en_md = counterpart(ru_md, docs_root)
+            if en_md is None:
+                continue
+            # EN markdown exists but EN toc lacks the href — still queue so
+            # ``planned_toc_extras_for_pair`` puts it in translate scope.
+            doc_ru.add(ru_md)
+
     # Absent EN **sibling** sidebars are full-mirrored (§6.85). Queue every RU
     # href in that toc that lacks an EN mirror so the new menu does not point at
     # missing files. Do **not** expand ancestor hubs (``reference/toc_p``) —
@@ -397,9 +442,7 @@ def plan_translation_scope(
         en_toc = counterpart(ru_toc, docs_root)
         en_text = (read_en_base(en_toc) or "") if en_toc else ""
         toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
-        sibling_of_diff = any(
-            _norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md
-        )
+        sibling_of_diff = any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md)
         if en_toc_is_absent(en_text) and sibling_of_diff:
             for rel in _toc_md_hrefs(ru_text):
                 ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
@@ -420,9 +463,7 @@ def plan_translation_scope(
                 continue
             # Only when the included child sidebar sits next to a diff page.
             child_dir = child.rsplit("/", 1)[0]
-            if not any(
-                _norm(p).rsplit("/", 1)[0] == child_dir for p in diff_ru_md
-            ):
+            if not any(_norm(p).rsplit("/", 1)[0] == child_dir for p in diff_ru_md):
                 continue
             ru_md = _norm(resolve_toc_target_path(ru_toc, href))
             _add_doc_if_en_absent(
@@ -441,9 +482,7 @@ def plan_translation_scope(
         ru_text = read_ru(ru_md)
         if not ru_text:
             continue
-        for target in sorted(
-            _ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)
-        ):
+        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
             if target in seen_close:
                 continue
             en_md = counterpart(target, docs_root)
@@ -454,14 +493,15 @@ def plan_translation_scope(
                 seen_close.add(target)
                 queue.append(target)
 
-    doc_from_diff = frozenset(diff_ru_md)
-    doc_from_main = frozenset(doc_ru - diff_ru_md)
+    doc_from_diff = frozenset(diff_ru_md | deleted_ru_md)
+    doc_from_main = frozenset(doc_ru - diff_ru_md - deleted_ru_md)
     nav_from_main = frozenset(nav_ru - nav_from_diff)
 
     return TranslationScopePlan(
         doc_ru_paths=frozenset(doc_ru),
         doc_from_diff=doc_from_diff,
         doc_from_main=doc_from_main,
+        doc_deleted=frozenset(deleted_ru_md),
         nav_ru_paths=frozenset(nav_ru),
         nav_from_diff=frozenset(nav_from_diff),
         nav_from_main=nav_from_main,
@@ -481,10 +521,13 @@ def make_repo_scope_readers(
     merge_base_with: str,
     *,
     ru_content_ref: str | None = None,
+    ru_base_ref: str | None = None,
 ) -> tuple[ReadFn, ReadFn, ReadFn]:
     """Build scope readers for ``plan_translation_scope`` in CI.
 
     ``ru_content_ref`` — optional git ref for RU (merged PR → merge commit, §6.120).
+    ``ru_base_ref`` — its pre-merge parent, used to recover the original RU
+    delta when translating an old merged PR (§6.210).
 
     EN baseline is the **translation-branch tip** (``merge_base_with``, usually
     ``origin/main``), not ``merge-base(HEAD, main)``. For merged source PRs HEAD
@@ -524,6 +567,10 @@ def make_repo_scope_readers(
         return read_text_at_ref(repo_path, mb, path)
 
     def read_ru_base(path: str) -> str | None:
+        if ru_base_ref:
+            text = read_text_at_ref(repo_path, ru_base_ref, path)
+            if text is not None:
+                return text
         text = read_text_at_ref(repo_path, mb, path)
         if text is not None:
             return text
@@ -550,6 +597,7 @@ def doc_pairs_from_plan(
                 ru_path=ru_path,
                 en_path=en_path,
                 ru_changed=True,
+                ru_deleted=ru_path in plan.doc_deleted,
             )
         )
     return pairs
@@ -582,9 +630,7 @@ def merge_navigation_pair_lists(
     extra: list[NavigationPair],
 ) -> list[NavigationPair]:
     """Union nav pairs; ``extra`` wins on ``ru_changed`` / clears ``supplement_only``."""
-    by_key: dict[tuple[str, str], NavigationPair] = {
-        (p.ru_path, p.en_path): p for p in primary
-    }
+    by_key: dict[tuple[str, str], NavigationPair] = {(p.ru_path, p.en_path): p for p in primary}
     for pair in extra:
         key = (pair.ru_path, pair.en_path)
         prev = by_key.get(key)
@@ -620,19 +666,29 @@ def planned_toc_extras_for_pair(
     ru_toc_text: str,
     *,
     docs_root: str = "ydb/docs",
+    active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> tuple[set[str], set[str]]:
     """``(extra_hrefs, extra_include_paths)`` from scope plan for one sidebar.
 
     Replaces ``extra_toc_hrefs_from_md_targets`` + ``extra_toc_hrefs_for_pair``
     (§22 J.6): href/include entries are derived from the unified plan, not from
     post-hoc basename intersection after translate.
+
+    ``active_doc_ru_paths`` (§6.165): when set, only those RU markdown paths
+    count for href extras. Callers must pass the paths **actually translated**
+    (after bilingual skip §6.76). Using the full ``plan.doc_ru_paths`` pulls
+    bilingual-skipped pages (e.g. ``quickstart.md``) into toc name retranslation
+    and overwrites good EN menu labels (#48411 / #48589).
     """
+    doc_paths = plan.doc_ru_paths
+    if active_doc_ru_paths is not None:
+        doc_paths = frozenset(doc_paths & frozenset(active_doc_ru_paths))
     extra_hrefs: set[str] = set()
     extra_includes: set[str] = set()
     for kind, rel in collect_toc_link_targets(ru_toc_text):
         if kind == "href" and rel.endswith(".md"):
             ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
-            if ru_md in plan.doc_ru_paths:
+            if ru_md in doc_paths:
                 extra_hrefs.add(rel)
         elif kind == "include" and rel.endswith((".yaml", ".yml")):
             ru_child = _norm(resolve_toc_target_path(ru_toc, rel))

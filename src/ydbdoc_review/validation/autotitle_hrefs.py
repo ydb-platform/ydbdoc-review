@@ -57,6 +57,8 @@ def restore_autotitle_hrefs(
     source_base: str | None,
     *,
     force_exact: bool = False,
+    en_page_path: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
 ) -> str:
     """Copy ``[{#T}](href)`` targets from ``source_base`` onto ``translated``.
 
@@ -68,12 +70,20 @@ def restore_autotitle_hrefs(
     1. Re-attach bare ``{#T}`` left by ``strip_unreachable`` (#47108) using RU
        hrefs that are missing from EN.
     2. When full ``[{#T}](…)`` counts match, force each href to the RU twin.
+
+    When ``en_toc_reachable`` is set, skip RU hrefs whose EN targets are outside
+    the toc graph so restore does not reintroduce RU-only pages (#49451).
     """
     if not source_base or not translated:
         return translated
 
     if force_exact:
-        return _restore_autotitle_force_exact(translated, source_base)
+        return _restore_autotitle_force_exact(
+            translated,
+            source_base,
+            en_page_path=en_page_path,
+            en_toc_reachable=en_toc_reachable,
+        )
 
     tr_paths = _AUTO_LINK.findall(translated)
     base_paths = _AUTO_LINK.findall(source_base)
@@ -90,8 +100,38 @@ def restore_autotitle_hrefs(
     return out
 
 
-def _restore_autotitle_force_exact(translated: str, source_base: str) -> str:
-    base_hrefs = _AUTO_LINK.findall(source_base)
+def _reachable_ru_autotitle_hrefs(
+    source_base: str,
+    *,
+    en_page_path: str | None,
+    en_toc_reachable: frozenset[str] | None,
+) -> list[str]:
+    hrefs = _AUTO_LINK.findall(source_base)
+    if en_toc_reachable is None or not en_page_path:
+        return hrefs
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+    out: list[str] = []
+    for href in hrefs:
+        target = resolve_internal_md_href(en_page_path, href)
+        if target is not None and target not in en_toc_reachable:
+            continue
+        out.append(href)
+    return out
+
+
+def _restore_autotitle_force_exact(
+    translated: str,
+    source_base: str,
+    *,
+    en_page_path: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
+) -> str:
+    base_hrefs = _reachable_ru_autotitle_hrefs(
+        source_base,
+        en_page_path=en_page_path,
+        en_toc_reachable=en_toc_reachable,
+    )
     if not base_hrefs:
         return translated
 

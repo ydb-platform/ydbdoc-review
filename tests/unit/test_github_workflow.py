@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,10 +11,17 @@ import pytest
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
-from ydbdoc_review.github.workflow import DocJobResult, run_doc_translate, run_doc_verify
+from ydbdoc_review.github.workflow import (
+    DocJobResult,
+    _enforce_report_checkout_bytes,
+    _hard_validation_errors,
+    run_doc_continue,
+    run_doc_translate,
+    run_doc_verify,
+)
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
+from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult, PRTranslationResult
 
 
 def _mock_inline_verify_job() -> DocJobResult:
@@ -51,6 +59,15 @@ def git_repo(tmp_path: Path) -> str:
     return str(repo)
 
 
+def _make_en_a_reachable(repo_path: str) -> None:
+    """Give intended-valid workflow mocks a current EN toc for their target."""
+    en_core = Path(repo_path) / "ydb" / "docs" / "en" / "core"
+    en_core.mkdir(parents=True, exist_ok=True)
+    (en_core / "toc_p.yaml").write_text(
+        "items:\n- name: A\n  href: ../a.md\n", encoding="utf-8"
+    )
+
+
 def _fake_pr_result() -> PRTranslationResult:
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -64,6 +81,7 @@ def _fake_pr_result() -> PRTranslationResult:
         target_path=pair.en_path,
         source_lang="ru",
         target_lang="en",
+        authoritative_source_text="Привет.\n",
     )
     fr = FileTranslationResult(
         file_path=pair.en_path,
@@ -75,6 +93,111 @@ def _fake_pr_result() -> PRTranslationResult:
     return PRTranslationResult(
         pair_results=[PairRunResult(plan=plan, target_text="Hello.\n", file_result=fr)]
     )
+
+
+def test_report_checkout_guard_blocks_in_memory_drift():
+    result = _fake_pr_result()
+    with patch(
+        "ydbdoc_review.github.workflow.read_text_at_ref",
+        return_value="Different committed bytes.\n",
+    ):
+        mismatches = _enforce_report_checkout_bytes("/repo", "abc123", result)
+
+    assert mismatches == ["ydb/docs/en/a.md"]
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    assert file_result.verdict == "blocked"
+    assert any(
+        message.startswith("report_checkout_mismatch:")
+        for message in file_result.heuristic_blocking
+    )
+
+
+def test_hard_validation_ignores_unrelated_current_drift_for_historical_result():
+    result = _fake_pr_result()
+    run = result.pair_results[0]
+    run.historical_disposition = "already_translated"
+    run.plan = replace(
+        run.plan,
+        authoritative_source_text="```python\nprint('new RU')\n```\n",
+    )
+    run.target_text = "Current EN without that later, unrelated fence.\n"
+
+    assert _hard_validation_errors(result) == []
+
+
+def test_run_doc_continue_retranslates_translation_pr_scope(git_repo: str):
+    pull = {
+        "title": "Auto-translate docs from PR #40385",
+        "head": {
+            "ref": "ydbdoc-review/pr-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    translated = DocJobResult(mode="doc_continue", pr_number=40385)
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with patch(
+            "ydbdoc_review.github.workflow.run_doc_translate",
+            return_value=translated,
+        ) as translate:
+            with patch("ydbdoc_review.github.workflow.run_doc_verify") as verify:
+                result = run_doc_continue(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=50840,
+                    merge_base_with="HEAD",
+                    dry_run=True,
+                    config=load_config(env=_env()),
+                    instruction="Переводи те файлы, которые не переведены",
+                )
+
+    assert result is translated
+    translate.assert_called_once()
+    assert translate.call_args.kwargs["pr_number"] == 40385
+    assert translate.call_args.kwargs["continue_feedback"] == (
+        "Переводи те файлы, которые не переведены"
+    )
+    verify.assert_not_called()
+
+
+def test_run_doc_continue_verifies_non_translation_pr(git_repo: str):
+    pull = {
+        "title": "Critic fixup",
+        "head": {
+            "ref": "ydbdoc-review/verify-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    verified = DocJobResult(mode="doc_continue", pr_number=50840)
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with patch("ydbdoc_review.github.workflow.run_doc_translate") as translate:
+            with patch(
+                "ydbdoc_review.github.workflow.run_doc_verify",
+                return_value=verified,
+            ) as verify:
+                result = run_doc_continue(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=50840,
+                    merge_base_with="HEAD",
+                    dry_run=True,
+                    config=load_config(env=_env()),
+                    instruction="Исправь замечания критика",
+                )
+
+    assert result is verified
+    verify.assert_called_once()
+    assert verify.call_args.kwargs["pr_number"] == 50840
+    assert verify.call_args.kwargs["continue_feedback"] == "Исправь замечания критика"
+    translate.assert_not_called()
 
 
 def test_run_doc_translate_dry_run(git_repo: str):
@@ -109,6 +232,58 @@ def test_run_doc_translate_dry_run(git_repo: str):
     assert result.committed is False
     mock_gh.return_value.post_issue_comment.assert_not_called()
     assert not Path(git_repo, "ydb/docs/en/a.md").exists()
+
+
+def test_run_doc_translate_merged_pr_preserves_existing_en(git_repo: str):
+    Path(git_repo, "ydb/docs/ru/a.md").write_text("Привет, мир.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "docs"], cwd=git_repo, check=True)
+    merge_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    pull = {
+        "title": "historical docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": merge_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+        "merged": True,
+        "state": "closed",
+        "merge_commit_sha": merge_sha,
+    }
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_fake_pr_result(),
+    ) as verify_pairs:
+        with patch("ydbdoc_review.github.workflow.run_pr_translation") as translate_pairs:
+            with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                mock_gh.return_value.get_pull.return_value = pull
+                with patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                    return_value=[("ydb/docs/ru/a.md", "modified")],
+                ), patch(
+                    "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                    return_value=[("ydb/docs/ru/a.md", "modified")],
+                ):
+                    result = run_doc_translate(
+                        repo_path=git_repo,
+                        github_repo="o/r",
+                        pr_number=50741,
+                        merge_base_with="HEAD",
+                        dry_run=True,
+                        config=load_config(env=_env()),
+                    )
+
+    assert result.pr_result.translated_count == 1
+    verify_pairs.assert_called_once()
+    translate_pairs.assert_not_called()
 
 
 def test_run_doc_translate_missing_github_token(git_repo: str):
@@ -205,7 +380,71 @@ def test_run_doc_translate_no_pairs(git_repo: str):
     assert result.pr_result.pair_results == []
 
 
+def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
+    """§6.175 / #48751: bilingual noop must still comment «перевод не требуется»."""
+    from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+    pull = {
+        "title": "Fix glossary links",
+        "merged": True,
+        "merge_commit_sha": "deadbeef",
+        "head": {
+            "ref": "docs-glossary",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    ru = "ydb/docs/ru/core/concepts/glossary.md"
+    en = "ydb/docs/en/core/concepts/glossary.md"
+    changes = [(ru, "modified"), (en, "modified")]
+    scope = TranslationScopePlan(
+        doc_ru_paths=frozenset({ru}),
+        doc_from_diff=frozenset({ru}),
+        doc_from_main=frozenset(),
+        nav_ru_paths=frozenset(),
+        nav_from_diff=frozenset(),
+        nav_from_main=frozenset(),
+    )
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        client = mock_gh.return_value
+        client.get_pull.return_value = pull
+        client.post_issue_comment.return_value = "https://github.com/o/r/pull/48751#issuecomment-1"
+        with patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=changes,
+        ):
+            with patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                return_value=changes,
+            ):
+                with patch(
+                    "ydbdoc_review.github.workflow.plan_translation_scope",
+                    return_value=scope,
+                ):
+                    with patch(
+                        "ydbdoc_review.github.workflow.ensure_commit",
+                        return_value=False,
+                    ):
+                        result = run_doc_translate(
+                            repo_path=git_repo,
+                            github_repo="o/r",
+                            pr_number=48751,
+                            dry_run=False,
+                            config=load_config(env=_env()),
+                        )
+    assert result.translation_pr_number is None
+    assert len(result.pr_result.pair_results) == 1
+    assert result.pr_result.pair_results[0].skipped
+    assert result.source_comment_url
+    posted = client.post_issue_comment.call_args[0][3]
+    assert "перевод не требуется" in posted
+    assert "§6.76" in posted
+    assert "bilingual" in posted.lower()
+
+
 def test_run_doc_translate_posts_comments(git_repo: str):
+    _make_en_a_reachable(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -246,9 +485,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
                                 )
 
     assert result.translation_pr_number == 99
-    assert result.translation_comment_url == (
-        "https://github.com/o/r/pull/99#issuecomment-verify"
-    )
+    assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
     assert result.committed is True
     assert result.pushed is True
     mock_verify.assert_called_once()
@@ -257,9 +494,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     comment_calls = mock_gh.return_value.post_issue_comment.call_args_list
     assert comment_calls[0][0][2] == 7
     mock_gh.return_value.create_pull.assert_called_once()
-    mock_gh.return_value.add_issue_labels.assert_called_once_with(
-        "o", "r", 99, ["documentation"]
-    )
+    mock_gh.return_value.add_issue_labels.assert_called_once_with("o", "r", 99, ["documentation"])
     _, kwargs = mock_gh.return_value.create_pull.call_args
     assert kwargs["head"] == "ydbdoc-review/pr-7"
     assert kwargs["base"] == "feature/docs"
@@ -267,6 +502,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
 
 def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str):
     """Source PR comment failure must not abort after inline verify succeeded."""
+    _make_en_a_reachable(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -309,9 +545,7 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
                                     config=load_config(env=_env()),
                                 )
 
-    assert result.translation_comment_url == (
-        "https://github.com/o/r/pull/99#issuecomment-verify"
-    )
+    assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
     assert result.source_comment_url is None
     mock_gh.return_value.post_issue_comment.assert_called_once()
     assert mock_gh.return_value.post_issue_comment.call_args[0][2] == 7
@@ -319,6 +553,7 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
 
 def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
     """Fork PR: branch from upstream main, push translation branch, PR targets main."""
+    _make_en_a_reachable(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -426,9 +661,7 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     prep.assert_called_once()
     assert prep.call_args.kwargs["translation_branch"] == "ydbdoc-review/verify-11"
     assert prep.call_args.kwargs["base_branch"] == "main"
-    mock_gh.return_value.delete_branch.assert_called_with(
-        "o", "r", "ydbdoc-review/verify-11"
-    )
+    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-11")
     assert mock_gh.return_value.delete_branch.call_count >= 1
     mock_gh.return_value.create_pull.assert_called_once()
     create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
@@ -436,9 +669,7 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     assert create_kwargs["base"] == "main"
     assert result.translation_pr_number == 99
     assert result.source_comment_url == "url"
-    posted_bodies = [
-        c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list
-    ]
+    posted_bodies = [c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list]
     assert any("#99" in body for body in posted_bodies)
 
 
@@ -493,9 +724,7 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
                                 config=load_config(env=_env()),
                             )
 
-    mock_gh.return_value.delete_branch.assert_called_with(
-        "o", "r", "ydbdoc-review/verify-11"
-    )
+    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-11")
     assert mock_gh.return_value.delete_branch.call_count >= 2
     push.assert_called_once()
     assert push.call_args.args[2] == "ydbdoc-review/verify-11"
@@ -550,9 +779,7 @@ def test_run_doc_verify_deletes_stale_fixup_branch_at_start(git_repo: str):
                         config=load_config(env=_env()),
                     )
 
-    mock_gh.return_value.delete_branch.assert_called_with(
-        "o", "r", "ydbdoc-review/verify-47233"
-    )
+    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-47233")
 
 
 def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
@@ -560,6 +787,7 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
 
     pull = {
         "title": "Auto-translate docs from PR #3",
@@ -608,9 +836,7 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
     mock_gh.return_value.delete_branch.assert_not_called()
     mock_gh.return_value.create_pull.assert_not_called()
     assert result.translation_pr_number == 11
-    posted_bodies = [
-        c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list
-    ]
+    posted_bodies = [c.args[3] for c in mock_gh.return_value.post_issue_comment.call_args_list]
     assert len(posted_bodies) == 1
     assert "коммитом в эту ветку" not in posted_bodies[0]
 
@@ -676,6 +902,7 @@ def test_run_doc_verify_posts_comment(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    _make_en_a_reachable(git_repo)
     content_sha = subprocess.check_output(
         ["git", "-C", git_repo, "rev-parse", "HEAD"], text=True
     ).strip()
@@ -801,6 +1028,101 @@ def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
     assert result.pr_result.translated_count == 1
 
 
+def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
+    """Verify must not commit hybridized glossary EN (#49578 / §6.189)."""
+    en = Path(git_repo) / "ydb" / "docs" / "en" / "core" / "concepts"
+    en.mkdir(parents=True)
+    glossary = en / "glossary.md"
+    good_en = "Sessions: [{#T}](query_execution/execution_process.md#sessions).\n"
+    glossary.write_text(good_en, encoding="utf-8")
+
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/concepts/glossary.md",
+        en_path="ydb/docs/en/core/concepts/glossary.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="Сессии: кириллица.\n",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    pr_result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=plan,
+                target_text="Сессии: кириллица.\n",
+                file_result=fr,
+            )
+        ]
+    )
+
+    pull = {
+        "title": "Auto-translate docs from PR #45667",
+        "body": "source PR #45667",
+        "head": {
+            "ref": "ydbdoc-review/pr-45667",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "feature/docs"},
+    }
+
+    source_pull = {
+        "head": {
+            "sha": "source-head-sha",
+            "repo": {"owner": {"login": "o"}, "name": "r"},
+        }
+    }
+
+    def _get_pull(_owner: str, _repo: str, number: int) -> dict:
+        if number == 49578:
+            return pull
+        if number == 45667:
+            return source_pull
+        raise AssertionError(f"unexpected PR {number}")
+
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=pr_result,
+    ):
+        with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
+            with patch(
+                "ydbdoc_review.github.workflow.git_commit_paths", return_value=True
+            ) as commit:
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
+                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                        mock_gh.return_value.get_pull.side_effect = _get_pull
+                        mock_gh.return_value.get_file_text.return_value = "RU.\n"
+                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                        mock_gh.return_value.post_issue_comment.return_value = "url"
+                        with patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                            return_value=[("ydb/docs/en/core/concepts/glossary.md", "modified")],
+                        ):
+                            run_doc_verify(
+                                repo_path=git_repo,
+                                github_repo="o/r",
+                                pr_number=49578,
+                                merge_base_with="HEAD",
+                                dry_run=False,
+                                config=load_config(env=_env()),
+                            )
+
+    assert glossary.read_text(encoding="utf-8") == good_en
+    commit.assert_not_called()
+    push.assert_not_called()
+
+
 def test_run_doc_verify_bilingual_source_pr_ru_only_completeness_gap(git_repo: str):
     """Author PR that changes RU without EN mirror → completeness 🔴."""
     pull = {
@@ -843,4 +1165,3 @@ def test_run_doc_verify_bilingual_source_pr_ru_only_completeness_gap(git_repo: s
 
     assert result.source_pr_number is None
     assert result.pr_result.completeness_gaps == ["ydb/docs/en/a.md"]
-

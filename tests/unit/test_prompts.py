@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
 from ydbdoc_review.segmentation.chunker import Batch
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.glossary import load_glossary
@@ -83,6 +84,25 @@ def test_build_translate_messages_skips_style_guide_for_ru_target():
     user = messages[1]["content"]
     assert isinstance(user, str)
     assert "English style" not in user
+
+
+def test_build_translate_messages_include_continue_instruction_and_parent_context():
+    batch = Batch(index=0, segments=[_segment("s0001", "Текст")])
+    feedback = (
+        "Translate the missing security page.\n\n"
+        "## Previous run context\n"
+        "Previous critic response: device authentication hierarchy is wrong."
+    )
+    with continue_feedback_scope(feedback):
+        messages = build_translate_messages(
+            batch, load_glossary(), file_path="docs/ru/security/index.md"
+        )
+
+    system = messages[0]["content"]
+    assert isinstance(system, str)
+    assert "Translate the missing security page" in system
+    assert "Previous run context" in system
+    assert "device authentication hierarchy is wrong" in system
 
 
 def test_build_critic_messages():

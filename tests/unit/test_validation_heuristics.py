@@ -7,12 +7,16 @@ from textwrap import dedent
 from ydbdoc_review.validation.heuristics import (
     bump_verdict_for_blocking_heuristics,
     bump_verdict_for_heuristics,
+    check_broken_inline_code_markup,
     check_cyrillic_in_en,
+    check_cyrillic_in_en_all_fences,
     check_fence_parity,
     check_heading_parity,
     check_length_ratio,
     check_list_tab_parity,
     check_md_link_parity,
+    check_unrestored_placeholders,
+    check_unrestored_yfmvar_placeholders,
     run_file_heuristics,
     run_file_heuristics_classified,
     validate_navigation_merge_warnings,
@@ -24,6 +28,131 @@ from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_tran
 def test_cyrillic_in_en_detects_prose():
     warnings = check_cyrillic_in_en("Hello привет world", target_lang="en")
     assert len(warnings) == 1
+
+
+def test_unrestored_placeholder_blocks():
+    """§6.163: leftover protect markers in final EN are blocking."""
+    text = "The ⟦V1⟧ cluster uses [SIDs](%E2%9F%A6U1%E2%9F%A7) and ⟦C1⟧ code.\n"
+    msgs = check_unrestored_placeholders(text, target_lang="en")
+    assert len(msgs) == 1
+    assert msgs[0].startswith("unrestored_placeholder:")
+    assert "⟦V1⟧" in msgs[0]
+    assert "%E2%9F%A6U1%E2%9F%A7" in msgs[0]
+    classified = run_file_heuristics_classified(
+        "Секция.\n",
+        text,
+        normalized_source_text="Секция.\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("unrestored_placeholder:") for m in classified.blocking)
+
+
+def test_unrestored_yfmvar_blocks():
+    """§6.173 / #48812: leaked link_with_variable stand-ins must block merge."""
+    text = (
+        "Global indexes, [sync](yfmvar-0-yfmvarend#sync) or "
+        "[async](yfmvar-1-yfmvarend#async), are hidden tables.\n"
+    )
+    msgs = check_unrestored_yfmvar_placeholders(text, target_lang="en")
+    assert len(msgs) == 1
+    assert msgs[0].startswith("unrestored_yfmvar:")
+    assert "yfmvar-0-yfmvarend" in msgs[0]
+    classified = run_file_heuristics_classified(
+        "Индексы.\n",
+        text,
+        normalized_source_text="Индексы.\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("unrestored_yfmvar:") for m in classified.blocking)
+
+
+def test_broken_inline_code_markup_blocks():
+    """§6.176 / #49040: mangled `.pub` bold+backtick and empty ( extension)."""
+    text = (
+        "Select the file with the public key ( extension) from those created, "
+        "for example **/home/user/.ssh/id_ed25519`.pub`**.\n"
+    )
+    msgs = check_broken_inline_code_markup(text, target_lang="en")
+    assert len(msgs) >= 2
+    assert all(m.startswith("broken_inline_code:") for m in msgs)
+    classified = run_file_heuristics_classified(
+        "Ключ (расширение `.pub`), например **/home/user/.ssh/id_ed25519.pub**.\n",
+        text,
+        normalized_source_text=(
+            "Ключ (расширение `.pub`), например **/home/user/.ssh/id_ed25519.pub**.\n"
+        ),
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("broken_inline_code:") for m in classified.blocking)
+
+
+def test_broken_inline_code_allows_bold_wrapping_code():
+    """§6.177 / #49059: ``**Box `workflow`**`` is valid, not a merge blocker."""
+    text = (
+        "* **Box `workflow`**\n"
+        '* Three others: "repo", "admin:public_key" and "read:org".\n'
+        "Use **/home/user/.ssh/id_ed25519.pub** as the key file.\n"
+    )
+    assert check_broken_inline_code_markup(text, target_lang="en") == []
+    classified = run_file_heuristics_classified(
+        "* Поле **`workflow`**\n",
+        text,
+        normalized_source_text="* Поле **`workflow`**\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert not any(m.startswith("broken_inline_code:") for m in classified.blocking)
+
+
+def test_unrestored_placeholder_blocks_glossary_v2():
+    """§6.164 / #48595: glossary leftover ``⟦V2⟧`` must block merge."""
+    text = "A **client certificate** confirms identity when interacting with ⟦V2⟧.\n"
+    msgs = check_unrestored_placeholders(text, target_lang="en")
+    assert any("⟦V2⟧" in m for m in msgs)
+    classified = run_file_heuristics_classified(
+        "Сертификат.\n",
+        text,
+        normalized_source_text="Сертификат.\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("unrestored_placeholder:") for m in classified.blocking)
+
+
+def test_cyrillic_in_yaml_fence_blocks():
+    """§6.164 / #48595: RU angle-brackets in yaml examples must block."""
+    text = dedent(
+        """
+        Intro paragraph with enough English words for length checks here.
+
+        ```yaml
+        client_certificate_authorization:
+          default_group: <SID по умолчанию>
+          groups:
+            - member_groups: <массив SID>
+              subject_terms:
+                - short_name: <имя компонента Subject Name>
+        ```
+        """
+    )
+    msgs = check_cyrillic_in_en_all_fences(text, target_lang="en")
+    assert msgs
+    assert any("по умолчанию" in m for m in msgs)
+    assert all(m.startswith("cyrillic_in_code_fence:") for m in msgs if "ещё" not in m)
+    # Prose check must still miss fence Cyrillic (historical blind spot).
+    assert check_cyrillic_in_en(text, target_lang="en") == []
+    classified = run_file_heuristics_classified(
+        "Секция настроек.\n",
+        text,
+        normalized_source_text="Секция настроек.\n",
+        source_lang="ru",
+        target_lang="en",
+    )
+    assert any(m.startswith("cyrillic_in_code_fence:") for m in classified.blocking)
+    assert not any(m.startswith("cyrillic_in_code_fence:") for m in classified.warnings)
 
 
 def test_md_link_parity_ignores_self_basename_link():
@@ -44,9 +173,7 @@ def test_verify_realign_message_is_info_not_blocking():
     from ydbdoc_review.validation.heuristics import _classify_heuristic
 
     assert (
-        _classify_heuristic(
-            "verify_realign: rebuilt EN from RU due to segment alignment mismatch"
-        )
+        _classify_heuristic("verify_realign: rebuilt EN from RU due to segment alignment mismatch")
         == "info"
     )
 
@@ -61,12 +188,7 @@ def test_strip_unreachable_links_message_is_info_not_blocking():
         )
         == "info"
     )
-    assert (
-        _classify_heuristic(
-            "strip_unreachable_links_failed: AttributeError: boom"
-        )
-        == "warnings"
-    )
+    assert _classify_heuristic("strip_unreachable_links_failed: AttributeError: boom") == "warnings"
 
 
 def test_md_link_parity_flags_missing_en_link():
@@ -80,9 +202,7 @@ def test_md_link_parity_flags_missing_en_link():
 
 def test_md_link_parity_ignores_links_outside_en_toc_reachable():
     """Strip (§6.107) drops unreachable EN links; parity must not fail QA (§6.114)."""
-    ru = (
-        "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
-    )
+    ru = "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
     en = "See watermarks and [patterns](patterns.md).\n"
     reachable = frozenset(
         {
@@ -105,7 +225,8 @@ def test_cyrillic_in_en_ignores_fenced_code():
     assert check_cyrillic_in_en(text, target_lang="en") == []
 
 
-def test_cyrillic_in_en_fence_comments_warns_on_line_comments():
+def test_cyrillic_in_en_fence_comments_blocks_on_line_comments():
+    """§6.164: residual Cyrillic in fences is blocking, not a soft warning."""
     text = "Intro\n\n```go\n// настраиваем провайдер\n```\n"
     classified = run_file_heuristics_classified(
         text,
@@ -114,12 +235,28 @@ def test_cyrillic_in_en_fence_comments_warns_on_line_comments():
         source_lang="ru",
         target_lang="en",
     )
-    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
-    assert not classified.blocking
+    assert any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in classified.blocking
+    )
+    assert not any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in classified.warnings
+    )
 
 
 def test_cyrillic_skipped_for_ru_target():
     assert check_cyrillic_in_en("привет", target_lang="ru") == []
+
+
+def test_cyrillic_in_explicit_anchor_is_not_untranslated_prose():
+    text = "### Field descriptions {#fields-Описание}\n"
+    assert check_cyrillic_in_en(text, target_lang="en") == []
+
+
+def test_cyrillic_in_protected_certificate_notation_is_not_prose():
+    text = "Use the exact `Имя=Значение,...@<domain>` notation.\n"
+    assert check_cyrillic_in_en(text, target_lang="en") == []
 
 
 def test_fence_parity_mismatch():
@@ -132,6 +269,35 @@ def test_fence_parity_mismatch():
 def test_fence_parity_ignores_triple_backticks_inside_block_body():
     block = "```bash\necho '```'\nmore\n```\n"
     assert check_fence_parity(block, block) == []
+
+
+def test_fence_parity_uses_exact_markers_for_unstable_legacy_layout():
+    source = """{% list tabs %}
+
+- Python
+
+    ```python
+    A
+
+      ```python
+      B
+
+    ```python
+    C
+
+      ```
+
+    - Native SDK
+
+      ```python
+      D
+      ```
+
+{% endlist %}
+"""
+    target = source.replace("- Python", "Translated paragraph")
+    assert check_fence_parity(source, target) == []
+    assert check_fence_parity(source, target + "```\n")
 
 
 def test_heading_parity():
@@ -158,6 +324,23 @@ def test_length_ratio_short_text_skipped():
     assert check_length_ratio("Hi", "Hello", source_lang="ru", target_lang="en") == []
 
 
+def test_length_ratio_normalizes_legacy_fences_before_counting_prose():
+    source = (
+        ("Русский текст для проверки объёма перевода. " * 4)
+        + "\n```python\n"
+        + ("very_long_code_line()\n" * 30)
+        + "```python\n"
+    )
+    target = (
+        ("English text used to verify translation volume. " * 4)
+        + "\n```python\n"
+        + ("very_long_code_line()\n" * 30)
+        + "```\n"
+    )
+
+    assert check_length_ratio(source, target, source_lang="ru", target_lang="en") == []
+
+
 def test_length_ratio_out_of_bounds():
     src = "word " * 50
     tgt = "x" * 45
@@ -166,10 +349,7 @@ def test_length_ratio_out_of_bounds():
 
 
 def test_run_file_heuristics_flags_broken_wikipedia_link():
-    src = (
-        "См. [CoW](https://ru.wikipedia.org/wiki/Копирование_при_записи).\n"
-        + "Текст. " * 30
-    )
+    src = "См. [CoW](https://ru.wikipedia.org/wiki/Копирование_при_записи).\n" + "Текст. " * 30
     tgt = (
         "See [CoW](https://en.wikipedia.org/wiki/%D0%9A%D0%BE%D0%BF%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5_%D0%BF%D1%80%D0%B8_%D0%B7%D0%B0%D0%BF%D0%B8%D1%81%D0%B8).\n"
         + "Text. " * 30
@@ -200,7 +380,9 @@ def test_bump_verdict_for_blocking_heuristics():
 def test_run_file_heuristics_classified_ru_source_is_info():
     ru = "x --config-dir/opt/ydb/cfg\n"
     norm = normalize_ru_source_for_translation(ru)
-    c = run_file_heuristics_classified(ru, "x --config-dir /opt/ydb/cfg\n", normalized_source_text=norm)
+    c = run_file_heuristics_classified(
+        ru, "x --config-dir /opt/ydb/cfg\n", normalized_source_text=norm
+    )
     assert c.info and not c.blocking
 
 
@@ -260,18 +442,8 @@ def test_validate_navigation_merge_warnings_redirect():
 
 def test_heading_parity_counts_indented_headings_inside_yfm_if():
     """§6.156: RU headings indented in ``{% if %}`` must still count."""
-    ru = (
-        "{% if feature_group_by_rollup_cube %}\n"
-        "  ## ROLLUP {#rollup}\n"
-        "{% endif %}\n"
-        "## Other\n"
-    )
-    en = (
-        "{% if feature_group_by_rollup_cube %}\n"
-        "## ROLLUP {#rollup}\n"
-        "{% endif %}\n"
-        "## Other\n"
-    )
+    ru = "{% if feature_group_by_rollup_cube %}\n  ## ROLLUP {#rollup}\n{% endif %}\n## Other\n"
+    en = "{% if feature_group_by_rollup_cube %}\n## ROLLUP {#rollup}\n{% endif %}\n## Other\n"
     assert check_heading_parity(ru, en) == []
 
 
@@ -279,11 +451,14 @@ def test_md_link_parity_ignores_stripped_basenames():
     """§6.156: intentional strip must not re-block via md_link_parity."""
     ru = "See [t](table.md) and [c](create-resource-pool-classifier.md).\n"
     en = "See t and c.\n"
-    assert check_md_link_parity(
-        ru,
-        en,
-        source_lang="ru",
-        target_lang="en",
-        source_file="ydb/docs/ru/core/dev/system-views.md",
-        ignore_basenames={"table.md", "create-resource-pool-classifier.md"},
-    ) == []
+    assert (
+        check_md_link_parity(
+            ru,
+            en,
+            source_lang="ru",
+            target_lang="en",
+            source_file="ydb/docs/ru/core/dev/system-views.md",
+            ignore_basenames={"table.md", "create-resource-pool-classifier.md"},
+        )
+        == []
+    )

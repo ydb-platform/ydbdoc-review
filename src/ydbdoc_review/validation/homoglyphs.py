@@ -84,6 +84,13 @@ _ANGLE_PLACEHOLDER_EN: dict[str, str] = {
     "описание ошибки": "error description",
     "тип используемых физических устройств": "type of physical devices used",
     "uuid": "uuid",
+    # client_certificate_authorization.yaml examples (#48762 / #48595)
+    "sid по умолчанию": "default SID",
+    "массив sid": "SID array",
+    "массив разрешенных суффиксов": "array of allowed suffixes",
+    "массив разрешённых суффиксов": "array of allowed suffixes",
+    "массив допустимых значений": "array of allowed values",
+    "имя компонента subject name": "Subject Name component name",
 }
 
 
@@ -128,6 +135,44 @@ def fix_russian_angle_placeholders_in_en_fences(text: str) -> str:
     return fix_russian_angle_placeholders_in_en(text)
 
 
+# Deterministic RU→EN replacements inside inline `` `…` `` (outside fences).
+_INLINE_NOTATION_EN: tuple[tuple[str, str], ...] = (
+    ("Имя=Значение", "Name=Value"),
+)
+
+
+def fix_russian_inline_notation_in_en(text: str) -> str:
+    """Map known RU notation labels inside backticks to EN (#40385 / #50976)."""
+    if not any(src in text for src, _tgt in _INLINE_NOTATION_EN):
+        return text
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    in_fence = False
+    fence_char = ""
+    for line in lines:
+        m = _FENCE_OPEN.match(line)
+        if m:
+            marker = m.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_char = marker[0]
+            elif marker[0] == fence_char:
+                in_fence = False
+            out.append(line)
+            continue
+        if in_fence:
+            out.append(line)
+            continue
+        body = line.rstrip("\n\r")
+        suffix = line[len(body) :]
+        new_body = body
+        for src, tgt in _INLINE_NOTATION_EN:
+            new_body = new_body.replace(f"`{src}", f"`{tgt}")
+            new_body = new_body.replace(src, tgt)
+        out.append(new_body + suffix)
+    return "".join(out)
+
+
 def postprocess_en_target_markdown(text: str) -> str:
     """Homoglyphs, fence placeholders, and markdownlint-friendly fence spacing."""
     from ydbdoc_review.validation.markdown_layout import (
@@ -137,7 +182,23 @@ def postprocess_en_target_markdown(text: str) -> str:
     )
 
     text = fix_cyrillic_homoglyphs_in_en(text)
+    text = fix_russian_inline_notation_in_en(text)
     text = fix_russian_angle_placeholders_in_en(text)
+    text = decode_percent_encoded_protect_markers(text)
     text = fix_image_bang_spacing(text)
     text = fix_no_space_in_emphasis(text)
     return fix_blanks_around_fences(text)
+
+
+_PERCENT_PROTECT_RE = re.compile(
+    r"%E2%9F%A6([CLIHVTUS]\d+)%E2%9F%A7", re.IGNORECASE
+)
+
+
+def decode_percent_encoded_protect_markers(text: str) -> str:
+    """Turn ``%E2%9F%A6U1%E2%9F%A7`` back into ``⟦U1⟧`` (#48764).
+
+    Does not restore atoms (that needs reinsert); makes leftovers visible to
+    ``unrestored_placeholder`` / repair in the literal ``⟦…⟧`` form.
+    """
+    return _PERCENT_PROTECT_RE.sub(r"⟦\1⟧", text)

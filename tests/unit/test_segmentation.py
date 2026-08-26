@@ -283,6 +283,29 @@ def test_extract_tab_title_non_whitelisted():
     assert "Из консоли" in titles[0].text
 
 
+def test_yfm_control_marker_paragraph_is_not_translatable():
+    """#50729: fallback ``{% endlist %}`` is structure, not an EN segment."""
+    doc = parse_markdown("Before.\n\n  {% endlist %}\n")
+    texts = [s.text for s in extract_segments(doc)]
+    assert not any("endlist" in text for text in texts)
+
+
+def test_language_label_in_fallback_markdown_list_is_structural():
+    doc = parse_markdown("- C++\n\n  SDK body.\n")
+    texts = [s.text for s in extract_segments(doc)]
+    assert "C++" not in texts
+    assert "SDK body." in texts
+
+
+def test_sdk_variant_tab_titles_are_structural():
+    for title in ("Native SDK", "Native SDK (Asyncio)", "database/sql", "JDBC"):
+        doc = parse_markdown(
+            f"{{% list tabs %}}\n\n- {title}\n\n  Body.\n\n{{% endlist %}}\n"
+        )
+        texts = [s.text for s in extract_segments(doc)]
+        assert title not in texts
+
+
 def test_extract_term_definition():
     doc = parse_markdown(
         "Some [*cluster] here.\n\n[*cluster]: A set of nodes.\n"
@@ -388,4 +411,3 @@ def test_extract_placeholders_match_kind():
             assert p.node.kind == "yfm_variable"
         else:
             pytest.fail(f"unexpected prefix in {p.placeholder}")
-

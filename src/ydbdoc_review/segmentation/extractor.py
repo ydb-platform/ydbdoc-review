@@ -12,6 +12,7 @@ The ``ast_path`` is a list of mixed int/string steps:
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from ydbdoc_review.parsing.ast_types import (
@@ -46,7 +47,12 @@ DEFAULT_TAB_TITLE_WHITELIST: frozenset[str] = frozenset(
         "json", "yaml", "yml", "csv", "tsv", "xml", "html", "css", "sql",
         "toml", "ini", "env",
         "linux", "macos", "windows", "docker", "kubernetes", "k8s",
+        "native sdk", "native sdk (asyncio)", "database/sql", "jdbc",
     }
+)
+
+_YFM_CONTROL_FALLBACK = re.compile(
+    r"^\{%\s*(?:endlist|endcut|endnote|endif|else|elsif\b[^%]*)\s*%\}$"
 )
 
 
@@ -103,12 +109,33 @@ class _ExtractState:
         path: list[str],
     ) -> None:
         if isinstance(block, Paragraph):
+            # If a legacy/misaligned YFM container falls back to a paragraph,
+            # its control marker is still structure, never translatable text.
+            # Excluding it keeps RU/EN alignment stable after canonical render
+            # (#37673 / #50729 vector-search).
+            if _YFM_CONTROL_FALLBACK.match(_short_inline_preview(block.children)):
+                return
+            if (
+                path
+                and path[-1] == "list_item"
+                and _is_whitelisted_tab_title(
+                    _short_inline_preview(block.children), self.tab_title_whitelist
+                )
+            ):
+                # A malformed legacy tabs container can fall back to a plain
+                # Markdown list. Its exact SDK language labels are structural,
+                # just like normal YfmTab titles, and must not shift alignment.
+                return
             self._emit_inline_segment(
                 SegmentKind.PARAGRAPH, block.children, ast_path, path
             )
         elif isinstance(block, Heading):
             self._emit_inline_segment(
-                SegmentKind.HEADING, block.children, ast_path, path
+                SegmentKind.HEADING,
+                block.children,
+                ast_path,
+                path,
+                heading_anchor=block.anchor,
             )
         elif isinstance(block, BulletList) or isinstance(block, OrderedList):
             for j, item in enumerate(block.children):
@@ -215,6 +242,8 @@ class _ExtractState:
         inline_children: list,
         ast_path: list,
         path: list[str],
+        *,
+        heading_anchor: str | None = None,
     ) -> None:
         if not inline_children:
             return
@@ -229,6 +258,7 @@ class _ExtractState:
                 text=text,
                 placeholders=placeholders,
                 ast_path=list(ast_path),
+                heading_anchor=heading_anchor if kind == SegmentKind.HEADING else None,
             )
         )
 
@@ -249,5 +279,21 @@ def _short_inline_preview(children: Iterable) -> str:
 
 
 def _is_whitelisted_tab_title(title: str, whitelist: frozenset[str]) -> bool:
-    normalized = normalize_confusable_cyrillic(title.strip()).lower()
-    return normalized in whitelist
+    import re
+
+    raw = title.strip()
+    normalized = normalize_confusable_cyrillic(raw).lower()
+    if normalized in whitelist:
+        return True
+    # "Python (alternative)" / "Python (альтернативный)" — same pane as lang
+    # (§6.193). Match on raw title: confusable normalize mangles Cyrillic words.
+    m = re.match(
+        r"^(.+?)\s*\((?:alternative|альтернативный)\)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        base = normalize_confusable_cyrillic(m.group(1).strip()).lower()
+        if base in whitelist:
+            return True
+    return False

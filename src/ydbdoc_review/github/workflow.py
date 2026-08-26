@@ -24,6 +24,8 @@ from ydbdoc_review.github.git_ops import (
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    is_translation_pr_branch,
+    is_verify_fixup_branch,
     list_pr_file_changes_api,
     list_pr_file_changes_git,
     load_pair_contents,
@@ -34,28 +36,19 @@ from ydbdoc_review.github.pr import (
     parse_source_pr_from_text,
     pull_request_context,
     repo_https_clone_url,
-    is_translation_pr_branch,
-    is_verify_fixup_branch,
     source_pr_number_from_branch,
+    source_pr_scope_changes,
     translate_ru_content_ref,
     translation_branch_base,
     translation_pr_base,
     verify_fixup_branch,
     verify_fixup_pr_base,
 )
-from ydbdoc_review.llm.client import create_llm_client
-from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
-from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
-from ydbdoc_review.ops.lifecycle import (
-    append_retention_footer,
-    begin_ops_job,
-    finish_ops_job,
-)
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.pipeline.analyze import PairContent
+from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
     make_repo_scope_readers,
@@ -64,7 +57,28 @@ from ydbdoc_review.navigation.scope_planner import (
     plan_translation_scope,
     synthetic_changes_from_plan,
 )
-from ydbdoc_review.pipeline.completeness import bilingual_en_mirrors, completeness_gaps
+from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
+from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
+from ydbdoc_review.ops.lifecycle import (
+    append_retention_footer,
+    begin_ops_job,
+    compose_continue_feedback,
+    finish_ops_job,
+    load_parent_run_context,
+)
+from ydbdoc_review.pipeline.analyze import (
+    BILINGUAL_SKIP_SUMMARY,
+    PairContent,
+    PairPlan,
+)
+from ydbdoc_review.pipeline.completeness import (
+    bilingual_en_mirrors,
+    completeness_gaps,
+    completeness_state_gaps,
+    evaluate_completeness_states,
+    href_only_source_noop_satisfied,
+    translation_pr_scope_gaps,
+)
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
@@ -75,9 +89,11 @@ from ydbdoc_review.pipeline.pairs import (
     DocPair,
     build_navigation_pairs,
     build_verify_navigation_pairs,
+    counterpart,
     filter_translation_pr_verify_scope,
 )
-from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
+from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
@@ -89,11 +105,18 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.candidate_overlay import validate_candidate_overlay
+from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
+from ydbdoc_review.validation.hard_file_validator import validate_whole_file
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
     apply_include_target_checks,
 )
-from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
+from ydbdoc_review.validation.redirect_impacts import (
+    added_redirects,
+    mirror_redirects_to_en,
+    retarget_redirect_inbound_links,
+)
 from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
     apply_toc_target_checks,
@@ -139,9 +162,7 @@ def _github_tokens(config: Config) -> tuple[str, str]:
     api = config.secrets.github_token
     push = config.secrets.github_push_token or api
     if not api:
-        raise GitHubConfigError(
-            "GitHub token not configured. Set GITHUB_TOKEN."
-        )
+        raise GitHubConfigError("GitHub token not configured. Set GITHUB_TOKEN.")
     if not push:
         raise GitHubConfigError(
             "GitHub push token not configured. Set GITHUB_PUSH_TOKEN or GITHUB_TOKEN."
@@ -149,15 +170,36 @@ def _github_tokens(config: Config) -> tuple[str, str]:
     return api, push
 
 
-def _next_report_number(
-    client: GitHubClient, owner: str, repo: str, issue_number: int
-) -> int:
+def _next_report_number(client: GitHubClient, owner: str, repo: str, issue_number: int) -> int:
     count = 0
     for comment in client.iter_issue_comments(owner, repo, issue_number):
         body = str(comment.get("body") or "")
         if _REPORT_MARKER in body:
             count += 1
     return count + 1
+
+
+def _enforce_report_checkout_bytes(
+    repo_path: str,
+    checkout_ref: str,
+    result: PRTranslationResult,
+) -> list[str]:
+    """Block a report whose in-memory EN differs from its advertised SHA."""
+    mismatches: list[str] = []
+    for pair in result.pair_results:
+        if pair.deleted or pair.target_text is None:
+            continue
+        committed = read_text_at_ref(repo_path, checkout_ref, pair.plan.target_path)
+        if committed == pair.target_text:
+            continue
+        mismatches.append(pair.plan.target_path)
+        if pair.file_result is not None:
+            pair.file_result.verdict = "blocked"
+            pair.file_result.heuristic_blocking.append(
+                "report_checkout_mismatch: final QA text differs from immutable "
+                f"checkout `{checkout_ref[:12]}`"
+            )
+    return mismatches
 
 
 def _safe_post_issue_comment(
@@ -184,6 +226,38 @@ def _safe_post_issue_comment(
         return None
 
 
+def _pr_result_for_bilingual_skips(
+    en_paths: frozenset[str] | set[str],
+    *,
+    docs_root: str,
+) -> PRTranslationResult:
+    """Synthetic skipped pair results so §6.76 source comment can fire (#48751)."""
+    results: list[PairRunResult] = []
+    for en_path in sorted(en_paths):
+        if not en_path.endswith(".md"):
+            continue
+        ru_path = counterpart(en_path, docs_root)
+        if ru_path is None:
+            continue
+        pair = DocPair(
+            ru_path=ru_path,
+            en_path=en_path,
+            ru_changed=True,
+            en_changed=True,
+        )
+        plan = PairPlan(
+            pair=pair,
+            action="skip",
+            source_path=ru_path,
+            target_path=en_path,
+            source_lang="ru",
+            target_lang="en",
+            summary=BILINGUAL_SKIP_SUMMARY,
+        )
+        results.append(PairRunResult(plan=plan, skipped=True))
+    return PRTranslationResult(pair_results=results)
+
+
 def _delete_stale_verify_fixup(
     gh: GitHubClient,
     owner: str,
@@ -201,6 +275,39 @@ def _delete_stale_verify_fixup(
         )
 
 
+def _postpass_localize_en_fragments(
+    repo_path: str,
+    md_paths: list[str],
+    *,
+    merge_base_with: str,
+    docs_root: str = "ydb/docs",
+) -> list[str]:
+    """Second pass: localize EN ``#fragment`` after all target pages exist on disk."""
+    from ydbdoc_review.validation.fragment_repair import repair_en_fragments
+
+    reader = _docs_text_reader(repo_path, merge_base_with)
+    prefix = f"{docs_root}/en/"
+    changed: list[str] = []
+    for rel in md_paths:
+        if not rel.endswith(".md") or not rel.startswith(prefix):
+            continue
+        text = read_text(repo_path, rel)
+        if not text:
+            continue
+        fixed = repair_en_fragments(text, en_page_path=rel, read_text=reader)
+        if fixed == text:
+            continue
+        write_text(repo_path, rel, fixed)
+        changed.append(rel)
+    if changed:
+        logger.info(
+            "Post-pass localized EN fragments in %d file(s): %s",
+            len(changed),
+            ", ".join(changed[:8]) + ("…" if len(changed) > 8 else ""),
+        )
+    return changed
+
+
 def _apply_results_to_disk(
     repo_path: str,
     result: PRTranslationResult,
@@ -209,6 +316,7 @@ def _apply_results_to_disk(
     docs_root: str = "ydb/docs",
 ) -> TouchedPaths:
     """Write translated markdown, navigation YAML, locale assets, and deletes."""
+    from ydbdoc_review.translation.file_profiles import is_glossary_file
     from ydbdoc_review.validation.locale_assets import apply_locale_asset_copies
 
     written: list[str] = []
@@ -217,6 +325,10 @@ def _apply_results_to_disk(
         if run.skipped or run.error:
             continue
         rel = run.plan.target_path
+        # Glossary hub: never rewrite EN from verify (critic/finalize can
+        # hybridize 400+ segments; §6.189 / #49578).
+        if run.plan.action == "critic_only" and is_glossary_file(rel):
+            continue
         if run.deleted:
             deleted.append(rel)
             if dry_run:
@@ -260,6 +372,34 @@ def _docs_text_reader(repo_path: str, merge_base_with: str):
     return _read
 
 
+def _hard_validation_errors(result: PRTranslationResult) -> list[str]:
+    errors: list[str] = []
+    for run in result.pair_results:
+        if run.historical_disposition in {
+            "already_translated",
+            "superseded",
+            "translated_now",
+        }:
+            continue
+        if run.skipped or run.deleted or run.error or run.target_text is None or run.plan.target_lang.lower() not in {"en", "english"}:
+            continue
+        authority = run.plan.authoritative_source_text or run.source_text
+        if authority is None:
+            errors.append(f"hard_validation_missing_authority: {run.plan.target_path}")
+            continue
+        errors.extend(f"hard_validation:{item.path}:{item.code.value}:{item.detail}" for item in validate_whole_file(path=run.plan.target_path, authoritative_ru=authority, candidate_en=run.target_text))
+    return errors
+
+
+def _apply_transaction_gates(repo_path: str, result: PRTranslationResult, *, docs_root: str) -> None:
+    hard = _hard_validation_errors(result)
+    overlay = validate_candidate_overlay(repo_path, result, docs_root=docs_root)
+    blocked = {run.plan.target_path for run in result.pair_results if any(run.plan.target_path in error for error in (*hard, *overlay))}
+    states = evaluate_completeness_states(result, blocked_paths=blocked)
+    result.completeness_states = {path: state.value for path, state in states.items()}
+    result.completeness_gaps = list(dict.fromkeys([*result.completeness_gaps, *hard, *overlay, *completeness_state_gaps(states)]))
+
+
 def _run_verify_pairs(
     contents: list[PairContent],
     client: YandexLLMClient,
@@ -268,6 +408,8 @@ def _run_verify_pairs(
     *,
     en_toc_reachable: frozenset[str] | None = None,
     docs_text_reader=None,
+    docs_repo_path: str | None = None,
+    historical_merged_provenance: bool = False,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
     state = PRRunState(contents=contents)
@@ -277,6 +419,8 @@ def _run_verify_pairs(
         config=config,
         en_toc_reachable=en_toc_reachable,
         docs_text_reader=docs_text_reader,
+        docs_repo_path=docs_repo_path,
+        historical_merged_provenance=historical_merged_provenance,
     )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
@@ -310,14 +454,21 @@ def run_doc_translate(
     )
     if not gate.ok:
         if deny_body and not dry_run:
-            _safe_post_issue_comment(
-                gh, owner, repo, pr_number, deny_body, label="ops deny"
-            )
+            _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
         return DocJobResult(
             mode=f"doc_{ops_mode}",
             pr_number=pr_number,
             source_pr_number=pr_number,
             dry_run=dry_run,
+        )
+
+    effective_continue_feedback = continue_feedback or (
+        ops_ctx.continue_feedback if ops_ctx else None
+    )
+    if ops_mode == "continue" and ops_ctx is not None:
+        effective_continue_feedback = compose_continue_feedback(
+            effective_continue_feedback,
+            load_parent_run_context(ops_ctx),
         )
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
@@ -326,6 +477,7 @@ def run_doc_translate(
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
     ru_ref = translate_ru_content_ref(ctx)
+    ru_base_ref: str | None = None
     if ru_ref is not None:
         if ensure_commit(repo_path, ru_ref):
             logger.info(
@@ -333,6 +485,10 @@ def run_doc_translate(
                 pr_number,
                 ru_ref[:12],
             )
+            # A merged PR's original RU delta is merge_commit^..merge_commit.
+            # Comparing it with current main makes old source changes look like
+            # no-ops and silently preserves stale EN (§6.210 / #40385).
+            ru_base_ref = f"{ru_ref}^"
         else:
             logger.warning(
                 "Merged source PR #%s: merge commit %s not fetchable; "
@@ -342,13 +498,18 @@ def run_doc_translate(
             )
             ru_ref = None
 
-    changes = merge_pr_file_changes(
+    changes = source_pr_scope_changes(
+        ctx,
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
+    changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
     read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
-        repo_path, merge_base_with, ru_content_ref=ru_ref
+        repo_path,
+        merge_base_with,
+        ru_content_ref=ru_ref,
+        ru_base_ref=ru_base_ref,
     )
     scope_plan = plan_translation_scope(
         changes,
@@ -357,6 +518,19 @@ def run_doc_translate(
         read_ru_base=read_ru_base,
         docs_root=docs_root,
     )
+    skip_globs = cfg.paths.translate_skip_globs
+    if skip_globs:
+        from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+        scope_plan = TranslationScopePlan(
+            doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
+            doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
+            doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
+            nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
+            nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
+            nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
+            doc_deleted=filter_path_set(scope_plan.doc_deleted, skip_globs),
+        )
     logger.info(
         "Scope plan for PR #%s: %s doc paths (%s diff + %s main), %s nav paths",
         pr_number,
@@ -365,9 +539,7 @@ def run_doc_translate(
         len(scope_plan.doc_from_main),
         len(scope_plan.nav_ru_paths),
     )
-    bilingual_skip = frozenset(
-        bilingual_en_mirrors(changes, docs_root=docs_root)
-    )
+    bilingual_skip = frozenset(bilingual_en_mirrors(changes, docs_root=docs_root))
     pairs = doc_pairs_from_plan(
         scope_plan,
         docs_root=docs_root,
@@ -377,9 +549,16 @@ def run_doc_translate(
         navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
         build_navigation_pairs(changes, docs_root=docs_root),
     )
-    changes = merge_pr_file_changes(
-        changes, synthetic_changes_from_plan(scope_plan)
+    # Redirect retargeting is authorized only for EN mirrors of files changed
+    # by the source PR, never synthetic dependency pages added by scope closure.
+    redirect_impact_scope = frozenset(
+        en_path
+        for path, kind in changes
+        if kind != "deleted"
+        and (en_path := counterpart(path, docs_root)) is not None
+        and en_path.endswith(".md")
     )
+    changes = merge_pr_file_changes(changes, synthetic_changes_from_plan(scope_plan))
     job = DocJobResult(
         mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
         pr_number=pr_number,
@@ -389,6 +568,30 @@ def run_doc_translate(
     )
     if not pairs and not nav_pairs:
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
+        # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
+        # ``skip_en_paths`` before analyze — still post «перевод не требуется»
+        # (§6.76 / #48751). Without this early path the comment never appeared.
+        pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
+        job.pr_result = pr_result
+        if pr_result.pair_results and not dry_run:
+            elapsed = time.monotonic() - started
+            meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
+            job.source_comment_url = _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                append_retention_footer(
+                    build_source_pr_comment(
+                        pr_result,
+                        translation_pr_number=None,
+                        meta=meta,
+                        config=cfg,
+                        committed=False,
+                    )
+                ),
+                label="source PR summary",
+            )
         if ops_ctx is not None:
             finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job
@@ -398,9 +601,7 @@ def run_doc_translate(
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
 
-    with continue_feedback_scope(
-        continue_feedback or (ops_ctx.continue_feedback if ops_ctx else None)
-    ):
+    with continue_feedback_scope(effective_continue_feedback):
         pending_en_md = {p.en_path for p in pairs}
         pending_en_tocs = {nav.en_path for nav in nav_pairs}
 
@@ -433,24 +634,25 @@ def run_doc_translate(
                 pairs,
                 merge_base_with=merge_base_with,
                 ru_content_ref=ru_ref,
+                ru_base_ref=ru_base_ref,
             )
-            pr_result = run_pr_translation(
+            pair_runner = run_pr_translation
+            runner_kwargs = {
+                "config": cfg,
+                "en_toc_reachable": en_toc_reachable,
+                "docs_text_reader": _docs_text_reader(repo_path, merge_base_with),
+                "docs_repo_path": repo_path,
+            }
+            pr_result = pair_runner(
                 contents,
                 client,
                 glossary,
-                config=cfg,
                 use_analyze_llm=False,
-                en_toc_reachable=en_toc_reachable,
-                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                historical_merged_provenance=ctx.merged,
+                **runner_kwargs,
             )
         else:
             pr_result = PRTranslationResult()
-
-        md_en_paths = {
-            r.plan.target_path
-            for r in pr_result.pair_results
-            if r.target_text is not None and not r.error
-        }
 
         if nav_pairs:
             pr_result.navigation_results = run_navigation_merges(
@@ -462,6 +664,8 @@ def run_doc_translate(
                 config=cfg,
                 scope_plan=scope_plan,
                 ru_content_ref=ru_ref,
+                ru_base_ref=ru_base_ref,
+                active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
 
     # Orphan gate vs translation-branch tip (not stale merged-PR HEAD), §6.140.
@@ -476,8 +680,7 @@ def run_doc_translate(
     )
     if orphan_paths:
         logger.error(
-            "Orphan EN pages after nav merge — treat as completeness gaps "
-            "for PR #%s: %s",
+            "Orphan EN pages after nav merge — treat as completeness gaps for PR #%s: %s",
             pr_number,
             orphan_paths,
         )
@@ -485,6 +688,8 @@ def run_doc_translate(
             dict.fromkeys([*pr_result.completeness_gaps, *orphan_paths])
         )
     job.pr_result = pr_result
+
+    _apply_transaction_gates(repo_path, pr_result, docs_root=cfg.paths.docs_root)
 
     if pr_result.completeness_gaps:
         logger.error(
@@ -500,6 +705,48 @@ def run_doc_translate(
             dry_run=dry_run,
             docs_root=cfg.paths.docs_root,
         )
+        redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
+        if any(path == redirects_path for path, _kind in changes):
+            redirects_current = (
+                read_text_at_ref(repo_path, ru_ref, redirects_path)
+                if ru_ref
+                else read_text(repo_path, redirects_path)
+            ) or ""
+            redirects_base = (
+                read_text_at_ref(repo_path, ru_base_ref or merge_base_with, redirects_path) or ""
+            )
+            redirect_mappings = added_redirects(redirects_base, redirects_current)
+            impact_paths = retarget_redirect_inbound_links(
+                repo_path,
+                redirect_mappings,
+                docs_root=cfg.paths.docs_root,
+                dry_run=dry_run,
+                allowed_paths=redirect_impact_scope,
+            )
+            # Translation branches start from current upstream main. Never
+            # write the historical source-merge copy of this global file:
+            # doing so reverted unrelated redirects in #50901.
+            redirects_worktree = (
+                read_text_at_ref(repo_path, merge_base_with, redirects_path)
+                or read_text(repo_path, redirects_path)
+                or redirects_current
+            )
+            mirrored_redirects = mirror_redirects_to_en(redirects_worktree, redirect_mappings)
+            if mirrored_redirects != redirects_worktree:
+                impact_paths.append(redirects_path)
+                if not dry_run:
+                    write_text(repo_path, redirects_path, mirrored_redirects)
+            touched = TouchedPaths(
+                list(dict.fromkeys([*touched.written, *impact_paths])),
+                touched.deleted,
+            )
+        if not dry_run and touched.written:
+            _postpass_localize_en_fragments(
+                repo_path,
+                touched.written,
+                merge_base_with=merge_base_with,
+                docs_root=cfg.paths.docs_root,
+            )
 
     committed = pushed = False
     if touched and not dry_run and not no_commit:
@@ -536,6 +783,7 @@ def run_doc_translate(
                 branch,
                 push_token,
                 upstream_url,
+                force=True,
             )
             pushed = True
     job.committed = committed
@@ -564,9 +812,7 @@ def run_doc_translate(
             job.translation_pr_number = tr_pr_number
             if created:
                 try:
-                    gh.add_issue_labels(
-                        owner, repo, tr_pr_number, ["documentation"]
-                    )
+                    gh.add_issue_labels(owner, repo, tr_pr_number, ["documentation"])
                 except GitHubAPIError as exc:
                     logger.warning(
                         "Could not add documentation label to PR #%s: %s",
@@ -590,6 +836,7 @@ def run_doc_translate(
             no_commit=no_commit,
             config=cfg,
             inherited_completeness_gaps=pr_result.completeness_gaps,
+            continue_feedback=effective_continue_feedback,
             skip_ops_gates=True,
         )
         job.translation_comment_url = verify_job.translation_comment_url
@@ -623,12 +870,8 @@ def run_doc_translate(
             ops_ctx,
             status="ok" if not pr_result.failed_count else "failed",
             cost_rub=usage.estimate_cost_rub(),
-            input_tokens=sum(
-                (r.input_tokens or 0) for r in usage.records if r.success
-            ),
-            output_tokens=sum(
-                (r.output_tokens or 0) for r in usage.records if r.success
-            ),
+            input_tokens=sum((r.input_tokens or 0) for r in usage.records if r.success),
+            output_tokens=sum((r.output_tokens or 0) for r in usage.records if r.success),
             translation_pr=tr_pr_number,
         )
 
@@ -648,6 +891,7 @@ def run_doc_verify(
     continue_feedback: str | None = None,
     skip_ops_gates: bool = False,
     ops_mode: str = "verify",
+    _fixup_rerun_depth: int = 0,
 ) -> DocJobResult:
     """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
@@ -679,12 +923,8 @@ def run_doc_verify(
     # Only parse "PR #N" from title/body on translation PRs. Bilingual author
     # PRs are self-contained; a title like "fix for PR #999" must not redirect RU.
     if source_pr is None and translation_pr:
-        pull_body = str(
-            gh.get_pull(owner, repo, pr_number).get("body") or ""
-        )
-        source_pr = parse_source_pr_from_text(
-            f"{ctx.title}\n{pull_body}"
-        )
+        pull_body = str(gh.get_pull(owner, repo, pr_number).get("body") or "")
+        source_pr = parse_source_pr_from_text(f"{ctx.title}\n{pull_body}")
     if source_pr is None and verify_fixup_pr:
         source_pr = source_pr_number_from_branch(
             ctx.head_ref, prefix=cfg.paths.verify_fixup_branch_prefix
@@ -702,9 +942,7 @@ def run_doc_verify(
         )
         if not gate.ok:
             if deny_body and not dry_run:
-                _safe_post_issue_comment(
-                    gh, owner, repo, pr_number, deny_body, label="ops deny"
-                )
+                _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
             return DocJobResult(
                 mode=f"doc_{ops_mode}",
                 pr_number=pr_number,
@@ -714,9 +952,7 @@ def run_doc_verify(
 
     upstream_url = repo_https_clone_url(owner, repo)
     fixup_source_pr = source_pr or pr_number
-    fixup_branch = verify_fixup_branch(
-        cfg.paths.verify_fixup_branch_prefix, fixup_source_pr
-    )
+    fixup_branch = verify_fixup_branch(cfg.paths.verify_fixup_branch_prefix, fixup_source_pr)
     fixup_base_ref, fixup_base_branch = translation_branch_base(ctx)
     fixup_pr_base = verify_fixup_pr_base(
         ctx, translation_branch_prefix=cfg.paths.translation_branch_prefix
@@ -735,18 +971,17 @@ def run_doc_verify(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
+    changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     source_changes = (
         list_pr_file_changes_api(gh, owner, repo, source_pr)
         if source_pr is not None
         else (None if translation_pr else changes)
     )
+    if source_changes is not None:
+        source_changes = filter_translate_changes(source_changes, cfg.paths.translate_skip_globs)
     # On verify-* continue/re-verify: re-check the original bilingual source scope
     # (not only the narrow fixup diff).
-    pair_changes = (
-        source_changes
-        if verify_fixup_pr and source_changes is not None
-        else changes
-    )
+    pair_changes = source_changes if verify_fixup_pr and source_changes is not None else changes
     pairs = build_pairs_from_changes(pair_changes, docs_root=cfg.paths.docs_root)
     nav_pairs = build_verify_navigation_pairs(
         pair_changes,
@@ -754,6 +989,8 @@ def run_doc_verify(
         source_changes=source_changes,
     )
     scope_plan = None
+    expected_scope_pairs: list[DocPair] = []
+    source_bilingual_skip: frozenset[str] = frozenset()
     if source_changes:
         read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
         scope_plan = plan_translation_scope(
@@ -763,9 +1000,29 @@ def run_doc_verify(
             read_ru_base=read_ru_base,
             docs_root=cfg.paths.docs_root,
         )
+        skip_globs = cfg.paths.translate_skip_globs
+        if skip_globs:
+            from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+            scope_plan = TranslationScopePlan(
+                doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
+                doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
+                doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
+                nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
+                nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
+                nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
+            )
         nav_pairs = merge_navigation_pair_lists(
             navigation_pairs_from_plan(scope_plan, docs_root=cfg.paths.docs_root),
             nav_pairs,
+        )
+        source_bilingual_skip = frozenset(
+            bilingual_en_mirrors(source_changes, docs_root=cfg.paths.docs_root)
+        )
+        expected_scope_pairs = doc_pairs_from_plan(
+            scope_plan,
+            docs_root=cfg.paths.docs_root,
+            skip_en_paths=source_bilingual_skip,
         )
     job = DocJobResult(
         mode="doc_verify",
@@ -784,14 +1041,37 @@ def run_doc_verify(
             pr_number,
         )
 
+    translation_scope_missing: list[str] = []
     if translation_pr:
+        noop_satisfied: set[str] = set()
+        if source_pr is not None:
+            source_pull = gh.get_pull(owner, repo, source_pr)
+            source_base_sha = str(source_pull.get("base", {}).get("sha") or "")
+            source_head_sha = str(source_pull.get("head", {}).get("sha") or "")
+            changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
+            for pair in expected_scope_pairs:
+                if pair.en_path in changed_en_paths:
+                    continue
+                if href_only_source_noop_satisfied(
+                    gh.get_file_text(owner, repo, pair.ru_path, source_base_sha),
+                    gh.get_file_text(owner, repo, pair.ru_path, source_head_sha),
+                    read_text(repo_path, pair.ru_path),
+                    read_text(repo_path, pair.en_path),
+                ):
+                    noop_satisfied.add(pair.en_path)
+        translation_scope_missing = translation_pr_scope_gaps(
+            expected_scope_pairs,
+            nav_pairs,
+            changes,
+            already_satisfied=source_bilingual_skip | frozenset(noop_satisfied),
+        )
         pairs, nav_pairs = filter_translation_pr_verify_scope(
             pairs,
             nav_pairs,
             changes,
             docs_root=cfg.paths.docs_root,
         )
-        if not pairs and not nav_pairs:
+        if not pairs and not nav_pairs and not translation_scope_missing:
             logger.info(
                 "No scoped doc/navigation pairs for translation PR verify on #%s",
                 pr_number,
@@ -825,9 +1105,7 @@ def run_doc_verify(
                     "doc_verify PR #%s: both locales from checkout (bilingual/source PR)",
                     pr_number,
                 )
-                contents = load_pair_contents(
-                    repo_path, pairs, merge_base_with=merge_base_with
-                )
+                contents = load_pair_contents(repo_path, pairs, merge_base_with=merge_base_with)
             else:
                 contents = load_verify_pair_contents(
                     repo_path,
@@ -837,6 +1115,7 @@ def run_doc_verify(
                     owner=owner,
                     repo=repo,
                     source_pr=source_pr,
+                    target_ref=verify_content_sha,
                 )
             pr_result = _run_verify_pairs(
                 contents,
@@ -845,7 +1124,13 @@ def run_doc_verify(
                 cfg,
                 en_toc_reachable=en_toc_reachable,
                 docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_repo_path=repo_path,
             )
+            if source_pr is None:
+                authority = {item.pair.ru_path: item.current_ru_text or item.ru_text for item in contents}
+                for run in pr_result.pair_results:
+                    if run.source_text is None:
+                        run.source_text = authority.get(run.plan.pair.ru_path)
         else:
             pr_result = PRTranslationResult()
 
@@ -879,11 +1164,11 @@ def run_doc_verify(
             ru_pr_by_path=ru_nav_texts,
             scope_plan=scope_plan,
             extra_toc_hrefs=(
-                None
-                if scope_plan is not None
-                else extra_toc_hrefs_from_md_targets(md_en_paths)
+                None if scope_plan is not None else extra_toc_hrefs_from_md_targets(md_en_paths)
             ),
             docs_root=cfg.paths.docs_root,
+            active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
+            skip_globs=cfg.paths.translate_skip_globs,
         )
 
     apply_include_parity_repair(
@@ -904,11 +1189,7 @@ def run_doc_verify(
             for r in pr_result.pair_results
             if r.plan.target_lang == "en" and r.target_text is not None
         }
-        | {
-            n.en_path
-            for n in pr_result.navigation_results
-            if n.target_text is not None
-        },
+        | {n.en_path for n in pr_result.navigation_results if n.target_text is not None},
     )
     apply_orphan_toc_page_checks(
         pr_result,
@@ -917,9 +1198,7 @@ def run_doc_verify(
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.
-        computed_gaps = completeness_gaps(
-            changes, pr_result, docs_root=cfg.paths.docs_root
-        )
+        computed_gaps = completeness_gaps(changes, pr_result, docs_root=cfg.paths.docs_root)
         if computed_gaps:
             logger.info(
                 "doc_verify bilingual completeness gaps on PR #%s: %s",
@@ -934,10 +1213,32 @@ def run_doc_verify(
             dict.fromkeys([*inherited_completeness_gaps, *pr_result.completeness_gaps])
         )
         pr_result.completeness_gaps = merged_gaps
+    if translation_scope_missing:
+        logger.error(
+            "Translation PR #%s is missing source-scope EN paths: %s",
+            pr_number,
+            translation_scope_missing,
+        )
+        pr_result.completeness_gaps = list(
+            dict.fromkeys([*pr_result.completeness_gaps, *translation_scope_missing])
+        )
 
     job.pr_result = pr_result
 
-    touched = _apply_results_to_disk(
+    _apply_transaction_gates(repo_path, pr_result, docs_root=cfg.paths.docs_root)
+
+    final_read_only_verify = _fixup_rerun_depth >= 3 and inline_fixup_push
+    if final_read_only_verify:
+        logger.info(
+            "Final read-only doc_verify for PR #%s: reporting the current head "
+            "without applying further critic suggestions",
+            pr_number,
+        )
+        touched = None
+    elif pr_result.completeness_gaps:
+        touched = TouchedPaths([], [])
+    else:
+        touched = _apply_results_to_disk(
             repo_path,
             pr_result,
             dry_run=dry_run,
@@ -945,6 +1246,7 @@ def run_doc_verify(
         )
 
     committed = pushed = False
+    inline_head_changed = False
     fixup_pr_number: int | None = None
     fixup_pr_url: str | None = None
     if touched and not dry_run and not no_commit:
@@ -969,6 +1271,7 @@ def run_doc_verify(
             paths=touched.written,
             deleted_paths=touched.deleted,
         )
+        head_before_fixup = git_head_sha(repo_path)
         committed = git_commit_paths(
             repo_path,
             touched.written,
@@ -977,6 +1280,7 @@ def run_doc_verify(
             _GITHUB_ACTOR_EMAIL,
             deleted_paths=touched.deleted,
         )
+        inline_head_changed = committed and git_head_sha(repo_path) != head_before_fixup
         if committed:
             if not inline_fixup_push:
                 _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
@@ -1010,6 +1314,51 @@ def run_doc_verify(
     job.committed = committed
     job.pushed = pushed
 
+    # A report is evidence about one immutable checkout. Inline critic fixes
+    # change the translation PR head, so the old result must never be posted as
+    # current. Re-run verify on the new head and report that result (§6.219).
+    if pushed and inline_fixup_push and inline_head_changed and not dry_run:
+        if _fixup_rerun_depth >= 2:
+            logger.info(
+                "Inline critic fix changed PR #%s after the automatic rerun limit; "
+                "running one final read-only doc_verify on the new head",
+                pr_number,
+            )
+            return run_doc_verify(
+                repo_path=repo_path,
+                github_repo=github_repo,
+                pr_number=pr_number,
+                merge_base_with=merge_base_with,
+                dry_run=False,
+                no_commit=no_commit,
+                config=cfg,
+                inherited_completeness_gaps=inherited_completeness_gaps,
+                continue_feedback=continue_feedback,
+                skip_ops_gates=True,
+                ops_mode=ops_mode,
+                _fixup_rerun_depth=_fixup_rerun_depth + 1,
+            )
+        else:
+            logger.info(
+                "Inline critic fix changed PR #%s head; re-running doc_verify (%s/2)",
+                pr_number,
+                _fixup_rerun_depth + 1,
+            )
+            return run_doc_verify(
+                repo_path=repo_path,
+                github_repo=github_repo,
+                pr_number=pr_number,
+                merge_base_with=merge_base_with,
+                dry_run=False,
+                no_commit=no_commit,
+                config=cfg,
+                inherited_completeness_gaps=inherited_completeness_gaps,
+                continue_feedback=continue_feedback,
+                skip_ops_gates=True,
+                ops_mode=ops_mode,
+                _fixup_rerun_depth=_fixup_rerun_depth + 1,
+            )
+
     elapsed = time.monotonic() - started
     if dry_run:
         return job
@@ -1031,9 +1380,7 @@ def run_doc_verify(
             job.translation_pr_number = fixup_pr_number
             if created:
                 try:
-                    gh.add_issue_labels(
-                        owner, repo, fixup_pr_number, ["documentation"]
-                    )
+                    gh.add_issue_labels(owner, repo, fixup_pr_number, ["documentation"])
                 except GitHubAPIError as exc:
                     logger.warning(
                         "Could not add documentation label to PR #%s: %s",
@@ -1044,6 +1391,14 @@ def run_doc_verify(
     # Full QA report: on newly opened fixup PR when one exists; otherwise on
     # the verified PR (translation / verify-* / bilingual with no fixes).
     report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
+    if final_read_only_verify:
+        mismatches = _enforce_report_checkout_bytes(repo_path, verify_content_sha, pr_result)
+        if mismatches:
+            logger.error(
+                "Refusing green evidence for checkout %s; in-memory QA differs: %s",
+                verify_content_sha,
+                mismatches,
+            )
     report_num = _next_report_number(gh, owner, repo, report_pr)
     meta = ReportMeta(
         mode="doc_verify",
@@ -1074,9 +1429,7 @@ def run_doc_verify(
             owner,
             repo,
             pr_number,
-            build_verify_fixup_source_comment(
-                fixup_pr_number, translation_pr=translation_pr
-            ),
+            build_verify_fixup_source_comment(fixup_pr_number, translation_pr=translation_pr),
             label="doc_verify fixup link",
         )
     if ops_ctx is not None:
@@ -1114,6 +1467,7 @@ def run_doc_continue(
     api_token, _push = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
+    ctx = pull_request_context(gh, owner, repo, pr_number)
 
     feedback = (instruction or "").strip()
     if not feedback:
@@ -1128,9 +1482,7 @@ def run_doc_continue(
                 "и снова повесьте лейбл **`doc_continue``."
             )
             if not dry_run:
-                _safe_post_issue_comment(
-                    gh, owner, repo, pr_number, body, label="continue missing"
-                )
+                _safe_post_issue_comment(gh, owner, repo, pr_number, body, label="continue missing")
             return DocJobResult(
                 mode="doc_continue",
                 pr_number=pr_number,
@@ -1138,17 +1490,38 @@ def run_doc_continue(
             )
         feedback = found
 
-    # Re-run verify with operator feedback (critic + heuristics + optional repair).
-    job = run_doc_verify(
-        repo_path=repo_path,
-        github_repo=github_repo,
-        pr_number=pr_number,
-        merge_base_with=merge_base_with,
-        dry_run=dry_run,
-        no_commit=no_commit,
-        config=cfg,
-        continue_feedback=feedback,
-        ops_mode="continue",
+    source_pr = source_pr_number_from_branch(
+        ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
+    if source_pr is not None:
+        # A translation PR may be incomplete. Re-running verify can only edit
+        # files already present in its diff, so it can never create an omitted
+        # source-scope mirror (#50840). Continue must re-run translation from
+        # the source PR, then perform its normal inline verify.
+        job = run_doc_translate(
+            repo_path=repo_path,
+            github_repo=github_repo,
+            pr_number=source_pr,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+            config=cfg,
+            continue_feedback=feedback,
+            ops_mode="continue",
+        )
+    else:
+        # Verify-fixup PRs have all source-scope files already; critic feedback
+        # is applied inline without rebuilding a translation branch.
+        job = run_doc_verify(
+            repo_path=repo_path,
+            github_repo=github_repo,
+            pr_number=pr_number,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+            config=cfg,
+            continue_feedback=feedback,
+            ops_mode="continue",
+        )
     job.mode = "doc_continue"
     return job

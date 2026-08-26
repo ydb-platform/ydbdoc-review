@@ -1,0 +1,15 @@
+{
+  "ref": "36fdea05efbfa77aa365ae6747bbe09a5bd6969f",
+  "role": "PR #51142 base at creation; exact current RU/EN before translation",
+  "files": {
+    "bulk-upsert": {"decision": "preserve", "ru_sha256": "de198bb468a2f66841014dc5d815603139c04fd921a452c4fc7f454a4d99736d", "en_sha256": "34472c5c6daaf43f730fee98d190d1ebbfc5af234fd37c67246eacd9039581db"},
+    "retry": {"decision": "preserve", "ru_sha256": "aa49c648a4379c32a9b066d57d52de8e46766bf1761421cb85849001343ec806", "en_sha256": "bf410dc82b5fee197f529c44938574e08c210deb92d9fe4c8685dfdabc867438"},
+    "upsert": {"decision": "preserve", "ru_sha256": "f295893f609f9a02aa7ad4a7c86e8b7cdadd86474b6ccd121681b38f3b1b0d28", "en_sha256": "b0f284d2b4f94fccafb2f9d2c5b687a1c2f08e1654e33dbf122fada5b09ec824"},
+    "ttl": {"decision": "preserve", "ru_sha256": "54f8960aac97a537d9272ecde664cf52af97e8122ff6020100d20795275ea98b", "en_sha256": "6179c2187912ce538d481f510c684727c820b415827d1da5080b29d1eeeab1c8"},
+    "coordination": {"decision": "preserve", "ru_sha256": "d4c0913c0d734a563af9eff069a0b5082a49389513e7cfe49e5e0d8caf37fb39", "en_sha256": "9753d5c9c7c5b5c4d37ef9dd582d559ca94889c7379c64e864e59fbdeb66aa8f"},
+    "topic": {"decision": "blocked", "ru_sha256": "fa679dbd7af2f722e96de476e3f7277c35f2e5d3ae850526e23308803dfc28d3", "en_sha256": "1b3d30fe60d3fe79371f413e957efc4e7746e3fe9b2c44355e3ce37ba2a8cc99"},
+    "install": {"decision": "blocked", "ru_sha256": "9796ad87dd9fe0e52a596f887210e3aede427e68b6dc2504a441a543b3c7ac71", "en_sha256": "6e881a4413f46ad188d158b36934ed4e78af3c65c489953626b5bb6da6654d4b"},
+    "vector-search": {"decision": "blocked", "ru_sha256": "81a909e75b31322d7a81930aaef452fb0d9d7827f3bc3d31fa88774a047d4318", "en_sha256": "7906991b2b403d5ad881b956e62b80010a83c15678a8d0fc413294b7c18a28ee"},
+    "health-check-api": {"decision": "blocked", "ru_sha256": "c58ad213d11164f2f431690669f2363815c4d2c4d85fcce4e5f2cf6dac77b66a", "en_sha256": "013fd06125ac5fe7564f83333d979904313b878239dcd78ce9144ffc45e62174"}
+  }
+}

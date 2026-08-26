@@ -46,6 +46,22 @@ def code_blocks_from_text(text: str) -> list[FencedCode | IndentedCode]:
     return collect_code_blocks(parse_markdown(text))
 
 
+def fence_structure_is_round_trip_stable(text: str, *, lang: str = "ru") -> bool:
+    """Whether our renderer preserves the source's fenced-block count."""
+    raw = len(code_blocks_from_text(text))
+    rendered = render_markdown(parse_markdown(text), target_lang=lang)
+    return len(code_blocks_from_text(rendered)) == raw
+
+
+def fence_marker_tokens(text: str) -> list[str]:
+    marker = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+    return [
+        match.group(1) + match.group(2).strip()
+        for line in text.splitlines()
+        if (match := marker.match(line))
+    ]
+
+
 def _normalize_fence_content_for_compare(text: str) -> str:
     """Normalize fence body for compare: angle placeholders + YAML homoglyphs."""
     inner = fix_russian_angle_placeholders_in_en_fences(f"```\n{text}\n```")
@@ -60,6 +76,9 @@ _MERMAID_START = re.compile(
 _MERMAID_ARROW = re.compile(r"(--x|->>|->|--)")
 # Collapse label tokens; keep arrows, punctuation, and mermaid keywords.
 _MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")
+# Quoted node/subgraph labels: RU hyphens vs EN spaces must not differ
+# structurally («Дата-центр» → ``*-*`` vs «Data center» → ``* *``; #49578).
+_MERMAID_QUOTED_LABEL = re.compile(r"""\["(?:\\.|[^"\\])*"\]|\['(?:\\.|[^'\\])*'\]""")
 
 
 def _is_mermaid_fence(content: str) -> bool:
@@ -74,6 +93,8 @@ def _mermaid_structure_line(line: str) -> str:
         return ""
     if _MERMAID_START.match(stripped):
         return stripped.split()[0].lower()
+    # Whole quoted label → one token (word count / hyphens inside must not matter).
+    stripped = _MERMAID_QUOTED_LABEL.sub("[*]", stripped)
     if stripped.startswith("participant "):
         rest = stripped[len("participant ") :]
         if " as " in rest:
@@ -138,9 +159,7 @@ def _fence_diff_is_comment_translation_only(
         if src_prefix is not None:
             if trailing_comment_code_prefix(tgt_line) != src_prefix:
                 return False
-        if _comment_body_if_cyrillic(tgt_line) is not None and _CYRILLIC.search(
-            tgt_line
-        ):
+        if _comment_body_if_cyrillic(tgt_line) is not None and _CYRILLIC.search(tgt_line):
             return False
     return saw_diff
 
@@ -246,6 +265,7 @@ def _fence_diff_is_whitespace_only(
     target_content: str,
 ) -> bool:
     """True when bodies differ only by blank lines or trailing spaces."""
+
     def _lines(text: str) -> list[str]:
         return [line.rstrip() for line in text.splitlines() if line.strip()]
 
@@ -300,6 +320,13 @@ def check_fence_body_copy(
 ) -> list[str]:
     """Warn when any fenced/indented block body differs from source (pipeline corruption)."""
     source_text = _source_text_for_fence_compare(source_text, source_lang=source_lang)
+    if not fence_structure_is_round_trip_stable(
+        source_text, lang=source_lang
+    ) and fence_marker_tokens(source_text) == fence_marker_tokens(target_text):
+        # The target preserves the only unambiguous contract available for a
+        # malformed legacy file: the exact ordered marker sequence. Our AST
+        # cannot reliably pair bodies in that case; Diplodoc build is the gate.
+        return []
     src_blocks = code_blocks_from_text(source_text)
     tgt_blocks = code_blocks_from_text(target_text)
     if len(src_blocks) != len(tgt_blocks):
@@ -318,7 +345,9 @@ def check_fence_body_copy(
     return warnings
 
 
-def _copy_fence_body_from_source(src: FencedCode | IndentedCode, tgt: FencedCode | IndentedCode) -> bool:
+def _copy_fence_body_from_source(
+    src: FencedCode | IndentedCode, tgt: FencedCode | IndentedCode
+) -> bool:
     """Return False for ``text`` diagram fences — keep EN translation (§6.59)."""
     if isinstance(src, FencedCode):
         return _fence_lang(src.info) != "text"
@@ -357,8 +386,10 @@ def check_absolute_paths_in_fences(source_text: str, target_text: str) -> list[s
         if len(src_lines) != len(tgt_lines):
             continue
         for line_no, (sl, tl) in enumerate(zip(src_lines, tgt_lines, strict=True), start=1):
-            if "/opt/ydb/" in sl and "/opt/ydb/" not in tl and re.search(
-                r"(?<!/opt/ydb/)(?:ca\.crt|node\.crt|node\.key)", tl
+            if (
+                "/opt/ydb/" in sl
+                and "/opt/ydb/" not in tl
+                and re.search(r"(?<!/opt/ydb/)(?:ca\.crt|node\.crt|node\.key)", tl)
             ):
                 warnings.append(
                     f"fence_path_stripped: block {i} line {line_no}: "

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.git_ops import (
@@ -12,17 +12,17 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
 )
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
-from ydbdoc_review.pipeline.analyze import PairContent
+from ydbdoc_review.pipeline.analyze import PairContent, PairProvenance, derive_pair_provenance
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
     DocPair,
     NavigationPair,
     build_doc_pairs,
 )
-from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 _STATUS_TO_KIND: dict[str, ChangeKind] = {
@@ -100,6 +100,24 @@ def translate_ru_content_ref(ctx: PullRequestContext) -> str | None:
     return None
 
 
+def source_pr_scope_changes(
+    ctx: PullRequestContext,
+    git_changes: list[tuple[str, ChangeKind]],
+    api_changes: list[tuple[str, ChangeKind]],
+) -> list[tuple[str, ChangeKind]]:
+    """Return the authoritative source-PR change list for translation scope.
+
+    For an open PR the checkout diff can contain changes not yet visible through
+    the API, so both sources are merged. For a merged PR the checkout can be its
+    historical merge commit while ``merge_base_with`` points at today's main.
+    That diff contains unrelated repository drift and must not expand the PR
+    scope (or falsely mark EN mirrors as bilingual).
+    """
+    if ctx.merged:
+        return merge_pr_file_changes(api_changes)
+    return merge_pr_file_changes(git_changes, api_changes)
+
+
 def repo_https_clone_url(owner: str, repo: str) -> str:
     """HTTPS clone URL for the upstream (target) repository."""
     return f"https://github.com/{owner}/{repo}.git"
@@ -171,9 +189,7 @@ def list_pr_file_changes_api(
     return out
 
 
-def list_pr_file_changes_git(
-    repo_path: str, merge_base_with: str
-) -> list[tuple[str, ChangeKind]]:
+def list_pr_file_changes_git(repo_path: str, merge_base_with: str) -> list[tuple[str, ChangeKind]]:
     """Changed paths from local git merge-base diff."""
     return list_local_changes(repo_path, merge_base_with)
 
@@ -223,9 +239,7 @@ def source_pr_merged(data: dict) -> bool:
     return bool(data.get("merged"))
 
 
-def _source_pr_head_ref(
-    data: dict, owner: str, repo: str, source_pr: int
-) -> tuple[str, str, str]:
+def _source_pr_head_ref(data: dict, owner: str, repo: str, source_pr: int) -> tuple[str, str, str]:
     head = data.get("head") or {}
     head_repo = head.get("repo") or {}
     head_owner = head_repo.get("owner") or {}
@@ -249,9 +263,7 @@ def source_pr_content_ref_from_pull(
     return _source_pr_head_ref(data, owner, repo, source_pr)
 
 
-def source_pr_merge_ref_from_pull(
-    data: dict, owner: str, repo: str
-) -> tuple[str, str, str] | None:
+def source_pr_merge_ref_from_pull(data: dict, owner: str, repo: str) -> tuple[str, str, str] | None:
     """Upstream merge-commit ref for a merged source PR, or ``None``."""
     if not source_pr_merged(data):
         return None
@@ -338,9 +350,7 @@ def pick_verify_ru_text(
         secondary = -idx if source_pr_merged else idx
         return (fence_n, secondary)
 
-    scored = [
-        (_fence_body_copy_warnings(c, en_text), i, c) for i, c in enumerate(matching)
-    ]
+    scored = [(_fence_body_copy_warnings(c, en_text), i, c) for i, c in enumerate(matching)]
     scored.sort(key=_tie_key)
     return scored[0][2]
 
@@ -391,6 +401,7 @@ def load_verify_pair_contents(
     owner: str,
     repo: str,
     source_pr: int,
+    target_ref: str | None = None,
 ) -> list[PairContent]:
     """Load EN from translation PR checkout; RU from PR head / merge / checkout.
 
@@ -402,15 +413,21 @@ def load_verify_pair_contents(
     """
     pull_data = gh.get_pull(owner, repo, source_pr)
     merged = source_pr_merged(pull_data)
-    ru_owner, ru_repo, ru_ref = source_pr_content_ref_from_pull(
-        pull_data, owner, repo, source_pr
-    )
+    ru_owner, ru_repo, ru_ref = source_pr_content_ref_from_pull(pull_data, owner, repo, source_pr)
     merge_ref = source_pr_merge_ref_from_pull(pull_data, owner, repo)
     contents: list[PairContent] = []
     for pair in pairs:
-        en_text = read_text(repo_path, pair.en_path)
-        if en_text is None and not pair.en_deleted:
-            en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+        current_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        provenance = PairProvenance.CURRENT_PAIR
+        en_text = None
+        if not pair.en_deleted:
+            # Bind report evidence to the immutable SHA printed in the report;
+            # the mutable worktree may move during recursive inline fixups.
+            en_text = (
+                read_text_at_ref(repo_path, target_ref, pair.en_path)
+                if target_ref is not None
+                else read_text(repo_path, pair.en_path)
+            )
 
         ru_api: str | None = None
         ru_merge: str | None = None
@@ -436,14 +453,10 @@ def load_verify_pair_contents(
         )
 
         ru_diff = (
-            file_diff_range(repo_path, merge_base_with, pair.ru_path)
-            if pair.ru_changed
-            else None
+            file_diff_range(repo_path, merge_base_with, pair.ru_path) if pair.ru_changed else None
         )
         en_diff = (
-            file_diff_range(repo_path, merge_base_with, pair.en_path)
-            if pair.en_changed
-            else None
+            file_diff_range(repo_path, merge_base_with, pair.en_path) if pair.en_changed else None
         )
         ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
@@ -456,6 +469,8 @@ def load_verify_pair_contents(
                 en_diff_vs_base=en_diff or None,
                 ru_base_text=ru_base_text,
                 en_base_text=en_base_text,
+                provenance=provenance,
+                current_ru_text=current_ru,
             )
         )
     return contents
@@ -467,6 +482,7 @@ def load_pair_contents(
     *,
     merge_base_with: str,
     ru_content_ref: str | None = None,
+    ru_base_ref: str | None = None,
 ) -> list[PairContent]:
     """Load RU/EN bodies and diffs for each pair from the local checkout.
 
@@ -478,6 +494,9 @@ def load_pair_contents(
     """
     contents: list[PairContent] = []
     for pair in pairs:
+        current_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        current_en = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
+        provenance = derive_pair_provenance(current_ru=current_ru, current_en=current_en) if ru_content_ref else PairProvenance.CURRENT_PAIR
         ru_text: str | None = None
         if ru_content_ref:
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
@@ -496,19 +515,26 @@ def load_pair_contents(
         en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
+        if ru_content_ref and current_en is not None:
+            # A merged historical PR is checked out at its old merge commit,
+            # while the translation branch is based on current main.  Current
+            # EN is therefore the target authority; the checkout EN is only
+            # historical evidence used to prove that the pair advanced.
+            en_text = current_en
 
         ru_diff = (
-            file_diff_range(repo_path, merge_base_with, pair.ru_path)
-            if pair.ru_changed
-            else None
+            file_diff_range(repo_path, merge_base_with, pair.ru_path) if pair.ru_changed else None
         )
         en_diff = (
-            file_diff_range(repo_path, merge_base_with, pair.en_path)
-            if pair.en_changed
+            file_diff_range(repo_path, merge_base_with, pair.en_path) if pair.en_changed else None
+        )
+        ru_base_text = read_text_at_ref(repo_path, ru_base_ref or merge_base_with, pair.ru_path)
+        en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
+        historical_en_text = (
+            read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
+            if ru_content_ref
             else None
         )
-        ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
-        en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         contents.append(
             PairContent(
                 pair=pair,
@@ -518,6 +544,9 @@ def load_pair_contents(
                 en_diff_vs_base=en_diff or None,
                 ru_base_text=ru_base_text,
                 en_base_text=en_base_text,
+                provenance=provenance,
+                current_ru_text=current_ru,
+                historical_en_text=historical_en_text,
             )
         )
     return contents
@@ -551,17 +580,13 @@ def load_verify_navigation_ru_texts(
         en_text = read_text(repo_path, pair.en_path)
         if en_text is None:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
-        picked = pick_verify_nav_ru_text(
-            en_text=en_text, ru_api=ru_api, ru_local=ru_local
-        )
+        picked = pick_verify_nav_ru_text(en_text=en_text, ru_api=ru_api, ru_local=ru_local)
         if picked is not None:
             texts[pair.ru_path] = picked
     return texts
 
 
-_BRANCH_SOURCE_RE = re.compile(
-    r"ydbdoc-review/pr-(\d+)", re.IGNORECASE
-)
+_BRANCH_SOURCE_RE = re.compile(r"ydbdoc-review/pr-(\d+)", re.IGNORECASE)
 
 
 def parse_source_pr_from_text(text: str) -> int | None:

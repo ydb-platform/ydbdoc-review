@@ -79,6 +79,48 @@ def test_tabs_accordion_variant():
     assert tabs.variant == "tabs accordion"
 
 
+def test_tabs_group_lang_variant_roundtrip():
+    """§6.194: ``group=lang`` must parse as YfmTabs (#37673 health-check / topic)."""
+    text = (
+        "{% list tabs group=lang %}\n"
+        "\n"
+        "- Go\n"
+        "\n"
+        "  Go body.\n"
+        "\n"
+        "- Python\n"
+        "\n"
+        "  Python body.\n"
+        "\n"
+        "{% endlist %}\n"
+    )
+    doc = parse_markdown(text)
+    assert len(doc.children) == 1
+    tabs = doc.children[0]
+    assert isinstance(tabs, YfmTabs)
+    assert tabs.variant == "tabs group=lang"
+    assert len(tabs.children) == 2
+    assert_stable(text)
+    assert "{% list tabs group=lang %}" in round_trip(text)
+
+
+def test_tabs_group_hyphenated_value():
+    text = (
+        "{% list tabs group=manual-systemd %}\n"
+        "\n"
+        "- Unit\n"
+        "\n"
+        "  Body.\n"
+        "\n"
+        "{% endlist %}\n"
+    )
+    doc = parse_markdown(text)
+    tabs = doc.children[0]
+    assert isinstance(tabs, YfmTabs)
+    assert tabs.variant == "tabs group=manual-systemd"
+    assert_stable(text)
+
+
 def test_tabs_with_code_inside():
     text = (
         "{% list tabs %}\n"

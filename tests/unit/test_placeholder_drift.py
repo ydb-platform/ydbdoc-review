@@ -96,6 +96,21 @@ def test_filter_critic_response_clears_verdict():
     assert out.verdict == "ok"
 
 
+def test_identical_non_cyrillic_segment_drops_critic_hallucination():
+    seg = _segment("s0152", "Some nodes are restarting too often")
+    issue = CriticIssueOut(
+        segment_id="s0152",
+        severity="blocked",
+        category="meaning drift",
+        comment="The translation is missing unrelated context.",
+        suggested_text="Description: unrelated text",
+    )
+    filtered = drop_spurious_placeholder_issues(
+        [issue], [seg], {"s0152": seg.text}
+    )
+    assert filtered == []
+
+
 def test_cross_lang_reorder_issue_dropped():
     """§6.56: same atom multiset, reorder comment — spurious after align."""
     ru = "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧"
@@ -465,4 +480,3 @@ def test_drop_missing_u_placeholder_for_stripped_href():
         en_toc_reachable=reachable,
     )
     assert filtered == []
-

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,10 +20,19 @@ from difflib import SequenceMatcher
 from typing import Literal
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.pipeline.qa import align_translations_from_target
+from ydbdoc_review.pipeline.qa import (
+    align_translations_from_target,
+    partial_align_translations_from_target,
+    partial_seed_is_trustworthy,
+)
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.segmentation.placeholder_align import describe_atom
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.validation.markers import (
+    is_placeholder_only_text,
+    placeholders_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +41,132 @@ ChangeType = Literal["new_file", "deleted_file", "modified"]
 MergeStrategy = Literal["reconstruct", "patch"]
 
 _ENV_ENABLE = "YDBDOC_DIFFERENTIAL_TRANSLATION"
+_AUTOTITLE_LIST_LINE = re.compile(r"^\s*[-*+]\s+\[\{#T\}\]\(([^)]+)\)\.?\s*$")
+
+
+def _autotitle_href_from_line(line: str) -> str | None:
+    match = _AUTOTITLE_LIST_LINE.fullmatch(line.rstrip("\r\n"))
+    return match.group(1) if match else None
+
+
+def autotitle_delta_satisfied_in_en(ru_base_text: str, ru_pr_text: str, en_text: str) -> bool:
+    """True when a source-only autotitle list insertion is already present in EN."""
+    base_lines = ru_base_text.splitlines(keepends=True)
+    pr_lines = ru_pr_text.splitlines(keepends=True)
+    added_hrefs: list[str] = []
+    en_hrefs = {
+        href
+        for line in en_text.splitlines(keepends=True)
+        if (href := _autotitle_href_from_line(line)) is not None
+    }
+    for tag, _i1, _i2, j1, j2 in SequenceMatcher(
+        None, base_lines, pr_lines, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "insert":
+            return False
+        added = pr_lines[j1:j2]
+        if not added:
+            continue
+        for line in added:
+            href = _autotitle_href_from_line(line)
+            if href is None:
+                return False
+            added_hrefs.append(href)
+    if not added_hrefs:
+        return False
+    return all(href in en_hrefs for href in added_hrefs)
+
+
+def patch_en_with_source_added_autotitle_lines(
+    ru_base_text: str,
+    ru_pr_text: str,
+    en_text: str,
+) -> str | None:
+    """Apply a source-only autotitle list insertion without rewriting EN bytes.
+
+    This handles tiny index changes such as #45949/#50904. Only insert opcodes
+    containing ``[{#T}](...)`` list items are accepted; any removal or modified
+    source line fails closed to the regular translation path.
+    """
+    base_lines = ru_base_text.splitlines(keepends=True)
+    pr_lines = ru_pr_text.splitlines(keepends=True)
+    en_lines = en_text.splitlines(keepends=True)
+    insertions: list[tuple[str | None, str | None, list[str]]] = []
+
+    for tag, i1, _i2, j1, j2 in SequenceMatcher(
+        None, base_lines, pr_lines, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        added = pr_lines[j1:j2]
+        if (
+            tag != "insert"
+            or not added
+            or any(_AUTOTITLE_LIST_LINE.fullmatch(line) is None for line in added)
+        ):
+            return None
+
+        previous = next(
+            (
+                match.group(1)
+                for line in reversed(base_lines[:i1])
+                if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+            ),
+            None,
+        )
+        following = next(
+            (
+                match.group(1)
+                for line in base_lines[i1:]
+                if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+            ),
+            None,
+        )
+        insertions.append((previous, following, added))
+
+    if not insertions:
+        return None
+
+    for previous, following, added in insertions:
+        added_hrefs = [_autotitle_href_from_line(line) for line in added]
+        if added_hrefs and all(
+            href in {
+                h
+                for line in en_lines
+                if (h := _autotitle_href_from_line(line)) is not None
+            }
+            for href in added_hrefs
+            if href is not None
+        ):
+            continue
+        index: int | None = None
+        if previous is not None:
+            index = next(
+                (
+                    pos + 1
+                    for pos, line in enumerate(en_lines)
+                    if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+                    and match.group(1) == previous
+                ),
+                None,
+            )
+        if index is None and following is not None:
+            index = next(
+                (
+                    pos
+                    for pos, line in enumerate(en_lines)
+                    if (match := _AUTOTITLE_LIST_LINE.fullmatch(line))
+                    and match.group(1) == following
+                ),
+                None,
+            )
+        if index is None:
+            return None
+        en_lines[index:index] = added
+
+    return "".join(en_lines)
 
 
 @dataclass(frozen=True)
@@ -127,8 +263,17 @@ def _segment_to_block(seg: Segment) -> TextBlock:
     )
 
 
-def _segment_key(seg: Segment) -> tuple[str, str]:
-    return (seg.kind.value, seg.text)
+def _segment_key(seg: Segment) -> tuple[str, str, tuple[str, ...]]:
+    """Semantic differential key including protected inline atom payloads.
+
+    Segment text contains placeholders such as ``⟦C1⟧``. Comparing only that
+    text makes two different inline-code values look equal, which hid the
+    ``client_certificate_required=true`` → ``: true`` edit in #40385.
+    Placeholder numbering is intentionally excluded; atom descriptions carry
+    the actual code, URL, variable, or HTML payload.
+    """
+    atoms = tuple(describe_atom(item.node) for item in seg.placeholders)
+    return (seg.kind.value, seg.text, atoms)
 
 
 def is_change_magnitude_high(
@@ -258,9 +403,10 @@ def analyze_ru_diff(
             kept_ids.add(pr_seg.id)
             continue
         # Heuristic: if a similar-length equal-kind segment existed, call modified
-        if any(
-            s.kind == pr_seg.kind and s.text != pr_seg.text for s in base_segments
-        ) and _segment_key(pr_seg) not in base_keys:
+        if (
+            any(s.kind == pr_seg.kind and s.text != pr_seg.text for s in base_segments)
+            and _segment_key(pr_seg) not in base_keys
+        ):
             modified.append(block)
             modified_ids.add(pr_seg.id)
         else:
@@ -269,9 +415,7 @@ def analyze_ru_diff(
 
     # Removed: base segments with no equal PR counterpart
     pr_keys = {_segment_key(s) for s in pr_segments}
-    removed = [
-        _segment_to_block(s) for s in base_segments if _segment_key(s) not in pr_keys
-    ]
+    removed = [_segment_to_block(s) for s in base_segments if _segment_key(s) not in pr_keys]
 
     changed = len(added_ids) + len(modified_ids)
     denom = max(len(pr_segments), 1)
@@ -360,6 +504,24 @@ class DifferentialTranslationAnalyzer:
                 config={"is_new_file": True},
             )
 
+        # A formatting-only RU change must never trigger EN regeneration.  Do
+        # this before incomplete/stale heuristics: those describe existing EN,
+        # but cannot create translation work when the source has no semantic
+        # segment delta (#49933 / #50789).
+        analysis: RuDiffAnalysis | None = None
+        if ru_base_text is not None and ru_base_text.strip():
+            analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
+            if ru_base_text != ru_pr_text and not (
+                analysis.added_segment_ids
+                or analysis.modified_segment_ids
+                or analysis.removed_blocks
+            ):
+                return TranslationStrategy(
+                    mode="skip",
+                    reason="RU diff has no semantic segment changes",
+                    config={"semantic_noop": True, "change_magnitude": 0.0},
+                )
+
         if is_en_file_incomplete(
             en_current_text,
             ru_pr_text,
@@ -369,8 +531,7 @@ class DifferentialTranslationAnalyzer:
             return TranslationStrategy(
                 mode="full",
                 reason=(
-                    f"EN file too small (~{ratio:.0%} of RU), likely incomplete; "
-                    "full translation"
+                    f"EN file too small (~{ratio:.0%} of RU), likely incomplete; full translation"
                 ),
                 config={"en_file_incomplete": True, "en_to_ru_ratio": ratio},
             )
@@ -395,7 +556,7 @@ class DifferentialTranslationAnalyzer:
                 config={"missing_ru_base": True},
             )
 
-        analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
+        analysis = analysis or analyze_ru_diff(ru_base_text, ru_pr_text)
         if is_change_magnitude_high(analysis, cfg.change_magnitude_threshold):
             return TranslationStrategy(
                 mode="full",
@@ -433,19 +594,40 @@ class DifferentialTranslationAnalyzer:
 
         try:
             base_en = align_translations_from_target(base_segments, en_current_text)
+            base_en_relaxed = base_en
         except TranslationValidationError as exc:
+            base_en = partial_align_translations_from_target(base_segments, en_current_text)
             logger.info(
-                "Cannot align existing EN to base RU (%s) — empty differential plan",
+                "Cannot fully align existing EN to base RU (%s) — "
+                "partial seed for %s/%s base segments (§6.168)",
                 exc,
+                len(base_en),
+                len(base_segments),
             )
-            pending = frozenset(s.id for s in pr_segments)
-            return DifferentialTranslationPlan(
-                added_blocks=[_segment_to_block(s) for s in pr_segments],
-                modified_blocks=[],
-                en_blocks_to_keep=[],
-                merge_strategy="reconstruct",
-                seeded_translations={},
-                pending_segment_ids=pending,
+            # Weak partial maps (kind drift / count match only) must not drive
+            # differential — fall back to full (§6.163 / #48595).
+            # Use a real ratio (not int(0.4*n)): for n=4, int gives 1 and a
+            # single heading seed would enable relaxed LCS that mis-pairs
+            # plain paragraphs.
+            if len(base_en) < 0.4 * len(base_segments):
+                pending = frozenset(s.id for s in pr_segments)
+                return DifferentialTranslationPlan(
+                    added_blocks=[_segment_to_block(s) for s in pr_segments],
+                    modified_blocks=[],
+                    en_blocks_to_keep=[],
+                    merge_strategy="reconstruct",
+                    seeded_translations={},
+                    pending_segment_ids=pending,
+                )
+            base_en_relaxed = partial_align_translations_from_target(
+                base_segments,
+                en_current_text,
+                require_trustworthy=False,
+            )
+            logger.info(
+                "Relaxed equal-opcode map %s/%s (§6.184)",
+                len(base_en_relaxed),
+                len(base_segments),
             )
 
         pairs = _align_pr_to_base(base_segments, pr_segments)
@@ -455,28 +637,43 @@ class DifferentialTranslationAnalyzer:
         added_blocks: list[TextBlock] = []
         modified_blocks: list[TextBlock] = []
 
+        def _keep(pr_seg: Segment, en_text: str) -> None:
+            seeded[pr_seg.id] = en_text
+            kept_en_blocks.append(
+                TextBlock(
+                    kind=pr_seg.kind.value,
+                    content=en_text,
+                    line_range=(0, 0),
+                    segment_id=pr_seg.id,
+                )
+            )
+
+        def _safe_reuse(pr_seg: Segment, en_text: str) -> bool:
+            if not placeholders_match(pr_seg.text, en_text):
+                return False
+            if is_placeholder_only_text(pr_seg.text):
+                return is_placeholder_only_text(en_text)
+            return True
+
         for pr_seg, base_seg in pairs:
             if base_seg is not None:
                 en_text = base_en.get(base_seg.id)
-                if en_text is not None:
-                    seeded[pr_seg.id] = en_text
-                    kept_en_blocks.append(
-                        TextBlock(
-                            kind=pr_seg.kind.value,
-                            content=en_text,
-                            line_range=(0, 0),
-                            segment_id=pr_seg.id,
-                        )
-                    )
+                unchanged = pr_seg.text == base_seg.text
+                # Equal RU opcode: prefer strict map, then relaxed LCS (§6.184).
+                if unchanged:
+                    reuse = en_text or base_en_relaxed.get(base_seg.id)
+                    if reuse is not None and _safe_reuse(pr_seg, reuse):
+                        _keep(pr_seg, reuse)
+                        continue
+                if en_text is not None and partial_seed_is_trustworthy(pr_seg, en_text):
+                    _keep(pr_seg, en_text)
                     continue
             pending.add(pr_seg.id)
             added_blocks.append(_segment_to_block(pr_seg))
 
         analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
         # Prefer analysis classification for modified vs added labels
-        modified_blocks = [
-            b for b in added_blocks if b.segment_id in analysis.modified_segment_ids
-        ]
+        modified_blocks = [b for b in added_blocks if b.segment_id in analysis.modified_segment_ids]
         added_blocks = [
             b for b in added_blocks if b.segment_id not in analysis.modified_segment_ids
         ]
@@ -541,3 +738,184 @@ def prepare_differential_seed(
         strategy.config.get("change_magnitude"),
     )
     return strategy, dict(plan.seeded_translations), pending
+
+
+_LOW_MAGNITUDE_PATCH = 0.05
+
+
+def slim_pending_for_low_magnitude_patch(
+    pending: list[Segment],
+    *,
+    ru_base_text: str,
+    ru_pr_text: str,
+) -> tuple[list[Segment], RuDiffAnalysis] | None:
+    """When RU delta is tiny, keep existing EN and LLM only added/modified (§6.184).
+
+    Always activates below the magnitude threshold — even when ``pending`` is
+    empty or already equals the change set. Returning ``None`` in those cases
+    previously fell through to full RU→EN reconstruct and destroyed glossary
+    quality on #45667 / #49578.
+    """
+    analysis = analyze_ru_diff(ru_base_text, ru_pr_text)
+    if analysis.change_magnitude >= _LOW_MAGNITUDE_PATCH:
+        return None
+    change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
+    slim = [s for s in pending if s.id in change_ids]
+    return slim, analysis
+
+
+def low_magnitude_patch_has_anchors(segments: list[Segment], analysis: RuDiffAnalysis) -> bool:
+    """Whether every changed segment can be safely located in existing EN."""
+    change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
+    if not change_ids:
+        return True
+    by_id = {segment.id: index for index, segment in enumerate(segments)}
+    for segment_id in change_ids:
+        index = by_id.get(segment_id)
+        if index is None:
+            return False
+        if not any(
+            segment.kind.value == "heading" and segment.heading_anchor
+            for segment in segments[:index]
+        ):
+            return False
+    return True
+
+
+def _preceding_heading_anchor(segments: list[Segment], segment_id: str) -> str | None:
+    idx = next((i for i, s in enumerate(segments) if s.id == segment_id), None)
+    if idx is None:
+        return None
+    from ydbdoc_review.segmentation.types import SegmentKind
+
+    for i in range(idx - 1, -1, -1):
+        seg = segments[i]
+        if seg.kind == SegmentKind.HEADING and seg.heading_anchor:
+            return seg.heading_anchor
+    return None
+
+
+def _section_body_span(en_text: str, anchor: str) -> tuple[int, int] | None:
+    """Inclusive start / exclusive end of body after ``{#anchor}`` heading."""
+    needle = "{#" + anchor + "}"
+    start = en_text.find(needle)
+    if start < 0:
+        return None
+    line_end = en_text.find("\n", start)
+    if line_end < 0:
+        return len(en_text), len(en_text)
+    body_start = line_end + 1
+    match = re.search(r"\n#{1,6} ", en_text[line_end:])
+    if not match:
+        return body_start, len(en_text)
+    return body_start, line_end + match.start()
+
+
+def _section_end_before_next_heading(en_text: str, anchor: str) -> int | None:
+    """Byte offset of the next heading after ``{#anchor}``, or EOF."""
+    span = _section_body_span(en_text, anchor)
+    if span is None:
+        return None
+    return span[1]
+
+
+def _strip_md_links(text: str) -> str:
+    return re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+
+def _paragraphs_in_span(text: str, start: int, end: int) -> list[tuple[int, int, str]]:
+    """Return (abs_start, abs_end, paragraph) for non-empty blocks in span."""
+    body = text[start:end]
+    out: list[tuple[int, int, str]] = []
+    offset = 0
+    for part in re.split(r"(\n\s*\n)", body):
+        if re.fullmatch(r"\n\s*\n", part or ""):
+            offset += len(part)
+            continue
+        if not part.strip():
+            offset += len(part)
+            continue
+        abs_start = start + offset
+        abs_end = abs_start + len(part)
+        out.append((abs_start, abs_end, part.strip()))
+        offset += len(part)
+    return out
+
+
+def _best_paragraph_replace(en_text: str, anchor: str, en_seg: str) -> tuple[int, int] | None:
+    """Find a section paragraph that the new EN text should replace."""
+    from difflib import SequenceMatcher
+
+    span = _section_body_span(en_text, anchor)
+    if span is None:
+        return None
+    target = _strip_md_links(en_seg).casefold()
+    best: tuple[float, int, int] | None = None
+    for abs_start, abs_end, para in _paragraphs_in_span(en_text, *span):
+        if para.startswith("#"):
+            continue
+        ratio = SequenceMatcher(None, _strip_md_links(para).casefold(), target).ratio()
+        if best is None or ratio > best[0]:
+            best = (ratio, abs_start, abs_end)
+    if best is None or best[0] < 0.55:
+        return None
+    return best[1], best[2]
+
+
+def patch_en_with_added_translations(
+    en_text: str,
+    *,
+    pr_segments: list[Segment],
+    translations: dict[str, str],
+    added_segment_ids: frozenset[str],
+    modified_segment_ids: frozenset[str] = frozenset(),
+) -> str:
+    """Splice newly translated paragraphs into existing EN (§6.184).
+
+    Prefer replacing a similar paragraph under the same ``{#anchor}`` (plain
+    → linked glossary cross-refs). Otherwise insert before the next heading.
+
+    Never reconstructs the whole page — existing EN structure is preserved.
+    """
+    change_ids = added_segment_ids | modified_segment_ids
+    # (kind, pos_or_start, end_or_none, text) — replace uses start/end; insert uses pos.
+    ops: list[tuple[str, int, int | None, str]] = []
+    for seg in pr_segments:
+        if seg.id not in change_ids:
+            continue
+        en_seg = (translations.get(seg.id) or "").strip()
+        if not en_seg:
+            continue
+        if en_seg in en_text:
+            continue
+        anchor = _preceding_heading_anchor(pr_segments, seg.id)
+        if not anchor:
+            logger.warning(
+                "low-magnitude patch: no preceding anchor for %s; skip",
+                seg.id,
+            )
+            continue
+        replace_at = _best_paragraph_replace(en_text, anchor, en_seg)
+        if replace_at is not None:
+            ops.append(("replace", replace_at[0], replace_at[1], en_seg))
+            continue
+        pos = _section_end_before_next_heading(en_text, anchor)
+        if pos is None:
+            logger.warning(
+                "low-magnitude patch: EN missing {#%s}; skip insert",
+                anchor,
+            )
+            continue
+        ops.append(("insert", pos, None, en_seg))
+
+    if not ops:
+        return en_text
+
+    out = en_text
+    # Apply from the end so earlier offsets stay valid.
+    for kind, a, b, text in sorted(ops, key=lambda row: -row[1]):
+        if kind == "replace" and b is not None:
+            out = out[:a] + text + out[b:]
+        else:
+            out = out[:a] + "\n" + text + "\n" + out[a:]
+    return out

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/require-memory-bank-before-commit.py",
+        "matcher": "git\\s+commit",
+        "failClosed": true
+      }
+    ]
+  }
+}

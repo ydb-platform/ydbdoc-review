@@ -84,9 +84,18 @@ def merge_critic_responses(responses: list[CriticResponse]) -> CriticResponse:
 
 
 def _fallback_critic_response(*, reason: str) -> CriticResponse:
-    """Safe default when critic JSON cannot be parsed after retries."""
-    logger.error("Critic skipped (%s); treating as warnings with no issues", reason)
-    return CriticResponse(verdict="warnings", issues=[])
+    """Fail closed when critic JSON cannot be parsed after retries."""
+    logger.error("Critic failed (%s); blocking verification", reason)
+    return CriticResponse(
+        verdict="blocked",
+        issues=[
+            CriticIssueOut(
+                severity="blocked",
+                category="critic_execution_failed",
+                comment=f"Critic execution failed: {reason}",
+            )
+        ],
+    )
 
 
 def _fetch_critic_response(
@@ -96,24 +105,60 @@ def _fetch_critic_response(
     pass_label: str,
     max_tokens: int | None = None,
 ) -> CriticResponse:
-    """Call critic model with parse retries; fallback instead of raising."""
+    """Call critic with JSON repair and a model fallback before failing closed."""
     last_exc: LLMParseError | None = None
+    original_messages = list(messages)
+    retry_messages = original_messages
+    model_chain = client.model_chain_for_role("critic")
     for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
+        content = ""
+        # First retry asks the primary model to repair its malformed response.
+        # The final retry uses the configured fallback with the original prompt,
+        # avoiding a deterministic loop on the same model and payload.
+        model = model_chain[0]
+        if attempt == _MAX_CRITIC_ATTEMPTS and len(model_chain) > 1:
+            model = model_chain[1]
+            retry_messages = original_messages
         try:
-            result = client.chat(messages, role="critic", max_tokens=max_tokens)
+            result = client.chat(
+                retry_messages,
+                model=model,
+                max_tokens=max_tokens,
+            )
             content = (result.content or "").strip()
             if not content:
                 raise LLMParseError("Empty LLM response")
             return parse_critic_response(content)
         except LLMParseError as exc:
             last_exc = exc
+            preview = content[:200]
             logger.warning(
-                "%s parse attempt %s/%s failed: %s",
+                "%s parse attempt %s/%s failed: %s; model=%s "
+                "response_chars=%s response_preview=%r",
                 pass_label,
                 attempt,
                 _MAX_CRITIC_ATTEMPTS,
                 exc,
+                model,
+                len(content),
+                preview,
             )
+            if attempt == 1 and content:
+                retry_messages = [
+                    *original_messages,
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON. Return the same "
+                            "critic result as one valid JSON object matching the requested "
+                            "schema. Return JSON only, without Markdown fences or prose."
+                        ),
+                    },
+                ]
     return _fallback_critic_response(reason=str(last_exc or "unknown parse error"))
 
 
@@ -122,10 +167,46 @@ def parse_critic_response(raw: str) -> CriticResponse:
     data = parse_json_content(raw)
     if isinstance(data, dict):
         verdict_raw = data.get("verdict")
+        normalized_verdict: CriticVerdict | None = None
         if isinstance(verdict_raw, str):
-            normalized = normalize_critic_verdict_value(verdict_raw)
-            if normalized is not None:
-                data = {**data, "verdict": normalized}
+            normalized_verdict = normalize_critic_verdict_value(verdict_raw)
+            if normalized_verdict is not None:
+                data = {**data, "verdict": normalized_verdict}
+        issues = data.get("issues")
+        if isinstance(issues, list):
+            default_severity = (
+                "blocked" if normalized_verdict == "blocked" else "warning"
+            )
+            normalized_issues: list[object] = []
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    normalized_issues.append(issue)
+                    continue
+                # Some critic models emit a bare rewrite with no diagnosis.
+                # It is not an actionable issue and often repeats the current
+                # translation verbatim, so treating it as blocked creates a
+                # false failure and an endless fixup loop.
+                if (
+                    issue.get("suggested_text")
+                    and not issue.get("severity")
+                    and not issue.get("category")
+                    and not issue.get("comment")
+                    and not issue.get("description")
+                ):
+                    continue
+                normalized_issue = dict(issue)
+                normalized_issue.setdefault("severity", default_severity)
+                normalized_issue.setdefault("category", "translation_quality")
+                if not normalized_issue.get("comment"):
+                    normalized_issue["comment"] = (
+                        normalized_issue.get("description")
+                        or normalized_issue.get("suggested_text")
+                        or "Critic reported a translation issue."
+                    )
+                normalized_issues.append(normalized_issue)
+            data = {**data, "issues": normalized_issues}
+            if issues and not normalized_issues:
+                data["verdict"] = "ok"
     try:
         return CriticResponse.model_validate(data)
     except Exception as exc:
@@ -240,6 +321,48 @@ def _critic_fix_would_regress(
     return None
 
 
+_CODE_ONLY_LINK = re.compile(r"\[(⟦C\d+⟧)\]\((⟦U\d+⟧)\)")
+
+
+def _drop_impossible_code_link_issues(
+    response: CriticResponse,
+    translations: dict[str, str],
+    segments: list[Segment],
+) -> CriticResponse:
+    """Ignore link advice that contradicts a source-preserved code-only label."""
+    kept: list[CriticIssueOut] = []
+    source_by_id = _segments_by_id(segments)
+    for issue in response.issues:
+        current = translations.get(issue.segment_id or "", "")
+        source = source_by_id.get(issue.segment_id or "")
+        suggested = issue.suggested_text or ""
+        link_matches = list(
+            _CODE_ONLY_LINK.finditer(source.text if source is not None else "")
+        )
+        haystack = f"{issue.category} {issue.comment}"
+        impossible = re.search(r"link|anchor", haystack, re.IGNORECASE) and any(
+            re.search(
+                rf"\[[^\]]*{re.escape(match.group(1))}[^\]]*\]"
+                rf"\({re.escape(match.group(2))}\)",
+                current,
+            )
+            and match.group(2) in suggested
+            and match.group(1) not in suggested
+            for match in link_matches
+        )
+        if impossible:
+            logger.warning(
+                "Ignoring critic issue for %s: suggestion removes a source-preserved "
+                "code-only link label",
+                issue.segment_id,
+            )
+            continue
+        kept.append(issue)
+    if len(kept) == len(response.issues):
+        return response
+    return CriticResponse(verdict="ok" if not kept else response.verdict, issues=kept)
+
+
 def apply_critic_fixes(
     translations: dict[str, str],
     segments: list[Segment],
@@ -304,6 +427,15 @@ def apply_critic_fixes(
             validate_segment_translation(seg, issue.suggested_text)
         except TranslationValidationError as exc:
             logger.warning("Skipping critic fix for %s: %s", issue.segment_id, exc)
+            skipped.append(issue)
+            continue
+        from ydbdoc_review.validation.heuristics import check_cyrillic_in_en
+
+        if check_cyrillic_in_en(issue.suggested_text, target_lang="en"):
+            logger.warning(
+                "Skipping critic fix for %s: suggested_text introduces Cyrillic in EN",
+                issue.segment_id,
+            )
             skipped.append(issue)
             continue
         updated[issue.segment_id] = issue.suggested_text
@@ -432,6 +564,7 @@ def review_with_critic(
         max_tokens=max_tokens,
         translated_text=translated_text,
     )
+    initial = _drop_impossible_code_link_issues(initial, translations, segments)
     fixed, applied, skipped = apply_critic_fixes(translations, segments, initial.issues)
 
     unresolved: CriticResponse | None = None
@@ -450,6 +583,7 @@ def review_with_critic(
             max_tokens=max_tokens,
             translated_text=translated_text,
         )
+        unresolved = _drop_impossible_code_link_issues(unresolved, fixed, segments)
 
     return CriticReviewResult(
         initial=initial,

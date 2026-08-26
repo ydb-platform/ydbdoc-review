@@ -20,11 +20,13 @@ from ydbdoc_review.translation.differential import (
     find_corresponding_en_block,
     is_en_file_incomplete,
     is_en_file_stale,
+    low_magnitude_patch_has_anchors,
     parse_markdown_blocks,
     prepare_differential_seed,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.validation.href_parity import check_href_parity
 
 
 def _cfg(**kwargs: object) -> DifferentialTranslationConfig:
@@ -53,6 +55,72 @@ def test_analyze_small_edit_low_magnitude() -> None:
     assert analysis.change_magnitude < 0.5
     assert analysis.kept_segment_ids
     assert analysis.added_segment_ids or analysis.modified_segment_ids
+
+
+def test_analyze_detects_inline_code_only_change_from_pr_40385() -> None:
+    base = (
+        "Ключ | Описание\n"
+        "---- | ---\n"
+        "`request_client_certificate` | Если "
+        "`client_certificate_required=true`, соединение не устанавливается.\n"
+    )
+    pr = (
+        "Ключ | Описание\n"
+        "---- | ---\n"
+        "`request_client_certificate` | Если "
+        "`client_certificate_required: true`, соединение не устанавливается.\n"
+    )
+
+    analysis = analyze_ru_diff(base, pr)
+
+    assert analysis.change_magnitude > 0
+    assert analysis.modified_segment_ids or analysis.added_segment_ids
+
+
+def test_whitespace_only_ru_change_from_pr_49933_skips_before_full_heuristics() -> None:
+    ru_base = (
+        "{% note warning %}\n\n"
+        "Секреты необходимо [создавать](../../create-secret.md). \n\n"
+        "{% endnote %}\n"
+    )
+    ru_pr = ru_base.replace(". \n", ".\n")
+    # Deliberately short EN: the old order classified it as incomplete and
+    # regenerated the sentence, losing the create-secret link in #50789.
+    en_current = "[create](../../create-secret.md)\n"
+    analyzer = DifferentialTranslationAnalyzer(_cfg())
+
+    strategy = analyzer.analyze_file_state(
+        ru_pr_text=ru_pr,
+        en_current_text=en_current,
+        ru_base_text=ru_base,
+    )
+
+    assert strategy.mode == "skip"
+    assert strategy.config["semantic_noop"] is True
+
+
+def test_pr_49933_removed_create_secret_link_is_not_a_valid_translation() -> None:
+    ru = "Секреты необходимо [создавать](../../create-secret.md).\n"
+    en = "Secrets must be created manually.\n"
+
+    assert check_href_parity(ru, en)
+
+
+def test_inline_code_change_without_explicit_anchor_uses_full_reconstruct() -> None:
+    base = (
+        "## Синтаксис\n\n"
+        "Ключ | Описание\n"
+        "---- | ---\n"
+        "`request_client_certificate` | Если "
+        "`client_certificate_required=true`, соединение не устанавливается.\n"
+    )
+    source = base.replace(
+        "client_certificate_required=true", "client_certificate_required: true"
+    )
+    analysis = analyze_ru_diff(base, source)
+    segments = extract_segments(parse_markdown(source))
+
+    assert not low_magnitude_patch_has_anchors(segments, analysis)
 
 
 def test_strategy_full_when_no_en() -> None:
@@ -151,6 +219,26 @@ def test_prepare_seed_reuses_unchanged() -> None:
     assert seeded
     assert pending
     assert all(s.id not in seeded for s in pending)
+
+
+def test_prepare_seed_falls_back_full_on_kind_mismatch() -> None:
+    """§6.163 / #48595: same segment count, drifted kinds → full, not wrong seed."""
+    # RU / base: heading, para, heading, para
+    base = "# Title\n\nIntro.\n\n## Syntax\n\nBody.\n"
+    pr = base
+    # EN: heading, para, para, para — count matches, kinds do not
+    en = "# Title\n\nIntro EN.\n\nSubject field EN.\n\nBody EN.\n"
+    strategy, seeded, pending = prepare_differential_seed(
+        pr_segments=extract_segments(parse_markdown(pr)),
+        ru_pr_text=pr,
+        en_current_text=en,
+        ru_base_text=base,
+        config=_cfg(),
+    )
+    assert strategy.mode == "full"
+    assert strategy.config.get("fallback_from_differential") is True
+    assert seeded == {}
+    assert len(pending) == len(extract_segments(parse_markdown(pr)))
 
 
 def test_translate_step_differential_calls_llm_only_for_pending() -> None:

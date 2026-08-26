@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from pathlib import PurePosixPath
 
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -17,21 +18,50 @@ from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_fence_comments_with_client,
     translate_cyrillic_text_fences_with_client,
 )
-from ydbdoc_review.validation.fence_integrity import enforce_source_fenced_blocks
+from ydbdoc_review.validation.fence_integrity import (
+    enforce_source_fenced_blocks,
+    fence_structure_is_round_trip_stable,
+)
 from ydbdoc_review.validation.glossary_toc_links import (
     en_mirror_path,
     strip_unreachable_internal_links,
 )
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
+from ydbdoc_review.validation.href_parity import restore_md_link_hrefs
 from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
 )
+from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
 )
 
 logger = logging.getLogger(__name__)
+
+_INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
+_CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+_SOURCE_CERTIFICATE_SUBJECT_NOTATION = "Имя=Значение,...@<domain>"
+_TARGET_CERTIFICATE_SUBJECT_NOTATION = "Name=Value,...@<domain>"
+
+
+def _restore_cyrillic_source_code_atoms(text: str, source_text: str) -> str:
+    """Restore the unique certificate-subject notation protected by #50976."""
+    source_atoms = [
+        atom
+        for atom in _INLINE_CODE.finditer(source_text)
+        if atom.group(1) == _SOURCE_CERTIFICATE_SUBJECT_NOTATION
+    ]
+    target_atoms = [
+        atom
+        for atom in _INLINE_CODE.finditer(text)
+        if atom.group(1) == _TARGET_CERTIFICATE_SUBJECT_NOTATION
+    ]
+    if len(source_atoms) != 1 or len(target_atoms) != 1:
+        return text
+    source = source_atoms[0]
+    target = target_atoms[0]
+    return text[: target.start()] + source.group(0) + text[target.end() :]
 
 
 def render_with_translations(
@@ -76,9 +106,12 @@ def finalize_en_target(
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     out_warnings: list[str] | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    layout_source_text: str | None = None,
+    protected_source_text: str | None = None,
 ) -> str:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
-    text = enforce_source_fenced_blocks(text, normalized_source_text)
+    if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
+        text = enforce_source_fenced_blocks(text, normalized_source_text)
     if client is not None and glossary is not None:
         text = translate_cyrillic_fence_comments_with_client(
             text,
@@ -111,10 +144,12 @@ def finalize_en_target(
             out_warnings=out_warnings,
         )
     text = localize_links_in_text(text, target_lang="en")
-    if (
-        en_toc_reachable is not None
-        and target_lang.lower() in {"en", "english"}
-    ):
+    text = postprocess_en_target_markdown(text)
+    text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
+    protected = protected_source_text or normalized_source_text
+    text = restore_md_link_hrefs(text, protected)
+    text = _restore_cyrillic_source_code_atoms(text, protected)
+    if en_toc_reachable is not None and target_lang.lower() in {"en", "english"}:
         stripped: list[str] = []
         try:
             text = strip_unreachable_internal_links(
@@ -131,18 +166,15 @@ def finalize_en_target(
                 exc,
             )
             if out_warnings is not None:
-                out_warnings.append(
-                    f"strip_unreachable_links_failed: {type(exc).__name__}: {exc}"
-                )
+                out_warnings.append(f"strip_unreachable_links_failed: {type(exc).__name__}: {exc}")
         else:
             if stripped and out_warnings is not None:
                 names = ", ".join(
-                    f"`{PurePosixPath(h.split('#', 1)[0]).name}`"
-                    for h in stripped[:8]
+                    f"`{PurePosixPath(h.split('#', 1)[0]).name}`" for h in stripped[:8]
                 )
                 extra = f", … (+{len(stripped) - 8})" if len(stripped) > 8 else ""
                 out_warnings.append(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
-    return postprocess_en_target_markdown(text)
+    return text

@@ -28,6 +28,6 @@ Rules:
 - `verdict`: **only** `ok` | `warnings` | `blocked` — for **this batch only** (do not use `needs_fix`, `issues_found`, etc.)
 - `ok` — no unresolved problems in this batch
 - `warnings` — non-blocking issues remain
-- `blocked` — must not merge until fixed (e.g. wrong meaning, broken placeholders)
+- `blocked` — must not merge until fixed (wrong meaning, leftover/broken `⟦…⟧` protect markers, **any** residual Cyrillic in EN including code fences / YAML examples)
 - List only **unresolved** issues whose `segment_id` is in this batch. If a prior issue was fixed correctly, omit it
 - Use `suggested_text` for any remaining fixable problem (full corrected `translated_text` for that segment, or `null`)

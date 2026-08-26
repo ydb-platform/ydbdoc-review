@@ -9,16 +9,16 @@ from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     ManualAction,
     NavigationRunResult,
-    PRTranslationResult,
     PairRunResult,
+    PRTranslationResult,
 )
-from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
     build_full_report,
     build_source_pr_comment,
 )
+from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 
@@ -418,6 +418,46 @@ def test_full_report_shows_alignment_error():
     assert "не мержить" in body or "требует правок" in body
 
 
+def test_full_report_does_not_hide_alignment_error_behind_completeness_gap():
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="EN",
+        segments_count=2,
+        verdict="blocked",
+        segment_alignment_error="segment count mismatch: source 2 vs target 1",
+        prompt_version="v1",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, file_result=fr)],
+        completeness_gaps=["ydb/docs/en/missing.md"],
+    )
+
+    body = build_full_report(
+        result,
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+
+    assert "отсутствующие EN-зеркала" in body
+    assert "missing.md" in body
+    assert "(alignment)" in body
+    assert "segment count mismatch" in body
+
+
 def test_full_report_includes_info_section():
     cfg = _cfg()
     pair = DocPair(
@@ -491,6 +531,44 @@ def test_merge_recommendation_green_for_nav_only_ok():
     assert "🟢" in body
     assert "можно мержить" in body
     assert "нет обработанных файлов" not in body
+
+
+def test_merge_recommendation_red_when_scope_file_missing_despite_green_files():
+    """#50976: completeness gaps must block green even if scoped files pass QA."""
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/tls.md",
+        en_path="ydb/docs/en/core/reference/configuration/tls.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="EN",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(
+            pair_results=[PairRunResult(plan=plan, file_result=fr)],
+            completeness_gaps=[
+                "ydb/docs/en/core/reference/configuration/monitoring_config.md",
+            ],
+        ),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "не мержить — не все файлы source PR переведены" in body
+    assert "monitoring_config.md" in body
+    assert "🟢" not in body.split("Рекомендация:")[1].split("\n", 1)[0]
 
 
 def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():

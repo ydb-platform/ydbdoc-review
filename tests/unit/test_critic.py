@@ -10,6 +10,8 @@ from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.critic import (
+    _drop_impossible_code_link_issues,
+    _fallback_critic_response,
     apply_critic_fixes,
     merge_critic_responses,
     merge_verdicts,
@@ -20,7 +22,14 @@ from ydbdoc_review.translation.critic import (
     run_verify,
 )
 from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.translation.schemas import CriticIssueOut
+from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
+
+
+def test_critic_parse_failure_is_blocking():
+    response = _fallback_critic_response(reason="invalid JSON")
+
+    assert response.verdict == "blocked"
+    assert response.issues[0].category == "critic_execution_failed"
 
 
 def _segment(seg_id: str, text: str) -> Segment:
@@ -98,6 +107,64 @@ def test_parse_critic_response_ok():
     assert out.verdict == "warnings"
     assert len(out.issues) == 1
     assert out.issues[0].segment_id == "s1"
+
+
+def test_parse_critic_response_fills_omitted_issue_metadata():
+    raw = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "description": "The translation is incomplete.",
+                    "suggested_text": "Complete translation.",
+                }
+            ],
+        }
+    )
+
+    out = parse_critic_response(raw)
+
+    assert out.verdict == "blocked"
+    assert out.issues[0].severity == "blocked"
+    assert out.issues[0].category == "translation_quality"
+    assert out.issues[0].comment == "The translation is incomplete."
+
+
+def test_parse_critic_response_ignores_bare_rewrite_without_diagnosis():
+    raw = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "suggested_text": "The current translation.",
+                }
+            ],
+        }
+    )
+
+    out = parse_critic_response(raw)
+
+    assert out.verdict == "ok"
+    assert out.issues == []
+
+
+def test_apply_critic_fixes_skips_cyrillic_suggestion():
+    seg = _segment("s1", "Name in `Name=Value,...@<domain>` notation.")
+    issues = [
+        CriticIssueOut(
+            segment_id="s1",
+            severity="blocked",
+            category="residual_cyrillic",
+            comment="Cyrillic in EN",
+            suggested_text="Name in `Привет` notation.",
+        )
+    ]
+    updated, applied, skipped = apply_critic_fixes({"s1": seg.text}, [seg], issues)
+    assert applied == []
+    assert skipped == issues
+    assert updated["s1"] == seg.text
 
 
 def test_apply_critic_fixes_applies_valid_suggestion():
@@ -261,8 +328,8 @@ def test_run_critic_empty_response_fallback():
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
-    assert out.verdict == "warnings"
-    assert out.issues == []
+    assert out.verdict == "blocked"
+    assert out.issues[0].category == "critic_execution_failed"
 
 
 def test_run_critic_retries_then_parses():
@@ -277,6 +344,45 @@ def test_run_critic_retries_then_parses():
         file_path="docs/ru/a.md",
     )
     assert out.verdict == "ok"
+
+
+def test_run_critic_repairs_invalid_json_then_parses():
+    raw = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(["not json", raw])
+    seg = _segment("s1", "x")
+
+    out = run_critic(
+        client,
+        segments=[seg],
+        translations={"s1": "EN x"},
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+
+    assert out.verdict == "ok"
+    calls = client._client.chat.completions.create.call_args_list
+    repair_prompt = calls[1].kwargs["messages"][-1]["content"]
+    assert "previous response was not valid JSON" in repair_prompt
+
+
+def test_run_critic_uses_fallback_model_after_two_parse_failures():
+    raw = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(["not json", "still not json", raw])
+    seg = _segment("s1", "x")
+
+    out = run_critic(
+        client,
+        segments=[seg],
+        translations={"s1": "EN x"},
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+
+    assert out.verdict == "ok"
+    calls = client._client.chat.completions.create.call_args_list
+    assert calls[0].kwargs["model"].endswith("/yandexgpt-5.1")
+    assert calls[2].kwargs["model"].endswith("/yandexgpt-5-lite")
+    assert calls[2].kwargs["messages"] == calls[0].kwargs["messages"]
 
 
 def test_run_critic_merges_multiple_batches():
@@ -348,8 +454,8 @@ def test_run_verify_empty_response_fallback():
         glossary=load_glossary(),
         file_path="docs/ru/a.md",
     )
-    assert out.verdict == "warnings"
-    assert out.issues == []
+    assert out.verdict == "blocked"
+    assert out.issues[0].category == "critic_execution_failed"
 
 
 def test_run_verify_calls_llm():
@@ -407,6 +513,78 @@ def test_review_with_critic_full_flow():
     assert len(result.applied) == 1
     assert result.unresolved is not None
     assert result.unresolved.verdict == "ok"
+
+
+def test_review_50976_ignores_impossible_code_only_link_rewrite():
+    current = "See the [⟦C1⟧ command](⟦U1⟧)."
+    critic_raw = json.dumps(
+        {
+            "verdict": "warnings",
+            "issues": [
+                {
+                    "segment_id": "s1",
+                    "severity": "warning",
+                    "category": "link",
+                    "comment": "Link anchor contains only the code placeholder.",
+                    "suggested_text": "See the command description at ⟦U1⟧.",
+                }
+            ],
+        }
+    )
+    client = _mock_client([critic_raw])
+
+    result = review_with_critic(
+        client,
+        source_text="См. команду.",
+        translated_text=current,
+        segments=[_segment("s1", "См. [⟦C1⟧](⟦U1⟧).")],
+        translations={"s1": current},
+        glossary=load_glossary(),
+        file_path="ydb/docs/en/core/security/authentication.md",
+    )
+
+    assert result.initial.verdict == "ok"
+    assert result.initial.issues == []
+    assert result.translations["s1"] == current
+    assert client._client.chat.completions.create.call_count == 1
+
+
+def test_50976_filter_requires_exact_code_only_link_in_source():
+    issue = _issue(
+        segment_id="s1",
+        category="link",
+        comment="Link anchor contains only the code placeholder.",
+        suggested_text="See ⟦U1⟧.",
+    )
+    response = CriticResponse(verdict="warnings", issues=[issue])
+    source = _segment("s1", "See [⟦C1⟧ descriptive text](⟦U1⟧).")
+
+    filtered = _drop_impossible_code_link_issues(
+        response,
+        {"s1": "See [⟦C1⟧ descriptive text](⟦U1⟧)."},
+        [source],
+    )
+
+    assert filtered.issues == [issue]
+    assert filtered.verdict == "warnings"
+
+
+def test_50976_filter_checks_each_source_code_only_link():
+    issue = _issue(
+        segment_id="s1",
+        category="link",
+        comment="The second link anchor is invalid.",
+        suggested_text="Keep [⟦C1⟧](⟦U1⟧), replace second with ⟦U2⟧.",
+    )
+    response = CriticResponse(verdict="warnings", issues=[issue])
+    text = "[⟦C1⟧](⟦U1⟧) and [⟦C2⟧](⟦U2⟧)"
+
+    filtered = _drop_impossible_code_link_issues(
+        response, {"s1": text}, [_segment("s1", text)]
+    )
+
+    assert filtered.verdict == "ok"
+    assert filtered.issues == []
 
 
 def test_review_with_critic_skips_verify_when_no_issues():

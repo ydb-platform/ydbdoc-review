@@ -13,7 +13,7 @@ Each item has `source_text` ({source_lang}) and `translated_text` ({target_lang}
 
 ## Task
 
-Find translation issues **only in the segments listed above**: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), placeholder corruption, CLI flag damage, **residual Cyrillic in {target_lang} prose or inline `` `…` `` terms** (severity `blocked` when present).
+Find translation issues **only in the segments listed above**: terminology (glossary mismatches), meaning drift, broken links, wrong locale in URLs (`/ru/docs/` vs `/en/docs/`), placeholder corruption, CLI flag damage, **any residual Cyrillic in {target_lang}** (prose, inline `` `…` ``, **and** fenced code / YAML placeholders like ``<SID по умолчанию>``). Residual Cyrillic or wrong/missing placeholders → severity `blocked`; batch `verdict` must be `blocked` (never soft-warn these).
 
 **Do not** flag placeholder issues when `atom_map` shows the same atoms are present under the same marker names but **word order** differs in {target_lang} prose (e.g. RU "к таблице ⟦C1⟧ колонку ⟦C2⟧" vs EN "column ⟦C2⟧ to ⟦C1⟧ table" after alignment). Flag placeholder corruption only when an atom is **wrong, missing, or substituted** (e.g. `Uint64` where `views` should be).
 

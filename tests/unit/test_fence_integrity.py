@@ -56,6 +56,43 @@ def test_check_fence_body_copy_detects_pipeline_change():
     assert "fence_body_copy" in warnings[0]
 
 
+def test_malformed_legacy_source_is_normalized_before_body_validation():
+    source = """{% list tabs %}
+
+- Python
+
+    {% cut "asyncio" %}
+
+    ```python
+    A
+
+      ```python
+      B
+
+    {% endcut %}
+
+    ```python
+    C
+
+      ```
+
+    - Native SDK (Asyncio)
+
+      ```python
+      D
+      ```
+
+    {% endlist %}
+
+{% endlist %}
+"""
+    same_markers = source.replace("    A\n", "    translated comment\n")
+    assert check_fence_body_copy(source, same_markers)
+
+    extra_marker = same_markers + "```\n"
+    assert check_fence_body_copy(source, extra_marker)
+
+
 def test_normalize_ru_config_dir_before_translate():
     ru = "```bash\ninit --config-dir/opt/ydb/cfg\n```\n"
     norm = normalize_ru_source_for_translation(ru)
@@ -177,6 +214,28 @@ def test_fence_content_allows_mermaid_label_translation():
     )
 
 
+def test_fence_content_allows_mermaid_quoted_hyphen_vs_space_labels():
+    """#49578: RU «Дата-центр» vs EN «Data center» must not fence_body_copy."""
+    ru = (
+        "graph TD\n"
+        '    subgraph DC1["Дата-центр 1 (Fail realm 1)"]\n'
+        '        Hash["Хеш-функция\\nот ID записи"]\n'
+        "    end\n"
+    )
+    en = (
+        "graph TD\n"
+        '    subgraph DC1["Data center 1 (Fail realm 1)"]\n'
+        '        Hash["Hash function\\nfrom record ID"]\n'
+        "    end\n"
+    )
+    assert fence_content_matches_source(ru, en, fence_info="mermaid")
+    assert not check_fence_body_copy(
+        f"```mermaid\n{ru}```",
+        f"```mermaid\n{en}```",
+        source_lang="ru",
+    )
+
+
 def test_fence_content_allows_mermaid_note_and_message_translation():
     """Regression #41206: Note/arrow message text may be shorter in EN."""
     ru = (
@@ -242,16 +301,8 @@ def test_fence_content_rejects_text_diagram_structure_change():
 
 
 def test_fence_content_rejects_mermaid_structure_change():
-    ru = (
-        "sequenceDiagram\n"
-        "    participant Топик\n"
-        "    Топик->>Приемник: событие\n"
-    )
-    en = (
-        "sequenceDiagram\n"
-        "    participant Topic\n"
-        "    Topic->Sink: event\n"
-    )
+    ru = "sequenceDiagram\n    participant Топик\n    Топик->>Приемник: событие\n"
+    en = "sequenceDiagram\n    participant Topic\n    Topic->Sink: event\n"
     assert not fence_content_matches_source(ru, en)
 
 
@@ -285,19 +336,6 @@ def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
 
 def test_fence_body_allows_comment_translation_with_trailing_blank_line():
     """§6.156: RU fence often keeps a trailing blank line EN drops."""
-    ru = (
-        "```yql\n"
-        "SELECT\n"
-        "   x,  -- ОК: колонка\n"
-        "FROM t\n"
-        "\n"
-        "```\n"
-    )
-    en = (
-        "```yql\n"
-        "SELECT\n"
-        "   x,  -- OK: column\n"
-        "FROM t\n"
-        "```\n"
-    )
+    ru = "```yql\nSELECT\n   x,  -- ОК: колонка\nFROM t\n\n```\n"
+    en = "```yql\nSELECT\n   x,  -- OK: column\nFROM t\n```\n"
     assert check_fence_body_copy(ru, en, source_lang="ru") == []

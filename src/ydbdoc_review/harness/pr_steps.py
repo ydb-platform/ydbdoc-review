@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Protocol
 
+from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.harness.context import HarnessContext
-from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, plan_pairs
+from ydbdoc_review.pipeline.analyze import PairPlan, plan_pairs
+
+logger = logging.getLogger(__name__)
 
 
 class PRHarnessStep(Protocol):
@@ -64,6 +68,7 @@ class PlanVerifyPairsStep:
                     source_lang="ru",
                     target_lang="en",
                     summary="doc_verify critic pass",
+                    authoritative_source_text=content.current_ru_text or content.ru_text,
                 )
             )
         state.plans = plans
@@ -82,11 +87,39 @@ class ExecutePairPlansStep:
             config=ctx.config,
             en_toc_reachable=ctx.en_toc_reachable,
             docs_text_reader=ctx.docs_text_reader,
+            docs_repo_path=ctx.docs_repo_path,
         )
         results = []
-        for plan in state.plans:
+        total = len(state.plans)
+        for idx, plan in enumerate(state.plans, start=1):
             content = content_by_ru.get(plan.pair.ru_path)
             if content is None:
                 continue
-            results.append(run_pair_plan(content, plan, file_ctx, state.cache))
+            logger.info(
+                "pair %s/%s start action=%s target=%s",
+                idx,
+                total,
+                plan.action,
+                plan.target_path,
+            )
+            started = time.monotonic()
+            result = run_pair_plan(
+                content,
+                plan,
+                file_ctx,
+                state.cache,
+                historical_merged_provenance=ctx.historical_merged_provenance,
+            )
+            elapsed = time.monotonic() - started
+            status = "error" if result.error else ("skip" if result.skipped else "ok")
+            logger.info(
+                "pair %s/%s done status=%s elapsed=%.1fs target=%s%s",
+                idx,
+                total,
+                status,
+                elapsed,
+                plan.target_path,
+                f" err={result.error}" if result.error else "",
+            )
+            results.append(result)
         state.pair_results = results

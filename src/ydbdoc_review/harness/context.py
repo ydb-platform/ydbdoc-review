@@ -24,10 +24,12 @@ class HarnessContext:
     parallel: int
     cache: dict[str, str] | None
     enable_critic: bool
+    allow_verify_realign: bool
     critic_feedback_retries: int
     usage_record_start: int
     en_toc_reachable: frozenset[str] | None = None
     docs_text_reader: DocsTextReader | None = None
+    docs_repo_path: str | None = None
 
     @classmethod
     def from_options(
@@ -43,10 +45,12 @@ class HarnessContext:
         cache: dict[str, str] | None = None,
         max_parallel_batches: int | None = None,
         enable_critic: bool = True,
+        allow_verify_realign: bool = True,
         critic_feedback_retries: int | None = None,
         usage_record_start: int | None = None,
         en_toc_reachable: frozenset[str] | None = None,
         docs_text_reader: DocsTextReader | None = None,
+        docs_repo_path: str | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -60,6 +64,7 @@ class HarnessContext:
             parallel=max_parallel_batches or cfg.llm.concurrency.batches_per_file,
             cache=cache,
             enable_critic=enable_critic,
+            allow_verify_realign=allow_verify_realign,
             critic_feedback_retries=(
                 critic_feedback_retries
                 if critic_feedback_retries is not None
@@ -72,4 +77,5 @@ class HarnessContext:
             ),
             en_toc_reachable=en_toc_reachable,
             docs_text_reader=docs_text_reader,
+            docs_repo_path=docs_repo_path,
         )

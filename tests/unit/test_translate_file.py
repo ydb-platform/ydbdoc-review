@@ -332,15 +332,14 @@ def test_translate_file_verify_preserves_en_fence_bodies():
 
 def test_translate_file_heuristics_bump_verdict_to_warnings():
     source = "Текст для перевода.\n"
-    segments = extract_segments(parse_markdown(source))
-    seg_id = segments[0].id
-    # Critic OK, but translation leaves Cyrillic in EN target.
+    # Model an already-existing EN mirror with residual Cyrillic. New
+    # translations reject this fail-closed before rendering, while verify mode
+    # must still classify legacy targets through the downstream heuristics.
     translated = "Text with привет inside."
-    translate_raw = _translate_json(segments, {seg_id: translated})
     critic_raw = json.dumps({"verdict": "ok", "issues": []})
 
     client = _mock_client(
-        [translate_raw, _prose_unfixed_cyrillic_json(translated), critic_raw]
+        [_prose_unfixed_cyrillic_json(translated), critic_raw]
     )
     result = translate_file(
         source,
@@ -348,6 +347,8 @@ def test_translate_file_heuristics_bump_verdict_to_warnings():
         load_glossary(),
         file_path="docs/ru/heuristics.md",
         target_lang="en",
+        enable_translate=False,
+        existing_target_text=translated,
         config=_unit_cfg(),
         enable_critic=True,
     )
@@ -363,7 +364,6 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
     seg_id = segments[0].id
 
     translated = "Problem with привет."
-    translate_raw = _translate_json(segments, {seg_id: translated})
     critic_raw = json.dumps(
         {
             "verdict": "blocked",
@@ -396,7 +396,6 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
     prose_raw = _prose_unfixed_cyrillic_json(translated)
     client = _mock_client(
         [
-            translate_raw,
             prose_raw,
             critic_raw,
             prose_raw,
@@ -409,6 +408,8 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
         load_glossary(),
         file_path="docs/ru/blocked.md",
         target_lang="en",
+        enable_translate=False,
+        existing_target_text=translated,
         config=_unit_cfg(),
         enable_critic=True,
     )
@@ -417,7 +418,7 @@ def test_translate_file_heuristics_do_not_downgrade_blocked():
     assert result.heuristic_blocking or result.heuristic_warnings
 
 
-def test_translate_file_survives_empty_critic_response():
+def test_translate_file_blocks_on_empty_critic_response():
     source = "Привет.\n"
     segments = extract_segments(parse_markdown(source))
     seg_id = segments[0].id
@@ -434,6 +435,6 @@ def test_translate_file_survives_empty_critic_response():
     )
 
     assert "Hello." in result.final_text
-    assert result.verdict == "ok"
+    assert result.verdict == "blocked"
     assert result.critic_initial is not None
-    assert result.critic_initial.issues == []
+    assert result.critic_initial.issues[0].category == "critic_execution_failed"

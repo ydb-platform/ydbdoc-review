@@ -2911,7 +2911,7 @@ added/modified PR segments. Still **render from the current source AST**
 - no / empty EN, incomplete EN (``len(EN)/len(RU) < min_ratio``),
 - EN stale (optional last-commit age > N days),
 - change magnitude > threshold (default 50%),
-- EN cannot be aligned to base RU (segment count/structure),
+- EN cannot be aligned to base RU (segment count/**kind** structure, §6.163),
 - ``translation.differential_enabled=false`` /
   ``YDBDOC_TRANSLATION_DIFFERENTIAL_ENABLED=0``.
 

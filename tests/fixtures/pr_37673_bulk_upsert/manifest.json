@@ -1,0 +1,23 @@
+{
+  "source_pr": "ydb-platform/ydb#37673",
+  "generated_pr": "ydb-platform/ydb#51134",
+  "path": "ydb/docs/{locale}/core/recipes/ydb-sdk/bulk-upsert.md",
+  "files": {
+    "ru_before.md": {"ref": "1263f47", "sha256": "205603427d5e397690c0c90eac183832e194406e2f59abf2ab32289305ccebf4", "lines": 416, "fences": 8, "list_tabs": 4},
+    "ru_after.md": {"ref": "b8030bc", "sha256": "9939a1f9161ca172cf15d68d6807b46fb77d14543f845984e426d6554c63c76a", "lines": 476, "fences": 10, "list_tabs": 4},
+    "ru_current.md": {"ref": "36fdea05efbfa77aa365ae6747bbe09a5bd6969f", "role": "PR #51142 base at creation", "sha256": "de198bb468a2f66841014dc5d815603139c04fd921a452c4fc7f454a4d99736d", "lines": 644, "fences": 12, "list_tabs": 5},
+    "en_current.md": {"ref": "36fdea05efbfa77aa365ae6747bbe09a5bd6969f", "role": "PR #51142 base at creation; EN immediately before translation branch", "sha256": "34472c5c6daaf43f730fee98d190d1ebbfc5af234fd37c67246eacd9039581db", "lines": 646, "fences": 12, "list_tabs": 5},
+    "bad_candidate.md": {"ref": "c53d9d9bff94dab3f2ba8ddf247c506c14644995", "sha256": "f5fe2aad481f960ae6f5b29b56c6afc12395872cad0c6d444416ac31a4ef97e0", "lines": 415, "fences": 8, "list_tabs": 4},
+    "expected_en.md": {"derived_from": "en_current.md", "role": "byte-identical no-op oracle", "sha256": "34472c5c6daaf43f730fee98d190d1ebbfc5af234fd37c67246eacd9039581db", "lines": 646, "fences": 12, "list_tabs": 5}
+  },
+  "expected_operations": {
+    "remove": [["include", "javascript", "../../_includes/work-in-progress.md"]],
+    "add": [
+      ["include", "javascript", "../../_includes/feature-not-supported.md"],
+      ["pane", "rust"],
+      ["fence", "rust", "rust"],
+      ["pane", "php"],
+      ["fence", "php", "php"]
+    ]
+  }
+}

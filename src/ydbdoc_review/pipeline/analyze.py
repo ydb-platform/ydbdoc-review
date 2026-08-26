@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Literal
 
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -29,6 +30,23 @@ BILINGUAL_SKIP_SUMMARY = (
 _ANALYZE_TEXT_LIMIT = 8000
 
 
+class PairProvenance(str, Enum):
+    CURRENT_PAIR = "current_pair"
+    CURRENT_RU_MISSING_EN = "current_ru_missing_en"
+    SUPERSEDED_ABSENT = "superseded_absent"
+    CURRENT_EN_ORPHAN = "current_en_orphan"
+
+
+def derive_pair_provenance(*, current_ru: str | None, current_en: str | None) -> PairProvenance:
+    if _non_trivial(current_ru) and _non_trivial(current_en):
+        return PairProvenance.CURRENT_PAIR
+    if _non_trivial(current_ru):
+        return PairProvenance.CURRENT_RU_MISSING_EN
+    if _non_trivial(current_en):
+        return PairProvenance.CURRENT_EN_ORPHAN
+    return PairProvenance.SUPERSEDED_ABSENT
+
+
 @dataclass(frozen=True)
 class PairContent:
     """File bodies and metadata for one RU/EN pair (filesystem-agnostic)."""
@@ -41,6 +59,11 @@ class PairContent:
     # Merge-base bodies for §6.132 differential translation (optional).
     ru_base_text: str | None = None
     en_base_text: str | None = None
+    provenance: PairProvenance = PairProvenance.CURRENT_PAIR
+    current_ru_text: str | None = None
+    # EN body at the historical source merge.  Used only to prove that both
+    # sides moved forward after an old PR; current EN remains authoritative.
+    historical_en_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +77,8 @@ class PairPlan:
     source_lang: str
     target_lang: str
     summary: str = ""
+    provenance: PairProvenance = PairProvenance.CURRENT_PAIR
+    authoritative_source_text: str | None = None
 
 
 def _non_trivial(text: str | None) -> bool:
@@ -72,6 +97,12 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     source PR, skip auto-translate (§6.76) — authors updated the bilingual pair.
     """
     pair = content.pair
+    if content.provenance is PairProvenance.SUPERSEDED_ABSENT:
+        return PairPlan(pair, "skip", pair.ru_path, pair.en_path, "ru", "en", "absent on current main", content.provenance)
+    if content.provenance is PairProvenance.CURRENT_EN_ORPHAN:
+        return PairPlan(pair, "skip", pair.ru_path, pair.en_path, "ru", "en", "current EN orphan; fail closed", content.provenance)
+    if content.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
+        return PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en", "current RU missing EN; full translation", content.provenance, content.current_ru_text or content.ru_text)
     ru_ok = _non_trivial(content.ru_text)
     en_ok = _non_trivial(content.en_text)
 
@@ -270,5 +301,5 @@ def plan_pairs(
             "use_analyze_llm=True is no longer supported for doc_translate; "
             "use plan_from_analyze() directly if needed"
         )
-    plans = [plan_pair_heuristic(content) for content in contents]
+    plans = [replace(plan_pair_heuristic(content), provenance=content.provenance, authoritative_source_text=content.current_ru_text or content.ru_text) for content in contents]
     return sorted(plans, key=lambda p: p.pair.ru_path)

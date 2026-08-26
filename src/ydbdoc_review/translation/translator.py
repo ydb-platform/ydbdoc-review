@@ -10,22 +10,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
 from ydbdoc_review.llm.retry import is_rate_limit_error
-from ydbdoc_review.shutdown import check_shutdown
 from ydbdoc_review.llm.structured import parse_json_model
-from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
+from ydbdoc_review.shutdown import check_shutdown
 from ydbdoc_review.translation.errors import TranslationValidationError
-from ydbdoc_review.translation.repair import repair_segment_translation
 from ydbdoc_review.translation.glossary import Glossary
+from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.prompts import (
     DEFAULT_PROMPT_VERSION,
     build_translate_messages,
 )
+from ydbdoc_review.translation.repair import repair_segment_translation
 from ydbdoc_review.translation.schemas import TranslateBatchResponse
 from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
-from ydbdoc_review.validation.heuristics import count_fence_markers
-from ydbdoc_review.validation.markers import placeholders_match
+from ydbdoc_review.validation.heuristics import (
+    check_cyrillic_in_en,
+    count_fence_markers,
+)
+from ydbdoc_review.validation.markers import (
+    is_placeholder_only_text,
+    placeholders_match,
+)
 from ydbdoc_review.validation.placeholder_repair import repair_translation_placeholders
 from ydbdoc_review.validation.placeholder_roles import placeholder_roles_valid
 
@@ -51,12 +57,34 @@ def parse_translate_response(raw: str, *, expected_ids: set[str]) -> dict[str, s
     return {item.id: item.text for item in parsed.segments}
 
 
-def validate_segment_translation(source: Segment, translated_text: str) -> None:
+def validate_segment_translation(
+    source: Segment,
+    translated_text: str,
+    *,
+    target_lang: str = "en",
+) -> None:
     """Structural checks for one segment translation."""
+    cyrillic_issues = check_cyrillic_in_en(
+        translated_text, target_lang=target_lang
+    )
+    if cyrillic_issues:
+        raise TranslationValidationError(
+            f"Cyrillic remains in EN translation for {source.id!r}: "
+            f"{cyrillic_issues[0]}",
+            segment_id=source.id,
+        )
     if not placeholders_match(source.text, translated_text):
         raise TranslationValidationError(
             f"placeholder mismatch for {source.id!r}: "
             f"expected placeholders from source in same order",
+            segment_id=source.id,
+        )
+    if is_placeholder_only_text(source.text) and not is_placeholder_only_text(
+        translated_text
+    ):
+        raise TranslationValidationError(
+            f"placeholder-only segment {source.id!r} must stay marker-only "
+            f"(no prose around ⟦…⟧); got elaboration",
             segment_id=source.id,
         )
     if not placeholder_roles_valid(source, translated_text):
@@ -81,7 +109,10 @@ def validate_segment_translation(source: Segment, translated_text: str) -> None:
 
 
 def validate_batch_translations(
-    batch: Batch, translations: dict[str, str]
+    batch: Batch,
+    translations: dict[str, str],
+    *,
+    target_lang: str = "en",
 ) -> None:
     """Validate all segments in a batch."""
     for seg in batch.segments:
@@ -90,7 +121,9 @@ def validate_batch_translations(
                 f"missing translation for {seg.id!r}",
                 segment_id=seg.id,
             )
-        validate_segment_translation(seg, translations[seg.id])
+        validate_segment_translation(
+            seg, translations[seg.id], target_lang=target_lang
+        )
 
 
 def _cache_key(seg: Segment, *, target_lang: str) -> str:
@@ -149,7 +182,9 @@ def _translate_batch_with_model(
             if last_attempt is not None:
                 last_attempt.clear()
                 last_attempt.update(translations)
-            validate_batch_translations(batch, translations)
+            validate_batch_translations(
+                batch, translations, target_lang=target_lang
+            )
             return translations
         except (LLMParseError, TranslationValidationError) as exc:
             last_exc = exc
@@ -405,11 +440,17 @@ def translate_segments(
     pending: list[Segment] = []
 
     for seg in segments:
+        # Config-table keys etc.: copy markers as-is — never send to LLM (§6.172).
+        if is_placeholder_only_text(seg.text):
+            translations[seg.id] = seg.text.strip()
+            continue
         if cache is not None:
             key = _cache_key(seg, target_lang=target_lang)
             cached = cache.get(key)
             if cached is not None:
-                validate_segment_translation(seg, cached)
+                validate_segment_translation(
+                    seg, cached, target_lang=target_lang
+                )
                 translations[seg.id] = cached
                 continue
         pending.append(seg)
@@ -457,6 +498,16 @@ def translate_segments(
             text = batch_trans[seg.id]
             translations[seg.id] = text
             if cache is not None:
+                try:
+                    validate_segment_translation(
+                        seg, text, target_lang=target_lang
+                    )
+                except TranslationValidationError:
+                    # Recovery may deliberately return the RU source together
+                    # with a blocking manual action. It is safe for the current
+                    # diagnostic result, but must never become an accepted
+                    # translation in a later run via the cache.
+                    continue
                 cache[_cache_key(seg, target_lang=target_lang)] = text
 
     return translations

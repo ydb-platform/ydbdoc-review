@@ -12,6 +12,7 @@ from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import FileTranslationResult
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.validation.fence_integrity import fence_marker_tokens
 
 
 def test_run_pair_plan_forwards_en_toc_reachable_to_harness():

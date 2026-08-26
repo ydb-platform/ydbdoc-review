@@ -19,6 +19,7 @@ from ydbdoc_review.navigation.scope_planner import (
     plan_translation_scope,
     planned_toc_extras_for_pair,
 )
+from ydbdoc_review.pipeline.analyze import PairContent, plan_pair_heuristic
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "nav_cases"
 
@@ -112,9 +113,7 @@ def test_doc_pairs_from_plan_skips_bilingual_en():
     )
     pairs = doc_pairs_from_plan(
         plan,
-        skip_en_paths=frozenset(
-            {"ydb/docs/en/core/reference/ydb-sdk/topic.md"}
-        ),
+        skip_en_paths=frozenset({"ydb/docs/en/core/reference/ydb-sdk/topic.md"}),
     )
     assert pairs == []
 
@@ -205,6 +204,25 @@ def test_planned_toc_extras_for_pair_case_45181():
     )
     assert sdk_hrefs == {"topic.md"}
     assert sdk_includes == set()
+
+
+def test_pr_50904_deleted_ru_page_queues_delete_en_pair():
+    ru = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    en = "ydb/docs/en/core/devops/deployment-options/manual/node-authorization.md"
+    plan = plan_translation_scope(
+        [(ru, "deleted")],
+        read_ru=lambda _path: None,
+        read_en_base=lambda path: "# stale EN\n" if path == en else None,
+    )
+
+    assert plan.doc_from_diff == frozenset({ru})
+    pairs = doc_pairs_from_plan(plan)
+    assert [pair.en_path for pair in pairs] == [en]
+    assert pairs[0].ru_deleted is True
+    assert (
+        plan_pair_heuristic(PairContent(pair=pairs[0], ru_text=None, en_text="# stale EN\n")).action
+        == "delete_en"
+    )
 
 
 def test_case_44820_plans_sqs_from_direct_diff():
@@ -301,9 +319,7 @@ def test_case_46569_queues_parent_toc_that_includes_needed_child():
         "ydb/docs/ru/core/concepts/streaming-query/watermarks.md": "# RU WM\n",
         "ydb/docs/ru/core/concepts/streaming-query/index.md": "# RU index\n",
         "ydb/docs/en/core/concepts/toc_i.yaml": (
-            "items:\n"
-            "- name: Streaming queries\n"
-            "  href: streaming-query.md\n"
+            "items:\n- name: Streaming queries\n  href: streaming-query.md\n"
         ),
     }
 
@@ -394,9 +410,7 @@ def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
         "ydb/docs/ru/core/concepts/streaming-query/watermarks.md": "# RU WM\n",
         "ydb/docs/ru/core/concepts/streaming-query/index.md": "# RU index\n",
         "ydb/docs/en/core/concepts/toc_i.yaml": (
-            "items:\n"
-            "- name: Streaming queries\n"
-            "  href: streaming-query.md\n"
+            "items:\n- name: Streaming queries\n  href: streaming-query.md\n"
         ),
         "ydb/docs/en/core/concepts/streaming-query.md": "# EN flat SQ\n",
     }
@@ -418,3 +432,83 @@ def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
     assert "ydb/docs/ru/core/concepts/streaming-query/index.md" in plan.doc_from_main
     assert "ydb/docs/ru/core/concepts/streaming-query/toc_i.yaml" in plan.nav_ru_paths
     assert "ydb/docs/ru/core/concepts/toc_i.yaml" in plan.nav_from_main
+
+
+def test_pr_37673_queues_en_absent_toc_sibling_debug_md():
+    """§6.192: debug-logs in diff must also queue EN-absent debug.md overview."""
+    ru_toc = (
+        "items:\n"
+        "- name: Overview\n"
+        "  href: index.md\n"
+        "- name: Diagnostics\n"
+        "  items:\n"
+        "  - name: Overview\n"
+        "    href: debug.md\n"
+        "  - name: Logs\n"
+        "    href: debug-logs.md\n"
+    )
+    en_toc = "items:\n- name: Overview\n  href: index.md\n"
+    files = {
+        "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": ru_toc,
+        "ydb/docs/en/core/recipes/ydb-sdk/toc_i.yaml": en_toc,
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md": "# Logs\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/index.md": "# Index\n",
+        "ydb/docs/en/core/recipes/ydb-sdk/index.md": "# Index\n",
+    }
+
+    def read_ru(path: str) -> str | None:
+        return files.get(path)
+
+    def read_en(path: str) -> str | None:
+        return files.get(path)
+
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md", "modified")],
+        read_ru=read_ru,
+        read_en_base=read_en,
+        read_ru_base=lambda _p: files.get(_p),
+    )
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md" in plan.doc_ru_paths
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug.md" in plan.doc_ru_paths
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml" in plan.nav_ru_paths
+
+
+def test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists():
+    """§6.194: orphan EN debug.md on disk still queues when EN toc dropped it."""
+    ru_toc = (
+        "items:\n"
+        "- name: Overview\n"
+        "  href: index.md\n"
+        "- name: Diagnostics\n"
+        "  items:\n"
+        "  - name: Overview\n"
+        "    href: debug.md\n"
+        "  - name: Logs\n"
+        "    href: debug-logs.md\n"
+    )
+    en_toc = "items:\n- name: Overview\n  href: index.md\n"
+    files = {
+        "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml": ru_toc,
+        "ydb/docs/en/core/recipes/ydb-sdk/toc_i.yaml": en_toc,
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md": "# Logs\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/index.md": "# Index\n",
+        "ydb/docs/en/core/recipes/ydb-sdk/index.md": "# Index\n",
+        # Orphan EN page still on main — §6.192 file-absent check would skip.
+        "ydb/docs/en/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
+    }
+
+    plan = plan_translation_scope(
+        [("ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md", "modified")],
+        read_ru=files.get,
+        read_en_base=files.get,
+        read_ru_base=files.get,
+    )
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug.md" in plan.doc_ru_paths
+    extras, _ = planned_toc_extras_for_pair(
+        plan,
+        "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml",
+        ru_toc,
+    )
+    assert "debug.md" in extras

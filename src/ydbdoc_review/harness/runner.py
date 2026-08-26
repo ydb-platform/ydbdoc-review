@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.profiles import HarnessProfile
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.pipeline.types import FileTranslationResult
+
+logger = logging.getLogger(__name__)
 
 
 class FileHarness:
@@ -22,7 +27,21 @@ class FileHarness:
         for step in self._profile.steps:
             if state.stopped_early:
                 break
+            logger.info(
+                "file step start profile=%s step=%s file=%s",
+                self._profile.name,
+                step.name,
+                state.file_path,
+            )
+            started = time.monotonic()
             step.run(state, ctx)
+            logger.info(
+                "file step done profile=%s step=%s file=%s elapsed=%.1fs",
+                self._profile.name,
+                step.name,
+                state.file_path,
+                time.monotonic() - started,
+            )
         return self._to_result(state, ctx)
 
     def _to_result(
@@ -50,4 +69,5 @@ class FileHarness:
             segment_excerpts=state.segment_excerpts,
             segment_source_excerpts=state.segment_source_excerpts,
             segment_alignment_error=state.segment_alignment_error,
+            differential_meta=state.differential_meta,
         )

@@ -7,11 +7,14 @@ from textwrap import dedent
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
 from ydbdoc_review.validation.fence_comments import (
@@ -20,9 +23,12 @@ from ydbdoc_review.validation.fence_comments import (
     collect_cyrillic_fence_comment_lines,
     collect_cyrillic_text_fence_lines,
     translate_cyrillic_fence_comments,
+    translate_cyrillic_fence_comments_with_client,
     translate_cyrillic_text_fences,
     translate_cyrillic_text_fences_with_client,
 )
+from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.validation.fence_comments import _parse_comment_translate_response
 from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
@@ -92,6 +98,18 @@ def test_collect_cyrillic_text_fence_lines_increment_chain():
     assert len(items) == 1
     assert "Полная копия" in items[0].body
     assert "Инкремент₁" in items[0].body
+
+
+def test_collect_cyrillic_mermaid_fence_lines():
+    md = """\
+```mermaid
+graph LR
+    Client["Клиент\\n(любой узел)"]
+```
+"""
+    items = collect_cyrillic_text_fence_lines(md)
+    assert len(items) == 1
+    assert "Клиент" in items[0].body
 
 
 def test_check_cyrillic_in_en_text_fences_warns_on_increment_chain():
@@ -219,7 +237,7 @@ def test_check_cyrillic_in_en_fence_comments_warns():
     warnings = check_cyrillic_in_en_fence_comments(GO_SAMPLE, target_lang="en")
     assert warnings
     assert warnings[0].startswith("cyrillic_in_fence:")
-    assert _classify_heuristic(warnings[0]) == "warnings"
+    assert _classify_heuristic(warnings[0]) == "blocking"
 
 
 def test_check_cyrillic_in_en_fence_comments_skips_prose_outside_fence():
@@ -332,6 +350,74 @@ def test_translate_cyrillic_fence_comments_with_mock_fn():
     assert check_cyrillic_in_en_fence_comments(translated, target_lang="en") == []
 
 
+def _comment_response(items: list[dict[str, str]]) -> str:
+    return json.dumps({"comments": items}, ensure_ascii=False)
+
+
+def test_fence_comment_retries_mostly_english_cyrillic_suffix_and_preserves_bytes():
+    source = dedent("""
+        Intro paragraph with enough English words for checks.
+
+        ```go
+        if err != nil { panic(err) } // аварийный выход
+        ```
+    """).strip()
+    bad = _comment_response([{"id": "b1-l0", "text": "Emergency exitы"}])
+    good = _comment_response([{"id": "b1-l0", "text": "Emergency exit"}])
+    client = MagicMock()
+    client.model_chain_for_role.return_value = ["primary"]
+    client.chat.side_effect = [SimpleNamespace(content=bad), SimpleNamespace(content=good)]
+
+    out = translate_cyrillic_fence_comments_with_client(
+        source, client, load_glossary()
+    )
+
+    assert "if err != nil { panic(err) } // Emergency exit" in out
+    source_code = next(line for line in source.splitlines() if "panic(err)" in line)
+    output_code = next(line for line in out.splitlines() if "panic(err)" in line)
+    assert output_code.split("//", 1)[0] == source_code.split("//", 1)[0]
+    assert out.count("```") == source.count("```")
+    assert client.chat.call_count == 2
+
+
+def test_fence_comment_all_validation_attempts_fail_closed():
+    ids = ["b1-l3", "b1-l4"]
+    client = MagicMock()
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.return_value = SimpleNamespace(
+        content=_comment_response(
+            [{"id": item_id, "text": "Still плохо"} for item_id in ids]
+        )
+    )
+
+    with pytest.raises(TranslationValidationError, match="Cyrillic remains"):
+        translate_cyrillic_fence_comments_with_client(
+            GO_SAMPLE, client, load_glossary()
+        )
+
+    assert client.chat.call_count == 6
+
+
+@pytest.mark.parametrize(
+    "items, message",
+    [
+        ([{"id": "b1-l1", "text": "ok"}], "missing ids"),
+        (
+            [
+                {"id": "b1-l1", "text": "ok"},
+                {"id": "invented", "text": "extra"},
+            ],
+            "extra ids",
+        ),
+    ],
+)
+def test_fence_comment_response_requires_exact_ids(items, message):
+    with pytest.raises(LLMParseError, match=message):
+        _parse_comment_translate_response(
+            _comment_response(items), expected_ids={"b1-l1", "b1-l2"}
+        )
+
+
 def test_fence_comment_translate_skip_surfaces_rate_limit_warning():
     from unittest.mock import MagicMock
 
@@ -366,12 +452,15 @@ def test_fence_comment_translate_skip_surfaces_rate_limit_warning():
         target_lang="en",
     )
     for warning in warnings:
-        classified.warnings.append(warning)
-    assert any("rate-limit" in w for w in classified.warnings)
-    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
+        classified.blocking.append(warning)
+    assert any("rate-limit" in w for w in classified.blocking)
+    assert any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in classified.blocking
+    )
 
 
-def test_run_file_heuristics_classified_fence_comment_is_warning_not_blocking():
+def test_run_file_heuristics_classified_fence_comment_is_blocking():
     classified = run_file_heuristics_classified(
         GO_SAMPLE,
         GO_SAMPLE,
@@ -379,8 +468,11 @@ def test_run_file_heuristics_classified_fence_comment_is_warning_not_blocking():
         source_lang="ru",
         target_lang="en",
     )
-    assert any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
-    assert not any(w.startswith("cyrillic_in_fence:") for w in classified.blocking)
+    assert any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in classified.blocking
+    )
+    assert not any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
 
 
 def _completion(content: str):

@@ -32,9 +32,7 @@ def _completion(content: str):
 
 def _mock_client(responses: list[str]) -> YandexLLMClient:
     mock_openai = MagicMock()
-    mock_openai.chat.completions.create.side_effect = [
-        _completion(r) for r in responses
-    ]
+    mock_openai.chat.completions.create.side_effect = [_completion(r) for r in responses]
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
     return YandexLLMClient(
         folder_id="b1x",
@@ -46,10 +44,7 @@ def _mock_client(responses: list[str]) -> YandexLLMClient:
 
 def _translate_json(segments, mapping: dict[str, str]) -> str:
     payload = {
-        "segments": [
-            {"id": seg.id, "text": mapping.get(seg.id, seg.text)}
-            for seg in segments
-        ]
+        "segments": [{"id": seg.id, "text": mapping.get(seg.id, seg.text)} for seg in segments]
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -60,12 +55,14 @@ def test_profiles_translate_only_verify_has_qa():
     assert translate_names == ["parse", "translate"]
     assert verify_names[0] == "parse"
     assert verify_names[1] == "load_target"
-    assert "finalize_en" in verify_names
+    assert verify_names.count("finalize_en") == 2
+    assert verify_names.index("finalize_en") < verify_names.index("critic_loop")
     assert verify_names.index("finalize_en") < verify_names.index("heuristics")
     assert verify_names.index("heuristics") < verify_names.index("verdict")
     assert verify_names.index("verdict") < verify_names.index("report_artifacts")
     shared_qa = [
         "round_trip",
+        "finalize_en",
         "critic_loop",
         "finalize_en",
         "heuristics",
@@ -124,11 +121,7 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
             "comments": [
                 {
                     "id": f"b{it.block_index}-l{it.line_index}",
-                    "text": (
-                        "Query"
-                        if "Запрос" in it.body
-                        else "Pool ID"
-                    ),
+                    "text": ("Query" if "Запрос" in it.body else "Pool ID"),
                 }
                 for it in items
             ]
@@ -147,14 +140,19 @@ def test_verify_profile_translates_yql_trailing_cyrillic_comments():
     result = FileHarness(VERIFY_PROFILE).run(
         state,
         HarnessContext.from_options(
-            _mock_client([critic_ok, fence_json]),
+            _mock_client([fence_json, critic_ok]),
             glossary=glossary,
             config=cfg,
         ),
     )
     assert result.verdict == "ok"
     assert not any(
-        w.startswith("cyrillic_in_fence:") for w in result.heuristic_warnings
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in result.heuristic_warnings
+    )
+    assert not any(
+        w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
+        for w in result.heuristic_blocking
     )
     assert "Запрос" not in result.final_text
     assert "Идентификатор" not in result.final_text
@@ -175,6 +173,44 @@ def test_parse_step_empty_file_stops_early():
     ParseStep().run(state, ctx)
     assert state.stopped_early is True
     assert state.segments == []
+
+
+def test_finalize_runs_despite_stale_alignment_error():
+    from ydbdoc_review.harness.steps import FinalizeEnStep
+
+    exact = "See [SID](authorization.md#sid).\n"
+    state = FileRunState(
+        mode="verify",
+        file_path="ydb/docs/ru/core/security/index.md",
+        raw_source_text=exact,
+        source_text=exact,
+        translated_text="See [SID](authorization.md#user).\n",
+        fence_reference_text="See [SID](authorization.md#user).\n",
+        segment_alignment_error="stale critic alignment",
+    )
+    ctx = HarnessContext.from_options(
+        _mock_client([]),
+        config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"}),
+    )
+
+    FinalizeEnStep().run(state, ctx)
+
+    assert state.translated_text == exact
+
+
+def test_finalize_uses_ru_for_protected_href_and_en_for_fence_reference():
+    from ydbdoc_review.harness.render import finalize_en_target
+
+    ru = "See [SID](authorization.md#sid).\n"
+    en_fence_reference = "See [SID](authorization.md#user).\n"
+
+    result = finalize_en_target(
+        en_fence_reference,
+        en_fence_reference,
+        protected_source_text=ru,
+    )
+
+    assert result == ru
 
 
 def test_harness_translate_matches_translate_file():
@@ -226,3 +262,40 @@ def test_translate_step_skipped_in_verify_profile():
     with patch("ydbdoc_review.harness.steps.translate_segments") as mock_tr:
         TranslateStep().run(state, ctx)
         mock_tr.assert_not_called()
+
+
+def test_translate_semantic_noop_preserves_existing_en_link_exactly():
+    base = (
+        "{% note warning %}\n\n"
+        "Секреты необходимо [создавать](../../create-secret.md). \n\n"
+        "{% endnote %}\n"
+    )
+    source = base.replace(". \n", ".\n")
+    existing = (
+        "{% note warning %}\n\n"
+        "Secrets must be [created](../../create-secret.md).\n\n"
+        "{% endnote %}\n"
+    )
+    state = FileRunState(
+        mode="translate",
+        file_path="ydb/docs/ru/core/limitation-dump-secrets.md",
+        raw_source_text=source,
+        source_text=source,
+        existing_target_text=existing,
+        # Production #49933 currently resolves the same normalized base text;
+        # the low-magnitude analysis must still preserve EN exactly.
+        base_source_text=source,
+    )
+    ctx = HarnessContext.from_options(
+        _mock_client([]),
+        config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"}),
+    )
+    ParseStep().run(state, ctx)
+
+    with patch("ydbdoc_review.harness.steps.finalize_en_target") as finalize:
+        TranslateStep().run(state, ctx)
+
+    assert state.stopped_early is True
+    assert state.differential_meta["semantic_noop"] is True
+    assert state.translated_text == existing
+    finalize.assert_not_called()

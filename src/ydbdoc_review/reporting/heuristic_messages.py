@@ -49,7 +49,7 @@ _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
 _NAV_KIND = re.compile(
     r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|"
     r"inconsistent_indent|missing_toc_target|orphan_toc_page|toc_structure_parity|"
-    r"toc_en_only_legacy): (.+)$"
+    r"toc_en_only_legacy|duplicate_toc_entry): (.+)$"
 )
 
 
@@ -63,12 +63,26 @@ def heuristic_location_label(message: str) -> str:
     """Short location column for a heuristic line in the PR report."""
     if message.startswith("cyrillic_in_fence:"):
         return "комментарии в коде"
+    if message.startswith("cyrillic_in_code_fence:") or message.startswith(
+        "cyrillic_in_text_fence:"
+    ):
+        return "блок кода"
+    if message.startswith("unrestored_placeholder:"):
+        return "плейсхолдеры"
+    if message.startswith("unrestored_yfmvar:"):
+        return "плейсхолдеры (yfmvar)"
+    if message.startswith("broken_inline_code:"):
+        return "разметка"
     if message.startswith("fence_body_copy:") or message.startswith("fence_path_stripped:"):
         return "блок кода"
     if message.startswith("fence_parity:"):
         return "блоки кода"
     if message.startswith("link_locale:") or message.startswith("md_link_parity:"):
         return "ссылки"
+    if message.startswith("href_parity:") or message.startswith("inbound_fragment:"):
+        return "ссылки"
+    if message.startswith("anchor_parity:"):
+        return "якоря"
     if message.startswith("include_parity:") or message.startswith("include_target:"):
         return "include"
     if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
@@ -90,6 +104,7 @@ def heuristic_location_label(message: str) -> str:
             "orphan_toc_page:",
             "toc_structure_parity:",
             "toc_en_only_legacy:",
+            "duplicate_toc_entry:",
         )
     ):
         return "навигация (toc/redirect)"
@@ -170,6 +185,42 @@ def humanize_heuristic(message: str) -> str:
 
 
 def _humanize_heuristic_problem(message: str) -> str:
+    if message.startswith("unrestored_placeholder:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            "В EN остались служебные protect-маркеры перевода "
+            f"(`⟦…⟧` / percent-encoded): {detail}. "
+            "Их нельзя оставлять в опубликованном тексте — "
+            "переведите заново или восстановите атомы вручную."
+        )
+    if message.startswith("unrestored_yfmvar:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            "В EN остались служебные URL-плейсхолдеры парсера "
+            f"(`yfmvar-N-yfmvarend` вместо `{{{{ var }}}}`): {detail}. "
+            "Ссылки сломаны — переведите заново или восстановите "
+            "`{{ … }}` в href вручную."
+        )
+    if message.startswith("broken_inline_code:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            "В EN сломана разметка inline code / bold "
+            f"(пустые скобки или backtick внутри `**…**`): {detail}. "
+            "Восстановите `` `.ext` `` и путь целиком, как в RU."
+        )
+    if message.startswith("cyrillic_in_code_fence:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"В fenced-блоке EN осталась кириллица: {detail}. "
+            "Переведите плейсхолдеры/комментарии внутри примера на английский."
+        )
+    if message.startswith("cyrillic_in_text_fence:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"В ``text``-блоке EN осталась кириллица: {detail}. "
+            "Переведите строки диаграммы на английский."
+        )
+
     m = _FENCE_BODY_COPY.match(message)
     if m:
         block, preview = m.group(1), m.group(2)
@@ -252,6 +303,25 @@ def _humanize_heuristic_problem(message: str) -> str:
             "Добавьте те же ``.md``-ссылки или обновите путь, если RU переехал."
         )
 
+    if message.startswith("href_parity:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"Внутренние ссылки EN должны совпадать с RU один в один: {detail}. "
+            "Скопируйте те же ``path#fragment`` / ``[{#T}](…)`` без EN-only якорей."
+        )
+    if message.startswith("anchor_parity:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"Явные ``{{#id}}`` в EN должны совпадать с RU: {detail}. "
+            "Не переименовывайте якоря при переводе."
+        )
+    if message.startswith("inbound_fragment:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"Другая EN-страница ссылается на якорь, которого нет после перевода: "
+            f"{detail}. Поправьте inbound-ссылку или верните якорь как в RU."
+        )
+
     if message.startswith("include_parity:"):
         detail = message.split(":", 1)[1].strip()
         return (
@@ -294,6 +364,10 @@ def _humanize_heuristic_problem(message: str) -> str:
         if kind == "toc_en_only_legacy":
             return (
                 f"В EN toc есть пункты без RU-зеркала (legacy): {detail}"
+            )
+        if kind == "duplicate_toc_entry":
+            return (
+                f"В EN toc дублируются пункты (href/include): {detail}"
             )
 
     if message.startswith("ru_source"):
