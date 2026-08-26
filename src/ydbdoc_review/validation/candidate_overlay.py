@@ -25,6 +25,7 @@ def validate_candidate_overlay(
             deletes.add(run.plan.target_path)
         elif run.target_text is not None:
             writes[run.plan.target_path] = run.target_text
+        deletes.update(run.additional_delete_paths)
     for nav in result.navigation_results:
         if not nav.error and nav.target_text is not None:
             writes[nav.en_path] = nav.target_text

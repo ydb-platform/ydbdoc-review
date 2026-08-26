@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from enum import Enum
+from enum import StrEnum
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
 from ydbdoc_review.pipeline.pairs import (
@@ -22,7 +22,7 @@ from ydbdoc_review.validation.href_parity import (
 )
 
 
-class CompletenessState(str, Enum):
+class CompletenessState(StrEnum):
     EXISTING_SATISFIED = "existing_satisfied"
     ADD_REQUIRED = "add_required"
     ADDED = "added"
@@ -45,7 +45,12 @@ def evaluate_completeness_states(
     for run in result.pair_results:
         path = run.plan.target_path
         disposition = run.historical_disposition
-        if path in blocked_paths or run.error:
+        move_incomplete = (
+            run.plan.pair.previous_en_path is not None
+            and run.target_text is not None
+            and run.plan.pair.previous_en_path not in run.additional_delete_paths
+        )
+        if path in blocked_paths or run.error or move_incomplete:
             states[path] = CompletenessState.BLOCKED
         elif run.deleted:
             states[path] = CompletenessState.DELETED
@@ -159,6 +164,7 @@ def committed_en_paths(result: PRTranslationResult) -> set[str]:
         if run.deleted:
             paths.add(run.plan.target_path)
             continue
+        paths.update(run.additional_delete_paths)
         if run.skipped and run.historical_disposition in {
             "already_translated",
             "existing_satisfied",
@@ -184,10 +190,21 @@ def completeness_gaps(
     *,
     docs_root: str = "ydb/docs",
     bidirectional: bool = False,
+    logical_pairs: list[DocPair] | None = None,
 ) -> list[str]:
     """Sorted opposite-locale targets missing from the translation run."""
-    if bidirectional:
-        expected: set[str] = set()
+    expected: set[str]
+    if logical_pairs is not None:
+        expected = set()
+        for pair in logical_pairs:
+            if pair.ru_changed and pair.en_changed:
+                continue
+            if pair.ru_changed:
+                expected.add(pair.en_path)
+            elif pair.en_changed:
+                expected.add(pair.ru_path)
+    elif bidirectional:
+        expected = set()
         for pair in build_doc_pairs(changes, docs_root=docs_root):
             if pair.ru_changed and pair.en_changed:
                 continue

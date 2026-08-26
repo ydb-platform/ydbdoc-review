@@ -161,6 +161,24 @@ items:
     assert "ydb/docs/en/core/dev/json-indexes.md" not in reachable
 
 
+def test_collect_en_toc_reachable_md_accepts_explicit_pending_target():
+    missing = "ydb/docs/en/core/dev/json-indexes.md"
+    files = {
+        "ydb/docs/en/core/toc_p.yaml": _MINI_TOC,
+        "ydb/docs/en/core/concepts/toc_p.yaml": _CONCEPTS_TOC,
+        "ydb/docs/en/core/dev/toc_p.yaml": "items:\n- href: json-indexes.md\n",
+    }
+
+    reachable = collect_en_toc_reachable_md(
+        files.get,
+        root_toc="ydb/docs/en/core/toc_p.yaml",
+        extra_md_paths={missing},
+        extra_toc_paths={"ydb/docs/en/core/dev/toc_p.yaml"},
+    )
+
+    assert missing in reachable
+
+
 def test_strip_unreachable_glossary_links():
     glossary_path = "ydb/docs/en/core/concepts/glossary.md"
     text = (

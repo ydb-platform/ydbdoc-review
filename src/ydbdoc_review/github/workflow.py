@@ -6,6 +6,7 @@ import logging
 import os
 import posixpath
 import re
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -75,6 +76,7 @@ from ydbdoc_review.ops.lifecycle import (
 )
 from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
+    LogicalOperation,
     PairContent,
     PairPlan,
     PairProvenance,
@@ -434,7 +436,7 @@ def _apply_results_to_disk(
     from ydbdoc_review.translation.file_profiles import is_glossary_file
     from ydbdoc_review.validation.locale_assets import apply_locale_asset_copies
 
-    written: list[str] = []
+    writes: dict[str, str] = {}
     deleted: list[str] = []
     for run in result.pair_results:
         if run.skipped or run.error:
@@ -446,24 +448,20 @@ def _apply_results_to_disk(
             continue
         if run.deleted:
             deleted.append(rel)
-            if dry_run:
-                continue
-            path = Path(repo_path) / rel.replace("/", os.sep)
-            if path.is_file():
-                path.unlink()
             continue
+        for delete_rel in run.additional_delete_paths:
+            deleted.append(delete_rel)
         if run.target_text is None:
             continue
-        written.append(rel)
-        if not dry_run:
-            write_text(repo_path, rel, run.target_text)
+        writes[rel] = run.target_text
     for nav in result.navigation_results:
         if nav.error or nav.target_text is None:
             continue
         rel = nav.en_path
-        written.append(rel)
-        if not dry_run:
-            write_text(repo_path, rel, nav.target_text)
+        writes[rel] = nav.target_text
+    if not dry_run:
+        _apply_text_transaction(repo_path, writes=writes, deletes=set(deleted))
+    written = list(writes)
     written.extend(
         apply_locale_asset_copies(
             result,
@@ -473,6 +471,68 @@ def _apply_results_to_disk(
         )
     )
     return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
+
+
+def _apply_text_transaction(
+    repo_path: str,
+    *,
+    writes: dict[str, str],
+    deletes: set[str],
+) -> None:
+    """Apply all text outputs atomically enough to restore originals on failure.
+
+    Every destination is staged beside its final path. Writes are installed
+    before deletes (MOVE never removes its source first). If any replace or
+    unlink fails, all touched paths are restored byte-for-byte.
+    """
+    root = Path(repo_path)
+    paths = set(writes) | deletes
+    originals: dict[str, bytes | None] = {}
+    staged: dict[str, Path] = {}
+    created_dirs: list[Path] = []
+    try:
+        for rel in paths:
+            path = root / rel.replace("/", os.sep)
+            originals[rel] = path.read_bytes() if path.is_file() else None
+        for rel, text in writes.items():
+            path = root / rel.replace("/", os.sep)
+            missing_dirs: list[Path] = []
+            cursor = path.parent
+            while cursor != root and not cursor.exists():
+                missing_dirs.append(cursor)
+                cursor = cursor.parent
+            path.parent.mkdir(parents=True, exist_ok=True)
+            created_dirs.extend(reversed(missing_dirs))
+            fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+            staged[rel] = Path(tmp_name)
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+                stream.write(text)
+        for rel, staged_path in staged.items():
+            os.replace(staged_path, root / rel.replace("/", os.sep))
+        for rel in deletes - set(writes):
+            path = root / rel.replace("/", os.sep)
+            if path.is_file():
+                path.unlink()
+    except Exception:
+        for rel, original in originals.items():
+            path = root / rel.replace("/", os.sep)
+            if original is None:
+                if path.is_file():
+                    path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(original)
+        raise
+    finally:
+        for staged_path in staged.values():
+            if staged_path.exists():
+                staged_path.unlink()
+        for directory in reversed(created_dirs):
+            try:
+                directory.rmdir()
+            except OSError:
+                # Never remove pre-existing/non-empty directories.
+                pass
 
 
 def _docs_text_reader(
@@ -775,7 +835,7 @@ def run_doc_translate(
             if pairs
             else []
         )
-        actionable_ru_paths = frozenset(
+        candidate_ru_paths = frozenset(
             content.pair.ru_path
             for content in contents
             if not content.pair.ru_deleted
@@ -787,11 +847,12 @@ def run_doc_translate(
         pending_en_md = {
             content.pair.en_path
             for content in contents
-            if content.pair.ru_path in actionable_ru_paths
+            if content.pair.ru_path in candidate_ru_paths
             and not (
                 content.historical_replay
-                and content.historical_en_text is not None
-                and content.en_text is None
+                and content.historical_target_text is not None
+                and content.current_en_text is None
+                and content.logical_operation is not LogicalOperation.MOVE
             )
         }
         pending_en_tocs = {
@@ -821,14 +882,27 @@ def run_doc_translate(
             replace(
                 content,
                 historical_target_deleted=True,
+                logical_operation=LogicalOperation.TOMBSTONE,
             )
             if content.historical_replay
-            and content.historical_en_text is not None
-            and content.en_text is None
+            and content.historical_target_text is not None
+            and content.current_en_text is None
+            and content.current_previous_en_text is None
+            and content.logical_operation is not LogicalOperation.MOVE
             and content.pair.en_path not in en_toc_reachable
             else content
             for content in contents
         ]
+        actionable_ru_paths = frozenset(
+            content.pair.ru_path
+            for content in contents
+            if not content.pair.ru_deleted
+            and content.logical_operation is not LogicalOperation.TOMBSTONE
+            and content.provenance not in {
+                PairProvenance.SUPERSEDED_ABSENT,
+                PairProvenance.CURRENT_EN_ORPHAN,
+            }
+        )
         logger.info(
             "EN toc reachability: %s md paths (%s pending md, %s pending toc)",
             len(en_toc_reachable),
@@ -874,7 +948,11 @@ def run_doc_translate(
         baseline_ref=merge_base_with,
     )
     pr_result.completeness_gaps = completeness_gaps(
-        changes, pr_result, docs_root=cfg.paths.docs_root, bidirectional=True
+        changes,
+        pr_result,
+        docs_root=cfg.paths.docs_root,
+        bidirectional=True,
+        logical_pairs=pairs,
     )
     if orphan_paths:
         logger.error(

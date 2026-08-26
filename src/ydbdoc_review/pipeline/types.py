@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ydbdoc_review.llm.usage import UsageTracker
+from ydbdoc_review.llm.usage import UsageTracker  # type: ignore[attr-defined]
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
@@ -13,12 +13,12 @@ from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 FileVerdict = Literal["ok", "warnings", "blocked"]
 
 __all__ = [
-    "ManualAction",
     "FileTranslationResult",
     "FileVerdict",
+    "ManualAction",
     "NavigationRunResult",
-    "PairRunResult",
     "PRTranslationResult",
+    "PairRunResult",
 ]
 
 @dataclass
@@ -92,6 +92,7 @@ class PairRunResult:
     # RU/EN source body actually used for this run (verify pick / merge ref).
     source_text: str | None = None
     historical_disposition: str | None = None
+    additional_delete_paths: tuple[str, ...] = ()
 
 
 @dataclass

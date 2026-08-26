@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from typing import Protocol
 
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.pipeline.analyze import PairPlan, plan_pairs
+from ydbdoc_review.pipeline.analyze import LogicalOperation, PairPlan, plan_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,16 @@ class ExecutePairPlansStep:
                 state.cache,
                 historical_merged_provenance=ctx.historical_merged_provenance,
             )
+            if (
+                content.logical_operation is LogicalOperation.MOVE
+                and content.pair.previous_en_path is not None
+                and result.error is None
+                and result.target_text is not None
+            ):
+                result = replace(
+                    result,
+                    additional_delete_paths=(content.pair.previous_en_path,),
+                )
             elapsed = time.monotonic() - started
             status = "error" if result.error else ("skip" if result.skipped else "ok")
             logger.info(

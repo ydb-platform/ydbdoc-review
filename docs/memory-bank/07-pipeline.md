@@ -233,6 +233,17 @@ deltas, never a universal historical full-file render. Missing official merge
 SHA, semantic failure, or completeness gaps fail the action with a non-zero
 result.
 
+The content model keeps historical target bytes separate from authoritative
+current target bytes. Current ``None`` is a real absence, never a cue to reuse
+the historical checkout. After reconciliation, MOVE is a compound pending
+write+delete seeded from a live old-path EN; TOMBSTONE is suppressed before LLM,
+navigation, orphan QA, and completeness. Reachability accepts only current-base
+files or explicit pending outputs, so a dangling ambient TOC href is not proof
+of liveness. Text writes are staged first, installed before deletes, and rolled
+back to the original bytes as one transaction on any filesystem failure.
+Staging cleanup also covers write/flush/close failures and removes only empty
+parent directories that the transaction itself created.
+
 ### 16.3. Translation branch and PR
 
 - Branch name: `ydbdoc-review/pr-<source_pr_number>` on **upstream** (`ydb-platform/ydb`).

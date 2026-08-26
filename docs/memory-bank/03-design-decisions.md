@@ -5174,8 +5174,9 @@ source PR [#45949](https://github.com/ydb-platform/ydb/pull/45949) against curre
    validator with ``no relevant structural delta``.
 2. [#50857](https://github.com/ydb-platform/ydb/pull/50857) had intentionally
    deleted the EN ``dynamic-config`` page and removed it from the EN TOC, but
-   replay treated the remaining RU page as a fresh missing translation and
-   attempted to resurrect an orphan.
+   ``load_pair_contents`` retained EN from the historical checkout when the
+   authoritative current-target read returned ``None``. Replay therefore
+   treated the remaining RU page as pending and attempted to resurrect it.
 3. GitHub reports the ``node-authorization`` move in #45949 as separate
    ``removed`` and ``added`` files, not ``renamed``. Treating them independently
    loses move provenance, while an unsafe full replay can absorb the later
@@ -5196,6 +5197,8 @@ and absorb changes outside the exact source-PR delta.
    Ordinary open/current PR deletion remains symmetric. Historical operations
    are classified against current ``main`` as ``still_required``,
    ``already_satisfied``, ``superseded``, or ``conflict``.
+   ``historical_target_text`` and ``current_en_text`` are separate authorities;
+   explicit current absence never falls back to historical checkout bytes.
 3. A target-side tombstone is ``superseded`` only with current-state proof:
    historical EN existed, current EN is absent, and the current EN TOC no longer
    reaches the path. A current PR with an ordinary missing EN file is not
@@ -5210,12 +5213,25 @@ and absorb changes outside the exact source-PR delta.
    scope by not absorbing #50596's later RU-only table formatting into the
    historical translation. Negative controls reject same-name or similar
    documents without the combined routing and topic evidence.
+   A reconciled move is one compound output: seed the destination from live
+   current old-path EN, then atomically write the destination and delete the old
+   EN path. Historical old EN is baseline evidence only. A failed validation
+   emits neither side of the move. Disk application stages every text write,
+   installs writes before deletes, and restores all original bytes if any
+   replace or unlink fails; this transaction covers all pair and navigation
+   text outputs in the run, not only the move pair. Staging paths are registered
+   before stream write/flush/close, and rollback removes every temporary file
+   plus any still-empty parent directory created solely by the transaction.
 5. The official merged snapshot is mandatory. If the GitHub merge SHA is
    unavailable, fail closed instead of checking out local ``HEAD``. Semantic
    failures and completeness gaps must also produce a non-zero action result.
 6. Never solve historical replay with a universal full render. Apply only the
    classified source-PR operation and the minimum proven carry-forward needed
    for later current-state meaning.
+7. Completeness consumes reconciled logical operations, not the raw GitHub file
+   list. TOC hrefs are live only when their target exists at current base or is
+   an explicit pending output; an ambient dangling href cannot defeat a
+   tombstone. Candidate overlay validation sees the complete compound output.
 
 **Regression evidence:** exact added/removed #45949 paths and representative
 pre/post-merge blobs; measured ``0.641757246377`` move branch; redirect/TOC and

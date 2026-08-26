@@ -39,6 +39,14 @@ class PairProvenance(StrEnum):
     CURRENT_EN_ORPHAN = "current_en_orphan"
 
 
+class LogicalOperation(StrEnum):
+    """Temporal operation after historical pair reconciliation."""
+
+    ORDINARY = "ordinary"
+    MOVE = "move"
+    TOMBSTONE = "tombstone"
+
+
 def derive_pair_provenance(*, current_ru: str | None, current_en: str | None) -> PairProvenance:
     if _non_trivial(current_ru) and _non_trivial(current_en):
         return PairProvenance.CURRENT_PAIR
@@ -63,9 +71,15 @@ class PairContent:
     en_base_text: str | None = None
     provenance: PairProvenance = PairProvenance.CURRENT_PAIR
     current_ru_text: str | None = None
+    # Current-main target authority.  Explicit ``None`` must never fall back to
+    # the historical checkout target during merged-PR replay.
+    current_en_text: str | None = None
     # EN body at the historical source merge.  Used only to prove that both
     # sides moved forward after an old PR; current EN remains authoritative.
     historical_en_text: str | None = None
+    historical_target_text: str | None = None
+    current_previous_en_text: str | None = None
+    logical_operation: LogicalOperation = LogicalOperation.ORDINARY
     # True only when base/head blobs come from a merged historical source PR
     # and current_* fields describe the translation branch base.
     historical_replay: bool = False
@@ -128,7 +142,13 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             summary="EN file deleted in PR — remove RU mirror",
         )
 
-    if content.historical_replay and content.historical_target_deleted:
+    if (
+        content.historical_replay
+        and (
+            content.logical_operation is LogicalOperation.TOMBSTONE
+            or content.historical_target_deleted
+        )
+    ):
         return PairPlan(
             pair,
             "skip",

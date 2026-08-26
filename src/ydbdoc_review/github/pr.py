@@ -17,7 +17,12 @@ from ydbdoc_review.github.git_ops import (
 )
 from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.pipeline.analyze import PairContent, PairProvenance, derive_pair_provenance
+from ydbdoc_review.pipeline.analyze import (
+    LogicalOperation,
+    PairContent,
+    PairProvenance,
+    derive_pair_provenance,
+)
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
     DocPair,
@@ -661,11 +666,10 @@ def load_pair_contents(
         en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
-        if use_historical and current_en is not None:
+        if use_historical:
             # A merged historical PR is checked out at its old merge commit,
             # while the translation branch is based on current main.  Current
-            # EN is therefore the target authority; the checkout EN is only
-            # historical evidence used to prove that the pair advanced.
+            # EN is therefore the target authority, including explicit absence.
             en_text = current_en
 
         ru_diff = (
@@ -689,6 +693,19 @@ def load_pair_contents(
             if use_historical
             else None
         )
+        current_previous_en = (
+            read_text_at_ref(repo_path, merge_base_with, pair.previous_en_path)
+            if use_historical and pair.previous_en_path is not None
+            else None
+        )
+        logical_operation = LogicalOperation.ORDINARY
+        if use_historical and pair.previous_en_path is not None:
+            logical_operation = LogicalOperation.MOVE
+            # A live old target is the authoritative seed for the move.  The
+            # historical old target remains differential evidence only.
+            if current_en is None and current_previous_en is not None:
+                en_text = current_previous_en
+                provenance = PairProvenance.CURRENT_PAIR
         contents.append(
             PairContent(
                 pair=pair,
@@ -700,7 +717,11 @@ def load_pair_contents(
                 en_base_text=en_base_text,
                 provenance=provenance,
                 current_ru_text=current_ru,
+                current_en_text=current_en,
                 historical_en_text=historical_en_text,
+                historical_target_text=historical_en_text,
+                current_previous_en_text=current_previous_en,
+                logical_operation=logical_operation,
                 historical_replay=use_historical,
             )
         )

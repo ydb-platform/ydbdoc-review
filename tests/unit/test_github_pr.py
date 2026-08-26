@@ -399,6 +399,74 @@ def test_load_pair_contents_merged_pr_uses_current_en_as_target(git_repo: str):
     assert content.historical_replay
 
 
+def test_historical_current_en_absence_never_falls_back_to_checkout(git_repo: str):
+    repo = Path(git_repo)
+    en = repo / "ydb/docs/en/a.md"
+    en.parent.mkdir(parents=True)
+    en.write_text("Historical EN.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "historical target"], cwd=repo, check=True)
+    historical = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+    en.unlink()
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "current tombstone"], cwd=repo, check=True)
+    current = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+    pair = build_pairs_from_changes(
+        [("ydb/docs/ru/a.md", "modified")], docs_root="ydb/docs"
+    )[0]
+
+    content = load_pair_contents(
+        git_repo,
+        [pair],
+        merge_base_with=current,
+        ru_content_ref=historical,
+        ru_base_ref=f"{historical}^",
+    )[0]
+
+    assert content.historical_target_text == "Historical EN.\n"
+    assert content.current_en_text is None
+    assert content.en_text is None
+
+
+def test_historical_move_uses_live_old_en_as_destination_seed(git_repo: str):
+    repo = Path(git_repo)
+    old_ru = "ydb/docs/ru/old/a.md"
+    new_ru = "ydb/docs/ru/new/a.md"
+    old_en = "ydb/docs/en/old/a.md"
+    for path, text in ((old_ru, "# RU old\n"), (old_en, "# Current EN old\n")):
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "move base"], cwd=repo, check=True)
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    (repo / old_ru).unlink()
+    target = repo / new_ru
+    target.parent.mkdir(parents=True)
+    target.write_text("# RU new\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "historical move"], cwd=repo, check=True)
+    merge = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    pair = reconcile_doc_pair_renames(
+        build_pairs_from_changes([(old_ru, "deleted"), (new_ru, "added")], docs_root="ydb/docs"),
+        [(old_ru, new_ru)],
+        docs_root="ydb/docs",
+    )[0]
+
+    content = load_pair_contents(
+        git_repo, [pair], merge_base_with=merge, ru_content_ref=merge, ru_base_ref=base
+    )[0]
+
+    assert content.logical_operation.value == "move"
+    assert content.current_en_text is None
+    assert content.current_previous_en_text == "# Current EN old\n"
+    assert content.en_text == "# Current EN old\n"
+
+
 def test_load_pair_contents_synthetic_sibling_uses_current_ru(git_repo: str):
     repo = Path(git_repo)
     ru = repo / "ydb/docs/ru/a.md"

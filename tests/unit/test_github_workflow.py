@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -13,15 +16,23 @@ from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.workflow import (
     DocJobResult,
+    _apply_results_to_disk,
     _enforce_report_checkout_bytes,
     _hard_validation_errors,
     run_doc_continue,
     run_doc_translate,
     run_doc_verify,
 )
+from ydbdoc_review.llm.client import ChatResult, YandexLLMClient
+from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult, PRTranslationResult
+from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
+    NavigationRunResult,
+    PairRunResult,
+    PRTranslationResult,
+)
 
 
 def _mock_inline_verify_job() -> DocJobResult:
@@ -42,6 +53,53 @@ def _env() -> dict[str, str]:
         "GITHUB_PUSH_TOKEN": "ghp",
         "YDBDOC_SKIP_OPS_GATES": "1",
     }
+
+
+def _workflow_llm() -> YandexLLMClient:
+    class FakeClient:
+        def __init__(self):
+            self.usage_tracker = UsageTracker()
+            self.transcript_recorder = None
+
+        def model_chain_for_role(self, role):
+            del role
+            return ["fake-model"]
+
+        def chat(self, messages, **kwargs):
+            del kwargs
+            prompt = json.dumps(messages, ensure_ascii=False)
+            segment_ids = list(dict.fromkeys(re.findall(r"s\d{4}", prompt)))
+            response = (
+                '{"verdict":"ok","issues":[]}'
+                if "verdict" in prompt.casefold()
+                else json.dumps(
+                    {
+                        "segments": [
+                            {
+                                "id": item,
+                                "text": "Current EN meaning from the old path.",
+                            }
+                            for item in segment_ids
+                        ]
+                    }
+                )
+                if segment_ids
+                else '{"verdict":"ok","issues":[]}'
+            )
+            return ChatResult(
+                content=response,
+                model_slug="fake-model",
+                model_uri="fake://model",
+                usage=LLMUsage(
+                    model_slug="fake-model",
+                    input_tokens=10,
+                    output_tokens=5,
+                    latency_ms=1.0,
+                    retries=0,
+                    success=True,
+                ),
+            )
+    return FakeClient()  # type: ignore[return-value]
 
 
 @pytest.fixture
@@ -118,6 +176,156 @@ def test_report_checkout_guard_blocks_in_memory_drift():
         message.startswith("report_checkout_mismatch:")
         for message in file_result.heuristic_blocking
     )
+
+
+def test_apply_results_transaction_rolls_back_all_paths_on_write_failure(
+    tmp_path: Path,
+):
+    old = "ydb/docs/en/old.md"
+    new = "ydb/docs/en/new.md"
+    toc = "ydb/docs/en/toc.yaml"
+    for rel, body in ((old, "old bytes\n"), (toc, "old toc\n")):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    pair = DocPair(
+        ru_path="ydb/docs/ru/new.md",
+        en_path=new,
+        ru_changed=True,
+        previous_en_path=old,
+    )
+    plan = PairPlan(pair, "translate_to_en", pair.ru_path, new, "ru", "en")
+    result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=plan,
+                target_text="new bytes\n",
+                additional_delete_paths=(old,),
+            )
+        ],
+        navigation_results=[
+            NavigationRunResult("ydb/docs/ru/toc.yaml", toc, "toc", "new toc\n")
+        ],
+    )
+    real_replace = os.replace
+    calls = 0
+
+    def fail_second_replace(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected transaction failure")
+        real_replace(source, destination)
+
+    with patch("ydbdoc_review.github.workflow.os.replace", side_effect=fail_second_replace):
+        with pytest.raises(OSError, match="injected transaction failure"):
+            _apply_results_to_disk(str(tmp_path), result, dry_run=False)
+
+    assert (tmp_path / old).read_text(encoding="utf-8") == "old bytes\n"
+    assert not (tmp_path / new).exists()
+    assert (tmp_path / toc).read_text(encoding="utf-8") == "old toc\n"
+
+
+def test_apply_results_transaction_cleans_stage_and_created_dirs_on_stream_failure(
+    tmp_path: Path,
+):
+    result = _fake_pr_result()
+    result.pair_results[0].plan = replace(
+        result.pair_results[0].plan,
+        target_path="new/nested/ydb/docs/en/a.md",
+    )
+    real_fdopen = os.fdopen
+
+    class FailingStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def write(self, text):
+            self.stream.write(text[:1])
+            raise OSError("injected staging write failure")
+
+        def __exit__(self, exc_type, exc, traceback):
+            return self.stream.__exit__(exc_type, exc, traceback)
+
+    def failing_fdopen(fd, *args, **kwargs):
+        return FailingStream(real_fdopen(fd, *args, **kwargs))
+
+    with patch("ydbdoc_review.github.workflow.os.fdopen", side_effect=failing_fdopen):
+        with pytest.raises(OSError, match="injected staging write failure"):
+            _apply_results_to_disk(str(tmp_path), result, dry_run=False)
+
+    assert not (tmp_path / "new").exists()
+    assert not list(tmp_path.rglob(".a.md.*"))
+
+
+def test_apply_results_transaction_cleans_stage_on_stream_close_failure(tmp_path: Path):
+    result = _fake_pr_result()
+    real_fdopen = os.fdopen
+
+    class CloseFailingStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self.stream
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.stream.__exit__(exc_type, exc, traceback)
+            raise OSError("injected staging close failure")
+
+    def failing_fdopen(fd, *args, **kwargs):
+        return CloseFailingStream(real_fdopen(fd, *args, **kwargs))
+
+    with patch("ydbdoc_review.github.workflow.os.fdopen", side_effect=failing_fdopen):
+        with pytest.raises(OSError, match="injected staging close failure"):
+            _apply_results_to_disk(str(tmp_path), result, dry_run=False)
+
+    assert not (tmp_path / "ydb/docs/en/a.md").exists()
+    assert not list(tmp_path.rglob(".a.md.*"))
+
+
+def test_apply_results_transaction_rolls_back_previous_unlink_failure(tmp_path: Path):
+    old = "ydb/docs/en/old.md"
+    new = "ydb/docs/en/new.md"
+    old_path = tmp_path / old
+    old_path.parent.mkdir(parents=True)
+    old_path.write_text("old bytes\n", encoding="utf-8")
+    pair = DocPair(
+        ru_path="ydb/docs/ru/new.md",
+        en_path=new,
+        ru_changed=True,
+        previous_en_path=old,
+    )
+    plan = PairPlan(pair, "translate_to_en", pair.ru_path, new, "ru", "en")
+    result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=plan,
+                target_text="new bytes\n",
+                additional_delete_paths=(old,),
+            )
+        ]
+    )
+    real_unlink = Path.unlink
+    failed = False
+
+    def fail_previous_once(path, *args, **kwargs):
+        nonlocal failed
+        if path == old_path and not failed:
+            failed = True
+            raise OSError("injected previous unlink failure")
+        return real_unlink(path, *args, **kwargs)
+
+    with patch("ydbdoc_review.github.workflow.Path.unlink", new=fail_previous_once):
+        with pytest.raises(OSError, match="injected previous unlink failure"):
+            _apply_results_to_disk(str(tmp_path), result, dry_run=False)
+
+    assert old_path.read_text(encoding="utf-8") == "old bytes\n"
+    assert not (tmp_path / new).exists()
+    assert not list(tmp_path.rglob(".new.md.*"))
 
 
 def test_report_checkout_guard_keeps_real_checkout_link_issue():
@@ -498,6 +706,158 @@ def test_merged_source_snapshot_unavailable_fails_closed(git_repo: str):
                     dry_run=True,
                     config=load_config(env=_env()),
                 )
+
+
+def test_run_doc_translate_45949_move_and_50857_tombstone_transaction(git_repo: str):
+    repo = Path(git_repo)
+    old_ru = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    new_ru = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
+    old_en = old_ru.replace("/ru/", "/en/")
+    new_en = new_ru.replace("/ru/", "/en/")
+    dynamic_ru = "ydb/docs/ru/core/maintenance/manual/dynamic-config.md"
+    dynamic_en = dynamic_ru.replace("/ru/", "/en/")
+    client_ru = "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md"
+    client_en = client_ru.replace("/ru/", "/en/")
+    index_ru = "ydb/docs/ru/core/devops/concepts/index.md"
+    index_en = index_ru.replace("/ru/", "/en/")
+    concepts_toc_ru = "ydb/docs/ru/core/devops/concepts/toc_p.yaml"
+    concepts_toc_en = concepts_toc_ru.replace("/ru/", "/en/")
+    manual_toc_ru = "ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml"
+    manual_toc_en = manual_toc_ru.replace("/ru/", "/en/")
+    redirects = "ydb/docs/redirects.yaml"
+    en_toc = "ydb/docs/en/core/toc_p.yaml"
+
+    base_files = {
+        old_ru: "# Authentication and authorization of database nodes\n\nNode certificate.\n",
+        old_en: "# Node authentication\n\nCurrent EN meaning from the old path.\n",
+        dynamic_ru: "# Dynamic config\n\nRU page.\n",
+        dynamic_en: "# Dynamic config\n\nHistorical EN page.\n",
+        client_ru: "# Client certificate\n\nSee node authorization.\n",
+        client_en: "# Client certificate\n\nSee [node authorization](../../devops/concepts/node-authorization.md).\n",
+        index_ru: "# Concepts\n\n- [Node authorization](../deployment-options/manual/node-authorization.md)\n",
+        index_en: "# Concepts\n\n- [Node authorization](../deployment-options/manual/node-authorization.md)\n",
+        concepts_toc_ru: "items:\n- name: Concepts\n  href: index.md\n",
+        concepts_toc_en: "items:\n- name: Concepts\n  href: index.md\n",
+        manual_toc_ru: "items:\n- name: Node authorization\n  href: node-authorization.md\n",
+        manual_toc_en: "items:\n- name: Node authorization\n  href: node-authorization.md\n",
+        en_toc: "items:\n- include:\n    path: devops/concepts/toc_p.yaml\n"
+        "- include:\n    path: devops/deployment-options/manual/toc_p.yaml\n"
+        "- href: maintenance/manual/dynamic-config.md\n",
+    }
+    for path, body in base_files.items():
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "45949 base"], cwd=repo, check=True)
+    (repo / old_ru).unlink()
+    new_target = repo / new_ru
+    new_target.parent.mkdir(parents=True, exist_ok=True)
+    new_target.write_text(
+        "# Configuring authentication and authorization of database nodes\n\n"
+        "Node certificate and registration.\n",
+        encoding="utf-8",
+    )
+    (repo / dynamic_ru).write_text("# Dynamic config\n\nHistorical source update.\n", encoding="utf-8")
+    (repo / client_ru).write_text("# Client certificate\n\nSee the moved node authorization.\n", encoding="utf-8")
+    (repo / index_ru).write_text(
+        "# Concepts\n\n- [Node authorization](node-authorization.md)\n", encoding="utf-8"
+    )
+    (repo / concepts_toc_ru).write_text(
+        "items:\n- name: Concepts\n  href: index.md\n"
+        "- name: Node authorization\n  href: node-authorization.md\n",
+        encoding="utf-8",
+    )
+    (repo / manual_toc_ru).write_text("items: []\n", encoding="utf-8")
+    (repo / redirects).write_text(
+        "ru:\n- from: core/devops/deployment-options/manual/node-authorization.md\n"
+        "  to: core/devops/concepts/node-authorization.md\nen: []\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "merge 45949"], cwd=repo, check=True)
+    merge_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+
+    (repo / dynamic_en).unlink()
+    (repo / client_ru).write_text(
+        "# Client certificate\n\n| Later RU-only table formatting |\n| --- |\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "50857 and 50596 current state"], cwd=repo, check=True)
+
+    changes = [
+        (old_ru, "deleted"),
+        (new_ru, "added"),
+        (dynamic_ru, "modified"),
+        (client_ru, "modified"),
+        (index_ru, "modified"),
+        (concepts_toc_ru, "modified"),
+        (manual_toc_ru, "modified"),
+        (redirects, "modified"),
+    ]
+
+    pull = {
+        "title": "Move node authorization",
+        "merged": True,
+        "merge_commit_sha": merge_sha,
+        "head": {"ref": "source", "sha": merge_sha, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main"},
+    }
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh, patch(
+        "ydbdoc_review.github.workflow.ensure_commit", return_value=True
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=changes
+    ), patch(
+        "ydbdoc_review.github.workflow.create_llm_client",
+        return_value=_workflow_llm(),
+    ), patch(
+        "ydbdoc_review.github.workflow.prepare_translation_branch_on_base"
+    ), patch(
+        "ydbdoc_review.github.workflow.git_commit_paths", return_value=True
+    ), patch("ydbdoc_review.github.workflow.push_branch"), patch(
+        "ydbdoc_review.github.workflow.run_doc_verify", return_value=_mock_inline_verify_job()
+    ):
+        client = mock_gh.return_value
+        client.get_pull.return_value = pull
+        client.iter_pull_files.return_value = [
+            {"filename": old_ru, "status": "removed"},
+            {"filename": new_ru, "status": "added"},
+            {"filename": dynamic_ru, "status": "modified"},
+            {"filename": client_ru, "status": "modified"},
+            {"filename": index_ru, "status": "modified"},
+            {"filename": concepts_toc_ru, "status": "modified"},
+            {"filename": manual_toc_ru, "status": "modified"},
+            {"filename": redirects, "status": "modified"},
+        ]
+        client.create_pull.return_value = ("https://github.com/o/r/pull/99", 99, True)
+        client.iter_issue_comments.return_value = iter([])
+        client.post_issue_comment.return_value = "url"
+        result = run_doc_translate(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=45949,
+            merge_base_with="HEAD",
+            dry_run=False,
+            config=load_config(env=_env()),
+        )
+
+    assert result.pr_result.completeness_gaps == []
+    assert result.committed and result.pushed
+    assert (repo / new_en).read_text(encoding="utf-8").endswith("Current EN meaning from the old path.\n")
+    assert not (repo / old_en).exists()
+    assert not (repo / dynamic_en).exists()
+    assert result.pr_result.completeness_states[dynamic_en] == "superseded_absent"
+    assert "node-authorization.md" in (repo / index_en).read_text(encoding="utf-8")
+    assert "node-authorization.md" in (repo / concepts_toc_en).read_text(
+        encoding="utf-8"
+    )
+    assert "node-authorization.md" not in (repo / manual_toc_en).read_text(
+        encoding="utf-8"
+    )
+    assert (repo / client_en).read_text(encoding="utf-8") == base_files[client_en]
+
+
 def test_run_doc_translate_posts_comments(git_repo: str):
     _make_en_a_reachable(git_repo)
     pull = {
