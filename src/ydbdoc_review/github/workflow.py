@@ -734,6 +734,13 @@ def run_doc_translate(
                 list(dict.fromkeys([*touched.written, *impact_paths])),
                 touched.deleted,
             )
+        if not dry_run and touched.written:
+            _postpass_localize_en_fragments(
+                repo_path,
+                touched.written,
+                merge_base_with=merge_base_with,
+                docs_root=cfg.paths.docs_root,
+            )
 
     committed = pushed = False
     if touched and not dry_run and not no_commit:
