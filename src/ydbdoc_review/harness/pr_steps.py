@@ -6,11 +6,11 @@ import logging
 import time
 from typing import Protocol
 
+from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.harness.context import HarnessContext
-from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, plan_pairs
+from ydbdoc_review.pipeline.analyze import PairPlan, plan_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,13 @@ class ExecutePairPlansStep:
                 plan.target_path,
             )
             started = time.monotonic()
-            result = run_pair_plan(content, plan, file_ctx, state.cache)
+            result = run_pair_plan(
+                content,
+                plan,
+                file_ctx,
+                state.cache,
+                historical_merged_provenance=ctx.historical_merged_provenance,
+            )
             elapsed = time.monotonic() - started
             status = "error" if result.error else ("skip" if result.skipped else "ok")
             logger.info(

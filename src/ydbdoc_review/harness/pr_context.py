@@ -19,6 +19,7 @@ class PRHarnessContext:
     en_toc_reachable: frozenset[str] | None = None
     docs_text_reader: DocsTextReader | None = None
     docs_repo_path: str | None = None
+    historical_merged_provenance: bool = False
 
     @classmethod
     def from_options(
@@ -31,6 +32,7 @@ class PRHarnessContext:
         en_toc_reachable: frozenset[str] | None = None,
         docs_text_reader: DocsTextReader | None = None,
         docs_repo_path: str | None = None,
+        historical_merged_provenance: bool = False,
     ) -> PRHarnessContext:
         return cls(
             client=client,
@@ -40,4 +42,5 @@ class PRHarnessContext:
             en_toc_reachable=en_toc_reachable,
             docs_text_reader=docs_text_reader,
             docs_repo_path=docs_repo_path,
+            historical_merged_provenance=historical_merged_provenance,
         )

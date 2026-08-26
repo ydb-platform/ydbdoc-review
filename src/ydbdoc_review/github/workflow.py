@@ -48,7 +48,7 @@ from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.llm.client import create_llm_client
+from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
     make_repo_scope_readers,
@@ -344,6 +344,7 @@ def _run_verify_pairs(
     en_toc_reachable: frozenset[str] | None = None,
     docs_text_reader=None,
     docs_repo_path: str | None = None,
+    historical_merged_provenance: bool = False,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
     state = PRRunState(contents=contents)
@@ -354,6 +355,7 @@ def _run_verify_pairs(
         en_toc_reachable=en_toc_reachable,
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
+        historical_merged_provenance=historical_merged_provenance,
     )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
@@ -581,7 +583,13 @@ def run_doc_translate(
                 # main and translate only RU gaps from the immutable merge
                 # commit.  A full translate rewrites whole files from the old
                 # RU snapshot and reverts later EN work (PR #50741).
-                pr_result = pair_runner(contents, client, glossary, **runner_kwargs)
+                pr_result = pair_runner(
+                    contents,
+                    client,
+                    glossary,
+                    historical_merged_provenance=True,
+                    **runner_kwargs,
+                )
             else:
                 pr_result = pair_runner(
                     contents,

@@ -13,13 +13,13 @@ from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.qa import compose_file_verdict
 from ydbdoc_review.pipeline.types import PairRunResult
+from ydbdoc_review.translation.differential import (
+    autotitle_delta_satisfied_in_en,
+)
 from ydbdoc_review.translation.errors import TranslationError
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
-from ydbdoc_review.translation.differential import (
-    autotitle_delta_satisfied_in_en,
-)
 from ydbdoc_review.validation.href_parity import (
     apply_href_only_delta,
     apply_localized_mirror_delta,
@@ -31,6 +31,7 @@ from ydbdoc_review.validation.href_parity import (
 )
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
+from ydbdoc_review.validation.structural_delta import structural_delta_satisfied
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,8 @@ def _try_deterministic_en_preserve(
     source_text: str,
     existing_target: str | None,
     ctx: HarnessContext,
+    *,
+    historical_merged_provenance: bool = False,
 ) -> str | None:
     """Return preserved/patched EN when the RU merge delta is already satisfied."""
     if existing_target is None or plan.target_path != content.pair.en_path:
@@ -49,6 +52,25 @@ def _try_deterministic_en_preserve(
     ru_base = content.ru_base_text
     if not ru_base or ru_base == source_text:
         return None
+    if not historical_merged_provenance:
+        return None
+
+    structural = structural_delta_satisfied(ru_base, source_text, existing_target)
+    if structural.satisfied:
+        logger.info(
+            "Historical structural delta already satisfied for %s; "
+            "preserving EN byte-for-byte (%s; additions=%d, removals=%d)",
+            plan.target_path,
+            structural.reason,
+            len(structural.additions),
+            len(structural.removals),
+        )
+        return existing_target
+    if structural.fail_closed:
+        raise TranslationError(
+            "historical structural delta cannot be applied safely without "
+            f"overwriting later target structure: {structural.reason}"
+        )
 
     localized = apply_localized_mirror_delta(ru_base, source_text, existing_target)
     if localized is not None:
@@ -102,6 +124,8 @@ def run_pair_plan(
     plan: PairPlan,
     ctx: HarnessContext,
     cache: dict[str, str],
+    *,
+    historical_merged_provenance: bool = False,
 ) -> PairRunResult:
     """Run one pair plan; delegates to ``FileHarness`` for translate/verify."""
     if plan.action == "skip":
@@ -119,9 +143,23 @@ def run_pair_plan(
 
     existing_target = _read_target_text(content, plan)
     if plan.action in {"translate_to_en", "critic_only"}:
-        preserved = _try_deterministic_en_preserve(
-            content, plan, source_text, existing_target, ctx
-        )
+        try:
+            preserved = _try_deterministic_en_preserve(
+                content,
+                plan,
+                source_text,
+                existing_target,
+                ctx,
+                historical_merged_provenance=historical_merged_provenance,
+            )
+        except TranslationError as exc:
+            logger.error("Refusing destructive historical rewrite: %s", exc)
+            return PairRunResult(
+                plan=plan,
+                target_text=existing_target,
+                source_text=source_text,
+                error=str(exc),
+            )
         if preserved is not None:
             return PairRunResult(
                 plan=plan,
