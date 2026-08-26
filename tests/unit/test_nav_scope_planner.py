@@ -220,7 +220,14 @@ def test_pr_50904_deleted_ru_page_queues_delete_en_pair():
     assert [pair.en_path for pair in pairs] == [en]
     assert pairs[0].ru_deleted is True
     assert (
-        plan_pair_heuristic(PairContent(pair=pairs[0], ru_text=None, en_text="# stale EN\n")).action
+        plan_pair_heuristic(
+            PairContent(
+                pair=pairs[0],
+                ru_text=None,
+                en_text="# stale EN\n",
+                en_base_text="# stale EN\n",
+            )
+        ).action
         == "delete_en"
     )
 
@@ -512,3 +519,35 @@ def test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists():
         ru_toc,
     )
     assert "debug.md" in extras
+
+
+def test_pr_37673_historical_debug_toc_does_not_resurrect_pages_absent_on_current_ru():
+    toc = "ydb/docs/ru/core/recipes/ydb-sdk/toc_i.yaml"
+    historical_toc = (
+        "items:\n"
+        "- name: Debug\n"
+        "  href: debug.md\n"
+        "- name: Debug logs\n"
+        "  href: debug-logs.md\n"
+    )
+    current_toc = "items:\n- name: Overview\n  href: index.md\n"
+    current = {
+        toc: current_toc,
+        "ydb/docs/ru/core/recipes/ydb-sdk/index.md": "# Index\n",
+        "ydb/docs/en/core/recipes/ydb-sdk/index.md": "# Index\n",
+    }
+    historical = {
+        toc: historical_toc,
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug.md": "# Debug\n",
+        "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md": "# Logs\n",
+    }
+
+    plan = plan_translation_scope(
+        [(toc, "modified")],
+        read_ru=current.get,
+        read_en_base=current.get,
+        read_ru_base=historical.get,
+    )
+
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug.md" not in plan.doc_ru_paths
+    assert "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md" not in plan.doc_ru_paths

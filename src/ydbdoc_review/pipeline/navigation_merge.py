@@ -19,6 +19,10 @@ from ydbdoc_review.navigation.redirects import (
     merge_en_redirects_yaml,
     redirect_translate_scope,
 )
+from ydbdoc_review.navigation.scope_planner import (
+    TranslationScopePlan,
+    planned_toc_extras_for_pair,
+)
 from ydbdoc_review.navigation.toc import (
     TocTranslateScope,
     en_toc_is_absent,
@@ -29,10 +33,6 @@ from ydbdoc_review.navigation.toc import (
     toc_entry_paths,
     toc_reordered_shared_hrefs,
     toc_translate_scope,
-)
-from ydbdoc_review.navigation.scope_planner import (
-    TranslationScopePlan,
-    planned_toc_extras_for_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
 from ydbdoc_review.pipeline.skip_paths import matches_translate_skip, toc_entry_is_skipped
@@ -311,8 +311,12 @@ def merge_navigation_pair(
             verdict="ok",
         )
 
+    use_historical = bool(
+        ru_content_ref
+        and (scope_plan is None or pair.ru_path in scope_plan.nav_from_diff)
+    )
     ru_pr: str | None = None
-    if ru_content_ref:
+    if use_historical:
         ru_pr = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
     if ru_pr is None:
         ru_pr = read_text(repo_path, pair.ru_path)
@@ -332,7 +336,7 @@ def merge_navigation_pair(
         merge_base_with,
         ru_path=pair.ru_path,
         en_path=pair.en_path,
-        ru_base_ref=ru_base_ref,
+        ru_base_ref=ru_base_ref if use_historical else None,
     )
 
     if kind == "toc":

@@ -12,8 +12,8 @@ from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     NavigationRunResult,
-    PRTranslationResult,
     PairRunResult,
+    PRTranslationResult,
 )
 
 
@@ -162,7 +162,13 @@ def test_completeness_ok_when_bilingual_skip():
         summary=BILINGUAL_SKIP_SUMMARY,
     )
     result = PRTranslationResult(
-        pair_results=[PairRunResult(plan=plan, skipped=True)],
+            pair_results=[
+                PairRunResult(
+                    plan=plan,
+                    skipped=True,
+                    historical_disposition="existing_satisfied",
+                )
+            ],
     )
     assert completeness_gaps(changes, result) == []
 
@@ -182,7 +188,13 @@ def test_completeness_ok_when_existing_en_pair_is_skipped():
         target_lang="en",
     )
     result = PRTranslationResult(
-        pair_results=[PairRunResult(plan=plan, skipped=True)],
+        pair_results=[
+            PairRunResult(
+                plan=plan,
+                skipped=True,
+                historical_disposition="existing_satisfied",
+            )
+        ],
     )
 
     assert completeness_gaps(changes, result) == []

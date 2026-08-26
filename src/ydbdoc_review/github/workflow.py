@@ -70,6 +70,7 @@ from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
     PairContent,
     PairPlan,
+    PairProvenance,
 )
 from ydbdoc_review.pipeline.completeness import (
     bilingual_en_mirrors,
@@ -602,8 +603,38 @@ def run_doc_translate(
     glossary = load_glossary()
 
     with continue_feedback_scope(effective_continue_feedback):
-        pending_en_md = {p.en_path for p in pairs}
-        pending_en_tocs = {nav.en_path for nav in nav_pairs}
+        contents = (
+            load_pair_contents(
+                repo_path,
+                pairs,
+                merge_base_with=merge_base_with,
+                ru_content_ref=ru_ref,
+                ru_base_ref=ru_base_ref,
+                historical_ru_paths=(scope_plan.doc_from_diff if scope_plan else None),
+            )
+            if pairs
+            else []
+        )
+        actionable_ru_paths = frozenset(
+            content.pair.ru_path
+            for content in contents
+            if not content.pair.ru_deleted
+            and content.provenance not in {
+                PairProvenance.SUPERSEDED_ABSENT,
+                PairProvenance.CURRENT_EN_ORPHAN,
+            }
+        )
+        pending_en_md = {
+            content.pair.en_path
+            for content in contents
+            if content.pair.ru_path in actionable_ru_paths
+        }
+        pending_en_tocs = {
+            nav.en_path
+            for nav in nav_pairs
+            if not nav.ru_deleted
+            and read_text_at_ref(repo_path, merge_base_with, nav.ru_path) is not None
+        }
 
         def _read_en_toc_graph(path: str) -> str | None:
             # Prefer upstream main for EN toc/pages so strip_unreachable does not
@@ -629,13 +660,6 @@ def run_doc_translate(
         )
 
         if pairs:
-            contents = load_pair_contents(
-                repo_path,
-                pairs,
-                merge_base_with=merge_base_with,
-                ru_content_ref=ru_ref,
-                ru_base_ref=ru_base_ref,
-            )
             pair_runner = run_pr_translation
             runner_kwargs = {
                 "config": cfg,
@@ -665,7 +689,7 @@ def run_doc_translate(
                 scope_plan=scope_plan,
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
-                active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
+                active_doc_ru_paths=actionable_ru_paths,
             )
 
     # Orphan gate vs translation-branch tip (not stale merged-PR HEAD), §6.140.
@@ -1083,8 +1107,21 @@ def run_doc_verify(
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
 
-    pending_en_md = {p.en_path for p in pairs}
-    pending_en_tocs = {nav.en_path for nav in nav_pairs}
+    verify_active_ru_paths = frozenset(
+        pair.ru_path
+        for pair in pairs
+        if not pair.ru_deleted
+        and read_text_at_ref(repo_path, merge_base_with, pair.ru_path) is not None
+    )
+    pending_en_md = {
+        pair.en_path for pair in pairs if pair.ru_path in verify_active_ru_paths
+    }
+    pending_en_tocs = {
+        nav.en_path
+        for nav in nav_pairs
+        if not nav.ru_deleted
+        and read_text_at_ref(repo_path, merge_base_with, nav.ru_path) is not None
+    }
     en_toc_reachable = build_en_toc_reachable_from_repo(
         repo_path,
         docs_root=cfg.paths.docs_root,
@@ -1167,7 +1204,7 @@ def run_doc_verify(
                 None if scope_plan is not None else extra_toc_hrefs_from_md_targets(md_en_paths)
             ),
             docs_root=cfg.paths.docs_root,
-            active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
+            active_doc_ru_paths=verify_active_ru_paths,
             skip_globs=cfg.paths.translate_skip_globs,
         )
 

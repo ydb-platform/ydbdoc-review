@@ -33,6 +33,46 @@ class StructuralDeltaDecision:
     status: HistoricalDeltaStatus = HistoricalDeltaStatus.AMBIGUOUS
 
 
+@dataclass(frozen=True)
+class HistoricalOperationSurvival:
+    survives: bool
+    reason: str
+
+
+def historical_operations_survive(
+    source_before: str, source_after: str, current_source: str | None
+) -> HistoricalOperationSurvival:
+    """Prove whether any exact B→A line operation still exists in current RU.
+
+    This intentionally does not attempt semantic matching. Exact surviving
+    additions/removals remain actionable; if later RU removed/replaced every
+    operation, replaying the historical delta is out of scope.
+    """
+    if current_source is None:
+        return HistoricalOperationSurvival(True, "current RU unavailable")
+    before = source_before.splitlines(keepends=True)
+    after = source_after.splitlines(keepends=True)
+    current = current_source.splitlines(keepends=True)
+    current_counts = Counter(current)
+    after_counts = Counter(after)
+    for tag, i1, i2, j1, j2 in SequenceMatcher(
+        a=before, b=after, autojunk=False
+    ).get_opcodes():
+        if tag in {"insert", "replace"} and any(
+            current_counts[line] >= after_counts[line] for line in after[j1:j2]
+        ):
+            return HistoricalOperationSurvival(
+                True, f"exact historical {tag} operation survives"
+            )
+        if tag == "delete" and all(
+            current_counts[line] <= after_counts[line] for line in before[i1:i2]
+        ):
+            return HistoricalOperationSurvival(
+                True, "exact historical delete operation survives"
+            )
+    return HistoricalOperationSurvival(False, "all exact historical line operations were removed or replaced")
+
+
 def _technical_title(title: list[object]) -> str:
     raw = "".join(str(getattr(node, "content", "")) for node in title)
     return re.sub(r"[^a-z0-9+#./_-]+", "", raw.casefold())

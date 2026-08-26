@@ -75,7 +75,7 @@ def test_run_pr_translation_skip_and_delete():
     )
     contents = [
         PairContent(pair=skip_pair, ru_text="x", en_text="y"),
-        PairContent(pair=del_pair),
+        PairContent(pair=del_pair, en_text="obsolete", en_base_text="obsolete"),
     ]
     client = _mock_client([])
     result = run_pr_translation(contents, client, load_glossary(), use_analyze_llm=False)

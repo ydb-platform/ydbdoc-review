@@ -143,12 +143,12 @@ def test_superseded_ru_with_stale_en_is_not_noop_satisfied():
     )
 
 
-def test_superseded_source_snapshot_is_not_forced_back_into_en():
+def test_mixed_superseded_source_snapshot_is_not_href_noop():
     source_base = "Old short monitoring page.\n"
     source_head = "Historical expanded monitoring page.\n"
     current_ru = "[Мониторинг](../ydb-ui/ydb-monitoring.md)\n"
     current_en = "[Monitoring](../ydb-ui/ydb-monitoring.md)\n"
 
-    assert href_only_source_noop_satisfied(
+    assert not href_only_source_noop_satisfied(
         source_base, source_head, current_ru, current_en
     )

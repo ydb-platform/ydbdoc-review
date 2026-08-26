@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from enum import Enum
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
@@ -13,7 +14,11 @@ from ydbdoc_review.pipeline.pairs import (
     is_docs_markdown,
 )
 from ydbdoc_review.pipeline.types import PRTranslationResult
-from ydbdoc_review.validation.href_parity import check_href_parity, is_href_only_change
+from ydbdoc_review.validation.href_parity import (
+    check_href_parity,
+    collect_internal_hrefs,
+    is_href_only_change,
+)
 
 
 class CompletenessState(str, Enum):
@@ -34,13 +39,16 @@ def evaluate_completeness_states(result: PRTranslationResult, *, blocked_paths: 
     states: dict[str, CompletenessState] = {}
     for run in result.pair_results:
         path = run.plan.target_path
+        disposition = run.historical_disposition
         if path in blocked_paths or run.error:
             states[path] = CompletenessState.BLOCKED
         elif run.deleted:
             states[path] = CompletenessState.DELETED
-        elif run.skipped and run.plan.provenance.value == "superseded_absent":
+        elif disposition == "delete_already_satisfied":
+            states[path] = CompletenessState.DELETE_ALREADY_SATISFIED
+        elif disposition in {"superseded", "superseded_absent"}:
             states[path] = CompletenessState.SUPERSEDED_ABSENT
-        elif run.skipped:
+        elif disposition in {"already_translated", "existing_satisfied"}:
             states[path] = CompletenessState.EXISTING_SATISFIED
         elif run.target_text is not None:
             states[path] = CompletenessState.ADDED if run.plan.provenance.value == "current_ru_missing_en" else CompletenessState.UPDATED
@@ -139,11 +147,13 @@ def committed_en_paths(result: PRTranslationResult) -> set[str]:
     for run in result.pair_results:
         if run.deleted or run.error:
             continue
-        if run.skipped:
-            # ``skip`` means the EN side at the selected baseline already
-            # satisfies this pair.  This is common when translating an old
-            # merged PR against current main (#50741), and must count exactly
-            # like a navigation no-op below.
+        if run.skipped and run.historical_disposition in {
+            "already_translated",
+            "existing_satisfied",
+            "superseded",
+            "superseded_absent",
+            "delete_already_satisfied",
+        }:
             paths.add(run.plan.target_path)
             continue
         if run.target_text is not None:
@@ -210,14 +220,19 @@ def href_only_source_noop_satisfied(
     if source_head is None or current_ru is None or current_en is None:
         return False
     source_was_href_only = is_href_only_change(source_base, source_head)
-    source_was_superseded = source_head != current_ru
-    if source_was_superseded:
-        # RU moved on main after the source PR landed. Do not replay the
-        # historical snapshot into EN, but skip the scope gap only when current
-        # EN already matches current RU internal links (#50976).
-        return not check_href_parity(current_ru, current_en)
     if not source_was_href_only:
         return False
+    source_was_superseded = source_head != current_ru
+    if source_was_superseded:
+        base_hrefs = Counter(collect_internal_hrefs(source_base or ""))
+        head_hrefs = Counter(collect_internal_hrefs(source_head))
+        introduced = head_hrefs - base_hrefs
+        current_hrefs = Counter(collect_internal_hrefs(current_ru))
+        if introduced and not (introduced & current_hrefs):
+            # The exact operation is superseded, but current RU/EN still must
+            # form a valid pair before the source path is considered complete.
+            return not check_href_parity(current_ru, current_en)
+        return not check_href_parity(current_ru, current_en)
     return not check_href_parity(current_ru, current_en)
 
 

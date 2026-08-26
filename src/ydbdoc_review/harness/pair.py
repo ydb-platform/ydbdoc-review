@@ -24,7 +24,6 @@ from ydbdoc_review.validation.href_parity import (
     apply_href_only_delta,
     apply_localized_mirror_delta,
     check_href_parity,
-    collect_internal_hrefs,
     insert_missing_autotitle_list_items,
     is_href_only_change,
     restore_md_link_hrefs,
@@ -33,6 +32,7 @@ from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_l
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 from ydbdoc_review.validation.structural_delta import (
     HistoricalDeltaStatus,
+    historical_operations_survive,
     structural_delta_satisfied,
 )
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
@@ -58,16 +58,13 @@ def _try_deterministic_en_preserve(
     if not historical_merged_provenance:
         return None
 
-    if (
-        content.current_ru_text is not None
-        and content.current_ru_text != source_text
-        and content.historical_en_text is not None
-        and content.historical_en_text != existing_target
-    ):
+    survival = historical_operations_survive(ru_base, source_text, content.current_ru_text)
+    if not survival.survives:
         logger.info(
-            "Historical delta for %s was superseded by a newer "
-            "RU/EN pair; preserving current EN byte-for-byte",
+            "Historical delta for %s is no longer present in current RU; "
+            "preserving current EN byte-for-byte (%s)",
             plan.target_path,
+            survival.reason,
         )
         return existing_target, HistoricalDeltaStatus.SUPERSEDED.value
 
@@ -142,7 +139,7 @@ def _try_deterministic_en_preserve(
             ru_source=source_text,
             en_baseline=content.en_base_text or existing_target,
         )
-    if collect_internal_hrefs(source_text) and not check_href_parity(
+    if is_href_only_change(ru_base, source_text) and not check_href_parity(
         source_text,
         parity_target,
         en_page_path=plan.target_path,
@@ -185,7 +182,21 @@ def run_pair_plan(
 ) -> PairRunResult:
     """Run one pair plan; delegates to ``FileHarness`` for translate/verify."""
     if plan.action == "skip":
-        return PairRunResult(plan=plan, skipped=True)
+        disposition = (
+            "delete_already_satisfied"
+            if plan.pair.ru_deleted
+            else "superseded_absent"
+            if plan.provenance is PairProvenance.SUPERSEDED_ABSENT
+            else "existing_satisfied"
+        )
+        return PairRunResult(plan=plan, skipped=True, historical_disposition=disposition)
+
+    if plan.action == "blocked":
+        return PairRunResult(
+            plan=plan,
+            error=plan.summary or "pair disposition blocked",
+            historical_disposition="blocked",
+        )
 
     if plan.action == "delete_en":
         return PairRunResult(plan=plan, deleted=True, target_text=None)

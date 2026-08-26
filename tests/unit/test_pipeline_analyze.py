@@ -35,7 +35,11 @@ def test_heuristic_translate_ru_only_changed():
 
 def test_heuristic_delete_en():
     plan = plan_pair_heuristic(
-        _content(pair=_pair(ru_deleted=True, ru_changed=True))
+        _content(
+            pair=_pair(ru_deleted=True, ru_changed=True),
+            en_text="EN",
+            en_base_text="EN",
+        )
     )
     assert plan.action == "delete_en"
 

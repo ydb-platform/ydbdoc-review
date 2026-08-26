@@ -11,6 +11,8 @@ from ydbdoc_review.github.pr import (
     PullRequestContext,
     build_pairs_from_changes,
     is_fork_head,
+    is_translation_pr_branch,
+    is_verify_fixup_branch,
     list_pr_file_changes_api,
     load_pair_contents,
     parse_repo,
@@ -18,10 +20,8 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
-    is_translation_pr_branch,
-    is_verify_fixup_branch,
-    translation_pr_base,
     translation_branch_base,
+    translation_pr_base,
     verify_fixup_pr_base,
 )
 
@@ -292,6 +292,41 @@ def test_load_pair_contents_merged_pr_uses_current_en_as_target(git_repo: str):
     assert content.current_ru_text == "# RU\n\nCurrent source version.\n"
     assert content.historical_en_text == "Historical EN.\n"
     assert content.en_text == "Current paired EN.\n"
+
+
+def test_load_pair_contents_synthetic_sibling_uses_current_ru(git_repo: str):
+    repo = Path(git_repo)
+    ru = repo / "ydb/docs/ru/a.md"
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    ru.write_text("Historical source.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "historical"], cwd=git_repo, check=True)
+    historical_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    ru.write_text("Current sibling.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "current"], cwd=git_repo, check=True)
+    current_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    pair = build_pairs_from_changes(
+        [("ydb/docs/ru/a.md", "modified")], docs_root="ydb/docs"
+    )[0]
+
+    content = load_pair_contents(
+        git_repo,
+        [pair],
+        merge_base_with=current_sha,
+        ru_content_ref=historical_sha,
+        ru_base_ref=base_sha,
+        historical_ru_paths=frozenset(),
+    )[0]
+
+    assert content.ru_text == "Current sibling.\n"
+    assert content.ru_base_text == "Current sibling.\n"
 
 
 def test_pull_request_context():

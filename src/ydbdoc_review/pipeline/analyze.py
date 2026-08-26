@@ -19,6 +19,7 @@ PairAction = Literal[
     "critic_only",
     "skip",
     "delete_en",
+    "blocked",
 ]
 
 BILINGUAL_SKIP_MARKER = "§6.76"
@@ -97,16 +98,22 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     source PR, skip auto-translate (§6.76) — authors updated the bilingual pair.
     """
     pair = content.pair
-    if content.provenance is PairProvenance.SUPERSEDED_ABSENT:
-        return PairPlan(pair, "skip", pair.ru_path, pair.en_path, "ru", "en", "absent on current main", content.provenance)
-    if content.provenance is PairProvenance.CURRENT_EN_ORPHAN:
-        return PairPlan(pair, "skip", pair.ru_path, pair.en_path, "ru", "en", "current EN orphan; fail closed", content.provenance)
-    if content.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
-        return PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en", "current RU missing EN; full translation", content.provenance, content.current_ru_text or content.ru_text)
-    ru_ok = _non_trivial(content.ru_text)
-    en_ok = _non_trivial(content.en_text)
-
+    # Explicit source deletion owns the decision even though current existence
+    # alone classifies the remaining EN as an orphan.
     if pair.ru_deleted:
+        if not _non_trivial(content.current_ru_text):
+            if not _non_trivial(content.en_text):
+                return PairPlan(
+                    pair, "skip", pair.ru_path, pair.en_path, "ru", "en",
+                    "RU deletion already satisfied", PairProvenance.SUPERSEDED_ABSENT,
+                )
+            deletion_en_baseline = content.historical_en_text or content.en_base_text
+            if deletion_en_baseline is None or content.en_text != deletion_en_baseline:
+                return PairPlan(
+                    pair, "blocked", pair.ru_path, pair.en_path, "ru", "en",
+                    "current EN orphan changed after source deletion; refuse delete",
+                    PairProvenance.CURRENT_EN_ORPHAN,
+                )
         return PairPlan(
             pair=pair,
             action="delete_en",
@@ -116,6 +123,15 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             target_lang="en",
             summary="RU file deleted in PR — remove EN mirror",
         )
+
+    if content.provenance is PairProvenance.SUPERSEDED_ABSENT:
+        return PairPlan(pair, "skip", pair.ru_path, pair.en_path, "ru", "en", "absent on current main", content.provenance)
+    if content.provenance is PairProvenance.CURRENT_EN_ORPHAN:
+        return PairPlan(pair, "blocked", pair.ru_path, pair.en_path, "ru", "en", "current EN orphan; fail closed", content.provenance)
+    if content.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
+        return PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en", "current RU missing EN; full translation", content.provenance, content.current_ru_text or content.ru_text)
+    ru_ok = _non_trivial(content.ru_text)
+    en_ok = _non_trivial(content.en_text)
 
     if pair.ru_changed and pair.en_changed:
         return PairPlan(
@@ -301,5 +317,11 @@ def plan_pairs(
             "use_analyze_llm=True is no longer supported for doc_translate; "
             "use plan_from_analyze() directly if needed"
         )
-    plans = [replace(plan_pair_heuristic(content), provenance=content.provenance, authoritative_source_text=content.current_ru_text or content.ru_text) for content in contents]
+    plans = [
+        replace(
+            plan_pair_heuristic(content),
+            authoritative_source_text=content.current_ru_text or content.ru_text,
+        )
+        for content in contents
+    ]
     return sorted(plans, key=lambda p: p.pair.ru_path)

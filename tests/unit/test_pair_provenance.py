@@ -23,3 +23,23 @@ def test_current_ru_missing_en_uses_current_authority():
 def test_superseded_absent_skips():
     pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True)
     assert plan_pair_heuristic(PairContent(pair, ru_text="historical", provenance=PairProvenance.SUPERSEDED_ABSENT)).action == "skip"
+
+
+def test_explicit_deletion_precedes_current_en_orphan_and_blocks_reused_en():
+    pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True, ru_deleted=True)
+    safe = PairContent(
+        pair,
+        en_text="old en",
+        current_ru_text=None,
+        historical_en_text="old en",
+        provenance=PairProvenance.CURRENT_EN_ORPHAN,
+    )
+    reused = PairContent(
+        pair,
+        en_text="repurposed en",
+        current_ru_text=None,
+        historical_en_text="old en",
+        provenance=PairProvenance.CURRENT_EN_ORPHAN,
+    )
+    assert plan_pair_heuristic(safe).action == "delete_en"
+    assert plan_pair_heuristic(reused).action == "blocked"

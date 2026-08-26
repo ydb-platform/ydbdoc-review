@@ -262,7 +262,10 @@ def test_run_doc_translate_merged_pr_preserves_existing_en(git_repo: str):
         "ydbdoc_review.github.workflow._run_verify_pairs",
         return_value=_fake_pr_result(),
     ) as verify_pairs:
-        with patch("ydbdoc_review.github.workflow.run_pr_translation") as translate_pairs:
+        with patch(
+            "ydbdoc_review.github.workflow.run_pr_translation",
+            return_value=_fake_pr_result(),
+        ) as translate_pairs:
             with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                 mock_gh.return_value.get_pull.return_value = pull
                 with patch(
@@ -282,8 +285,9 @@ def test_run_doc_translate_merged_pr_preserves_existing_en(git_repo: str):
                     )
 
     assert result.pr_result.translated_count == 1
-    verify_pairs.assert_called_once()
-    translate_pairs.assert_not_called()
+    verify_pairs.assert_not_called()
+    translate_pairs.assert_called_once()
+    assert translate_pairs.call_args.kwargs["historical_merged_provenance"] is True
 
 
 def test_run_doc_translate_missing_github_token(git_repo: str):

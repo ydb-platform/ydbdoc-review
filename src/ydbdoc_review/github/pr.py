@@ -483,6 +483,7 @@ def load_pair_contents(
     merge_base_with: str,
     ru_content_ref: str | None = None,
     ru_base_ref: str | None = None,
+    historical_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> list[PairContent]:
     """Load RU/EN bodies and diffs for each pair from the local checkout.
 
@@ -494,17 +495,21 @@ def load_pair_contents(
     """
     contents: list[PairContent] = []
     for pair in pairs:
+        use_historical = bool(
+            ru_content_ref
+            and (historical_ru_paths is None or pair.ru_path in historical_ru_paths)
+        )
         current_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
         current_en = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
-        provenance = derive_pair_provenance(current_ru=current_ru, current_en=current_en) if ru_content_ref else PairProvenance.CURRENT_PAIR
+        provenance = derive_pair_provenance(current_ru=current_ru, current_en=current_en) if use_historical else PairProvenance.CURRENT_PAIR
         ru_text: str | None = None
-        if ru_content_ref:
+        if use_historical:
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
         if ru_text is None:
             ru_text = read_text(repo_path, pair.ru_path)
         if ru_text is None and not pair.ru_deleted:
             ru_text = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
-        if ru_content_ref and ru_text is not None:
+        if use_historical and ru_text is not None:
             # Prefer post-merge main fragment targets over stale merge-commit ones
             # (§6.128). Checkout may still be the source PR head — use merge base.
             ru_main = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
@@ -515,7 +520,7 @@ def load_pair_contents(
         en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
-        if ru_content_ref and current_en is not None:
+        if use_historical and current_en is not None:
             # A merged historical PR is checked out at its old merge commit,
             # while the translation branch is based on current main.  Current
             # EN is therefore the target authority; the checkout EN is only
@@ -528,11 +533,15 @@ def load_pair_contents(
         en_diff = (
             file_diff_range(repo_path, merge_base_with, pair.en_path) if pair.en_changed else None
         )
-        ru_base_text = read_text_at_ref(repo_path, ru_base_ref or merge_base_with, pair.ru_path)
+        ru_base_text = read_text_at_ref(
+            repo_path,
+            (ru_base_ref or merge_base_with) if use_historical else merge_base_with,
+            pair.ru_path,
+        )
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         historical_en_text = (
             read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
-            if ru_content_ref
+            if use_historical
             else None
         )
         contents.append(

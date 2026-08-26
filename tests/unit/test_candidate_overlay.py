@@ -39,6 +39,26 @@ def test_delete_with_inbound_reference_blocks(tmp_path: Path):
     assert any("delete_markdown" in error for error in validate_candidate_overlay(str(tmp_path), result))
 
 
+def test_delete_is_atomic_after_all_inbound_owners_are_migrated(tmp_path: Path):
+    root = tmp_path / "ydb/docs/en"
+    root.mkdir(parents=True)
+    (root / "a.md").write_text("[old](./old.md)\n", encoding="utf-8")
+    (root / "b.md").write_text(
+        "{% include [old](./old.md) %}\n", encoding="utf-8"
+    )
+    (root / "old.md").write_text("WIP\n", encoding="utf-8")
+    result = _result("ydb/docs/en/a.md", "[feature](./feature.md)\n")
+    result.pair_results += _result(
+        "ydb/docs/en/b.md", "{% include [feature](./feature.md) %}\n"
+    ).pair_results
+    result.pair_results += _result("ydb/docs/en/feature.md", "Feature\n").pair_results
+    pair = DocPair("ydb/docs/ru/old.md", "ydb/docs/en/old.md")
+    plan = PairPlan(pair, "delete_en", pair.ru_path, pair.en_path, "ru", "en")
+    result.pair_results.append(PairRunResult(plan, deleted=True))
+
+    assert validate_candidate_overlay(str(tmp_path), result) == []
+
+
 def test_preexisting_template_links_do_not_block_pending_writes(tmp_path: Path):
     root = tmp_path / "ydb/docs/en/core"
     root.mkdir(parents=True)
