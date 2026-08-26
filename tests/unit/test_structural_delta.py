@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 from ydbdoc_review.harness.pair import _try_deterministic_en_preserve, run_pair_plan
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.validation.structural_delta import structural_delta_satisfied
+from ydbdoc_review.validation.structural_delta import (
+    HistoricalDeltaStatus,
+    structural_delta_satisfied,
+)
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "pr_37673_bulk_upsert"
 
@@ -42,6 +45,79 @@ def test_structural_delta_preserves_target_when_ops_are_already_satisfied():
 
     assert decision.satisfied
     assert not decision.fail_closed
+    assert decision.status is HistoricalDeltaStatus.ALREADY_TRANSLATED
+
+
+def test_later_current_drift_is_out_of_scope_when_source_ops_are_translated():
+    current_ru = AFTER + "\n{% list tabs %}\n\n- C++\n\n  later RU\n\n{% endlist %}\n"
+    current_en = AFTER.replace("echo 1;", "echo 'translated';")
+
+    decision = structural_delta_satisfied(
+        BEFORE,
+        AFTER,
+        current_en,
+        current_source=current_ru,
+    )
+
+    assert decision.satisfied
+    assert decision.status is HistoricalDeltaStatus.ALREADY_TRANSLATED
+
+
+def test_source_operation_removed_from_current_ru_is_superseded():
+    before = "{% list tabs %}\n\n- Go\n\n  existing\n\n{% endlist %}\n"
+    after = before.replace(
+        "{% endlist %}",
+        "- PHP\n\n  ```php\n  added();\n  ```\n\n{% endlist %}",
+    )
+
+    decision = structural_delta_satisfied(
+        before,
+        after,
+        before,
+        current_source=before,
+    )
+
+    assert decision.satisfied
+    assert decision.status is HistoricalDeltaStatus.SUPERSEDED
+
+
+def test_surviving_operation_missing_from_en_remains_blocking():
+    decision = structural_delta_satisfied(
+        BEFORE,
+        AFTER,
+        BEFORE,
+        current_source=AFTER,
+    )
+
+    assert not decision.satisfied
+    assert decision.status is HistoricalDeltaStatus.MISSING_CURRENT_DELTA
+
+
+def test_prose_only_historical_delta_skips_when_both_current_blobs_advanced():
+    pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True)
+    content = PairContent(
+        pair=pair,
+        ru_base_text="Старый текст.\n",
+        ru_text="Исторический текст.\n",
+        current_ru_text="Более новый русский текст.\n",
+        historical_en_text="Old text.\n",
+        en_text="Newer English text.\n",
+    )
+    plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
+    ctx = SimpleNamespace(docs_text_reader=None, client=MagicMock())
+
+    result = run_pair_plan(
+        content,
+        plan,
+        ctx,
+        {},
+        historical_merged_provenance=True,
+    )
+
+    assert result.skipped
+    assert result.historical_disposition == "superseded"
+    assert result.target_text == "Newer English text.\n"
+    ctx.client.chat.assert_not_called()
 
 
 def test_structural_delta_fails_closed_when_later_target_misses_one_op():

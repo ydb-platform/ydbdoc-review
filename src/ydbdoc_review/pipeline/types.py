@@ -91,6 +91,7 @@ class PairRunResult:
     error: str | None = None
     # RU/EN source body actually used for this run (verify pick / merge ref).
     source_text: str | None = None
+    historical_disposition: str | None = None
 
 
 @dataclass

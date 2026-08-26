@@ -524,6 +524,11 @@ def load_pair_contents(
         )
         ru_base_text = read_text_at_ref(repo_path, ru_base_ref or merge_base_with, pair.ru_path)
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
+        historical_en_text = (
+            read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
+            if ru_content_ref
+            else None
+        )
         contents.append(
             PairContent(
                 pair=pair,
@@ -535,6 +540,7 @@ def load_pair_contents(
                 en_base_text=en_base_text,
                 provenance=provenance,
                 current_ru_text=current_ru,
+                historical_en_text=historical_en_text,
             )
         )
     return contents

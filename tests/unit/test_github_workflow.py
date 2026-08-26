@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,13 +14,14 @@ from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.workflow import (
     DocJobResult,
     _enforce_report_checkout_bytes,
+    _hard_validation_errors,
     run_doc_continue,
     run_doc_translate,
     run_doc_verify,
 )
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
+from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult, PRTranslationResult
 
 
 def _mock_inline_verify_job() -> DocJobResult:
@@ -109,6 +111,19 @@ def test_report_checkout_guard_blocks_in_memory_drift():
         message.startswith("report_checkout_mismatch:")
         for message in file_result.heuristic_blocking
     )
+
+
+def test_hard_validation_ignores_unrelated_current_drift_for_historical_result():
+    result = _fake_pr_result()
+    run = result.pair_results[0]
+    run.historical_disposition = "already_translated"
+    run.plan = replace(
+        run.plan,
+        authoritative_source_text="```python\nprint('new RU')\n```\n",
+    )
+    run.target_text = "Current EN without that later, unrelated fence.\n"
+
+    assert _hard_validation_errors(result) == []
 
 
 def test_run_doc_continue_retranslates_translation_pr_scope(git_repo: str):

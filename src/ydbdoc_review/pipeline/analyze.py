@@ -61,6 +61,9 @@ class PairContent:
     en_base_text: str | None = None
     provenance: PairProvenance = PairProvenance.CURRENT_PAIR
     current_ru_text: str | None = None
+    # EN body at the historical source merge.  Used only to prove that both
+    # sides moved forward after an old PR; current EN remains authoritative.
+    historical_en_text: str | None = None
 
 
 @dataclass(frozen=True)

@@ -31,7 +31,10 @@ from ydbdoc_review.validation.href_parity import (
 )
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
-from ydbdoc_review.validation.structural_delta import structural_delta_satisfied
+from ydbdoc_review.validation.structural_delta import (
+    HistoricalDeltaStatus,
+    structural_delta_satisfied,
+)
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
 
 logger = logging.getLogger(__name__)
@@ -45,7 +48,7 @@ def _try_deterministic_en_preserve(
     ctx: HarnessContext,
     *,
     historical_merged_provenance: bool = False,
-) -> str | None:
+) -> tuple[str, str] | None:
     """Return preserved/patched EN when the RU merge delta is already satisfied."""
     if existing_target is None or plan.target_path != content.pair.en_path:
         return None
@@ -55,7 +58,25 @@ def _try_deterministic_en_preserve(
     if not historical_merged_provenance:
         return None
 
-    structural = structural_delta_satisfied(ru_base, source_text, existing_target)
+    structural = structural_delta_satisfied(
+        ru_base,
+        source_text,
+        existing_target,
+        current_source=content.current_ru_text,
+    )
+    if (
+        structural.status is HistoricalDeltaStatus.NO_RELEVANT_DELTA
+        and content.current_ru_text is not None
+        and content.current_ru_text != source_text
+        and content.historical_en_text is not None
+        and content.historical_en_text != existing_target
+    ):
+        logger.info(
+            "Historical non-structural delta for %s was superseded by a newer "
+            "RU/EN pair; preserving current EN byte-for-byte",
+            plan.target_path,
+        )
+        return existing_target, HistoricalDeltaStatus.SUPERSEDED.value
     if structural.satisfied:
         logger.info(
             "Historical structural delta already satisfied for %s; "
@@ -65,7 +86,7 @@ def _try_deterministic_en_preserve(
             len(structural.additions),
             len(structural.removals),
         )
-        return existing_target
+        return existing_target, structural.status.value
     if structural.fail_closed:
         raise TranslationError(
             "historical structural delta cannot be applied safely without "
@@ -88,18 +109,29 @@ def _try_deterministic_en_preserve(
                 ru_source=source_text,
                 en_baseline=content.en_base_text or existing_target,
             )
+        patched = structural_delta_satisfied(
+            ru_base,
+            source_text,
+            localized,
+            current_source=content.current_ru_text,
+        )
+        if not patched.satisfied:
+            raise TranslationError(
+                "localized patch did not satisfy surviving historical operations: "
+                f"{patched.reason}"
+            )
         logger.info(
             "Deterministic localized mirror delta for %s; bypassing LLM and repairs",
             plan.target_path,
         )
-        return localized
+        return localized, HistoricalDeltaStatus.TRANSLATED_NOW.value
 
     if autotitle_delta_satisfied_in_en(ru_base, source_text, existing_target):
         logger.info(
             "RU autotitle delta already satisfied in EN for %s; preserving bytes",
             plan.target_path,
         )
-        return existing_target
+        return existing_target, HistoricalDeltaStatus.ALREADY_TRANSLATED.value
 
     parity_target = existing_target
     if ctx.docs_text_reader is not None:
@@ -120,7 +152,13 @@ def _try_deterministic_en_preserve(
             "RU/EN href parity OK for %s despite structural drift; preserving EN",
             plan.target_path,
         )
-        return parity_target
+        return parity_target, HistoricalDeltaStatus.ALREADY_TRANSLATED.value
+
+    if structural.status is HistoricalDeltaStatus.MISSING_CURRENT_DELTA:
+        raise TranslationError(
+            "surviving historical operation is not translated and has no safe localized patch: "
+            f"{structural.reason}"
+        )
 
     return None
 
@@ -182,10 +220,21 @@ def run_pair_plan(
                 error=str(exc),
             )
         if preserved is not None:
+            if isinstance(preserved, tuple):
+                preserved_text, disposition = preserved
+            else:  # Backward-compatible for custom/mocked preserve hooks.
+                preserved_text = preserved
+                disposition = HistoricalDeltaStatus.ALREADY_TRANSLATED.value
             return PairRunResult(
                 plan=plan,
-                target_text=preserved,
+                target_text=preserved_text,
                 source_text=source_text,
+                skipped=disposition
+                in {
+                    HistoricalDeltaStatus.ALREADY_TRANSLATED.value,
+                    HistoricalDeltaStatus.SUPERSEDED.value,
+                },
+                historical_disposition=disposition,
             )
     if plan.action == "critic_only" and is_href_only_change(content.en_base_text, existing_target):
         href_only_target = existing_target

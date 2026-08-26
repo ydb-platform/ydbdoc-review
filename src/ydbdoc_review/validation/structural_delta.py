@@ -6,11 +6,21 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from enum import StrEnum
 
 from ydbdoc_review.parsing.ast_types import FencedCode, YfmInclude, YfmTabs
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 
 StructuralAtom = tuple[str, ...]
+
+
+class HistoricalDeltaStatus(StrEnum):
+    ALREADY_TRANSLATED = "already_translated"
+    SUPERSEDED = "superseded"
+    MISSING_CURRENT_DELTA = "missing_current_delta"
+    TRANSLATED_NOW = "translated_now"
+    AMBIGUOUS = "ambiguous"
+    NO_RELEVANT_DELTA = "no_relevant_delta"
 
 
 @dataclass(frozen=True)
@@ -20,6 +30,7 @@ class StructuralDeltaDecision:
     additions: tuple[StructuralAtom, ...] = ()
     removals: tuple[StructuralAtom, ...] = ()
     fail_closed: bool = False
+    status: HistoricalDeltaStatus = HistoricalDeltaStatus.AMBIGUOUS
 
 
 def _technical_title(title: list[object]) -> str:
@@ -87,15 +98,26 @@ def structural_delta_satisfied(
     source_before: str,
     source_after: str,
     localized_target: str,
+    *,
+    current_source: str | None = None,
 ) -> StructuralDeltaDecision:
-    """Prove ordered pane/fence/include B→A operations already hold in T."""
+    """Classify surviving historical B→A operations against current RU/EN.
+
+    Historical jobs own only operations which still survive in current RU.
+    Operations removed or replaced by later RU changes are superseded.  Later
+    RU/EN structure outside those operations is deliberately out of scope.
+    """
     try:
         before = _structural_atoms(source_before)
         after = _structural_atoms(source_after)
         target = _structural_atoms(localized_target)
+        current = _structural_atoms(current_source or source_after)
     except Exception as exc:
         return StructuralDeltaDecision(
-            False, f"structural parse failed: {exc}", fail_closed=True
+            False,
+            f"structural parse failed: {exc}",
+            fail_closed=True,
+            status=HistoricalDeltaStatus.AMBIGUOUS,
         )
 
     matcher = SequenceMatcher(a=before, b=after, autojunk=False)
@@ -107,28 +129,83 @@ def structural_delta_satisfied(
         if tag in {"replace", "insert"}:
             added.extend(after[j1:j2])
     if not added and not removed:
-        return StructuralDeltaDecision(False, "no relevant structural delta")
+        return StructuralDeltaDecision(
+            False,
+            "no relevant structural delta",
+            status=HistoricalDeltaStatus.NO_RELEVANT_DELTA,
+        )
 
     title_counts = Counter(
         atom[-1].split("@", 1)[0] for atom in after if atom[0] == "pane"
     )
     public_added = tuple(_public(atom, title_counts) for atom in added)
     public_removed = tuple(_public(atom, title_counts) for atom in removed)
-    additions_present_in_order = _is_subsequence(added, target)
-    stale = [atom for atom in removed if atom in target]
-    if not additions_present_in_order or stale:
-        later_structure = any(atom not in after for atom in target)
+    before_counts = Counter(before)
+    after_counts = Counter(after)
+    current_counts = Counter(current)
+    target_counts = Counter(target)
+
+    net_added = Counter(
+        {atom: count - before_counts[atom] for atom, count in after_counts.items() if count > before_counts[atom]}
+    )
+    net_removed = Counter(
+        {atom: count - after_counts[atom] for atom, count in before_counts.items() if count > after_counts[atom]}
+    )
+
+    surviving_additions = Counter(
+        {
+            atom: count
+            for atom, count in net_added.items()
+            if current_counts[atom] >= before_counts[atom] + count
+        }
+    )
+    surviving_removals = Counter(
+        {
+            atom: count
+            for atom, count in net_removed.items()
+            if current_counts[atom] <= after_counts[atom]
+        }
+    )
+    if not surviving_additions and not surviving_removals:
         return StructuralDeltaDecision(
-            False,
-            "unsatisfied ordered structural delta: "
-            f"additions_in_order={additions_present_in_order}, stale={stale!r}",
+            True,
+            "all historical structural operations were superseded in current RU",
             public_added,
             public_removed,
-            bool(later_structure),
+            status=HistoricalDeltaStatus.SUPERSEDED,
+        )
+
+    missing_additions = [
+        atom
+        for atom, count in surviving_additions.items()
+        if target_counts[atom] < before_counts[atom] + count
+    ]
+    stale_removals = [
+        atom
+        for atom in surviving_removals
+        if target_counts[atom] > after_counts[atom]
+    ]
+    ordered_surviving = [atom for atom in added if surviving_additions[atom]]
+    additions_in_current_order = _is_subsequence(ordered_surviving, current)
+    additions_in_target_order = _is_subsequence(ordered_surviving, target)
+    if missing_additions or stale_removals or not additions_in_target_order:
+        needs_structural_rebuild = any(
+            atom[0] in {"tabs", "pane", "fence"} for atom in missing_additions
+        )
+        return StructuralDeltaDecision(
+            False,
+            "surviving historical operations are missing from current EN: "
+            f"missing={missing_additions!r}, stale={stale_removals!r}, "
+            f"current_order={additions_in_current_order}, target_order={additions_in_target_order}",
+            public_added,
+            public_removed,
+            needs_structural_rebuild,
+            HistoricalDeltaStatus.MISSING_CURRENT_DELTA,
         )
     return StructuralDeltaDecision(
         True,
-        "all ordered pane/fence/include operations already satisfied in localized target",
+        "all surviving historical operations already translated in current EN",
         public_added,
         public_removed,
+        status=HistoricalDeltaStatus.ALREADY_TRANSLATED,
     )

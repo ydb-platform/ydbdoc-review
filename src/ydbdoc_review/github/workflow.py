@@ -375,6 +375,12 @@ def _docs_text_reader(repo_path: str, merge_base_with: str):
 def _hard_validation_errors(result: PRTranslationResult) -> list[str]:
     errors: list[str] = []
     for run in result.pair_results:
+        if run.historical_disposition in {
+            "already_translated",
+            "superseded",
+            "translated_now",
+        }:
+            continue
         if run.skipped or run.deleted or run.error or run.target_text is None or run.plan.target_lang.lower() not in {"en", "english"}:
             continue
         authority = run.plan.authoritative_source_text or run.source_text
