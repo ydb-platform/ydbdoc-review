@@ -1,3 +1,5 @@
+# ruff: noqa: RUF001
+
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +10,7 @@ import pytest
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import _try_deterministic_en_preserve, run_pair_plan
+from ydbdoc_review.harness.profiles import TRANSLATE_WITH_QA_PROFILE
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.translation.glossary import load_glossary
@@ -66,6 +69,85 @@ def test_structural_delta_preserves_target_when_ops_are_already_satisfied():
     assert decision.status is HistoricalDeltaStatus.ALREADY_TRANSLATED
 
 
+def test_href_only_localized_patch_uses_href_parity_not_structural_validation():
+    pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True)
+    before = "[Раздел](old.md#old)\n"
+    after = "[Раздел](new.md#new)\n"
+    content = PairContent(
+        pair=pair,
+        ru_base_text=before,
+        ru_text=after,
+        current_ru_text=after,
+        en_text="[Section](old.md#old)\n",
+        historical_replay=True,
+    )
+    plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
+
+    preserved = _try_deterministic_en_preserve(
+        content,
+        plan,
+        after,
+        content.en_text,
+        SimpleNamespace(docs_text_reader=None),
+        historical_merged_provenance=True,
+    )
+
+    assert preserved == (
+        "[Section](new.md#new)\n",
+        HistoricalDeltaStatus.TRANSLATED_NOW.value,
+    )
+
+
+def test_move_replay_preserves_later_en_prose_when_structure_is_satisfied():
+    before = "{% include [auth](old/node-authorization.md) %}\n"
+    after = "{% include [auth](new/node-authorization.md) %}\n"
+    current_ru = after + "Позднее уточнение.\n"
+    current_en = after + "Later clarification that must survive.\n"
+
+    decision = structural_delta_satisfied(
+        before, after, current_en, current_source=current_ru
+    )
+
+    assert decision.satisfied
+    assert decision.status is HistoricalDeltaStatus.ALREADY_TRANSLATED
+
+
+def test_pr_45949_real_file_move_preserves_later_destination_en_edit():
+    old_ru = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    new_ru = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
+    new_en = new_ru.replace("/ru/", "/en/")
+    pair = DocPair(
+        new_ru,
+        new_en,
+        ru_changed=True,
+        previous_ru_path=old_ru,
+        previous_en_path=old_ru.replace("/ru/", "/en/"),
+    )
+    body = "# Node authorization\n\nStable technical content.\n"
+    later_en = "# Node authorization\n\nStable technical content. Later clarification.\n"
+    content = PairContent(
+        pair=pair,
+        ru_base_text=body,
+        ru_text=body,
+        current_ru_text=body,
+        en_text=later_en,
+        historical_replay=True,
+    )
+    plan = PairPlan(pair, "translate_to_en", new_ru, new_en, "ru", "en")
+
+    result = run_pair_plan(
+        content,
+        plan,
+        _translation_ctx(),
+        {},
+        historical_merged_provenance=True,
+    )
+
+    assert result.skipped
+    assert result.target_text == later_en
+    assert result.historical_disposition == HistoricalDeltaStatus.ALREADY_TRANSLATED.value
+
+
 def test_later_current_drift_is_out_of_scope_when_source_ops_are_translated():
     current_ru = AFTER + "\n{% list tabs %}\n\n- C++\n\n  later RU\n\n{% endlist %}\n"
     current_en = AFTER.replace("echo 1;", "echo 'translated';")
@@ -111,7 +193,7 @@ def test_surviving_operation_missing_from_en_remains_blocking():
     assert decision.status is HistoricalDeltaStatus.MISSING_CURRENT_DELTA
 
 
-def test_prose_only_historical_delta_does_not_suppress_full_translation():
+def test_prose_only_superseded_historical_delta_preserves_current_en():
     pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True)
     content = PairContent(
         pair=pair,
@@ -120,24 +202,19 @@ def test_prose_only_historical_delta_does_not_suppress_full_translation():
         current_ru_text="Более новый русский текст.\n",
         historical_en_text="Old text.\n",
         en_text="Newer English text.\n",
+        historical_replay=True,
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
-    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
-        harness.return_value.run.return_value = SimpleNamespace(
-            final_text="Translated PR snapshot.\n", differential_meta={}
-        )
-        result = run_pair_plan(
-            content, plan, _translation_ctx(), {}, historical_merged_provenance=True
-        )
+    result = run_pair_plan(
+        content, plan, _translation_ctx(), {}, historical_merged_provenance=True
+    )
 
-    state = harness.return_value.run.call_args.args[0]
-    assert state.source_text == "Исторический текст.\n"
-    assert state.existing_target_text is None
-    assert result.target_text == "Translated PR snapshot.\n"
-    assert not result.skipped
+    assert result.target_text == "Newer English text.\n"
+    assert result.skipped
+    assert result.historical_disposition == HistoricalDeltaStatus.SUPERSEDED.value
 
 
-def test_pr_37673_historical_delta_does_not_seed_full_translation():
+def test_pr_37673_satisfied_delta_preserves_current_translation():
     def read(name: str) -> str:
         return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -154,21 +231,16 @@ def test_pr_37673_historical_delta_does_not_seed_full_translation():
         current_ru_text=read("ru_current.md"),
         historical_en_text="Historical EN before the current paired rewrite.\n",
         en_text=current_en,
+        historical_replay=True,
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
-    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
-        harness.return_value.run.return_value = SimpleNamespace(
-            final_text="Fresh full translation.\n", differential_meta={}
-        )
-        result = run_pair_plan(
-            content, plan, _translation_ctx(), {}, historical_merged_provenance=True
-        )
+    result = run_pair_plan(
+        content, plan, _translation_ctx(), {}, historical_merged_provenance=True
+    )
 
-    state = harness.return_value.run.call_args.args[0]
-    assert state.source_text == read("ru_after.md")
-    assert state.existing_target_text is None
-    assert state.base_source_text is None
-    assert result.target_text == "Fresh full translation.\n"
+    assert result.target_text == current_en
+    assert result.skipped
+    assert result.historical_disposition == HistoricalDeltaStatus.ALREADY_TRANSLATED.value
 
 
 def test_surviving_prose_op_is_not_coarsely_preserved_when_both_blobs_changed():
@@ -180,6 +252,7 @@ def test_surviving_prose_op_is_not_coarsely_preserved_when_both_blobs_changed():
         current_ru_text="Required operation.\nLater source addition.\n",
         historical_en_text="Old.\n",
         en_text="Later English addition only.\n",
+        historical_replay=True,
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
     ctx = SimpleNamespace(docs_text_reader=None)
@@ -204,6 +277,7 @@ def test_current_ru_authority_falls_through_to_full_translation_for_new_fence():
         ru_text=historical_head,
         current_ru_text=current_ru,
         en_text="# Section\n\nHistorical text.\n",
+        historical_replay=True,
     )
     plan = PairPlan(
         pair,
@@ -228,8 +302,8 @@ def test_current_ru_authority_falls_through_to_full_translation_for_new_fence():
     class FakeHarness:
         calls = 0
 
-        def __init__(self, _profile):
-            pass
+        def __init__(self, profile):
+            assert profile is TRANSLATE_WITH_QA_PROFILE
 
         def run(self, state, _ctx):
             FakeHarness.calls += 1
@@ -274,6 +348,7 @@ def test_pr_50976_monitoring_missing_historical_op_translates_from_current_ru():
         ru_text=historical_head,
         current_ru_text=current_ru,
         en_text=current_en,
+        historical_replay=True,
     )
     plan = PairPlan(
         pair,
@@ -370,6 +445,7 @@ def test_both_blobs_advanced_but_required_operation_missing_is_update_required()
         current_ru_text="Required source line.\nLater source line.\n",
         historical_en_text="Before.\n",
         en_text="Later EN line only.\n",
+        historical_replay=True,
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
 
@@ -407,6 +483,7 @@ def test_pr_50976_client_inline_code_delta_cannot_take_href_shortcut():
         ru_text=head,
         current_ru_text=head,
         en_text="See [nodes](node.md#auth). Use `Name=Value`.\n",
+        historical_replay=True,
     )
     plan = PairPlan(pair, "translate_to_en", pair.ru_path, pair.en_path, "ru", "en")
 

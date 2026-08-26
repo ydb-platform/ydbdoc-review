@@ -217,8 +217,21 @@ If EN exists but RU doesn't → create RU from EN.
 
 - **New file in RU**: create EN.
 - **Deleted file in RU**: also delete EN.
-- **Renamed file**: not auto-detected from git rename info in MVP;
-  treat as delete+add. (Tracked in backlog if needed.)
+- **Renamed file in an ordinary current/open PR**: retain the conservative
+  delete+add contract. Rename reconciliation, including explicit GitHub rename
+  provenance, runs only when the source PR is already merged.
+
+Historical merged-PR replay is stricter than ordinary pairing (§6.225). It must
+use the official merge snapshot and mark ``historical_replay`` explicitly. Each
+operation is reconciled against current ``main`` as still required, already
+satisfied, superseded, or conflict. A later EN deletion is a tombstone only when
+historical EN existence and current EN TOC removal corroborate it. GitHub
+``removed`` + ``added`` entries may form one move only with combined path/topic,
+content, and redirect/TOC evidence; the destination retains old-path provenance
+without absorbing later changes outside the source PR. This path applies exact
+deltas, never a universal historical full-file render. Missing official merge
+SHA, semantic failure, or completeness gaps fail the action with a non-zero
+result.
 
 ### 16.3. Translation branch and PR
 

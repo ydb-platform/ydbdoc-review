@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-24
-**Current focus:** §6.222 — remap LLM-invented EN link fragments via RU source (#40385 / #50976).
+**Last updated:** 2026-08-27
+**Current focus:** §6.225 — reconcile historical merged-PR operations against current ``main`` without full-file rewrites (#45949 / #50857 / #50596).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,9 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-27 | **§6.225** — type-aware href validation; fail-closed official merge snapshots; scoped historical replay; TOC-proven tombstones; real added+removed move inference preserving later EN meaning; semantic failures exit non-zero (#45949 / #50857 / #50596) |
+| 2026-08-26 | **§6.224** — merged PRs run translation provenance, post-write fragment repair, and pending-write-scoped overlay validation (#45949) |
+| 2026-08-26 | **§6.223** — localize RU transliterated auto-slugs on EN cross-page links (#45949 / #51078) |
 | 2026-08-24 | **§6.222** — remap LLM-invented ASCII link fragments via RU source path lookup (#40385 / #50976) |
 | 2026-08-24 | **§6.221** — remap RU autogen link fragments to EN explicit anchors; fix ``Имя=Значение`` notation; reject critic EN fixes that reintroduce Cyrillic (#40385 / #50976) |
 | 2026-08-24 | **§6.220** — critic malformed JSON: repair once on primary, then retry original prompt on configured fallback; retain fail-closed verdict (#50904) |

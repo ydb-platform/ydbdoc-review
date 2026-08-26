@@ -409,12 +409,12 @@ def check_href_parity(
             return []
     # #51078: RU transliterated Diplodoc slugs vs EN auto-slugs for the same section.
     if missing and extra and en_page_path and docs_text_reader is not None:
-        used_extra: set[int] = set()
-        kept_missing: list[str] = []
+        localized_used_extra: set[int] = set()
+        localized_kept_missing: list[str] = []
         for source_href in missing:
             matched = False
             for idx, target_href in enumerate(extra):
-                if idx in used_extra:
+                if idx in localized_used_extra:
                     continue
                 if _href_fragments_are_localized_equivalent(
                     source_href,
@@ -422,13 +422,15 @@ def check_href_parity(
                     en_page_path=en_page_path,
                     docs_text_reader=docs_text_reader,
                 ):
-                    used_extra.add(idx)
+                    localized_used_extra.add(idx)
                     matched = True
                     break
             if not matched:
-                kept_missing.append(source_href)
-        missing = kept_missing
-        extra = [href for idx, href in enumerate(extra) if idx not in used_extra]
+                localized_kept_missing.append(source_href)
+        missing = localized_kept_missing
+        extra = [
+            href for idx, href in enumerate(extra) if idx not in localized_used_extra
+        ]
         if not missing and not extra:
             return []
     # #50976: accept a same-page EN-localized fragment only when the source
@@ -923,22 +925,22 @@ def restore_md_link_hrefs(
 
     if len(en_links) == len(ru_links) and en_links and en_href_counts != ru_href_counts:
         # Rebuild from the end so offsets stay valid.
-        pieces: list[str] = []
+        rebuilt_pieces: list[str] = []
         cursor = len(out)
         for (elabel, _ehref, start, end), (_rlabel, rhref, _rs, _re) in zip(
             reversed(en_links), reversed(ru_links), strict=True
         ):
-            pieces.append(out[end:cursor])
+            rebuilt_pieces.append(out[end:cursor])
             localized = _maybe_localize_en_href(
                 rhref,
                 en_page_path=en_page_path,
                 docs_text_reader=docs_text_reader,
                 ru_source=source_ru,
             )
-            pieces.append(f"[{elabel}]({localized})")
+            rebuilt_pieces.append(f"[{elabel}]({localized})")
             cursor = start
-        pieces.append(out[:cursor])
-        out = "".join(reversed(pieces))
+        rebuilt_pieces.append(out[:cursor])
+        out = "".join(reversed(rebuilt_pieces))
 
     # Reinject dropped links (counts still differ or plain-text leftovers).
     present = Counter(href for _label, href, _s, _e in _iter_md_links(out))
@@ -958,7 +960,12 @@ def restore_md_link_hrefs(
             out = new_out
             continue
         # Fallback: no plain "see the section" — leave for critic / continue.
-    return out
+    return _localize_md_hrefs(
+        out,
+        en_page_path=en_page_path,
+        docs_text_reader=docs_text_reader,
+        ru_source=source_ru,
+    )
 
 
 def insert_missing_autotitle_list_items(

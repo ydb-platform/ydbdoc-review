@@ -7,7 +7,8 @@ import os
 import posixpath
 import re
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ydbdoc_review.config.loader import Config, load_config
@@ -26,10 +27,12 @@ from ydbdoc_review.github.git_ops import (
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    infer_doc_pair_moves,
     is_translation_pr_branch,
     is_verify_fixup_branch,
     list_pr_file_changes_api,
     list_pr_file_changes_git,
+    list_pr_renames_api,
     load_pair_contents,
     load_verify_navigation_ru_texts,
     load_verify_pair_contents,
@@ -37,6 +40,7 @@ from ydbdoc_review.github.pr import (
     parse_repo,
     parse_source_pr_from_text,
     pull_request_context,
+    reconcile_doc_pair_renames,
     repo_https_clone_url,
     source_pr_number_from_branch,
     source_pr_scope_changes,
@@ -58,6 +62,7 @@ from ydbdoc_review.navigation.scope_planner import (
     merge_navigation_pair_lists,
     navigation_pairs_from_plan,
     plan_translation_scope,
+    synthetic_changes_from_plan,
 )
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
@@ -470,7 +475,9 @@ def _apply_results_to_disk(
     return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
 
 
-def _docs_text_reader(repo_path: str, merge_base_with: str):
+def _docs_text_reader(
+    repo_path: str, merge_base_with: str
+) -> Callable[[str], str | None]:
     """Read docs paths from worktree, else upstream tip (§6.142 fragment repair)."""
 
     def _read(path: str) -> str | None:
@@ -552,7 +559,7 @@ def _run_verify_pairs(
     config: Config,
     *,
     en_toc_reachable: frozenset[str] | None = None,
-    docs_text_reader=None,
+    docs_text_reader: Callable[[str], str | None] | None = None,
     docs_repo_path: str | None = None,
     historical_merged_provenance: bool = False,
 ) -> PRTranslationResult:
@@ -621,9 +628,7 @@ def run_doc_translate(
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
-    # One explicit source snapshot. Merged PRs use the landed merge tree;
-    # open PRs use the already checked-out PR HEAD. No per-file fallback.
-    ru_ref = translate_ru_content_ref(ctx) or "HEAD"
+    ru_ref = translate_ru_content_ref(ctx)
     ru_base_ref: str | None = None
     if ru_ref is not None:
         if ensure_commit(repo_path, ru_ref):
@@ -638,7 +643,8 @@ def run_doc_translate(
             ru_base_ref = f"{ru_ref}^"
         else:
             raise RuntimeError(
-                f"source PR snapshot {ru_ref!r} is not available locally"
+                f"official merged source snapshot {ru_ref!r} is unavailable; "
+                "refusing checkout-HEAD fallback"
             )
 
     changes = source_pr_scope_changes(
@@ -648,35 +654,18 @@ def run_doc_translate(
     )
     changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
-    official_pairs = build_pairs_from_changes(changes, docs_root=docs_root)
-    dependency_pairs, dependency_chains = _expand_missing_markdown_dependencies(
+    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
         repo_path,
-        source_ref=ru_ref,
-        target_ref=merge_base_with,
-        source_pairs=official_pairs,
-        docs_root=docs_root,
+        merge_base_with,
+        ru_content_ref=ru_ref,
+        ru_base_ref=ru_base_ref,
     )
-    if dependency_pairs:
-        logger.info(
-            "Dependency closure for PR #%s: %d missing mirror(s): %s",
-            pr_number,
-            len(dependency_pairs),
-            "; ".join(" -> ".join(chain) for chain in dependency_chains.values()),
-        )
-    official_pairs = [*official_pairs, *dependency_pairs]
-    official_nav = [
-        pair
-        for pair in build_navigation_pairs(changes, docs_root=docs_root)
-        if pair.ru_changed
-    ]
-    scope_plan = TranslationScopePlan(
-        doc_ru_paths=frozenset(pair.ru_path for pair in official_pairs),
-        doc_from_diff=frozenset(pair.ru_path for pair in official_pairs),
-        doc_from_main=frozenset(),
-        nav_ru_paths=frozenset(pair.ru_path for pair in official_nav),
-        nav_from_diff=frozenset(pair.ru_path for pair in official_nav),
-        nav_from_main=frozenset(),
-        doc_deleted=frozenset(pair.ru_path for pair in official_pairs if pair.ru_deleted),
+    scope_plan = plan_translation_scope(
+        changes,
+        read_ru=read_ru,
+        read_en_base=read_en_base,
+        read_ru_base=read_ru_base,
+        docs_root=docs_root,
     )
     skip_globs = cfg.paths.translate_skip_globs
     if skip_globs:
@@ -697,8 +686,30 @@ def run_doc_translate(
         len(scope_plan.doc_from_main),
         len(scope_plan.nav_ru_paths),
     )
-    pairs = official_pairs
-    nav_pairs = official_nav
+    bilingual_skip = frozenset(bilingual_en_mirrors(changes, docs_root=docs_root))
+    pairs = doc_pairs_from_plan(
+        scope_plan,
+        docs_root=docs_root,
+        skip_en_paths=bilingual_skip,
+    )
+    if ctx.merged:
+        pairs = reconcile_doc_pair_renames(
+            pairs,
+            list_pr_renames_api(gh, owner, repo, pr_number),
+            docs_root=docs_root,
+        )
+        assert ru_ref is not None and ru_base_ref is not None
+        pairs = infer_doc_pair_moves(
+            pairs,
+            changes,
+            docs_root=docs_root,
+            read_before=lambda path: read_text_at_ref(repo_path, ru_base_ref, path),
+            read_after=lambda path: read_text_at_ref(repo_path, ru_ref, path),
+        )
+    nav_pairs = merge_navigation_pair_lists(
+        navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
+        build_navigation_pairs(changes, docs_root=docs_root),
+    )
     # Redirect retargeting is authorized only for EN mirrors of files changed
     # by the source PR, never synthetic dependency pages added by scope closure.
     redirect_impact_scope = frozenset(
@@ -708,6 +719,7 @@ def run_doc_translate(
         and (en_path := counterpart(path, docs_root)) is not None
         and en_path.endswith(".md")
     )
+    changes = merge_pr_file_changes(changes, synthetic_changes_from_plan(scope_plan))
     job = DocJobResult(
         mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
         pr_number=pr_number,
@@ -720,7 +732,7 @@ def run_doc_translate(
         # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
         # ``skip_en_paths`` before analyze — still post «перевод не требуется»
         # (§6.76 / #48751). Without this early path the comment never appeared.
-        pr_result = PRTranslationResult(completeness_gaps=["empty_source_scope"])
+        pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
         job.pr_result = pr_result
         if pr_result.pair_results and not dry_run:
             elapsed = time.monotonic() - started
@@ -742,7 +754,7 @@ def run_doc_translate(
                 label="source PR summary",
             )
         if ops_ctx is not None:
-            finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+            finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job
 
     client = create_llm_client(cfg)
@@ -759,7 +771,6 @@ def run_doc_translate(
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
                 historical_ru_paths=(scope_plan.doc_from_diff if scope_plan else None),
-                strict_source_snapshot=True,
             )
             if pairs
             else []
@@ -777,6 +788,11 @@ def run_doc_translate(
             content.pair.en_path
             for content in contents
             if content.pair.ru_path in actionable_ru_paths
+            and not (
+                content.historical_replay
+                and content.historical_en_text is not None
+                and content.en_text is None
+            )
         }
         pending_en_tocs = {
             nav.en_path
@@ -801,6 +817,18 @@ def run_doc_translate(
             pending_en_tocs=pending_en_tocs,
             read_text=_read_en_toc_graph,
         )
+        contents = [
+            replace(
+                content,
+                historical_target_deleted=True,
+            )
+            if content.historical_replay
+            and content.historical_en_text is not None
+            and content.en_text is None
+            and content.pair.en_path not in en_toc_reachable
+            else content
+            for content in contents
+        ]
         logger.info(
             "EN toc reachability: %s md paths (%s pending md, %s pending toc)",
             len(en_toc_reachable),
@@ -810,19 +838,16 @@ def run_doc_translate(
 
         if pairs:
             pair_runner = run_pr_translation
-            runner_kwargs = {
-                "config": cfg,
-                "en_toc_reachable": en_toc_reachable,
-                "docs_text_reader": _docs_text_reader(repo_path, merge_base_with),
-                "docs_repo_path": repo_path,
-            }
             pr_result = pair_runner(
                 contents,
                 client,
                 glossary,
                 use_analyze_llm=False,
                 historical_merged_provenance=ctx.merged,
-                **runner_kwargs,
+                config=cfg,
+                en_toc_reachable=en_toc_reachable,
+                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_repo_path=repo_path,
             )
         else:
             pr_result = PRTranslationResult()
@@ -1584,6 +1609,7 @@ def run_doc_verify(
     # the verified PR (translation / verify-* / bilingual with no fixes).
     report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
     if final_read_only_verify:
+        assert verify_content_sha is not None
         mismatches = _enforce_report_checkout_bytes(repo_path, verify_content_sha, pr_result)
         if mismatches:
             logger.error(

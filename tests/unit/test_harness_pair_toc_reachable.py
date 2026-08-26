@@ -1,5 +1,7 @@
 """Regression: en_toc_reachable must reach finalize_en_target (§6.112 / #46846)."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -14,7 +16,6 @@ from ydbdoc_review.validation.fence_integrity import fence_marker_tokens
 
 
 def test_translate_does_not_pass_current_toc_reachability_to_harness():
-    """Full source-snapshot translation must not strip links using current TOC."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/dev/streaming-query/index.md",
         en_path="ydb/docs/en/core/dev/streaming-query/index.md",

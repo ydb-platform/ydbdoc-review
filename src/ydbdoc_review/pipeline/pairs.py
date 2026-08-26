@@ -90,6 +90,8 @@ class DocPair:
     ru_deleted: bool = False
     en_deleted: bool = False
     dependency: bool = False
+    previous_ru_path: str | None = None
+    previous_en_path: str | None = None
 
 
 def build_doc_pairs(

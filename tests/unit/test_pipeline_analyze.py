@@ -6,6 +6,7 @@ import pytest
 
 from ydbdoc_review.pipeline.analyze import (
     PairContent,
+    PairProvenance,
     plan_from_analyze,
     plan_pair_heuristic,
     plan_pairs,
@@ -42,6 +43,59 @@ def test_heuristic_delete_en():
         )
     )
     assert plan.action == "delete_en"
+
+
+def test_historical_deletion_already_absent_on_main_is_superseded_not_recreated():
+    plan = plan_pair_heuristic(
+        _content(
+            pair=_pair(ru_deleted=True, ru_changed=True),
+            ru_text=None,
+            current_ru_text=None,
+            en_text=None,
+            historical_replay=True,
+        )
+    )
+
+    assert plan.action == "skip"
+    assert plan.provenance.value == "superseded_absent"
+
+
+def test_historical_deletion_refuses_to_remove_later_edited_en_orphan():
+    plan = plan_pair_heuristic(
+        _content(
+            pair=_pair(ru_deleted=True, ru_changed=True),
+            current_ru_text=None,
+            historical_en_text="Historical EN\n",
+            en_base_text="Historical EN\n",
+            en_text="Later intentional EN content\n",
+            historical_replay=True,
+        )
+    )
+
+    assert plan.action == "blocked"
+
+
+def test_pr_50857_historical_dynamic_config_en_tombstone_is_superseded():
+    pair = _pair(
+        ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+        en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+        ru_changed=True,
+    )
+    plan = plan_pair_heuristic(
+        _content(
+            pair=pair,
+            ru_text="Historical dynamic config update.\n",
+            current_ru_text="Current dynamic config page.\n",
+            historical_en_text="Historical Dynamic Config page.\n",
+            en_text=None,
+            provenance=PairProvenance.CURRENT_RU_MISSING_EN,
+            historical_replay=True,
+            historical_target_deleted=True,
+        )
+    )
+
+    assert plan.action == "skip"
+    assert plan.provenance is PairProvenance.SUPERSEDED_ABSENT
 
 
 def test_heuristic_both_changed_skips_bilingual_snapshot():

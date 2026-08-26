@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -32,7 +32,7 @@ BILINGUAL_SKIP_SUMMARY = (
 _ANALYZE_TEXT_LIMIT = 8000
 
 
-class PairProvenance(str, Enum):
+class PairProvenance(StrEnum):
     CURRENT_PAIR = "current_pair"
     CURRENT_RU_MISSING_EN = "current_ru_missing_en"
     SUPERSEDED_ABSENT = "superseded_absent"
@@ -66,6 +66,10 @@ class PairContent:
     # EN body at the historical source merge.  Used only to prove that both
     # sides moved forward after an old PR; current EN remains authoritative.
     historical_en_text: str | None = None
+    # True only when base/head blobs come from a merged historical source PR
+    # and current_* fields describe the translation branch base.
+    historical_replay: bool = False
+    historical_target_deleted: bool = False
 
 
 @dataclass(frozen=True)
@@ -88,14 +92,22 @@ def _non_trivial(text: str | None) -> bool:
 
 
 def plan_pair_heuristic(content: PairContent) -> PairPlan:
-    """Translate every RU file changed by the source PR from that PR snapshot.
-
-    Existing/current EN and later changes on ``main`` never suppress or seed
-    ``doc_translate``.  A source PR is the translation unit: if it changed RU,
-    render that complete RU file to EN again.
-    """
+    """Plan the exact surviving source-PR delta against current main."""
     pair = content.pair
     if pair.ru_deleted:
+        if content.historical_replay and not _non_trivial(content.current_ru_text):
+            if not _non_trivial(content.en_text):
+                return PairPlan(
+                    pair, "skip", pair.ru_path, pair.en_path, "ru", "en",
+                    "RU deletion already satisfied", PairProvenance.SUPERSEDED_ABSENT,
+                )
+            deletion_en_baseline = content.historical_en_text or content.en_base_text
+            if deletion_en_baseline is None or content.en_text != deletion_en_baseline:
+                return PairPlan(
+                    pair, "blocked", pair.ru_path, pair.en_path, "ru", "en",
+                    "current EN orphan changed after source deletion; refuse delete",
+                    PairProvenance.CURRENT_EN_ORPHAN,
+                )
         return PairPlan(
             pair=pair,
             action="delete_en",
@@ -116,6 +128,18 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             summary="EN file deleted in PR — remove RU mirror",
         )
 
+    if content.historical_replay and content.historical_target_deleted:
+        return PairPlan(
+            pair,
+            "skip",
+            pair.ru_path,
+            pair.en_path,
+            "ru",
+            "en",
+            "historical EN was intentionally deleted and removed from current TOC",
+            PairProvenance.SUPERSEDED_ABSENT,
+        )
+
     ru_ok = _non_trivial(content.ru_text)
     en_ok = _non_trivial(content.en_text)
 
@@ -130,10 +154,9 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             summary=BILINGUAL_SKIP_SUMMARY,
         )
 
-    # The source PR owns this decision.  Do this before current-main
-    # provenance checks so later/reformatted/absent main files cannot turn a
-    # requested translation into a preserve, skip, or bilingual no-op.
-    if pair.ru_changed and ru_ok:
+    # An ordinary source PR owns its explicit snapshot. Historical current-main
+    # provenance is only a replay concern and must not suppress that snapshot.
+    if not content.historical_replay and pair.ru_changed and ru_ok:
         return PairPlan(
             pair=pair,
             action="translate_to_en",
@@ -143,7 +166,6 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             target_lang="en",
             summary="RU changed in source PR — full re-translate to EN",
         )
-
     if content.provenance is PairProvenance.SUPERSEDED_ABSENT:
         return PairPlan(
             pair,
@@ -241,6 +263,7 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             source_lang="ru",
             target_lang="en",
             summary="RU changed — full re-translate to EN",
+            authoritative_source_text=content.current_ru_text or content.ru_text,
         )
 
     if en_ok:

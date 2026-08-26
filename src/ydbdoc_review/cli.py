@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 import typer
 from dotenv import load_dotenv
@@ -22,9 +22,9 @@ from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.shutdown import install_shutdown_handlers
+from ydbdoc_review.translation.glossary import load_glossary
 
 app = typer.Typer(
     name="ydbdoc-review",
@@ -32,6 +32,15 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _fail_on_semantic_result(result: object) -> None:
+    """Make scheduler-facing commands fail when QA/completeness is red."""
+    pr_result: Any = getattr(cast(Any, result), "pr_result", None)
+    if pr_result is not None and (
+        pr_result.failed_count > 0 or bool(pr_result.completeness_gaps)
+    ):
+        raise typer.Exit(code=1)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -123,6 +132,7 @@ def run(
             f"[yellow]Warning:[/yellow] {result.pr_result.failed_count} pair(s) failed — "
             "see logs and translation PR report."
         )
+    _fail_on_semantic_result(result)
 
 
 @app.command()
@@ -164,6 +174,7 @@ def verify(
         raise typer.Exit(code=1) from exc
 
     _print_job_summary(result.mode, result)
+    _fail_on_semantic_result(result)
 
 
 @app.command("continue")
@@ -208,6 +219,7 @@ def continue_(
         raise typer.Exit(code=1) from exc
 
     _print_job_summary(result.mode, result)
+    _fail_on_semantic_result(result)
 
 
 @app.command()
@@ -276,6 +288,7 @@ def job(
         raise typer.Exit(code=1) from exc
 
     _print_job_summary(getattr(result, "mode", m), result)
+    _fail_on_semantic_result(result)
 
 
 @app.command("list-models")

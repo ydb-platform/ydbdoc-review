@@ -5164,4 +5164,67 @@ target page existed on disk. ``validate_candidate_overlay`` scanned the entire
 **Tags:** force-update ``v0.1.0`` (merged PR translate + overlay scope).
 
 
+### §6.225 Historical replay is an operation reconciliation, not a full render (#45949 / #50857 / #50596, 2026-08-27)
+
+**Problem:** Deployed ``v0.1.0`` at ``4982d4a`` failed while replaying merged
+source PR [#45949](https://github.com/ydb-platform/ydb/pull/45949) against current
+``main`` for three independent reasons:
+
+1. A correct href-only localization was rejected by the structural-delta
+   validator with ``no relevant structural delta``.
+2. [#50857](https://github.com/ydb-platform/ydb/pull/50857) had intentionally
+   deleted the EN ``dynamic-config`` page and removed it from the EN TOC, but
+   replay treated the remaining RU page as a fresh missing translation and
+   attempted to resurrect an orphan.
+3. GitHub reports the ``node-authorization`` move in #45949 as separate
+   ``removed`` and ``added`` files, not ``renamed``. Treating them independently
+   loses move provenance, while an unsafe full replay can absorb the later
+   RU-only ``client_certificate_authorization`` table-formatting change from
+   [#50596](https://github.com/ydb-platform/ydb/pull/50596) even though current
+   EN is unchanged.
+
+The local full-render experiment at ``a4ff891`` was unsafe: rendering historical
+files from current state can rewrite complete documents, resurrect tombstones,
+and absorb changes outside the exact source-PR delta.
+
+**Decision:**
+
+1. Validate deterministic patches by operation kind. Href-only patches must
+   prove exact href/parity semantics; a structural validator cannot reject a
+   non-structural delta merely because it contains no structural change.
+2. Historical rules run only when ``PairContent.historical_replay`` is explicit.
+   Ordinary open/current PR deletion remains symmetric. Historical operations
+   are classified against current ``main`` as ``still_required``,
+   ``already_satisfied``, ``superseded``, or ``conflict``.
+3. A target-side tombstone is ``superseded`` only with current-state proof:
+   historical EN existed, current EN is absent, and the current EN TOC no longer
+   reaches the path. A current PR with an ordinary missing EN file is not
+   suppressed.
+4. Infer an added+removed move conservatively when the API provides no rename:
+   require the exact old/new path relationship to be corroborated by basename
+   and heading/topic identity, document similarity, and redirect/TOC rewiring.
+   The real #45949 blobs at merge ``2f6dc867`` (base
+   ``d9fc9f993eb7fbade94da40c7c666178abb93170``) have a deliberately non-trivial
+   body ratio of ``0.641757246377``. They collapse into one destination pair and
+   retain the old path as move provenance. The exact-delta boundary preserves
+   scope by not absorbing #50596's later RU-only table formatting into the
+   historical translation. Negative controls reject same-name or similar
+   documents without the combined routing and topic evidence.
+5. The official merged snapshot is mandatory. If the GitHub merge SHA is
+   unavailable, fail closed instead of checking out local ``HEAD``. Semantic
+   failures and completeness gaps must also produce a non-zero action result.
+6. Never solve historical replay with a universal full render. Apply only the
+   classified source-PR operation and the minimum proven carry-forward needed
+   for later current-state meaning.
+
+**Regression evidence:** exact added/removed #45949 paths and representative
+pre/post-merge blobs; measured ``0.641757246377`` move branch; redirect/TOC and
+same-name negative controls; #50857 EN tombstone with TOC proof; non-absorption
+of #50596's later RU-only table formatting; href-only validation; missing
+official merge SHA; ordinary deletion compatibility; inline critic/QA
+invocation; and semantic/completeness
+non-zero exit status. Focused and broad relevant unit suites, Ruff, mypy, and
+``git diff --check`` are release gates.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -1,8 +1,11 @@
 """Tests for PR helpers."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import subprocess
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pytest
@@ -10,14 +13,17 @@ import pytest
 from ydbdoc_review.github.pr import (
     PullRequestContext,
     build_pairs_from_changes,
+    infer_doc_pair_moves,
     is_fork_head,
     is_translation_pr_branch,
     is_verify_fixup_branch,
     list_pr_file_changes_api,
+    list_pr_renames_api,
     load_pair_contents,
     parse_repo,
     parse_source_pr_from_text,
     pull_request_context,
+    reconcile_doc_pair_renames,
     repo_https_clone_url,
     source_pr_number_from_branch,
     translation_branch_base,
@@ -223,6 +229,104 @@ def test_load_pair_contents(git_repo: str):
     assert contents[0].ru_text and "RU" in contents[0].ru_text
 
 
+def test_pr_45949_rename_metadata_collapses_delete_add_into_one_move():
+    old = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    new = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
+    old_en = old.replace("/ru/", "/en/")
+    new_en = new.replace("/ru/", "/en/")
+    pairs = build_pairs_from_changes(
+        [(old, "deleted"), (new, "added")], docs_root="ydb/docs"
+    )
+
+    moved = reconcile_doc_pair_renames(
+        pairs, [(old, new)], docs_root="ydb/docs"
+    )
+
+    assert len(moved) == 1
+    assert moved[0].ru_path == new
+    assert moved[0].en_path == new_en
+    assert moved[0].previous_ru_path == old
+    assert moved[0].previous_en_path == old_en
+
+
+def test_pr_45949_added_removed_api_infers_move_from_content_and_redirect_toc():
+    old = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    new = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
+    redirects = "ydb/docs/ru/redirects.yaml"
+    changes = [(old, "deleted"), (new, "added"), (redirects, "modified")]
+    pairs = build_pairs_from_changes(changes, docs_root="ydb/docs")
+    old_body = (
+        "# Authentication and authorization of database nodes\n\n"
+        "Node authentication verifies database nodes during service gRPC calls.\n\n"
+        "The database node opens a gRPC connection to a storage node.\n"
+        "The storage node checks certificate Subject requirements.\n"
+    )
+    new_body = (
+        "# Configuring authentication and authorization of database nodes\n\n"
+        "Node authentication verifies database nodes during protected gRPC calls.\n\n"
+        "Before a dynamic node joins the cluster, it registers with a storage node.\n"
+        "The storage node checks certificate Subject requirements and assigns a SID.\n"
+        "The node then joins the cluster using its NodeId.\n"
+    )
+    yaml = (
+        "- from: core/devops/deployment-options/manual/node-authorization.md\n"
+        "  to: core/devops/concepts/node-authorization.md\n"
+    )
+
+    moved = infer_doc_pair_moves(
+        pairs,
+        changes,
+        docs_root="ydb/docs",
+        read_before=lambda path: old_body if path == old else None,
+        read_after=lambda path: (
+            new_body if path == new else yaml if path == redirects else None
+        ),
+    )
+
+    ratio = SequenceMatcher(None, old_body, new_body, autojunk=False).ratio()
+    assert 0.6 <= ratio < 0.9
+    assert len(moved) == 1
+    assert moved[0].ru_path == new
+    assert moved[0].previous_ru_path == old
+
+
+def test_inferred_move_rejects_same_basename_with_unrelated_topic():
+    old = "ydb/docs/ru/core/old/index.md"
+    new = "ydb/docs/ru/core/new/index.md"
+    redirects = "ydb/docs/ru/redirects.yaml"
+    changes = [(old, "deleted"), (new, "added"), (redirects, "modified")]
+    pairs = build_pairs_from_changes(changes, docs_root="ydb/docs")
+    route = "from: core/old/index.md\nto: core/new/index.md\n"
+
+    result = infer_doc_pair_moves(
+        pairs,
+        changes,
+        docs_root="ydb/docs",
+        read_before=lambda path: "# Storage diagnostics\n" if path == old else None,
+        read_after=lambda path: (
+            "# Query syntax\n" if path == new else route if path == redirects else None
+        ),
+    )
+
+    assert len(result) == 2
+    assert all(pair.previous_ru_path is None for pair in result)
+
+
+def test_list_pr_renames_preserves_previous_filename():
+    class Client:
+        def iter_pull_files(self, owner, repo, pr_number):
+            del owner, repo, pr_number
+            yield {
+                "status": "renamed",
+                "previous_filename": "ydb/docs/ru/old.md",
+                "filename": "ydb/docs/ru/new.md",
+            }
+
+    assert list_pr_renames_api(Client(), "o", "r", 45949) == [  # type: ignore[arg-type]
+        ("ydb/docs/ru/old.md", "ydb/docs/ru/new.md")
+    ]
+
+
 def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
     ru = Path(git_repo) / "ydb" / "docs" / "ru" / "a.md"
     base_sha = subprocess.check_output(
@@ -292,6 +396,7 @@ def test_load_pair_contents_merged_pr_uses_current_en_as_target(git_repo: str):
     assert content.current_ru_text == "# RU\n\nCurrent source version.\n"
     assert content.historical_en_text == "Historical EN.\n"
     assert content.en_text == "Current paired EN.\n"
+    assert content.historical_replay
 
 
 def test_load_pair_contents_synthetic_sibling_uses_current_ru(git_repo: str):
@@ -327,6 +432,7 @@ def test_load_pair_contents_synthetic_sibling_uses_current_ru(git_repo: str):
 
     assert content.ru_text == "Current sibling.\n"
     assert content.ru_base_text == "Current sibling.\n"
+    assert not content.historical_replay
 
 
 def test_pull_request_context():

@@ -21,6 +21,7 @@ from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
+    apply_href_only_delta,
     apply_localized_mirror_delta,
     check_href_parity,
     insert_missing_autotitle_list_items,
@@ -53,7 +54,11 @@ def _try_deterministic_en_preserve(
         return None
     ru_base = content.ru_base_text
     historical_head = content.ru_text or source_text
-    if not ru_base or ru_base == historical_head:
+    if not ru_base:
+        return None
+    if ru_base == historical_head:
+        if content.pair.previous_ru_path is not None:
+            return existing_target, HistoricalDeltaStatus.ALREADY_TRANSLATED.value
         return None
     if not historical_merged_provenance:
         return None
@@ -92,10 +97,10 @@ def _try_deterministic_en_preserve(
         )
         return existing_target, structural.status.value
     if structural.fail_closed:
-        if authoritative_current:
+        if authoritative_current or plan.action == "translate_to_en":
             logger.info(
                 "Unsafe historical structural patch for %s; falling through "
-                "to full translation from authoritative current RU",
+                "to translation from the authoritative source",
                 plan.target_path,
             )
             return None
@@ -104,6 +109,7 @@ def _try_deterministic_en_preserve(
             f"overwriting later target structure: {structural.reason}"
         )
 
+    href_only = is_href_only_change(ru_base, historical_head)
     localized = apply_localized_mirror_delta(
         ru_base,
         historical_head,
@@ -120,17 +126,30 @@ def _try_deterministic_en_preserve(
                 ru_source=historical_head,
                 en_baseline=content.en_base_text or existing_target,
             )
-        patched = structural_delta_satisfied(
-            ru_base,
-            historical_head,
-            localized,
-            current_source=content.current_ru_text,
-        )
-        if not patched.satisfied:
-            raise TranslationError(
-                "localized patch did not satisfy surviving historical operations: "
-                f"{patched.reason}"
+        if href_only:
+            parity_errors = check_href_parity(
+                historical_head,
+                localized,
+                en_page_path=plan.target_path,
+                docs_text_reader=ctx.docs_text_reader,
             )
+            if parity_errors:
+                raise TranslationError(
+                    "localized href patch did not satisfy exact RU/EN parity: "
+                    + "; ".join(parity_errors)
+                )
+        else:
+            patched = structural_delta_satisfied(
+                ru_base,
+                historical_head,
+                localized,
+                current_source=content.current_ru_text,
+            )
+            if not patched.satisfied:
+                raise TranslationError(
+                    "localized structural patch did not satisfy surviving "
+                    f"historical operations: {patched.reason}"
+                )
         logger.info(
             "Deterministic localized mirror delta for %s; bypassing LLM and repairs",
             plan.target_path,
@@ -235,7 +254,8 @@ def run_pair_plan(
     if plan.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
         existing_target = None
         content = replace(content, ru_base_text=None, en_base_text=None, en_text=None)
-    if plan.action == "critic_only":
+    historical_replay = historical_merged_provenance and content.historical_replay
+    if historical_replay and plan.action in {"translate_to_en", "critic_only"}:
         try:
             preserved = _try_deterministic_en_preserve(
                 content,
@@ -270,6 +290,15 @@ def run_pair_plan(
                 },
                 historical_disposition=disposition,
             )
+        if (
+            historical_replay
+            and content.current_ru_text is not None
+            and source_text == content.current_ru_text
+            and content.ru_text != source_text
+        ):
+            # Historical snapshots prove operation ownership only.  Any
+            # fallback translates current RU without seeding from old blobs.
+            content = replace(content, ru_base_text=None, en_base_text=None)
     if plan.action == "critic_only" and is_href_only_change(content.en_base_text, existing_target):
         href_only_target = existing_target
         if ctx.docs_text_reader is not None and existing_target is not None:
@@ -289,34 +318,55 @@ def run_pair_plan(
             target_text=href_only_target,
             source_text=source_text,
         )
+    if historical_replay and plan.action == "translate_to_en" and existing_target is not None:
+        deterministic = apply_href_only_delta(
+            content.ru_base_text,
+            source_text,
+            content.en_base_text or existing_target,
+            en_page_path=plan.target_path,
+            docs_text_reader=ctx.docs_text_reader,
+        )
+        if deterministic is not None:
+            if ctx.docs_text_reader is not None:
+                deterministic = repair_en_fragments(
+                    deterministic,
+                    en_page_path=plan.target_path,
+                    read_text=ctx.docs_text_reader,
+                    ru_source=source_text,
+                    en_baseline=content.en_base_text or existing_target,
+                )
+            return PairRunResult(
+                plan=plan,
+                target_text=deterministic,
+                source_text=source_text,
+                historical_disposition=HistoricalDeltaStatus.TRANSLATED_NOW.value,
+            )
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
-    enable_critic = plan.action != "skip"
+    enable_critic = True
     profile = TRANSLATE_WITH_QA_PROFILE if enable_translate else VERIFY_PROFILE
 
-    # A source PR is the translation unit.  Full translation must not use the
-    # current target or historical baselines as differential seeds.
     base_source: str | None = None
-    if not enable_translate and plan.action == "critic_only" and (
-        plan.target_lang.lower() in {"en", "english"}
-        or plan.target_path == content.pair.en_path
-    ):
-        base_source = content.ru_base_text
-    elif enable_translate and plan.action == "translate_to_ru":
-        base_source = content.en_base_text
+    base_target: str | None = None
+    if historical_replay or plan.action == "critic_only":
+        if plan.action in {"translate_to_en", "critic_only"} and (
+            plan.target_lang.lower() in {"en", "english"}
+            or plan.target_path == content.pair.en_path
+        ):
+            base_source = content.ru_base_text
+            base_target = content.en_base_text
+        elif plan.action == "translate_to_ru":
+            base_source = content.en_base_text
+            base_target = content.ru_base_text
 
     state = FileRunState(
         mode=profile.name,  # type: ignore[arg-type]
         file_path=plan.source_path,
         raw_source_text=source_text,
         source_text=source_text,
-        existing_target_text=None if enable_translate else existing_target,
-        base_target_text=(
-            None
-            if enable_translate
-            else content.en_base_text
-            if plan.action == "translate_to_en"
-            else content.ru_base_text
+        existing_target_text=(
+            existing_target if historical_replay or not enable_translate else None
         ),
+        base_target_text=base_target,
         base_source_text=base_source,
     )
     harness_ctx = HarnessContext.from_options(
@@ -328,9 +378,15 @@ def run_pair_plan(
         cache=cache,
         enable_critic=enable_critic,
         usage_record_start=len(ctx.client.usage_tracker.records),
-        en_toc_reachable=None if enable_translate else ctx.en_toc_reachable,
-        docs_text_reader=None if enable_translate else ctx.docs_text_reader,
-        docs_repo_path=None if enable_translate else ctx.docs_repo_path,
+        en_toc_reachable=(
+            ctx.en_toc_reachable if historical_replay or not enable_translate else None
+        ),
+        docs_text_reader=(
+            ctx.docs_text_reader if historical_replay or not enable_translate else None
+        ),
+        docs_repo_path=(
+            ctx.docs_repo_path if historical_replay or not enable_translate else None
+        ),
     )
 
     try:
@@ -340,13 +396,7 @@ def run_pair_plan(
         return PairRunResult(plan=plan, error=str(exc))
 
     differential_meta = getattr(file_result, "differential_meta", {})
-    semantic_noop = (
-        not enable_translate
-        and plan.action == "translate_to_en"
-        and existing_target is not None
-        and isinstance(differential_meta, dict)
-        and differential_meta.get("semantic_noop") is True
-    )
+    semantic_noop = False
     deterministic_autotitle_patch = (
         isinstance(differential_meta, dict)
         and differential_meta.get("deterministic_autotitle_patch") is True

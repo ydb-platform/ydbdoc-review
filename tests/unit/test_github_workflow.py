@@ -475,6 +475,29 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
     assert "bilingual" in posted.lower()
 
 
+def test_merged_source_snapshot_unavailable_fails_closed(git_repo: str):
+    pull = {
+        "title": "Historical docs",
+        "merged": True,
+        "merge_commit_sha": "deadbeef",
+        "head": {
+            "ref": "historical-docs",
+            "sha": "cafebabe",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with patch("ydbdoc_review.github.workflow.ensure_commit", return_value=False):
+            with pytest.raises(RuntimeError, match="official merged source snapshot"):
+                run_doc_translate(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=45949,
+                    dry_run=True,
+                    config=load_config(env=_env()),
+                )
 def test_run_doc_translate_posts_comments(git_repo: str):
     _make_en_a_reachable(git_repo)
     pull = {
@@ -1070,7 +1093,10 @@ def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
 
     assert result.mode == "doc_verify"
     assert result.source_pr_number is None  # not redirected to #999
-    assert result.pr_result.completeness_gaps == []
+    assert result.pr_result.completeness_gaps == [
+        "qa_blocked:ydb/docs/en/a.md",
+        "ydb/docs/en/a.md",
+    ]
     assert result.pr_result.translated_count == 1
 
 

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
+from typing import Any, cast
 
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.git_ops import (
@@ -20,6 +23,8 @@ from ydbdoc_review.pipeline.pairs import (
     DocPair,
     NavigationPair,
     build_doc_pairs,
+    counterpart,
+    locale_of,
 )
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
@@ -189,6 +194,115 @@ def list_pr_file_changes_api(
     return out
 
 
+def list_pr_renames_api(
+    client: GitHubClient, owner: str, repo: str, pr_number: int
+) -> list[tuple[str, str]]:
+    """Return strong GitHub rename evidence as ``(old_path, new_path)``."""
+    renames: list[tuple[str, str]] = []
+    for item in client.iter_pull_files(owner, repo, pr_number):
+        if str(item.get("status") or "") != "renamed":
+            continue
+        old = str(item.get("previous_filename") or "").replace("\\", "/")
+        new = str(item.get("filename") or "").replace("\\", "/")
+        if old and new:
+            renames.append((old, new))
+    return renames
+
+
+def reconcile_doc_pair_renames(
+    pairs: list[DocPair],
+    renames: list[tuple[str, str]],
+    *,
+    docs_root: str,
+) -> list[DocPair]:
+    """Collapse locale renames into one logical pair using API provenance."""
+    by_ru = {pair.ru_path: pair for pair in pairs}
+    removed: set[str] = set()
+    replacements: dict[str, DocPair] = {}
+    for old, new in renames:
+        if locale_of(old, docs_root) != "ru" or locale_of(new, docs_root) != "ru":
+            continue
+        destination = by_ru.get(new)
+        if destination is None:
+            continue
+        old_en = counterpart(old, docs_root)
+        if old_en is None:
+            continue
+        removed.add(old)
+        replacements[new] = replace(
+            destination,
+            previous_ru_path=old,
+            previous_en_path=old_en,
+        )
+    return [
+        replacements.get(pair.ru_path, pair)
+        for pair in pairs
+        if pair.ru_path not in removed
+    ]
+
+
+def infer_doc_pair_moves(
+    pairs: list[DocPair],
+    changes: list[tuple[str, ChangeKind]],
+    *,
+    docs_root: str,
+    read_before: Callable[[str], str | None],
+    read_after: Callable[[str], str | None],
+) -> list[DocPair]:
+    """Infer delete+add moves only with content and navigation evidence."""
+    deleted = [pair for pair in pairs if pair.ru_deleted]
+    added = [
+        pair
+        for pair in pairs
+        if pair.ru_changed and not pair.ru_deleted and read_before(pair.ru_path) is None
+    ]
+    yaml_paths = [path for path, _kind in changes if path.endswith((".yaml", ".yml"))]
+    yaml_evidence = "\n".join(read_after(path) or "" for path in yaml_paths)
+
+    def heading_topics(text: str) -> set[str]:
+        heading = next(
+            (line.removeprefix("#").strip().casefold() for line in text.splitlines() if line.startswith("# ")),
+            "",
+        )
+        return {
+            token[:8]
+            for token in re.findall(r"[\w-]+", heading)
+            if len(token) >= 3
+        }
+
+    inferred: list[tuple[str, str]] = []
+    for old_pair in deleted:
+        old_body = read_before(old_pair.ru_path)
+        if not old_body:
+            continue
+        old_rel = old_pair.ru_path.split("/ru/", 1)[-1]
+        for new_pair in added:
+            if old_pair.ru_path.rsplit("/", 1)[-1] != new_pair.ru_path.rsplit("/", 1)[-1]:
+                continue
+            new_body = read_after(new_pair.ru_path)
+            if not new_body:
+                continue
+            similarity = SequenceMatcher(None, old_body, new_body, autojunk=False).ratio()
+            old_topics = heading_topics(old_body)
+            new_topics = heading_topics(new_body)
+            topic_similarity = (
+                len(old_topics & new_topics) / len(old_topics | new_topics)
+                if old_topics and new_topics
+                else 0.0
+            )
+            new_rel = new_pair.ru_path.split("/ru/", 1)[-1]
+            old_route = old_rel.removeprefix("core/")
+            new_route = new_rel.removeprefix("core/")
+            route_proven = bool(
+                yaml_evidence
+                and (old_rel in yaml_evidence or old_route in yaml_evidence)
+                and (new_rel in yaml_evidence or new_route in yaml_evidence)
+            )
+            if similarity >= 0.6 and topic_similarity >= 0.75 and route_proven:
+                inferred.append((old_pair.ru_path, new_pair.ru_path))
+    return reconcile_doc_pair_renames(pairs, inferred, docs_root=docs_root)
+
+
 def list_pr_file_changes_git(repo_path: str, merge_base_with: str) -> list[tuple[str, ChangeKind]]:
     """Changed paths from local git merge-base diff."""
     return list_local_changes(repo_path, merge_base_with)
@@ -234,12 +348,14 @@ def is_verify_fixup_branch(branch: str, *, verify_fixup_branch_prefix: str) -> b
     return source_pr_number_from_branch(branch, prefix=verify_fixup_branch_prefix) is not None
 
 
-def source_pr_merged(data: dict) -> bool:
+def source_pr_merged(data: Mapping[str, Any]) -> bool:
     """True when the source PR is merged into its base branch."""
     return bool(data.get("merged"))
 
 
-def _source_pr_head_ref(data: dict, owner: str, repo: str, source_pr: int) -> tuple[str, str, str]:
+def _source_pr_head_ref(
+    data: Mapping[str, Any], owner: str, repo: str, source_pr: int
+) -> tuple[str, str, str]:
     head = data.get("head") or {}
     head_repo = head.get("repo") or {}
     head_owner = head_repo.get("owner") or {}
@@ -252,7 +368,7 @@ def _source_pr_head_ref(data: dict, owner: str, repo: str, source_pr: int) -> tu
 
 
 def source_pr_content_ref_from_pull(
-    data: dict, owner: str, repo: str, source_pr: int
+    data: Mapping[str, Any], owner: str, repo: str, source_pr: int
 ) -> tuple[str, str, str]:
     """Primary RU git ref: source PR **head** (fork head when applicable, §6.31).
 
@@ -263,7 +379,9 @@ def source_pr_content_ref_from_pull(
     return _source_pr_head_ref(data, owner, repo, source_pr)
 
 
-def source_pr_merge_ref_from_pull(data: dict, owner: str, repo: str) -> tuple[str, str, str] | None:
+def source_pr_merge_ref_from_pull(
+    data: Mapping[str, Any], owner: str, repo: str
+) -> tuple[str, str, str] | None:
     """Upstream merge-commit ref for a merged source PR, or ``None``."""
     if not source_pr_merged(data):
         return None
@@ -499,13 +617,19 @@ def load_pair_contents(
         if strict_source_snapshot:
             if not ru_content_ref:
                 raise ValueError("strict source snapshot requires ru_content_ref")
-            ru_text = None
-            en_text = None
+            snapshot_ru_text = None
+            snapshot_en_text = None
             if pair.ru_changed and not pair.ru_deleted:
-                ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
+                snapshot_ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
             if pair.en_changed and not pair.en_deleted:
-                en_text = read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
-            contents.append(PairContent(pair=pair, ru_text=ru_text, en_text=en_text))
+                snapshot_en_text = read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
+            contents.append(
+                PairContent(
+                    pair=pair,
+                    ru_text=snapshot_ru_text,
+                    en_text=snapshot_en_text,
+                )
+            )
             continue
         use_historical = bool(
             ru_content_ref
@@ -520,6 +644,7 @@ def load_pair_contents(
         )
         ru_text: str | None = None
         if use_historical:
+            assert ru_content_ref is not None
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
         if ru_text is None:
             ru_text = read_text(repo_path, pair.ru_path)
@@ -552,11 +677,15 @@ def load_pair_contents(
         ru_base_text = read_text_at_ref(
             repo_path,
             (ru_base_ref or merge_base_with) if use_historical else merge_base_with,
-            pair.ru_path,
+            pair.previous_ru_path or pair.ru_path,
         )
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         historical_en_text = (
-            read_text_at_ref(repo_path, ru_content_ref, pair.en_path)
+            read_text_at_ref(
+                repo_path,
+                cast(str, ru_content_ref),
+                pair.previous_en_path or pair.en_path,
+            )
             if use_historical
             else None
         )
@@ -572,6 +701,7 @@ def load_pair_contents(
                 provenance=provenance,
                 current_ru_text=current_ru,
                 historical_en_text=historical_en_text,
+                historical_replay=use_historical,
             )
         )
     return contents
