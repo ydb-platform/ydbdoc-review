@@ -402,6 +402,10 @@ def check_link_locale_in_en(target_text: str, *, target_lang: str = "en") -> lis
             issues.append(
                 f"link_locale: RU asset suffix in EN relative path: {href}"
             )
+        elif _fragment_has_cyrillic(href):
+            issues.append(
+                f"link_locale: Cyrillic anchor fragment in EN document: {href}"
+            )
     for href in collect_fragment_hrefs(doc):
         if href in seen:
             continue

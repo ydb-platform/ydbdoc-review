@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+from urllib.parse import unquote
+
 import pytest
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -131,6 +134,18 @@ def test_check_link_locale_flags_cyrillic_anchor_fragment():
     issues = check_link_locale_in_en(md)
     assert len(issues) == 1
     assert "Cyrillic anchor fragment in EN document" in issues[0]
+
+
+def test_check_link_locale_flags_relative_path_with_cyrillic_fragment():
+    md = (
+        "[Users](../dev/system-views.md#информация-о-пользователях-users)\n"  # noqa: RUF001
+    )
+    issues = check_link_locale_in_en(md)
+    assert len(issues) == 1
+    assert unquote(issues[0]) == (
+        "link_locale: Cyrillic anchor fragment in EN document: "
+        "../dev/system-views.md#информация-о-пользователях-users"  # noqa: RUF001
+    )
 
 
 def test_check_link_locale_accepts_english_anchor_fragment():

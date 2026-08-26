@@ -172,4 +172,5 @@ def build_heading_anchor_map(source: Document, target: Document) -> dict[str, st
                 # an explicit ``{#id}`` (e.g. ``#информация-…-users`` → ``#users``).
                 if ru_auto and en_explicit:
                     mapping[ru_auto] = en_explicit
+                    mapping[f"{ru_auto}-{src_h.anchor}"] = en_explicit
     return mapping

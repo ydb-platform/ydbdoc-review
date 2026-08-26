@@ -53,6 +53,7 @@ def test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit():
     en = parse_markdown("### Information about users {#users}\n")
     mapping = build_heading_anchor_map(ru, en)
     assert mapping["информация-о-пользователях"] == "users"
+    assert mapping["информация-о-пользователях-users"] == "users"
 
 
 def test_build_heading_anchor_map_auto_and_explicit():
