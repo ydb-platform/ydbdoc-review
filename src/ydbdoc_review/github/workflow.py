@@ -24,6 +24,7 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
     read_text_at_upstream_tip,
+    resolve_ref_sha,
     write_text,
 )
 from ydbdoc_review.github.pr import (
@@ -582,31 +583,52 @@ def _hard_validation_errors(result: PRTranslationResult) -> list[str]:
 
 
 def _apply_transaction_gates(
-    repo_path: str, result: PRTranslationResult, *, docs_root: str
+    repo_path: str,
+    result: PRTranslationResult,
+    *,
+    docs_root: str,
+    baseline_ref: str | None = None,
 ) -> None:
     hard = _hard_validation_errors(result)
-    overlay = validate_candidate_overlay(repo_path, result, docs_root=docs_root)
+    overlay = validate_candidate_overlay(
+        repo_path, result, docs_root=docs_root, baseline_ref=baseline_ref
+    )
     qa_blocked = {
         run.plan.target_path
         for run in result.pair_results
         if run.file_result is not None and run.file_result.verdict == "blocked"
     }
-    blocked = {
+    hard_blocked = {
         run.plan.target_path
         for run in result.pair_results
-        if any(run.plan.target_path in error for error in (*hard, *overlay))
-    } | qa_blocked
+        if any(
+            error.startswith(f"hard_validation:{run.plan.target_path}:")
+            or error == f"hard_validation_missing_authority: {run.plan.target_path}"
+            for error in hard
+        )
+    }
+    overlay_responsible = {issue.responsible_path for issue in overlay}
+    overlay_blocked = set(overlay_responsible)
+    for run in result.pair_results:
+        if overlay_responsible.intersection(run.additional_delete_paths):
+            overlay_blocked.add(run.plan.target_path)
+    blocked = hard_blocked | overlay_blocked | qa_blocked
     states = evaluate_completeness_states(result, blocked_paths=blocked)
     result.completeness_states = {path: state.value for path, state in states.items()}
     qa_errors = [f"qa_blocked:{path}" for path in sorted(qa_blocked)]
+    unexplained_state_gaps = [
+        path
+        for path in completeness_state_gaps(states)
+        if path not in blocked
+    ]
     result.completeness_gaps = list(
         dict.fromkeys(
             [
                 *result.completeness_gaps,
                 *hard,
-                *overlay,
+                *(issue.format() for issue in overlay),
                 *qa_errors,
-                *completeness_state_gaps(states),
+                *unexplained_state_gaps,
             ]
         )
     )
@@ -817,6 +839,9 @@ def run_doc_translate(
             finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job
 
+    # Pin the authoritative translation base once, only for an active
+    # transaction. Empty/no-op PRs must not require a local upstream ref.
+    translation_base_sha = resolve_ref_sha(repo_path, merge_base_with)
     client = create_llm_client(cfg)
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
@@ -965,7 +990,12 @@ def run_doc_translate(
         )
     job.pr_result = pr_result
 
-    _apply_transaction_gates(repo_path, pr_result, docs_root=cfg.paths.docs_root)
+    _apply_transaction_gates(
+        repo_path,
+        pr_result,
+        docs_root=cfg.paths.docs_root,
+        baseline_ref=translation_base_sha,
+    )
 
     if pr_result.completeness_gaps:
         logger.error(

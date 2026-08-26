@@ -604,7 +604,9 @@ def test_run_doc_translate_no_pairs(git_repo: str):
         },
         "base": {"ref": "main"},
     }
-    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh, patch(
+        "ydbdoc_review.github.workflow.resolve_ref_sha"
+    ) as resolve_base:
         mock_gh.return_value.get_pull.return_value = pull
         with patch(
             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
@@ -618,6 +620,7 @@ def test_run_doc_translate_no_pairs(git_repo: str):
                 config=load_config(env=_env()),
             )
     assert result.pr_result.pair_results == []
+    resolve_base.assert_not_called()
 
 
 def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
@@ -785,6 +788,9 @@ def test_run_doc_translate_45949_move_and_50857_tombstone_transaction(git_repo: 
     )
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "50857 and 50596 current state"], cwd=repo, check=True)
+    current_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
 
     changes = [
         (old_ru, "deleted"),
@@ -807,6 +813,8 @@ def test_run_doc_translate_45949_move_and_50857_tombstone_transaction(git_repo: 
     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh, patch(
         "ydbdoc_review.github.workflow.ensure_commit", return_value=True
     ), patch(
+        "ydbdoc_review.github.workflow.resolve_ref_sha", return_value=current_sha
+    ) as resolve_base, patch(
         "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=changes
     ), patch(
         "ydbdoc_review.github.workflow.create_llm_client",
@@ -842,6 +850,7 @@ def test_run_doc_translate_45949_move_and_50857_tombstone_transaction(git_repo: 
             config=load_config(env=_env()),
         )
 
+    resolve_base.assert_called_once_with(git_repo, "HEAD")
     assert result.pr_result.completeness_gaps == []
     assert result.committed and result.pushed
     assert (repo / new_en).read_text(encoding="utf-8").endswith("Current EN meaning from the old path.\n")
@@ -1453,10 +1462,7 @@ def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
 
     assert result.mode == "doc_verify"
     assert result.source_pr_number is None  # not redirected to #999
-    assert result.pr_result.completeness_gaps == [
-        "qa_blocked:ydb/docs/en/a.md",
-        "ydb/docs/en/a.md",
-    ]
+    assert result.pr_result.completeness_gaps == ["qa_blocked:ydb/docs/en/a.md"]
     assert result.pr_result.translated_count == 1
 
 

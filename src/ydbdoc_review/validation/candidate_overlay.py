@@ -3,10 +3,29 @@
 from __future__ import annotations
 
 import re
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
 from ydbdoc_review.pipeline.types import PRTranslationResult
+
+
+@dataclass(frozen=True)
+class CandidateOverlayIssue:
+    code: str
+    owner_path: str
+    target_path: str
+    responsible_path: str
+
+    def format(self) -> str:
+        return f"{self.code}: {self.owner_path} -> {self.target_path}"
+
+    def __contains__(self, value: str) -> bool:
+        return value in self.format()
+
+    def endswith(self, value: str) -> bool:
+        return self.format().endswith(value)
 
 
 def validate_candidate_overlay(
@@ -14,7 +33,8 @@ def validate_candidate_overlay(
     result: PRTranslationResult,
     *,
     docs_root: str = "ydb/docs",
-) -> list[str]:
+    baseline_ref: str | None = None,
+) -> list[CandidateOverlayIssue]:
     """Resolve includes against current files plus the complete pending transaction."""
     writes: dict[str, str] = {}
     deletes: set[str] = set()
@@ -30,20 +50,39 @@ def validate_candidate_overlay(
         if not nav.error and nav.target_text is not None:
             writes[nav.en_path] = nav.target_text
 
+    baseline_paths: set[str] | None = None
+    if baseline_ref is not None:
+        proc = subprocess.run(
+            ["git", "-C", repo_path, "ls-tree", "-r", "--name-only", baseline_ref, "--", docs_root],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        baseline_paths = {line for line in proc.stdout.splitlines() if line}
+
+    def read_baseline(path: str) -> str | None:
+        if baseline_ref is None:
+            disk = Path(repo_path) / path
+            return disk.read_text(encoding="utf-8") if disk.is_file() else None
+        if baseline_paths is not None and path not in baseline_paths:
+            return None
+        proc = subprocess.run(
+            ["git", "-C", repo_path, "show", f"{baseline_ref}:{path}"],
+            capture_output=True,
+        )
+        return proc.stdout.decode("utf-8") if proc.returncode == 0 else None
+
     def read_overlay(path: str) -> str | None:
         if path in deletes:
             return None
         if path in writes:
             return writes[path]
-        disk = Path(repo_path) / path
-        if not disk.is_file():
-            return None
-        return disk.read_text(encoding="utf-8")
+        return read_baseline(path)
 
     def overlay_exists(path: str) -> bool:
         if path in deletes:
             return False
-        return path in writes or (Path(repo_path) / path).exists()
+        return path in writes or read_baseline(path) is not None
 
     def resolve_local(owner: str, href: str) -> str | None:
         href = href.strip().strip("<>")
@@ -62,7 +101,9 @@ def validate_candidate_overlay(
                 parts.append(part)
         return "/".join(parts)
 
-    errors: list[str] = []
+    errors: list[CandidateOverlayIssue] = []
+    def issue(code: str, owner: str, target: str, responsible: str | None = None) -> None:
+        errors.append(CandidateOverlayIssue(code, owner, target, responsible or owner))
     seen: set[str] = set()
     queue = sorted(path for path in writes if path.endswith(".md"))
     while queue:
@@ -78,7 +119,7 @@ def validate_candidate_overlay(
             if target is None:
                 continue
             if read_overlay(target) is None:
-                errors.append(f"candidate_overlay_missing_include: {page} -> {target}")
+                issue("candidate_overlay_missing_include", page, target)
             elif target.endswith(".md") and target not in seen:
                 queue.append(target)
 
@@ -97,15 +138,19 @@ def validate_candidate_overlay(
             if target is None or not target.lower().endswith(".md"):
                 continue
             if target in deletes:
-                errors.append(f"candidate_overlay_delete_markdown_reference: {page} -> {target}")
+                issue("candidate_overlay_delete_markdown_reference", page, target, target)
             elif not overlay_exists(target):
-                errors.append(f"candidate_overlay_missing_markdown_target: {page} -> {target}")
+                issue("candidate_overlay_missing_markdown_target", page, target)
 
     if deletes:
-        all_md = {
-            str(path.relative_to(repo_path)).replace("\\", "/")
-            for path in Path(repo_path).joinpath(docs_root).rglob("*.md")
-        }
+        all_md = (
+            {path for path in baseline_paths or set() if path.endswith(".md")}
+            if baseline_ref is not None
+            else {
+                str(path.relative_to(repo_path)).replace("\\", "/")
+                for path in Path(repo_path).joinpath(docs_root).rglob("*.md")
+            }
+        )
         for page in sorted(all_md - deletes):
             text = read_overlay(page)
             if text is None:
@@ -115,7 +160,7 @@ def validate_candidate_overlay(
             for include in includes:
                 target = resolve_locale_md_path(page, include.path, docs_root=docs_root)
                 if target in deletes:
-                    errors.append(f"candidate_overlay_delete_inbound_include: {page} -> {target}")
+                    issue("candidate_overlay_delete_inbound_include", page, target, target)
             for href in re.findall(r"\]\(([^)\s]+)(?:\s+['\"][^)]*['\"])?\)", text):
                 if href.strip().strip("<>") in include_hrefs:
                     continue
@@ -123,7 +168,7 @@ def validate_candidate_overlay(
                 if target is None or not target.lower().endswith(".md"):
                     continue
                 if target in deletes:
-                    errors.append(f"candidate_overlay_delete_markdown_reference: {page} -> {target}")
+                    issue("candidate_overlay_delete_markdown_reference", page, target, target)
 
     yaml_writes = {path for path in writes if path.endswith((".yaml", ".yml"))}
     for toc_path in sorted(yaml_writes - deletes):
@@ -135,18 +180,18 @@ def validate_candidate_overlay(
             if target is None:
                 continue
             if target in deletes:
-                errors.append(f"candidate_overlay_delete_toc_dependency: {toc_path} -> {target}")
+                issue("candidate_overlay_delete_toc_dependency", toc_path, target, target)
             elif not overlay_exists(target):
-                errors.append(f"candidate_overlay_missing_toc_target: {toc_path} -> {target}")
+                issue("candidate_overlay_missing_toc_target", toc_path, target)
 
     if deletes:
-        all_yaml = {
+        all_yaml = ({path for path in baseline_paths or set() if path.endswith((".yaml", ".yml"))} if baseline_ref is not None else {
             str(path.relative_to(repo_path)).replace("\\", "/")
             for path in Path(repo_path).joinpath(docs_root).rglob("*.yaml")
         } | {
             str(path.relative_to(repo_path)).replace("\\", "/")
             for path in Path(repo_path).joinpath(docs_root).rglob("*.yml")
-        }
+        })
         for toc_path in sorted(all_yaml - deletes):
             text = read_overlay(toc_path)
             if text is None:
@@ -156,5 +201,5 @@ def validate_candidate_overlay(
                 if target is None:
                     continue
                 if target in deletes:
-                    errors.append(f"candidate_overlay_delete_toc_dependency: {toc_path} -> {target}")
-    return sorted(set(errors))
+                    issue("candidate_overlay_delete_toc_dependency", toc_path, target, target)
+    return sorted(set(errors), key=lambda item: (item.code, item.owner_path, item.target_path))

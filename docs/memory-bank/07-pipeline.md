@@ -244,6 +244,14 @@ back to the original bytes as one transaction on any filesystem failure.
 Staging cleanup also covers write/flush/close failures and removes only empty
 parent directories that the transaction itself created.
 
+Overlay validation never reads ambient worktree fallback during historical
+replay. The workflow resolves the translation base to one immutable SHA, lists
+its docs tree with git, then overlays pending writes and deletes in memory.
+Issues retain exact owner/target/responsible-operation fields through the gate;
+only report output converts them to strings. Thus stale historical owners and
+tombstone files are invisible, while a real pinned-base inbound link blocks its
+deletion until that owner is retargeted in the same pending transaction.
+
 ### 16.3. Translation branch and PR
 
 - Branch name: `ydbdoc-review/pr-<source_pr_number>` on **upstream** (`ydb-platform/ydb`).

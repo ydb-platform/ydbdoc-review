@@ -38,6 +38,11 @@ def git_head_sha(repo: str) -> str | None:
         return None
 
 
+def resolve_ref_sha(repo: str, ref: str) -> str:
+    """Resolve a ref once for an authoritative, immutable read baseline."""
+    return _git(repo, "rev-parse", ref)
+
+
 def list_local_changes(
     repo: str, merge_base_with: str
 ) -> list[tuple[str, ChangeKind]]:

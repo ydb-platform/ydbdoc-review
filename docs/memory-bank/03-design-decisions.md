@@ -5232,6 +5232,16 @@ and absorb changes outside the exact source-PR delta.
    list. TOC hrefs are live only when their target exists at current base or is
    an explicit pending output; an ambient dangling href cannot defeat a
    tombstone. Candidate overlay validation sees the complete compound output.
+8. Candidate overlay pins the resolved current translation-base SHA once and
+   enumerates/reads authoritative files with ``git ls-tree`` / ``git show``.
+   Historical worktree bytes cannot affect validation. Diagnostics are
+   structured as code, owner, target, and responsible operation path: outbound
+   failures block their owner; inbound references block the operation deleting
+   the target. Formatting happens only when building the report, and an
+   explained structured failure does not add an unrelated bare completeness
+   gap or mutate a ``superseded_absent`` tombstone disposition. A genuine link
+   in the pinned base still blocks deletion until a pending owner retargets it;
+   redirect presence alone does not waive that contract.
 
 **Regression evidence:** exact added/removed #45949 paths and representative
 pre/post-merge blobs; measured ``0.641757246377`` move branch; redirect/TOC and
