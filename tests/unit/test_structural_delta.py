@@ -5,9 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import _try_deterministic_en_preserve, run_pair_plan
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.validation.structural_delta import (
     HistoricalDeltaStatus,
     historical_operations_survive,
@@ -180,6 +183,174 @@ def test_surviving_prose_op_is_not_coarsely_preserved_when_both_blobs_changed():
         ctx,
         historical_merged_provenance=True,
     ) is None
+
+
+def test_current_ru_authority_falls_through_to_full_translation_for_new_fence():
+    pair = DocPair("ydb/docs/ru/a.md", "ydb/docs/en/a.md", ru_changed=True)
+    historical_head = "# Раздел\n\nИсторический текст.\n"
+    current_ru = historical_head + "\n```yaml\nvalue: true\n```\n"
+    content = PairContent(
+        pair=pair,
+        ru_base_text="# Раздел\n\nСтарый текст.\n",
+        ru_text=historical_head,
+        current_ru_text=current_ru,
+        en_text="# Section\n\nHistorical text.\n",
+    )
+    plan = PairPlan(
+        pair,
+        "translate_to_en",
+        pair.ru_path,
+        pair.en_path,
+        "ru",
+        "en",
+        authoritative_source_text=current_ru,
+    )
+    client = MagicMock()
+    client.usage_tracker.records = []
+    ctx = HarnessContext.from_options(
+        client,
+        glossary=load_glossary(),
+        config=load_config(
+            env={"YDBDOC_YC_FOLDER_ID": "folder", "YDBDOC_YC_API_KEY": "key"}
+        ),
+    )
+    translated = "# Section\n\nHistorical text.\n\n```yaml\nvalue: true\n```\n"
+
+    class FakeHarness:
+        calls = 0
+
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, _ctx):
+            FakeHarness.calls += 1
+            assert state.source_text == current_ru
+            assert state.base_source_text is None
+            result = MagicMock()
+            result.final_text = translated
+            result.differential_meta = {}
+            return result
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", FakeHarness):
+        result = run_pair_plan(
+            content,
+            plan,
+            ctx,
+            {},
+            historical_merged_provenance=True,
+        )
+
+    assert FakeHarness.calls == 1
+    assert result.error is None
+    assert result.source_text == current_ru
+
+
+def test_pr_50976_monitoring_missing_historical_op_translates_from_current_ru():
+    pair = DocPair(
+        "ydb/docs/ru/core/reference/configuration/monitoring_config.md",
+        "ydb/docs/en/core/reference/configuration/monitoring_config.md",
+        ru_changed=True,
+    )
+    historical_base = "# Мониторинг\n\nСтарое описание.\n"
+    historical_head = "# Мониторинг\n\nОбязательная операция mTLS.\n"
+    current_ru = historical_head + "\n```yaml\nmonitoring:\n  tls: true\n```\n"
+    current_en = "# Monitoring\n\nOld description.\n"
+    translated = (
+        "# Monitoring\n\nRequired mTLS operation.\n\n"
+        "```yaml\nmonitoring:\n  tls: true\n```\n"
+    )
+    content = PairContent(
+        pair=pair,
+        ru_base_text=historical_base,
+        ru_text=historical_head,
+        current_ru_text=current_ru,
+        en_text=current_en,
+    )
+    plan = PairPlan(
+        pair,
+        "translate_to_en",
+        pair.ru_path,
+        pair.en_path,
+        "ru",
+        "en",
+        authoritative_source_text=current_ru,
+    )
+    ctx = HarnessContext.from_options(
+        MagicMock(usage_tracker=MagicMock(records=[])),
+        glossary=load_glossary(),
+        config=load_config(
+            env={"YDBDOC_YC_FOLDER_ID": "folder", "YDBDOC_YC_API_KEY": "key"}
+        ),
+    )
+
+    class FakeHarness:
+        called = False
+
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, _ctx):
+            FakeHarness.called = True
+            assert state.source_text == current_ru
+            assert state.base_source_text is None
+            result = MagicMock()
+            result.final_text = translated
+            result.differential_meta = {}
+            return result
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", FakeHarness):
+        result = run_pair_plan(
+            content,
+            plan,
+            ctx,
+            {},
+            historical_merged_provenance=True,
+        )
+
+    assert FakeHarness.called
+    assert result.error is None
+    assert result.source_text == current_ru
+    assert result.target_text == translated
+    assert not result.skipped
+
+
+def test_missing_historical_structure_without_distinct_current_authority_fails_closed():
+    pair = DocPair("ydb/docs/ru/monitoring.md", "ydb/docs/en/monitoring.md", ru_changed=True)
+    historical_base = "# Мониторинг\n\nСтарое описание.\n"
+    historical_head = (
+        "# Мониторинг\n\nОбязательная операция mTLS.\n\n"
+        "```yaml\nmonitoring:\n  tls: true\n```\n"
+    )
+    content = PairContent(
+        pair=pair,
+        ru_base_text=historical_base,
+        ru_text=historical_head,
+        current_ru_text=historical_head,
+        en_text="# Monitoring\n\nOld description.\n",
+    )
+    plan = PairPlan(
+        pair,
+        "translate_to_en",
+        pair.ru_path,
+        pair.en_path,
+        "ru",
+        "en",
+        authoritative_source_text=historical_head,
+    )
+    ctx = SimpleNamespace(docs_text_reader=None, client=MagicMock())
+
+    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+        result = run_pair_plan(
+            content,
+            plan,
+            ctx,
+            {},
+            historical_merged_provenance=True,
+        )
+
+    assert result.error is not None
+    assert "surviving historical operation" in result.error
+    harness.assert_not_called()
 
 
 def test_both_blobs_advanced_but_required_operation_missing_is_update_required():

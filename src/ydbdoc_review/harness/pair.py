@@ -53,12 +53,20 @@ def _try_deterministic_en_preserve(
     if existing_target is None or plan.target_path != content.pair.en_path:
         return None
     ru_base = content.ru_base_text
-    if not ru_base or ru_base == source_text:
+    historical_head = content.ru_text or source_text
+    if not ru_base or ru_base == historical_head:
         return None
     if not historical_merged_provenance:
         return None
 
-    survival = historical_operations_survive(ru_base, source_text, content.current_ru_text)
+    authoritative_current = bool(
+        content.current_ru_text is not None
+        and source_text == content.current_ru_text
+        and source_text != historical_head
+    )
+    survival = historical_operations_survive(
+        ru_base, historical_head, content.current_ru_text
+    )
     if not survival.survives:
         logger.info(
             "Historical delta for %s is no longer present in current RU; "
@@ -70,7 +78,7 @@ def _try_deterministic_en_preserve(
 
     structural = structural_delta_satisfied(
         ru_base,
-        source_text,
+        historical_head,
         existing_target,
         current_source=content.current_ru_text,
     )
@@ -85,6 +93,13 @@ def _try_deterministic_en_preserve(
         )
         return existing_target, structural.status.value
     if structural.fail_closed:
+        if authoritative_current:
+            logger.info(
+                "Unsafe historical structural patch for %s; falling through "
+                "to full translation from authoritative current RU",
+                plan.target_path,
+            )
+            return None
         raise TranslationError(
             "historical structural delta cannot be applied safely without "
             f"overwriting later target structure: {structural.reason}"
@@ -92,7 +107,7 @@ def _try_deterministic_en_preserve(
 
     localized = apply_localized_mirror_delta(
         ru_base,
-        source_text,
+        historical_head,
         existing_target,
         en_page_path=plan.target_path,
         docs_text_reader=ctx.docs_text_reader,
@@ -103,12 +118,12 @@ def _try_deterministic_en_preserve(
                 localized,
                 en_page_path=plan.target_path,
                 read_text=ctx.docs_text_reader,
-                ru_source=source_text,
+                ru_source=historical_head,
                 en_baseline=content.en_base_text or existing_target,
             )
         patched = structural_delta_satisfied(
             ru_base,
-            source_text,
+            historical_head,
             localized,
             current_source=content.current_ru_text,
         )
@@ -123,7 +138,7 @@ def _try_deterministic_en_preserve(
         )
         return localized, HistoricalDeltaStatus.TRANSLATED_NOW.value
 
-    if autotitle_delta_satisfied_in_en(ru_base, source_text, existing_target):
+    if autotitle_delta_satisfied_in_en(ru_base, historical_head, existing_target):
         logger.info(
             "RU autotitle delta already satisfied in EN for %s; preserving bytes",
             plan.target_path,
@@ -136,11 +151,11 @@ def _try_deterministic_en_preserve(
             parity_target,
             en_page_path=plan.target_path,
             read_text=ctx.docs_text_reader,
-            ru_source=source_text,
+            ru_source=historical_head,
             en_baseline=content.en_base_text or existing_target,
         )
-    if is_href_only_change(ru_base, source_text) and not check_href_parity(
-        source_text,
+    if is_href_only_change(ru_base, historical_head) and not check_href_parity(
+        historical_head,
         parity_target,
         en_page_path=plan.target_path,
         docs_text_reader=ctx.docs_text_reader,
@@ -152,6 +167,13 @@ def _try_deterministic_en_preserve(
         return parity_target, HistoricalDeltaStatus.ALREADY_TRANSLATED.value
 
     if structural.status is HistoricalDeltaStatus.MISSING_CURRENT_DELTA:
+        if authoritative_current:
+            logger.info(
+                "Missing historical operation for %s will be translated from "
+                "authoritative current RU",
+                plan.target_path,
+            )
+            return None
         raise TranslationError(
             "surviving historical operation is not translated and has no safe localized patch: "
             f"{structural.reason}"
@@ -161,6 +183,8 @@ def _try_deterministic_en_preserve(
 
 
 def _read_source_text(content: PairContent, plan: PairPlan) -> str | None:
+    if plan.authoritative_source_text is not None:
+        return plan.authoritative_source_text
     if plan.source_path == content.pair.ru_path:
         return content.ru_text
     return content.en_text
@@ -247,6 +271,16 @@ def run_pair_plan(
                 },
                 historical_disposition=disposition,
             )
+        if (
+            historical_merged_provenance
+            and content.current_ru_text is not None
+            and source_text == content.current_ru_text
+            and content.ru_text != source_text
+        ):
+            # Historical base/head served only as operation evidence above.
+            # The fallback must be a genuine current-RU translation, never a
+            # differential render seeded by the historical snapshot.
+            content = replace(content, ru_base_text=None, en_base_text=None)
     if plan.action == "critic_only" and is_href_only_change(content.en_base_text, existing_target):
         href_only_target = existing_target
         if ctx.docs_text_reader is not None and existing_target is not None:
