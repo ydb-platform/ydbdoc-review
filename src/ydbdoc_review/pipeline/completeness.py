@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 from ydbdoc_review.navigation.paths import is_navigation_yaml
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
@@ -12,6 +14,43 @@ from ydbdoc_review.pipeline.pairs import (
 )
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.validation.href_parity import check_href_parity, is_href_only_change
+
+
+class CompletenessState(str, Enum):
+    EXISTING_SATISFIED = "existing_satisfied"
+    ADD_REQUIRED = "add_required"
+    ADDED = "added"
+    UPDATE_REQUIRED = "update_required"
+    UPDATED = "updated"
+    DELETE_REQUIRED = "delete_required"
+    DELETED = "deleted"
+    DELETE_ALREADY_SATISFIED = "delete_already_satisfied"
+    SUPERSEDED_ABSENT = "superseded_absent"
+    BLOCKED = "blocked"
+
+
+def evaluate_completeness_states(result: PRTranslationResult, *, blocked_paths: set[str] | None = None) -> dict[str, CompletenessState]:
+    blocked_paths = blocked_paths or set()
+    states: dict[str, CompletenessState] = {}
+    for run in result.pair_results:
+        path = run.plan.target_path
+        if path in blocked_paths or run.error:
+            states[path] = CompletenessState.BLOCKED
+        elif run.deleted:
+            states[path] = CompletenessState.DELETED
+        elif run.skipped and run.plan.provenance.value == "superseded_absent":
+            states[path] = CompletenessState.SUPERSEDED_ABSENT
+        elif run.skipped:
+            states[path] = CompletenessState.EXISTING_SATISFIED
+        elif run.target_text is not None:
+            states[path] = CompletenessState.ADDED if run.plan.provenance.value == "current_ru_missing_en" else CompletenessState.UPDATED
+        else:
+            states[path] = CompletenessState.BLOCKED
+    return states
+
+
+def completeness_state_gaps(states: dict[str, CompletenessState]) -> list[str]:
+    return sorted(path for path, state in states.items() if state is CompletenessState.BLOCKED)
 
 
 def _norm(path: str) -> str:

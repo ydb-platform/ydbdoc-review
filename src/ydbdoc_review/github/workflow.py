@@ -74,6 +74,8 @@ from ydbdoc_review.pipeline.analyze import (
 from ydbdoc_review.pipeline.completeness import (
     bilingual_en_mirrors,
     completeness_gaps,
+    completeness_state_gaps,
+    evaluate_completeness_states,
     href_only_source_noop_satisfied,
     translation_pr_scope_gaps,
 )
@@ -103,7 +105,9 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.candidate_overlay import validate_candidate_overlay
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
+from ydbdoc_review.validation.hard_file_validator import validate_whole_file
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
     apply_include_target_checks,
@@ -333,6 +337,28 @@ def _docs_text_reader(repo_path: str, merge_base_with: str):
         return read_text_at_upstream_tip(repo_path, merge_base_with, path)
 
     return _read
+
+
+def _hard_validation_errors(result: PRTranslationResult) -> list[str]:
+    errors: list[str] = []
+    for run in result.pair_results:
+        if run.skipped or run.deleted or run.error or run.target_text is None or run.plan.target_lang.lower() not in {"en", "english"}:
+            continue
+        authority = run.plan.authoritative_source_text or run.source_text
+        if authority is None:
+            errors.append(f"hard_validation_missing_authority: {run.plan.target_path}")
+            continue
+        errors.extend(f"hard_validation:{item.path}:{item.code.value}:{item.detail}" for item in validate_whole_file(path=run.plan.target_path, authoritative_ru=authority, candidate_en=run.target_text))
+    return errors
+
+
+def _apply_transaction_gates(repo_path: str, result: PRTranslationResult, *, docs_root: str) -> None:
+    hard = _hard_validation_errors(result)
+    overlay = validate_candidate_overlay(repo_path, result, docs_root=docs_root)
+    blocked = {run.plan.target_path for run in result.pair_results if any(run.plan.target_path in error for error in (*hard, *overlay))}
+    states = evaluate_completeness_states(result, blocked_paths=blocked)
+    result.completeness_states = {path: state.value for path, state in states.items()}
+    result.completeness_gaps = list(dict.fromkeys([*result.completeness_gaps, *hard, *overlay, *completeness_state_gaps(states)]))
 
 
 def _run_verify_pairs(
@@ -601,12 +627,6 @@ def run_doc_translate(
         else:
             pr_result = PRTranslationResult()
 
-        md_en_paths = {
-            r.plan.target_path
-            for r in pr_result.pair_results
-            if r.target_text is not None and not r.error
-        }
-
         if nav_pairs:
             pr_result.navigation_results = run_navigation_merges(
                 nav_pairs,
@@ -641,6 +661,8 @@ def run_doc_translate(
             dict.fromkeys([*pr_result.completeness_gaps, *orphan_paths])
         )
     job.pr_result = pr_result
+
+    _apply_transaction_gates(repo_path, pr_result, docs_root=cfg.paths.docs_root)
 
     if pr_result.completeness_gaps:
         logger.error(
@@ -1070,6 +1092,11 @@ def run_doc_verify(
                 docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
                 docs_repo_path=repo_path,
             )
+            if source_pr is None:
+                authority = {item.pair.ru_path: item.current_ru_text or item.ru_text for item in contents}
+                for run in pr_result.pair_results:
+                    if run.source_text is None:
+                        run.source_text = authority.get(run.plan.pair.ru_path)
         else:
             pr_result = PRTranslationResult()
 
@@ -1164,6 +1191,8 @@ def run_doc_verify(
 
     job.pr_result = pr_result
 
+    _apply_transaction_gates(repo_path, pr_result, docs_root=cfg.paths.docs_root)
+
     final_read_only_verify = _fixup_rerun_depth >= 3 and inline_fixup_push
     if final_read_only_verify:
         logger.info(
@@ -1172,6 +1201,8 @@ def run_doc_verify(
             pr_number,
         )
         touched = None
+    elif pr_result.completeness_gaps:
+        touched = TouchedPaths([], [])
     else:
         touched = _apply_results_to_disk(
             repo_path,

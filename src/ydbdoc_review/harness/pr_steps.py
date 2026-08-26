@@ -68,6 +68,7 @@ class PlanVerifyPairsStep:
                     source_lang="ru",
                     target_lang="en",
                     summary="doc_verify critic pass",
+                    authoritative_source_text=content.current_ru_text or content.ru_text,
                 )
             )
         state.plans = plans

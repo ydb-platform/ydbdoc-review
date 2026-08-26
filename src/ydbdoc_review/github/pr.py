@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.git_ops import (
@@ -12,17 +12,17 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
 )
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
-from ydbdoc_review.pipeline.analyze import PairContent
+from ydbdoc_review.pipeline.analyze import PairContent, PairProvenance, derive_pair_provenance
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
     DocPair,
     NavigationPair,
     build_doc_pairs,
 )
-from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 _STATUS_TO_KIND: dict[str, ChangeKind] = {
@@ -417,6 +417,8 @@ def load_verify_pair_contents(
     merge_ref = source_pr_merge_ref_from_pull(pull_data, owner, repo)
     contents: list[PairContent] = []
     for pair in pairs:
+        current_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        provenance = PairProvenance.CURRENT_PAIR
         en_text = None
         if not pair.en_deleted:
             # Bind report evidence to the immutable SHA printed in the report;
@@ -467,6 +469,8 @@ def load_verify_pair_contents(
                 en_diff_vs_base=en_diff or None,
                 ru_base_text=ru_base_text,
                 en_base_text=en_base_text,
+                provenance=provenance,
+                current_ru_text=current_ru,
             )
         )
     return contents
@@ -490,6 +494,9 @@ def load_pair_contents(
     """
     contents: list[PairContent] = []
     for pair in pairs:
+        current_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        current_en = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
+        provenance = derive_pair_provenance(current_ru=current_ru, current_en=current_en) if ru_content_ref else PairProvenance.CURRENT_PAIR
         ru_text: str | None = None
         if ru_content_ref:
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
@@ -526,6 +533,8 @@ def load_pair_contents(
                 en_diff_vs_base=en_diff or None,
                 ru_base_text=ru_base_text,
                 en_base_text=en_base_text,
+                provenance=provenance,
+                current_ru_text=current_ru,
             )
         )
     return contents

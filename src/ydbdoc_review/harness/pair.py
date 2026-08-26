@@ -10,7 +10,7 @@ from ydbdoc_review.harness.profiles import TRANSLATE_PROFILE, VERIFY_PROFILE
 from ydbdoc_review.harness.runner import FileHarness
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.llm.errors import LLMError
-from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
+from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, PairProvenance
 from ydbdoc_review.pipeline.qa import compose_file_verdict
 from ydbdoc_review.pipeline.types import PairRunResult
 from ydbdoc_review.translation.differential import (
@@ -160,6 +160,9 @@ def run_pair_plan(
         )
 
     existing_target = _read_target_text(content, plan)
+    if plan.provenance is PairProvenance.CURRENT_RU_MISSING_EN:
+        existing_target = None
+        content = replace(content, ru_base_text=None, en_base_text=None, en_text=None)
     if plan.action in {"translate_to_en", "critic_only"}:
         try:
             preserved = _try_deterministic_en_preserve(

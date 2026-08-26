@@ -7,7 +7,6 @@ Regression fixtures from ``client_certificate_authorization.md`` →
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
@@ -40,9 +39,6 @@ PR_51078_EN_FRAG = "enabling-node-authentication-and-authorization-mode"
 PR_51078_HREF = f"../../devops/concepts/node-authorization.md#{PR_51078_RU_FRAG}"
 PR_51078_HREF_EN = f"../../devops/concepts/node-authorization.md#{PR_51078_EN_FRAG}"
 
-_YDB_DOCS_ROOT = Path(__file__).resolve().parents[2] / ".." / "ydb" / "ydb" / "docs"
-
-
 def _pr_51078_target_pages() -> dict[str, str]:
     return {
         PR_51078_TARGET_EN: dedent(
@@ -63,15 +59,6 @@ def _pr_51078_target_pages() -> dict[str, str]:
 
 
 def _pr_51078_en_bad_paragraph() -> str:
-    try:
-        text = (_YDB_DOCS_ROOT / "en/core/reference/configuration/client_certificate_authorization.md").read_text(
-            encoding="utf-8"
-        )
-        for line in text.splitlines():
-            if PR_51078_RU_FRAG in line:
-                return line + "\n"
-    except OSError:
-        pass
     return dedent(
         f"""\
         The `CN` component may contain the server's network name rather than the user name. \
@@ -83,15 +70,6 @@ def _pr_51078_en_bad_paragraph() -> str:
 
 
 def _pr_51078_ru_paragraph() -> str:
-    try:
-        text = (_YDB_DOCS_ROOT / "ru/core/reference/configuration/client_certificate_authorization.md").read_text(
-            encoding="utf-8"
-        )
-        for line in text.splitlines():
-            if PR_51078_RU_FRAG in line:
-                return line + "\n"
-    except OSError:
-        pass
     return dedent(
         f"""\
         В компоненте `CN` может указываться сетевое имя сервера, а не имя пользователя. \

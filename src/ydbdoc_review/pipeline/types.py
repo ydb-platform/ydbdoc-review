@@ -100,6 +100,7 @@ class PRTranslationResult:
     pair_results: list[PairRunResult] = field(default_factory=list)
     navigation_results: list[NavigationRunResult] = field(default_factory=list)
     completeness_gaps: list[str] = field(default_factory=list)
+    completeness_states: dict[str, str] = field(default_factory=dict)
 
     @property
     def translated_count(self) -> int:
