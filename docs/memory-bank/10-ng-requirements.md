@@ -310,8 +310,16 @@ created by the same safe operation bundle.
 
 An identical existing target-locale redirect is a no-op. A conflicting existing
 destination is never overwritten and produces an operator question. NG does not
-collapse redirect chains. It does not remove an old redirect unless the original
-source PR removed that exact mapping and the target copy still matches it.
+collapse redirect chains. It never changes or removes an existing redirect.
+
+The shared `ydb/docs/redirects.yaml` is append-only and has no locale pair to
+translate. A redirect added directly by the merged source PR is already present
+on current `main`, may serve as mapping evidence, and produces no standalone NG
+candidate change. NG itself may only append a new redirect required by one of its
+atomic mirrored-deletion bundles. A direct modification or deletion of an
+existing redirect violates the append-only contract: NG does not mirror or replay
+it and reports the exact entry as red. A conflicting existing mapping remains an
+operator question and is never overwritten.
 
 Every NG-generated TOC href removal requires a resolved redirect. Redirect,
 target-file deletion and TOC removal belong to one atomic bundle. If destination
@@ -1192,7 +1200,13 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Whole recognized TOC-file deletion while preserving unrelated target-locale
+   entries.
+2. Priority when one glossary entry is both directly changed in both locales and
+   opportunistically used by a directional article bundle.
+3. Conflict between direct image authority and the opposite direction required
+   by a document dependency bundle.
+4. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
