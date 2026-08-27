@@ -228,12 +228,29 @@ there is no user-facing text to translate.
   on the source PR and creates no Draft.
 - Timeout, malformed response, model error or uncertainty means translation
   continues. The filter is fail-open.
-- `/ydbdoc continue всё равно переводи` records `force_translation=true`, skips
-  the negative semantic verdict and spends one continue attempt.
+- For a one-locale source operation, `/ydbdoc continue всё равно переводи`
+  records `force_translation=true`, skips the negative semantic verdict and
+  spends one continue attempt. Its translation direction is already known.
 - The override is retained by subsequent rebuilds.
 - It overrides only the semantic classifier. It does not override merged-only,
   single-language rules, an unresolved bilingual authority choice, `SUPERSEDED`, ACL, budget,
   safety gates or continue limits.
+
+For a bilingual pair classified as `NO_TRANSLATION`, `doc_translate` creates a
+continue-capable no-Draft lineage retained for 14 days. The source-PR report
+presents exactly two ready choices:
+
+```text
+/ydbdoc continue всё равно переводи с русского
+/ydbdoc continue всё равно переводи с английского
+```
+
+The operator chooses only after reading that report. The selected locale is
+stored as authority and the following `doc_continue` performs the destructive
+rebuild and translation without another authority question. A bilingual command
+that merely says `всё равно переводи` is rejected before snapshot, model or branch
+work; the bot repeats the two valid commands. This rejected instruction does not
+consume one of the three continue attempts.
 
 Cheap semantic classification uses a configured ordered fallback chain. A timeout,
 malformed response or technical failure advances to the next classifier model.
@@ -1056,14 +1073,12 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Authority selection when `force_translation` follows bilingual
-   `NO_TRANSLATION`.
-2. Semantic classification and authority for a locale pair whose RU and EN
+1. Semantic classification and authority for a locale pair whose RU and EN
    binary images both changed.
-3. Deterministic detection that a glossary entry is used by an operation bundle.
-4. Severity of a directly changed unsupported file under an eligible locale
+2. Deterministic detection that a glossary entry is used by an operation bundle.
+3. Severity of a directly changed unsupported file under an eligible locale
    root.
-5. Final retrofit-versus-rewrite choice after every requirement above is closed
+4. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
