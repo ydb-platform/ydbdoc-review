@@ -730,6 +730,31 @@ the format, then tries the configured fallback critic once. If no valid verdict
 is produced, the result is red and clearly says that translation quality could
 not be checked. It does not invent translation defects.
 
+The bounded technical-failure state machine is:
+
+- semantic classifier: try each configured classifier identifier once and stop at
+  the first valid classification;
+- initial translator: one selected model A call, then one eligible fallback
+  translator call;
+- critic: one primary call, one same-model format-repair call for malformed output,
+  then one eligible fallback critic call;
+- repairer: one selected repair call, then one eligible fallback repair call.
+
+No hidden unbounded retries are allowed. If both translator calls fail, the
+operation bundle is omitted and red. If a repair call and fallback fail, that
+repair attempt is consumed, candidate bytes remain unchanged and the cycle moves
+to the next verification pass. After the second consumed repair attempt, the safe
+candidate remains in a red Draft. Critic exhaustion uses the existing red
+unavailable-verification result. Every attempt, fallback, failure reason, returned
+usage and actual cost is recorded in technical details.
+
+User-facing model-failure messages are plain Russian. They say either that the
+translation could not be produced or that its quality could not be checked because
+the configured models did not return a valid result. They recommend trying again
+later by applying `doc_translate` to the merged source PR. The message explicitly
+warns that repeated `doc_translate` is a clean restart which closes the current
+Draft, deletes its translation branch and discards current continue decisions.
+
 ## 23.11 `doc_verify` scope
 
 - A bot translation PR is checked against the exact source snapshot, paths and
@@ -886,12 +911,10 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Bounded call-state machine for translator, repairer and critic technical
-   failures, including fallback limits and terminal statuses.
-2. Exact 14-day lineage expiry clock and refresh behavior.
-3. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+1. Exact 14-day lineage expiry clock and refresh behavior.
+2. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-4. Final retrofit-versus-rewrite choice after every requirement above is closed
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
