@@ -249,6 +249,17 @@ For RU to EN:
 7. The answer becomes an exact source-to-target URL mapping for the lineage and
    is applied to every exact occurrence on rebuild.
 
+The exact placeholder form is:
+
+```text
+https://ydbdoc.invalid/unresolved/<short-hash-of-exact-original-url>
+```
+
+The reserved `.invalid` domain keeps Markdown syntactically valid while ensuring
+the placeholder cannot resolve to an accidental real resource. The hash is stable
+for the exact original URL. The original URL remains in structured lineage and
+the human report. Any `ydbdoc.invalid` occurrence is blocking.
+
 For EN to RU, external English URLs are retained. Russian documentation may link
 to English resources.
 
@@ -399,9 +410,8 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact stable external URL placeholder representation.
-2. Exact wiki domains or resolver allowlist for automatic RU-to-EN mapping.
-3. Final retrofit-versus-rewrite choice after requirements gap analysis.
+1. Exact wiki domains or resolver allowlist for automatic RU-to-EN mapping.
+2. Final retrofit-versus-rewrite choice after requirements gap analysis.
 
 ---
 
