@@ -939,7 +939,14 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Canonical locale roots and path-pair mapping, exact glossary and redirect paths,
+   TOC recognition and eligible NG root paths.
+2. Mixed operations on one locale pair, including cross-locale add/delete,
+   both-locale delete and both-changed with one current side absent.
+3. Terminal behavior for a genuine article deletion that has no replacement but
+   would remove a TOC href under the mandatory-redirect rule.
+4. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
+5. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
