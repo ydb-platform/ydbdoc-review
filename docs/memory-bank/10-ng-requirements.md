@@ -706,6 +706,19 @@ and asks the tech writer to select the authoritative locale through continue.
 Repeated normal translations therefore harmonize the actively used glossary over
 time without a separate mass rewrite.
 
+Glossary usage is detected deterministically. An operation bundle uses an entry
+only when a scoped Markdown/YFM document contains either:
+
+- a parsed link to that entry's explicit glossary anchor; or
+- the exact visible entry title from its glossary heading, compared with Unicode
+  case folding and collapsed whitespace.
+
+NG does not use stemming, morphology, fuzzy matching or an LLM to expand glossary
+scope. Inflected forms such as `узел` and `узла` are different strings unless an
+explicit glossary link identifies the entry. Bold terms, aliases and synonyms
+inside an entry definition are not independently extracted as usage triggers.
+Missing an opportunistic harmonization opportunity is not a verification issue.
+
 When both glossary files changed and still differ, one RU/EN term-entry pair is
 the atomic unit and an explicit exception to normal full-file overwrite:
 
@@ -1089,10 +1102,9 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Deterministic detection that a glossary entry is used by an operation bundle.
-2. Severity of a directly changed unsupported file under an eligible locale
+1. Severity of a directly changed unsupported file under an eligible locale
    root.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
