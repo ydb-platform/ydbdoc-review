@@ -336,6 +336,29 @@ must produce equal verification semantics regardless of the caller.
 `doc_verify` evaluates the actual bytes of the open PR. A hypothetical in-memory
 repair can never make the unchanged PR green.
 
+## 23.9.1 Documentation glossary
+
+The RU and EN documentation glossary pages are a mandatory locale pair and must
+be maintained and harmonized. They are not an internal prompt-only word list.
+
+- If only the RU glossary changed in the merged source PR, `doc_translate`
+  completely synchronizes the current RU glossary into EN.
+- If only the EN glossary changed, it completely synchronizes current EN into RU.
+- If both changed in one PR, they are treated as bilingual and `doc_verify`
+  checks their equivalence without choosing an authoritative locale.
+- A term present in only one glossary is blocking unless a future explicit
+  single-language rule says otherwise.
+- Verifier compares the term set, RU-to-EN names, meaning of definitions, links,
+  placeholders and technical notation.
+- NG does not carry forward historical special cases that skip glossary criticism,
+  repair or writes.
+
+The harmonized RU and EN documentation glossaries are also the terminology source
+for translating every other article. NG derives term pairs from these pages. It
+does not maintain a second manually duplicated terminology YAML as a separate
+source of truth. The exact glossary snapshots used by a run are recorded in
+reproducibility metadata.
+
 ## 23.10 Two-model translation and repair loop
 
 Translation and criticism use independent model roles:
