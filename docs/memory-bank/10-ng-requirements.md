@@ -339,6 +339,22 @@ same locale-relative path. It mirrors the complete source hierarchy and order,
 translates labels and mirrors hrefs to the target locale. Missing target TOC is
 therefore not an operator conflict.
 
+A recognized TOC changed directly by the merged source PR is also an independent
+root operation bundle, even when no Markdown document changed. NG derives the
+source PR's structural TOC operations by comparing its immutable base version
+with the current applicable source TOC on `main`, then applies only those
+additions, removals, moves, label changes, `href` changes and `include.path`
+changes to the paired target TOC. Unrelated target entries and drift remain
+untouched.
+
+Labels are translated and paths follow the normal mirror and missing-target
+rules. Removing an `href` requires the normal atomic redirect; changing only a
+label does not. If an operation cannot be mapped to exactly one target node or
+position, NG omits the TOC bundle and asks the operator rather than guessing. A
+real target TOC change creates a Draft even with no document bundle. If the
+scoped operations produce no target change, NG creates no Draft for that bundle
+and reports that TOC translation is not required.
+
 If the target TOC already exists, NG does not overwrite or fully mirror it. Only
 scoped entries are changed. For an insertion, NG selects the mirrored source TOC
 path and exact mirrored ancestor href chain. It inserts after the nearest previous
@@ -1150,11 +1166,10 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Direct TOC-only source operations.
-2. Scope of glossary verification for unrelated drift.
-3. Reclassification of an originally bilingual pair after one side becomes
+1. Scope of glossary verification for unrelated drift.
+2. Reclassification of an originally bilingual pair after one side becomes
    `SUPERSEDED` on current `main`.
-4. Final retrofit-versus-rewrite choice after every requirement above is closed
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
