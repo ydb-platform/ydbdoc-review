@@ -547,6 +547,14 @@ transcripts are retained for 14 days. Secrets and token values are never stored 
 printed. Expired context produces an explicit explanation and cannot be used by
 continue.
 
+An open Draft whose lineage has expired after 14 days is no longer automatically
+verifiable or continuable. `/ydbdoc continue` is rejected. `doc_verify` reports
+red in clear Russian that the original snapshot and decisions are no longer
+available, and shows the expiry date and source PR. The only automatic recovery
+is to apply `doc_translate` to the merged source PR again. That clean restart
+closes the expired Draft, deletes its branch and rebuilds everything from scratch.
+NG never gives the expired Draft a green result.
+
 `YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE` controls the hard dependency count per
 source article. Its confirmed current value is `100`.
 
@@ -560,34 +568,33 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Behavior of an open translation Draft after its 14-day lineage context expires.
-2. Exact boundary between the shared pure verifier, an LLM critic call and the
+1. Exact boundary between the shared pure verifier, an LLM critic call and the
    materialized critic response interpreted by the verifier.
-3. Which red issue classes are model-repairable and which require an operator or
+2. Which red issue classes are model-repairable and which require an operator or
    an external fact without spending repair attempts.
-4. Atomic publication unit for a safe subset when another part of the candidate
+3. Atomic publication unit for a safe subset when another part of the candidate
    is unsafe.
-5. Conflict policy when one canonical dependency is reached from root documents
+4. Conflict policy when one canonical dependency is reached from root documents
    with opposite translation directions.
-6. Exact reference syntaxes that bring companion files into dependency closure.
-7. Whether glossary drift blocks only glossary-scoped runs or every translation
+5. Exact reference syntaxes that bring companion files into dependency closure.
+6. Whether glossary drift blocks only glossary-scoped runs or every translation
    that reads the glossaries as terminology input.
-8. Whether model A and model B must always have different model identifiers and
+7. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-9. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-10. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-11. Exact files counted by the per-root dependency limit of 100.
-12. Whether a depth exception raises the whole root closure limit or only one
+8. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+9. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+10. Exact files counted by the per-root dependency limit of 100.
+11. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-13. Exact human actor used by ACL for label events and continue comments.
-14. Report and Action behavior when ACL or budget rejects `doc_verify` before
+12. Exact human actor used by ACL for label events and continue comments.
+13. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-15. Canonical comment location for source lifecycle, Draft QA and ordinary
+14. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-16. Cost recording behavior when a job crashes after one or more paid calls.
-17. Scope behavior for deleted assets that cannot be reached from current source
+15. Cost recording behavior when a job crashes after one or more paid calls.
+16. Scope behavior for deleted assets that cannot be reached from current source
     content.
-18. Final retrofit-versus-rewrite choice after every requirement above is closed
+17. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
