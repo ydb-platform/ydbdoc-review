@@ -541,8 +541,8 @@ be maintained and harmonized. They are not an internal prompt-only word list.
 - If only the RU glossary changed in the merged source PR, `doc_translate`
   completely synchronizes the current RU glossary into EN.
 - If only the EN glossary changed, it completely synchronizes current EN into RU.
-- If both changed in one PR, they are treated as bilingual and `doc_verify`
-  checks their equivalence without choosing an authoritative locale.
+- If both changed in one PR, they are harmonized entry by entry rather than
+  choosing one whole file as authority.
 - A term present in only one glossary is blocking unless a future explicit
   single-language rule says otherwise.
 - Verifier compares the term set, RU-to-EN names, meaning of definitions, links,
@@ -573,6 +573,23 @@ and EN definitions differ, NG does not choose authority. It reports a red confli
 and asks the tech writer to select the authoritative locale through continue.
 Repeated normal translations therefore harmonize the actively used glossary over
 time without a separate mass rewrite.
+
+When both glossary files changed and still differ, one RU/EN term-entry pair is
+the atomic unit and an explicit exception to normal full-file overwrite:
+
+- equal term entries are unchanged;
+- an RU-only term is translated and added to EN;
+- an EN-only term is translated and added to RU;
+- when both definitions exist but differ, the cheap classifier may select the
+  clearly more complete or correct entry as authority;
+- an unambiguous entry is synchronized in the other locale;
+- an ambiguous entry is omitted from changes and produces a precise authority
+  question for continue;
+- independent safe entry pairs may be published in a red Draft.
+
+The shared verifier checks the resulting complete term set and definitions. This
+entry-level exception prevents a bilingual glossary run from deleting useful
+entries in either locale.
 
 ## 23.10 Two-model translation and repair loop
 
@@ -808,20 +825,18 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact behavior when both RU and EN documentation glossary files changed and
-   differ.
-2. Accepted evidence and exact mutations for redirect creation, replacement,
+1. Accepted evidence and exact mutations for redirect creation, replacement,
    collision and stale redirect handling.
-3. Deterministic target TOC selection and entry ordering before an ambiguity is
+2. Deterministic target TOC selection and entry ordering before an ambiguity is
    escalated to the operator.
-4. Recursive dependency traversal matrix by source file type and parsed reference
+3. Recursive dependency traversal matrix by source file type and parsed reference
    syntax.
-5. Bounded call-state machine for translator, repairer and critic technical
+4. Bounded call-state machine for translator, repairer and critic technical
    failures, including fallback limits and terminal statuses.
-6. Exact 14-day lineage expiry clock and refresh behavior.
-7. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+5. Exact 14-day lineage expiry clock and refresh behavior.
+6. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-8. Final retrofit-versus-rewrite choice after every requirement above is closed
+7. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
