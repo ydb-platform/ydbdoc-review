@@ -1136,6 +1136,14 @@ relative path together before creating bundles:
 These rules use the immutable source manifest to determine what the source PR
 did and current `main` to determine whether that operation is still applicable.
 
+`SUPERSEDED` applies to an originally bilingual pair as a whole. If the merged
+source PR changed both RU and EN sides but a later change has removed either side
+from current `main`, NG does not reclassify the surviving side as a new
+one-locale authority. It marks the complete original pair `SUPERSEDED`, restores
+and deletes nothing, and reports the exact missing path and later-state reason.
+Residual orphan or TOC problems are left to QA or the external documentation
+build under the established stale-operation rule.
+
 ## 23.15.3 Genuine deletion without a successor
 
 NG never removes a published article and its TOC href without also creating a
@@ -1184,9 +1192,7 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Reclassification of an originally bilingual pair after one side becomes
-   `SUPERSEDED` on current `main`.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
