@@ -661,6 +661,20 @@ Color never changes Draft to Ready. A human controls Ready and merge.
 
 One canonical bot comment is updated for each new run.
 
+Comment ownership is explicit:
+
+- the merged source PR has one canonical lifecycle comment for `doc_translate`,
+  no-Draft reasons, active Draft link, lineage state and continue history;
+- an active translation Draft has one canonical QA comment for its exact current
+  commit and verification result;
+- an ordinary open PR checked by `doc_verify` has one canonical QA comment in that
+  PR.
+
+The source lifecycle and Draft QA comments share a `run_id` and link to one
+another. A later run updates the applicable canonical comments rather than adding
+duplicates. When blockers exceed one GitHub comment, the canonical comment remains
+the summary and links to numbered detail comments recreated for the current run.
+
 A green report is short. It shows checked commit, direction, file and dependency
 counts, check categories, repairs used and final result. Detailed files, copied
 images, mappings, exceptions, models, tokens, cost and versions remain available
@@ -762,12 +776,10 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Canonical comment location for source lifecycle, Draft QA and ordinary
-   read-only verify.
-2. Cost recording behavior when a job crashes after one or more paid calls.
-3. Scope behavior for deleted assets that cannot be reached from current source
+1. Cost recording behavior when a job crashes after one or more paid calls.
+2. Scope behavior for deleted assets that cannot be reached from current source
     content.
-4. Final retrofit-versus-rewrite choice after every requirement above is closed
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
