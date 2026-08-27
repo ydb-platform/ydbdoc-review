@@ -247,13 +247,22 @@ choice includes the exact source path, for example:
 ```
 
 The operator chooses only after reading that report. The selected locale is
-stored as authority and the following `doc_continue` performs the destructive
-rebuild and translation without another authority question. A bilingual command
+stored with `force_translation=true` for that exact canonical pair. Every later
+`doc_continue` in the same lineage replays both authority and force flag, so an
+unrelated later decision cannot cause the pair to return to `NO_TRANSLATION` or
+disappear from the rebuilt Draft. The following `doc_continue` performs the
+destructive rebuild and translation without another authority question. A bilingual command
 without a path is accepted only when exactly one bilingual pair in the lineage is
 waiting for this decision. With multiple waiting pairs it is rejected before
 snapshot, model or branch work, and the bot repeats the path-specific commands.
 One continue comment may contain decisions for multiple exact paths. A rejected
 ambiguous instruction does not consume one of the three continue attempts.
+
+The same scoping rule applies to one-locale semantic no-op pairs: reports provide
+path-specific force commands, and a pathless force command is accepted only when
+exactly one pair in the entire lineage is waiting for any force-translation
+decision. A fresh clean `doc_translate` discards all pair-specific force and
+authority decisions with the old lineage.
 
 Cheap semantic classification uses a configured ordered fallback chain. A timeout,
 malformed response or technical failure advances to the next classifier model.
@@ -1125,7 +1134,15 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Exact English external-URL markers.
+2. Removal of the contradictory Wikipedia locale-substitution rule.
+3. Exact unresolved-URL short-hash algorithm and collision behavior.
+4. Internal-link fragment behavior.
+5. Direct TOC-only source operations.
+6. Scope of glossary verification for unrelated drift.
+7. Reclassification of an originally bilingual pair after one side becomes
+   `SUPERSEDED` on current `main`.
+8. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
