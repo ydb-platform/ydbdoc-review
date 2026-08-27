@@ -125,8 +125,26 @@ original merged PR:
 
 - only RU changed: translate current RU to EN;
 - only EN changed: translate current EN to RU;
-- both changed: bilingual pair, no automatic overwrite, QA only;
+- both changed: run bilingual semantic classification to select no translation,
+  RU authority, EN authority or an operator-required ambiguity;
 - one PR may contain different directions for different paths.
+
+For a pair where both locales changed, the cheap classifier compares the complete
+current RU and EN files:
+
+- `NO_TRANSLATION`: versions are equivalent, create no Draft for this pair and
+  report that translation is not required;
+- `RU_AUTHORITY`: RU is clearly complete or correct, perform the normal complete
+  RU-to-EN overwrite;
+- `EN_AUTHORITY`: EN is clearly complete or correct, perform the normal complete
+  EN-to-RU overwrite;
+- `AMBIGUOUS`: both contain unique meaning or authority is unclear, make no guess
+  and ask the tech writer to select authority through continue.
+
+A selected overwrite enters the normal shared verification and two-repair loop.
+If all pairs are `NO_TRANSLATION`, no Draft is created and the source PR receives
+the short verification report. If a pair is ambiguous and no safe diff exists,
+lineage remains on the source PR until continue supplies authority.
 
 For add and update, the complete current source file is translated and the target
 is completely overwritten. NG does not compute a historical delta, perform a
@@ -173,8 +191,18 @@ there is no user-facing text to translate.
   the negative semantic verdict and spends one continue attempt.
 - The override is retained by subsequent rebuilds.
 - It overrides only the semantic classifier. It does not override merged-only,
-  single-language rules, bilingual classification, `SUPERSEDED`, ACL, budget,
+  single-language rules, an unresolved bilingual authority choice, `SUPERSEDED`, ACL, budget,
   safety gates or continue limits.
+
+Cheap semantic classification uses a configured ordered fallback chain. A timeout,
+malformed response or technical failure advances to the next classifier model.
+For a one-direction pair, exhaustion remains fail-open because direction is known
+and normal translation can proceed. For a bilingual pair, exhaustion cannot pick
+authority safely: the pair is red, no candidate is generated, and the source
+comment clearly says that every classifier failed. The operator may retry through
+continue. A valid `AMBIGUOUS` answer is a product verdict, not a technical failure,
+and produces the authority question without cycling through models merely to find
+a preferred answer.
 
 ## 23.4 Add, update, delete and redirects
 
@@ -691,19 +719,18 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-2. Exact files counted by the per-root dependency limit of 100.
-3. Whether a depth exception raises the whole root closure limit or only one
+1. Exact files counted by the per-root dependency limit of 100.
+2. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-4. Exact human actor used by ACL for label events and continue comments.
-5. Report and Action behavior when ACL or budget rejects `doc_verify` before
+3. Exact human actor used by ACL for label events and continue comments.
+4. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-6. Canonical comment location for source lifecycle, Draft QA and ordinary
+5. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-7. Cost recording behavior when a job crashes after one or more paid calls.
-8. Scope behavior for deleted assets that cannot be reached from current source
+6. Cost recording behavior when a job crashes after one or more paid calls.
+7. Scope behavior for deleted assets that cannot be reached from current source
     content.
-9. Final retrofit-versus-rewrite choice after every requirement above is closed
+8. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
