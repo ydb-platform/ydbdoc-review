@@ -16,6 +16,22 @@ Requirements discovery must finish before deciding whether to retrofit the curre
 code or write a clean implementation. No NG implementation starts before that gap
 analysis and explicit user approval.
 
+### Requirements handoff process
+
+- This project Memory Bank is the only authoritative requirements source. Do not
+  maintain a separate assistant-specific knowledge bank for this project.
+- Every confirmed decision from requirements discussion is added to §23.
+- After the initial discussion is complete, start a new analyst in a clean context
+  and provide only the project Memory Bank.
+- The analyst must study the complete contract, identify contradictions or missing
+  decisions and ask questions until the implementation task is unambiguous.
+- When the analyst has no unresolved requirements, perform a separate gap analysis
+  comparing retrofit of the current code with a clean rewrite.
+- Present that comparison and recommendation to the user. The user chooses the
+  implementation strategy.
+- Only after that choice is the final task handed to a developer. Requirements
+  analysis and strategy selection must not silently turn into implementation.
+
 Return point before NG work: immutable tag `pre-ng-2026-08-27` at
 `1f04ab1c71488f53c4ad547c20c7e635d59696ad`.
 
