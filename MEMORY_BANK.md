@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-27
-**Current focus:** §24, implementable specification and independent-review handoff for the confirmed simplified NG rebuild.
+**Current focus:** §24 passed independent formal review and is the developer/tester handoff for the confirmed simplified NG rebuild.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -28,7 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-08-27 | **§24**: implementation-ready NG specification for independent review, with strict rewrite boundaries, immutable DTOs, exact state machines, persistence/recovery, Russian reports and 175 acceptance criteria |
+| 2026-08-27 | **§24 v1.0.1 — SPEC PASS**: independent formal review closed event/idempotency, zero-call budget, dependency/shared-output, cache, lossless TOC/redirect, glossary composition, report ownership and expiry-recovery blockers; all 175 acceptance criteria remain traced to the test matrix |
 | 2026-08-27 | **§23**: confirmed simplified NG contract for `doc_translate`, `doc_continue`, read-only `doc_verify`, full current-source overwrite, scoped dependencies, shared verifier, two-model repair loop, reporting, ACL and budget |
 | 2026-08-27 | **§6.225** — type-aware href validation; fail-closed official merge snapshots; scoped historical replay; TOC-proven tombstones; real added+removed move inference preserving later EN meaning; semantic failures exit non-zero (#45949 / #50857 / #50596) |
 | 2026-08-26 | **§6.224** — merged PRs run translation provenance, post-write fragment repair, and pending-write-scoped overlay validation (#45949) |

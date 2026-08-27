@@ -7,8 +7,8 @@
 
 ## 24. Status, authority and version
 
-- **Status:** SPEC READY FOR INDEPENDENT REVIEW
-- **Specification version:** 1.0.0
+- **Status:** SPEC PASS
+- **Specification version:** 1.0.1
 - **Specification date:** 2026-08-27
 - **Product authority:** [§23 NG requirements](10-ng-requirements.md)
 - **Implementation strategy:** REWRITE_CORE, as fixed by §23.17
@@ -49,8 +49,9 @@ required.
   allowed parsed edges.
 - **operation bundle**: the atomic publication unit rooted at one scoped
   document or one standalone supported root operation.
-- **candidate overlay**: immutable writes, deletes, TOC edits and redirect
-  appends proposed over the snapshot without changing a worktree.
+- **candidate overlay**: immutable writes, deletes, TOC edits, redirect appends
+  and glossary entry edits proposed over the snapshot without changing a
+  worktree.
 - **safe diff**: the union of complete bundles that have no blocking issue
   attached to the bundle or a mandatory shared dependency.
 - **operator decision**: a typed, lineage-scoped answer extracted from an
@@ -253,12 +254,13 @@ DecisionKind =
   FORCE_TRANSLATION | PAIR_AUTHORITY | IMAGE_AUTHORITY |
   SHARED_DEPENDENCY_AUTHORITY | GLOSSARY_AUTHORITY |
   GLOSSARY_ENTRY_MAPPING | REDIRECT_TARGET | TOC_PLACEMENT |
-  URL_REPLACEMENT | DEPTH_LIMIT | MIXED_PAIR_OUTCOME | GENERAL_GUIDANCE
+  URL_REPLACEMENT | DEPTH_LIMIT | MIXED_PAIR_OUTCOME |
+  RETRY_CLASSIFICATION | GENERAL_GUIDANCE
 LineageState =
   WAITING_NO_DRAFT | DRAFT_OPEN | READY_BLOCKED | DRAFT_CLOSED |
   DAMAGED | MERGED | EXPIRED | REPLACED
 RunPhase =
-  RECEIVED | LABEL_REMOVED | GATES_PASSED | LOCK_ACQUIRED |
+  RECEIVED | LABEL_REMOVED | LOCK_ACQUIRED | GATES_PASSED |
   SNAPSHOT_CAPTURED | PLANNED | MODEL_RUNNING | VERIFIED |
   PUBLICATION_STARTED | PUBLISHED | REPORTED | TERMINAL
 RunOutcome =
@@ -290,6 +292,7 @@ RepoId(owner: str, name: str)
 
 CommandEvent(
   delivery_id: str,
+  label_timeline_event_id: int,
   actions_run_id: int,
   command: Command,
   repository: RepoId,
@@ -409,6 +412,9 @@ TocEdit(toc_path: RepoPath, op: TocOpKind, node_id: str, before: bytes | None,
         after: bytes | None, required_redirect_id: str | None)
 RedirectAppend(old_href: str, new_href: str, evidence: RedirectEvidenceKind,
                evidence_ref: str)
+GlossaryEdit(glossary_path: RepoPath, entry_id: str,
+             before: bytes | None, after: bytes | None,
+             desired_ordinal: int | None, source_entry_locator: str)
 
 OperationBundle(
   bundle_id: str,
@@ -421,6 +427,7 @@ OperationBundle(
   deletes: tuple[Delete, ...],
   toc_edits: tuple[TocEdit, ...],
   redirects: tuple[RedirectAppend, ...],
+  glossary_edits: tuple[GlossaryEdit, ...],
   mandatory_bundle_ids: tuple[str, ...],
   shared_dependency_keys: tuple[CanonicalPairKey, ...],
   state: BundleState
@@ -433,6 +440,8 @@ CandidateOverlay(
   deletes: FrozenMap[RepoPath, Delete],
   overlay_sha256: Digest
 )
+
+ModelIdentifier(provider: str, model: str)
 
 OperatorDecision(
   decision_id: str,
@@ -460,6 +469,9 @@ LineageSnapshot(
   consumed_comment_ids: tuple[int, ...],
   placeholder_map: FrozenMap[str, str],
   model_rotation_index: int,
+  latest_translator_model: ModelIdentifier | None,
+  latest_critic_model: ModelIdentifier | None,
+  latest_verification_case_sha256: Digest | None,
   latest_main_snapshot: SnapshotRef | None,
   created_at: datetime,
   expires_at: datetime,
@@ -469,7 +481,8 @@ LineageSnapshot(
 Evidence(
   source_path: RepoPath | None,
   target_path: RepoPath | None,
-  commit_sha: GitSha,
+  commit_sha: GitSha | None,
+  checked_content_sha256: Digest,
   start_line: int | None,
   end_line: int | None,
   heading_or_path: str | None,
@@ -495,8 +508,6 @@ VerificationIssue(
   action: SuggestedAction,
   repair_payload: bytes | None
 )
-
-ModelIdentifier(provider: str, model: str)
 
 ModelAttemptRecord(
   run_id: str,
@@ -540,7 +551,7 @@ VerificationCase(
 
 VerificationResult(
   case_sha256: Digest,
-  checked_commit_sha: GitSha,
+  checked_commit_sha: GitSha | None,
   verdict: Verdict,
   issues: tuple[VerificationIssue, ...],
   safe_bundle_ids: tuple[str, ...],
@@ -568,6 +579,8 @@ VerificationResult(
 8. A Write and Delete for the same path in one overlay is invalid.
 9. Identical writes from multiple bundles deduplicate by path and digest.
    Different bytes for the same path are a blocking shared-output conflict.
+   GlossaryEdit is the sole exception: disjoint safe entry edits are composed by
+   §24.10.9 into one final file Write and never appear as competing direct Writes.
 10. A TOC href removal has exactly one required redirect in the same bundle.
 11. A published bundle includes every transitive mandatory bundle.
 12. Decisions are append-only within a lineage. A later decision with the same
@@ -579,8 +592,17 @@ VerificationResult(
 16. A PASS result has no BLOCKED or WARNING issue. PASS_WITH_WARNINGS has at least
     one WARNING and no BLOCKED. BLOCKED has at least one BLOCKED issue.
 17. Actual cost is either returned by the provider or calculated from
-    provider-returned usage with the persisted versioned tariff. If required
-    usage is absent, cost is null. NG never invents missing usage.
+   provider-returned usage with the persisted versioned tariff. If required
+   usage is absent, cost is null. NG never invents missing usage.
+18. Evidence is always bound to exact checked bytes by
+    **checked_content_sha256**. An internal pre-publication result has null
+    **commit_sha** and **checked_commit_sha**; binding that unchanged content to
+    the created Draft commit fills those reporting fields without changing case
+    identity or verification semantics. Every published or external-verify
+    report has a non-null checked commit.
+19. An active Draft lineage stores the exact latest A/B identifiers and final
+    verification case hash. A later configuration reorder MUST NOT silently
+    reinterpret **model_rotation_index** as a different historical model pair.
 
 ## 24.5 Event contract, gates, locks and terminal outcomes
 
@@ -592,7 +614,9 @@ Production command handling accepts only a GitHub pull-request **labeled** event
 - label **doc_continue** maps to DOC_CONTINUE;
 - label **doc_verify** maps to DOC_VERIFY.
 
-The command actor is **pull_request.sender.login** from that exact labeled event.
+The command actor is the top-level webhook **sender.login** from that exact
+labeled event. It is not **pull_request.user.login**, the PR author or a service
+account inferred from prior state.
 The event delivery ID is the idempotency key. A workflow-dispatch or local CLI
 MAY create the same CommandEvent only in an explicitly non-production environment
 and MUST NOT obtain GitHub write ports.
@@ -607,24 +631,57 @@ comment ID. Edited text is read at label time and its body digest is persisted.
 
 Every labeled event follows this exact order:
 
-1. Validate repository, PR number, action, exact command label and delivery ID.
-2. Remove only that command label. Failure to remove it is TECHNICAL_FAILURE and
+1. Validate repository, PR number, action, exact command label and delivery ID
+   from the webhook payload, without consulting current label state.
+2. Atomically claim **repository + delivery_id** by inserting the delivery and
+   RECEIVED run rows, or load the already associated run. A duplicate resumes
+   only that run's persisted phase and mutation journal. If it is terminal, return
+   its recorded result. A duplicate MUST NOT remove a currently present label,
+   acknowledge a newer event or create another run.
+3. For a newly claimed delivery only, fully paginate the PR's GitHub
+   issue/timeline events and bind the run to the stable ID of the currently active
+   matching **labeled** event. The event ID, label, actor and PR must match the
+   webhook; persist that ID into the delivery/run before removal. Inability to
+   prove one exact event is a technical failure before label mutation.
+4. Remove only that bound command-label instance. Failure to
+   remove it is TECHNICAL_FAILURE and
    blocks all further work.
-3. Update the one applicable canonical lifecycle/QA comment to an acknowledgement
+5. Update the one applicable canonical lifecycle/QA comment to an acknowledgement
    state carrying command and delivery ID. Do not create a per-delivery comment.
-4. Resolve source-PR/lineage identity without reading content bytes. For
+6. Resolve source-PR/lineage identity without reading content bytes. For
    DOC_CONTINUE, also select and hash the latest applicable comment metadata/body.
-5. Apply ACL. DOC_CONTINUE checks both label sender and selected comment author.
+7. Apply ACL. DOC_CONTINUE checks both label sender and selected comment author.
    Missing or empty allowlist is configuration failure, never allow-all.
-6. Apply command lifecycle gates: merged-only translate, open-only verify,
+8. Apply command lifecycle gates: merged-only translate, open-only verify,
    expired-NG-Draft verify, and continue
-   location/state/expiry/count/duplicate-Draft rules.
-7. Query GitHub Actions for concurrent queued or in-progress NG command runs.
-8. Acquire the per-source compare-and-set lock with a two-hour expiry.
-9. Read Moscow-day actual spend and apply budget.
-10. Validate model configuration can supply required roles and, for translation,
-    at least one distinct A/B pair.
-11. Only now capture snapshots, plan scope, call a model or mutate a branch/PR.
+   location/state/expiry/count/duplicate-Draft rules. For DOC_TRANSLATE, a
+   previously merged translation returns ALREADY_COMPLETE here, and multiple
+   active translation PRs reject here, before lock, budget or model configuration.
+9. Query GitHub Actions for concurrent queued or in-progress NG command runs.
+10. Acquire the per-source compare-and-set lock with a two-hour expiry.
+11. Perform a metadata-only paid-work preflight. DOC_TRANSLATE constructs and
+    persists the official manifest; DOC_CONTINUE reads its retained manifest;
+    DOC_VERIFY fetches its stable fully paginated PR-files list. Apply only path,
+    status, pair-shape, single-language and supported-type rules, without reading
+    file content. Classify the run as **model_capable** exactly when those
+    operations can create a classifier, translator or critic unit under §24.9.2.
+12. If model_capable, read Moscow-day actual spend and apply budget. A proven
+    deterministic-only, single-language-only or unsupported-only run skips the
+    budget gate because it can make no paid call.
+13. If model_capable, validate model configuration can supply the possible roles
+    and, for translation/continue, at least one distinct A/B pair.
+14. Only now capture content snapshots, perform content-dependent planning, call
+    a model or mutate a content branch/PR lifecycle. Required label and canonical
+    comment mutations remain the earlier explicit exceptions.
+
+The RECEIVED row and bound label event ID are committed before label removal.
+**LABEL_REMOVED** is recorded after step 4, **LOCK_ACQUIRED** after step 10 and
+**GATES_PASSED** only after step 13. A duplicate delivery never repeats an already
+completed phase; it performs
+only the next incomplete idempotent effect recorded for that same run.
+The provisional RECEIVED envelope may have a null label event ID only inside the
+step-2/step-3 transaction boundary; a domain CommandEvent is emitted only after
+binding, and no later phase permits null.
 
 All rejections remove the label, post a Russian terminal report, make no model
 call or content/branch mutation and fail the Action. A terminal ALREADY_COMPLETE
@@ -668,7 +725,7 @@ HTML URL. No local queue is created. The lock remains the race-safe second check
 The only normal phase path is:
 
 ~~~text
-RECEIVED -> LABEL_REMOVED -> GATES_PASSED -> LOCK_ACQUIRED
+RECEIVED -> LABEL_REMOVED -> LOCK_ACQUIRED -> GATES_PASSED
 -> SNAPSHOT_CAPTURED -> PLANNED -> MODEL_RUNNING -> VERIFIED
 -> PUBLICATION_STARTED -> PUBLISHED -> REPORTED -> TERMINAL
 ~~~
@@ -676,11 +733,13 @@ RECEIVED -> LABEL_REMOVED -> GATES_PASSED -> LOCK_ACQUIRED
 MODEL_RUNNING is skipped when planning needs no model. PUBLICATION_STARTED and
 PUBLISHED are skipped when the command is verify or safe diff is empty.
 
-A gate rejection follows **LABEL_REMOVED -> REPORTED -> TERMINAL**. A planned
-no-op follows **PLANNED -> REPORTED -> TERMINAL**. A failure after any other
-phase may transition only to **REPORTED -> TERMINAL** after recovery has made the
-mutation journal consistent. Phase never moves backward; duplicate delivery
-resumes the recorded phase.
+A rejection before lock acquisition follows **LABEL_REMOVED -> REPORTED ->
+TERMINAL**. A budget or model-configuration rejection after lock acquisition
+follows **LOCK_ACQUIRED -> REPORTED -> TERMINAL** and releases the lock. A
+planned no-op follows **PLANNED -> REPORTED -> TERMINAL**. A failure after any
+other phase may transition only to **REPORTED -> TERMINAL** after recovery has
+made the mutation journal consistent. Phase never moves backward; duplicate
+delivery resumes the recorded phase.
 
 Allowed lineage transitions are:
 
@@ -707,22 +766,28 @@ again.
 
 After the universal gates, DOC_TRANSLATE MUST execute:
 
-1. Fetch the source PullIdentity. If not merged, reject before manifest, snapshot
-   and model work.
-2. Require non-empty merge_commit_sha, base SHA and head SHA. Fetch every PR-files
-   page and build SourceManifest. Any invalid entry or pagination failure blocks.
-3. Discover all lineage and translation PR records for the source PR.
-4. If any translation PR is merged, mark lineage MERGED, report already
-   translated and stop without branch or content changes.
-5. If more than one active translation PR exists, block and ask a human to close
-   duplicates.
+1. Use the source PullIdentity fetched for the merged-only lifecycle gate. If it
+   was not merged, that gate has already rejected before budget, manifest,
+   snapshot and model work.
+2. Use the SourceManifest already constructed by universal preflight step 11,
+   which required all three SHAs, stable identity and complete pagination. Do not
+   fetch or reinterpret a second manifest after budget admission.
+3. Reconcile the lineage and translation PR records already discovered by the
+   lifecycle gate with GitHub once more under the lock. If a translation became
+   merged, mark lineage MERGED and stop ALREADY_COMPLETE. If duplicates appeared,
+   reject before destructive work. This closes the race without moving either
+   normal result behind budget/model calls.
+4. The previous terminal and duplicate checks are complete; do not plan content
+   for either result.
+5. Identify at most one unfinished lineage eligible for clean restart.
 6. If an unfinished lineage exists, perform a clean restart only after all gates:
    comment on and close its old Draft if present, delete the remote deterministic
    branch if present, mark the old lineage REPLACED, and leave old artifacts to
    their normal 14-day expiry.
-7. Allocate a new lineage ID and reset continue count, decisions, force flags,
-   placeholder numbering and model rotation state. Branch is exactly
-   **ydbdoc-review/pr-N**.
+7. Allocate a provisional new lineage ID and reset continue count, decisions,
+   force flags and placeholder numbering. Reserve the next repository model pair
+   and store its exact A/B identifiers plus ring index; a clean restart does not
+   reuse the replaced lineage's pair. Branch is exactly **ydbdoc-review/pr-N**.
 8. Capture main SHA once, persist SnapshotRef, and materialize every required blob
    from that SHA. The source PR selects operations only; no source content is
    read from its head or merge commit.
@@ -736,15 +801,23 @@ After the universal gates, DOC_TRANSLATE MUST execute:
 12. Generate all candidate bundles, execute shared verification and bounded repair,
     and compute the safe overlay.
 13. If safe overlay diff against current-main snapshot is empty, create no branch
-    or Draft. Persist WAITING_NO_DRAFT only when a resolvable blocker/force choice
-    exists; otherwise terminate with the no-translation report.
+    or Draft. Persist **WAITING_NO_DRAFT** and an active lineage only when §23
+    supplies a continue-resolvable force, authority, mapping, depth or repair
+    question with a valid ready instruction. A semantic no-op always satisfies
+    this condition. When there is no continue-resolvable question, retain the run
+    artifacts for audit but do not create **ng_active_lineages** or a compact
+    LineageSnapshot; terminate with the applicable no-translation, unsupported,
+    superseded or technical report. A later DOC_TRANSLATE is therefore a new run,
+    not a destructive restart of an unfinished lineage.
 14. For a non-empty safe overlay, create a local publication tree from the exact
     main SHA, apply only the safe overlay, make one deterministic bot commit, push
     the branch, and create a new Draft PR. The base branch is main.
 15. Post or update the source lifecycle comment and Draft QA comment with the same
     run ID. Set lineage DRAFT_OPEN and its translation PR number.
-16. Persist final report, case, call records and compact lineage. Set expires_at
-    to exactly completion time plus 14 days.
+16. Persist final report, case and call records. Persist the compact lineage and
+    set its expires_at to exactly completion time plus 14 days only for
+    **WAITING_NO_DRAFT** or **DRAFT_OPEN**. Run artifacts always retain their own
+    14-day expiry.
 17. Release the lock and map final verdict to Action status.
 
 If safe bundles exist but other bundles are blocked, step 14 still creates a red
@@ -761,8 +834,11 @@ After universal gates, DOC_CONTINUE MUST:
 3. Reject expired, merged, replaced, closed, damaged, duplicate-Draft or
    READY_BLOCKED lineage. A Ready PR report instructs the human to convert it back
    to Draft.
-4. Revalidate that the preselected comment is still the latest applicable
-   unconsumed continue comment before parsing it.
+4. Re-read and revalidate that the preselected comment is still the latest
+   applicable unconsumed continue comment, with the same comment ID, author,
+   created_at and body digest, immediately before parsing it. If its body changed,
+   restart selection and ACL for the new immutable body; never parse bytes other
+   than the bytes whose digest and author are accepted in step 8.
 5. Parse every ready-command decision deterministically. A pathless bilingual
    force/authority choice is accepted only when exactly one bilingual pair waits.
    A pathless one-locale force choice is accepted only when exactly one pair in
@@ -795,6 +871,13 @@ After universal gates, DOC_CONTINUE MUST:
 15. Update canonical comments, persist the new compact lineage snapshot and set
     expires_at to completion time plus 14 days even when final verdict is red.
 
+For translate and continue, **completion time** is one persisted UTC instant
+captured after content publication/verification and before final metadata/report
+mutations. The same instant derives lineage expires_at, run finished_at and the
+Draft body marker. Updating that marker uses the mutation checkpoint in §24.12.4;
+a crash cannot leave a successful accepted continue with a refreshed YDB expiry
+but a stale visible expiry marker.
+
 The raw natural-language instruction MAY guide translation wording but MUST NOT
 override any deterministic safety, ACL, budget, manifest, direction, single-language,
 SUPERSEDED, dependency-count, redirect or continue-limit rule.
@@ -804,8 +887,13 @@ SUPERSEDED, dependency-count, redirect or continue-limit rule.
 After universal gates, DOC_VERIFY MUST:
 
 1. Require the checked PR to be open. Ready and Draft are both allowed.
-2. Capture exact PullIdentity and materialize the actual head SHA bytes plus the
-   immutable comparison base required for PR scope.
+2. Use the stable PullIdentity and fully paginated PR-files list captured by
+   universal preflight step 11. Revalidate head/base identity immediately before
+   materializing actual head bytes plus base bytes by those exact SHAs; retry the
+   identity-plus-pagination preflight once on contradiction, then fail
+   technically. For ordinary PR scope, that API path/status list is authoritative;
+   local diff cannot add, remove or reclassify paths. A rename is DELETE old plus
+   ADD new for scope identity.
 3. If it is an NG Draft, load its unexpired lineage and verify against the exact
    recorded source manifest, source snapshots, paths, directions and decisions.
    Expired lineage produces BLOCKED without a critic call.
@@ -814,13 +902,19 @@ After universal gates, DOC_VERIFY MUST:
    one-locale change yields MISSING_LOCALE_TRANSLATION, except single-language
    paths. Only local dependencies enter scope.
 5. Build VerificationCase from the actual PR bytes. Candidate overlay for an
-   ordinary PR represents exactly the PR diff; no hypothetical repair changes it.
+   ordinary PR represents exactly the API-scoped base-to-head PR result; no
+   hypothetical repair changes it. For an NG Draft, reconstruct the overlay over
+   its recorded main snapshot and require its materialized bytes to equal the
+   actual head. Manual byte changes therefore change the case rather than being
+   hidden by retained candidate artifacts.
 6. Run deterministic validators. If case hash matches a retained final internal
    verification result, reuse the complete stored critic response and interpreted
    result. Otherwise run the complete critic scope.
 7. Never run a repair call. Suggested repairs are report text only.
-8. Post or update one canonical QA comment, including on adapter or critic
-   failure.
+8. Post or update the canonical QA comment, including on adapter or critic
+   failure. For a recognized NG Draft, also update its source lifecycle comment
+   to the same run ID, checked Draft link/SHA and result, preserving the two
+   cross-links. An ordinary or legacy PR updates only its own QA comment.
 9. Never create, close or delete a branch or PR; never commit, push, apply a
    repair, change Draft state or merge.
 10. Release the lock and fail only for BLOCKED, REJECTED or TECHNICAL_FAILURE.
@@ -830,6 +924,11 @@ After universal gates, DOC_VERIFY MUST:
 Reports MUST generate these one-line forms. The deterministic parser MUST accept
 them case-insensitively for the Russian words, with arbitrary repeated whitespace,
 while paths, hrefs, anchors and URLs remain exact:
+
+**<exact-source-path>**, **<exact-ru-path>**, **<exact-en-path>** and
+**<exact-root-path>** are full normalized repository paths. **<exact-pair-path>**
+is the exact locale-free **CanonicalPairKey.relative_path** (for example
+**core/a.md**), so it cannot accidentally encode a conflicting locale choice.
 
 ~~~text
 /ydbdoc continue всё равно переводи <exact-source-path>
@@ -854,6 +953,16 @@ while paths, hrefs, anchors and URLs remain exact:
 
 One comment MAY contain several such lines plus free prose. Each canonical line
 becomes one scoped OperatorDecision. Remaining prose becomes GENERAL_GUIDANCE.
+A **повтори классификацию** line becomes RETRY_CLASSIFICATION and is valid only
+for the exact pair currently blocked by classifier exhaustion; the rebuild runs
+the configured classifier chain again and the decision does not imply authority.
+The **для <exact-pair-path> используй ... файл** forms answer either a current
+BILINGUAL_AUTHORITY_AMBIGUOUS question or the corresponding valid side of a
+MIXED_PAIR_AMBIGUOUS question. For bilingual NO_TRANSLATION, only the explicit
+**всё равно переводи с русского/английского <exact-locale-path>** forms are used;
+they persist both PAIR_AUTHORITY and FORCE_TRANSLATION. The parser derives the
+decision kind from the one outstanding question at that exact scope and MUST NOT
+apply a syntactically valid form to a different question kind.
 A canonical line with unknown/duplicate scope, invalid URL/integer or conflicting
 value makes the complete comment ambiguous and rejects it without consuming the
 attempt. A pathless force phrase is normalized only under §24.6.2 step 5.
@@ -891,6 +1000,16 @@ Current-main capture is:
 The base version for a directly changed TOC or glossary structural comparison is
 read at SourceManifest.base_sha. Its applicable source version is read from the
 current-main snapshot. All translated content comes only from current main.
+
+The exact shared redirect-registry delta attributed to the source PR is the one
+narrow provenance exception: when the manifest contains
+**ydb/docs/redirects.yaml**, parse that file at **base_sha** and
+**merge_commit_sha** and compare exact normalized entries. This read is used only
+to prove which mapping the source PR added, modified or deleted; it is never
+translated or copied into a candidate. An added mapping is usable evidence only
+if the identical mapping still exists in current main. A later-main-only mapping
+must not be attributed to the source PR. Missing, unparsable or contradictory
+provenance bytes block redirect evidence before model calls.
 
 ### 24.7.3 Operation expansion and ordering
 
@@ -990,10 +1109,12 @@ The shared registry is exactly **ydb/docs/redirects.yaml**. Images are
 ~~~
 
 Markdown/YFM documents, recognized TOCs, reached allowlisted dependencies and the
-exact registry are eligible. A directly changed unsupported locale file is a
-yellow unchanged item. If it is the only scope, no Draft is created and Action
-passes. The same type reached as a mandatory dependency is red and omits its
-bundle.
+exact registry are eligible. Every manifest entry outside these categories is
+listed as unsupported and unchanged. A directly changed unsupported file under a
+locale root is a yellow item with the required Russian message; a file outside
+the documentation/locale scope is an informational unchanged item. If unsupported
+items are the only scope, no Draft is created and Action passes. The same type
+reached as a mandatory dependency is red and omits its bundle.
 
 ### 24.8.2 Single-language filter
 
@@ -1014,8 +1135,10 @@ a link into it. Only the total skipped count MAY appear.
 
 For every root article independently:
 
-1. Initialize a FIFO queue with root path at depth 0 and an empty canonical
-   visited set. Root does not consume file allowance.
+1. Initialize a FIFO queue with root path at depth 0 and initialize the canonical
+   visited set with that root path. Root does not consume file allowance and an
+   edge returning to it is recorded as a cycle/repeat edge, never enqueued or
+   counted as a dependency.
 2. Parse Markdown/YFM with the approved AST. Do not regex-scan raw text.
 3. Emit edges, in source order, only for parsed locale-local include nodes, parsed
    image nodes and parsed ordinary local links whose final extension is in the
@@ -1094,22 +1217,51 @@ checking is limited to other scoped closures.
 ### 24.8.6 Bundle construction and conflicts
 
 A document-root bundle contains target document, mandatory translated includes,
-required images/companions, opportunistic used glossary entries, minimal TOC
-edits and all deletes/redirects belonging to the root. A standalone TOC, glossary,
-image, companion or explicit delete has its own bundle.
+required images/companions, mandatory references to opportunistic used-glossary
+entry bundles, minimal TOC edits and all deletes/redirects belonging to the root.
+A standalone TOC, image, companion or explicit delete has its own bundle. Each
+selected glossary entry pair is a separate GLOSSARY bundle identified by stable
+anchor or resolved anchorless interval identity and carries GlossaryEdit values,
+not a competing full-file Write.
 
 Shared dependency rules:
 
-1. Same direction and identical result deduplicates the write.
+1. Before model calls, a canonical textual dependency required by more than one
+   root in the same direction is lifted into one shared dependency bundle. It is
+   translated, criticized and repaired exactly once from the current source
+   bytes; every requiring root lists that bundle in mandatory_bundle_ids. A
+   non-textual same-direction shared dependency is likewise represented once and
+   copied deterministically. NG MUST NOT ask independent root prompts to generate
+   competing translations of the same shared target path.
 2. Opposite directions first compare current locale content for equivalence.
 3. Equivalent dependency content requires no overwrite and no conflict.
 4. Different content blocks every requiring bundle, shows both chains and waits
    for an exact authority decision.
 5. Unsafe shared dependency blocks every requiring bundle.
 
+A safe shared dependency is included in the publication overlay only through the
+transitive closure of at least one selected safe root. If every requiring root is
+omitted, the otherwise-safe dependency is not published by itself.
+
 Publication is closed over mandatory_bundle_ids. No page without mandatory
 include, TOC href without page, deletion without TOC update/redirect, or half
 bundle may publish.
+
+Before verification, intent composition is deterministic per target path:
+
+1. Direct Write/Delete conflicts use the model invariants above.
+2. TocEdits are applied to one parsed snapshot tree in stable bundle-manifest and
+   operation order. Each **before** precondition must match the same node identity
+   at application time. Independent edits to different nodes compose; incompatible
+   edits to one node/position block every contributing bundle instead of using
+   last-writer-wins.
+3. RedirectAppends are keyed by exact old href. Identical old/new pairs deduplicate;
+   two destinations for one old href block both. Non-conflicting appends are
+   serialized once over the exact registry snapshot.
+4. GlossaryEdits use the dedicated entry composer in §24.10.9.
+5. The composer emits at most one final Write or Delete per path into
+   CandidateOverlay. Whole-overlay validation repeats all preconditions after
+   unsafe bundles and their intents are removed.
 
 ## 24.9 Translation, classification, rotation and repair state machines
 
@@ -1146,11 +1298,23 @@ terminal product output and does not advance to another classifier.
 
 Call counts are defined per immutable unit:
 
-- one **classification unit** per applicable textual locale pair requiring the
-  semantic no-op or bilingual authority classifier;
+- one **semantic-no-op classification unit** per applicable one-direction
+  document or standalone translatable companion root. Mandatory dependency
+  members, including lifted shared dependencies, are visible in their root's
+  classification input and do not create extra semantic-no-op classifiers;
+- one **pair-authority classification unit** per applicable BILINGUAL_WRITE
+  Markdown/YFM, companion or TOC pair. Image pairs use hashes instead. A directly
+  changed bilingual glossary creates one **glossary-entry authority
+  classification unit** for each deterministically paired changed entry whose
+  current definitions differ; it does not create one whole-file authority call.
+  One-locale direct TOC structural operations and mandatory glossary
+  synchronization never enter semantic-no-op classification, because that filter
+  cannot suppress their explicit §23 operations;
 - one **translation unit** per generated textual operation bundle. Its prompt
-  includes the complete root and all textual mandatory members, so there is no
-  hidden per-segment paid call;
+  includes the complete root and all non-lifted textual mandatory members. A
+  lifted same-direction shared textual dependency is its own one translation
+  unit and is never regenerated inside a requiring root prompt, so there is no
+  hidden per-segment or per-requirer paid call;
 - one **critic unit** per candidate operation bundle containing translated
   Markdown/YFM, translatable companion text, glossary meaning or a translated TOC
   label. Image-only, byte-copy-only and deterministic delete/TOC/redirect bundles
@@ -1164,9 +1328,19 @@ create extra model calls. If a complete unit exceeds a provider context limit,
 that bundle is omitted as red MODEL_INPUT_TOO_LARGE. NG v1 MUST NOT silently
 split it into an unbounded call count.
 
+**operation_id** is the SHA-256 of unit kind plus its canonical pair/root/entry
+scope and stable manifest order. It is unchanged on delivery recovery. Call
+indices are exact: classifier and initial translator use pass_index 0; critic
+passes use 1, 2 and 3; repairs use pass_index 1 and 2. attempt_index 0 is primary,
+1 is the translator/repair fallback or the critic format-repair/fallback call,
+and critic attempt_index 2 is the fallback after a format-repair failure. The
+resulting operation_id/role/pass_index/attempt_index tuple is unique in one run
+and deterministically derives call_id.
+
 ### 24.9.3 Classifier state machine
 
-For each classification unit, call each configured classifier identifier at most
+For each classification unit, including one exact glossary-entry unit, call each
+configured classifier identifier at most
 once, in order, until a valid schema result:
 
 ~~~text
@@ -1240,8 +1414,10 @@ verify pass 3: FINAL_CRITIC_B
 
 If pass 1 has no repairable red, the candidate is terminal after pass 1. If pass 1
 has repairable red, repair 1 is consumed even when both primary and fallback
-repair calls fail; candidate remains unchanged and pass 2 still runs. The same
-rule applies to repair 2 and pass 3.
+repair calls fail; candidate remains unchanged and pass 2 still runs. If pass 2
+has no repairable red, the candidate is terminal after pass 2. Otherwise repair 2
+is consumed and pass 3 always runs, even when both repair calls failed. Pass 3 is
+always terminal. Operator-required blockers are retained at every stopping point.
 
 Each repair unit calls its selected repair model once and one eligible fallback
 once only after technical failure. It therefore uses exactly one or two calls.
@@ -1347,33 +1523,57 @@ retains English URLs.
 A recognized TOC is parsed into an ordered immutable tree:
 
 ~~~text
+YamlSpan(start_byte: int, end_byte: int, start_line: int, end_line: int)
+OpaqueYamlField(key: str, ordinal: int, raw_field_bytes: bytes,
+                raw_value_bytes: bytes, span: YamlSpan)
+
 TocNode(
   node_id: str,
   name: str | None,
   href: str | None,
   include_path: str | None,
-  service_fields: FrozenMap[str, scalar],
+  service_fields: tuple[OpaqueYamlField, ...],
   children: tuple[TocNode, ...],
-  source_location: exact YAML path and line
+  source_location: exact YAML path and line,
+  source_span: YamlSpan,
+  raw_node_sha256: Digest
 )
 ~~~
 
 Node ID is explicit href when unique, otherwise include_path when unique,
 otherwise the stable source structural path. Duplicate href/include identities
 remain separate nodes and trigger ambiguity whenever an operation needs one.
+**service_fields** contains every key other than the recognized name, href,
+include.path and child-items structure, in source order, with arbitrary nested
+YAML preserved as opaque bytes. The lossless parser/CST retains comments, anchors,
+scalar style, whitespace and ordering for every unchanged target span. An edit to
+an existing target TOC patches only the exact recognized spans and insertion/
+removal boundary selected by the operation; it MUST NOT parse-render the complete
+target file or normalize unrelated bytes. A newly created target TOC may use the
+canonical renderer, but it deep-copies all source service-field nodes and their
+order while changing only labels and locale-mirrored hrefs. Unsupported YAML
+constructs that prevent lossless localized editing block the affected TOC bundle.
 
 ### 24.10.5 Direct source TOC delta
 
-The TOC locale pair first follows normal manifest direction classification. One
-changed locale supplies the structural source delta. If both changed, the
-complete current TOC pair receives the bilingual classifier; the selected
-authority supplies the delta, NO_TRANSLATION is no-op, and AMBIGUOUS waits for an
-exact authority decision. Even after authority selection, an existing target TOC
-is changed only by scoped tree operations and is never fully overwritten.
+The TOC locale pair first follows the complete normal manifest classification
+table. SINGLE_RU_WRITE or SINGLE_EN_WRITE supplies the structural source delta
+without a semantic-no-op classifier; deterministic structural operations MUST
+NOT disappear merely because they contain no translatable label. BILINGUAL_WRITE
+receives the complete-current-pair authority classifier; the selected authority
+supplies the delta, NO_TRANSLATION is no-op, and AMBIGUOUS waits for an exact
+authority decision. BILINGUAL_DELETE is no-op, and a mixed delete/write pair
+waits for its normal mixed-pair decision. Even after authority selection, an
+existing target TOC is changed only by scoped tree operations and is never fully
+overwritten.
 
 For a TOC directly changed by the source PR:
 
 1. Parse its immutable base version and current applicable source-main version.
+   For an applicable manifest ADD, an absent base is the empty tree. For an
+   applicable manifest DELETE, an absent current source is the empty tree. Any
+   other missing or unparsable required version is an exact structural blocker,
+   not an inferred empty tree.
 2. Compute ordered tree edit operations: addition, removal, move, label change,
    href change and include.path change. Matching uses exact unique href, then
    exact unique include.path, then unchanged structural identity. It never uses
@@ -1382,6 +1582,9 @@ For a TOC directly changed by the source PR:
 4. Leave all unrelated target entries and drift untouched.
 5. If exactly one target node/position cannot be identified, omit the affected
    TOC bundle and ask the operator.
+6. Assert that every target byte outside the union of exact edited CST spans and
+   insertion/removal boundaries is byte-identical to the snapshot. Any unrelated
+   byte change is ATOMIC_BUNDLE_INCOMPLETE and blocks the TOC bundle.
 
 A real scoped target change creates a Draft even without documents. A no-op does
 not.
@@ -1438,6 +1641,17 @@ no standalone change. Direct modification or deletion of an existing registry
 entry is red and is neither mirrored nor replayed. NG-generated registry changes
 are append-only.
 
+The registry adapter is lossless for existing bytes. It parses exact entry spans,
+validates the complete YAML, and serializes new entries with one versioned
+canonical append renderer at the registry's append boundary. Every pre-existing
+byte, entry order, comment, scalar style and line ending remains identical. If a
+valid append cannot be made without rewriting existing bytes, the redirect bundle
+is blocked; parse-render normalization is forbidden.
+
+"Direct source-PR" above means the exact base_sha-to-merge_commit_sha registry
+delta from §24.7.2, not a base-to-current-main difference and not an entry inferred
+from the PR file name alone.
+
 This invariant applies to item, subtree, complete TOC and genuine no-successor
 deletion without exception.
 
@@ -1481,6 +1695,44 @@ term present in only one locale is blocking until its translated counterpart is
 safely added. The verifier compares term identity, RU/EN names, definition
 meaning, links, placeholders and technical notation for every selected entry.
 
+Glossary publication uses this deterministic composition algorithm:
+
+1. Parse the exact RU and EN baseline files once and assign every selected pair
+   its stable entry identity, exact source interval and ordinal. Section intervals
+   may overlap under the heading rule; overlapping edits are detected in step 4,
+   not silently flattened.
+2. Represent each pair as one glossary-entry bundle with zero, one or two
+   GlossaryEdit values. Article bundles that use it list that entry bundle in
+   **mandatory_bundle_ids**.
+3. After verification, discard edits from OMITTED entry bundles. Sort remaining
+   edits by glossary path and baseline entry order, then apply them to the exact
+   baseline lossless Markdown/YFM CST. **desired_ordinal** fixes insertion and
+   reorder position; additions at the same boundary preserve manifest/entry
+   order. Bytes outside selected entry spans and exact insertion
+   boundaries remain byte-identical, so unrelated glossary drift and presentation
+   are not normalized.
+4. Two safe edits for the same entry identity, overlapping baseline interval or
+   incompatible insertion boundary are CONFLICTING_TARGET_WRITE and neither
+   publishes. Disjoint edits compose into exactly one final Write per glossary
+   path.
+5. Reparse and verify the complete composed RU/EN files and assert unchanged-span
+   byte equality before whole-overlay publication. A composition, parse or
+   unrelated-byte failure blocks all bundles whose edits entered that composed
+   file; it never falls back to last-writer-wins.
+
+One-locale full synchronization is still full in semantic scope, but is planned
+as entry bundles plus one reserved **__skeleton__** GlossaryEdit for preamble,
+inter-entry structure and other bytes outside entry intervals. Every authoritative
+source entry has an ADD or UPDATE edit in authoritative source order; every
+target-only entry has a DELETE edit; the skeleton is translated in the same
+direction. When all are safe, the composed target is a complete synchronization
+of source structure, order and meaning. If the explicit §23
+full-glossary/opposite-article conflict omits one entry, that exact target entry
+and its target ordinal are preserved while independent entry and skeleton edits
+may publish. Both-locale direct harmonization and opportunistic usage do not
+select **__skeleton__** or unrelated entries. Whole-file structural failure still
+blocks every edit because safe entry identity cannot be established.
+
 Historical unrelated entry drift is at most yellow. Duplicate anchors, unclosed
 Markdown/YFM or other whole-file parse failures are red regardless of scoped
 entries. Exact glossary snapshots and selected entries are in case metadata.
@@ -1513,8 +1765,15 @@ case_sha256 is SHA-256 over canonical JSON containing:
 - selected primary and fallback model identifiers;
 - central single-language manifest and all behavior-affecting configuration.
 
-Timestamps, run ID, cost and comment IDs are excluded unless they alter an
-operator decision. Any included byte or configuration change yields a new hash.
+The source/target commit identities above are the immutable source and baseline
+snapshot commits used to interpret the candidate, not the later publication or
+checked PR-head commit. **checked_commit_sha**, evidence **commit_sha**,
+publication commit metadata, timestamps, run ID, cost and comment IDs are
+excluded unless they alter an operator decision. Evidence content digests and all
+actual source/target/candidate byte digests remain included. Therefore binding
+the exact internally verified bytes to a newly created Draft commit does not
+invalidate the case, while any manual byte change does. Any included byte or
+behavioral configuration change yields a new hash.
 
 ### 24.11.3 Deterministic checks
 
@@ -1543,8 +1802,15 @@ The cache key is exact case hash. Store final valid structured critic responses
 for every critic unit and the interpreted complete report for 14 days.
 DOC_VERIFY on an exact hit reruns all deterministic checks and reinterprets the
 stored response with the same engine. It MUST NOT reuse a partial bundle/file
-result. Any case difference reruns the complete critic scope. Published report is
-bound to current checked commit SHA and is semantically identical for equal case.
+result. For an NG Draft, exact-hit comparison reconstructs the base-to-head
+candidate from actual PR bytes and the recorded baseline; retained candidate
+bytes cannot substitute for this comparison. A fully published internal
+candidate can therefore hit after only the publication commit identity changes.
+A red partial publication whose actual overlay differs from the internally
+checked candidate is a miss and runs the complete critic scope. Any other case
+difference also reruns the complete critic scope. The current checked commit and
+rendered-report digest are rebound after interpretation and are never copied from
+the cached run; the published report is semantically identical for equal cases.
 
 ### 24.11.5 Severity and publication
 
@@ -1667,19 +1933,22 @@ ng_lineages
   PK (repository, lineage_id)
   source_pr, state, translation_pr, branch, continue_count,
   manifest_sha256, compact_snapshot_object_key,
-  model_rotation_index, created_at, updated_at, expires_at, revision
+  model_rotation_index, latest_translator_provider, latest_translator_model,
+  latest_critic_provider, latest_critic_model,
+  latest_verification_case_sha256,
+  created_at, updated_at, expires_at, revision
   INDEX (repository, translation_pr)
 
 ng_runs
   PK (repository, run_id)
-  delivery_id, command, source_pr, lineage_id,
-  actions_run_id, actor, phase, outcome, main_sha, checked_sha,
+  delivery_id, label_timeline_event_id, command, source_pr, lineage_id,
+  actions_run_id, actor, model_capable, phase, outcome, main_sha, checked_sha,
   started_at, finished_at, report_sha256, expires_at
   INDEX (repository, source_pr, started_at)
 
 ng_deliveries
   PK (repository, delivery_id)
-  run_id, command, pr_number, created_at, expires_at
+  run_id, label_timeline_event_id, command, pr_number, created_at, expires_at
 
 ng_locks
   PK (repository, source_pr)
@@ -1757,8 +2026,11 @@ created_at and expires_at. Reads verify digest.
 
 Actual cost is persisted immediately after each completed paid response, before
 the response is used. Missing usage stays null. Daily spend sums non-null actual
-cost by Europe/Moscow day. Admission is allowed when spend is below budget and
-may overrun only through admitted calls.
+cost by Europe/Moscow day. **moscow_day** is the Moscow calendar date containing
+ModelAttemptRecord.finished_at, the instant the paid response completed and its
+cost became recordable; a call crossing midnight is not charged to started_at.
+Admission is allowed when spend is below budget and may overrun only through
+admitted calls.
 
 ### 24.12.4 Checkpoints and crash recovery
 
@@ -1766,11 +2038,13 @@ Every irreversible effect is preceded and followed by a persisted mutation phase
 
 ~~~text
 NONE
+COMMAND_LABEL_REMOVE_INTENT -> COMMAND_LABEL_REMOVED
 OLD_DRAFT_CLOSE_INTENT -> OLD_DRAFT_CLOSED
 OLD_BRANCH_DELETE_INTENT -> OLD_BRANCH_DELETED
 NEW_BRANCH_PUSH_INTENT -> NEW_BRANCH_PUSHED
 DRAFT_CREATE_INTENT -> DRAFT_CREATED
 FORCE_PUSH_INTENT -> FORCE_PUSHED
+DRAFT_METADATA_UPDATE_INTENT -> DRAFT_METADATA_UPDATED
 COMMENTS_UPDATE_INTENT -> COMMENTS_UPDATED
 ~~~
 
@@ -1783,6 +2057,16 @@ Recovery re-reads GitHub state and:
 - deletes an orphan new branch only for a failed new-translate publication with
   no Draft and a matching recorded tree/commit;
 - never deletes human commits or an unrecorded branch during compensation.
+
+Command-label recovery is at-most-once with respect to a label reapplication. The
+journal stores **label_timeline_event_id**. On recovery, fully paginate current
+timeline events: if the label is absent or the latest active application has a
+different event ID, the old effect is complete and the newer label is untouched;
+if the same stored event ID is still the active application, retry its removal
+and record COMMAND_LABEL_REMOVED. GitHub cannot apply another instance while the
+label is present, so the event-ID compare followed by deletion cannot target a
+newer application. Missing/incomplete timeline pagination is technical failure,
+not permission to issue an unbound DELETE.
 
 A crash after a paid response retains cost and transcript. A crash before accepted
 continue completion does not refresh lineage expiry, but the same delivery resumes
@@ -1830,14 +2114,22 @@ occur only after the final intended continue.
 | create Draft | MUST iff safe diff is non-empty | MUST iff first safe diff and no Draft | MUST NOT |
 | commit/push content | MUST iff safe diff is non-empty | MUST iff rebuilt safe tree differs or first Draft | MUST NOT |
 | force-with-lease update active Draft | MUST NOT for new lineage | MUST iff active Draft tree differs | MUST NOT |
+| update NG Draft metadata marker | MUST after Draft creation | MUST after accepted continue | MUST NOT |
 | change Draft to Ready | MUST NOT | MUST NOT | MUST NOT |
 | merge PR | MUST NOT | MUST NOT | MUST NOT |
 | edit a human branch | MUST NOT | MUST NOT | MUST NOT |
 | create verify/fixup PR | MUST NOT | MUST NOT | MUST NOT |
 
 The new Draft title/body identify source PR, source manifest hash, main snapshot
-SHA and lineage ID. Branch is always **ydbdoc-review/pr-N**. Automation creates
-Draft explicitly and never calls Ready-for-review or merge APIs.
+SHA, lineage ID and exact lineage **expires_at**. The body carries one
+machine-readable invisible NG marker with those non-secret fields. Every accepted
+continue updates main SHA and expires_at in that marker. After YDB/artifact TTL,
+the marker is sufficient only to render the required expired-context source PR
+and expiry report; it MUST NOT be accepted as manifest, decisions, snapshot or
+continue context. A missing or human-corrupted marker with no live lineage is
+LINEAGE_DAMAGED and never green. Branch is always **ydbdoc-review/pr-N**.
+Automation creates Draft explicitly and never calls Ready-for-review or merge
+APIs.
 
 ### 24.13.3 Canonical comments
 
@@ -1850,8 +2142,9 @@ Markers are invisible HTML comments:
 ~~~
 
 Source PR has one lifecycle comment. Active Draft has one QA comment. Ordinary
-verified PR has one QA comment. Source lifecycle and Draft QA share run ID and
-links. The source lifecycle comment contains no-Draft reasons, active Draft link,
+verified PR has one QA comment. After translate, continue or DOC_VERIFY on a
+recognized NG Draft, source lifecycle and Draft QA share that run's ID and links.
+The source lifecycle comment contains no-Draft reasons, active Draft link,
 lineage state and continue history. The Draft QA comment is bound to its exact
 current commit. Detail comments are recreated for the current run when needed;
 old detail comments are minimized or marked superseded, never mistaken for
@@ -1873,7 +2166,7 @@ link when known.
 Направления: [directions]
 Файлы: [root_count], зависимости: [dependency_count]
 Проверки: структура, смысл, ссылки, меню, редиректы, глоссарий
-Автоисправления: [repair_count] из 2
+Проходы автоисправления: [repair_passes_used] из 2
 Результат: замечаний, мешающих слиянию, нет.
 
 Черновик перевода: [draft_link]
@@ -1915,9 +2208,20 @@ recommended.
 Что сделать: [action]
 [ready_continue_command]
 
-Попытки автоисправления: [repair_count] из 2.
+Проходы автоисправления: [repair_passes_used] из 2.
+[active_lineage_next_action]
 Слияние этого черновика запрещено до устранения всех красных пунктов.
 ~~~
+
+**repair_passes_used** is the maximum completed repair pass index across bundles,
+from 0 through 2. Technical details separately show total repair units and every
+primary/fallback call, so a multi-bundle run never renders an impossible value
+such as «5 из 2».
+
+For an active lineage, **active_lineage_next_action** is mandatory and contains
+the exact next action, a ready valid continue command when continue can resolve
+it, and `Осталось попыток продолжения: [remaining] из 3.` For an ordinary human
+PR it contains only a manual fix instruction and no continue counter/command.
 
 If a reliable line is unavailable, renderer replaces it with exact heading,
 Markdown element, YAML/JSON path, TOC hierarchy or fragment. It MUST NOT print an
@@ -2126,8 +2430,9 @@ Every run log/event MUST include:
 
 ~~~text
 timestamp, level, event_name, repository, command, run_id, delivery_id,
+label_timeline_event_id,
 actions_run_id, source_pr, translation_pr, lineage_id, lineage_revision,
-actor, continue_comment_author, phase, outcome,
+actor, continue_comment_author, model_capable, phase, outcome,
 source_manifest_sha256, main_sha, checked_sha, case_sha256,
 bundle_id, root_path, direction, issue_rule_id,
 model_role, pass_index, attempt_index, provider, model,
@@ -2181,6 +2486,19 @@ actual bytes under ordinary-PR scope. DOC_CONTINUE instructs a clean
 DOC_TRANSLATE restart from the merged source PR. Restart closes the old Draft and
 deletes its deterministic branch only after normal gates.
 
+Legacy restart discovery is fail-closed. A PR is eligible as the one old legacy
+translation only when GitHub reports its head ref as exactly
+**ydbdoc-review/pr-N** for source PR N, its base repository/branch as this
+repository's **main**, and its author as the authenticated GitHub identity
+returned for the configured NG write credential. That identity is resolved from
+GitHub and audited at deployment/runtime; it is not accepted from PR metadata or
+free text. Exactly
+one such open or closed-unmerged PR may be replaced. Multiple matches use the
+normal duplicate blocker. A branch with no such PR, a fork head, a different
+author/base or contradictory legacy metadata is not deleted or force-pushed; the
+restart is blocked for human reconciliation. An NG marker is never synthesized
+for the legacy PR, and its DOC_VERIFY remains ordinary read-only verification.
+
 Rollback:
 
 1. disable command labels;
@@ -2221,7 +2539,8 @@ mutations.
 - **NG-AC-011.** Each command removes only its own one-shot label on acceptance and
 all rejection paths.
 - **NG-AC-012.** Label removal failure stops before all model/content work.
-- **NG-AC-013.** Actor is the exact labeled-event sender, never PR author or bot.
+- **NG-AC-013.** Actor is the top-level labeled-event **sender.login**, never PR
+author, **pull_request.user.login** or bot.
 - **NG-AC-014.** Missing/empty allowlist fails closed.
 - **NG-AC-015.** Continue requires both allowed label sender and allowed selected
 comment author.
@@ -2230,10 +2549,12 @@ verification occurred.
 - **NG-AC-017.** Translate rejects open and closed-unmerged source PRs before
 manifest planning, budget use, model and branch work.
 - **NG-AC-018.** Verify rejects every non-open PR.
-- **NG-AC-019.** Budget denial occurs before model and destructive branch work,
-shows limit/spend/next Moscow day and fails Action.
+- **NG-AC-019.** Budget denial for a metadata-proven model-capable run occurs
+before model and destructive branch work, shows limit/spend/next Moscow day and
+fails Action; a proven zero-paid-call run skips this denial.
 - **NG-AC-020.** Daily cost uses actual idempotent call records and Moscow calendar
-day; no advance estimate/reservation gates admission.
+day; no advance estimate/reservation gates admission, and deterministic-only,
+single-language-only or unsupported-only scope does not consume budget admission.
 - **NG-AC-021.** Every completed paid response is cost-persisted before downstream
 processing.
 - **NG-AC-022.** Missing provider usage is not estimated.
@@ -2245,8 +2566,10 @@ for one lineage and does not block another source PR.
 after expiry with an audit record.
 - **NG-AC-026.** A concurrent rejection removes its label, fails Action and says to
 reapply it later.
-- **NG-AC-027.** Duplicate delivery resumes/returns one run and cannot duplicate a
-paid call or GitHub mutation.
+- **NG-AC-027.** Delivery is claimed before label mutation; a duplicate
+resumes/returns one run, label recovery compares the exact fully paginated
+timeline event ID and cannot remove a newer application, and no paid call or
+GitHub mutation is duplicated.
 
 ### Manifest, snapshots and pair operations
 
@@ -2280,17 +2603,22 @@ historical content is not restored.
 target is not deleted.
 - **NG-AC-043.** If either side of original bilingual write is missing, whole pair
 is SUPERSEDED and survivor is not reclassified.
-- **NG-AC-044.** Empty final safe diff creates no Draft and reports per-path reason.
+- **NG-AC-044.** Empty final safe diff creates no Draft and reports per-path
+reason; only a continue-resolvable question creates an active WAITING_NO_DRAFT
+lineage, while a terminal no-op retains audit artifacts without a continuable
+lineage.
 
 ### Lineage and continue
 
-- **NG-AC-045.** First translate creates a new lineage with branch
-**ydbdoc-review/pr-N**, zero continues and no decisions.
+- **NG-AC-045.** First translate that needs retained continue/Draft context creates
+a new active lineage with branch **ydbdoc-review/pr-N**, zero continues and no
+decisions; a terminal no-op has only its audit run under NG-AC-044.
 - **NG-AC-046.** Repeated translate on unfinished lineage, after gates, comments and
 closes old Draft, deletes its branch, discards decisions/count and creates a new
 lineage while retaining old audit artifacts.
 - **NG-AC-047.** Merged translation lineage is terminal forever; translate and
-continue make no content/branch changes.
+continue make no content/branch changes and translate reports ALREADY_COMPLETE
+before budget/model gates.
 - **NG-AC-048.** Multiple active translation PRs block every destructive command.
 - **NG-AC-049.** Continue is allowed for open Draft with branch and for valid
 no-Draft lineage at source PR.
@@ -2299,7 +2627,8 @@ lineages with the specified Russian next action.
 - **NG-AC-051.** Before Draft creation continue is accepted only on source PR;
 after creation only on Draft. Wrong location consumes no attempt or comment.
 - **NG-AC-052.** Latest applicable unconsumed continue comment is selected
-deterministically.
+deterministically; author/body digest is re-read before acceptance and an edit
+restarts selection plus ACL before any attempt is consumed.
 - **NG-AC-053.** One comment can create multiple exact scoped decisions.
 - **NG-AC-054.** Ambiguous/path-unknown/conflicting decision is rejected before
 snapshot/model/branch work and does not consume one of three attempts.
@@ -2329,8 +2658,9 @@ rules; otherwise ready path-specific commands are repeated.
 - **NG-AC-066.** Single-language bytes, links, includes, assets, Cyrillic and TOC
 entries are not inspected; mirror/parity is not required.
 - **NG-AC-067.** Only a skip count is reported for single-language paths.
-- **NG-AC-068.** Direct unsupported locale file is yellow unchanged; unsupported-only
-scope creates no Draft and passes.
+- **NG-AC-068.** Every unsupported manifest path is named and unchanged; a direct
+unsupported locale file is yellow, an outside-scope path is informational, and
+unsupported-only scope creates no Draft and passes.
 - **NG-AC-069.** Unsupported mandatory parsed dependency is red with exact chain and
 blocks only requiring bundles.
 - **NG-AC-070.** Dependency expansion uses parsed locale-local include, image and
@@ -2339,8 +2669,9 @@ allowlisted companion-link nodes only.
 directory and ordinary Markdown-article link do not expand scope.
 - **NG-AC-072.** Markdown includes recurse; companions/images are leaves; TOCs use
 separate scope.
-- **NG-AC-073.** Every edge increments depth; root is depth zero; cycles stop without
-error and canonical path is processed once.
+- **NG-AC-073.** Every edge increments depth; root is pre-marked visited at depth
+zero and never counted/re-enqueued; cycles stop without error and each canonical
+path is processed once.
 - **NG-AC-074.** Default depth is 3. Overflow blocks root, shows complete chain and
 ready exact-root command.
 - **NG-AC-075.** Accepted depth decision changes only exact root closure numeric
@@ -2349,7 +2680,8 @@ limit and persists in lineage.
 includes/images/companions and is calculated independently per root.
 - **NG-AC-077.** Count exceeding 100 blocks and cannot be overridden.
 - **NG-AC-078.** Direct companion is standalone root and shared dependency counts
-once in each root closure.
+once in each root closure; a same-direction shared output is generated once and
+is not published when every requiring root is omitted.
 
 ### Images, companions and documents
 
@@ -2387,7 +2719,8 @@ source report is posted.
 - **NG-AC-094.** NO_TRANSLATION lineage persists 14 days and provides correct
 path-specific force commands.
 - **NG-AC-095.** A/B selection uses deterministic ring, different identifiers and
-advances on later translate/continue.
+advances on later translate/continue; exact selected identifiers are persisted so
+configuration reorder cannot reinterpret a lineage index.
 - **NG-AC-096.** No distinct A/B pair is red independent-verification unavailable.
 - **NG-AC-097.** Initial translator performs one primary and at most one eligible
 fallback attempt.
@@ -2401,8 +2734,10 @@ B final verify with at most two repairs and three verifies.
 unchanged and proceeds to next verification.
 - **NG-AC-102.** Only MODEL_REPAIRABLE issues enter repair; operator/operational
 issues never do.
-- **NG-AC-103.** Model calls per unit satisfy exact normal/minimum/maximum formulas
-and there are no hidden segmentation calls.
+- **NG-AC-103.** Model calls per unit satisfy exact normal/minimum/maximum formulas,
+each differing bilingual glossary entry is one classifier unit, call indices and
+IDs follow the specified convention, a lifted shared dependency has one call unit
+rather than one per root, and there are no hidden segmentation calls.
 - **NG-AC-104.** Every call records exact role, pass, actual model, tokens, returned
 cost and failure before final report.
 - **NG-AC-105.** Plain Russian translator/critic failure recommends later clean
@@ -2437,11 +2772,15 @@ applies all exact occurrences and performs no availability probe.
 uses exact unambiguous parent/sibling placement.
 - **NG-AC-119.** Existing target TOC is never fully mirrored or overwritten.
 - **NG-AC-120.** Missing target TOC is fully created from source hierarchy/order,
-translated labels and mirrored hrefs.
+translated labels and mirrored hrefs, with ordered arbitrary service data copied.
 - **NG-AC-121.** Missing out-of-scope target page in newly created TOC retains
 source link yellow; single-language link has no warning.
-- **NG-AC-122.** Direct TOC root computes base-to-current source operations and
-applies only add/remove/move/label/href/include changes.
+- **NG-AC-122.** Direct TOC root uses empty base/current only for applicable
+ADD/DELETE, computes base-to-current source operations and applies only
+add/remove/move/label/href/include changes; a one-locale structural delta cannot
+be suppressed by semantic-no-op classification. Existing-target CST tests prove
+all bytes outside edited spans remain identical, including comments, scalar style
+and nested service fields.
 - **NG-AC-123.** Ambiguous target node, parent, duplicate or sibling order omits
 affected bundle and asks exact operator question.
 - **NG-AC-124.** Complete source TOC delete preserves target-only nodes/service data
@@ -2453,11 +2792,14 @@ TOC position replacement or operator mapping.
 - **NG-AC-127.** Redirect destination exists/current-or-candidate and remains in
 target locale; cross-locale redirect is forbidden.
 - **NG-AC-128.** Identical existing redirect is no-op; conflict is never
-overwritten; chains are not collapsed; existing entries are never changed/deleted.
+overwritten; chains are not collapsed; lossless append leaves every existing
+registry byte/order/comment/style unchanged.
 - **NG-AC-129.** Unresolved redirect omits deletion, TOC removal and redirect
 together but permits independent safe bundles.
 - **NG-AC-130.** Direct registry append is evidence/no standalone candidate;
-modification or deletion is red exact-entry report.
+it is derived only from exact base-to-merge registry bytes and must still exist
+identically in current main. Later-main-only entries are not attributed to the
+source PR; direct modification or deletion is a red exact-entry report.
 - **NG-AC-131.** Genuine deletion without successor remains blocked until exact
 valid redirect target; no delete-without-redirect exception.
 
@@ -2471,14 +2813,16 @@ or higher heading.
 anchor change is delete plus add.
 - **NG-AC-135.** Anchorless pairing uses ordinal within stable-anchor interval only;
 ambiguous interval requires mapping/authority, never title/LLM similarity.
-- **NG-AC-136.** One-locale direct glossary change performs full sync; both-locale
-change harmonizes changed entries independently.
+- **NG-AC-136.** One-locale direct glossary change has full entry scope;
+its skeleton, authoritative order and target-only deletions are synchronized.
+Both-locale change harmonizes changed entries independently, and disjoint safe
+GlossaryEdits compose deterministically into one Write per glossary file.
 - **NG-AC-137.** Entry classifier selects clear authority or AMBIGUOUS; safe entries
 may publish in red Draft.
 - **NG-AC-138.** Usage detection is only explicit anchor link or exact case-folded,
 whitespace-collapsed visible title.
-- **NG-AC-139.** Directional article harmonizes used entry from same locale and
-unrelated drift is not changed/blocking.
+- **NG-AC-139.** Directional article depends atomically on its used-entry bundle,
+which harmonizes from the same locale; unrelated drift is not changed/blocking.
 - **NG-AC-140.** Opposite-direction term conflicts and full-glossary/opposite-article
 conflict omit entry and all dependent bundles until operator authority.
 - **NG-AC-141.** Whole-glossary structural parse failures are red regardless of
@@ -2493,23 +2837,29 @@ overlay, deletes, manifest, decisions, glossary and versioned config; no ambient
 read occurs.
 - **NG-AC-144.** Case hash changes for any byte, scope, direction, decision, rule,
 prompt, model or behavior config change.
-- **NG-AC-145.** Exact cache hit reruns deterministic checks, makes zero critic
-calls and reuses complete result only.
+- **NG-AC-145.** Exact cache hit from actual reconstructed PR bytes reruns
+deterministic checks, makes zero critic calls and reuses complete result only;
+publication/checked commit rebinding alone does not miss, but any byte change or
+red partial-overlay difference does.
 - **NG-AC-146.** Any case mismatch reruns complete critic scope, never partial
 per-file cache.
-- **NG-AC-147.** Verify evaluates actual open-PR bytes; hypothetical repair cannot
-turn unchanged PR green.
+- **NG-AC-147.** Verify uses a stable fully paginated API path set and exact base/head
+bytes of the open PR; hypothetical or retained candidate bytes cannot turn the
+unchanged actual PR green.
 - **NG-AC-148.** Ordinary both-locale PR is checked without authority; one-locale
 PR gets exact MISSING_LOCALE_TRANSLATION unless exempt.
 - **NG-AC-149.** Verify scope is PR plus local dependencies, never repository-wide.
 - **NG-AC-150.** BLOCKED fails, PASS_WITH_WARNINGS succeeds, PASS succeeds; yellow
 alone triggers no repair.
 - **NG-AC-151.** Every published bundle is complete; unsafe/blocked bundle and all
-dependents are omitted.
+dependents are omitted, including article dependencies on glossary-entry bundles;
+an orphaned safe shared dependency is not published.
 - **NG-AC-152.** Safe independent bundles publish together in a red Draft and are
 listed separately from omitted bundles.
 - **NG-AC-153.** Conflicting writes for one path are red and neither version is
-published.
+published; TOC/redirect intents compose only under exact preconditions, and only
+disjoint verified GlossaryEdits may compose into one path. Any incompatible
+overlap or composition failure blocks every affected bundle.
 - **NG-AC-154.** Final overlay receives a whole-overlay deterministic validation
 before one atomic commit.
 
@@ -2519,13 +2869,15 @@ before one atomic commit.
 merges it.
 - **NG-AC-156.** Verify makes no branch, PR, commit, push, delete or repair mutation,
 including technical failure paths.
-- **NG-AC-157.** Source lifecycle and Draft QA comments are canonical, share run ID
-and cross-link; ordinary verify has one canonical QA comment.
+- **NG-AC-157.** Source lifecycle and Draft QA comments are canonical, share the
+latest translate/continue/NG-Draft-verify run ID and cross-link; ordinary or
+legacy verify has one canonical QA comment.
 - **NG-AC-158.** Later runs update comments instead of duplicating them.
 - **NG-AC-159.** Oversized blockers split into numbered details without dropping or
 hiding any red issue.
-- **NG-AC-160.** Green report is short with SHA/directions/counts/categories/repairs;
-technical details retain models/tokens/cost/versions/files/mappings.
+- **NG-AC-160.** Green report is short with SHA/directions/counts/categories and
+0..2 repair passes; technical details retain total repair units and every
+model/tokens/cost/version/file/mapping record.
 - **NG-AC-161.** Every red issue contains exact files, reliable location or
 structural locator, short fragments, source/result difference and concrete action.
 - **NG-AC-162.** Residual Cyrillic report includes exact file, line and fragment.
@@ -2544,7 +2896,8 @@ transcripts have independent 14-day expiry and no secret values.
 - **NG-AC-167.** Initial lineage expires 14 days after translate completes;
 accepted continue refreshes compact lineage only; verify/denials do not.
 - **NG-AC-168.** Expired open Draft cannot continue or become green; verify reports
-expiry/source and only clean translate recovery.
+expiry/source from retained context or the non-secret Draft marker and only clean
+translate recovery; the marker alone can never restore verification context.
 - **NG-AC-169.** Cost idempotency key is run_id plus call_id and survives later
 crash.
 - **NG-AC-170.** Mutation journal recovers desired effects, blocks conflicts and
@@ -2552,7 +2905,9 @@ never deletes/unconditional-force-pushes unrecorded human state.
 - **NG-AC-171.** Report failure recovery does not rerun completed model calls.
 - **NG-AC-172.** NG never starts/waits/interprets external docs build.
 - **NG-AC-173.** Legacy Draft without NG lineage cannot continue and requires clean
-translate restart; verify remains read-only and treats it as an ordinary open PR.
+translate restart; only one exact bot-owned deterministic-branch/base match may be
+closed/deleted. Ambiguous or human-owned state blocks, while verify remains
+read-only and treats the PR as ordinary.
 - **NG-AC-174.** Cutover enables one writer atomically; rollback disables NG before
 enabling legacy and preserves NG Drafts for human handling.
 - **NG-AC-175.** All required audit fields reconstruct event, bytes, decisions,
@@ -2564,28 +2919,28 @@ calls/costs, GitHub mutations and final result.
 |---|---|---|---|
 | import-boundaries | static/AST | every banned root, dynamic import, cycle, second router | 001–007 |
 | domain-contract | unit/property | enum unknowns, canonical JSON, path traversal, digest mutation, collection order | 008, 028–044, 143–146 |
-| event-gates | contract | labeled events, duplicate delivery, empty ACL, two actors, label API failure | 009–027 |
+| event-gates | contract | top-level sender versus PR author, paginated label timeline IDs, duplicate delivery after label reapply, exhausted-budget model-capable versus zero-call scope, empty ACL, two actors, label API failure | 009–027 |
 | actions-lock | adapter/fault | paginated runs, current exclusion, near-simultaneous CAS, stale lock | 023–027 |
 | manifest-api | adapter/recorded | merge/squash/rebase, 101+ files, Link pagination, changing identity, bad rename | 028–036 |
 | pr-45949-move | recorded regression | exact source manifest and TOC evidence from PR 45949 | 035–036, 122, 125–131 |
 | snapshot | adapter | main advances mid-run, missing blob, wrong SHA/size, ambient checkout differs | 032–033, 041–044 |
 | pair-table | table/property | every RU/EN op combination, later create/delete, mixed pair | 037–044 |
-| lineage | state-machine/model-based | all state rows, 0–4 continues, wrong PR, duplicate Draft, manual commits | 045–064 |
+| lineage | state-machine/model-based | all state rows, edited-comment author/body race, 0–4 continues, wrong PR, duplicate Draft, manual commits | 045–064 |
 | single-language | unit/negative | content with broken links/includes/assets/Cyrillic under pattern | 065–067 |
-| dependency-graph | property | cycles, repeats, depth 3/4/5, 100/101 files, shared roots, misleading raw text | 068–078 |
+| dependency-graph | property | root-return cycle, repeats, depth 3/4/5, 100/101 files, shared roots, misleading raw text | 068–078 |
 | images | byte/property | all extensions, equal/different dual edits, shared opposing roots | 079–082 |
 | companions | golden/parser | YAML keys/comments, JSON keys/values, TXT, every C/C++ suffix, malformed syntax | 083–089 |
-| model-state-machine | exhaustive fake adapter | every valid/error/malformed/fallback branch and call counter | 090–105 |
+| model-state-machine | exhaustive fake adapter | every valid/error/malformed/fallback branch, per-entry glossary units, stable call IDs and call counter | 090–105 |
 | links | golden/fault | relative/root/ydb.tech, marker combinations, Wikipedia redirect/fragment/429/5xx | 106–116 |
-| toc-operations | golden/property | missing target, insert anchors, duplicate href, move, include path, whole delete | 117–125 |
-| redirects | table/property | three evidence kinds, no successor, conflict, chain, cross-locale, append-only violation | 125–131 |
-| glossary | golden/property | anchors, rename/change, ambiguous intervals, direct/full/used/opposite directions | 132–141 |
+| toc-operations | golden/property | lossless comments/styles/nested service fields, applicable add/delete empty-tree boundary, no-text structural delta, missing target, insert anchors, duplicate href, move, include path, whole delete | 117–125 |
+| redirects | table/property | lossless append bytes/comments/styles, base/merge/current provenance, later-main false evidence, three evidence kinds, no successor, conflict, chain, cross-locale, append-only violation | 125–131 |
+| glossary | golden/property | anchors, rename/change, ambiguous intervals, disjoint/overlapping entry composition, direct/full/used/opposite directions | 132–141, 151, 153 |
 | verifier-core | pure unit/differential | same case from all callers, issue ordering, severity, evidence locations | 142–154 |
-| verification-cache | integration | exact hit, every single hash input mutation, expired record | 144–146 |
-| atomic-publication | fault/property | unsafe member, shared dependency, conflicting write, zero/some safe bundles | 151–154 |
+| verification-cache | integration | internal-to-published commit rebind hit, manual-byte and red-partial-overlay miss, every hash input mutation, expired record | 144–146 |
+| atomic-publication | fault/property | unsafe member, shared dependency, multi-bundle TOC/redirect/glossary composition, conflicting write, zero/some safe bundles | 151–154 |
 | github-lifecycle | mocked API | clean restart checkpoints, Draft creation, force lease fail, forbidden verify methods | 155–165, 170–171 |
-| reports-ru | snapshots | all §24.14 templates, escaping, oversized detail split, line unknown | 016, 019, 023, 094, 105, 159–165, 168 |
-| persistence | DB integration | CAS, unique delivery/call, Moscow midnight, delayed TTL, partial crash | 020–022, 061, 166–171 |
+| reports-ru | snapshots | all §24.14 templates, multi-bundle repair-pass count, escaping, oversized detail split, line unknown | 016, 019, 023, 094, 105, 159–165, 168 |
+| persistence | DB integration | CAS, unique delivery/call, Moscow midnight, delayed/physical TTL, expired Draft marker fallback, partial crash | 020–022, 061, 166–171 |
 | secrets-audit | static/runtime | sentinel secrets in env/errors/provider responses | 166, 175 |
 | migration-router | deployment contract | legacy Draft, dual-router attempted, cutover and rollback sequence | 173–174 |
 | no-external-build | call-spy | all commands and all verdicts | 172 |
@@ -2651,12 +3006,18 @@ No coding estimate is attached. Work MUST proceed in this dependency order:
 
 ## 24.21 Specification verdict
 
-§23.16 states that no product or implementation-strategy decision remains open.
-This specification found no blocking ambiguity that requires a new product
-choice. Implementation MUST stop and return to §23 if independent review exposes
-one.
+Independent formal review completed on 2026-08-27. It corrected the handoff
+blockers found in event identity/idempotency, zero-call budget gating, dependency
+cycles and shared ownership, model call identity, cache commit binding, no-Draft
+lineage state, lossless TOC/redirect composition, entry-level glossary
+publication, redirect provenance, report ownership and expiry recovery. The
+review re-read every affected and related section and found no remaining product
+choice or contradictory implementation branch.
 
-**Verdict: SPEC READY FOR INDEPENDENT REVIEW.**
+§23.16 still governs future discoveries: implementation MUST stop and return to
+§23 if a new ambiguity would require a product choice.
+
+**Verdict: SPEC PASS.**
 
 ---
 
