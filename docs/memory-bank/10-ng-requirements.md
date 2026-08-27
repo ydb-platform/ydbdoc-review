@@ -157,10 +157,11 @@ three-way merge, preserve current target prose or retain target-only manual
 content. Later source changes already present in current `main` are intentionally
 included.
 
-If the source path selected by the original direction no longer exists in current
-`main`, the operation is `SUPERSEDED` and changes nothing. Historical source is
-not restored. Remaining orphan or TOC defects are left to QA and the external
-documentation build.
+For an original add or update, if the source path selected by the original
+direction no longer exists in current `main`, the operation is `SUPERSEDED` and
+changes nothing. Historical source is not restored. Explicit deletes use the
+separate rule in §23.7. Remaining orphan or TOC defects are left to QA and the
+external documentation build.
 
 If the final safe diff is empty, no translation PR is created. The source PR gets
 a clear comment explaining why translation is not required, with reasons per
@@ -385,6 +386,14 @@ current scoped dependency closure and never scans the full repository for inboun
 links. Remaining references are left to the external docs build. Every deleted
 target path is listed clearly in the report. A target already absent is a no-op.
 The `public-materials/*` exclusion applies before this rule.
+
+Every explicit delete in the original merged PR is a standalone root operation,
+even though the deleted path cannot be discovered from current dependency
+references. If that source path is still absent in current `main`, delete the
+target mirror. If a later change recreated the exact source path, the old delete
+is `SUPERSEDED` and changes nothing. Markdown delete also removes the exact target
+TOC href. Image and companion delete removes only the target mirror. Reference
+checking remains limited to closures of other current root documents.
 
 ## 23.8 External URLs
 
@@ -783,9 +792,7 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Scope behavior for deleted assets that cannot be reached from current source
-    content.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
