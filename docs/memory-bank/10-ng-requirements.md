@@ -294,6 +294,19 @@ For EN to RU, every companion format is copied as-is. Markdown/YFM documents,
 documentation includes and their front matter are the exception and are fully
 translated according to document rules.
 
+### Code fences inside Markdown
+
+- Fence boundaries, declared language, commands, code, identifiers and technical
+  values are preserved exactly.
+- For RU to EN, Cyrillic comments inside a code fence are translated.
+- A string literal is translated only when it is clearly a user-facing message,
+  for example an error shown to a user.
+- Example data, SQL values and ambiguous string literals remain unchanged and
+  produce a yellow warning with exact file, line and fragment.
+- For EN to RU, code-fence content remains in English.
+- Verifier checks exact technical-token preservation and fence structure after
+  every repair.
+
 For EN to RU companions, the complete file is copied as-is. English comments and
 technical prose are acceptable because programmers understand English. This
 exception never applies to Markdown/YFM documentation or documentation includes.
