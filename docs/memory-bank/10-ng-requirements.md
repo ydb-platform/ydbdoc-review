@@ -51,6 +51,22 @@ Return point before NG work: immutable tag `pre-ng-2026-08-27` at
 - The output is always a Draft PR. Automation never changes Draft to Ready and
   never merges it.
 
+The source operation manifest is derived identically for merge, squash and rebase:
+
+1. GitHub API must report the source PR as merged and provide final
+   `merge_commit_sha`, `base.sha` and `head.sha`.
+2. Fetch every page of the GitHub Pull Request Files API.
+3. Persist each path, file status and `previous_filename` for a rename together
+   with those three SHAs as the immutable manifest.
+4. Expand `renamed` into independent delete of `previous_filename` and add of the
+   new path.
+5. Local checkout or git diff may validate data but cannot add or remove manifest
+   operations.
+
+Missing required SHA, incomplete pagination, rename without `previous_filename`
+or contradictory API data blocks the run before model calls and produces a clear
+Russian operational report.
+
 A repeated `doc_translate` on an unfinished translation is an explicit clean
 restart:
 
@@ -792,22 +808,20 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact authoritative operation-manifest algorithm for GitHub merge, squash and
-   rebase merge methods, including incomplete metadata failure.
-2. Exact behavior when both RU and EN documentation glossary files changed and
+1. Exact behavior when both RU and EN documentation glossary files changed and
    differ.
-3. Accepted evidence and exact mutations for redirect creation, replacement,
+2. Accepted evidence and exact mutations for redirect creation, replacement,
    collision and stale redirect handling.
-4. Deterministic target TOC selection and entry ordering before an ambiguity is
+3. Deterministic target TOC selection and entry ordering before an ambiguity is
    escalated to the operator.
-5. Recursive dependency traversal matrix by source file type and parsed reference
+4. Recursive dependency traversal matrix by source file type and parsed reference
    syntax.
-6. Bounded call-state machine for translator, repairer and critic technical
+5. Bounded call-state machine for translator, repairer and critic technical
    failures, including fallback limits and terminal statuses.
-7. Exact 14-day lineage expiry clock and refresh behavior.
-8. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+6. Exact 14-day lineage expiry clock and refresh behavior.
+7. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-9. Final retrofit-versus-rewrite choice after every requirement above is closed
+8. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
