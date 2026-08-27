@@ -879,6 +879,15 @@ transcripts are retained for 14 days. Secrets and token values are never stored 
 printed. Expired context produces an explicit explanation and cannot be used by
 continue.
 
+Lineage stores an exact UTC `expires_at`. Initial `doc_translate` sets it to 14
+days after that run completes. Every accepted `doc_continue`, including one that
+finishes red, writes a new compact lineage snapshot containing all accumulated
+operator decisions and sets a new `expires_at` to 14 days after that continue
+completes. `doc_verify`, ACL or budget denial, and concurrent-lock rejection do not
+refresh expiry. Full transcripts and old run artifacts expire independently 14
+days after their own run; the latest compact lineage snapshot remains until its
+current `expires_at`.
+
 An open Draft whose lineage has expired after 14 days is no longer automatically
 verifiable or continuable. `/ydbdoc continue` is rejected. `doc_verify` reports
 red in clear Russian that the original snapshot and decisions are no longer
@@ -911,10 +920,9 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact 14-day lineage expiry clock and refresh behavior.
-2. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+1. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
