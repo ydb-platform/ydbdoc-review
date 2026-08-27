@@ -363,6 +363,23 @@ real target TOC change creates a Draft even with no document bundle. If the
 scoped operations produce no target change, NG creates no Draft for that bundle
 and reports that TOC translation is not required.
 
+Deleting a complete recognized source TOC is interpreted as scoped deletion of
+all source nodes that can be mapped unambiguously to the target TOC. Target-only
+nodes are preserved. Ambiguous nodes are left unchanged and become an operator
+question. If mapped removals leave any target items or service data, the target
+TOC file remains. NG deletes the target TOC file only when the scoped result is
+completely empty.
+
+### Mandatory redirect invariant for every TOC deletion
+
+Every removed `href` requires a valid redirect in the same atomic bundle. This
+includes removal of one TOC item, removal of a subtree, and deletion of an entire
+TOC file. There is no bulk-delete, whole-file-delete, empty-TOC or operator-free
+exception. NG must resolve and validate a redirect separately for every removed
+published `href`. If even one required redirect is unresolved, the affected
+atomic removal bundle is omitted and reported red with a ready question for the
+tech writer. NG never leaves a removed TOC link without its redirect.
+
 If the target TOC already exists, NG does not overwrite or fully mirror it. Only
 scoped entries are changed. For an insertion, NG selects the mirrored source TOC
 path and exact mirrored ancestor href chain. It inserts after the nearest previous
@@ -1200,13 +1217,11 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Whole recognized TOC-file deletion while preserving unrelated target-locale
-   entries.
-2. Priority when one glossary entry is both directly changed in both locales and
+1. Priority when one glossary entry is both directly changed in both locales and
    opportunistically used by a directional article bundle.
-3. Conflict between direct image authority and the opposite direction required
+2. Conflict between direct image authority and the opposite direction required
    by a document dependency bundle.
-4. Final retrofit-versus-rewrite choice after every requirement above is closed
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
