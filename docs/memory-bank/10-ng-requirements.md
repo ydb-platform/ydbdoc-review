@@ -263,6 +263,13 @@ the human report. Any `ydbdoc.invalid` occurrence is blocking.
 For EN to RU, external English URLs are retained. Russian documentation may link
 to English resources.
 
+NG v1 automatically resolves only `ru.wikipedia.org` to `en.wikipedia.org` by
+using Wikipedia's official interlanguage mapping. It does not infer an English
+article from a translated title. Missing or ambiguous Wikipedia mapping produces
+the normal unresolved URL placeholder. Every other wiki domain is treated as an
+ordinary external resource and requires an exact operator mapping through
+`doc_continue`.
+
 ## 23.9 One verification core
 
 Internal checking in `doc_translate` and `doc_continue`, and external read-only
@@ -410,8 +417,7 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact wiki domains or resolver allowlist for automatic RU-to-EN mapping.
-2. Final retrofit-versus-rewrite choice after requirements gap analysis.
+1. Final retrofit-versus-rewrite choice after requirements gap analysis.
 
 ---
 
