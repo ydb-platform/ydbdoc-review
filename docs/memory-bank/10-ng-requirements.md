@@ -552,16 +552,20 @@ For RU to EN:
 7. The answer becomes an exact source-to-target URL mapping for the lineage and
    is applied to every exact occurrence on rebuild.
 
-The exact placeholder form is:
+The placeholder form is intentionally human-readable:
 
 ```text
-https://ydbdoc.invalid/unresolved/<short-hash-of-exact-original-url>
+https://ydbdoc.invalid/NEEDS-EN-URL-001
 ```
 
 The reserved `.invalid` domain keeps Markdown syntactically valid while ensuring
-the placeholder cannot resolve to an accidental real resource. The hash is stable
-for the exact original URL. The original URL remains in structured lineage and
-the human report. Any `ydbdoc.invalid` occurrence is blocking.
+the placeholder cannot resolve to an accidental real resource. The three-digit
+number is assigned on first encounter in deterministic manifest and document
+order, persisted in lineage and never renumbered by `doc_continue`. Further URLs
+use `002`, `003` and so on; numbering may restart in a clean new lineage. One exact
+original URL has one placeholder throughout a lineage. The original URL and every
+occurrence remain in structured lineage and the human report. Any
+`NEEDS-EN-URL-` placeholder is blocking and easy to find by text search.
 
 For EN to RU, external English URLs are retained. Russian documentation may link
 to English resources.
@@ -1138,13 +1142,12 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Exact unresolved-URL short-hash algorithm and collision behavior.
-2. Internal-link fragment behavior.
-3. Direct TOC-only source operations.
-4. Scope of glossary verification for unrelated drift.
-5. Reclassification of an originally bilingual pair after one side becomes
+1. Internal-link fragment behavior.
+2. Direct TOC-only source operations.
+3. Scope of glossary verification for unrelated drift.
+4. Reclassification of an originally bilingual pair after one side becomes
    `SUPERSEDED` on current `main`.
-6. Final retrofit-versus-rewrite choice after every requirement above is closed
+5. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
