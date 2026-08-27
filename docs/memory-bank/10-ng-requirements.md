@@ -539,6 +539,25 @@ authoritative. NG validates only that it is a syntactically valid absolute
 `https://` URL and does not make network availability a gate. Other external
 links are not probed with generic `HEAD` or `GET` requests.
 
+URL language and ownership are classified without downloading the destination:
+
+- a relative or root-relative link that resolves below `ydb/docs/ru` or
+  `ydb/docs/en` is an internal documentation link;
+- an absolute `https://ydb.tech/docs/ru/...` or
+  `https://ydb.tech/docs/en/...` link is also an internal documentation link and
+  follows the same locale-mirror rules;
+- an external URL is explicitly Russian only when its hostname starts with
+  `ru.`, its path contains a complete `/ru/` segment, or its parsed query has
+  `lang=ru` or `locale=ru`;
+- `ru.wikipedia.org` then follows the dedicated Wikipedia rule; every other
+  explicitly Russian external URL follows the unresolved-placeholder rule;
+- URLs with an explicit English marker and language-neutral external URLs remain
+  unchanged.
+
+Matching is case-insensitive for hostnames, path-language segments and query
+parameter names and values after standard URL parsing. Text fetched from an
+external page and an LLM language guess never participate in this classification.
+
 Wikipedia fragments are handled conservatively. A URL without a fragment uses
 the resolved EN article. A fragment is retained only if that exact fragment
 exists on the resolved EN page. NG does not translate or semantically match a RU
@@ -1037,7 +1056,14 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Authority selection when `force_translation` follows bilingual
+   `NO_TRANSLATION`.
+2. Semantic classification and authority for a locale pair whose RU and EN
+   binary images both changed.
+3. Deterministic detection that a glossary entry is used by an operation bundle.
+4. Severity of a directly changed unsupported file under an eligible locale
+   root.
+5. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
