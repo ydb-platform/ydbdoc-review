@@ -1030,6 +1030,18 @@ expand the dependency graph. The operational report names such source-PR files
 as unsupported and says clearly that NG left them unchanged. An unsupported file
 alone does not create a translation Draft.
 
+A directly changed unsupported file under a locale root is yellow, not red. The
+report names its exact path and says in Russian: `Тип файла не поддерживается,
+файл оставлен без изменений.` If supported bundles also exist, NG publishes them
+normally and includes this warning. If the source PR contains only unsupported
+files, NG creates no Draft, the Action passes, and the source-PR report says that
+translation was not performed because there are no supported files.
+
+This becomes red only when a supported root document has a mandatory parsed
+dependency on the unsupported file. In that case NG cannot construct a complete
+atomic bundle, omits that bundle and reports the exact dependency chain and file
+type. Independent safe bundles may still publish.
+
 ## 23.15.2 Mixed operations on one locale pair
 
 NG classifies all source-PR operations that address the same canonical RU/EN
@@ -1102,9 +1114,7 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Severity of a directly changed unsupported file under an eligible locale
-   root.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
