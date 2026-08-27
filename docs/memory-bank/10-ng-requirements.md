@@ -280,6 +280,20 @@ EN to RU companion YAML the general as-is rule still applies. Markdown front
 matter remains part of the documentation, so its comments, `title` and
 `description` follow the document direction in both directions.
 
+The remaining RU-to-EN companion matrix is explicit:
+
+- `.json`: translate Cyrillic string values, never object keys;
+- `.txt`: translate all natural-language Cyrillic text;
+- C and C++ source or headers: translate comments and string literals that contain
+  user-facing human text, never code or identifiers;
+- `.yaml` and `.yml`: translate only comments and values of exact keys `title` and
+  `description`;
+- Markdown/YFM and documentation includes: perform the full document translation.
+
+For EN to RU, every companion format is copied as-is. Markdown/YFM documents,
+documentation includes and their front matter are the exception and are fully
+translated according to document rules.
+
 For EN to RU companions, the complete file is copied as-is. English comments and
 technical prose are acceptable because programmers understand English. This
 exception never applies to Markdown/YFM documentation or documentation includes.
