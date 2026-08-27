@@ -965,16 +965,38 @@ expand the dependency graph. The operational report names such source-PR files
 as unsupported and says clearly that NG left them unchanged. An unsupported file
 alone does not create a translation Draft.
 
+## 23.15.2 Mixed operations on one locale pair
+
+NG classifies all source-PR operations that address the same canonical RU/EN
+relative path together before creating bundles:
+
+- an add or update in exactly one locale makes that locale authoritative; NG
+  fully creates or overwrites the other locale from it;
+- a delete in exactly one locale, while the paired locale is untouched by the
+  source PR, is a mirrored deletion request and deletes the paired locale;
+- an add or update in both locales uses the bilingual classifier defined above;
+- a delete in both locales requires no translation change and is reported as
+  already complete;
+- a delete in one locale combined with an add or update in the other locale in
+  the same source PR is ambiguous. NG does not guess. It creates a red Draft when
+  any other safe bundle exists, asks whether both sides must be deleted or the
+  remaining side is authoritative, and applies that stored answer on
+  `doc_continue`;
+- if a later change on current `main` makes an original operation inapplicable,
+  the established `SUPERSEDED` rule wins. NG reports the stale operation and does
+  not recreate historical content from the source PR snapshot.
+
+These rules use the immutable source manifest to determine what the source PR
+did and current `main` to determine whether that operation is still applicable.
+
 ## 23.16 Open decisions
 
 The following decisions are intentionally still open:
 
-1. Mixed operations on one locale pair, including cross-locale add/delete,
-   both-locale delete and both-changed with one current side absent.
-2. Terminal behavior for a genuine article deletion that has no replacement but
+1. Terminal behavior for a genuine article deletion that has no replacement but
    would remove a TOC href under the mandatory-redirect rule.
-3. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
-4. Final retrofit-versus-rewrite choice after every requirement above is closed
+2. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
