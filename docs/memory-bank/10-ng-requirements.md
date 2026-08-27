@@ -432,6 +432,22 @@ inside raster images and SVG is not analyzed or translated. The report lists
 source path, target path, size and content hash. Byte and hash equality are
 mandatory.
 
+Image pairs never enter the semantic or bilingual text classifiers. If exactly
+one locale image changed in the source PR, that image is authoritative and is
+copied byte-for-byte over the paired locale image. If both locale images changed,
+equal content hashes require no candidate change. Different hashes are a red
+authority question for that image bundle; NG does not inspect pixels or guess.
+The report provides both ready commands with the exact path:
+
+```text
+/ydbdoc continue используй русское изображение <путь>
+/ydbdoc continue используй английское изображение <путь>
+```
+
+The operator choice is stored in lineage and the selected bytes overwrite the
+other locale on rebuild. Until then, that atomic bundle is omitted. A semantic
+no-op or `force_translation` decision never changes image behavior.
+
 Main Markdown/YFM pages and locale-specific Markdown includes are translated
 fully in either direction.
 
@@ -1073,12 +1089,10 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Semantic classification and authority for a locale pair whose RU and EN
-   binary images both changed.
-2. Deterministic detection that a glossary entry is used by an operation bundle.
-3. Severity of a directly changed unsupported file under an eligible locale
+1. Deterministic detection that a glossary entry is used by an operation bundle.
+2. Severity of a directly changed unsupported file under an eligible locale
    root.
-4. Final retrofit-versus-rewrite choice after every requirement above is closed
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
