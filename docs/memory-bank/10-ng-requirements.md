@@ -113,11 +113,18 @@ already merged. A new source PR is required for a new translation.
 ### Concurrency
 
 - At most one job may run for one source PR or translation lineage at a time.
-- A concurrent `doc_translate` or `doc_continue` is not queued and makes no model
-  calls or branch changes.
+- Before any model call, every `doc_*` entry point queries GitHub Actions for
+  another `queued` or `in_progress` `doc_translate`, `doc_continue` or
+  `doc_verify` run belonging to the same source PR lineage or its translation
+  Draft, excluding the current run itself.
+- A concurrent `doc_translate`, `doc_continue` or `doc_verify` is not queued and
+  makes no model calls or branch changes.
+- The per-source lock remains the race-safe backstop when two runs pass the
+  GitHub Actions check almost simultaneously.
 - The bot replies in clear Russian that work is already running and shows the job
-  type, start time and workflow link.
-- The user may repeat the command after completion.
+  type, start time and workflow link. It removes the one-shot label, fails the
+  Action and says that translation or verification was not performed.
+- The user may apply the desired label again after completion.
 - A stale per-source lock expires after two hours.
 - Work on an unrelated source PR is not blocked by this lock.
 
@@ -1253,8 +1260,7 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Concurrent `doc_verify` behavior under the per-source lock.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
