@@ -224,8 +224,12 @@ Patterns apply to locale-relative paths and the complete subtree in both locales
 Matching pages are not translated, do not require mirrors and do not require
 RU/EN TOC parity. They are reported as `SKIPPED: single_language`.
 
-Local Markdown/YFM validity, local links, includes and reachability are still
-checked. NG does not infer or add patterns automatically.
+Matching pages are completely opaque to NG. It does not copy or validate their
+content, follow their includes or assets, inspect Cyrillic, check links or
+reachability, or validate their TOC entries. Links from other scoped documents to
+these pages are preserved exactly as written and produce no red or yellow issue.
+The technical report may show only a count of paths skipped by the manifest,
+without analyzing them. NG does not infer or add patterns automatically.
 
 ## 23.7 Dependencies, images and companion files
 
