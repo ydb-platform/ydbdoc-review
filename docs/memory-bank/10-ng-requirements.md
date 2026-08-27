@@ -501,6 +501,16 @@ The operator choice is stored in lineage and the selected bytes overwrite the
 other locale on rebuild. Until then, that atomic bundle is omitted. A semantic
 no-op or `force_translation` decision never changes image behavior.
 
+When an image is a dependency of a directional root document bundle, the root
+document direction takes precedence over a standalone image operation from the
+same source PR. An RU-to-EN article copies current RU image bytes over EN; an
+EN-to-RU article copies current EN bytes over RU. A conflicting direct edit of the
+other locale image is overwritten and named explicitly in the report, without an
+operator question. The standalone image-authority rules apply only when no root
+document bundle owns that image. If opposite-direction root bundles require the
+same image pair and the locale hashes differ, the existing shared-dependency
+authority conflict remains red.
+
 Main Markdown/YFM pages and locale-specific Markdown includes are translated
 fully in either direction.
 
@@ -1226,9 +1236,7 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Conflict between direct image authority and the opposite direction required
-   by a document dependency bundle.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
