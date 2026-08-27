@@ -235,6 +235,7 @@ For a source delete:
 
 - delete the target mirror;
 - remove the exact target href from the corresponding target TOC;
+- create a redirect for every href removed from a TOC;
 - do not scan every Markdown file for inbound links;
 - try to determine an old-to-new redirect only from clear evidence;
 - never guess a redirect destination.
@@ -246,6 +247,29 @@ this lineage and is replayed on the next full rebuild.
 
 Remaining inbound links are discovered by QA or the external docs build. A tech
 writer may use continue to name exact locations that must be removed or retargeted.
+
+Accepted automatic redirect evidence is limited to:
+
+1. An exact old-to-new mapping explicitly added by the source PR in
+   `ydb/docs/redirects.yaml`.
+2. An unambiguous replacement of the exact old href by the exact new href in the
+   same source TOC position.
+3. An exact mapping supplied by an authorized tech writer through continue.
+
+Text similarity, filename similarity and topic similarity are not evidence. The
+resolved destination must exist in the immutable current-main snapshot or be
+created by the same safe operation bundle.
+
+An identical existing target-locale redirect is a no-op. A conflicting existing
+destination is never overwritten and produces an operator question. NG does not
+collapse redirect chains. It does not remove an old redirect unless the original
+source PR removed that exact mapping and the target copy still matches it.
+
+Every NG-generated TOC href removal requires a resolved redirect. Redirect,
+target-file deletion and TOC removal belong to one atomic bundle. If destination
+cannot be resolved, the complete removal bundle is omitted and the Russian report
+asks the tech writer for the exact destination. Independent safe bundles may still
+be published in the red Draft.
 
 ## 23.5 TOC
 
@@ -825,18 +849,16 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Accepted evidence and exact mutations for redirect creation, replacement,
-   collision and stale redirect handling.
-2. Deterministic target TOC selection and entry ordering before an ambiguity is
+1. Deterministic target TOC selection and entry ordering before an ambiguity is
    escalated to the operator.
-3. Recursive dependency traversal matrix by source file type and parsed reference
+2. Recursive dependency traversal matrix by source file type and parsed reference
    syntax.
-4. Bounded call-state machine for translator, repairer and critic technical
+3. Bounded call-state machine for translator, repairer and critic technical
    failures, including fallback limits and terminal statuses.
-5. Exact 14-day lineage expiry clock and refresh behavior.
-6. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+4. Exact 14-day lineage expiry clock and refresh behavior.
+5. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-7. Final retrofit-versus-rewrite choice after every requirement above is closed
+6. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
