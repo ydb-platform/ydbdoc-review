@@ -405,8 +405,33 @@ The verifier performs no filesystem, Git or GitHub writes. It returns a stable
 structured verdict, issues, evidence, suggested actions and metrics. Equal input
 must produce equal verification semantics regardless of the caller.
 
+The shared verification service has one explicit internal boundary. A pure
+deterministic engine runs structural checks and interprets a materialized
+structured critic response. A critic adapter performs the external LLM call and
+returns that response. The pure engine itself never calls a model or the network.
+All workflows use this same service and cannot substitute different interpretation
+or severity logic.
+
 `doc_verify` evaluates the actual bytes of the open PR. A hypothetical in-memory
 repair can never make the unchanged PR green.
+
+### Verification case identity and reuse
+
+The verification case has a stable hash over exact source bytes, target bytes,
+scope, directions, manifest, operator decisions, verifier rules, prompt versions
+and model identifiers. The final structured critic response and interpreted report
+are retained with that hash for 14 days.
+
+If `doc_verify` receives the exact same case hash as the final internal verification
+performed by `doc_translate` or `doc_continue`, it reuses that stored model result.
+Deterministic validators still run, and the published report is identical for the
+same case.
+
+Any byte change in source or target, or any change to scope, configuration, prompt,
+model or verifier version creates a new case hash. NG then runs the complete
+verification scope again and does not reuse a partial per-file model verdict. This
+full rerun is intentional and keeps the cache rule simple and safe. The new report
+is bound to the new commit SHA.
 
 ## 23.9.1 Documentation glossary
 
@@ -568,33 +593,31 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact boundary between the shared pure verifier, an LLM critic call and the
-   materialized critic response interpreted by the verifier.
-2. Which red issue classes are model-repairable and which require an operator or
+1. Which red issue classes are model-repairable and which require an operator or
    an external fact without spending repair attempts.
-3. Atomic publication unit for a safe subset when another part of the candidate
+2. Atomic publication unit for a safe subset when another part of the candidate
    is unsafe.
-4. Conflict policy when one canonical dependency is reached from root documents
+3. Conflict policy when one canonical dependency is reached from root documents
    with opposite translation directions.
-5. Exact reference syntaxes that bring companion files into dependency closure.
-6. Whether glossary drift blocks only glossary-scoped runs or every translation
+4. Exact reference syntaxes that bring companion files into dependency closure.
+5. Whether glossary drift blocks only glossary-scoped runs or every translation
    that reads the glossaries as terminology input.
-7. Whether model A and model B must always have different model identifiers and
+6. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-8. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-9. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-10. Exact files counted by the per-root dependency limit of 100.
-11. Whether a depth exception raises the whole root closure limit or only one
+7. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+8. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+9. Exact files counted by the per-root dependency limit of 100.
+10. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-12. Exact human actor used by ACL for label events and continue comments.
-13. Report and Action behavior when ACL or budget rejects `doc_verify` before
+11. Exact human actor used by ACL for label events and continue comments.
+12. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-14. Canonical comment location for source lifecycle, Draft QA and ordinary
+13. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-15. Cost recording behavior when a job crashes after one or more paid calls.
-16. Scope behavior for deleted assets that cannot be reached from current source
+14. Cost recording behavior when a job crashes after one or more paid calls.
+15. Scope behavior for deleted assets that cannot be reached from current source
     content.
-17. Final retrofit-versus-rewrite choice after every requirement above is closed
+16. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
