@@ -594,6 +594,9 @@ URL language and ownership are classified without downloading the destination:
 - an external URL is explicitly Russian only when its hostname starts with
   `ru.`, its path contains a complete `/ru/` segment, or its parsed query has
   `lang=ru` or `locale=ru`;
+- an external URL is explicitly English only when its hostname starts with
+  `en.`, its path contains a complete `/en/` segment, or its parsed query has
+  `lang=en` or `locale=en`;
 - `ru.wikipedia.org` then follows the dedicated Wikipedia rule; every other
   explicitly Russian external URL follows the unresolved-placeholder rule;
 - URLs with an explicit English marker and language-neutral external URLs remain
@@ -1134,15 +1137,14 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Exact English external-URL markers.
-2. Removal of the contradictory Wikipedia locale-substitution rule.
-3. Exact unresolved-URL short-hash algorithm and collision behavior.
-4. Internal-link fragment behavior.
-5. Direct TOC-only source operations.
-6. Scope of glossary verification for unrelated drift.
-7. Reclassification of an originally bilingual pair after one side becomes
+1. Removal of the contradictory Wikipedia locale-substitution rule.
+2. Exact unresolved-URL short-hash algorithm and collision behavior.
+3. Internal-link fragment behavior.
+4. Direct TOC-only source operations.
+5. Scope of glossary verification for unrelated drift.
+6. Reclassification of an originally bilingual pair after one side becomes
    `SUPERSEDED` on current `main`.
-8. Final retrofit-versus-rewrite choice after every requirement above is closed
+7. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
