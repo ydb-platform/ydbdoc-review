@@ -741,6 +741,17 @@ NG never gives the expired Draft a green result.
 `YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE` controls the hard dependency count per
 source article. Its confirmed current value is `100`.
 
+If ACL or budget rejects a command, its one-shot label is still removed, no model
+or semantic verifier runs, and the Action fails. The checked PR receives a short
+red operational report which explicitly says that the translation was not
+verified. This report is not labeled as a translation-quality defect.
+
+For an ACL denial, the Russian text names the exact GitHub login and command, for
+example: `Перевод не проверялся. Пользователь @login запустил doc_verify, но у
+него недостаточно прав.` For a budget denial, it shows the daily limit, actual
+Moscow-day spend and when the next Moscow day begins. A previous green report for
+another commit is never reused as the current result.
+
 ## 23.15 External documentation build
 
 NG is translation CI only. It does not start, wait for or interpret the external
@@ -751,14 +762,12 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Report and Action behavior when ACL or budget rejects `doc_verify` before
-    semantic verification.
-2. Canonical comment location for source lifecycle, Draft QA and ordinary
-    read-only verify.
-3. Cost recording behavior when a job crashes after one or more paid calls.
-4. Scope behavior for deleted assets that cannot be reached from current source
+1. Canonical comment location for source lifecycle, Draft QA and ordinary
+   read-only verify.
+2. Cost recording behavior when a job crashes after one or more paid calls.
+3. Scope behavior for deleted assets that cannot be reached from current source
     content.
-5. Final retrofit-versus-rewrite choice after every requirement above is closed
+4. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
