@@ -94,6 +94,17 @@ already merged. A new source PR is required for a new translation.
   never applies a proposed repair.
 - It always posts a report, including on a technical verifier failure.
 
+### Concurrency
+
+- At most one job may run for one source PR or translation lineage at a time.
+- A concurrent `doc_translate` or `doc_continue` is not queued and makes no model
+  calls or branch changes.
+- The bot replies in clear Russian that work is already running and shows the job
+  type, start time and workflow link.
+- The user may repeat the command after completion.
+- A stale per-source lock expires after two hours.
+- Work on an unrelated source PR is not blocked by this lock.
+
 ## 23.2 Direction and full overwrite
 
 Direction is determined independently for every RU/EN locale pair in the
