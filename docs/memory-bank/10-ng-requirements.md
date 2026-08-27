@@ -308,6 +308,14 @@ Text similarity, filename similarity and topic similarity are not evidence. The
 resolved destination must exist in the immutable current-main snapshot or be
 created by the same safe operation bundle.
 
+An NG-generated redirect always stays inside the target locale. RU-to-EN may
+create only an EN-old to EN-new redirect; EN-to-RU may create only RU-old to
+RU-new. A source-locale destination is evidence for which relative successor to
+mirror, but is never used as the target of the opposite-locale redirect. If the
+mirrored target-locale successor neither exists nor is created by the same Draft,
+NG omits the complete target deletion, TOC-removal and redirect bundle and reports
+it red. Cross-locale redirects are forbidden.
+
 An identical existing target-locale redirect is a no-op. A conflicting existing
 destination is never overwritten and produces an operator question. NG does not
 collapse redirect chains. It never changes or removes an existing redirect.
@@ -1236,7 +1244,10 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Priority between one-locale full glossary synchronization and the opposite
+   direction of an article that uses an otherwise unchanged glossary entry.
+2. Concurrent `doc_verify` behavior under the per-source lock.
+3. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
