@@ -237,6 +237,17 @@ The dependency closure starts from every scoped source document and follows only
 explicit locale-local include and image references. It does not scan neighboring
 directories. Canonical paths are processed once and cycles stop without error.
 
+A companion file enters scope only when at least one of these conditions holds:
+
+1. The file is explicitly added, modified or deleted by the original merged PR.
+2. A parsed local `{% include %}` points to it.
+3. A parsed ordinary local Markdown link points to it and its extension is in the
+   approved companion allowlist.
+
+Plain-text path mentions, comments, code-fence strings, HTML and unknown syntaxes
+do not expand scope and are not guessed with regular expressions. An ordinary
+link to another Markdown article does not expand scope.
+
 - The source article has depth `0`.
 - Default maximum depth is `3`.
 - A depth overflow is red and shows the complete path chain in Russian.
@@ -635,25 +646,24 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact reference syntaxes that bring companion files into dependency closure.
-2. Whether glossary drift blocks only glossary-scoped runs or every translation
+1. Whether glossary drift blocks only glossary-scoped runs or every translation
    that reads the glossaries as terminology input.
-3. Whether model A and model B must always have different model identifiers and
+2. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-4. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-5. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-6. Exact files counted by the per-root dependency limit of 100.
-7. Whether a depth exception raises the whole root closure limit or only one
+3. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+4. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+5. Exact files counted by the per-root dependency limit of 100.
+6. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-8. Exact human actor used by ACL for label events and continue comments.
-9. Report and Action behavior when ACL or budget rejects `doc_verify` before
+7. Exact human actor used by ACL for label events and continue comments.
+8. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-10. Canonical comment location for source lifecycle, Draft QA and ordinary
+9. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-11. Cost recording behavior when a job crashes after one or more paid calls.
-12. Scope behavior for deleted assets that cannot be reached from current source
+10. Cost recording behavior when a job crashes after one or more paid calls.
+11. Scope behavior for deleted assets that cannot be reached from current source
     content.
-13. Final retrofit-versus-rewrite choice after every requirement above is closed
+12. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
