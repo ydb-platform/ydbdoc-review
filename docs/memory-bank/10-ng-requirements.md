@@ -541,8 +541,8 @@ checking remains limited to closures of other current root documents.
 For RU to EN:
 
 1. An already-English external URL is retained.
-2. For a RU wiki URL, NG attempts an authoritative EN alternative through page
-   metadata or an unambiguous locale substitution and verifies that it exists.
+2. For a RU wiki URL, NG attempts an authoritative EN alternative only through
+   the official Wikipedia interlanguage mapping from the canonical RU page.
 3. If mapping is not found, or the URL is another RU external resource, NG places
    a stable placeholder in the translated Draft.
 4. A placeholder is always red and cannot pass verification.
@@ -568,7 +568,8 @@ to English resources.
 
 NG v1 automatically resolves only `ru.wikipedia.org` to `en.wikipedia.org` by
 using Wikipedia's official interlanguage mapping. It does not infer an English
-article from a translated title. Missing or ambiguous Wikipedia mapping produces
+article from a translated title, matching slug or locale-domain substitution,
+even if such an EN URL exists. Missing or ambiguous Wikipedia mapping produces
 the normal unresolved URL placeholder. Every other wiki domain is treated as an
 ordinary external resource and requires an exact operator mapping through
 `doc_continue`.
@@ -1137,14 +1138,13 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Removal of the contradictory Wikipedia locale-substitution rule.
-2. Exact unresolved-URL short-hash algorithm and collision behavior.
-3. Internal-link fragment behavior.
-4. Direct TOC-only source operations.
-5. Scope of glossary verification for unrelated drift.
-6. Reclassification of an originally bilingual pair after one side becomes
+1. Exact unresolved-URL short-hash algorithm and collision behavior.
+2. Internal-link fragment behavior.
+3. Direct TOC-only source operations.
+4. Scope of glossary verification for unrelated drift.
+5. Reclassification of an originally bilingual pair after one side becomes
    `SUPERSEDED` on current `main`.
-7. Final retrofit-versus-rewrite choice after every requirement above is closed
+6. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
