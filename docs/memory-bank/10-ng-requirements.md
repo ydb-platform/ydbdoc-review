@@ -777,6 +777,15 @@ its operation bundles. This is an explicit allowed scope expansion:
 - the report has a clear Russian section listing added and updated term entries;
 - an unsafe glossary edit blocks only bundles that use that term.
 
+When an entry is both directly changed in the source PR and used by a directional
+article bundle, the article direction is authoritative for that entry. NG
+translates the article and fully harmonizes the used glossary entry from the same
+source locale, overwriting a conflicting direct edit in the other locale. This
+ordinary case requires no additional operator question. The existing
+opposite-direction conflict rule applies only when bundles in both directions use
+the same differing term. A directly changed entry unused by any article follows
+the standalone entry-level glossary rules.
+
 If one term is required by opposite-direction bundles in the same run and the RU
 and EN definitions differ, NG does not choose authority. It reports a red conflict
 and asks the tech writer to select the authoritative locale through continue.
@@ -1217,11 +1226,9 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Priority when one glossary entry is both directly changed in both locales and
-   opportunistically used by a directional article bundle.
-2. Conflict between direct image authority and the opposite direction required
+1. Conflict between direct image authority and the opposite direction required
    by a document dependency bundle.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
