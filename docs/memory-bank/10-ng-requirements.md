@@ -792,7 +792,22 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Exact authoritative operation-manifest algorithm for GitHub merge, squash and
+   rebase merge methods, including incomplete metadata failure.
+2. Exact behavior when both RU and EN documentation glossary files changed and
+   differ.
+3. Accepted evidence and exact mutations for redirect creation, replacement,
+   collision and stale redirect handling.
+4. Deterministic target TOC selection and entry ordering before an ambiguity is
+   escalated to the operator.
+5. Recursive dependency traversal matrix by source file type and parsed reference
+   syntax.
+6. Bounded call-state machine for translator, repairer and critic technical
+   failures, including fallback limits and terminal statuses.
+7. Exact 14-day lineage expiry clock and refresh behavior.
+8. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+   to Ready, or inconsistent GitHub objects.
+9. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
