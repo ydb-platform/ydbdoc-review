@@ -121,6 +121,25 @@ already merged. A new source PR is required for a new translation.
 - A stale per-source lock expires after two hours.
 - Work on an unrelated source PR is not blocked by this lock.
 
+### Translation lineage state table
+
+- Open Draft with existing branch: `doc_continue` is allowed.
+- Open PR changed by a human from Draft to Ready: `doc_continue` is blocked to
+  prevent force-pushing unreviewed bytes into a Ready PR. The bot asks the human
+  to convert it back to Draft first.
+- Draft closed without merge: continue is blocked; a new `doc_translate` performs
+  a clean restart.
+- Open translation PR with missing branch: lineage is damaged; continue is
+  blocked, while a new translate closes the stale PR and rebuilds from scratch.
+- Merged translation PR: lineage is terminal forever; translate and continue make
+  no content or branch changes.
+- Valid lineage without a Draft: continue remains allowed in the merged source PR.
+- Open Draft with manual commits: continue is allowed and, after its explicit
+  destructive warning, discards those commits during full rebuild.
+- Multiple active translation PRs for one source PR: every destructive command is
+  blocked. The report asks a human to close duplicates and retry.
+- Read-only `doc_verify` is allowed for every open PR, including a Ready PR.
+
 ### Command labels
 
 - `doc_translate`, `doc_verify` and `doc_continue` are one-shot command labels,
@@ -920,9 +939,7 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
-   to Ready, or inconsistent GitHub objects.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
