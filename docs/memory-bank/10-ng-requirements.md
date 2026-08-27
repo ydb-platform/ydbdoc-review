@@ -278,6 +278,14 @@ exception never applies to Markdown/YFM documentation or documentation includes.
 An unknown required companion type is not guessed. It produces a red report with
 the exact path.
 
+Deletion is consistent across scoped Markdown documents, images and companion
+files. If the original merged source PR deleted a locale-specific asset or
+companion, NG deletes its target mirror. It checks references only inside the
+current scoped dependency closure and never scans the full repository for inbound
+links. Remaining references are left to the external docs build. Every deleted
+target path is listed clearly in the report. A target already absent is a no-op.
+The `public-materials/*` exclusion applies before this rule.
+
 ## 23.8 External URLs
 
 For RU to EN:
