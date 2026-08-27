@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-27
-**Current focus:** §23, confirmed requirements for the simplified NG rebuild. Requirements are being completed before the retrofit-versus-rewrite decision.
+**Current focus:** §24, implementable specification and independent-review handoff for the confirmed simplified NG rebuild.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -22,11 +22,13 @@ stable cross-references — use them when linking between files.
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
 | Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
 | NG requirements | [10-ng-requirements](docs/memory-bank/10-ng-requirements.md) | 23 | Confirmed product contract, workflows, verification, operations |
+| NG specification | [11-ng-specification](docs/memory-bank/11-ng-specification.md) | 24 | Implementable architecture, DTOs, algorithms, persistence, reports, acceptance suite and test matrix |
 
 ## Recent changes
 
 | When | What |
 |------|------|
+| 2026-08-27 | **§24**: implementation-ready NG specification for independent review, with strict rewrite boundaries, immutable DTOs, exact state machines, persistence/recovery, Russian reports and 175 acceptance criteria |
 | 2026-08-27 | **§23**: confirmed simplified NG contract for `doc_translate`, `doc_continue`, read-only `doc_verify`, full current-source overwrite, scoped dependencies, shared verifier, two-model repair loop, reporting, ACL and budget |
 | 2026-08-27 | **§6.225** — type-aware href validation; fail-closed official merge snapshots; scoped historical replay; TOC-proven tombstones; real added+removed move inference preserving later EN meaning; semantic failures exit non-zero (#45949 / #50857 / #50596) |
 | 2026-08-26 | **§6.224** — merged PRs run translation provenance, post-write fragment repair, and pending-write-scoped overlay validation (#45949) |
