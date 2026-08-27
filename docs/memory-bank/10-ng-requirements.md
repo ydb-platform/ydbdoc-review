@@ -287,6 +287,13 @@ link to another Markdown article does not expand scope.
   `YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE`, currently `100`.
 - The file-count limit is hard and cannot be overridden by continue.
 
+The count is calculated separately for each root article. The root article itself,
+TOC files and redirect files do not consume the limit. Every unique Markdown
+include, image and companion file does consume it. Repeated occurrences in one
+closure count once. A dependency shared by two roots counts once in each root's
+closure. A standalone companion changed directly by the source PR is its own root
+and does not consume another article's dependency allowance.
+
 Images `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.svg` are copied from source
 locale to target locale byte-for-byte in either direction. OCR is not used. Text
 inside raster images and SVG is not analyzed or translated. The report lists
@@ -719,18 +726,17 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact files counted by the per-root dependency limit of 100.
-2. Whether a depth exception raises the whole root closure limit or only one
+1. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-3. Exact human actor used by ACL for label events and continue comments.
-4. Report and Action behavior when ACL or budget rejects `doc_verify` before
+2. Exact human actor used by ACL for label events and continue comments.
+3. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-5. Canonical comment location for source lifecycle, Draft QA and ordinary
+4. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-6. Cost recording behavior when a job crashes after one or more paid calls.
-7. Scope behavior for deleted assets that cannot be reached from current source
+5. Cost recording behavior when a job crashes after one or more paid calls.
+6. Scope behavior for deleted assets that cannot be reached from current source
     content.
-8. Final retrofit-versus-rewrite choice after every requirement above is closed
+7. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
