@@ -1258,10 +1258,56 @@ answer is replayed on the destructive rebuild.
 
 ## 23.16 Open decisions
 
-The following decisions are intentionally still open:
+No product or implementation-strategy decisions remain open. Any new ambiguity
+found during specification, implementation or testing must be returned to the
+requirements process and recorded here before code chooses a behavior.
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
-    and a separate implementation gap analysis is complete.
+## 23.17 Implementation strategy: rewrite the policy core
+
+The confirmed strategy is `REWRITE_CORE`, not an in-place retrofit and not a
+complete deletion of the project's technical assets. Two independent architecture
+analyses and a cross-review reached consensus that the current orchestration and
+policy graph encode semantics opposite to §23: differential target preservation,
+historical scope expansion, inferred moves, mutating verification and legacy TOC,
+redirect and glossary exceptions.
+
+NG is implemented as an isolated package under `src/ydbdoc_review/ng/`. Its domain
+and application layers must not import legacy workflow, harness, scope-planning,
+differential-translation, navigation-merge, repair-publication or reporting
+policy modules. An automated import-boundary test enforces this rule.
+
+The intended boundary is:
+
+- **keep** only demonstrably pure leaf primitives such as Markdown/YFM AST and
+  parsing, basic rendering, selected segmentation, path normalization and
+  direction-neutral structural checks;
+- **wrap** low-level GitHub HTTP and pagination, pinned git blob access,
+  provider-specific single-attempt model calls, YDB/S3 transport, TOC and redirect
+  parsing, usage extraction and report location helpers behind NG ports;
+- **rewrite** command lifecycle, immutable manifest and snapshot domain, scope and
+  dependency planning, atomic bundles, full translation, link and asset policy,
+  scoped TOC and append-only redirects, documentation glossary handling, shared
+  verification and repair state machine, persistence, reports and publication;
+- **retire from the production NG call graph** legacy orchestration, differential
+  and historical replay, inferred moves, mutating verify/fixup publication,
+  legacy full TOC merge, inbound-link scans, prompt-only glossary authority and
+  aggregate end-of-run lifecycle accounting.
+
+Reuse is approved by exact symbol after characterization tests, never by an
+entire legacy directory. A reused primitive must not perform ambient filesystem,
+environment, network or repository access, mutate input state, choose policy,
+hide retries or import legacy domain DTOs. Provider adapters expose one paid
+attempt; NG owns retries, fallback, model rotation, transcripts and immediate
+cost persistence.
+
+Legacy and NG may coexist only during development and recorded-case comparison.
+Only one command router may have GitHub write capability. Production cutover is
+atomic after the §23 acceptance suite passes; legacy and NG writers are never run
+in parallel on the same command labels. Existing legacy Drafts without NG lineage
+cannot be continued and require a clean `doc_translate` restart.
+
+The immutable recovery point remains Git tag `pre-ng-2026-08-27` at
+`1f04ab1c71488f53c4ad547c20c7e635d59696ad`.
 
 ---
 
