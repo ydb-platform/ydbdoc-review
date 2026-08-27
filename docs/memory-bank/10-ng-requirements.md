@@ -471,6 +471,23 @@ Every repair is followed by all deterministic checks and the same verifier.
 There are at most two repair cycles and three verification passes. If red issues
 remain, safe output is published in a red Draft and unsafe output is omitted.
 
+Only issues explicitly classified as `model_repairable` enter this repair loop.
+Repairable red issues include semantic loss or distortion, omitted prose,
+incorrect terminology, residual translatable Cyrillic, and a lost Markdown
+element, placeholder or technical token whose exact correct content is available
+from the source.
+
+Issues requiring an external fact or operator choice are never guessed by a
+model. This includes unresolved external URL, ambiguous redirect, unknown TOC
+parent or label, dependency-depth permission, direction conflict, missing source
+or dependency, unsupported file type, ACL or budget rejection, expired context
+and critic infrastructure failure. These issues do not start or consume automatic
+repair attempts by themselves.
+
+When repairable and operator-required red issues coexist, NG performs up to two
+repairs for the repairable subset and retains the operator-required blockers in
+the final report.
+
 If a critic returns invalid structured output, NG asks that model once to repair
 the format, then tries the configured fallback critic once. If no valid verdict
 is produced, the result is red and clearly says that translation quality could
@@ -593,31 +610,29 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Which red issue classes are model-repairable and which require an operator or
-   an external fact without spending repair attempts.
-2. Atomic publication unit for a safe subset when another part of the candidate
+1. Atomic publication unit for a safe subset when another part of the candidate
    is unsafe.
-3. Conflict policy when one canonical dependency is reached from root documents
+2. Conflict policy when one canonical dependency is reached from root documents
    with opposite translation directions.
-4. Exact reference syntaxes that bring companion files into dependency closure.
-5. Whether glossary drift blocks only glossary-scoped runs or every translation
+3. Exact reference syntaxes that bring companion files into dependency closure.
+4. Whether glossary drift blocks only glossary-scoped runs or every translation
    that reads the glossaries as terminology input.
-6. Whether model A and model B must always have different model identifiers and
+5. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-7. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-8. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-9. Exact files counted by the per-root dependency limit of 100.
-10. Whether a depth exception raises the whole root closure limit or only one
+6. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+7. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+8. Exact files counted by the per-root dependency limit of 100.
+9. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-11. Exact human actor used by ACL for label events and continue comments.
-12. Report and Action behavior when ACL or budget rejects `doc_verify` before
+10. Exact human actor used by ACL for label events and continue comments.
+11. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-13. Canonical comment location for source lifecycle, Draft QA and ordinary
+12. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-14. Cost recording behavior when a job crashes after one or more paid calls.
-15. Scope behavior for deleted assets that cannot be reached from current source
+13. Cost recording behavior when a job crashes after one or more paid calls.
+14. Scope behavior for deleted assets that cannot be reached from current source
     content.
-16. Final retrofit-versus-rewrite choice after every requirement above is closed
+15. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
