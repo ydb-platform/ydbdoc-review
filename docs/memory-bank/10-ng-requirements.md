@@ -935,18 +935,46 @@ NG is translation CI only. It does not start, wait for or interpret the external
 documentation build. The tech writer separately reviews the NG report, the docs
 build and the Draft content.
 
+## 23.15.1 Canonical documentation paths and eligible files
+
+The documentation root is exactly `ydb/docs`. The locale roots are exactly
+`ydb/docs/ru` and `ydb/docs/en`. A normal locale pair is calculated only by
+replacing the first locale component immediately below `ydb/docs`, `ru` with
+`en` or `en` with `ru`. The remaining relative path and filename are preserved
+byte-for-byte. NG does not infer pairs by filename similarity or content.
+
+The documentation glossary pair is fixed at
+`ydb/docs/ru/core/concepts/glossary.md` and
+`ydb/docs/en/core/concepts/glossary.md`. The shared redirect registry is exactly
+`ydb/docs/redirects.yaml`.
+
+Within either locale root, NG recognizes `toc.yaml`, `toc_p.yaml` and
+`toc_i.yaml` as navigation files. No other YAML file becomes a TOC merely
+because it contains similar keys.
+
+The eligible NG scope consists of:
+
+- Markdown/YFM source documents below a locale root;
+- the three recognized TOC filenames below a locale root;
+- allowlisted image and textual companion files reached under the dependency
+  rules in this contract;
+- the exact shared redirect registry.
+
+Files outside these categories are not translated, copied, deleted or used to
+expand the dependency graph. The operational report names such source-PR files
+as unsupported and says clearly that NG left them unchanged. An unsupported file
+alone does not create a translation Draft.
+
 ## 23.16 Open decisions
 
 The following decisions are intentionally still open:
 
-1. Canonical locale roots and path-pair mapping, exact glossary and redirect paths,
-   TOC recognition and eligible NG root paths.
-2. Mixed operations on one locale pair, including cross-locale add/delete,
+1. Mixed operations on one locale pair, including cross-locale add/delete,
    both-locale delete and both-changed with one current side absent.
-3. Terminal behavior for a genuine article deletion that has no replacement but
+2. Terminal behavior for a genuine article deletion that has no replacement but
    would remove a TOC href under the mandatory-redirect rule.
-4. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
-5. Final retrofit-versus-rewrite choice after every requirement above is closed
+3. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
+4. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
