@@ -1006,12 +1006,38 @@ removal and redirect together.
 
 There is no automatic "delete without redirect" exception.
 
+## 23.15.4 Glossary entry identity and parsing
+
+A glossary entry starts at a Markdown heading of level three or deeper and
+continues until the next heading of the same or a higher level. The preferred
+stable entry identity is the explicit YFM anchor `{#anchor}` on that heading.
+Heading case, surrounding whitespace and Markdown presentation are not part of
+the identity.
+
+The following deterministic rules apply:
+
+- the same explicit anchor appearing more than once in one glossary is a red
+  structural error reported with every exact line;
+- a heading rename with the same anchor is an update of the same entry;
+- changing an explicit anchor is a deletion of the old entry and addition of a
+  new entry;
+- an entry without an explicit anchor is paired only by its ordinal position
+  inside the interval bounded by the same neighboring stable anchored entries;
+- if multiple anchorless entries are inserted, deleted or reordered inside such
+  an interval and the pairing is no longer unique, NG does not use title
+  similarity or an LLM guess to establish identity.
+
+An ambiguous anchorless interval blocks only the affected glossary bundle. The
+Russian report shows both heading lists and line ranges and asks the tech writer
+either to provide the exact RU-to-EN entry correspondence or choose the
+authoritative locale for that interval through `/ydbdoc continue`. The stored
+answer is replayed on the destructive rebuild.
+
 ## 23.16 Open decisions
 
 The following decisions are intentionally still open:
 
-1. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
