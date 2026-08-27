@@ -989,14 +989,29 @@ relative path together before creating bundles:
 These rules use the immutable source manifest to determine what the source PR
 did and current `main` to determine whether that operation is still applicable.
 
+## 23.15.3 Genuine deletion without a successor
+
+NG never removes a published article and its TOC href without also creating a
+valid redirect, even when the source PR genuinely deletes the article and names
+no successor. The article deletion, exact TOC removal and redirect remain one
+atomic bundle.
+
+If no accepted redirect target can be established, NG omits that entire deletion
+bundle and reports a red blocker. Other independent safe bundles may still be
+published in the Draft. The Russian report asks the tech writer where the old URL
+must lead and provides a ready `/ydbdoc continue` command. The operator may name
+an existing parent, overview or other suitable page. On continue, NG validates
+that target under the normal redirect rules and then applies the deletion, TOC
+removal and redirect together.
+
+There is no automatic "delete without redirect" exception.
+
 ## 23.16 Open decisions
 
 The following decisions are intentionally still open:
 
-1. Terminal behavior for a genuine article deletion that has no replacement but
-   would remove a TOC href under the mandatory-redirect rule.
-2. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Glossary entry identity, parsing, normalization, duplicate and rename behavior.
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
