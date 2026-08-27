@@ -107,8 +107,8 @@ already merged. A new source PR is required for a new translation.
 
 ### Command labels
 
-- `doc_translate` and `doc_verify` are one-shot command labels, not persistent PR
-  state.
+- `doc_translate`, `doc_verify` and `doc_continue` are one-shot command labels,
+  not persistent PR state.
 - The bot removes the command label immediately after receiving its labeled event.
 - It removes the label both when the job is accepted and when a gate rejects it.
 - Removing the label does not cancel or alter an accepted job.
@@ -117,6 +117,11 @@ already merged. A new source PR is required for a new translation.
 - The bot never removes unrelated persistent labels.
 - Every accepted or rejected event receives a clear comment, so label removal
   cannot be mistaken for a successful launch.
+
+A `/ydbdoc continue ...` comment supplies instruction but does not start CI by
+itself. An allowed actor writes the comment and then an allowed actor applies the
+`doc_continue` label. The workflow consumes the latest applicable unconsumed
+continue instruction for that lineage.
 
 ## 23.2 Direction and full overwrite
 
@@ -701,6 +706,13 @@ sintjuri,SixOnMyface,nataliaboldyreva,ayakivosklznak
 
 The allowlist is an anti-abuse gate and is checked before model work.
 
+For every command label, ACL checks the human `sender.login` of that exact labeled
+event. PR author, previous operator and workflow service account do not substitute
+for the sender. For `doc_continue`, both the label-event sender and the author of
+the consumed `/ydbdoc continue ...` comment must be in the allowlist. If either is
+not allowed, no model or branch work occurs and the bot posts a clear Russian
+denial.
+
 Daily spending uses repository variable `YDBDOC_DAILY_BUDGET_RUB` and the Moscow
 calendar day. The sum includes every paid LLM call made by `doc_translate`,
 `doc_continue` and `doc_verify`. Keep the budget behavior intentionally simple:
@@ -739,15 +751,14 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact human actor used by ACL for label events and continue comments.
-2. Report and Action behavior when ACL or budget rejects `doc_verify` before
+1. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-3. Canonical comment location for source lifecycle, Draft QA and ordinary
+2. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-4. Cost recording behavior when a job crashes after one or more paid calls.
-5. Scope behavior for deleted assets that cannot be reached from current source
+3. Cost recording behavior when a job crashes after one or more paid calls.
+4. Scope behavior for deleted assets that cannot be reached from current source
     content.
-6. Final retrofit-versus-rewrite choice after every requirement above is closed
+5. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
