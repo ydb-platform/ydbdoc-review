@@ -318,6 +318,30 @@ section title. If the exact fragment does not exist, the complete URL becomes an
 unresolved placeholder and the report asks for a full EN URL including the
 correct fragment.
 
+### Internal documentation links
+
+Internal Markdown links do not expand translation scope. Dependency traversal
+continues to follow only includes and assets.
+
+For RU to EN, NG rewrites a RU internal link to the mirrored EN path when that EN
+target exists in the immutable current-main snapshot or is created by the same
+translation candidate. If no EN target exists, NG keeps the working RU link. It
+does not insert a placeholder and does not make the report red.
+
+The retained RU link produces a yellow warning with the exact target file, line
+and URL. The Russian report says that the RU link was preserved because the EN
+page is not available, merge is allowed, and recommends creating a separate PR
+to replace the link after the EN page becomes available.
+
+This rule intentionally prevents a deadlock when two independently merged source
+PRs link to one another while both EN translation PRs are still unmerged. Both
+translations remain mergeable in either order. NG v1 does not maintain a pending
+link registry and does not automatically create a later cleanup PR.
+
+For EN to RU, NG uses an existing RU mirror when available. If it is absent, the
+EN link is retained because links from Russian documentation to English content
+are allowed.
+
 ## 23.9 One verification core
 
 Internal checking in `doc_translate` and `doc_continue`, and external read-only
