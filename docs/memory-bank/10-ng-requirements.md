@@ -505,6 +505,14 @@ A dependency shared by multiple bundles is included when it is safe and required
 by at least one published bundle. An unsafe shared dependency blocks every bundle
 that requires it.
 
+If the same canonical locale-pair dependency is reached from root bundles with
+opposite directions, verifier first checks whether current RU and EN dependency
+content is equivalent. Equivalent content requires no overwrite and creates no
+conflict. If it differs, every bundle requiring that dependency is blocked. The
+Russian report shows both dependency chains and the concrete difference. A model
+never chooses authority. A tech writer selects the authoritative locale through
+`/ydbdoc continue`, and that decision is retained only in the current lineage.
+
 If a critic returns invalid structured output, NG asks that model once to repair
 the format, then tries the configured fallback critic once. If no valid verdict
 is produced, the result is red and clearly says that translation quality could
@@ -627,27 +635,25 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Conflict policy when one canonical dependency is reached from root documents
-   with opposite translation directions.
-2. Exact reference syntaxes that bring companion files into dependency closure.
-3. Whether glossary drift blocks only glossary-scoped runs or every translation
+1. Exact reference syntaxes that bring companion files into dependency closure.
+2. Whether glossary drift blocks only glossary-scoped runs or every translation
    that reads the glossaries as terminology input.
-4. Whether model A and model B must always have different model identifiers and
+3. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-5. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-6. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-7. Exact files counted by the per-root dependency limit of 100.
-8. Whether a depth exception raises the whole root closure limit or only one
+4. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+5. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+6. Exact files counted by the per-root dependency limit of 100.
+7. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-9. Exact human actor used by ACL for label events and continue comments.
-10. Report and Action behavior when ACL or budget rejects `doc_verify` before
+8. Exact human actor used by ACL for label events and continue comments.
+9. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-11. Canonical comment location for source lifecycle, Draft QA and ordinary
+10. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-12. Cost recording behavior when a job crashes after one or more paid calls.
-13. Scope behavior for deleted assets that cannot be reached from current source
+11. Cost recording behavior when a job crashes after one or more paid calls.
+12. Scope behavior for deleted assets that cannot be reached from current source
     content.
-14. Final retrofit-versus-rewrite choice after every requirement above is closed
+13. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
