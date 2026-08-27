@@ -3,6 +3,10 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** This is a reference for the existing codebase, not the
+> new product contract. §23 in [10-ng-requirements](10-ng-requirements.md) is
+> authoritative for simplified NG behavior.
+
 ---
 
 ## 4. Package layout

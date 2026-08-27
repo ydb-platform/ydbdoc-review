@@ -3,6 +3,10 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** §22 remains regression evidence for the existing TOC
+> planner. Simplified NG uses the minimal scoped TOC contract in §23 of
+> [10-ng-requirements](10-ng-requirements.md).
+
 ---
 
 ## 22. Unified navigation scope (TOC redesign)

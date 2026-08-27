@@ -3,6 +3,10 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** Existing development guidance remains historical input.
+> New implementation acceptance follows §23 in
+> [10-ng-requirements](10-ng-requirements.md).
+
 ---
 
 ## 7. Test strategy

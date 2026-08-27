@@ -3,6 +3,10 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** §6 records historical decisions and regression lessons.
+> Conflicting behavior is not carried into simplified NG. §23 in
+> [10-ng-requirements](10-ng-requirements.md) is the authoritative new contract.
+
 ---
 
 ## 6. Key design decisions and trade-offs
