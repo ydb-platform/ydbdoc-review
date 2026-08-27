@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-27
-**Current focus:** §6.225 — reconcile historical merged-PR operations against current ``main`` without full-file rewrites (#45949 / #50857 / #50596).
+**Current focus:** §23, confirmed requirements for the simplified NG rebuild. Requirements are being completed before the retrofit-versus-rewrite decision.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -21,11 +21,13 @@ stable cross-references — use them when linking between files.
 | Pipeline & reporting | [07-pipeline](docs/memory-bank/07-pipeline.md) | 15–17 | Per-file flow, PR workflow, reports |
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
 | Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
+| NG requirements | [10-ng-requirements](docs/memory-bank/10-ng-requirements.md) | 23 | Confirmed product contract, workflows, verification, operations |
 
 ## Recent changes
 
 | When | What |
 |------|------|
+| 2026-08-27 | **§23**: confirmed simplified NG contract for `doc_translate`, `doc_continue`, read-only `doc_verify`, full current-source overwrite, scoped dependencies, shared verifier, two-model repair loop, reporting, ACL and budget |
 | 2026-08-27 | **§6.225** — type-aware href validation; fail-closed official merge snapshots; scoped historical replay; TOC-proven tombstones; real added+removed move inference preserving later EN meaning; semantic failures exit non-zero (#45949 / #50857 / #50596) |
 | 2026-08-26 | **§6.224** — merged PRs run translation provenance, post-write fragment repair, and pending-write-scoped overlay validation (#45949) |
 | 2026-08-26 | **§6.223** — localize RU transliterated auto-slugs on EN cross-page links (#45949 / #51078) |
@@ -168,6 +170,7 @@ Older §6.x entries remain in [03-design-decisions](docs/memory-bank/03-design-d
 1. Start with [01-overview](docs/memory-bank/01-overview.md) and [05-roadmap](docs/memory-bank/05-roadmap.md).
 2. Open the part that matches your task (table above).
 3. **Navigation / TOC work:** read [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) §22 first. It supersedes §6.71–§6.90; historical rationale stays in §6.
+4. **NG requirements or implementation:** read [10-ng-requirements](docs/memory-bank/10-ng-requirements.md) §23 first. It supersedes conflicting historical behavior in §6, §15–§17 and §22 for the new implementation.
 
 Cross-reference cheat sheet: `§6.*` → 03-design-decisions · `§13.*` → 06-llm-config · `§15–17` → 07-pipeline · `§22` → 09-navigation-scope.
 

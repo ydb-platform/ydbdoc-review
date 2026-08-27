@@ -1,0 +1,387 @@
+# Memory Bank: simplified NG requirements
+
+> Part of the [Memory Bank index](../../MEMORY_BANK.md).
+> Authoritative product contract for the new simplified translation pipeline.
+
+---
+
+## 23. Status and authority
+
+This section contains the requirements confirmed with the user on 2026-08-27.
+It supersedes conflicting historical implementation decisions for the NG work.
+Historical §6 entries remain useful as regression evidence, but are not authority
+for NG behavior when they disagree with §23.
+
+Requirements discovery must finish before deciding whether to retrofit the current
+code or write a clean implementation. No NG implementation starts before that gap
+analysis and explicit user approval.
+
+Return point before NG work: immutable tag `pre-ng-2026-08-27` at
+`1f04ab1c71488f53c4ad547c20c7e635d59696ad`.
+
+## 23.1 Commands and lifecycle
+
+### `doc_translate`
+
+- Production translation starts by applying the `doc_translate` label.
+- Eliza is a local fallback, not the default label workflow.
+- Only a merged source PR may run `doc_translate`.
+- Open and closed-unmerged PRs are rejected before scope planning, budget use and
+  model calls.
+- The official merge snapshot is mandatory. PR HEAD and ambient worktree are not
+  substitutes.
+- The source PR selects paths and initial direction. Content is taken from an
+  immutable snapshot of current `main` at run start.
+- The output is always a Draft PR. Automation never changes Draft to Ready and
+  never merges it.
+
+A repeated `doc_translate` on an unfinished translation is an explicit clean
+restart:
+
+1. Run ACL and budget gates before destructive actions.
+2. Close the old Draft with a clear replacement comment.
+3. Delete its remote translation branch.
+4. Discard accumulated `doc_continue` decisions and its continue counter.
+5. Create a new lineage, branch and Draft from current `main`.
+6. Retain the old transcript for the 14-day audit period.
+
+If the previous translation PR is already merged, the lineage is terminal.
+Another `doc_translate` creates nothing and reports that the translation was
+already merged. A new source PR is required for a new translation.
+
+### `doc_continue`
+
+- `/ydbdoc continue` continues an active translation lineage.
+- A continue run is a destructive rebuild. It discards every translation-branch
+  file and commit, including manual changes.
+- It starts from a new immutable snapshot of latest `main`.
+- It reuses the original merged PR scope and directions.
+- It replays all accumulated structured operator decisions and adds the new
+  natural-language instruction.
+- It force-updates the existing Draft branch.
+- Human edits should be made only after the last intended continue run.
+- A lineage permits at most three continue runs.
+- One continue comment may resolve multiple reported questions.
+- Missing or expired lineage context never degrades into a context-free continue.
+
+### `doc_verify`
+
+- `doc_verify` is allowed only on open PRs.
+- It is read-only for repository content.
+- It never creates or deletes a branch or PR, never commits, never pushes and
+  never applies a proposed repair.
+- It always posts a report, including on a technical verifier failure.
+
+## 23.2 Direction and full overwrite
+
+Direction is determined independently for every RU/EN locale pair in the
+original merged PR:
+
+- only RU changed: translate current RU to EN;
+- only EN changed: translate current EN to RU;
+- both changed: bilingual pair, no automatic overwrite, QA only;
+- one PR may contain different directions for different paths.
+
+For add and update, the complete current source file is translated and the target
+is completely overwritten. NG does not compute a historical delta, perform a
+three-way merge, preserve current target prose or retain target-only manual
+content. Later source changes already present in current `main` are intentionally
+included.
+
+If the source path selected by the original direction no longer exists in current
+`main`, the operation is `SUPERSEDED` and changes nothing. Historical source is
+not restored. Remaining orphan or TOC defects are left to QA and the external
+documentation build.
+
+If the final safe diff is empty, no translation PR is created. The source PR gets
+a clear comment explaining why translation is not required, with reasons per
+path.
+
+## 23.3 Semantic no-translation classifier
+
+After deterministic gates, a cheap model may decide with high confidence that
+there is no user-facing text to translate.
+
+- A confident semantic no-op creates persistent lineage, posts the explanation
+  on the source PR and creates no Draft.
+- Timeout, malformed response, model error or uncertainty means translation
+  continues. The filter is fail-open.
+- `/ydbdoc continue всё равно переводи` records `force_translation=true`, skips
+  the negative semantic verdict and spends one continue attempt.
+- The override is retained by subsequent rebuilds.
+- It overrides only the semantic classifier. It does not override merged-only,
+  single-language rules, bilingual classification, `SUPERSEDED`, ACL, budget,
+  safety gates or continue limits.
+
+## 23.4 Add, update, delete and redirects
+
+NG v1 has no logical move operation. GitHub rename and `removed + added` are
+processed as independent delete and add operations.
+
+For a source delete:
+
+- delete the target mirror;
+- remove the exact target href from the corresponding target TOC;
+- do not scan every Markdown file for inbound links;
+- try to determine an old-to-new redirect only from clear evidence;
+- never guess a redirect destination.
+
+If old-to-new mapping is uncertain, publish every safe independent change in a
+Draft and produce a red report with a concrete question. A tech writer may answer
+through `/ydbdoc continue`. The answer becomes an exact structured mapping for
+this lineage and is replayed on the next full rebuild.
+
+Remaining inbound links are discovered by QA or the external docs build. A tech
+writer may use continue to name exact locations that must be removed or retargeted.
+
+## 23.5 TOC
+
+Only minimal scoped TOC edits are allowed:
+
+- add the missing target href for a scoped add;
+- remove the exact target href for a delete;
+- translate only the label of that entry;
+- place it under a target parent only when the parent is unambiguous.
+
+NG never rebuilds or mirrors a whole TOC. Ambiguity creates a red structured
+question in clear Russian. The question names the exact TOC, candidate parents,
+label or duplicate entries. The operator answers in natural language through
+continue. The decision is stored only in that lineage and replayed on rebuild.
+
+## 23.6 Single-language manifest
+
+The central manifest initially contains only:
+
+```yaml
+single_language_patterns:
+  - public-materials/*
+```
+
+Patterns apply to locale-relative paths and the complete subtree in both locales.
+Matching pages are not translated, do not require mirrors and do not require
+RU/EN TOC parity. They are reported as `SKIPPED: single_language`.
+
+Local Markdown/YFM validity, local links, includes and reachability are still
+checked. NG does not infer or add patterns automatically.
+
+## 23.7 Dependencies, images and companion files
+
+The dependency closure starts from every scoped source document and follows only
+explicit locale-local include and image references. It does not scan neighboring
+directories. Canonical paths are processed once and cycles stop without error.
+
+- The source article has depth `0`.
+- Default maximum depth is `3`.
+- A depth overflow is red and shows the complete path chain in Russian.
+- The report includes a ready `/ydbdoc continue` example to permit a larger
+  depth for that exact article and chain.
+- A depth exception is stored as a structured lineage decision and does not
+  raise the global default.
+- Maximum unique dependency files per source article comes from
+  `YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE`, currently `100`.
+- The file-count limit is hard and cannot be overridden by continue.
+
+Images `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.svg` are copied from source
+locale to target locale byte-for-byte in either direction. OCR is not used. Text
+inside raster images and SVG is not analyzed or translated. The report lists
+source path, target path, size and content hash. Byte and hash equality are
+mandatory.
+
+Main Markdown/YFM pages and locale-specific Markdown includes are translated
+fully in either direction.
+
+Companion text allowlist:
+
+```text
+.yaml .yml .json .txt
+.c .cc .cpp .cxx .h .hh .hpp .hxx .inc
+```
+
+For RU to EN companions, NG finds natural-language Cyrillic in comments and
+human-facing string literals and translates it without changing syntax, keys,
+identifiers, paths, URLs, placeholders or technical literals. Residual
+translatable Cyrillic or damaged syntax is red. After two failed safe attempts,
+the unsafe companion output is omitted while independent safe changes may remain
+in the Draft.
+
+For EN to RU companions, the complete file is copied as-is. English comments and
+technical prose are acceptable because programmers understand English. This
+exception never applies to Markdown/YFM documentation or documentation includes.
+
+An unknown required companion type is not guessed. It produces a red report with
+the exact path.
+
+## 23.8 External URLs
+
+For RU to EN:
+
+1. An already-English external URL is retained.
+2. For a RU wiki URL, NG attempts an authoritative EN alternative through page
+   metadata or an unambiguous locale substitution and verifies that it exists.
+3. If mapping is not found, or the URL is another RU external resource, NG places
+   a stable placeholder in the translated Draft.
+4. A placeholder is always red and cannot pass verification.
+5. One exact original URL has one placeholder throughout the lineage.
+6. The report lists every location and provides a command such as
+   `/ydbdoc continue используй <EN URL> вместо <RU URL>`.
+7. The answer becomes an exact source-to-target URL mapping for the lineage and
+   is applied to every exact occurrence on rebuild.
+
+For EN to RU, external English URLs are retained. Russian documentation may link
+to English resources.
+
+## 23.9 One verification core
+
+Internal checking in `doc_translate` and `doc_continue`, and external read-only
+`doc_verify`, must use exactly one pure verification core. Duplicate prompts,
+validators, severity rules and verdict logic are prohibited.
+
+The verifier receives a fully materialized immutable case containing source and
+target snapshots, scope, directions, candidate overlay, pending deletes, manifest,
+dependency closure, operator mappings and versioned configuration. It does not
+read an ambient worktree or select another git ref.
+
+The verifier performs no filesystem, Git or GitHub writes. It returns a stable
+structured verdict, issues, evidence, suggested actions and metrics. Equal input
+must produce equal verification semantics regardless of the caller.
+
+`doc_verify` evaluates the actual bytes of the open PR. A hypothetical in-memory
+repair can never make the unchanged PR green.
+
+## 23.10 Two-model translation and repair loop
+
+Translation and criticism use independent model roles:
+
+1. Model A creates the initial translation.
+2. Model B verifies it through the shared verifier.
+3. If red issues exist, model B repairs only the reported problems.
+4. Model A verifies the repaired candidate in a fresh context.
+5. If red issues remain, model A performs the second and final repair.
+6. Model B performs the third and final verification.
+
+Every repair is followed by all deterministic checks and the same verifier.
+There are at most two repair cycles and three verification passes. If red issues
+remain, safe output is published in a red Draft and unsafe output is omitted.
+
+If a critic returns invalid structured output, NG asks that model once to repair
+the format, then tries the configured fallback critic once. If no valid verdict
+is produced, the result is red and clearly says that translation quality could
+not be checked. It does not invent translation defects.
+
+## 23.11 `doc_verify` scope
+
+- A bot translation PR is checked against the exact source snapshot, paths and
+  directions recorded in its lineage.
+- In an ordinary PR where both RU and EN mirrors changed, verifier checks semantic
+  and structural equivalence without declaring either locale authoritative.
+- In an ordinary PR where only RU or only EN changed, verifier reports red
+  `MISSING_LOCALE_TRANSLATION` and lists exact missing mirror paths.
+- Single-language manifest paths are exempt from mirror requirements.
+- Only the PR scope and its local dependencies are checked. NG does not scan the
+  whole repository for legacy parity defects.
+
+## 23.12 Severity
+
+Verifier has three user-facing outcomes:
+
+- red `BLOCKED`: merge is not allowed and the Action fails;
+- yellow `PASS_WITH_WARNINGS`: merge is allowed and the Action succeeds;
+- green `PASS`: no problems, Action succeeds.
+
+Red includes lost or distorted meaning, incomplete translation, broken structure,
+links, code, placeholders, TOC, unresolved dependencies, residual translatable
+Cyrillic, unsafe output and unavailable critic.
+
+Yellow includes style, readability, optional wording and punctuation suggestions
+without semantic loss. Yellow alone does not start repair. If repair is already
+running because of a red issue, a related yellow issue may be fixed with it.
+
+Color never changes Draft to Ready. A human controls Ready and merge.
+
+## 23.13 Report contract
+
+One canonical bot comment is updated for each new run.
+
+A green report is short. It shows checked commit, direction, file and dependency
+counts, check categories, repairs used and final result. Detailed files, copied
+images, mappings, exceptions, models, tokens, cost and versions remain available
+under technical details.
+
+A red report is detailed and written in clear Russian. Every blocker contains:
+
+- exact target file and source file when relevant;
+- reliable line or line range on the exact checked commit;
+- a short exact fragment;
+- what existed in source and what changed or disappeared in target;
+- a concrete action;
+- a ready continue command when the lineage can resolve it.
+
+Internal jargon such as `fenced block violation` is forbidden as the explanation.
+The report says that a code block was lost, a marker was not closed, a command was
+changed, or Cyrillic remained. Residual Cyrillic reports exact file, line and
+fragment.
+
+If a line cannot be determined reliably, use the heading, Markdown element,
+YAML/JSON path, TOC hierarchy or exact fragment. Never present an approximate
+line as exact. Rebuild recalculates every location against the new commit SHA.
+
+Blocking issues cannot be hidden behind an `and N more` summary. Prefer one large
+comment to many inline comments. If GitHub cannot fit all blockers, split the
+report into numbered parts without dropping red issues.
+
+For an active translation lineage, a red report includes attempts already made,
+the exact next action and a ready `/ydbdoc continue` command. For an ordinary
+human PR, it gives a manual fix instruction because the bot cannot modify that
+branch.
+
+## 23.14 ACL, budget and retention
+
+All model-backed `doc_*` CI entry points and `/ydbdoc continue` are restricted by
+the repository variable `YDBDOC_ALLOWED_ACTORS`.
+
+Confirmed actors:
+
+```text
+sintjuri,SixOnMyface,nataliaboldyreva,ayakivosklznak
+```
+
+The allowlist is an anti-abuse gate and is checked before model work.
+
+Daily spending uses repository variable `YDBDOC_DAILY_BUDGET_RUB` and the Moscow
+calendar day. The sum includes every paid LLM call made by `doc_translate`,
+`doc_continue` and `doc_verify`. Keep the budget behavior intentionally simple:
+
+- before a model-backed run, read actual cost already recorded for today;
+- if actual spending is already at or above the limit, reject the run before
+  model calls and before destructive branch actions;
+- if spending is below the limit, allow the run;
+- a small overrun caused by the last admitted run is acceptable;
+- do not implement advance estimates, reservations or complex concurrency logic;
+- record actual cost after every run and show it in the report.
+
+Run records, actual costs, lineage decisions, snapshots, reports and full model
+transcripts are retained for 14 days. Secrets and token values are never stored or
+printed. Expired context produces an explicit explanation and cannot be used by
+continue.
+
+`YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE` controls the hard dependency count per
+source article. Its confirmed current value is `100`.
+
+## 23.15 External documentation build
+
+NG is translation CI only. It does not start, wait for or interpret the external
+documentation build. The tech writer separately reviews the NG report, the docs
+build and the Draft content.
+
+## 23.16 Open decisions
+
+The following decisions are intentionally still open:
+
+1. Exact persistent branch naming for a clean repeated `doc_translate`.
+2. Exact stable external URL placeholder representation.
+3. Exact wiki domains or resolver allowlist for automatic RU-to-EN mapping.
+4. Final retrofit-versus-rewrite choice after requirements gap analysis.
+
+---
+
+[Back to Memory Bank index](../../MEMORY_BANK.md)
