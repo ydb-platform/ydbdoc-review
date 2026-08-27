@@ -488,6 +488,23 @@ When repairable and operator-required red issues coexist, NG performs up to two
 repairs for the repairable subset and retains the operator-required blockers in
 the final report.
 
+### Atomic safe publication
+
+The atomic publication unit is an operation bundle rooted at one scoped document.
+It contains the target document, every mandatory include, required images and
+companion files, minimal TOC edits, and deletes or redirects belonging to that
+root operation.
+
+A bundle enters the Draft only as a complete deterministic-safe unit. NG never
+publishes a TOC href without its page, a page without a mandatory include, or only
+one half of a required delete and TOC update. If a mandatory member is unsafe, the
+whole bundle is omitted. Independent safe bundles from the same source PR may be
+published in the red Draft and are listed explicitly.
+
+A dependency shared by multiple bundles is included when it is safe and required
+by at least one published bundle. An unsafe shared dependency blocks every bundle
+that requires it.
+
 If a critic returns invalid structured output, NG asks that model once to repair
 the format, then tries the configured fallback critic once. If no valid verdict
 is produced, the result is red and clearly says that translation quality could
@@ -610,29 +627,27 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Atomic publication unit for a safe subset when another part of the candidate
-   is unsafe.
-2. Conflict policy when one canonical dependency is reached from root documents
+1. Conflict policy when one canonical dependency is reached from root documents
    with opposite translation directions.
-3. Exact reference syntaxes that bring companion files into dependency closure.
-4. Whether glossary drift blocks only glossary-scoped runs or every translation
+2. Exact reference syntaxes that bring companion files into dependency closure.
+3. Whether glossary drift blocks only glossary-scoped runs or every translation
    that reads the glossaries as terminology input.
-5. Whether model A and model B must always have different model identifiers and
+4. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-6. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-7. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-8. Exact files counted by the per-root dependency limit of 100.
-9. Whether a depth exception raises the whole root closure limit or only one
+5. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+6. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+7. Exact files counted by the per-root dependency limit of 100.
+8. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-10. Exact human actor used by ACL for label events and continue comments.
-11. Report and Action behavior when ACL or budget rejects `doc_verify` before
+9. Exact human actor used by ACL for label events and continue comments.
+10. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-12. Canonical comment location for source lifecycle, Draft QA and ordinary
+11. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-13. Cost recording behavior when a job crashes after one or more paid calls.
-14. Scope behavior for deleted assets that cannot be reached from current source
+12. Cost recording behavior when a job crashes after one or more paid calls.
+13. Scope behavior for deleted assets that cannot be reached from current source
     content.
-15. Final retrofit-versus-rewrite choice after every requirement above is closed
+14. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
