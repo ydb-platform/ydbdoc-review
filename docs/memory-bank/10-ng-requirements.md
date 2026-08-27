@@ -264,12 +264,21 @@ Companion text allowlist:
 .c .cc .cpp .cxx .h .hh .hpp .hxx .inc
 ```
 
-For RU to EN companions, NG finds natural-language Cyrillic in comments and
-human-facing string literals and translates it without changing syntax, keys,
-identifiers, paths, URLs, placeholders or technical literals. Residual
-translatable Cyrillic or damaged syntax is red. After two failed safe attempts,
-the unsafe companion output is omitted while independent safe changes may remain
-in the Draft.
+For RU to EN companions, NG translates only the human-language locations allowed
+for that file type without changing syntax, keys, identifiers, paths, URLs,
+placeholders or technical literals. Residual Cyrillic is blocking only in a
+location that the file-type policy says must be translated. Damaged syntax is
+always blocking. After two failed safe attempts, the unsafe companion output is
+omitted while independent safe changes may remain in the Draft.
+
+For YAML, including Markdown YAML front matter, the only translatable locations
+are comments and scalar values whose exact key is `title` or `description`. Every
+other YAML key and value is preserved exactly, even if it contains Cyrillic. The
+verifier treats such preserved values as intentional and does not report residual
+Cyrillic there. Comments, `title` and `description` are translated RU to EN. For
+EN to RU companion YAML the general as-is rule still applies. Markdown front
+matter remains part of the documentation, so its comments, `title` and
+`description` follow the document direction in both directions.
 
 For EN to RU companions, the complete file is copied as-is. English comments and
 technical prose are acceptable because programmers understand English. This
