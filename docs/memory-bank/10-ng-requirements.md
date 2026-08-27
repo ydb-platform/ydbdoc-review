@@ -105,6 +105,19 @@ already merged. A new source PR is required for a new translation.
 - A stale per-source lock expires after two hours.
 - Work on an unrelated source PR is not blocked by this lock.
 
+### Command labels
+
+- `doc_translate` and `doc_verify` are one-shot command labels, not persistent PR
+  state.
+- The bot removes the command label immediately after receiving its labeled event.
+- It removes the label both when the job is accepted and when a gate rejects it.
+- Removing the label does not cancel or alter an accepted job.
+- A later run requires the user to apply the label again, which guarantees a new
+  labeled event.
+- The bot never removes unrelated persistent labels.
+- Every accepted or rejected event receives a clear comment, so label removal
+  cannot be mistaken for a successful launch.
+
 ## 23.2 Direction and full overwrite
 
 Direction is determined independently for every RU/EN locale pair in the
