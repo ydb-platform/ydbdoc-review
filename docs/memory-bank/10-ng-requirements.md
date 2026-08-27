@@ -739,6 +739,13 @@ calendar day. The sum includes every paid LLM call made by `doc_translate`,
 - do not implement advance estimates, reservations or complex concurrency logic;
 - record actual cost after every run and show it in the report.
 
+Cost persistence happens immediately after every completed paid LLM response, not
+only at job end. Each record is idempotent by `run_id + call_id`. A final job
+summary aggregates those call records. If the job crashes later, all already
+recorded calls still count toward the Moscow-day budget. When a timeout or provider
+failure returns no usage data, NG does not invent an estimate; the operational
+report shows only usage actually returned by the provider.
+
 Run records, actual costs, lineage decisions, snapshots, reports and full model
 transcripts are retained for 14 days. Secrets and token values are never stored or
 printed. Expired context produces an explicit explanation and cannot be used by
@@ -776,10 +783,9 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Cost recording behavior when a job crashes after one or more paid calls.
-2. Scope behavior for deleted assets that cannot be reached from current source
+1. Scope behavior for deleted assets that cannot be reached from current source
     content.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
