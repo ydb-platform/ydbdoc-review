@@ -270,6 +270,13 @@ the normal unresolved URL placeholder. Every other wiki domain is treated as an
 ordinary external resource and requires an exact operator mapping through
 `doc_continue`.
 
+Wikipedia fragments are handled conservatively. A URL without a fragment uses
+the resolved EN article. A fragment is retained only if that exact fragment
+exists on the resolved EN page. NG does not translate or semantically match a RU
+section title. If the exact fragment does not exist, the complete URL becomes an
+unresolved placeholder and the report asks for a full EN URL including the
+correct fragment.
+
 ## 23.9 One verification core
 
 Internal checking in `doc_translate` and `doc_continue`, and external read-only
