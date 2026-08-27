@@ -343,6 +343,22 @@ Plain-text path mentions, comments, code-fence strings, HTML and unknown syntaxe
 do not expand scope and are not guessed with regular expressions. An ordinary
 link to another Markdown article does not expand scope.
 
+Recursive traversal follows this exact matrix:
+
+- a root Markdown/YFM document and a Markdown documentation include may follow
+  parsed `{% include %}` nodes, parsed image references, and parsed ordinary local
+  links whose destination extension is in the companion allowlist;
+- an ordinary link to another Markdown article never expands scope;
+- YAML, JSON, TXT, C and C++ companions are leaves and never introduce another
+  dependency, even when their contents resemble paths or includes;
+- images are leaves;
+- TOC files use the separate navigation contract and do not expand article
+  dependency closure;
+- HTML, code fences and plain-text path mentions introduce nothing.
+
+Every followed include, image or companion edge increments depth by one. A
+companion changed directly by the original source PR is a root at depth `0`.
+
 - The source article has depth `0`.
 - Default maximum depth is `3`.
 - A depth overflow is red and shows the complete path chain in Russian.
@@ -870,14 +886,12 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Recursive dependency traversal matrix by source file type and parsed reference
-   syntax.
-2. Bounded call-state machine for translator, repairer and critic technical
+1. Bounded call-state machine for translator, repairer and critic technical
    failures, including fallback limits and terminal statuses.
-3. Exact 14-day lineage expiry clock and refresh behavior.
-4. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+2. Exact 14-day lineage expiry clock and refresh behavior.
+3. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-5. Final retrofit-versus-rewrite choice after every requirement above is closed
+4. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
