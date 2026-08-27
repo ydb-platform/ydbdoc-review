@@ -496,6 +496,22 @@ Translation and criticism use independent model roles:
 5. If red issues remain, model A performs the second and final repair.
 6. Model B performs the third and final verification.
 
+Model A and model B must have different model identifiers. Different prompts for
+one model do not count as independence. Separate model families are preferred but
+not required.
+
+Translator and critic model identifiers come from configured ordered rotation
+lists. At run start NG deterministically selects two distinct identifiers and
+keeps that pair fixed for the complete run. A later `doc_translate` or
+`doc_continue` advances the rotation and may use another pair. A technical
+fallback is allowed only when the effective A and B identifiers remain distinct.
+If no independent pair is available, the result is red and says in Russian that
+independent verification is unavailable.
+
+The report records every model call by role and pass: initial translator, first
+critic and repair, second critic and repair, final critic, including any fallback.
+It shows exact model identifiers, tokens and cost.
+
 Every repair is followed by all deterministic checks and the same verifier.
 There are at most two repair cycles and three verification passes. If red issues
 remain, safe output is published in a red Draft and unsafe output is omitted.
@@ -664,22 +680,20 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Whether model A and model B must always have different model identifiers and
-   what fallback combinations are allowed.
-2. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-3. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-4. Exact files counted by the per-root dependency limit of 100.
-5. Whether a depth exception raises the whole root closure limit or only one
+1. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+2. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+3. Exact files counted by the per-root dependency limit of 100.
+4. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-6. Exact human actor used by ACL for label events and continue comments.
-7. Report and Action behavior when ACL or budget rejects `doc_verify` before
+5. Exact human actor used by ACL for label events and continue comments.
+6. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-8. Canonical comment location for source lifecycle, Draft QA and ordinary
+7. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-9. Cost recording behavior when a job crashes after one or more paid calls.
-10. Scope behavior for deleted assets that cannot be reached from current source
+8. Cost recording behavior when a job crashes after one or more paid calls.
+9. Scope behavior for deleted assets that cannot be reached from current source
     content.
-11. Final retrofit-versus-rewrite choice after every requirement above is closed
+10. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
