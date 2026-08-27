@@ -238,19 +238,22 @@ there is no user-facing text to translate.
 
 For a bilingual pair classified as `NO_TRANSLATION`, `doc_translate` creates a
 continue-capable no-Draft lineage retained for 14 days. The source-PR report
-presents exactly two ready choices:
+presents exactly two ready choices for each affected canonical locale pair. Each
+choice includes the exact source path, for example:
 
 ```text
-/ydbdoc continue всё равно переводи с русского
-/ydbdoc continue всё равно переводи с английского
+/ydbdoc continue всё равно переводи с русского ydb/docs/ru/core/a.md
+/ydbdoc continue всё равно переводи с английского ydb/docs/en/core/a.md
 ```
 
 The operator chooses only after reading that report. The selected locale is
 stored as authority and the following `doc_continue` performs the destructive
 rebuild and translation without another authority question. A bilingual command
-that merely says `всё равно переводи` is rejected before snapshot, model or branch
-work; the bot repeats the two valid commands. This rejected instruction does not
-consume one of the three continue attempts.
+without a path is accepted only when exactly one bilingual pair in the lineage is
+waiting for this decision. With multiple waiting pairs it is rejected before
+snapshot, model or branch work, and the bot repeats the path-specific commands.
+One continue comment may contain decisions for multiple exact paths. A rejected
+ambiguous instruction does not consume one of the three continue attempts.
 
 Cheap semantic classification uses a configured ordered fallback chain. A timeout,
 malformed response or technical failure advances to the next classifier model.
@@ -1122,9 +1125,7 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Scope of a bilingual `force_translation` authority choice when multiple locale
-   pairs received `NO_TRANSLATION` in one lineage.
-2. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
