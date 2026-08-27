@@ -285,6 +285,27 @@ question in clear Russian. The question names the exact TOC, candidate parents,
 label or duplicate entries. The operator answers in natural language through
 continue. The decision is stored only in that lineage and replayed on rebuild.
 
+There is one explicit exception when the corresponding target TOC file does not
+exist. If a source TOC exists, NG unconditionally creates the target TOC at the
+same locale-relative path. It mirrors the complete source hierarchy and order,
+translates labels and mirrors hrefs to the target locale. Missing target TOC is
+therefore not an operator conflict.
+
+If the target TOC already exists, NG does not overwrite or fully mirror it. Only
+scoped entries are changed. For an insertion, NG selects the mirrored source TOC
+path and exact mirrored ancestor href chain. It inserts after the nearest previous
+source sibling already present in target, otherwise before the nearest following
+sibling, otherwise at the end of the one unambiguous parent. Multiple target TOCs,
+parents, duplicate hrefs or contradictory sibling order produce an operator
+question.
+
+When a newly created target TOC contains a source entry whose target page does not
+exist and is outside translation scope, NG retains a working source-locale href.
+This is yellow, not red. The Russian report names the TOC, line and href, permits
+merge, and recommends a separate PR to replace the link after that page becomes
+available in the target language. A link into `single_language_patterns` is
+preserved without a warning.
+
 ## 23.6 Single-language manifest
 
 The central manifest initially contains only:
@@ -849,16 +870,14 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Deterministic target TOC selection and entry ordering before an ambiguity is
-   escalated to the operator.
-2. Recursive dependency traversal matrix by source file type and parsed reference
+1. Recursive dependency traversal matrix by source file type and parsed reference
    syntax.
-3. Bounded call-state machine for translator, repairer and critic technical
+2. Bounded call-state machine for translator, repairer and critic technical
    failures, including fallback limits and terminal statuses.
-4. Exact 14-day lineage expiry clock and refresh behavior.
-5. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
+3. Exact 14-day lineage expiry clock and refresh behavior.
+4. Lifecycle and recovery for manually closed Draft, deleted branch, Draft changed
    to Ready, or inconsistent GitHub objects.
-6. Final retrofit-versus-rewrite choice after every requirement above is closed
+5. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
