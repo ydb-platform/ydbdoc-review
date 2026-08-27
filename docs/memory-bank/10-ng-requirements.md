@@ -636,6 +636,14 @@ target exists in the immutable current-main snapshot or is created by the same
 translation candidate. If no EN target exists, NG keeps the working RU link. It
 does not insert a placeholder and does not make the report red.
 
+When an internal link has a fragment, NG rewrites the locale path only if the
+mirrored target contains that exact fragment. If the mirrored page exists but the
+exact fragment does not, NG keeps the complete working source-locale link,
+including its original path and fragment. It never rewrites only the path and
+never asks an LLM to match translated headings. The retained link is yellow and
+the report gives its exact file, line, URL and a recommendation for a separate
+link-fix PR after the target anchor exists.
+
 The retained RU link produces a yellow warning with the exact target file, line
 and URL. The Russian report says that the RU link was preserved because the EN
 page is not available, merge is allowed, and recommends creating a separate PR
@@ -1142,12 +1150,11 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Internal-link fragment behavior.
-2. Direct TOC-only source operations.
-3. Scope of glossary verification for unrelated drift.
-4. Reclassification of an originally bilingual pair after one side becomes
+1. Direct TOC-only source operations.
+2. Scope of glossary verification for unrelated drift.
+3. Reclassification of an originally bilingual pair after one side becomes
    `SUPERSEDED` on current `main`.
-5. Final retrofit-versus-rewrite choice after every requirement above is closed
+4. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
