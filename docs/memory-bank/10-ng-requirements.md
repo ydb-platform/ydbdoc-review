@@ -591,6 +591,14 @@ Matching is case-insensitive for hostnames, path-language segments and query
 parameter names and values after standard URL parsing. Text fetched from an
 external page and an LLM language guess never participate in this classification.
 
+Internal `ydb.tech/docs/...` recognition is performed before external-language
+classification. For every other external URL, NG collects all explicit language
+markers from hostname, path and query. Only RU markers mean Russian; only EN
+markers mean English; no markers mean language-neutral. If both RU and EN markers
+occur, NG assigns neither a precedence nor a guessed language. The complete URL
+uses the normal red unresolved placeholder and the report asks for one exact
+replacement through `doc_continue`.
+
 Wikipedia fragments are handled conservatively. A URL without a fragment uses
 the resolved EN article. A fragment is retained only if that exact fragment
 exists on the resolved EN page. NG does not translate or semantically match a RU
@@ -1114,7 +1122,9 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Scope of a bilingual `force_translation` authority choice when multiple locale
+   pairs received `NO_TRANSLATION` in one lineage.
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
