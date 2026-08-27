@@ -61,6 +61,12 @@ restart:
 5. Create a new lineage, branch and Draft from current `main`.
 6. Retain the old transcript for the 14-day audit period.
 
+The translation branch name is deterministic: `ydbdoc-review/pr-N`, where `N`
+is the merged source PR number. A clean restart deletes the old branch and then
+creates a new branch with the same name. There can be only one active translation
+branch and one active Draft for a source PR, but the new Draft is a new PR and a
+new lineage.
+
 If the previous translation PR is already merged, the lineage is terminal.
 Another `doc_translate` creates nothing and reports that the translation was
 already merged. A new source PR is required for a new translation.
@@ -393,10 +399,9 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact persistent branch naming for a clean repeated `doc_translate`.
-2. Exact stable external URL placeholder representation.
-3. Exact wiki domains or resolver allowlist for automatic RU-to-EN mapping.
-4. Final retrofit-versus-rewrite choice after requirements gap analysis.
+1. Exact stable external URL placeholder representation.
+2. Exact wiki domains or resolver allowlist for automatic RU-to-EN mapping.
+3. Final retrofit-versus-rewrite choice after requirements gap analysis.
 
 ---
 
