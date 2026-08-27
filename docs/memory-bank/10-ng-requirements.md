@@ -370,6 +370,17 @@ the normal unresolved URL placeholder. Every other wiki domain is treated as an
 ordinary external resource and requires an exact operator mapping through
 `doc_continue`.
 
+Automatic Wikipedia mapping is confirmed only when the official Wikipedia API
+returns an existing canonical EN page. Wikipedia redirects are followed to that
+canonical URL. Timeout, `429`, `5xx` and network failure mean unresolved rather
+than proof that a page is absent, so NG uses the normal placeholder and reports
+the technical reason.
+
+An exact URL supplied by an authorized tech writer through continue is
+authoritative. NG validates only that it is a syntactically valid absolute
+`https://` URL and does not make network availability a gate. Other external
+links are not probed with generic `HEAD` or `GET` requests.
+
 Wikipedia fragments are handled conservatively. A URL without a fragment uses
 the resolved EN article. A fragment is retained only if that exact fragment
 exists on the resolved EN page. NG does not translate or semantically match a RU
@@ -680,20 +691,19 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-2. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-3. Exact files counted by the per-root dependency limit of 100.
-4. Whether a depth exception raises the whole root closure limit or only one
+1. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+2. Exact files counted by the per-root dependency limit of 100.
+3. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-5. Exact human actor used by ACL for label events and continue comments.
-6. Report and Action behavior when ACL or budget rejects `doc_verify` before
+4. Exact human actor used by ACL for label events and continue comments.
+5. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-7. Canonical comment location for source lifecycle, Draft QA and ordinary
+6. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-8. Cost recording behavior when a job crashes after one or more paid calls.
-9. Scope behavior for deleted assets that cannot be reached from current source
+7. Cost recording behavior when a job crashes after one or more paid calls.
+8. Scope behavior for deleted assets that cannot be reached from current source
     content.
-10. Final retrofit-versus-rewrite choice after every requirement above is closed
+9. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
