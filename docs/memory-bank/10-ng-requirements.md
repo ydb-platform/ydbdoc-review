@@ -804,6 +804,15 @@ opposite-direction conflict rule applies only when bundles in both directions us
 the same differing term. A directly changed entry unused by any article follows
 the standalone entry-level glossary rules.
 
+There is one rare explicit conflict instead of another precedence layer. If a
+one-locale direct glossary change would trigger full glossary synchronization in
+one direction while an article bundle uses a differing entry in the opposite
+direction, NG does not choose automatically. It omits the conflicting glossary
+entry and every article bundle that depends on it, reports the exact term,
+articles and two directions, and gives ready authority commands for
+`doc_continue`. Independent entries and bundles may still publish in the red
+Draft. The operator decision is stored in lineage and resolves the rebuild.
+
 If one term is required by opposite-direction bundles in the same run and the RU
 and EN definitions differ, NG does not choose authority. It reports a red conflict
 and asks the tech writer to select the authoritative locale through continue.
@@ -1244,10 +1253,8 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Priority between one-locale full glossary synchronization and the opposite
-   direction of an article that uses an otherwise unchanged glossary entry.
-2. Concurrent `doc_verify` behavior under the per-source lock.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+1. Concurrent `doc_verify` behavior under the per-source lock.
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
