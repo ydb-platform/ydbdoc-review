@@ -119,6 +119,23 @@ If the final safe diff is empty, no translation PR is created. The source PR get
 a clear comment explaining why translation is not required, with reasons per
 path.
 
+Some blocked runs may create lineage but no Draft because no safe diff exists yet.
+Until a Draft exists, `/ydbdoc continue` is accepted only in the merged source PR
+and lineage is resolved by that source PR number. The source comment must clearly
+explain:
+
+- that translation was started but no Draft could be created;
+- the exact blocking reason and affected files;
+- that the lineage is stored for 14 days;
+- that continue must be written in this source PR;
+- a ready command or concrete answer example;
+- that the first continue producing a safe diff will create a Draft;
+- the remaining continue attempts.
+
+After a Draft is created, later continue commands are accepted only in the active
+translation PR. A command posted in the wrong PR performs no model work and replies
+with a clear Russian explanation and a link to the correct comment location.
+
 ## 23.3 Semantic no-translation classifier
 
 After deterministic gates, a cheap model may decide with high confidence that
