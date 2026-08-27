@@ -467,6 +467,24 @@ does not maintain a second manually duplicated terminology YAML as a separate
 source of truth. The exact glossary snapshots used by a run are recorded in
 reproducibility metadata.
 
+Every translation opportunistically harmonizes glossary entries actually used by
+its operation bundles. This is an explicit allowed scope expansion:
+
+- for a RU-to-EN bundle, the current RU glossary entry is authoritative and the
+  EN entry is added or fully synchronized from it;
+- for an EN-to-RU bundle, the current EN entry is authoritative and the RU entry
+  is added or fully synchronized from it;
+- unrelated glossary drift is not changed by that run;
+- glossary edits are included in the same Draft and pass the shared verifier;
+- the report has a clear Russian section listing added and updated term entries;
+- an unsafe glossary edit blocks only bundles that use that term.
+
+If one term is required by opposite-direction bundles in the same run and the RU
+and EN definitions differ, NG does not choose authority. It reports a red conflict
+and asks the tech writer to select the authoritative locale through continue.
+Repeated normal translations therefore harmonize the actively used glossary over
+time without a separate mass rewrite.
+
 ## 23.10 Two-model translation and repair loop
 
 Translation and criticism use independent model roles:
@@ -646,24 +664,22 @@ build and the Draft content.
 
 The following decisions are intentionally still open:
 
-1. Whether glossary drift blocks only glossary-scoped runs or every translation
-   that reads the glossaries as terminology input.
-2. Whether model A and model B must always have different model identifiers and
+1. Whether model A and model B must always have different model identifiers and
    what fallback combinations are allowed.
-3. Exact HTTP policy for proving that an external or Wikipedia URL exists.
-4. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
-5. Exact files counted by the per-root dependency limit of 100.
-6. Whether a depth exception raises the whole root closure limit or only one
+2. Exact HTTP policy for proving that an external or Wikipedia URL exists.
+3. Terminal behavior for a `doc_translate` whose entire scope is bilingual.
+4. Exact files counted by the per-root dependency limit of 100.
+5. Whether a depth exception raises the whole root closure limit or only one
     exact chain.
-7. Exact human actor used by ACL for label events and continue comments.
-8. Report and Action behavior when ACL or budget rejects `doc_verify` before
+6. Exact human actor used by ACL for label events and continue comments.
+7. Report and Action behavior when ACL or budget rejects `doc_verify` before
     semantic verification.
-9. Canonical comment location for source lifecycle, Draft QA and ordinary
+8. Canonical comment location for source lifecycle, Draft QA and ordinary
     read-only verify.
-10. Cost recording behavior when a job crashes after one or more paid calls.
-11. Scope behavior for deleted assets that cannot be reached from current source
+9. Cost recording behavior when a job crashes after one or more paid calls.
+10. Scope behavior for deleted assets that cannot be reached from current source
     content.
-12. Final retrofit-versus-rewrite choice after every requirement above is closed
+11. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
