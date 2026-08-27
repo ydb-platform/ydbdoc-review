@@ -758,6 +758,24 @@ and asks the tech writer to select the authoritative locale through continue.
 Repeated normal translations therefore harmonize the actively used glossary over
 time without a separate mass rewrite.
 
+Glossary verification scope depends on why the glossary entered the run:
+
+- when the merged source PR directly changed exactly one locale glossary, the
+  established full synchronization applies and the complete resulting glossary
+  pair is verified;
+- when the source PR directly changed both glossaries, only entries changed by
+  that PR are harmonized and semantically compared;
+- when an ordinary document bundle opportunistically brings glossary entries
+  into scope, only the deterministically used entries are harmonized and
+  semantically compared.
+
+The general statement that a term present in only one glossary is blocking is
+therefore scoped to the entries selected above. Historical drift in unrelated
+entries is not changed and does not block the current PR; it may be listed as a
+yellow existing debt. Whole-file structural failures that prevent safe parsing,
+including duplicate explicit anchors or unclosed Markdown/YFM structure, remain
+red regardless of semantic entry scope because NG cannot safely edit that file.
+
 Glossary usage is detected deterministically. An operation bundle uses an entry
 only when a scoped Markdown/YFM document contains either:
 
@@ -1166,10 +1184,9 @@ answer is replayed on the destructive rebuild.
 
 The following decisions are intentionally still open:
 
-1. Scope of glossary verification for unrelated drift.
-2. Reclassification of an originally bilingual pair after one side becomes
+1. Reclassification of an originally bilingual pair after one side becomes
    `SUPERSEDED` on current `main`.
-3. Final retrofit-versus-rewrite choice after every requirement above is closed
+2. Final retrofit-versus-rewrite choice after every requirement above is closed
     and a separate implementation gap analysis is complete.
 
 ---
