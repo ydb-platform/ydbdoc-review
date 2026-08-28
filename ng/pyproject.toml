@@ -1,0 +1,13 @@
+[project]
+name = "ydbdoc-review-ng"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["ydb[yc]==3.31.2"]
+
+[project.scripts]
+ydbdoc-review-ng = "ydbdoc_review_ng.cli:main"
+ydbdoc-review-ng-launch = "ydbdoc_review_ng.launch:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

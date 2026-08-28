@@ -1,0 +1,21 @@
+{
+  "capture": {
+    "completed_at_utc": "2026-08-28T04:13:32Z",
+    "git": "2.50.1 (Apple Git-155)",
+    "github_api_version": "2022-11-28",
+    "github_cli": "2.92.0",
+    "python": "3.14.6",
+    "request_count": 49,
+    "request_ids_sha256": "65cd7aa515db5a69f6db33f0846b700375d1294ab47031e05b8751c011115a33",
+    "started_at_utc": "2026-08-28T03:58:14Z"
+  },
+  "counts": {
+    "blobs": 24,
+    "lookups": 40,
+    "not_found": 6,
+    "raw_responses": 49
+  },
+  "domain": "ydbdoc-review-ng/pr-45949/provenance-root/v2",
+  "provenance_root": "9646b5c786ffc7adedf8e31f1deb3f7d99d1f9b2d5088589e378fd5628561ed6",
+  "schema_version": "pr-fixture-provenance/v2"
+}
