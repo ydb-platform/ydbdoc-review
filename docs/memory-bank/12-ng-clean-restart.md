@@ -159,6 +159,22 @@ deleted. Both clean-room repositories were recreated empty. Nothing from this
 harness may be copied forward except the two RCA reports and the requirements
 clarifications recorded in this section.
 
+### 25.1.5 Stage 1 contract-schema attempt 1
+
+The first Stage 1 contract-schema attempt failed independent adversarial review
+and was discarded. It incorrectly wrote contract artifacts into the runtime
+repository, violating the rule that the runtime repository remains empty through
+formal Phase 0 PASS. The review also demonstrated that nested arbitrary payloads,
+embedded `NG-AC` and finding claims, and production test controls passed the
+schemas. External boundaries, real-YDB inspection and health/capabilities
+invocation were incomplete, while the meta-tests did not exercise OpenAPI,
+conditional constraints or the demonstrated evasions.
+
+Verdict: **STAGE 1 ATTEMPT 1 FAIL**. All generated runtime contents were deleted,
+the empty runtime repository was reinitialized, and Stage 1 must be authored from
+scratch only in the acceptance repository. No artifact from this attempt is a
+template, and stages 2–5 remain blocked.
+
 ## 25.2 Exact repository and distribution recommendation
 
 Create **two new repositories**, not another subproject in this repository and
