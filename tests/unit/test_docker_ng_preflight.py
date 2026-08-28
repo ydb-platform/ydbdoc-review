@@ -12,6 +12,7 @@ def test_docker_installs_ng_real_contract_and_runner():
     assert "ng/tests/test_state_contract.py ng/tests/test_real_ydb_state.py" in docker
     assert "pip install --no-cache-dir /app/ng pytest==8.3.5" in docker
     assert "COPY scripts/run_ng_real_ydb_preflight.py" in docker
+    assert "COPY scripts/run_ng_real_contract.py /app/scripts/run_ng_real_contract.py" in docker
 
 
 def test_accepted_ng_bytes_match_frozen_manifest():

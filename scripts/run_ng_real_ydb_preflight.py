@@ -202,10 +202,12 @@ def run(environment: Mapping[str, str]) -> int:
             key_file.write(secret)
         _validate_key_document(secret)
         command = [
-            sys.executable, "-m", "pytest", "/app/ng/tests/test_real_ydb_state.py",
-            f"--junitxml={report_path}", "-q",
+            sys.executable, "/app/scripts/run_ng_real_contract.py", f"--junitxml={report_path}",
         ]
-        if _run_bounded(command, child_environment, TEST_TIMEOUT_SECONDS) != 0:
+        contract_code = _run_bounded(command, child_environment, TEST_TIMEOUT_SECONDS)
+        if contract_code != 0:
+            if contract_code == 86:
+                raise PreflightError("В контейнере не удалось загрузить SDK YDB. Перевод не запускался.")
             marker_error = _junit_init_error(report_path)
             if marker_error is not None:
                 raise marker_error
