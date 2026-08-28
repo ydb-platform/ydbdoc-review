@@ -211,6 +211,21 @@ pinning belong to harness-owned executable controls, not JSON Schema. Product
 implementation, product-repository creation and `doc_translate` remain prohibited
 until formal Phase 0 PASS.
 
+### 25.1.8 Acceptance Trust Kernel attempt 1
+
+The first implementation of Deliverable A failed independent adversarial testing.
+Its 24 authored tests passed, but reviewer-owned mutations obtained false passes
+in all four mandatory risk classes. Capabilities and acceptance destinations were
+forgeable, YDB authority was a driver-supplied boolean, nested observation state
+and captured-byte evidence were not independently frozen/revalidated, stale
+boolean barriers were not bound to a process/request/session identity, and the
+gateway's receipt/commit/flush sequence was only in-memory bookkeeping rather
+than an authoritative durable transport record.
+
+Verdict: **DELIVERABLE A ATTEMPT 1 TEST FAIL**. The uncommitted attempt cannot be
+frozen or used by Deliverable B. Two independent RCAs must establish a coherent
+attempt-2 trust-root and causality design before a developer changes the code.
+
 ## 25.2 Exact repository and distribution recommendation
 
 Use **two repositories in sequence**, not another subproject in this repository
