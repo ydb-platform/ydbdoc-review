@@ -17,15 +17,15 @@ SPEC.loader.exec_module(LAUNCHER)
 def test_imports_ydb_before_pytest_and_runs_only_exact_contract():
     order, calls = [], []
     original = builtins.__import__
-    fake_pytest = types.SimpleNamespace(main=lambda args: calls.append(args) or 0)
+    fake_pytest = types.SimpleNamespace(main=lambda args: calls.append(args) or 7)
     def importing(name, *args, **kwargs):
         if name == "ydb": order.append(name); return object()
         if name == "pytest": order.append(name); return fake_pytest
         return original(name, *args, **kwargs)
     with patch("builtins.__import__", side_effect=importing):
-        assert LAUNCHER.main(["--junitxml=/safe/report.xml"]) == 0
+        assert LAUNCHER.main(["--junitxml=/safe/report.xml"]) == 7
     assert order == ["ydb", "pytest"]
-    assert calls == [["/app/ng/tests/test_real_ydb_state.py", "--junitxml=/safe/report.xml", "-vv", "-s"]]
+    assert calls == [["/app/ng/tests/test_real_ydb_state.py", "--junitxml=/safe/report.xml", "-vv", "-s", "-x"]]
     assert "-q" not in calls[0]
 
 

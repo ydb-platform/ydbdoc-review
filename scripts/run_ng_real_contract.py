@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         print("PYTEST_INIT_IMPORT", file=sys.stderr)
         return PYTEST_IMPORT_FAILURE
-    return int(pytest.main([REAL_CONTRACT, f"--junitxml={args.junitxml}", "-vv", "-s"]))
+    return int(pytest.main([REAL_CONTRACT, f"--junitxml={args.junitxml}", "-vv", "-s", "-x"]))
 
 
 if __name__ == "__main__":
