@@ -25,7 +25,8 @@ def test_imports_ydb_before_pytest_and_runs_only_exact_contract():
     with patch("builtins.__import__", side_effect=importing):
         assert LAUNCHER.main(["--junitxml=/safe/report.xml"]) == 0
     assert order == ["ydb", "pytest"]
-    assert calls == [["/app/ng/tests/test_real_ydb_state.py", "--junitxml=/safe/report.xml", "-q"]]
+    assert calls == [["/app/ng/tests/test_real_ydb_state.py", "--junitxml=/safe/report.xml", "-vv", "-s"]]
+    assert "-q" not in calls[0]
 
 
 def test_ydb_preload_failure_is_fixed_sanitized_and_never_imports_pytest(capsys):
