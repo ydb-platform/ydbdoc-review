@@ -1,23 +1,47 @@
-# Memory Bank: simplified NG implementable specification
+# Memory Bank: simplified NG behavioral specification
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).
-> Developer and independent-tester handoff for the §23 product contract.
+> Behavioral and protocol handoff for the §23 product contract. The failed
+> in-repository implementation topology and work order are superseded by §25.
 
 ---
 
 ## 24. Status, authority and version
 
-- **Status:** SPEC PASS
-- **Specification version:** 1.0.1
-- **Specification date:** 2026-08-27
+- **Status:** BEHAVIORAL SPEC PASS; IMPLEMENTATION NOT ACCEPTED
+- **Specification version:** 1.0.3
+- **Specification date:** 2026-08-28
 - **Product authority:** [§23 NG requirements](10-ng-requirements.md)
-- **Implementation strategy:** REWRITE_CORE, as fixed by §23.17
+- **Implementation strategy:** CLEAN_ROOM_DISTRIBUTION, as fixed by §23.17 and
+  §25
 - **Recovery point:** tag **pre-ng-2026-08-27**, commit
   **1f04ab1c71488f53c4ad547c20c7e635d59696ad**
 
-This document is normative for implementation details, interfaces and tests. It
-MUST NOT change a product decision from §23. If this document and §23 conflict,
-§23 wins and implementation MUST stop until the specification is corrected.
+**Review note for v1.0.3:** the second independent RCA proved that unconditional
+post-response durability cannot be guaranteed over the configured synchronous
+provider APIs: the process can die after the provider accepts a paid request but
+before its result reaches YDB. §24 now specifies the derived §23 safety rule with
+durable pre-request state, at-most-once dispatch, explicit `UNKNOWN_BILLED`, a
+current-Moscow-day paid-work gate and authoritative reconciliation. No usage or
+cost is invented. Version 1.0.2's implementability correction remains in force:
+top-level Actions run-name contains provisional event PR metadata only, while
+persisted identity is authoritative for source/lineage matching.
+
+**Clean-restart note for 2026-08-28:** all three implementations built from this
+handoff failed independent acceptance. Their code and in-tree tests were deleted.
+The §24 behavioral rules, strict DTO definitions, `UNKNOWN_BILLED` protocol and
+NG-AC semantics remain the frozen contract baseline. The in-repository package
+topology in §24.2, legacy-reuse allowance, migration order in §24.17,
+topology-specific NG-AC-001..003 wording and implementation-first work breakdown
+in §24.20 are historical and MUST NOT be followed. §25 replaces them with a new
+distribution, no legacy import closure and an independently reviewed red-first
+acceptance harness. Cutover and NG `doc_translate` are prohibited meanwhile.
+
+This document is normative for behavior, DTOs and protocols except where §25
+explicitly replaces topology, test ownership, work order or migration mechanics.
+It MUST NOT change a product decision from §23. If this document and §23
+conflict, §23 wins and implementation MUST stop until the specification is
+corrected.
 Historical §6, §15–§17 and §22 behavior is regression evidence only. It MUST NOT
 be imported into NG as an unstated requirement.
 
@@ -56,8 +80,10 @@ required.
   attached to the bundle or a mandatory shared dependency.
 - **operator decision**: a typed, lineage-scoped answer extracted from an
   authorized continue comment.
-- **model attempt**: exactly one paid provider request. Provider adapters MUST
-  NOT retry internally.
+- **model attempt**: one durable call identity for which the provider adapter is
+  invoked at most once. Provider adapters MUST NOT retry internally. An attempt
+  may end with a recorded result or with unknown billing after an ambiguous
+  process failure.
 - **verification pass**: deterministic validation of the complete case plus one
   critic attempt sequence for every critic unit.
 - **terminal report**: the canonical Russian comment updated after every accepted
@@ -120,109 +146,25 @@ NG v1 MUST NOT:
 
 ## 24.2 Package architecture and import boundaries
 
-The production implementation MUST live below **src/ydbdoc_review/ng/**:
+The v1.0.3 in-repository package topology and exact-symbol legacy reuse model were
+exercised by three failed attempts and are withdrawn. They are not retained here
+as a template.
 
-~~~text
-ng/
-  domain/
-    enums.py ids.py events.py manifest.py snapshot.py
-    scope.py bundles.py lineage.py verification.py reports.py
-  application/
-    command_router.py gates.py translate.py continue_command.py verify.py
-    planning.py model_loop.py publication.py recovery.py
-  services/
-    manifest_builder.py pair_classifier.py dependency_planner.py
-    document_policy.py companion_policy.py link_policy.py
-    toc_policy.py redirect_policy.py glossary_policy.py
-    verifier.py case_hash.py report_renderer.py
-  ports/
-    github.py snapshots.py models.py persistence.py artifacts.py
-    wikipedia.py clock.py
-  adapters/
-    github_rest.py pinned_git.py yandex_model.py eliza_model.py
-    ydb_persistence.py s3_artifacts.py wikipedia_api.py
-    legacy_primitives.py
-  entrypoints/
-    github_event.py cli.py
-  config.py
-~~~
+The effective architecture is §25.2 through §25.4:
 
-Dependency direction is strict:
+- a separate `ydbdoc-review-ng` repository and `ydbdoc_ng` distribution;
+- a separate `ydbdoc-review-ng-acceptance` repository;
+- black-box process or OCI testing with no production imports;
+- no `ydbdoc_review` or failed-NG dependency anywhere in the source, build or
+  runtime closure;
+- a strict domain/application/verifier/control-plane/ports/adapters structure;
+- an independently reviewed red acceptance harness before product coding.
 
-1. **domain** imports only the Python standard library and other **ng.domain**
-   modules.
-2. **ports** imports only **ng.domain**, typing and standard-library abstractions.
-3. **services** imports only **ng.domain**, **ng.ports** and explicitly approved
-   pure primitives through **adapters.legacy_primitives**.
-4. **application** imports **ng.domain**, **ng.ports** and **ng.services**.
-5. **adapters** implement ports. They MAY import third-party SDKs and approved
-   low-level transport or parsing symbols.
-6. **entrypoints** assemble adapters and application handlers. No policy is
-   allowed in an entrypoint.
-
-### 24.2.1 Hard forbidden imports
-
-No module below **ng/** may import any of these legacy policy roots:
-
-~~~text
-ydbdoc_review.github.workflow
-ydbdoc_review.harness
-ydbdoc_review.pipeline
-ydbdoc_review.navigation.scope_planner
-ydbdoc_review.pipeline.navigation_merge
-ydbdoc_review.translation.differential
-ydbdoc_review.translation.critic
-ydbdoc_review.translation.critic_retranslate
-ydbdoc_review.translation.repair
-ydbdoc_review.reporting.builder
-ydbdoc_review.ops.lifecycle
-ydbdoc_review.ops.feedback_ctx
-~~~
-
-The ban includes dynamic imports, string-based plugin imports and re-export
-aliases. Legacy modules MUST NOT import **ng.domain**, **ng.services** or
-**ng.application**. The sole migration exception is the production command router,
-which MAY import **ng.entrypoints.github_event** after cutover.
-
-An AST-based import-boundary test MUST fail on:
-
-- a forbidden absolute or relative import;
-- a non-adapter import of any module outside **ydbdoc_review.ng**;
-- an adapter import absent from the exact-symbol allowlist;
-- a cycle between domain, services, application, ports or adapters;
-- more than one GitHub-write-capable command router.
-
-### 24.2.2 Reuse rule and current-code anchors
-
-Codebase graph inspection shows the existing orchestration is concentrated in
-**github.workflow.run_doc_translate**, **run_doc_continue** and **run_doc_verify**;
-those functions call each other and legacy scope, publication and reporting
-policy. They MUST NOT be reused.
-
-The following are candidates, not automatic approvals:
-
-- Markdown/YFM AST and **parsing.markdown_parser.parse_markdown**;
-- basic rendering in **rendering.markdown_renderer.render_markdown**;
-- selected segmentation and placeholder leaf functions;
-- basic path normalization;
-- direction-neutral structural validators;
-- low-level GitHub REST methods such as **GitHubClient.get_pull** and fully
-  paginated **GitHubClient.iter_pull_files**;
-- pinned git blob access;
-- YDB/S3 byte transport;
-- report location helpers.
-
-Every reused symbol MUST have a characterization test proving: deterministic
-output, no ambient filesystem/environment/network access unless it is explicitly
-a transport adapter, no mutation of inputs, no policy choice, no hidden retries
-and no legacy DTO in its public signature. Approval is recorded in one checked-in
-exact-symbol allowlist consumed by the import test. Importing an entire legacy
-directory is forbidden.
-
-The current model clients hide retry and fallback loops. NG MUST expose a new
-single-attempt model port. Provider-specific adapters perform exactly one request
-and return usage or one typed failure. NG owns all retry, rotation, transcript and
-cost behavior.
+The model port remains at-most-once. One invocation performs at most one provider
+request and never retries internally. Optional authoritative reconciliation
+returns only an exact recovered result, proof of non-acceptance/non-billing, or
+INCONCLUSIVE. The application owns selection, rotation, transcript, call-state
+and cost behavior.
 
 ## 24.3 Normative enums
 
@@ -273,6 +215,8 @@ IssueClass = MODEL_REPAIRABLE | OPERATOR_REQUIRED | DETERMINISTIC |
 BundleState = PLANNED | CANDIDATE | SAFE | OMITTED | PUBLISHED | NOOP
 ModelRole = CLASSIFIER | TRANSLATOR_A | CRITIC_B | REPAIR_B |
   CRITIC_A | REPAIR_A | FINAL_CRITIC_B
+ModelCallState =
+  RESERVED | RESULT_RECORDED | RECONCILED_NOT_BILLED | UNKNOWN_BILLED
 CallOutcome =
   SUCCESS | TIMEOUT | PROVIDER_ERROR | MALFORMED | FORMAT_REPAIR_FAILED |
   FALLBACK_EXHAUSTED
@@ -520,14 +464,18 @@ ModelAttemptRecord(
   actual: ModelIdentifier,
   prompt_version: str,
   request_sha256: Digest,
+  state: ModelCallState,
+  provider_request_id: str | None,
+  reconciliation_evidence_sha256: Digest | None,
   response_sha256: Digest | None,
-  outcome: CallOutcome,
+  outcome: CallOutcome | None,
   failure_code: str | None,
   input_tokens: int | None,
   output_tokens: int | None,
   cost_rub: Decimal | None,
-  started_at: datetime,
-  finished_at: datetime
+  reserved_at: datetime,
+  reservation_moscow_day: date,
+  finished_at: datetime | None
 )
 
 VerificationCase(
@@ -603,6 +551,17 @@ VerificationResult(
 19. An active Draft lineage stores the exact latest A/B identifiers and final
     verification case hash. A later configuration reorder MUST NOT silently
     reinterpret **model_rotation_index** as a different historical model pair.
+20. A ModelAttemptRecord starts as **RESERVED** with null outcome, response,
+    tokens, cost and finished_at. The exact call ID may be dispatched to its
+    provider at most once. **RESULT_RECORDED** has a non-null outcome and
+    finished_at. **RECONCILED_NOT_BILLED** has authoritative evidence, null
+    response/tokens/cost, outcome PROVIDER_ERROR and a typed failure code.
+    **UNKNOWN_BILLED** has
+    null response/tokens/cost, a billing-unknown failure code and no inferred
+    outcome. Unknown cost is never serialized as zero.
+21. **reservation_moscow_day** is the Europe/Moscow calendar date containing
+    reserved_at and never changes. Authoritative reconciliation evidence is
+    content-addressed, secret-free and tied to the exact provider/call identity.
 
 ## 24.5 Event contract, gates, locks and terminal outcomes
 
@@ -665,9 +624,11 @@ Every labeled event follows this exact order:
     status, pair-shape, single-language and supported-type rules, without reading
     file content. Classify the run as **model_capable** exactly when those
     operations can create a classifier, translator or critic unit under §24.9.2.
-12. If model_capable, read Moscow-day actual spend and apply budget. A proven
-    deterministic-only, single-language-only or unsupported-only run skips the
-    budget gate because it can make no paid call.
+12. If model_capable, read Moscow-day actual spend and unresolved
+    **UNKNOWN_BILLED** rows. Reject paid work when actual spend is at or above
+    budget or any unresolved unknown belongs to the current Moscow day. A proven
+    deterministic-only, single-language-only or unsupported-only run skips both
+    paid-work denials because it can make no paid call.
 13. If model_capable, validate model configuration can supply the possible roles
     and, for translation/continue, at least one distinct A/B pair.
 14. Only now capture content snapshots, perform content-dependent planning, call
@@ -684,8 +645,9 @@ step-2/step-3 transaction boundary; a domain CommandEvent is emitted only after
 binding, and no later phase permits null.
 
 All rejections remove the label, post a Russian terminal report, make no model
-call or content/branch mutation and fail the Action. A terminal ALREADY_COMPLETE
-or NO_SUPPORTED_SCOPE result passes the Action.
+call or content/branch mutation and fail the Action. An unresolved-billing denial
+is distinct from a spent-budget denial and MUST NOT present unknown cost as zero.
+A terminal ALREADY_COMPLETE or NO_SUPPORTED_SCOPE result passes the Action.
 
 The lock key is **repository + source_pr**. For an ordinary PR verify, its own PR
 number is the source key. For a translation Draft, lineage lookup supplies the
@@ -695,16 +657,50 @@ IDs. Work on a different source key proceeds independently.
 
 ### 24.5.3 Active-run preflight
 
-All pages of GitHub Actions workflow runs are queried for the three NG workflows
-and statuses QUEUED or IN_PROGRESS. Each workflow uses the stable run name:
+The top-level GitHub Actions **run-name** is display metadata known when the
+**pull_request_target: labeled** workflow run is created. It MUST use only
+immutable fields present in that labeled event:
 
 ~~~text
-ydbdoc-ng source=<N> lineage=<lineage-id-or-none> command=<Command>
+ydbdoc-ng event_pr=<P> command=<Command>
 ~~~
 
-The current Actions run ID is excluded. A match on source number or resolved
-lineage blocks the command. The report MUST show command, creation/start time and
-HTML URL. No local queue is created. The lock remains the race-safe second check.
+**P** is the number of the PR on which the command label was applied. The
+top-level run name MUST NOT contain, encode or be parsed as authoritative
+**source_pr** or **lineage_id**. In particular, NG MUST NOT infer lineage from
+free-form PR title, body or branch text inside a workflow expression.
+
+After step 6 of §24.5.2 resolves command identity, the run MUST atomically persist
+an active-run identity in **ng_runs** containing repository, Actions run ID,
+event PR, command, resolved source PR and resolved lineage ID or null. For an
+ordinary DOC_VERIFY, **source_pr == event_pr** and lineage is null. For
+DOC_TRANSLATE, **source_pr == event_pr**; lineage may remain null until the new
+lineage is created. For DOC_CONTINUE and DOC_VERIFY on a recognized NG Draft,
+source PR and lineage are the exact values resolved from retained lineage or the
+strictly parsed Draft marker under the normal lineage rules. A display title is
+never lineage evidence.
+
+All pages of queued or in-progress runs for the three NG workflows MUST still be
+queried. The current Actions run ID is excluded. Every other Actions run ID is
+joined to its persisted **ng_runs** identity. A resolved candidate conflicts when
+its source PR equals the current resolved source PR or when both non-null lineage
+IDs are equal. If two matching runs observe each other, only the later tuple
+**(Actions created_at, Actions run ID)** is rejected; the earlier run is allowed
+to continue, so the preflight cannot reject both runs symmetrically.
+
+A queued candidate may not yet have a persisted resolved identity. If its event
+PR equals the current event PR, it is a provisional conflict and the same ordering
+rule applies. Otherwise NG MUST NOT guess its source PR or lineage from the run
+name. The per-source compare-and-set lock in step 10 remains the authoritative
+race-safe guard for unresolved candidates and for two runs resolving
+concurrently. No local queue is created.
+
+A preflight or lock rejection MUST show the conflicting command, event PR,
+resolved source PR and lineage when known, creation/start time and exact GitHub
+Actions HTML URL. After identity resolution, the same event PR, source PR,
+lineage, command, Actions run ID and workflow URL MUST be written to the job
+summary and to the next canonical acknowledgement or terminal report. The
+workflow's top-level display name is not the audit record.
 
 ### 24.5.4 Terminal mapping
 
@@ -1337,6 +1333,26 @@ and critic attempt_index 2 is the fallback after a format-repair failure. The
 resulting operation_id/role/pass_index/attempt_index tuple is unique in one run
 and deterministically derives call_id.
 
+Before invoking any state-machine arrow that calls a provider, NG MUST:
+
+1. compare-and-set one **RESERVED** ModelAttemptRecord for the deterministic
+   call_id, including request digest, provider/model, reserved_at and
+   reservation_moscow_day;
+2. invoke the provider adapter for that call_id at most once;
+3. compare-and-set the complete typed result, returned usage/cost and response
+   artifact as **RESULT_RECORDED** before parsing or using the result.
+
+A resumed **RESERVED** call is never dispatched again. Recovery first records
+**UNKNOWN_BILLED**, stops the current unit and all later paid units, and produces
+TECHNICAL_FAILURE. If the provider exposes authoritative exact-request lookup,
+reconciliation MAY subsequently replace UNKNOWN_BILLED with RESULT_RECORDED or
+RECONCILED_NOT_BILLED. Inconclusive lookup, a provider without that capability,
+local logs, operator text and cost estimates cannot resolve the state. A resolved
+original result is consumed on delivery recovery without a second provider call;
+a proven-not-billed attempt follows its already selected state-machine failure
+edge. This durability protocol wraps classifier, translator, critic, format
+repair and repair calls identically.
+
 ### 24.9.3 Classifier state machine
 
 For each classification unit, including one exact glossary-entry unit, call each
@@ -1850,6 +1866,7 @@ run outcomes.
 ~~~text
 ACL_DENIED                         BLOCKED OPERATIONAL
 BUDGET_EXHAUSTED                   BLOCKED OPERATIONAL
+MODEL_CALL_BILLING_UNKNOWN         BLOCKED OPERATIONAL
 CONCURRENT_RUN                     BLOCKED OPERATIONAL
 LOCK_HELD                          BLOCKED OPERATIONAL
 SOURCE_NOT_MERGED                  BLOCKED OPERATIONAL
@@ -1941,10 +1958,16 @@ ng_lineages
 
 ng_runs
   PK (repository, run_id)
-  delivery_id, label_timeline_event_id, command, source_pr, lineage_id,
+  delivery_id, label_timeline_event_id, command, event_pr,
+  source_pr nullable until §24.5.2 step 6, lineage_id,
   actions_run_id, actor, model_capable, phase, outcome, main_sha, checked_sha,
   started_at, finished_at, report_sha256, expires_at
+  INDEX (repository, actions_run_id)
   INDEX (repository, source_pr, started_at)
+
+At delivery claim, **event_pr** is persisted and **source_pr** is null. Step 6
+fills **source_pr** and **lineage_id** in the same identity update before
+active-run preflight.
 
 ng_deliveries
   PK (repository, delivery_id)
@@ -1963,10 +1986,14 @@ ng_decisions
 ng_model_calls
   PK (repository, run_id, call_id)
   source_pr, lineage_id, operation_id, role, pass_index, attempt_index,
-  provider, model, outcome, failure_code, input_tokens, output_tokens,
-  cost_rub nullable, moscow_day, started_at, finished_at, transcript_object_key,
-  expires_at
-  INDEX (repository, moscow_day)
+  provider, model, prompt_version, request_sha256, state,
+  provider_request_id nullable, reconciliation_evidence_sha256 nullable,
+  outcome nullable, failure_code nullable, response_sha256 nullable,
+  input_tokens nullable, output_tokens nullable, cost_rub nullable,
+  reserved_at, reservation_moscow_day, finished_at nullable,
+  transcript_object_key nullable, expires_at, revision
+  INDEX (repository, reservation_moscow_day, state)
+  INDEX (repository, finished_at)
 
 ng_verification_cache
   PK (repository, case_sha256)
@@ -2015,8 +2042,9 @@ created_at and expires_at. Reads verify digest.
   or returns the existing terminal result; it never removes another label or
   starts another run.
 - Paid call key: run_id plus deterministic
-  **operation_id/role/pass_index/attempt_index**. Cost insert is compare-and-set
-  and idempotent.
+  **operation_id/role/pass_index/attempt_index**. The RESERVED insert and every
+  later state change are compare-and-set. Once dispatch may have begun, neither
+  duplicate delivery nor stale-lock takeover invokes that call ID again.
 - Decision identity: lineage plus source comment ID plus normalized decision
   ordinal.
 - Comment identity: owner PR plus lifecycle/QA kind. Bodies are updated, not
@@ -2024,13 +2052,33 @@ created_at and expires_at. Reads verify digest.
 - Publication identity: run ID plus tree digest. A repeated push is allowed only
   if the remote already equals the recorded commit.
 
-Actual cost is persisted immediately after each completed paid response, before
-the response is used. Missing usage stays null. Daily spend sums non-null actual
-cost by Europe/Moscow day. **moscow_day** is the Moscow calendar date containing
-ModelAttemptRecord.finished_at, the instant the paid response completed and its
-cost became recordable; a call crossing midnight is not charged to started_at.
-Admission is allowed when spend is below budget and may overrun only through
-admitted calls.
+The RESERVED row is committed before invoking the provider. A returned adapter
+result and its response artifact are committed as RESULT_RECORDED before the
+result is parsed or used. Missing usage stays null. Daily actual spend sums
+non-null actual cost by the Europe/Moscow date containing finished_at. A call
+crossing midnight is charged to its completion day. Admission is allowed when
+spend is below budget and may overrun only through admitted calls.
+
+Separately, any unresolved UNKNOWN_BILLED row whose reservation_moscow_day is the
+current Europe/Moscow date blocks all new paid model calls, regardless of known
+spend. It does not block a metadata-proven zero-call run and stops blocking at
+the next Moscow-day boundary. Its unknown cost is not included as zero or as an
+estimate. The row and reconciliation audit remain retained for 14 days.
+
+Allowed model-call transitions are exactly:
+
+~~~text
+ABSENT -> RESERVED
+RESERVED -> RESULT_RECORDED
+RESERVED -> UNKNOWN_BILLED
+UNKNOWN_BILLED -> RESULT_RECORDED
+UNKNOWN_BILLED -> RECONCILED_NOT_BILLED
+~~~
+
+RESULT_RECORDED and RECONCILED_NOT_BILLED are terminal. UNKNOWN_BILLED remains
+unresolved until one of its two authoritative transitions. No transition returns
+to RESERVED, changes call identity/request digest/provider, overwrites a recorded
+result or accepts a manually asserted cost.
 
 ### 24.12.4 Checkpoints and crash recovery
 
@@ -2068,11 +2116,20 @@ label is present, so the event-ID compare followed by deletion cannot target a
 newer application. Missing/incomplete timeline pagination is technical failure,
 not permission to issue an unbound DELETE.
 
-A crash after a paid response retains cost and transcript. A crash before accepted
-continue completion does not refresh lineage expiry, but the same delivery resumes
-the already consumed attempt. A different delivery cannot run while the live lock
-exists. After stale-lock takeover it must resume/close the prior mutation journal
-before starting new work.
+A recovered RESERVED model call means dispatch may have occurred. Before any
+further paid call, recovery compare-and-sets it to UNKNOWN_BILLED and MUST NOT
+dispatch it again. If the provider supports authoritative lookup tied to the exact
+call/request identity, a reconciler may persist the exact recovered result as
+RESULT_RECORDED or persist provider proof of non-acceptance/non-billing as
+RECONCILED_NOT_BILLED. Reconciliation is monotonic and audited; UNKNOWN_BILLED
+cannot be cleared from operator input, local absence of a response, timeout
+classification or guessed usage. Providers without authoritative lookup leave
+the state unresolved.
+
+A crash before accepted continue completion does not refresh lineage expiry, but
+the same delivery resumes the already consumed attempt. A different delivery
+cannot run while the live lock exists. After stale-lock takeover it must
+resume/close the prior mutation journal before starting new work.
 
 If report persistence succeeds but GitHub comment update fails, the run remains
 TECHNICAL_FAILURE and recovery retries the canonical comment without rerunning
@@ -2279,6 +2336,29 @@ force choice.
 Изменения веток и вызовы моделей не выполнялись.
 ~~~
 
+Unresolved billing is rendered separately and never called a spent-budget
+result:
+
+~~~text
+🔴 Не удалось подтвердить расход на вызов модели
+
+Перевод не проверялся. Вызов [call_id] модели [provider/model] мог быть принят
+провайдером, но его результат и стоимость не удалось надёжно записать.
+Повторно этот вызов не запускался. Стоимость неизвестна и не считается нулевой.
+Новые платные вызовы заблокированы до [next_day_utc] UTC ([next_day_msk] МСК)
+или до подтверждения провайдером. Проверки без вызовов моделей не блокируются.
+[retry_instruction]
+Изменения веток после этого сбоя не выполнялись.
+~~~
+
+For an active translation lineage, **retry_instruction** identifies the merged
+source PR and explains that a later `doc_translate` is a clean destructive
+restart. For an ordinary open PR it says to reapply `doc_verify` later and never
+suggests the merged-only command on that PR. If authoritative reconciliation
+resolves the call earlier, the canonical report is updated with the exact
+provider result or proof that it was not billed; no manually supplied price or
+usage is accepted.
+
 ### 24.14.8 Concurrency denial
 
 ~~~text
@@ -2436,7 +2516,9 @@ actor, continue_comment_author, model_capable, phase, outcome,
 source_manifest_sha256, main_sha, checked_sha, case_sha256,
 bundle_id, root_path, direction, issue_rule_id,
 model_role, pass_index, attempt_index, provider, model,
-call_id, call_outcome, input_tokens, output_tokens, actual_cost_rub,
+call_id, model_call_state, call_outcome, provider_request_id,
+reservation_moscow_day, reconciliation_evidence_sha256,
+input_tokens, output_tokens, actual_cost_rub,
 lock_holder_run_id, duration_ms, retryable_boolean, failure_code
 ~~~
 
@@ -2450,7 +2532,8 @@ Required counters/histograms:
 - manifest pages/entries and contradiction failures;
 - roots, dependency counts/depth overflows/cycles;
 - classifier verdicts and exhaustion;
-- model attempts, fallback, malformed and failure by role/model;
+- model attempts, fallback, malformed and failure by role/model, including
+  RESERVED recovery, UNKNOWN_BILLED age and authoritative reconciliation result;
 - input/output tokens and actual RUB;
 - verifier verdicts/issues by stable rule ID;
 - bundles safe/omitted/published and publication mutations;
@@ -2459,70 +2542,45 @@ Required counters/histograms:
 - report/comment update failures and recovery actions.
 
 Audit records MUST permit reconstruction of who issued each label and instruction,
-what exact bytes and config were used, every model attempt/cost, every decision,
-every GitHub mutation and final result. They are retained 14 days.
+what exact bytes and config were used, every model attempt/state/cost, whether
+each call ID could have been dispatched, every authoritative reconciliation
+record, every decision, every GitHub mutation and final result. They are retained
+14 days.
 
 ## 24.17 Migration, cutover and rollback
 
-Migration order:
+§25.9 is the only executable migration, cutover and rollback sequence. Cutover
+and NG `doc_translate` remain prohibited until its preconditions receive explicit
+independent PASS and human approval.
 
-1. Freeze §23 and this reviewed specification.
-2. Create isolated NG package and import-boundary test.
-3. Characterize and approve exact pure leaf symbols.
-4. Implement immutable domain and pure policy/services.
-5. Implement adapters with recorded fixtures; provider adapters prove one attempt.
-6. Run unit, property, contract, recorded-PR and fault-injection suites.
-7. Run read-only recorded-case comparison. Legacy output is diagnostic only and
-   never changes NG expectations.
-8. Disable command-label writes during deployment.
-9. Atomically route all three labels to NG and disable legacy writers.
-10. Run production smoke tests with no-op/fixture commands and re-enable labels.
+The retained behavioral invariants are:
 
-Legacy and NG MAY coexist in code, never as write-capable routers for the same
-labels. Existing legacy Drafts lack NG lineage and MUST NOT be continued or
-interpreted as NG translation lineages. DOC_VERIFY remains allowed because every
-open PR is verifiable: it treats such a Draft as an ordinary PR and checks its
-actual bytes under ordinary-PR scope. DOC_CONTINUE instructs a clean
-DOC_TRANSLATE restart from the merged source PR. Restart closes the old Draft and
-deletes its deterministic branch only after normal gates.
-
-Legacy restart discovery is fail-closed. A PR is eligible as the one old legacy
-translation only when GitHub reports its head ref as exactly
-**ydbdoc-review/pr-N** for source PR N, its base repository/branch as this
-repository's **main**, and its author as the authenticated GitHub identity
-returned for the configured NG write credential. That identity is resolved from
-GitHub and audited at deployment/runtime; it is not accepted from PR metadata or
-free text. Exactly
-one such open or closed-unmerged PR may be replaced. Multiple matches use the
-normal duplicate blocker. A branch with no such PR, a fork head, a different
-author/base or contradictory legacy metadata is not deleted or force-pushed; the
-restart is blocked for human reconciliation. An NG marker is never synthesized
-for the legacy PR, and its DOC_VERIFY remains ordinary read-only verification.
-
-Rollback:
-
-1. disable command labels;
-2. wait for or cancel all NG runs and verify locks/mutation journals;
-3. deploy the immutable recovery tag/commit;
-4. enable exactly one legacy router only after NG writer credentials are removed;
-5. do not interpret NG lineage as legacy context and do not auto-mutate existing
-   NG Drafts;
-6. record rollback reason and affected run/lineage IDs.
-
-Rollback is deployment recovery, not permission to restore historical policy into
-NG or to run both writers.
+- exactly one command-label writer at every instant;
+- existing legacy Drafts are not interpreted as NG lineage and cannot continue;
+- eventual verification treats a legacy Draft as an ordinary open PR;
+- legacy restart discovery is fail-closed on ownership, base, branch and
+  duplicates;
+- rollback revokes NG write capability before enabling one legacy writer;
+- NG Drafts, lineage, calls and effects are preserved for audit and never
+  auto-mutated by legacy.
 
 ## 24.18 Numbered acceptance criteria
 
 An implementation is not cutover-ready unless every applicable criterion has an
-automated test and all tests pass.
+independently authored executable test in the separate acceptance repository and
+all tests pass against the release OCI image. Product-owned unit tests are useful
+engineering evidence but cannot satisfy an NG-AC criterion by themselves.
 
 ### Authority and architecture
 
-- **NG-AC-001.** All production NG code is below **src/ydbdoc_review/ng/**.
-- **NG-AC-002.** The AST import test rejects every forbidden legacy policy import.
-- **NG-AC-003.** Every legacy import is an exact allowlisted symbol with passing
-characterization tests.
+- **NG-AC-001.** The production artifact is built only from the separate
+  `ydbdoc-review-ng` repository and exposes the `ydbdoc_ng` distribution through
+  one versioned executable contract.
+- **NG-AC-002.** Source, lockfile, wheel and OCI scans reject every
+  `ydbdoc_review` dependency and every legacy/failed-NG import, copy, plugin,
+  subprocess, sidecar or other runtime closure.
+- **NG-AC-003.** There is no legacy symbol allowlist. Legacy behavior is input
+  evidence only and never supplies an NG acceptance expectation.
 - **NG-AC-004.** Domain and pure verifier have no filesystem, environment, git,
 GitHub, clock, network or model access.
 - **NG-AC-005.** Provider adapters make exactly one request per invocation and hide
@@ -2549,17 +2607,29 @@ verification occurred.
 - **NG-AC-017.** Translate rejects open and closed-unmerged source PRs before
 manifest planning, budget use, model and branch work.
 - **NG-AC-018.** Verify rejects every non-open PR.
-- **NG-AC-019.** Budget denial for a metadata-proven model-capable run occurs
-before model and destructive branch work, shows limit/spend/next Moscow day and
-fails Action; a proven zero-paid-call run skips this denial.
-- **NG-AC-020.** Daily cost uses actual idempotent call records and Moscow calendar
-day; no advance estimate/reservation gates admission, and deterministic-only,
-single-language-only or unsupported-only scope does not consume budget admission.
-- **NG-AC-021.** Every completed paid response is cost-persisted before downstream
-processing.
-- **NG-AC-022.** Missing provider usage is not estimated.
-- **NG-AC-023.** Active-run preflight checks all pages, excludes current run, shows
-other command/start/link and makes zero model/branch changes.
+- **NG-AC-019.** A metadata-proven model-capable run is denied before model and
+destructive branch work when current Moscow-day actual spend is exhausted or
+that day has unresolved UNKNOWN_BILLED; the Russian report distinguishes the two,
+shows the applicable facts/next Moscow day and fails Action. A proven
+zero-paid-call run skips both denials.
+- **NG-AC-020.** Daily cost uses only actual idempotent call records and Moscow
+calendar boundaries. No RUB amount is reserved or estimated; the durable
+pre-request RESERVED marker is call safety, not spend. Deterministic-only,
+single-language-only and unsupported-only scope does not consume budget
+admission.
+- **NG-AC-021.** Every deterministic call ID is durably RESERVED before dispatch,
+is sent to its provider at most once, and records a returned result/cost before
+downstream use. Recovery of an ambiguous RESERVED call yields UNKNOWN_BILLED,
+stops later paid calls and never resends it; only exact authoritative provider
+evidence may record its result or prove it not billed.
+- **NG-AC-022.** Missing provider usage/cost is never estimated or stored as zero;
+unresolved billing remains null, is reported explicitly and blocks paid work only
+for its reservation Moscow day.
+- **NG-AC-023.** Active-run preflight checks all pages, excludes the current
+  Actions run ID, joins other run IDs to persisted event/source/lineage identity,
+  applies deterministic earlier-run precedence, and shows the conflicting
+  command/event PR/source/lineage/start/link without relying on source or lineage
+  text in **run-name**; it makes zero model or content-branch changes.
 - **NG-AC-024.** The per-source lock is compare-and-set, blocks all three commands
 for one lineage and does not block another source PR.
 - **NG-AC-025.** A lock cannot be stolen before two hours and can be recovered
@@ -2738,10 +2808,13 @@ issues never do.
 each differing bilingual glossary entry is one classifier unit, call indices and
 IDs follow the specified convention, a lifted shared dependency has one call unit
 rather than one per root, and there are no hidden segmentation calls.
-- **NG-AC-104.** Every call records exact role, pass, actual model, tokens, returned
-cost and failure before final report.
-- **NG-AC-105.** Plain Russian translator/critic failure recommends later clean
-translate and warns of destructive restart.
+- **NG-AC-104.** Every call records exact role, pass, actual model, durable call
+state, tokens, returned cost and failure before final report; an ambiguous call
+records UNKNOWN_BILLED with null usage/cost and its exact call identity.
+- **NG-AC-105.** Plain Russian translator/critic failure recommends the valid
+later retry and warns of destructive restart where applicable. Unknown billing
+instead explains at-most-once safety, the paid-work-until-next-Moscow-day block
+and that unknown cost was not treated as zero.
 
 ### Links
 
@@ -2891,18 +2964,22 @@ result with the explicit not-verified operational report.
 
 ### Retention, recovery and operations
 
-- **NG-AC-166.** Runs, actual costs, decisions, snapshots, reports and full
-transcripts have independent 14-day expiry and no secret values.
+- **NG-AC-166.** Runs, actual costs, RESERVED/UNKNOWN_BILLED call state,
+reconciliation evidence, decisions, snapshots, reports and full transcripts have
+independent 14-day expiry and no secret values.
 - **NG-AC-167.** Initial lineage expires 14 days after translate completes;
 accepted continue refreshes compact lineage only; verify/denials do not.
 - **NG-AC-168.** Expired open Draft cannot continue or become green; verify reports
 expiry/source from retained context or the non-secret Draft marker and only clean
 translate recovery; the marker alone can never restore verification context.
-- **NG-AC-169.** Cost idempotency key is run_id plus call_id and survives later
-crash.
+- **NG-AC-169.** The run_id plus call_id CAS survives crashes, permits at most one
+provider dispatch, and allows only the normative monotonic model-call state
+transitions.
 - **NG-AC-170.** Mutation journal recovers desired effects, blocks conflicts and
 never deletes/unconditional-force-pushes unrecorded human state.
-- **NG-AC-171.** Report failure recovery does not rerun completed model calls.
+- **NG-AC-171.** Report failure recovery does not rerun RESULT_RECORDED,
+RECONCILED_NOT_BILLED or UNKNOWN_BILLED calls, and a recovered RESERVED call is
+made UNKNOWN_BILLED rather than dispatched again.
 - **NG-AC-172.** NG never starts/waits/interprets external docs build.
 - **NG-AC-173.** Legacy Draft without NG lineage cannot continue and requires clean
 translate restart; only one exact bot-owned deterministic-branch/base match may be
@@ -2911,16 +2988,23 @@ read-only and treats the PR as ordinary.
 - **NG-AC-174.** Cutover enables one writer atomically; rollback disables NG before
 enabling legacy and preserves NG Drafts for human handling.
 - **NG-AC-175.** All required audit fields reconstruct event, bytes, decisions,
-calls/costs, GitHub mutations and final result.
+every model-call state/possible dispatch/actual or unknown cost/reconciliation,
+GitHub mutations and final result.
 
 ## 24.19 Independent test matrix
 
+The matrix is owned by `ydbdoc-review-ng-acceptance`. These suites do not live in
+the production tree and do not import product modules. “Unit”, “property” and
+“static” describe the scope of the observable contract or artifact inspection,
+not permission to call production internals. §25.4 governs red-baseline,
+predicate-authorship and formal-review evidence.
+
 | Suite | Level | Fixtures/faults | Acceptance coverage |
 |---|---|---|---|
-| import-boundaries | static/AST | every banned root, dynamic import, cycle, second router | 001–007 |
-| domain-contract | unit/property | enum unknowns, canonical JSON, path traversal, digest mutation, collection order | 008, 028–044, 143–146 |
-| event-gates | contract | top-level sender versus PR author, paginated label timeline IDs, duplicate delivery after label reapply, exhausted-budget model-capable versus zero-call scope, empty ACL, two actors, label API failure | 009–027 |
-| actions-lock | adapter/fault | paginated runs, current exclusion, near-simultaneous CAS, stale lock | 023–027 |
+| import-boundaries | source/wheel/OCI static | every legacy/failed-NG dependency, dynamic plugin, subprocess/sidecar closure, cycle, second router | 001–007 |
+| domain-contract | protocol/property | enum unknowns, canonical JSON, path traversal, digest mutation, collection order | 008, 028–044, 143–146 |
+| event-gates | contract | top-level sender versus PR author, paginated label timeline IDs, duplicate delivery after label reapply, exhausted-budget and current-day UNKNOWN_BILLED for model-capable versus zero-call scope, empty ACL, two actors, label API failure | 009–027 |
+| actions-lock | adapter/fault | paginated runs, current exclusion, same event PR before identity persistence, different event PRs with one source, matching lineage, unrelated sources, two runs observing each other, missing persisted identity, exact conflict report URL, near-simultaneous CAS, stale lock | 023–027 |
 | manifest-api | adapter/recorded | merge/squash/rebase, 101+ files, Link pagination, changing identity, bad rename | 028–036 |
 | pr-45949-move | recorded regression | exact source manifest and TOC evidence from PR 45949 | 035–036, 122, 125–131 |
 | snapshot | adapter | main advances mid-run, missing blob, wrong SHA/size, ambient checkout differs | 032–033, 041–044 |
@@ -2930,17 +3014,17 @@ calls/costs, GitHub mutations and final result.
 | dependency-graph | property | root-return cycle, repeats, depth 3/4/5, 100/101 files, shared roots, misleading raw text | 068–078 |
 | images | byte/property | all extensions, equal/different dual edits, shared opposing roots | 079–082 |
 | companions | golden/parser | YAML keys/comments, JSON keys/values, TXT, every C/C++ suffix, malformed syntax | 083–089 |
-| model-state-machine | exhaustive fake adapter | every valid/error/malformed/fallback branch, per-entry glossary units, stable call IDs and call counter | 090–105 |
+| model-state-machine | external provider spy | every valid/error/malformed/fallback branch, per-entry glossary units, stable call IDs, and one wire invocation when the process dies after provider return but before result persistence | 021–022, 090–105, 169, 171 |
 | links | golden/fault | relative/root/ydb.tech, marker combinations, Wikipedia redirect/fragment/429/5xx | 106–116 |
 | toc-operations | golden/property | lossless comments/styles/nested service fields, applicable add/delete empty-tree boundary, no-text structural delta, missing target, insert anchors, duplicate href, move, include path, whole delete | 117–125 |
 | redirects | table/property | lossless append bytes/comments/styles, base/merge/current provenance, later-main false evidence, three evidence kinds, no successor, conflict, chain, cross-locale, append-only violation | 125–131 |
 | glossary | golden/property | anchors, rename/change, ambiguous intervals, disjoint/overlapping entry composition, direct/full/used/opposite directions | 132–141, 151, 153 |
-| verifier-core | pure unit/differential | same case from all callers, issue ordering, severity, evidence locations | 142–154 |
+| verifier-core | black-box differential | same case from all callers, issue ordering, severity, evidence locations | 142–154 |
 | verification-cache | integration | internal-to-published commit rebind hit, manual-byte and red-partial-overlay miss, every hash input mutation, expired record | 144–146 |
 | atomic-publication | fault/property | unsafe member, shared dependency, multi-bundle TOC/redirect/glossary composition, conflicting write, zero/some safe bundles | 151–154 |
-| github-lifecycle | mocked API | clean restart checkpoints, Draft creation, force lease fail, forbidden verify methods | 155–165, 170–171 |
-| reports-ru | snapshots | all §24.14 templates, multi-bundle repair-pass count, escaping, oversized detail split, line unknown | 016, 019, 023, 094, 105, 159–165, 168 |
-| persistence | DB integration | CAS, unique delivery/call, Moscow midnight, delayed/physical TTL, expired Draft marker fallback, partial crash | 020–022, 061, 166–171 |
+| github-lifecycle | external GitHub simulator/fixture repo | clean restart checkpoints, Draft creation, force lease fail, forbidden verify methods | 155–165, 170–171 |
+| reports-ru | snapshots | all §24.14 templates, separate spent-budget and unknown-billing reports, multi-bundle repair-pass count, escaping, oversized detail split, line unknown | 016, 019, 022–023, 094, 105, 159–165, 168 |
+| persistence | real YDB/emulator integration | call CAS and state-transition table; crashes before dispatch, after dispatch/before result write, after result write and after transcript write in fresh processes; current-day unknown blocks paid but not zero-call work; Moscow midnight; authoritative found/not-billed/inconclusive reconciliation; delayed TTL; expired Draft marker; mutation recovery | 020–022, 061, 166–171, 175 |
 | secrets-audit | static/runtime | sentinel secrets in env/errors/provider responses | 166, 175 |
 | migration-router | deployment contract | legacy Draft, dual-router attempted, cutover and rollback sequence | 173–174 |
 | no-external-build | call-spy | all commands and all verdicts | 172 |
@@ -2951,73 +3035,50 @@ Russian report and Action exit result. Golden reports compare semantic structure
 content before rendered whitespace so formatting changes cannot hide a lost
 blocker.
 
-Fault injection MUST stop after every persistence and GitHub mutation checkpoint,
-then rerun the same delivery and a new delivery. The assertions are no duplicate
-cost, no duplicate Draft/comment, no unrecorded branch deletion, no unconditional
-force and stable terminal result.
+Fault injection MUST stop after every persistence, provider-dispatch and GitHub
+mutation checkpoint, terminate the process rather than raise inside one call
+stack, then rerun the same delivery and a new delivery against the same real
+persistence. The provider fixture is external to the application fake and counts
+received request IDs. Assertions include exactly zero dispatch before RESERVED,
+at most one dispatch per call ID, UNKNOWN_BILLED after the ambiguous window, no
+later paid call that Moscow day, zero-call admission, no invented usage/cost, only
+authoritative reconciliation transitions, no duplicate Draft/comment, no
+unrecorded branch deletion, no unconditional force and stable terminal result.
 
 ## 24.20 Implementation work breakdown by dependency
 
-No coding estimate is attached. Work MUST proceed in this dependency order:
+The old implementation-first work breakdown is withdrawn.
 
-1. Freeze this specification and create requirement-to-test traceability for all
-   NG-AC items.
-2. Add package skeleton, exact-symbol allowlist and hard import-boundary tests.
-3. Implement frozen domain values, canonical serialization, hashing and enum
-   validation.
-4. Define ports and fake in-memory adapters for GitHub, snapshots, models,
-   persistence, artifacts, Wikipedia and clock.
-5. Implement event normalization, label handling, ACL, lifecycle, Actions
-   preflight, lock and budget gates.
-6. Implement manifest pagination/validation and immutable current-main/base/blob
-   snapshot adapters.
-7. Implement canonical pair expansion/classification and SUPERSEDED evaluation.
-8. Characterize/approve parser, renderer and path leaf primitives; implement
-   single-language and eligible-file filters.
-9. Implement AST dependency planner, depth/count decisions, image and companion
-   policies.
-10. Implement operator instruction parser, decision schemas, lineage state
-    machine and three-continue enforcement.
-11. Implement classifier chain, deterministic A/B rotation and single-attempt
-    provider adapters with immediate cost/transcript persistence.
-12. Implement full document/companion translation generation and protected-token
-    reconstruction.
-13. Implement internal/external link and Wikipedia policies with stable
-    placeholders.
-14. Implement immutable TOC tree/delta/apply planner and append-only redirect
-    planner.
-15. Implement glossary parser, entry identity, usage scope, harmonization and
-    conflict propagation.
-16. Implement pure deterministic verification engine, critic adapter, exact call
-    state machine, case hash/cache and two-repair loop.
-17. Implement bundle safety propagation, final overlay validation and atomic
-    publication tree.
-18. Implement YDB schemas, S3/YDB artifact storage, TTL, idempotency, mutation
-    journal and crash recovery.
-19. Implement canonical Russian lifecycle/QA/detail report rendering and GitHub
-    comment updater.
-20. Assemble translate, continue and read-only verify handlers; enforce exact
-    mutation matrix with call spies.
-21. Complete unit/property/adapter/fault/recorded-PR suites, including canonical
-    PR 45949.
-22. Run read-only comparison and security/secret audit.
-23. Perform atomic production cutover with rollback rehearsal and one-writer
-    assertion.
+Work proceeds only in this order:
+
+1. build the separate executable acceptance harness for the high-risk AC set and
+   all 26 findings;
+2. prove the harness red against its contract stub for specific semantic reasons;
+3. receive formal independent harness-review PASS;
+4. implement only the vertical slices in §25.7, keeping every slice executable
+   through the external harness;
+5. complete integration, smoke, shadow, security and migration gates in §25;
+6. request a separate explicit cutover decision.
+
+No product code is authorized by steps 1 through 3.
 
 ## 24.21 Specification verdict
 
-Independent formal review completed on 2026-08-27. It corrected the handoff
-blockers found in event identity/idempotency, zero-call budget gating, dependency
-cycles and shared ownership, model call identity, cache commit binding, no-Draft
-lineage state, lossless TOC/redirect composition, entry-level glossary
-publication, redirect provenance, report ownership and expiry recovery. The
-review re-read every affected and related section and found no remaining product
-choice or contradictory implementation branch.
+Independent formal review completed on 2026-08-27 and the second implementation
+RCA completed on 2026-08-28. The latter found that synchronous provider APIs do
+not offer the transaction or result lookup needed for unconditional
+response-plus-cost durability. Version 1.0.3 closes that implementability gap
+without inventing usage: pre-request CAS, at-most-once dispatch,
+UNKNOWN_BILLED, current-day paid-work blocking, zero-call admission and only
+authoritative reconciliation are now normative. The reviewed product behavior
+for event identity, zero-call budgeting, dependency/shared ownership, semantic
+verification, lossless TOC/redirect/glossary composition, reports and expiry is
+otherwise unchanged.
 
 §23.16 still governs future discoveries: implementation MUST stop and return to
 §23 if a new ambiguity would require a product choice.
 
-**Verdict: SPEC PASS.**
+**Verdict: BEHAVIORAL SPEC PASS. IMPLEMENTATION AND CUTOVER NOT READY.**
 
 ---
 

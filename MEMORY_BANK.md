@@ -2,8 +2,15 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-27
-**Current focus:** §24 passed independent formal review and is the developer/tester handoff for the confirmed simplified NG rebuild.
+**Last updated:** 2026-08-28
+**Current focus:** three NG implementation attempts are exhausted and failed
+independent acceptance. Their product code and in-tree tests have been deleted.
+The tracked legacy production tree matches peeled recovery commit
+`1f04ab1c71488f53c4ad547c20c7e635d59696ad`; production is restored and no NG
+cutover occurred.
+Cutover and NG `doc_translate` are prohibited. The only authorized next step is
+the §25 clean restart, beginning with an independently reviewed executable
+acceptance harness before any new product implementation.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -22,12 +29,20 @@ stable cross-references — use them when linking between files.
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
 | Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
 | NG requirements | [10-ng-requirements](docs/memory-bank/10-ng-requirements.md) | 23 | Confirmed product contract, workflows, verification, operations |
-| NG specification | [11-ng-specification](docs/memory-bank/11-ng-specification.md) | 24 | Implementable architecture, DTOs, algorithms, persistence, reports, acceptance suite and test matrix |
+| NG specification | [11-ng-specification](docs/memory-bank/11-ng-specification.md) | 24 | Frozen behavioral/DTO/protocol baseline; failed topology and work order superseded by §25 |
+| NG clean restart | [12-ng-clean-restart](docs/memory-bank/12-ng-clean-restart.md) | 25 | Failed-attempt record, independent Phase 0 harness, clean-room architecture, vertical slices, kill criteria, integrations and cutover gates |
 
 ## Recent changes
 
 | When | What |
 |------|------|
+| 2026-08-28 | **Independent clean-restart plan review**: verified all three attempts exhausted, failed NG implementation/tests absent, tracked legacy production tree identical to peeled recovery commit `1f04ab1c71488f53c4ad547c20c7e635d59696ad`, and no NG cutover. §25 now constrains test controls to external boundaries on the release image, makes the harness own ambiguous-window process kills, turns every kill into a whole-attempt stop requiring independent RCA plus explicit human authorization, and pins rollback to the verified peeled commit and recorded artifact digest. No product rule in §23 changed and NG `doc_translate` remains prohibited |
+| 2026-08-28 | **Clean restart ordered after third TEST FAIL**: all three NG implementation attempts are exhausted. `src/ydbdoc_review/ng/` and `tests/ng/` are deleted. No code from those attempts is an architecture template or acceptance oracle. The third attempt's green in-tree suite, CLI, Ruff and mypy results did not establish independent acceptance: the harness and predicates were implementation-coupled, closure of the 26 findings was not demonstrated through independent black-box observations, and the required real-boundary/new-process evidence was not a prerequisite to coding. §25 now requires a separate executable conformance harness to fail against an empty/contract-stub target and receive formal review PASS before product coding. Cutover and NG `doc_translate` remain prohibited |
+| 2026-08-28 | **Second implementation attempt, final TEST FAIL**: after remediation the production-path reproduction was still only **14 CLOSED, 5 PARTIAL (#2, #5, #15, #23, #25), 7 OPEN (#1, #3, #4, #6, #7, #17, #26)**. The failing causes were non-phase-driven duplicate resume, eager fallible dependencies outside terminal reporting, self-referential AC evidence, untyped external-effect recovery, operational identity inside semantic verification, insufficient DTO validation and fakes standing in for production boundaries. Ordinary bilingual verify made zero critic calls and internal/external semantic cache identities differed |
+| 2026-08-28 | **First implementation attempt, final TEST FAIL**: independent RCA confirmed tester findings **#1–#23 and #25–#26** and left **#24 PARTIAL**; none was refuted. The implementation therefore was not acceptance-ready despite an isolated-package claim and an NG-AC ledger |
+| 2026-08-28 | **§24 v1.0.3 behavioral contract retained**: synchronous provider APIs cannot guarantee response-plus-cost atomicity. The normative safety protocol remains durable `RESERVED`, at-most-once dispatch, `UNKNOWN_BILLED`, current-Moscow-day paid-work blocking, zero-call admission, no invented usage/cost and authoritative reconciliation only. §25 supersedes §24's failed in-repository package topology and implementation sequence |
+| 2026-08-28 | **§24 v1.0.2 implementability correction**: top-level Actions `run-name` now carries only labeled event PR + command; exact source PR/lineage is persisted by Actions run ID after resolution and shown in job summary/canonical report; active-run matching joins Actions status to persisted identity and the per-source CAS lock remains authoritative. No §23 product decision changed |
+| 2026-08-27 | **Historical first-attempt handoff, later TEST FAIL**: the isolated `src/ydbdoc_review/ng/` layout claimed ownership of all three lifecycles and traceability to NG-AC-001..175. Independent testing later rejected the claim; §25.1 is authoritative and this layout must not be reused |
 | 2026-08-27 | **§24 v1.0.1 — SPEC PASS**: independent formal review closed event/idempotency, zero-call budget, dependency/shared-output, cache, lossless TOC/redirect, glossary composition, report ownership and expiry-recovery blockers; all 175 acceptance criteria remain traced to the test matrix |
 | 2026-08-27 | **§23**: confirmed simplified NG contract for `doc_translate`, `doc_continue`, read-only `doc_verify`, full current-source overwrite, scoped dependencies, shared verifier, two-model repair loop, reporting, ACL and budget |
 | 2026-08-27 | **§6.225** — type-aware href validation; fail-closed official merge snapshots; scoped historical replay; TOC-proven tombstones; real added+removed move inference preserving later EN meaning; semantic failures exit non-zero (#45949 / #50857 / #50596) |

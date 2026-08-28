@@ -12,25 +12,25 @@ It supersedes conflicting historical implementation decisions for the NG work.
 Historical §6 entries remain useful as regression evidence, but are not authority
 for NG behavior when they disagree with §23.
 
-Requirements discovery must finish before deciding whether to retrofit the current
-code or write a clean implementation. No NG implementation starts before that gap
-analysis and explicit user approval.
+Requirements discovery, the original gap analysis and three implementation RCAs
+are complete. Retrofit and another in-repository package are rejected. §23.17 and
+§25 fix an independent clean-room distribution plus an external acceptance
+harness. No NG product implementation starts before the Phase 0 harness review
+PASS required by §25.4.7.
 
 ### Requirements handoff process
 
 - This project Memory Bank is the only authoritative requirements source. Do not
   maintain a separate assistant-specific knowledge bank for this project.
 - Every confirmed decision from requirements discussion is added to §23.
-- After the initial discussion is complete, start a new analyst in a clean context
-  and provide only the project Memory Bank.
-- The analyst must study the complete contract, identify contradictions or missing
-  decisions and ask questions until the implementation task is unambiguous.
-- When the analyst has no unresolved requirements, perform a separate gap analysis
-  comparing retrofit of the current code with a clean rewrite.
-- Present that comparison and recommendation to the user. The user chooses the
-  implementation strategy.
-- Only after that choice is the final task handed to a developer. Requirements
-  analysis and strategy selection must not silently turn into implementation.
+- Independent harness reviewers receive the Memory Bank and frozen external
+  fixture provenance, not failed implementation code or tests.
+- Any contradiction or missing product choice returns to §23 before either a
+  predicate or product behavior is written.
+- Harness review and product implementation are separate repositories and
+  separate review events.
+- A formal harness PASS authorizes only the vertical slice named next in §25.7,
+  never cutover or `doc_translate`.
 
 Return point before NG work: immutable tag `pre-ng-2026-08-27` at
 `1f04ab1c71488f53c4ad547c20c7e635d59696ad`.
@@ -1081,20 +1081,38 @@ Daily spending uses repository variable `YDBDOC_DAILY_BUDGET_RUB` and the Moscow
 calendar day. The sum includes every paid LLM call made by `doc_translate`,
 `doc_continue` and `doc_verify`. Keep the budget behavior intentionally simple:
 
-- before a model-backed run, read actual cost already recorded for today;
+- before a model-backed run, read actual cost already recorded for today and
+  check whether today has an unresolved call whose billing status is unknown;
+- if such an `UNKNOWN_BILLED` call exists, reject new paid model work until the
+  next Moscow day or until authoritative provider reconciliation resolves it;
 - if actual spending is already at or above the limit, reject the run before
   model calls and before destructive branch actions;
 - if spending is below the limit, allow the run;
+- a run proven to require zero paid calls is allowed despite either a spent
+  budget or an `UNKNOWN_BILLED` call;
 - a small overrun caused by the last admitted run is acceptable;
-- do not implement advance estimates, reservations or complex concurrency logic;
-- record actual cost after every run and show it in the report.
+- do not invent advance cost estimates or reserve a guessed RUB amount;
+- record provider-returned actual cost and unresolved billing state in the
+  report. A durable pre-request call marker is crash-safety state, not an
+  estimated budget reservation.
 
-Cost persistence happens immediately after every completed paid LLM response, not
-only at job end. Each record is idempotent by `run_id + call_id`. A final job
-summary aggregates those call records. If the job crashes later, all already
-recorded calls still count toward the Moscow-day budget. When a timeout or provider
-failure returns no usage data, NG does not invent an estimate; the operational
-report shows only usage actually returned by the provider.
+Before each provider request, NG durably records a `RESERVED` call keyed by
+`run_id + call_id`. That key is sent to the provider at most once. A returned
+result, usage and actual cost are persisted immediately before downstream use.
+If the process can have sent the request but cannot prove and persist its result,
+recovery changes the record from `RESERVED` to `UNKNOWN_BILLED`; it never repeats
+that request or treats it as free. The current run stops with a clear red
+operational report and makes no later model calls.
+
+Only authoritative provider evidence tied to the exact call may resolve
+`UNKNOWN_BILLED`: a recovered result records the returned usage and cost, while
+proof that the provider did not accept or bill the request records no cost.
+Missing or inconclusive evidence leaves the call unresolved. Human assertions,
+local estimates, timeout assumptions and a manually entered price cannot clear
+it. When usage or price is absent, NG does not invent either value. Unknown cost
+therefore stays null and is reported as unknown, never as zero. The unresolved
+record blocks paid runs only for its recorded Moscow calendar day; it remains in
+the 14-day audit record after that gate expires.
 
 Run records, actual costs, lineage decisions, snapshots, reports and full model
 transcripts are retained for 14 days. Secrets and token values are never stored or
@@ -1258,53 +1276,55 @@ answer is replayed on the destructive rebuild.
 
 ## 23.16 Open decisions
 
-No product or implementation-strategy decisions remain open. Any new ambiguity
-found during specification, implementation or testing must be returned to the
-requirements process and recorded here before code chooses a behavior.
+No product decisions remain open. The clean-restart repository, distribution and
+acceptance topology is fixed by §23.17 and §25. Any new ambiguity found during
+specification, harness construction, implementation or testing must be returned
+to the requirements process and recorded here before code chooses a behavior.
 
-## 23.17 Implementation strategy: rewrite the policy core
+## 23.17 Implementation strategy: independent clean-room distribution
 
-The confirmed strategy is `REWRITE_CORE`, not an in-place retrofit and not a
-complete deletion of the project's technical assets. Two independent architecture
-analyses and a cross-review reached consensus that the current orchestration and
-policy graph encode semantics opposite to §23: differential target preservation,
-historical scope expansion, inferred moves, mutating verification and legacy TOC,
-redirect and glossary exceptions.
+The three implementations attempted below `src/ydbdoc_review/ng/` failed
+independent acceptance and are exhausted. Their production tree and `tests/ng/`
+were deleted on 2026-08-28. They, the legacy runtime and their implementation
+histories are negative evidence only. They MUST NOT be restored, imported,
+copied, adapted or treated as an architecture or test oracle.
 
-NG is implemented as an isolated package under `src/ydbdoc_review/ng/`. Its domain
-and application layers must not import legacy workflow, harness, scope-planning,
-differential-translation, navigation-merge, repair-publication or reporting
-policy modules. An automated import-boundary test enforces this rule.
+The replacement strategy is `CLEAN_ROOM_DISTRIBUTION`, not an in-place retrofit
+and not another package inside the `ydbdoc_review` distribution. The exact
+repository and harness recommendation, phase gates and operational prerequisites
+are normative in §25. In summary:
 
-The intended boundary is:
+- production is a new independently buildable distribution with import package
+  `ydbdoc_ng`, outside this repository and with no dependency on
+  `ydbdoc_review`;
+- the executable acceptance harness is a second independent repository and
+  invokes the distribution only through versioned process/network contracts;
+- no product implementation may be written until that harness is demonstrably
+  red against an empty/contract-stub target and receives formal harness-review
+  PASS;
+- acceptance predicates and fixtures are authored and frozen independently.
+  They are never generated from §23/§24 text at test runtime;
+- legacy behavior may supply recorded input evidence only. It never supplies an
+  expected NG result.
 
-- **keep** only demonstrably pure leaf primitives such as Markdown/YFM AST and
-  parsing, basic rendering, selected segmentation, path normalization and
-  direction-neutral structural checks;
-- **wrap** low-level GitHub HTTP and pagination, pinned git blob access,
-  provider-specific single-attempt model calls, YDB/S3 transport, TOC and redirect
-  parsing, usage extraction and report location helpers behind NG ports;
-- **rewrite** command lifecycle, immutable manifest and snapshot domain, scope and
-  dependency planning, atomic bundles, full translation, link and asset policy,
-  scoped TOC and append-only redirects, documentation glossary handling, shared
-  verification and repair state machine, persistence, reports and publication;
-- **retire from the production NG call graph** legacy orchestration, differential
-  and historical replay, inferred moves, mutating verify/fixup publication,
-  legacy full TOC merge, inbound-link scans, prompt-only glossary authority and
-  aggregate end-of-run lifecycle accounting.
+The new distribution implements its own domain, application, verifier and
+adapter boundaries. Any third-party parser, renderer, SDK or transport is chosen
+and pinned directly as a new dependency. There is no exact-symbol legacy
+allowlist and no `legacy_primitives` adapter. The dependency closure, including
+dynamic imports, plugins, subprocesses and RPC sidecars, MUST contain no
+`ydbdoc_review` code or failed-NG artifact.
 
-Reuse is approved by exact symbol after characterization tests, never by an
-entire legacy directory. A reused primitive must not perform ambient filesystem,
-environment, network or repository access, mutate input state, choose policy,
-hide retries or import legacy domain DTOs. Provider adapters expose one paid
-attempt; NG owns retries, fallback, model rotation, transcripts and immediate
-cost persistence.
+Provider adapters expose one paid attempt; the control plane owns fallback,
+rotation, transcripts, durable pre-request call state, at-most-once dispatch,
+`UNKNOWN_BILLED` and actual-cost recording. External mutations use a typed
+durable outbox. All persisted and external DTOs are validated strictly before
+use. One semantic verifier serves translate, continue and verify without
+operational run/publication identity entering semantic case identity.
 
-Legacy and NG may coexist only during development and recorded-case comparison.
-Only one command router may have GitHub write capability. Production cutover is
-atomic after the §23 acceptance suite passes; legacy and NG writers are never run
-in parallel on the same command labels. Existing legacy Drafts without NG lineage
-cannot be continued and require a clean `doc_translate` restart.
+Production cutover and any NG `doc_translate` invocation are prohibited until
+every §25 gate passes. Legacy and NG writers are never run in parallel on the
+same labels. Existing legacy Draft handling at eventual migration remains
+fail-closed and follows §23.1 plus §24.17 as narrowed by §25.
 
 The immutable recovery point remains Git tag `pre-ng-2026-08-27` at
 `1f04ab1c71488f53c4ad547c20c7e635d59696ad`.
