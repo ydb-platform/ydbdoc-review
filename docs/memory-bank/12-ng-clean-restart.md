@@ -230,6 +230,21 @@ harness-owned authority, opaque registry handles, an fsync append-only causal
 journal, process-correlated one-shot kill permits, deep canonical revalidation
 and bundle assembly exclusively from authoritative registry snapshots.
 
+### 25.1.9 Acceptance Trust Kernel attempt 2
+
+The second Deliverable A implementation also failed independent QA. Its 15 tests
+passed only with a manual source path. Reviewer probes reconstructed in-process
+handles, bypassed the gateway through public record methods, created competing
+journal heads, lost registries on restart, used capabilities for closed listeners
+and supplied commit/client outcomes as caller assertions. The bundle was
+incomplete, while executable schemas, corpus and native-YDB component were absent.
+
+Verdict: **DELIVERABLE A ATTEMPT 2 TEST FAIL**. Two independent RCAs agreed that
+same-process Python privacy and HMAC cannot be the authority boundary. A2 was
+deleted. The final A3 attempt must use a separate authority daemon with private
+OS IPC/state, transactional durable registries and CAS, observer-owned typed
+events, recoverable exact-process kill state and complete bundle export.
+
 ## 25.2 Exact repository and distribution recommendation
 
 Use **two repositories in sequence**, not another subproject in this repository
