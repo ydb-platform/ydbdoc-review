@@ -17,7 +17,9 @@ from typing import Mapping
 
 LEGACY_ENDPOINT = "grpcs://ydb.serverless.yandexcloud.net:2135"
 LEGACY_DATABASE = "/ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k"
-PREFIX_RE = re.compile(r"^m0_pr45949_[0-9a-f]{16}$")
+PREFIX_RE = re.compile(r"^m0_[a-z0-9_]{12,80}$")
+REPOSITORY_RE = re.compile(r"^acceptance/r[0-9a-f]{16}$")
+DEFAULT_TABLE_PREFIX = "m0_ydbdoc_ng_acceptance_v1"
 TABLE_SUFFIXES = ("command_runs", "lineages", "model_calls", "verification_results")
 TEST_TIMEOUT_SECONDS = 55
 CLEANUP_TIMEOUT_SECONDS = 20
@@ -41,6 +43,20 @@ def _configuration(environment: Mapping[str, str]) -> tuple[str, str]:
         environment.get("YDBDOC_YDB_ENDPOINT", "") or LEGACY_ENDPOINT,
         environment.get("YDBDOC_YDB_DATABASE", "") or LEGACY_DATABASE,
     )
+
+
+def _stable_table_prefix(environment: Mapping[str, str]) -> str:
+    configured = environment.get("YDBDOC_REAL_YDB_TABLE_PREFIX", "")
+    if not configured:
+        return DEFAULT_TABLE_PREFIX
+    if not PREFIX_RE.fullmatch(configured) or re.search(
+        r"(?:^|_)pr[0-9]+(?:_|$)|_[0-9a-f]{16}$", configured
+    ):
+        raise PreflightError(
+            "YDBDOC_REAL_YDB_TABLE_PREFIX должен быть постоянным безопасным префиксом. "
+            "Перевод не запускался."
+        )
+    return configured
 
 
 def _validate_key_document(secret: str) -> None:
@@ -115,6 +131,9 @@ def _cleanup_exact_tables(environment: Mapping[str, str]) -> None:
     prefix = environment.get("YDBDOC_REAL_YDB_TABLE_PREFIX", "")
     if not PREFIX_RE.fullmatch(prefix):
         raise PreflightError("Не удалось доказать безопасную область очистки YDB.")
+    repository = environment.get("YDBDOC_REAL_YDB_REPOSITORY", "")
+    if not REPOSITORY_RE.fullmatch(repository):
+        raise PreflightError("Не удалось доказать область данных проверки YDB.")
     import ydb
 
     def confirmed_not_found(error: Exception) -> bool:
@@ -134,29 +153,36 @@ def _cleanup_exact_tables(environment: Mapping[str, str]) -> None:
     try:
         driver.wait(timeout=8, fail_fast=True)
         pool = ydb.SessionPool(driver)
-        present: list[str] = []
         total = 0
         for suffix in TABLE_SUFFIXES:
             table = f"{prefix}_{suffix}"
             try:
-                result = pool.retry_operation_sync(
-                    lambda session, name=table: session.transaction().execute(
-                        f"SELECT COUNT(*) AS n FROM `{name}`;", commit_tx=True
+                def count(session, name=table):
+                    query = session.prepare(
+                        f"DECLARE $repo AS Utf8; SELECT COUNT(*) AS n FROM `{name}` WHERE repository=$repo;"
                     )
-                )
+                    return session.transaction().execute(
+                        query, {"$repo": repository}, commit_tx=True
+                    )
+                result = pool.retry_operation_sync(count)
             except (ydb.issues.NotFound, ydb.issues.SchemeError) as error:
                 if confirmed_not_found(error):
                     continue
                 raise
             total += int(result[0].rows[0]["n"])
-            present.append(table)
         if total > MAX_CLEANUP_ROWS:
             raise PreflightError("Безопасный предел очистки YDB превышен.")
-        for table in present:
+        for suffix in TABLE_SUFFIXES:
+            table = f"{prefix}_{suffix}"
             try:
-                pool.retry_operation_sync(
-                    lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;")
-                )
+                def delete(session, name=table):
+                    query = session.prepare(
+                        f"DECLARE $repo AS Utf8; DELETE FROM `{name}` WHERE repository=$repo;"
+                    )
+                    return session.transaction().execute(
+                        query, {"$repo": repository}, commit_tx=True
+                    )
+                pool.retry_operation_sync(delete)
             except (ydb.issues.NotFound, ydb.issues.SchemeError) as error:
                 if not confirmed_not_found(error):
                     raise
@@ -171,15 +197,16 @@ def _cleanup_child(environment: Mapping[str, str]) -> None:
     except PreflightError:
         raise PreflightError("Очистка тестовых таблиц YDB не завершилась вовремя. Перевод не запускался.") from None
     if code != 0:
-        raise PreflightError("Не удалось удалить тестовые таблицы YDB. Перевод не запускался.")
+        raise PreflightError("Не удалось очистить данные проверки YDB. Перевод не запускался.")
 
 
 def run(environment: Mapping[str, str]) -> int:
     secret = _required_secret(environment)
     endpoint, database = _configuration(environment)
-    prefix = f"m0_pr45949_{secrets.token_hex(8)}"
+    prefix = _stable_table_prefix(environment)
     if not PREFIX_RE.fullmatch(prefix):
         raise PreflightError("Не удалось создать безопасную область проверки YDB.")
+    repository = f"acceptance/r{secrets.token_hex(8)}"
     key_fd, key_name = tempfile.mkstemp(prefix="ydbdoc-ng-sa-", suffix=".json")
     report_fd, report_name = tempfile.mkstemp(prefix="ydbdoc-ng-junit-", suffix=".xml")
     os.close(report_fd)
@@ -190,6 +217,7 @@ def run(environment: Mapping[str, str]) -> int:
         YDBDOC_YDB_DATABASE=database,
         YDBDOC_YDB_SA_KEY_FILE=str(key_path),
         YDBDOC_REAL_YDB_TABLE_PREFIX=prefix,
+        YDBDOC_REAL_YDB_REPOSITORY=repository,
         YDBDOC_REAL_YDB_STATE="1",
     )
     child_environment.pop("YDB_SA_KEY", None)

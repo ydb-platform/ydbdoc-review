@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unittest
 
 import test_state_contract as _contract_module
@@ -24,14 +25,19 @@ class RealYdbStateContract(_contract_module.StateContract):
         config = real_ydb_test_config_from_env(os.environ)
         if config is None:
             self.skipTest("not executed: explicit real-YDB credentials were not supplied")
+        repository = os.environ.get("YDBDOC_REAL_YDB_REPOSITORY", "")
+        if not re.fullmatch(r"acceptance/r[0-9a-f]{16}", repository):
+            raise RuntimeError("Некорректная область данных проверки YDB.")
+        owner, name = repository.split("/", 1)
         self.state = YdbState(
-            config, RepoIdentity("acceptance", config.table_prefix),
+            config, RepoIdentity(owner, name),
         )
         self.state.ensure_schema()
+        self.state.cleanup_test_rows(maximum_rows=1000)
 
     def tearDown(self):
         try:
-            self.state.teardown_test_schema(maximum_rows=1000)
+            self.state.cleanup_test_rows(maximum_rows=1000)
         finally:
             self.state.driver.stop(timeout=5)
 
