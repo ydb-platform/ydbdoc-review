@@ -175,6 +175,22 @@ the empty runtime repository was reinitialized, and Stage 1 must be authored fro
 scratch only in the acceptance repository. No artifact from this attempt is a
 template, and stages 2–5 remain blocked.
 
+### 25.1.6 Stage 1 contract-schema attempt 2
+
+The second Stage 1 attempt also failed independent adversarial review and was
+discarded in full. It corrected repository placement, the first self-certification
+evasions, canonical CLI/exit mapping and basic OpenAPI validation; all 57 authored
+meta-tests passed. The independent reviewer nevertheless proved that production
+configuration still accepted loopback test endpoints, the candidate could submit
+its own crash-barrier events, real-YDB inspection was candidate-facing and exposed
+only counts/digests rather than independently decoded rows, and one provider
+reconciliation response had no closed versioned schema.
+
+Verdict: **STAGE 1 ATTEMPT 2 FAIL**. The acceptance repository was deleted and
+reinitialized empty. Attempt 3 must separate candidate configuration from
+harness-owned transport, kill and native-YDB observation contracts. Stages 2–5
+and all product code remain blocked.
+
 ## 25.2 Exact repository and distribution recommendation
 
 Create **two new repositories**, not another subproject in this repository and
