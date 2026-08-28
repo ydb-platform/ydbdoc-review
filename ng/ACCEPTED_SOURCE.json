@@ -540,8 +540,8 @@
     {
       "source_path": "src/ydbdoc_review_ng/state.py",
       "destination_path": "ng/src/ydbdoc_review_ng/state.py",
-      "sha256": "ded3e7263c76a1b93610cae1e476f1dbde20823c2a5769c3aac88b1c93a88f70",
-      "source_blob_sha1": "629cd6c5a9a55d1d4fb4a5c2a062a10d4fda8146"
+      "sha256": "44f070e3415ea50be3af94274631426d9f198c02941603707fd9bab196f2539c",
+      "source_blob_sha1": "35980ce92683302b74d769e9ee600457c5016be3"
     },
     {
       "source_path": "tests/test_launch_contract.py",
@@ -576,8 +576,8 @@
     {
       "source_path": "tests/test_ydb_bounded_sdk.py",
       "destination_path": "ng/tests/test_ydb_bounded_sdk.py",
-      "sha256": "15428bfd6b12c0a004ce0b2f18148ad0b52f480ce8a11e85100ab3af2d264da5",
-      "source_blob_sha1": "d6d917264b63a27c97c912a30a5aa0cbe4a02f38"
+      "sha256": "1b6a752fdb87a42e080290f08f20170d0162d6bba181b321f8c8d9603352a6b2",
+      "source_blob_sha1": "679624e9ae0fa3ab35d57dc4edecb6a04a86335f"
     },
     {
       "source_path": "tools/derive_pr_fixture.py",
