@@ -277,5 +277,18 @@ class BoundedSdkContract(unittest.TestCase):
         ])
         self.assertEqual(tx.commits, 1)
 
+    def test_effect_checkpoint_constructs_result_only_after_early_commit(self):
+        effects = (EffectCheckpoint(0, "PUSH_BRANCH", "PLANNED", "branch:test", "a" * 64),)
+        events = []
+        class Result: rows = []
+        class Tx:
+            def execute(self, *args, **kwargs): return [Result()]
+            def commit(self): events.append("commit")
+        state = adapter(Pool())
+        state._serializable = lambda operation, **kwargs: operation(Tx())
+        with patch("builtins.print"), patch("ydbdoc_review_ng.state.ClaimResult", side_effect=lambda *args, **kwargs: events.append("construct") or object()):
+            state.put_effect_checkpoints("receipt", effects)
+        self.assertEqual(events, ["commit", "construct"])
+
 
 if __name__ == "__main__": unittest.main()

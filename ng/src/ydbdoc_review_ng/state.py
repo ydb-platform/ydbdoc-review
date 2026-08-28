@@ -1228,26 +1228,29 @@ class YdbState(StatePort):
         payload = _effects_json(effects)
         table, key_value = self._table("command_runs"), f"run:{receipt_identity}"
         def op(tx):
-            def early(result):
+            def early_commit():
                 print("EFFECT_CHECKPOINT_EARLY_COMMIT_START", flush=True)
                 tx.commit()
                 print("EFFECT_CHECKPOINT_EARLY_COMMIT_DONE", flush=True)
-                return result
             key = {"$repo": self.repository.canonical, "$key": key_value}
             print("EFFECT_CHECKPOINT_READ_START", flush=True)
             before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effects_schema_version,effect_checkpoints,expires_at>CurrentUtcTimestamp() AS alive FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN';", key)
             print("EFFECT_CHECKPOINT_READ_DONE", flush=True)
             rows = before[0].rows if before else []
             if not rows or not rows[0]["alive"]:
-                return early(ClaimResult(ClaimStatus.CONFLICT, False, "ABSENT"))
+                early_commit()
+                return ClaimResult(ClaimStatus.CONFLICT, False, "ABSENT")
             if rows[0].get("effects_schema_version") is not None:
                 if rows[0]["effects_schema_version"] != "command-effects/v1":
-                    return early(ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED"))
+                    early_commit()
+                    return ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED")
                 previous = _effects_from_json(rows[0]["effect_checkpoints"])
                 if previous == effects:
-                    return early(ClaimResult(ClaimStatus.EXISTING_SAME, False, "EFFECTS_RECORDED"))
+                    early_commit()
+                    return ClaimResult(ClaimStatus.EXISTING_SAME, False, "EFFECTS_RECORDED")
                 if not _valid_effect_transition(previous, effects):
-                    return early(ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED"))
+                    early_commit()
+                    return ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED")
                 params = {**key, "$payload": payload}
                 print("EFFECT_CHECKPOINT_WRITE_START", flush=True)
                 tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $payload AS Json; UPDATE `{table}` SET effect_checkpoints=$payload,updated_at=CurrentUtcTimestamp() WHERE repository=$repo AND record_key=$key AND effects_schema_version='command-effects/v1';", params)
