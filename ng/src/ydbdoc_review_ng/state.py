@@ -884,13 +884,14 @@ class YdbState(StatePort):
         # Exact columns are asserted by tests; production creates only these four tables.
         prefix = self.config.table_prefix if isinstance(self.config, RealYdbTestConfig) else ""
         statements = schema_statements(prefix)
+        schema_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
         for index, statement in enumerate(statements):
             print(f"YDB_SCHEMA_INDEX_START {index}", flush=True)
             try:
                 self._pool_attempt(
                     lambda session, sql=statement: session.execute_scheme(sql),
                     wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
-                    error_marker="YDB_SCHEMA_INDEX_ERROR",
+                    error_marker="YDB_SCHEMA_INDEX_ERROR", absolute_deadline=schema_deadline,
                 )
             except StateError:
                 print(f"YDB_SCHEMA_INDEX_ERROR {index}", flush=True)
@@ -903,6 +904,7 @@ class YdbState(StatePort):
             raise StateError("acceptance cleanup scope is invalid")
         if isinstance(maximum_rows, bool) or maximum_rows < 0:
             raise StateError("acceptance cleanup bound is invalid")
+        cleanup_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
         tables = tuple(self._table(name) for name in self.TABLES)
         def count(tx):
             total = 0
@@ -911,7 +913,7 @@ class YdbState(StatePort):
                 total += int(result[0].rows[0]["n"])
             tx.commit()
             return total
-        if self._serializable(count) > maximum_rows:
+        if self._serializable(count, absolute_deadline=cleanup_deadline) > maximum_rows:
             raise StateError("acceptance cleanup bound exceeded")
         for index, table in enumerate(tables):
             print(f"YDB_DROP_INDEX_START {index}", flush=True)
@@ -919,18 +921,22 @@ class YdbState(StatePort):
                 self._pool_attempt(
                     lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;"),
                     wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
-                    error_marker="YDB_DROP_INDEX_ERROR",
+                    error_marker="YDB_DROP_INDEX_ERROR", absolute_deadline=cleanup_deadline,
                 )
             except StateError:
                 print(f"YDB_DROP_INDEX_ERROR {index}", flush=True)
                 raise
             print(f"YDB_DROP_INDEX_DONE {index}", flush=True)
 
-    def _request_settings(self, rpc_seconds: float):
+    def _request_settings(self, rpc_seconds: float, absolute_deadline: float):
+        remaining = absolute_deadline - time.monotonic()
+        if remaining <= 0:
+            raise StateError("YDB_RPC_DEADLINE")
+        bounded_rpc = min(rpc_seconds, remaining)
         return (
             self._ydb.BaseRequestSettings()
-            .with_timeout(rpc_seconds)
-            .with_operation_timeout(rpc_seconds)
+            .with_timeout(bounded_rpc)
+            .with_operation_timeout(bounded_rpc)
         )
 
     def _transient_errors(self) -> tuple[type[Exception], ...]:
@@ -943,8 +949,8 @@ class YdbState(StatePort):
             if isinstance(kind, type) and issubclass(kind, Exception)
         )
 
-    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str):
-        deadline = time.monotonic() + wall_seconds
+    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str, absolute_deadline: float | None = None):
+        deadline = absolute_deadline if absolute_deadline is not None else time.monotonic() + wall_seconds
         transient = self._transient_errors()
         for attempt in range(self.OUTER_ATTEMPTS):
             remaining = deadline - time.monotonic()
@@ -957,7 +963,7 @@ class YdbState(StatePort):
                 get_session_client_timeout=bounded_rpc,
                 idempotent=True,
             )
-            request_settings = lambda seconds=bounded_rpc: self._request_settings(seconds)
+            request_settings = lambda cap=rpc_seconds, end=deadline: self._request_settings(cap, end)
             try:
                 return self.pool.retry_operation_sync(
                     lambda session: operation(_BoundedSession(session, request_settings)),
@@ -974,14 +980,14 @@ class YdbState(StatePort):
                 time.sleep(min(self.BACKOFF_SECONDS * (2 ** attempt), remaining))
         raise StateError(error_marker) from None
 
-    def _serializable(self, operation):
+    def _serializable(self, operation, *, absolute_deadline: float | None = None):
         def closure(session):
             tx = session.transaction(self._ydb.SerializableReadWrite())
             return operation(tx)
         try:
             return self._pool_attempt(
                 closure, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS,
-                error_marker="YDB_SERIALIZABLE_ERROR",
+                error_marker="YDB_SERIALIZABLE_ERROR", absolute_deadline=absolute_deadline,
             )
         except StateError:
             raise StateError("YDB serializable transaction failed") from None

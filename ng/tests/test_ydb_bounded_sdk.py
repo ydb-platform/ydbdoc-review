@@ -124,7 +124,33 @@ class BoundedSdkContract(unittest.TestCase):
     def test_structural_guard_only_central_owner_calls_sdk_retry(self):
         source = inspect.getsource(__import__("ydbdoc_review_ng.state", fromlist=["*"]))
         self.assertEqual(source.count("self.pool.retry_operation_sync("), 1)
+        self.assertNotIn("operation(session)", source)
+        self.assertIn("operation(_BoundedSession(session, request_settings))", source)
         self.assertIn("return self._pool_attempt(", source)
+
+    def test_acquire_and_each_successive_rpc_recompute_remaining_budget(self):
+        state, pool = adapter(Pool()), None
+        pool = state.pool
+        def operation(session):
+            session.execute_scheme("ONE")
+            session.execute_scheme("TWO")
+            return "ok"
+        with patch("ydbdoc_review_ng.state.time.monotonic", side_effect=[0.0, 1.0, 3.0, 6.0]):
+            self.assertEqual(state._pool_attempt(operation, wall_seconds=10, rpc_seconds=10, error_marker="SAFE"), "ok")
+        self.assertEqual(pool.calls[0].kwargs["max_session_acquire_timeout"], 9.0)
+        settings = [call[1]["settings"] for call in pool.sessions[0].scheme]
+        self.assertEqual([(item.timeout, item.operation_timeout) for item in settings], [(7.0, 7.0), (4.0, 4.0)])
+
+    def test_expired_deadline_blocks_next_rpc_before_raw_execute(self):
+        state, pool = adapter(Pool()), None
+        pool = state.pool
+        def operation(session):
+            session.execute_scheme("ONE")
+            session.execute_scheme("MUST_NOT_RUN")
+        with patch("ydbdoc_review_ng.state.time.monotonic", side_effect=[0.0, 0.0, 0.5, 1.1]):
+            with self.assertRaisesRegex(StateError, "^SAFE$"):
+                state._pool_attempt(operation, wall_seconds=1, rpc_seconds=1, error_marker="SAFE")
+        self.assertEqual(len(pool.sessions[0].scheme), 1)
 
     def test_schema_uses_separate_budget_request_settings_and_flushed_markers(self):
         state, pool = adapter(Pool()), None
@@ -140,6 +166,26 @@ class BoundedSdkContract(unittest.TestCase):
         self.assertTrue(all(call.kwargs == {"flush": True} for call in output.call_args_list))
         self.assertEqual(output.call_args_list[0].args, ("YDB_SCHEMA_INDEX_START 0",))
         self.assertEqual(output.call_args_list[-1].args, ("YDB_SCHEMA_INDEX_DONE 3",))
+
+    def test_four_schema_statements_share_one_absolute_deadline(self):
+        state, pool = adapter(Pool()), None
+        pool = state.pool
+        with patch("ydbdoc_review_ng.state.time.monotonic", side_effect=[0, 1, 2, 9, 10, 15, 16, 17, 18]), patch("builtins.print"):
+            state.ensure_schema()
+        settings = [session.scheme[0][1]["settings"] for session in pool.sessions]
+        self.assertEqual([item.timeout for item in settings], [5, 5, 4, 2])
+
+    def test_count_and_four_drops_receive_one_cleanup_deadline(self):
+        from ydbdoc_review_ng.state import RealYdbTestConfig
+        state = adapter(Pool())
+        state.config = RealYdbTestConfig("grpcs://example.invalid:2135", "/safe/database", "/safe/key", "m0_contract_test12")
+        seen = []
+        def serializable(operation, *, absolute_deadline=None): seen.append(("count", absolute_deadline)); return 0
+        def pool_attempt(operation, **kwargs): seen.append(("drop", kwargs["absolute_deadline"])); return None
+        state._serializable, state._pool_attempt = serializable, pool_attempt
+        with patch("ydbdoc_review_ng.state.time.monotonic", return_value=100), patch("builtins.print"):
+            state.teardown_test_schema()
+        self.assertEqual(seen, [("count", 120.0)] + [("drop", 120.0)] * 4)
 
     def test_schema_permanent_error_is_safe_and_flushes_static_error_marker(self):
         state = adapter(Pool([Permanent("sentinel-endpoint")]))
