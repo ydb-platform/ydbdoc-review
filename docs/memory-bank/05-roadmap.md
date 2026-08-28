@@ -3,6 +3,11 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** Phases A through K describe the existing implementation.
+> They are not the roadmap for the simplified NG rebuild. The new product contract
+> and handoff process are in §23 of
+> [10-ng-requirements](10-ng-requirements.md).
+
 ---
 
 ## 8. Roadmap

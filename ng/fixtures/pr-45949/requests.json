@@ -1,0 +1,362 @@
+[
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/redirects.yaml?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-001",
+    "method": "GET",
+    "path": "ydb/docs/redirects.yaml",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-001.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/index.md?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-002",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/index.md",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-002.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/node-authorization.md?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-003",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/node-authorization.md",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-003.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/toc_p.yaml?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-004",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/toc_p.yaml",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-004.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-005",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-005.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-006",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-006.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/maintenance/manual/dynamic-config.md?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-007",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-007.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md?ref=7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "id": "lookup-008",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md",
+    "ref_sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+    "response_artifact": "raw/lookups/lookup-008.http.b64",
+    "scope": "base"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/redirects.yaml?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-009",
+    "method": "GET",
+    "path": "ydb/docs/redirects.yaml",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-009.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/index.md?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-010",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/index.md",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-010.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/node-authorization.md?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-011",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/node-authorization.md",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-011.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/toc_p.yaml?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-012",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/toc_p.yaml",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-012.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-013",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-013.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-014",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-014.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/maintenance/manual/dynamic-config.md?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-015",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-015.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md?ref=0da32bb95ae025681e74f98654262dc992fb0c35",
+    "id": "lookup-016",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md",
+    "ref_sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+    "response_artifact": "raw/lookups/lookup-016.http.b64",
+    "scope": "head"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/redirects.yaml?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-017",
+    "method": "GET",
+    "path": "ydb/docs/redirects.yaml",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-017.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/index.md?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-018",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/index.md",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-018.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/node-authorization.md?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-019",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/node-authorization.md",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-019.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/toc_p.yaml?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-020",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/toc_p.yaml",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-020.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-021",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-021.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-022",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-022.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/maintenance/manual/dynamic-config.md?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-023",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-023.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md?ref=2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "id": "lookup-024",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md",
+    "ref_sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+    "response_artifact": "raw/lookups/lookup-024.http.b64",
+    "scope": "merge"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/redirects.yaml?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-025",
+    "method": "GET",
+    "path": "ydb/docs/redirects.yaml",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-025.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/index.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-026",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/index.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-026.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/node-authorization.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-027",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/node-authorization.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-027.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/concepts/toc_p.yaml?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-028",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/concepts/toc_p.yaml",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-028.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-029",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-029.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-030",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-030.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/maintenance/manual/dynamic-config.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-031",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-031.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-032",
+    "method": "GET",
+    "path": "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-032.http.b64",
+    "scope": "current_main"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/redirects.yaml?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-033",
+    "method": "GET",
+    "path": "ydb/docs/redirects.yaml",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-033.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/devops/concepts/index.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-034",
+    "method": "GET",
+    "path": "ydb/docs/en/core/devops/concepts/index.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-034.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/devops/concepts/node-authorization.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-035",
+    "method": "GET",
+    "path": "ydb/docs/en/core/devops/concepts/node-authorization.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-035.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/devops/concepts/toc_p.yaml?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-036",
+    "method": "GET",
+    "path": "ydb/docs/en/core/devops/concepts/toc_p.yaml",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-036.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/devops/deployment-options/manual/node-authorization.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-037",
+    "method": "GET",
+    "path": "ydb/docs/en/core/devops/deployment-options/manual/node-authorization.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-037.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/devops/deployment-options/manual/toc_p.yaml?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-038",
+    "method": "GET",
+    "path": "ydb/docs/en/core/devops/deployment-options/manual/toc_p.yaml",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-038.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/maintenance/manual/dynamic-config.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-039",
+    "method": "GET",
+    "path": "ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-039.http.b64",
+    "scope": "current_main_target"
+  },
+  {
+    "endpoint": "repos/ydb-platform/ydb/contents/ydb/docs/en/core/reference/configuration/client_certificate_authorization.md?ref=5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "id": "lookup-040",
+    "method": "GET",
+    "path": "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md",
+    "ref_sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+    "response_artifact": "raw/lookups/lookup-040.http.b64",
+    "scope": "current_main_target"
+  }
+]

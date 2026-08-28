@@ -3,6 +3,10 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** Existing model and prompt configuration is historical
+> implementation detail. Simplified NG roles, rotation and verification rules are
+> authoritative in §23 of [10-ng-requirements](10-ng-requirements.md).
+
 ---
 
 ## 12. LLM details (Yandex AI Studio)

@@ -3,6 +3,10 @@
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
 > Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
 
+> **NG authority notice:** §15 through §17 describe the existing pipeline and may
+> conflict with the simplified design. §23 in
+> [10-ng-requirements](10-ng-requirements.md) is authoritative for NG.
+
 ---
 
 ## 15. Pipeline data flow (detailed, Phase D+)

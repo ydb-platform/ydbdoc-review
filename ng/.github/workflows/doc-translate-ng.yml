@@ -1,0 +1,57 @@
+name: ydbdoc-review NG (doc_translate)
+run-name: "doc_translate PR #${{ github.event.pull_request.number }}"
+
+on:
+  pull_request_target:
+    types: [labeled]
+    paths:
+      - "ydb/docs/**"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ydbdoc-ng-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  translate:
+    if: github.event.label.name == 'doc_translate'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consume doc_translate label immediately
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/labels/doc_translate" || true
+      - uses: actions/checkout@v5
+        with:
+          repository: ydb-platform/ydbdoc-review
+          ref: v0.1.0
+          path: ydbdoc-review-ng
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ./ydbdoc-review-ng 'ydb[yc]'
+      - name: Write YDB service account key
+        env:
+          YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$YDB_SA_KEY" > "$RUNNER_TEMP/ydb-sa-key.json"
+      - name: Translate and publish Draft
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          YDBDOC_ALLOWED_ACTORS: ${{ vars.YDBDOC_ALLOWED_ACTORS }}
+          YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
+          YDBDOC_YDB_ENDPOINT: ${{ vars.YDBDOC_YDB_ENDPOINT }}
+          YDBDOC_YDB_DATABASE: ${{ vars.YDBDOC_YDB_DATABASE }}
+          YDBDOC_YDB_SA_KEY_FILE: ${{ runner.temp }}/ydb-sa-key.json
+          YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
+          YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
+          YDBDOC_MODEL_TRANSLATE: ${{ vars.YDBDOC_MODEL_TRANSLATE }}
+          YDBDOC_TRANSLATOR_CALL_RUB: ${{ vars.YDBDOC_TRANSLATOR_CALL_RUB }}
+          YDBDOC_MODEL_CHECK: ${{ vars.YDBDOC_MODEL_CHECK }}
+          YDBDOC_CRITIC_CALL_RUB: ${{ vars.YDBDOC_CRITIC_CALL_RUB }}
+        run: ydbdoc-review-ng-launch --event "$GITHUB_EVENT_PATH"

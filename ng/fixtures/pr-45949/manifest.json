@@ -1,0 +1,231 @@
+{
+  "authoritative_blob_artifacts": [
+    "blobs/08948fbdbb364db2247ddcd62049ddb51ec70c73.b64",
+    "blobs/0b0bc9e1362736a78a4820a86142e3cdd29525bb.b64",
+    "blobs/1ba9ffc928f41048adf49e0263dfc540142d179b.b64",
+    "blobs/1c1cf59beefbb2776c7321b17ec5949e73ac6a09.b64",
+    "blobs/1c6719b01ea8d6a2d3db940380cf7b4686cc16ec.b64",
+    "blobs/1f24997e171836d76523e272dc2930b18939170e.b64",
+    "blobs/3188f0d86055731f1abb8ee8ff2dce973a7483a3.b64",
+    "blobs/41de76b6b584c3caa27603b9e6452c14bbd752b9.b64",
+    "blobs/43a6dd4d89f180ac423e5548e681f9767900ea48.b64",
+    "blobs/4decf753937403ef5035aafb17953c31d7bde436.b64",
+    "blobs/503afb61f1cc9bb498c0bed26620600b0acde94f.b64",
+    "blobs/77ffb6855e93d453c6dc2b456a3e754d4f1ed53d.b64",
+    "blobs/7f73dddc8850a3352dea87c46f8d4af189940deb.b64",
+    "blobs/a14712be51bcd1d087b4597c513b5480da86a56b.b64",
+    "blobs/a72b7b33a2fbc3ffce0669caf42d814a1d8c2ea9.b64",
+    "blobs/b82da4cb934a078fdaf3c85b92a6e2ffcf566c80.b64",
+    "blobs/dd18388678c82d5d6ef6be694b04e71396bc4f18.b64",
+    "blobs/dfc0dd195d850920f6645e5afe2a8ec063870025.b64",
+    "blobs/e738be43d12b0356e6a50c8dc9cd93206171a454.b64",
+    "blobs/e910a8f31332fd21d13c99b99fd697112d2974c4.b64",
+    "blobs/ee910aef0796097bddd74aa2dcfc1f609a879a4a.b64",
+    "blobs/f1d580b53bfd3ab25a505f29a65c5792cd4a0065.b64",
+    "blobs/f2244f64a776d6b4599ae7f97c6c527b27a15ec5.b64",
+    "blobs/f4cf60133030429e28d1378ef096179b33134297.b64"
+  ],
+  "authoritative_raw_artifacts": [
+    "raw/base-commit.http.b64",
+    "raw/current_main-commit.http.b64",
+    "raw/files-page-001.http.b64",
+    "raw/files-page-002.http.b64",
+    "raw/files-page-003.http.b64",
+    "raw/head-commit.http.b64",
+    "raw/lookups/lookup-001.http.b64",
+    "raw/lookups/lookup-002.http.b64",
+    "raw/lookups/lookup-003.http.b64",
+    "raw/lookups/lookup-004.http.b64",
+    "raw/lookups/lookup-005.http.b64",
+    "raw/lookups/lookup-006.http.b64",
+    "raw/lookups/lookup-007.http.b64",
+    "raw/lookups/lookup-008.http.b64",
+    "raw/lookups/lookup-009.http.b64",
+    "raw/lookups/lookup-010.http.b64",
+    "raw/lookups/lookup-011.http.b64",
+    "raw/lookups/lookup-012.http.b64",
+    "raw/lookups/lookup-013.http.b64",
+    "raw/lookups/lookup-014.http.b64",
+    "raw/lookups/lookup-015.http.b64",
+    "raw/lookups/lookup-016.http.b64",
+    "raw/lookups/lookup-017.http.b64",
+    "raw/lookups/lookup-018.http.b64",
+    "raw/lookups/lookup-019.http.b64",
+    "raw/lookups/lookup-020.http.b64",
+    "raw/lookups/lookup-021.http.b64",
+    "raw/lookups/lookup-022.http.b64",
+    "raw/lookups/lookup-023.http.b64",
+    "raw/lookups/lookup-024.http.b64",
+    "raw/lookups/lookup-025.http.b64",
+    "raw/lookups/lookup-026.http.b64",
+    "raw/lookups/lookup-027.http.b64",
+    "raw/lookups/lookup-028.http.b64",
+    "raw/lookups/lookup-029.http.b64",
+    "raw/lookups/lookup-030.http.b64",
+    "raw/lookups/lookup-031.http.b64",
+    "raw/lookups/lookup-032.http.b64",
+    "raw/lookups/lookup-033.http.b64",
+    "raw/lookups/lookup-034.http.b64",
+    "raw/lookups/lookup-035.http.b64",
+    "raw/lookups/lookup-036.http.b64",
+    "raw/lookups/lookup-037.http.b64",
+    "raw/lookups/lookup-038.http.b64",
+    "raw/lookups/lookup-039.http.b64",
+    "raw/lookups/lookup-040.http.b64",
+    "raw/main-ref.http.b64",
+    "raw/merge-commit.http.b64",
+    "raw/pr.http.b64"
+  ],
+  "bounds": {
+    "file_count": 8,
+    "lookup_count": 40,
+    "max_blob_bytes": 1000000,
+    "max_http_bytes": 2000000,
+    "page_count": 3
+  },
+  "capture": {
+    "completed_at_utc": "2026-08-28T04:13:32Z",
+    "git": "2.50.1 (Apple Git-155)",
+    "github_api_version": "2022-11-28",
+    "github_cli": "2.92.0",
+    "python": "3.14.6",
+    "request_count": 49,
+    "request_ids_sha256": "65cd7aa515db5a69f6db33f0846b700375d1294ab47031e05b8751c011115a33",
+    "started_at_utc": "2026-08-28T03:58:14Z"
+  },
+  "files": [
+    {
+      "additions": 2,
+      "changes": 2,
+      "deletions": 0,
+      "filename": "ydb/docs/redirects.yaml",
+      "sha": "1c1cf59beefbb2776c7321b17ec5949e73ac6a09",
+      "status": "modified"
+    },
+    {
+      "additions": 1,
+      "changes": 1,
+      "deletions": 0,
+      "filename": "ydb/docs/ru/core/devops/concepts/index.md",
+      "sha": "41de76b6b584c3caa27603b9e6452c14bbd752b9",
+      "status": "modified"
+    },
+    {
+      "additions": 119,
+      "changes": 119,
+      "deletions": 0,
+      "filename": "ydb/docs/ru/core/devops/concepts/node-authorization.md",
+      "sha": "3188f0d86055731f1abb8ee8ff2dce973a7483a3",
+      "status": "added"
+    },
+    {
+      "additions": 2,
+      "changes": 2,
+      "deletions": 0,
+      "filename": "ydb/docs/ru/core/devops/concepts/toc_p.yaml",
+      "sha": "503afb61f1cc9bb498c0bed26620600b0acde94f",
+      "status": "modified"
+    },
+    {
+      "additions": 0,
+      "changes": 95,
+      "deletions": 95,
+      "filename": "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md",
+      "sha": "dfc0dd195d850920f6645e5afe2a8ec063870025",
+      "status": "removed"
+    },
+    {
+      "additions": 0,
+      "changes": 2,
+      "deletions": 2,
+      "filename": "ydb/docs/ru/core/devops/deployment-options/manual/toc_p.yaml",
+      "sha": "a14712be51bcd1d087b4597c513b5480da86a56b",
+      "status": "modified"
+    },
+    {
+      "additions": 1,
+      "changes": 2,
+      "deletions": 1,
+      "filename": "ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+      "sha": "f2244f64a776d6b4599ae7f97c6c527b27a15ec5",
+      "status": "modified"
+    },
+    {
+      "additions": 1,
+      "changes": 2,
+      "deletions": 1,
+      "filename": "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md",
+      "sha": "1c6719b01ea8d6a2d3db940380cf7b4686cc16ec",
+      "status": "modified"
+    }
+  ],
+  "files_pages": [
+    {
+      "artifact": "raw/files-page-001.http.b64",
+      "items": 3,
+      "number": 1
+    },
+    {
+      "artifact": "raw/files-page-002.http.b64",
+      "items": 3,
+      "number": 2
+    },
+    {
+      "artifact": "raw/files-page-003.http.b64",
+      "items": 2,
+      "number": 3
+    }
+  ],
+  "headers_artifact": "headers.json",
+  "inventory_artifact": "inventory.json",
+  "lookup_requests_artifact": "requests.json",
+  "main_ref_artifact": "raw/main-ref.http.b64",
+  "provenance_algorithm": "sha256-domain-tuples/v2",
+  "provenance_root": "9646b5c786ffc7adedf8e31f1deb3f7d99d1f9b2d5088589e378fd5628561ed6",
+  "raw_pr_artifact": "raw/pr.http.b64",
+  "refs": {
+    "base": {
+      "artifact": "raw/base-commit.http.b64",
+      "parents": [
+        "a03c495f0658320b5884834ff4f2a2d6dff963b2"
+      ],
+      "sha": "7dcbddd3cc3906c12330b4b41dddd48da8ee1815",
+      "tree": "803561a08e3855479d7f7dbb04a508216912ad3f"
+    },
+    "current_main": {
+      "artifact": "raw/current_main-commit.http.b64",
+      "parents": [
+        "01ffb66224d3f8eb572e6155d186a31421c17534",
+        "547713dd9c37f0e461d77247947fb05b9bbbd38f"
+      ],
+      "sha": "5cf1b7f85ab79c9a40b829ce23cbce0fbbe200e9",
+      "tree": "0280c4a66caeb64caf6b858aee966d24996c554e"
+    },
+    "head": {
+      "artifact": "raw/head-commit.http.b64",
+      "parents": [
+        "7e4c0138fea8d4bf73cb5cd40fb9d74f499d79e5"
+      ],
+      "sha": "0da32bb95ae025681e74f98654262dc992fb0c35",
+      "tree": "e7fa882fc053bbf9d1cd19e8401f85317ee093a0"
+    },
+    "merge": {
+      "artifact": "raw/merge-commit.http.b64",
+      "parents": [
+        "d9fc9f993eb7fbade94da40c7c666178abb93170"
+      ],
+      "sha": "2f6dc867f5121b3c81ccc30707d95fb15916baf2",
+      "tree": "f6a261dd161b233d79f219209a97174031bfffba"
+    }
+  },
+  "schema_version": "pr-fixture-manifest/v2",
+  "specification": {
+    "commit": "4040e14aac7",
+    "repository": "ydbdoc-review",
+    "section": "25.12.3 M-1"
+  },
+  "subject": {
+    "pull_request": 45949,
+    "repository": "ydb-platform/ydb"
+  }
+}
