@@ -1194,8 +1194,11 @@ call identities, broken/non-atomic YDB call transitions, paid dispatch after
 `UNKNOWN_BILLED`, unapplied dependency closure, stale continue authority, a
 missing terminal-comment intent checkpoint, missing-label acceptance, a fake
 rather than production-composition PR45949 E2E and misleading reports/model
-metadata. Two independent RCAs are required before attempt 2. No release tag,
-cutover or production `doc_translate` is authorized.
+metadata. Two independent RCAs agreed this is a bounded patch, not another
+rewrite: attempt 2 repairs the production composition, atomic state/model
+transitions, dependency materialization, live continue/checkpoints and the raw
+recorded PR45949 production path. No release tag, cutover or production
+`doc_translate` is authorized before attempt-2 TEST PASS.
 
 **Current verdict: SIMPLE REWRITE ATTEMPT 1 TEST FAIL. ATTEMPT 2 REQUIRES TWO
 INDEPENDENT RCAS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
