@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from enum import Enum
 from unittest.mock import patch
 
 from ydbdoc_review_ng.state import (
-    RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession, _BoundedTransaction,
+    EffectCheckpoint, RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession,
+    _BoundedTransaction, _effects_json, _safe_ydb_fingerprint,
 )
 
 
@@ -191,8 +193,89 @@ class BoundedSdkContract(unittest.TestCase):
         state = adapter(Pool([Permanent("sentinel-endpoint")]))
         with patch("builtins.print") as output, self.assertRaisesRegex(StateError, "^YDB_SCHEMA_INDEX_ERROR$"):
             state.ensure_schema()
-        self.assertEqual([call.args[0] for call in output.call_args_list], ["YDB_SCHEMA_INDEX_START 0", "YDB_SCHEMA_INDEX_ERROR 0"])
+        self.assertEqual([call.args[0] for call in output.call_args_list], [
+            "YDB_SCHEMA_INDEX_START 0", "YDB_ATTEMPT_ERROR class=OTHER status=NONE issues=NONE",
+            "YDB_SCHEMA_INDEX_ERROR 0",
+        ])
         self.assertTrue(all(call.kwargs == {"flush": True} for call in output.call_args_list))
+
+    def test_error_fingerprint_is_allowlisted_bounded_and_never_reads_messages(self):
+        class Status(Enum): UNAVAILABLE = 1
+        class Issue:
+            def __init__(self, code, severity, children=()):
+                self.issue_code, self.severity, self.issues = code, severity, children
+                self.message = "sentinel-secret endpoint query payload"
+                self.args = (self.message,)
+        class Unavailable(Exception):
+            status = Status.UNAVAILABLE
+        root = Unavailable("sentinel-secret endpoint query payload")
+        level4 = [Issue(400 + index, 4) for index in range(20)]
+        level3 = [Issue(300 + index, 3, level4) for index in range(20)]
+        level2 = [Issue(200 + index, 2, level3) for index in range(20)]
+        root.issues = [Issue(100 + index, 1, level2) for index in range(20)]
+        value = _safe_ydb_fingerprint(root)
+        self.assertNotIn("sentinel", value)
+        self.assertEqual(value.split()[0], "class=Unavailable")
+        self.assertIn("status=UNAVAILABLE", value)
+        fingerprints = value.split("issues=", 1)[1].split(",")
+        self.assertLessEqual(len(fingerprints), 16)
+        self.assertFalse(any(item.startswith("400") for item in fingerprints))
+
+    def test_unknown_error_prints_only_fixed_safe_fingerprint_before_rethrow(self):
+        state = adapter(Pool([Permanent("sentinel-secret endpoint query")]))
+        with patch("builtins.print") as output, self.assertRaisesRegex(StateError, "^SAFE$"):
+            state._pool_attempt(lambda session: None, wall_seconds=1, rpc_seconds=1, error_marker="SAFE")
+        rendered = output.call_args.args[0]
+        self.assertEqual(rendered, "YDB_ATTEMPT_ERROR class=OTHER status=NONE issues=NONE")
+        self.assertNotIn("sentinel", rendered)
+        self.assertEqual(output.call_args.kwargs, {"flush": True})
+
+    def test_effect_checkpoint_markers_follow_read_write_verify_boundaries(self):
+        effects = (EffectCheckpoint(0, "PUSH_BRANCH", "PLANNED", "branch:test", "a" * 64),)
+        payload = _effects_json(effects)
+        class Result:
+            def __init__(self, rows): self.rows = rows
+        class EffectTx:
+            def __init__(self, fail_at=None): self.calls, self.fail_at, self.commits = 0, fail_at, 0
+            def execute(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == self.fail_at: raise RuntimeError("sentinel-query")
+                if self.calls == 1: return [Result([{"alive": True, "effects_schema_version": None, "effect_checkpoints": None}])]
+                if self.calls == 3: return [Result([{"effects_schema_version": "command-effects/v1", "effect_checkpoints": payload}])]
+                return []
+            def commit(self): self.commits += 1
+        expected = [
+            "EFFECT_CHECKPOINT_READ_START", "EFFECT_CHECKPOINT_READ_DONE",
+            "EFFECT_CHECKPOINT_WRITE_START", "EFFECT_CHECKPOINT_WRITE_DONE",
+            "EFFECT_CHECKPOINT_VERIFY_START", "EFFECT_CHECKPOINT_VERIFY_DONE",
+        ]
+        for fail_at, visible in ((None, expected), (2, expected[:3]), (3, expected[:5])):
+            state, tx = adapter(Pool()), EffectTx(fail_at)
+            state._serializable = lambda operation, **kwargs: operation(tx)
+            with patch("builtins.print") as output:
+                if fail_at is None:
+                    self.assertTrue(state.put_effect_checkpoints("receipt", effects).won)
+                else:
+                    with self.assertRaises(RuntimeError): state.put_effect_checkpoints("receipt", effects)
+            self.assertEqual([call.args[0] for call in output.call_args_list], visible)
+            self.assertTrue(all(call.kwargs == {"flush": True} for call in output.call_args_list))
+
+    def test_effect_checkpoint_early_commit_markers_are_ordered(self):
+        effects = (EffectCheckpoint(0, "PUSH_BRANCH", "PLANNED", "branch:test", "a" * 64),)
+        class Result: rows = []
+        class Tx:
+            def __init__(self): self.commits = 0
+            def execute(self, *args, **kwargs): return [Result()]
+            def commit(self): self.commits += 1
+        state, tx = adapter(Pool()), Tx()
+        state._serializable = lambda operation, **kwargs: operation(tx)
+        with patch("builtins.print") as output:
+            state.put_effect_checkpoints("receipt", effects)
+        self.assertEqual([call.args[0] for call in output.call_args_list], [
+            "EFFECT_CHECKPOINT_READ_START", "EFFECT_CHECKPOINT_READ_DONE",
+            "EFFECT_CHECKPOINT_EARLY_COMMIT_START", "EFFECT_CHECKPOINT_EARLY_COMMIT_DONE",
+        ])
+        self.assertEqual(tx.commits, 1)
 
 
 if __name__ == "__main__": unittest.main()

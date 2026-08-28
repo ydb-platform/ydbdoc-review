@@ -27,10 +27,56 @@ COMMANDS = {"DOC_TRANSLATE", "DOC_CONTINUE", "DOC_VERIFY"}
 MODEL_ROLES = {"CLASSIFIER", "TRANSLATOR_A", "CRITIC_B", "REPAIR_B", "CRITIC_A", "REPAIR_A", "FINAL_CRITIC_B"}
 PROVIDER_OUTCOMES = {"SUCCESS", "TIMEOUT", "PROVIDER_ERROR", "MALFORMED", "RECOVERED_SUCCESS"}
 VERDICTS = {"PASS", "PASS_WITH_WARNINGS", "BLOCKED", "QUALITY_RED", "RED", "YELLOW", "GREEN"}
+SAFE_YDB_CLASSES = {
+    "Aborted", "Unavailable", "Overloaded", "Timeout", "DeadlineExceed", "ConnectionError",
+    "ConnectionFailure", "ConnectionLost", "SessionBusy", "BadSession", "Unauthenticated",
+    "Unauthorized", "NotFound", "SchemeError",
+}
+SAFE_YDB_STATUSES = {
+    "BAD_REQUEST", "UNAUTHORIZED", "INTERNAL_ERROR", "ABORTED", "UNAVAILABLE", "OVERLOADED",
+    "SCHEME_ERROR", "GENERIC_ERROR", "TIMEOUT", "BAD_SESSION", "PRECONDITION_FAILED",
+    "ALREADY_EXISTS", "NOT_FOUND", "SESSION_EXPIRED", "CANCELLED", "UNDETERMINED",
+    "UNSUPPORTED", "SESSION_BUSY", "EXTERNAL_ERROR",
+}
 
 
 class StateError(RuntimeError):
     """Sanitized state error. Adapter exceptions never expose configuration."""
+
+
+def _bounded_number(value: object) -> str:
+    return str(value) if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1_000_000 else "NONE"
+
+
+def _safe_attribute(value: object, name: str) -> object | None:
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def _bounded_children(value: object) -> list[object]:
+    children = _safe_attribute(value, "issues") or ()
+    try:
+        return list(children)[:16]
+    except Exception:
+        return []
+
+
+def _safe_ydb_fingerprint(error: Exception) -> str:
+    class_name = type(error).__name__
+    safe_class = class_name if class_name in SAFE_YDB_CLASSES else "OTHER"
+    status = _safe_attribute(error, "status")
+    status_name = status.name if isinstance(status, Enum) and status.name in SAFE_YDB_STATUSES else "NONE" if status is None else "OTHER"
+    fingerprints: list[str] = []
+    pending = [(issue, 1) for issue in _bounded_children(error)]
+    while pending and len(fingerprints) < 16:
+        issue, depth = pending.pop(0)
+        fingerprints.append(f"{_bounded_number(_safe_attribute(issue, 'issue_code'))}:{_bounded_number(_safe_attribute(issue, 'severity'))}")
+        if depth < 3:
+            pending.extend((child, depth + 1) for child in _bounded_children(issue)[: 16 - len(fingerprints)])
+    issue_text = ",".join(fingerprints) if fingerprints else "NONE"
+    return f"class={safe_class} status={status_name} issues={issue_text}"
 
 
 class ClaimStatus(str, Enum):
@@ -970,6 +1016,7 @@ class YdbState(StatePort):
                     retry_settings=retry_settings,
                 )
             except Exception as error:
+                print(f"YDB_ATTEMPT_ERROR {_safe_ydb_fingerprint(error)}", flush=True)
                 if not transient or not isinstance(error, transient):
                     raise StateError(error_marker) from None
                 if attempt + 1 >= self.OUTER_ATTEMPTS:
@@ -1181,27 +1228,42 @@ class YdbState(StatePort):
         payload = _effects_json(effects)
         table, key_value = self._table("command_runs"), f"run:{receipt_identity}"
         def op(tx):
+            def early(result):
+                print("EFFECT_CHECKPOINT_EARLY_COMMIT_START", flush=True)
+                tx.commit()
+                print("EFFECT_CHECKPOINT_EARLY_COMMIT_DONE", flush=True)
+                return result
             key = {"$repo": self.repository.canonical, "$key": key_value}
+            print("EFFECT_CHECKPOINT_READ_START", flush=True)
             before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effects_schema_version,effect_checkpoints,expires_at>CurrentUtcTimestamp() AS alive FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN';", key)
+            print("EFFECT_CHECKPOINT_READ_DONE", flush=True)
             rows = before[0].rows if before else []
             if not rows or not rows[0]["alive"]:
-                tx.commit(); return ClaimResult(ClaimStatus.CONFLICT, False, "ABSENT")
+                return early(ClaimResult(ClaimStatus.CONFLICT, False, "ABSENT"))
             if rows[0].get("effects_schema_version") is not None:
                 if rows[0]["effects_schema_version"] != "command-effects/v1":
-                    tx.commit(); return ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED")
+                    return early(ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED"))
                 previous = _effects_from_json(rows[0]["effect_checkpoints"])
                 if previous == effects:
-                    tx.commit(); return ClaimResult(ClaimStatus.EXISTING_SAME, False, "EFFECTS_RECORDED")
+                    return early(ClaimResult(ClaimStatus.EXISTING_SAME, False, "EFFECTS_RECORDED"))
                 if not _valid_effect_transition(previous, effects):
-                    tx.commit(); return ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED")
+                    return early(ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED"))
                 params = {**key, "$payload": payload}
+                print("EFFECT_CHECKPOINT_WRITE_START", flush=True)
                 tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $payload AS Json; UPDATE `{table}` SET effect_checkpoints=$payload,updated_at=CurrentUtcTimestamp() WHERE repository=$repo AND record_key=$key AND effects_schema_version='command-effects/v1';", params)
+                print("EFFECT_CHECKPOINT_WRITE_DONE", flush=True)
+                print("EFFECT_CHECKPOINT_VERIFY_START", flush=True)
                 actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effect_checkpoints FROM `{table}` WHERE repository=$repo AND record_key=$key;", key, commit_tx=True)
+                print("EFFECT_CHECKPOINT_VERIFY_DONE", flush=True)
                 won = bool(actual and actual[0].rows and _effects_from_json(actual[0].rows[0]["effect_checkpoints"]) == effects)
                 return ClaimResult(ClaimStatus.WON if won else ClaimStatus.INCONCLUSIVE, won, "EFFECTS_RECORDED")
             params = {**key, "$version": "command-effects/v1", "$payload": payload}
+            print("EFFECT_CHECKPOINT_WRITE_START", flush=True)
             tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $version AS Utf8; DECLARE $payload AS Json; UPDATE `{table}` SET effects_schema_version=$version,effect_checkpoints=$payload,updated_at=CurrentUtcTimestamp() WHERE repository=$repo AND record_key=$key AND effects_schema_version IS NULL;", params)
+            print("EFFECT_CHECKPOINT_WRITE_DONE", flush=True)
+            print("EFFECT_CHECKPOINT_VERIFY_START", flush=True)
             actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effects_schema_version,effect_checkpoints FROM `{table}` WHERE repository=$repo AND record_key=$key;", key, commit_tx=True)
+            print("EFFECT_CHECKPOINT_VERIFY_DONE", flush=True)
             won = bool(actual and actual[0].rows and actual[0].rows[0]["effects_schema_version"] == "command-effects/v1" and _effects_from_json(actual[0].rows[0]["effect_checkpoints"]) == effects)
             return ClaimResult(ClaimStatus.CREATED if won else ClaimStatus.INCONCLUSIVE, won, "EFFECTS_RECORDED")
         return self._serializable(op)
