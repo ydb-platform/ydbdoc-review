@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import inspect
+import time
 import unittest
 from enum import Enum
 from unittest.mock import patch
 
 from ydbdoc_review_ng.state import (
-    ClaimStatus, CommandReceipt, EffectCheckpoint, RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession,
+    ClaimStatus, CommandReceipt, EffectCheckpoint, RealYdbTestConfig, RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession,
     _BoundedTransaction, _effects_json, _safe_ydb_fingerprint,
     _safe_schema_issue_details,
+    _schema_contract, schema_statements,
 )
 
 
@@ -29,6 +31,8 @@ class RetrySettings:
 
 class Issues:
     Aborted = Transient
+    class NotFound(Exception): pass
+    class SchemeError(Exception): pass
 
 
 class FakeYdb:
@@ -49,23 +53,48 @@ class Tx:
     def commit(self, *args, **kwargs): self.calls.append(("commit", args, kwargs)); return "committed"
 
 
+class Column:
+    def __init__(self, name, type_name): self.name, self.type = name, type_name
+
+
+class Description:
+    def __init__(self, statement):
+        columns, primary_key = _schema_contract(statement)
+        self.columns = [Column(*column) for column in columns]
+        self.primary_key = list(primary_key)
+
+
 class Session:
-    def __init__(self): self.tx, self.scheme, self.prepared = Tx(), [], []
+    def __init__(self, pool): self.pool, self.tx, self.scheme, self.prepared, self.described = pool, Tx(), [], [], []
     def transaction(self, *args, **kwargs): return self.tx
-    def execute_scheme(self, *args, **kwargs): self.scheme.append((args, kwargs)); return "schema"
+    def execute_scheme(self, *args, **kwargs):
+        self.scheme.append((args, kwargs))
+        statement = args[0]
+        if statement.startswith("CREATE TABLE"):
+            table = statement.split("`", 2)[1]
+            self.pool.present[table] = Description(statement)
+        return "schema"
+    def describe_table(self, name, **kwargs):
+        self.described.append(name)
+        table = name.rsplit("/", 1)[-1]
+        if table not in self.pool.present:
+            raise Issues.NotFound("path not found")
+        return self.pool.present[table]
     def prepare(self, query, settings=None):
         self.prepared.append((query, settings))
         return DataQuery(query)
 
 
 class Pool:
-    def __init__(self, outcomes=()): self.outcomes, self.calls, self.sessions = list(outcomes), [], []
+    def __init__(self, outcomes=(), present=None):
+        self.outcomes, self.calls, self.sessions = list(outcomes), [], []
+        self.present = {} if present is None else dict(present)
     def retry_operation_sync(self, operation, retry_settings=None):
         self.calls.append(retry_settings)
         if self.outcomes:
             outcome = self.outcomes.pop(0)
             if isinstance(outcome, Exception): raise outcome
-        session = Session(); self.sessions.append(session)
+        session = Session(self); self.sessions.append(session)
         return operation(session)
 
 
@@ -74,6 +103,15 @@ def adapter(pool):
     value.config = YdbConfig("grpcs://example.invalid:2135", "/safe/database", "/safe/key")
     value.repository = RepoIdentity("owner", "repo")
     value.pool, value._ydb, value._schema_initialized = pool, FakeYdb, False
+    return value
+
+
+def acceptance_adapter(pool):
+    value = adapter(pool)
+    value.config = RealYdbTestConfig(
+        "grpcs://example.invalid:2135", "/safe/database", "/safe/key",
+        "m0_contract_test12",
+    )
     return value
 
 
@@ -112,7 +150,7 @@ class BoundedSdkContract(unittest.TestCase):
         self.assertEqual(len(pool.calls), 1)
 
     def test_scheme_execute_commit_get_both_rpc_settings_and_explicit_is_preserved(self):
-        session = Session()
+        session = Session(Pool())
         bounded = _BoundedSession(session, lambda: RequestSettings().with_timeout(3).with_operation_timeout(3))
         bounded.execute_scheme("DDL")
         tx = bounded.transaction("mode")
@@ -155,7 +193,7 @@ class BoundedSdkContract(unittest.TestCase):
         self.assertEqual((events[0][2].timeout, events[1][4].timeout), (3, 2))
 
     def test_raw_query_without_parameters_and_data_query_are_not_prepared(self):
-        session = Session()
+        session = Session(Pool())
         tx = _BoundedSession(session, RequestSettings).transaction()
         tx.execute("SELECT 1")
         prepared = DataQuery("DECLARE $value AS Utf8; SELECT $value;")
@@ -263,49 +301,204 @@ class BoundedSdkContract(unittest.TestCase):
                 state._pool_attempt(operation, wall_seconds=1, rpc_seconds=1, error_marker="SAFE")
         self.assertEqual(len(pool.sessions[0].scheme), 1)
 
-    def test_schema_uses_separate_budget_request_settings_and_flushed_markers(self):
-        state, pool = adapter(Pool()), None
-        pool = state.pool
+    def _present_schema(self):
+        return {
+            statement.split("`", 2)[1]: Description(statement)
+            for statement in schema_statements("m0_contract_test12")
+        }
+
+    def test_production_schema_keeps_original_four_create_path(self):
+        state = adapter(Pool())
         with patch("builtins.print") as output:
             state.ensure_schema()
-        self.assertEqual(len(pool.calls), 4)
-        for retry, session in zip(pool.calls, pool.sessions, strict=True):
-            self.assertEqual(retry.kwargs["max_retries"], 0)
-            settings = session.scheme[0][1]["settings"]
-            self.assertEqual((settings.timeout, settings.operation_timeout), (5, 5))
-        self.assertEqual(output.call_count, 8)
-        self.assertTrue(all(call.kwargs == {"flush": True} for call in output.call_args_list))
+        self.assertEqual(len(state.pool.calls), 4)
+        self.assertTrue(all(len(session.scheme) == 1 for session in state.pool.sessions))
         self.assertEqual(output.call_args_list[0].args, ("YDB_SCHEMA_INDEX_START 0",))
         self.assertEqual(output.call_args_list[-1].args, ("YDB_SCHEMA_INDEX_DONE 3",))
 
-    def test_four_schema_statements_share_one_absolute_deadline(self):
-        state, pool = adapter(Pool()), None
-        pool = state.pool
-        with patch("ydbdoc_review_ng.state.time.monotonic", side_effect=[0, 1, 2, 9, 10, 15, 16, 17, 18]), patch("builtins.print"):
+    def test_schema_all_absent_creates_once_then_verifies(self):
+        state = acceptance_adapter(Pool())
+        with patch("builtins.print") as output:
             state.ensure_schema()
-        settings = [session.scheme[0][1]["settings"] for session in pool.sessions]
-        self.assertEqual([item.timeout for item in settings], [5, 5, 4, 2])
+        ddl_sessions = [session for session in state.pool.sessions if session.scheme]
+        self.assertEqual(len(ddl_sessions), 4)
+        self.assertTrue(all(len(session.scheme) == 1 for session in ddl_sessions))
+        self.assertTrue(all(call.kwargs["max_retries"] == 0 for call in state.pool.calls))
+        self.assertEqual(output.call_args_list[-1].args, ("Схема тестовой YDB создана и проверена.",))
 
-    def test_count_and_four_drops_receive_one_cleanup_deadline(self):
-        from ydbdoc_review_ng.state import RealYdbTestConfig
-        state = adapter(Pool())
-        state.config = RealYdbTestConfig("grpcs://example.invalid:2135", "/safe/database", "/safe/key", "m0_contract_test12")
-        seen = []
-        def serializable(operation, *, absolute_deadline=None): seen.append(("count", absolute_deadline)); return 0
-        def pool_attempt(operation, **kwargs): seen.append(("drop", kwargs["absolute_deadline"])); return None
-        state._serializable, state._pool_attempt = serializable, pool_attempt
-        with patch("ydbdoc_review_ng.state.time.monotonic", return_value=100), patch("builtins.print"):
-            state.teardown_test_schema()
-        self.assertEqual(seen, [("count", 120.0)] + [("drop", 120.0)] * 4)
+    def test_schema_all_present_verifies_without_ddl(self):
+        state = acceptance_adapter(Pool(present=self._present_schema()))
+        with patch("builtins.print") as output:
+            state.ensure_schema()
+        self.assertFalse(any(session.scheme for session in state.pool.sessions))
+        self.assertEqual(
+            [path for session in state.pool.sessions for path in session.described],
+            [
+                f"/safe/database/{table}"
+                for table in self._present_schema()
+            ],
+        )
+        self.assertEqual(output.call_args.args, ("Схема тестовой YDB проверена. CREATE TABLE не выполнялся.",))
+
+    def test_schema_bootstrap_creates_relative_and_verifies_all_absolute(self):
+        state = acceptance_adapter(Pool())
+        with patch("builtins.print"):
+            state.ensure_schema()
+        described = [path for session in state.pool.sessions for path in session.described]
+        expected = [
+            f"/safe/database/{table}"
+            for table in self._present_schema()
+        ]
+        self.assertEqual(described, expected + expected)
+        ddl = [call[0][0] for session in state.pool.sessions for call in session.scheme]
+        self.assertEqual(len(ddl), 4)
+        self.assertTrue(all("`/safe/database/" not in statement for statement in ddl))
+
+    def test_schema_partial_fails_without_ddl(self):
+        present = self._present_schema()
+        present.pop("m0_contract_test12_lineages")
+        state = acceptance_adapter(Pool(present=present))
+        with self.assertRaisesRegex(StateError, "создана частично"):
+            state.ensure_schema()
+        self.assertFalse(any(session.scheme for session in state.pool.sessions))
+
+    def test_schema_mismatch_fails_without_ddl(self):
+        present = self._present_schema()
+        present["m0_contract_test12_lineages"].primary_key = ["repository"]
+        state = acceptance_adapter(Pool(present=present))
+        with self.assertRaisesRegex(StateError, "не совпадает"):
+            state.ensure_schema()
+        self.assertFalse(any(session.scheme for session in state.pool.sessions))
+
+    def _scheme_error_state(self, child_names=(), list_error=None):
+        class DescribeSession(Session):
+            def describe_table(self, name, **kwargs):
+                self.described.append(name)
+                raise Issues.SchemeError("opaque")
+        class DescribePool(Pool):
+            def retry_operation_sync(self, operation, retry_settings=None):
+                self.calls.append(retry_settings)
+                session = DescribeSession(self)
+                self.sessions.append(session)
+                return operation(session)
+        class SchemeClient:
+            def __init__(self): self.calls = []
+            def list_directory(inner, path, settings=None):
+                inner.calls.append((path, settings))
+                if list_error is not None:
+                    raise list_error
+                children = [type("Child", (), {"name": name})() for name in child_names]
+                return type("Listing", (), {"children": children})()
+        state = acceptance_adapter(DescribePool())
+        state.driver = type("Driver", (), {"scheme_client": SchemeClient()})()
+        return state
+
+    def test_describe_direct_not_found_is_missing_without_directory_listing(self):
+        state = acceptance_adapter(Pool())
+        state.driver = type("Driver", (), {"scheme_client": object()})()
+        self.assertIsNone(state._describe_acceptance_table(
+            "m0_contract_test12_command_runs", time.monotonic() + 10,
+        ))
+        self.assertEqual(
+            state.pool.sessions[0].described,
+            ["/safe/database/m0_contract_test12_command_runs"],
+        )
+
+    def test_scheme_error_and_exact_child_absent_proves_missing(self):
+        state = self._scheme_error_state(())
+        self.assertIsNone(state._describe_acceptance_table(
+            "m0_contract_test12_command_runs", time.monotonic() + 10,
+        ))
+        self.assertEqual(state.driver.scheme_client.calls[0][0], "/safe/database")
+
+    def test_scheme_error_and_exact_child_present_preserves_describe_failure(self):
+        table = "m0_contract_test12_command_runs"
+        state = self._scheme_error_state((table,))
+        with self.assertRaisesRegex(StateError, "^YDB_SCHEMA_DESCRIBE_ERROR$"):
+            state._describe_acceptance_table(table, time.monotonic() + 10)
+        self.assertEqual(state.pool.sessions[0].described, [f"/safe/database/{table}"])
+        self.assertFalse(any(session.scheme for session in state.pool.sessions))
+
+    def test_similar_child_name_does_not_count_as_exact_table(self):
+        table = "m0_contract_test12_command_runs"
+        state = self._scheme_error_state((table + "_old",))
+        self.assertIsNone(state._describe_acceptance_table(
+            table, time.monotonic() + 10,
+        ))
+
+    def test_describe_path_strips_trailing_database_slash(self):
+        state = acceptance_adapter(Pool())
+        state.config = RealYdbTestConfig(
+            "grpcs://example.invalid:2135", "/safe/database/", "/safe/key",
+            "m0_contract_test12",
+        )
+        state.driver = type("Driver", (), {"scheme_client": object()})()
+        self.assertIsNone(state._describe_acceptance_table(
+            "m0_contract_test12_command_runs", time.monotonic() + 10,
+        ))
+        self.assertEqual(
+            state.pool.sessions[0].described,
+            ["/safe/database/m0_contract_test12_command_runs"],
+        )
+
+    def test_create_and_data_table_names_remain_relative(self):
+        state = acceptance_adapter(Pool())
+        self.assertEqual(state._table("command_runs"), "m0_contract_test12_command_runs")
+        for statement in schema_statements(state.config.table_prefix):
+            self.assertNotIn("`/safe/database/", statement)
+        cleanup_source = inspect.getsource(YdbState.cleanup_test_rows)
+        self.assertNotIn("`/safe/database/", cleanup_source)
+
+    def test_directory_listing_failure_is_red_and_never_runs_ddl(self):
+        state = self._scheme_error_state((), Permanent("opaque"))
+        with self.assertRaisesRegex(StateError, "^YDB_SCHEMA_DESCRIBE_ERROR$"):
+            state._describe_acceptance_table(
+                "m0_contract_test12_command_runs", time.monotonic() + 10,
+            )
+        self.assertFalse(any(session.scheme for session in state.pool.sessions))
+
+    def test_directory_listing_receives_fresh_remaining_deadline_settings(self):
+        state = self._scheme_error_state(())
+        with patch("ydbdoc_review_ng.state.time.monotonic", side_effect=[100.0, 101.0, 103.0]):
+            self.assertIsNone(state._describe_acceptance_table(
+                "m0_contract_test12_command_runs", 110.0,
+            ))
+        settings = state.driver.scheme_client.calls[0][1]
+        self.assertEqual((settings.timeout, settings.operation_timeout), (5.0, 5.0))
+
+    def test_cleanup_is_repository_scoped_bounded_and_has_no_ddl(self):
+        state = acceptance_adapter(Pool())
+        class Rows:
+            rows = [{"n": 1}]
+        class CleanupTx:
+            def __init__(self): self.calls, self.commits = [], 0
+            def execute(self, query, params): self.calls.append((query, params)); return [Rows()]
+            def commit(self): self.commits += 1
+        tx = CleanupTx()
+        state._serializable = lambda operation, **kwargs: operation(tx)
+        state.cleanup_test_rows(maximum_rows=1000)
+        self.assertEqual(len(tx.calls), 8)
+        self.assertTrue(all("repository=$repo" in query for query, _ in tx.calls))
+        self.assertTrue(all(params == {"$repo": "owner/repo"} for _, params in tx.calls))
+        self.assertFalse(any("DROP" in query for query, _ in tx.calls))
+        self.assertEqual(tx.commits, 1)
+
+        class TooMany(CleanupTx):
+            def execute(self, query, params): self.calls.append((query, params)); return [type("Rows", (), {"rows": [{"n": 1001}]})()]
+        too_many = TooMany()
+        state._serializable = lambda operation, **kwargs: operation(too_many)
+        with self.assertRaisesRegex(StateError, "bound exceeded"):
+            state.cleanup_test_rows(maximum_rows=1000)
+        self.assertEqual(len(too_many.calls), 4)
+        self.assertFalse(any("DELETE" in query for query, _ in too_many.calls))
 
     def test_schema_permanent_error_is_safe_and_flushes_static_error_marker(self):
-        state = adapter(Pool([Permanent("sentinel-endpoint")]))
-        with patch("builtins.print") as output, self.assertRaisesRegex(StateError, "^YDB_SCHEMA_INDEX_ERROR$"):
+        state = acceptance_adapter(Pool([Permanent("sentinel-endpoint")]))
+        with patch("builtins.print") as output, self.assertRaisesRegex(StateError, "^YDB_SCHEMA_DESCRIBE_ERROR$"):
             state.ensure_schema()
         self.assertEqual([call.args[0] for call in output.call_args_list], [
-            "YDB_SCHEMA_INDEX_START 0", "YDB_ATTEMPT_ERROR class=OTHER status=NONE issues=NONE",
+            "YDB_ATTEMPT_ERROR class=OTHER status=NONE issues=NONE",
             "YDB_SCHEMA_ISSUES NONE",
-            "YDB_SCHEMA_INDEX_ERROR 0",
         ])
         self.assertTrue(all(call.kwargs == {"flush": True} for call in output.call_args_list))
 

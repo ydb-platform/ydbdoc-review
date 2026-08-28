@@ -936,6 +936,11 @@ class _BoundedSession:
             kwargs["settings"] = self._settings()
         return self._session.execute_scheme(*args, **kwargs)
 
+    def describe_table(self, *args, **kwargs):
+        if len(args) < 2 and kwargs.get("settings") is None:
+            kwargs["settings"] = self._settings()
+        return self._session.describe_table(*args, **kwargs)
+
     def transaction(self, *args, **kwargs):
         return _BoundedTransaction(self._session.transaction(*args, **kwargs), self._settings, self._session)
 
@@ -994,54 +999,137 @@ class YdbState(StatePort):
     def ensure_schema(self) -> None:
         if self._schema_initialized:
             return
-        # Exact columns are asserted by tests; production creates only these four tables.
-        prefix = self.config.table_prefix if isinstance(self.config, RealYdbTestConfig) else ""
+        if not isinstance(self.config, RealYdbTestConfig):
+            statements = schema_statements()
+            schema_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
+            for index, statement in enumerate(statements):
+                print(f"YDB_SCHEMA_INDEX_START {index}", flush=True)
+                try:
+                    self._pool_attempt(
+                        lambda session, sql=statement: session.execute_scheme(sql),
+                        wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
+                        error_marker="YDB_SCHEMA_INDEX_ERROR", absolute_deadline=schema_deadline,
+                        schema_diagnostics=True,
+                    )
+                except StateError:
+                    print(f"YDB_SCHEMA_INDEX_ERROR {index}", flush=True)
+                    raise
+                print(f"YDB_SCHEMA_INDEX_DONE {index}", flush=True)
+            self._schema_initialized = True
+            return
+        prefix = self.config.table_prefix
         statements = schema_statements(prefix)
         schema_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
-        for index, statement in enumerate(statements):
-            print(f"YDB_SCHEMA_INDEX_START {index}", flush=True)
-            try:
+        tables = tuple(self._table(name) for name in self.TABLES)
+        descriptions = tuple(
+            self._describe_acceptance_table(table, schema_deadline)
+            for table in tables
+        )
+        present = tuple(value is not None for value in descriptions)
+        if any(present) and not all(present):
+            found = ", ".join(table for table, exists in zip(tables, present, strict=True) if exists)
+            missing = ", ".join(table for table, exists in zip(tables, present, strict=True) if not exists)
+            raise StateError(
+                "Схема тестовой YDB создана частично. "
+                f"Есть: {found}. Нет: {missing}. Автоматическое исправление отключено."
+            )
+        created = not any(present)
+        if created:
+            for index, statement in enumerate(statements):
+                print(f"YDB_SCHEMA_CREATE_START {index}", flush=True)
                 self._pool_attempt(
                     lambda session, sql=statement: session.execute_scheme(sql),
-                    wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
-                    error_marker="YDB_SCHEMA_INDEX_ERROR", absolute_deadline=schema_deadline,
+                    wall_seconds=self.SCHEMA_WALL_SECONDS,
+                    rpc_seconds=self.SCHEMA_RPC_SECONDS,
+                    error_marker="YDB_SCHEMA_INDEX_ERROR",
+                    absolute_deadline=schema_deadline,
                     schema_diagnostics=True,
+                    attempts=1,
                 )
-            except StateError:
-                print(f"YDB_SCHEMA_INDEX_ERROR {index}", flush=True)
-                raise
-            print(f"YDB_SCHEMA_INDEX_DONE {index}", flush=True)
+                print(f"YDB_SCHEMA_CREATE_DONE {index}", flush=True)
+            descriptions = tuple(
+                self._describe_acceptance_table(table, schema_deadline)
+                for table in tables
+            )
+            if any(value is None for value in descriptions):
+                raise StateError("Не удалось подтвердить создание всех таблиц тестовой YDB.")
+        for table, statement, description in zip(tables, statements, descriptions, strict=True):
+            self._verify_acceptance_table(table, statement, description)
+        if created:
+            print("Схема тестовой YDB создана и проверена.", flush=True)
+        else:
+            print("Схема тестовой YDB проверена. CREATE TABLE не выполнялся.", flush=True)
         self._schema_initialized = True
 
-    def teardown_test_schema(self, maximum_rows: int = 1000) -> None:
+    def _describe_acceptance_table(self, table: str, deadline: float):
+        table_path = f"{self.config.database.rstrip('/')}/{table}"
+
+        def describe(session):
+            try:
+                return session.describe_table(table_path)
+            except Exception as error:
+                not_found = getattr(self._ydb.issues, "NotFound", None)
+                scheme_error = getattr(self._ydb.issues, "SchemeError", None)
+                if isinstance(not_found, type) and isinstance(error, not_found):
+                    return None
+                if isinstance(scheme_error, type) and isinstance(error, scheme_error):
+                    listing = self.driver.scheme_client.list_directory(
+                        self.config.database,
+                        settings=self._request_settings(self.SCHEMA_RPC_SECONDS, deadline),
+                    )
+                    child_names = {
+                        child.name for child in listing.children
+                        if isinstance(getattr(child, "name", None), str)
+                    }
+                    if table not in child_names:
+                        return None
+                raise
+        return self._pool_attempt(
+            describe,
+            wall_seconds=self.SCHEMA_WALL_SECONDS,
+            rpc_seconds=self.SCHEMA_RPC_SECONDS,
+            error_marker="YDB_SCHEMA_DESCRIBE_ERROR",
+            absolute_deadline=deadline,
+            schema_diagnostics=True,
+        )
+
+    @staticmethod
+    def _verify_acceptance_table(table: str, statement: str, description) -> None:
+        expected_columns, expected_primary_key = _schema_contract(statement)
+        actual_columns = tuple((column.name, str(column.type)) for column in description.columns)
+        actual_primary_key = tuple(description.primary_key)
+        if actual_columns != expected_columns or actual_primary_key != expected_primary_key:
+            raise StateError(
+                f"Схема таблицы {table} не совпадает с ожидаемой. "
+                "Автоматическое изменение таблицы отключено."
+            )
+
+    def cleanup_test_rows(self, maximum_rows: int = 1000) -> None:
         if not isinstance(self.config, RealYdbTestConfig) or not TABLE_PREFIX_RE.fullmatch(self.config.table_prefix):
             raise StateError("acceptance cleanup scope is invalid")
         if isinstance(maximum_rows, bool) or maximum_rows < 0:
             raise StateError("acceptance cleanup bound is invalid")
         cleanup_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
         tables = tuple(self._table(name) for name in self.TABLES)
-        def count(tx):
+        repository = self.repository.canonical
+        def cleanup(tx):
             total = 0
             for table in tables:
-                result = tx.execute(f"SELECT COUNT(*) AS n FROM `{table}`;")
+                result = tx.execute(
+                    f"DECLARE $repo AS Utf8; SELECT COUNT(*) AS n FROM `{table}` WHERE repository=$repo;",
+                    {"$repo": repository},
+                )
                 total += int(result[0].rows[0]["n"])
+            if total > maximum_rows:
+                raise StateError("acceptance cleanup bound exceeded")
+            for table in tables:
+                tx.execute(
+                    f"DECLARE $repo AS Utf8; DELETE FROM `{table}` WHERE repository=$repo;",
+                    {"$repo": repository},
+                )
             tx.commit()
             return total
-        if self._serializable(count, absolute_deadline=cleanup_deadline) > maximum_rows:
-            raise StateError("acceptance cleanup bound exceeded")
-        for index, table in enumerate(tables):
-            print(f"YDB_DROP_INDEX_START {index}", flush=True)
-            try:
-                self._pool_attempt(
-                    lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;"),
-                    wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
-                    error_marker="YDB_DROP_INDEX_ERROR", absolute_deadline=cleanup_deadline,
-                    schema_diagnostics=True,
-                )
-            except StateError:
-                print(f"YDB_DROP_INDEX_ERROR {index}", flush=True)
-                raise
-            print(f"YDB_DROP_INDEX_DONE {index}", flush=True)
+        self._serializable(cleanup, absolute_deadline=cleanup_deadline)
 
     def _request_settings(self, rpc_seconds: float, absolute_deadline: float):
         remaining = absolute_deadline - time.monotonic()
@@ -1064,10 +1152,11 @@ class YdbState(StatePort):
             if isinstance(kind, type) and issubclass(kind, Exception)
         )
 
-    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str, absolute_deadline: float | None = None, schema_diagnostics: bool = False):
+    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str, absolute_deadline: float | None = None, schema_diagnostics: bool = False, attempts: int | None = None):
         deadline = absolute_deadline if absolute_deadline is not None else time.monotonic() + wall_seconds
         transient = self._transient_errors()
-        for attempt in range(self.OUTER_ATTEMPTS):
+        maximum_attempts = self.OUTER_ATTEMPTS if attempts is None else attempts
+        for attempt in range(maximum_attempts):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
@@ -1090,7 +1179,7 @@ class YdbState(StatePort):
                     print(f"YDB_SCHEMA_ISSUES {_safe_schema_issue_details(error)}", flush=True)
                 if not transient or not isinstance(error, transient):
                     raise StateError(error_marker) from None
-                if attempt + 1 >= self.OUTER_ATTEMPTS:
+                if attempt + 1 >= maximum_attempts:
                     break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -1107,7 +1196,9 @@ class YdbState(StatePort):
                 closure, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS,
                 error_marker="YDB_SERIALIZABLE_ERROR", absolute_deadline=absolute_deadline,
             )
-        except StateError:
+        except StateError as error:
+            if str(error) == "acceptance cleanup bound exceeded":
+                raise
             raise StateError("YDB serializable transaction failed") from None
 
     # The adapter methods below intentionally use SELECT, conditional DML and a
@@ -1558,6 +1649,37 @@ def _verification_from_row(row) -> VerificationResult:
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         raise StateError("stored verification row is invalid") from None
+
+
+def _split_schema_fields(payload: str) -> tuple[str, ...]:
+    fields: list[str] = []
+    start = depth = 0
+    for index, character in enumerate(payload):
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif character == "," and depth == 0:
+            fields.append(payload[start:index].strip())
+            start = index + 1
+    fields.append(payload[start:].strip())
+    return tuple(fields)
+
+
+def _schema_contract(statement: str) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+    payload = statement[statement.index("(") + 1:statement.rindex(");")]
+    fields = _split_schema_fields(payload)
+    primary = fields[-1]
+    if not primary.startswith("PRIMARY KEY(") or not primary.endswith(")"):
+        raise ValueError("schema primary key is missing")
+    primary_key = tuple(value.strip() for value in primary[12:-1].split(","))
+    columns: list[tuple[str, str]] = []
+    for field in fields[:-1]:
+        name, raw_type = field.split(" ", 1)
+        required = raw_type.endswith(" NOT NULL")
+        type_name = raw_type[:-9] if required else raw_type
+        columns.append((name, type_name if required else f"{type_name}?"))
+    return tuple(columns), primary_key
 
 
 def schema_statements(prefix: str = "") -> tuple[str, ...]:

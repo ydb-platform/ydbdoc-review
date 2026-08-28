@@ -28,6 +28,14 @@ def test_configuration_uses_env_or_exact_legacy_defaults():
     assert RUNNER._configuration({"YDBDOC_YDB_ENDPOINT": "e", "YDBDOC_YDB_DATABASE": "d"}) == ("e", "d")
 
 
+def test_table_prefix_defaults_only_when_absent_and_rejects_unstable_value():
+    assert RUNNER._stable_table_prefix({}) == RUNNER.DEFAULT_TABLE_PREFIX
+    assert RUNNER._stable_table_prefix({"YDBDOC_REAL_YDB_TABLE_PREFIX": "m0_team_acceptance_schema"}) == "m0_team_acceptance_schema"
+    for value in ("bad", "m0_pr45949_shared", "m0_acceptance_0123456789abcdef"):
+        with pytest.raises(RUNNER.PreflightError, match="постоянным безопасным префиксом"):
+            RUNNER._stable_table_prefix({"YDBDOC_REAL_YDB_TABLE_PREFIX": value})
+
+
 @pytest.mark.parametrize("field", ["tests", "failures", "errors", "skipped"])
 def test_junit_requires_nonempty_all_green(tmp_path, field):
     values = {"tests": 1, "failures": 0, "errors": 0, "skipped": 0}
@@ -95,7 +103,7 @@ def test_cleanup_failure_is_red_even_after_green_test():
         _junit(report)
         return 0
     with patch.object(RUNNER, "_run_bounded", side_effect=bounded), patch.object(RUNNER, "_validate_key_document"):
-        with pytest.raises(RUNNER.PreflightError, match="удалить тестовые таблицы"):
+        with pytest.raises(RUNNER.PreflightError, match="очистить данные проверки"):
             RUNNER.run({"YDB_SA_KEY": "private-json"})
 
 
@@ -155,23 +163,25 @@ def test_cleanup_names_are_closed_and_no_listing_or_teardown_exists():
     assert RUNNER.TABLE_SUFFIXES == ("command_runs", "lineages", "model_calls", "verification_results")
     assert "teardown_test_schema" not in source
     assert "scheme_client.list" not in source
-    assert "DROP TABLE" in source
+    assert "DROP TABLE" not in source
+    assert "WHERE repository=$repo" in source
 
 
-def test_cleanup_partial_schema_ignores_confirmed_scheme_not_found_and_drops_existing():
+def test_cleanup_is_scoped_and_ignores_confirmed_missing_tables():
     calls = []
     class NotFound(Exception): pass
     class SchemeError(Exception): pass
     class Rows: rows = [{"n": 1}]
     class Tx:
-        def execute(self, query, commit_tx=False):
+        def execute(self, query, params=None, commit_tx=False):
             calls.append(("count", query))
+            assert params == {"$repo": "acceptance/r0123456789abcdef"}
             if "command_runs" in query: raise SchemeError("Path not found")
             if "lineages" in query: raise SchemeError("table does not exist")
             return [Rows()]
     class Session:
         def transaction(self): return Tx()
-        def execute_scheme(self, query): calls.append(("drop", query))
+        def prepare(self, query): return query
     class Pool:
         def __init__(self, driver): pass
         def retry_operation_sync(self, operation): return operation(Session())
@@ -184,25 +194,28 @@ def test_cleanup_partial_schema_ignores_confirmed_scheme_not_found_and_drops_exi
         Driver=Driver, SessionPool=Pool, issues=types.SimpleNamespace(NotFound=NotFound, SchemeError=SchemeError),
     )
     environment = {
-        "YDBDOC_REAL_YDB_TABLE_PREFIX": "m0_pr45949_0123456789abcdef",
+        "YDBDOC_REAL_YDB_TABLE_PREFIX": RUNNER.DEFAULT_TABLE_PREFIX,
+        "YDBDOC_REAL_YDB_REPOSITORY": "acceptance/r0123456789abcdef",
         "YDBDOC_YDB_SA_KEY_FILE": "/safe/key", "YDBDOC_YDB_ENDPOINT": "endpoint", "YDBDOC_YDB_DATABASE": "database",
     }
     with patch.dict(sys.modules, {"ydb": fake}):
         RUNNER._cleanup_exact_tables(environment)
-    expected = {f"m0_pr45949_0123456789abcdef_{suffix}" for suffix in RUNNER.TABLE_SUFFIXES}
+    expected = {f"{RUNNER.DEFAULT_TABLE_PREFIX}_{suffix}" for suffix in RUNNER.TABLE_SUFFIXES}
     touched = {name for _, query in calls for name in expected if f"`{name}`" in query}
     assert touched == expected
-    assert len([call for call in calls if call[0] == "count"]) == 4
-    assert len([call for call in calls if call[0] == "drop"]) == 2
+    assert len(calls) == 8
+    assert all("WHERE repository=$repo" in query for _, query in calls)
+    assert not any("DROP" in query for _, query in calls)
 
 
 def test_cleanup_unknown_scheme_error_is_red():
     class NotFound(Exception): pass
     class SchemeError(Exception): pass
     class Tx:
-        def execute(self, query, commit_tx=False): raise SchemeError("permission denied")
+        def execute(self, query, params=None, commit_tx=False): raise SchemeError("permission denied")
     class Session:
         def transaction(self): return Tx()
+        def prepare(self, query): return query
     class Pool:
         def __init__(self, driver): pass
         def retry_operation_sync(self, operation): return operation(Session())
@@ -214,6 +227,6 @@ def test_cleanup_unknown_scheme_error_is_red():
         iam=types.SimpleNamespace(ServiceAccountCredentials=types.SimpleNamespace(from_file=lambda path: object())),
         Driver=Driver, SessionPool=Pool, issues=types.SimpleNamespace(NotFound=NotFound, SchemeError=SchemeError),
     )
-    environment = {"YDBDOC_REAL_YDB_TABLE_PREFIX":"m0_pr45949_0123456789abcdef","YDBDOC_YDB_SA_KEY_FILE":"/safe/key","YDBDOC_YDB_ENDPOINT":"endpoint","YDBDOC_YDB_DATABASE":"database"}
+    environment = {"YDBDOC_REAL_YDB_TABLE_PREFIX":RUNNER.DEFAULT_TABLE_PREFIX,"YDBDOC_REAL_YDB_REPOSITORY":"acceptance/r0123456789abcdef","YDBDOC_YDB_SA_KEY_FILE":"/safe/key","YDBDOC_YDB_ENDPOINT":"endpoint","YDBDOC_YDB_DATABASE":"database"}
     with patch.dict(sys.modules, {"ydb": fake}), pytest.raises(SchemeError, match="permission denied"):
         RUNNER._cleanup_exact_tables(environment)
