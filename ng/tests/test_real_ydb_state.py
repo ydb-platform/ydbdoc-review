@@ -60,7 +60,7 @@ class RealYdbStateContract(_contract_module.StateContract):
         self.state.create_lineage(self.lineage())
         table = self.state._table("lineages")
         self.state._serializable(lambda tx: tx.execute(
-            f"DECLARE $r AS Utf8; DECLARE $id AS Utf8; UPDATE `{table}` SET expires_at=CurrentUtcTimestamp()+Interval('PT1H') WHERE repository=$r AND lineage_id=$id;",
+            f"DECLARE $r AS Utf8; DECLARE $id AS Utf8; UPDATE `{table}` SET expires_at=Unwrap(CurrentUtcTimestamp()+Interval('PT1H'),'test lineage expiry') WHERE repository=$r AND lineage_id=$id;",
             {"$r": self.state.repository.canonical, "$id": "lin-1"}, commit_tx=True,
         ))
         self.assertTrue(self.state.record_accepted_continue("lin-1", AcceptedContinue({"kind": "force"}, 1)).changed)
