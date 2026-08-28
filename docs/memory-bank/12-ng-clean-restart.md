@@ -191,6 +191,23 @@ reinitialized empty. Attempt 3 must separate candidate configuration from
 harness-owned transport, kill and native-YDB observation contracts. Stages 2–5
 and all product code remain blocked.
 
+### 25.1.7 Stage 1 contract-schema attempt 3 and full restart
+
+The third Stage 1 attempt passed all 65 authored meta-tests and corrected the
+previous candidate/harness ownership defects, but it also failed independent
+adversarial review. Candidate boundary calls had no current acceptance-session
+token. JSON Schema's base64 annotation accepted undecodable bytes and no canonical
+validator proved decoded bytes against size/digest. Encoded self-certification
+claims passed terminal validation. The production endpoint check accepted URL
+userinfo and performed an unpinned one-time DNS lookup, leaving a rebinding gap.
+
+Verdict: **STAGE 1 ATTEMPT 3 FAIL**. The agreed three-attempt limit is exhausted.
+There is no fourth patch cycle. Both clean-room repositories were deleted in full.
+Before any new repository or code exists, two independent RCA analysts must agree
+on a simpler architecture that assigns semantic validation and network pinning to
+harness-owned executable controls rather than pretending JSON Schema can prove
+them. Product implementation and `doc_translate` remain prohibited.
+
 ## 25.2 Exact repository and distribution recommendation
 
 Create **two new repositories**, not another subproject in this repository and
