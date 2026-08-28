@@ -1184,8 +1184,21 @@ the current run, restores the recorded prior workflow/artifact and only then
 restores one legacy writer if needed. Audit rows and NG Drafts remain for manual
 handling. Dual writers are forbidden.
 
-**Current verdict: SIMPLE REWRITE SPEC READY FOR INDEPENDENT REQUIREMENTS REVIEW.
-NO PRODUCT REPOSITORY EXISTS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
+### 25.11.5 Simple rewrite attempt 1
+
+Candidate `01db731a3f15aaa6be344c7243e39ddefbae6cd6` received independent
+**TEST FAIL**. Build, clean wheel installation, 24 tests, Ruff and mypy passed;
+real-YDB evidence was separately BLOCKED because credentials were unavailable.
+Production QA still found missing workflow model configuration, colliding model
+call identities, broken/non-atomic YDB call transitions, paid dispatch after
+`UNKNOWN_BILLED`, unapplied dependency closure, stale continue authority, a
+missing terminal-comment intent checkpoint, missing-label acceptance, a fake
+rather than production-composition PR45949 E2E and misleading reports/model
+metadata. Two independent RCAs are required before attempt 2. No release tag,
+cutover or production `doc_translate` is authorized.
+
+**Current verdict: SIMPLE REWRITE ATTEMPT 1 TEST FAIL. ATTEMPT 2 REQUIRES TWO
+INDEPENDENT RCAS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
 
 ---
 
