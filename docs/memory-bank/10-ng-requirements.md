@@ -12,25 +12,24 @@ It supersedes conflicting historical implementation decisions for the NG work.
 Historical §6 entries remain useful as regression evidence, but are not authority
 for NG behavior when they disagree with §23.
 
-Requirements discovery, the original gap analysis and three implementation RCAs
-are complete. Retrofit and another in-repository package are rejected. §23.17 and
-§25 fix an independent clean-room distribution plus an external acceptance
-harness. No NG product implementation starts before the Phase 0 harness review
-PASS required by §25.4.7.
+Requirements discovery, the original gap analysis and failed-attempt RCAs are
+complete. Retrofit and restoration of deleted code are rejected. §23.17,
+§24.22 and §25.11 fix a simple clean rewrite with independent ordinary testing.
+No NG cutover or production `doc_translate` occurs before independent TEST PASS.
 
 ### Requirements handoff process
 
 - This project Memory Bank is the only authoritative requirements source. Do not
   maintain a separate assistant-specific knowledge bank for this project.
 - Every confirmed decision from requirements discussion is added to §23.
-- Independent harness reviewers receive the Memory Bank and frozen external
+- Independent developers and testers receive the Memory Bank and frozen external
   fixture provenance, not failed implementation code or tests.
 - Any contradiction or missing product choice returns to §23 before either a
   predicate or product behavior is written.
-- Harness review and product implementation are separate repositories and
-  separate review events.
-- A formal harness PASS authorizes only the vertical slice named next in §25.7,
-  never cutover or `doc_translate`.
+- Development and independent test review are separate contexts. Developer tests
+  do not authorize cutover.
+- A formal TEST PASS is bound to one already committed candidate SHA and
+  authorizes release preparation for only that SHA, never merge or Ready state.
 
 Return point before NG work: immutable tag `pre-ng-2026-08-27` at
 `1f04ab1c71488f53c4ad547c20c7e635d59696ad`.
@@ -746,8 +745,13 @@ returns that response. The pure engine itself never calls a model or the network
 All workflows use this same service and cannot substitute different interpretation
 or severity logic.
 
-`doc_verify` evaluates the actual bytes of the open PR. A hypothetical in-memory
-repair can never make the unchanged PR green.
+`doc_verify` evaluates the actual bytes of the open PR and runs the same bounded
+critic and two-repair orchestration in memory. The repaired candidates are
+diagnostic only: they are not committed, pushed or published as a patch, and a
+hypothetical in-memory repair can never make the unchanged PR green. The final
+verdict remains bound to the original checked commit. The report uses successful
+repair evidence only to give a more concrete file/line issue and manual
+instruction.
 
 ### Verification case identity and reuse
 
@@ -1276,55 +1280,51 @@ answer is replayed on the destructive rebuild.
 
 ## 23.16 Open decisions
 
-No product decisions remain open. The clean-restart repository, distribution and
-acceptance topology is fixed by §23.17 and §25. Any new ambiguity found during
-specification, harness construction, implementation or testing must be returned
+No product decisions remain open. The clean-rewrite implementation and test
+profile is fixed by §23.17, §24.22 and §25.11. Any new
+ambiguity found during specification, implementation or testing must be returned
 to the requirements process and recorded here before code chooses a behavior.
 
-## 23.17 Implementation strategy: independent clean-room distribution
+## 23.17 Implementation strategy: simple clean rewrite
 
-The three implementations attempted below `src/ydbdoc_review/ng/` failed
-independent acceptance and are exhausted. Their production tree and `tests/ng/`
-were deleted on 2026-08-28. They, the legacy runtime and their implementation
-histories are negative evidence only. They MUST NOT be restored, imported,
-copied, adapted or treated as an architecture or test oracle.
+The three in-tree NG implementations and the later proof-platform, schema and
+trust-kernel attempts failed and were deleted on 2026-08-28. Their code MUST NOT
+be restored or copied. Their failure reports remain regression evidence only.
+The H/S/C/D artifact, separate authority daemon, separate-UID trust boundary,
+malicious-claimant protocol, universal closed-schema platform, mutant score and
+AC self-certification are explicitly non-normative historical experiments.
 
-The replacement strategy is `CLEAN_ROOM_DISTRIBUTION`, not an in-place retrofit
-and not another package inside the `ydbdoc_review` distribution. The exact
-repository and harness recommendation, phase gates and operational prerequisites
-are normative in §25. In summary:
+The confirmed replacement is a simple rewrite from scratch as ordinary CI
+automation:
 
-- production is a new independently buildable distribution with import package
-  `ydbdoc_ng`, outside this repository and with no dependency on
-  `ydbdoc_review`;
-- the executable acceptance harness is a second independent repository and
-  invokes the distribution only through versioned process/network contracts;
-- no product implementation may be written until that harness is demonstrably
-  red against an empty/contract-stub target and receives formal harness-review
-  PASS;
-- acceptance predicates and fixtures are authored and frozen independently.
-  They are never generated from §23/§24 text at test runtime;
-- legacy behavior may supply recorded input evidence only. It never supplies an
-  expected NG result.
+- one independently buildable Python package and one CLI;
+- one GitHub Actions workflow receiving all three one-shot labels;
+- one production composition path with small GitHub, git, model and YDB adapters;
+- pure planning and file-policy modules;
+- one shared verification and repair orchestration used by translate, continue
+  and verify;
+- four logical YDB tables, defined in §24.22, rather than a generic event store
+  or proof outbox;
+- ordinary unit, integration, real-YDB and recorded-PR tests owned by an
+  independent tester.
 
-The new distribution implements its own domain, application, verifier and
-adapter boundaries. Any third-party parser, renderer, SDK or transport is chosen
-and pinned directly as a new dependency. There is no exact-symbol legacy
-allowlist and no `legacy_primitives` adapter. The dependency closure, including
-dynamic imports, plugins, subprocesses and RPC sidecars, MUST contain no
-`ydbdoc_review` code or failed-NG artifact.
+No product repository currently exists. Repository location and package names
+may be chosen when implementation starts, but there MUST be no dependency on
+deleted NG code and no implicit import of legacy policy. Reusing a pinned
+third-party parser or SDK is allowed. Legacy inputs and failures may become test
+fixtures; legacy output is not an expected oracle.
 
-Provider adapters expose one paid attempt; the control plane owns fallback,
-rotation, transcripts, durable pre-request call state, at-most-once dispatch,
-`UNKNOWN_BILLED` and actual-cost recording. External mutations use a typed
-durable outbox. All persisted and external DTOs are validated strictly before
-use. One semantic verifier serves translate, continue and verify without
-operational run/publication identity entering semantic case identity.
+The implementation is trusted project code, not a hostile candidate that must
+be defeated by a separate proof service. Safety comes from deterministic gates,
+small typed state transitions, idempotent remote reconciliation, bounded model
+calls, independent testing and clear fail-safe reports. An external outage or an
+ambiguous fact is allowed to stop safely; the project MUST NOT invent a
+distributed proof protocol to make such an outage automatically recoverable.
 
-Production cutover and any NG `doc_translate` invocation are prohibited until
-every §25 gate passes. Legacy and NG writers are never run in parallel on the
-same labels. Existing legacy Draft handling at eventual migration remains
-fail-closed and follows §23.1 plus §24.17 as narrowed by §25.
+Production cutover and NG `doc_translate` remain prohibited until the rewrite is
+implemented, committed and an independent tester gives a formal TEST PASS bound
+to that exact SHA under §24.22 and §25.11. Any fix requires a new commit and full
+retest. Legacy and NG writers are never active simultaneously.
 
 The immutable recovery point remains Git tag `pre-ng-2026-08-27` at
 `1f04ab1c71488f53c4ad547c20c7e635d59696ad`.

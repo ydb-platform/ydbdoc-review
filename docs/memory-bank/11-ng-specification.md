@@ -9,11 +9,11 @@
 ## 24. Status, authority and version
 
 - **Status:** BEHAVIORAL SPEC PASS; IMPLEMENTATION NOT ACCEPTED
-- **Specification version:** 1.0.3
+- **Specification version:** 1.1.0
 - **Specification date:** 2026-08-28
 - **Product authority:** [§23 NG requirements](10-ng-requirements.md)
-- **Implementation strategy:** CLEAN_ROOM_DISTRIBUTION, as fixed by §23.17 and
-  §25
+- **Implementation strategy:** SIMPLE_CLEAN_REWRITE, as fixed by §23.17,
+  §24.22 and §25.11
 - **Recovery point:** tag **pre-ng-2026-08-27**, commit
   **1f04ab1c71488f53c4ad547c20c7e635d59696ad**
 
@@ -33,12 +33,15 @@ The §24 behavioral rules, strict DTO definitions, `UNKNOWN_BILLED` protocol and
 NG-AC semantics remain the frozen contract baseline. The in-repository package
 topology in §24.2, legacy-reuse allowance, migration order in §24.17,
 topology-specific NG-AC-001..003 wording and implementation-first work breakdown
-in §24.20 are historical and MUST NOT be followed. §25 replaces them with a new
-distribution, no legacy import closure and an independently reviewed red-first
-acceptance harness. Cutover and NG `doc_translate` are prohibited meanwhile.
+in §24.20 are historical and MUST NOT be followed.
+The later proof-platform and trust-kernel restart also exhausted three attempts.
+Its topology, H/S/C/D artifacts and gates are historical only. §24.22 and §25.11
+supersede every old topology, harness and work-order statement without weakening
+§23 behavior.
 
-This document is normative for behavior, DTOs and protocols except where §25
-explicitly replaces topology, test ownership, work order or migration mechanics.
+This document is normative for behavior, DTOs and protocols except where §24.22
+or §25.11 explicitly replaces topology, test ownership, work order or migration
+mechanics.
 It MUST NOT change a product decision from §23. If this document and §23
 conflict, §23 wins and implementation MUST stop until the specification is
 corrected.
@@ -150,15 +153,10 @@ The v1.0.3 in-repository package topology and exact-symbol legacy reuse model we
 exercised by three failed attempts and are withdrawn. They are not retained here
 as a template.
 
-The effective architecture is §25.2 through §25.4:
-
-- a separate `ydbdoc-review-ng` repository and `ydbdoc_ng` distribution;
-- a separate `ydbdoc-review-ng-acceptance` repository;
-- black-box process or OCI testing with no production imports;
-- no `ydbdoc_review` or failed-NG dependency anywhere in the source, build or
-  runtime closure;
-- a strict domain/application/verifier/control-plane/ports/adapters structure;
-- an independently reviewed red acceptance harness before product coding.
+The effective architecture is only §24.22 and §25.11: one new Python product,
+one CLI, one workflow, four logical YDB tables and an independent tester using a
+proportionate test pyramid. There is no separate acceptance product or pre-code
+harness gate.
 
 The model port remains at-most-once. One invocation performs at most one provider
 request and never retries internally. Optional authoritative reconciliation
@@ -903,10 +901,19 @@ After universal gates, DOC_VERIFY MUST:
    its recorded main snapshot and require its materialized bytes to equal the
    actual head. Manual byte changes therefore change the case rather than being
    hidden by retained candidate artifacts.
-6. Run deterministic validators. If case hash matches a retained final internal
-   verification result, reuse the complete stored critic response and interpreted
-   result. Otherwise run the complete critic scope.
-7. Never run a repair call. Suggested repairs are report text only.
+6. Run deterministic validators and the same critic/repair orchestration used by
+   internal translation verification. If the original case hash matches a
+   retained complete result, reuse it; otherwise run critic on the actual PR
+   bytes, up to two in-memory repair attempts for repairable red issues, and a
+   fresh critic pass after each attempt. Operator-required issues are never
+   guessed or sent to repair.
+7. Treat every repaired candidate as hypothetical diagnostic evidence only. The
+   verdict remains bound to the unchanged original PR bytes and therefore remains
+   red whenever those original bytes contain a blocking defect, even if the last
+   in-memory candidate is green. Never write a repaired candidate to filesystem,
+   git, branch or PR. The report gives file, exact line or structural location,
+   plain-Russian issue and concrete instruction, but no full patch or generated
+   replacement file.
 8. Post or update the canonical QA comment, including on adapter or critic
    failure. For a recognized NG Draft, also update its source lifecycle comment
    to the same run ID, checked Draft link/SHA and result, preserving the two
@@ -1938,6 +1945,29 @@ reports and are not presented as translation-quality defects.
 
 ### 24.12.1 Logical YDB schemas
 
+> [!warning] Historical decomposition, superseded
+> §24.22.2 replaces the physical and logical table decomposition below with
+> exactly four logical tables. The state names, keys, TTL rules, idempotency,
+> compare-and-set requirements, model-call transitions and recovery algorithms in
+> §24.12 remain normative. Old entity names used anywhere in §24 are conceptual
+> aliases, not permission to create additional tables.
+
+The mandatory mapping is:
+
+- `ng_runs`, `ng_deliveries`, `ng_locks`, `ng_comments`, `ng_publications` and
+  `ng_rotation` map to typed rows or fields in `command_runs`; reserved key
+  prefixes distinguish delivery, lock, canonical-comment, publication and
+  rotation rows;
+- `ng_active_lineages`, `ng_lineages` and `ng_decisions` map to `lineages`;
+- `ng_model_calls` maps to `model_calls`;
+- `ng_verification_cache` maps to `verification_results`.
+
+References below to an old name mean the corresponding row kind in this mapping.
+Implementations MUST preserve every unique key, CAS/revision rule, monotonic
+state transition, expiry check and recovery invariant while using no fifth
+logical product table. Transcript/object payloads may remain in the configured
+14-day artifact backend and are referenced by fields in these four tables.
+
 Physical adapters MAY choose native YDB types but MUST preserve these keys and
 constraints:
 
@@ -2549,9 +2579,11 @@ record, every decision, every GitHub mutation and final result. They are retaine
 
 ## 24.17 Migration, cutover and rollback
 
-§25.9 is the only executable migration, cutover and rollback sequence. Cutover
+§25.11 is the only executable migration, cutover and rollback sequence. Cutover
 and NG `doc_translate` remain prohibited until its preconditions receive explicit
-independent PASS and human approval.
+independent TEST PASS. The user's standing direction is to cut over and rerun
+PR 45949 immediately after that PASS; no additional conversational approval is
+required unless the discovered deployment mechanism would expand scope.
 
 The retained behavioral invariants are:
 
@@ -2565,6 +2597,12 @@ The retained behavioral invariants are:
   auto-mutated by legacy.
 
 ## 24.18 Numbered acceptance criteria
+
+> [!warning] Historical traceability catalog
+> This catalog remains regression evidence, but its separate acceptance
+> repository, malicious-candidate and proof-artifact assumptions are superseded
+> by §24.22. A release is accepted by observed behavior and the test pyramid in
+> §24.22, not by candidate-supplied AC claims or a universal mutant score.
 
 An implementation is not cutover-ready unless every applicable criterion has an
 independently authored executable test in the separate acceptance repository and
@@ -2993,6 +3031,9 @@ GitHub mutations and final result.
 
 ## 24.19 Independent test matrix
 
+This matrix is a historical risk inventory. §24.22.10 is the normative,
+proportionate test strategy for the rewrite.
+
 The matrix is owned by `ydbdoc-review-ng-acceptance`. These suites do not live in
 the production tree and do not import product modules. “Unit”, “property” and
 “static” describe the scope of the observable contract or artifact inspection,
@@ -3047,7 +3088,9 @@ unrecorded branch deletion, no unconditional force and stable terminal result.
 
 ## 24.20 Implementation work breakdown by dependency
 
-The old implementation-first work breakdown is withdrawn.
+The old implementation-first work breakdown is withdrawn and the later
+harness-first sequence below is also non-normative history. §24.22.11 is the
+current work order.
 
 Work proceeds only in this order:
 
@@ -3064,8 +3107,8 @@ No product code is authorized by steps 1 through 3.
 
 ## 24.21 Specification verdict
 
-Independent formal review completed on 2026-08-27 and the second implementation
-RCA completed on 2026-08-28. The latter found that synchronous provider APIs do
+Independent formal review completed on 2026-08-27 and the failed-attempt RCAs
+completed on 2026-08-28. They found that synchronous provider APIs do
 not offer the transaction or result lookup needed for unconditional
 response-plus-cost durability. Version 1.0.3 closes that implementability gap
 without inventing usage: pre-request CAS, at-most-once dispatch,
@@ -3078,7 +3121,255 @@ otherwise unchanged.
 §23.16 still governs future discoveries: implementation MUST stop and return to
 §23 if a new ambiguity would require a product choice.
 
-**Verdict: BEHAVIORAL SPEC PASS. IMPLEMENTATION AND CUTOVER NOT READY.**
+**Historical v1.0.3 verdict: BEHAVIORAL SPEC PASS. ITS IMPLEMENTATION AND
+PROOF-PLATFORM TOPOLOGY WERE NOT ACCEPTED. §24.22 IS THE CURRENT PROFILE.**
+
+## 24.22 Authoritative simple-rewrite implementation profile
+
+This section supersedes §24.2 topology, §24.17 migration routing, the proof
+assumptions in §24.18–§24.19 and every work order in §24.20 and historical §25.
+The detailed content behavior elsewhere in §23 and §24 remains normative.
+
+### 24.22.1 One deployable program
+
+The rewrite consists of one Python package, one CLI and one GitHub Actions
+workflow. The canonical process command is:
+
+```text
+ydbdoc <translate|continue|verify> --event <event-json>
+```
+
+The workflow maps `doc_translate`, `doc_continue` and `doc_verify` labeled events
+to that CLI. There is one production composition root. It constructs adapters
+and calls one of three command services; no workflow shell branch reimplements
+policy. No product repository exists at specification time.
+
+The package has these minimal logical modules. They may be files or small
+subpackages; this is a responsibility map, not a required directory ceremony:
+
+- `commands`: translate, continue and verify orchestration;
+- `github`: event inspection, complete PR-files pagination, comments, labels,
+  deterministic branch and Draft lifecycle;
+- `snapshot`: exact-SHA git trees and immutable file bytes;
+- `planner`: manifest operations, locale pairs, scope, dependencies and atomic
+  bundles;
+- `files`: Markdown/YFM, YAML, JSON, TXT, C/C++, image, TOC, redirect and
+  glossary policies;
+- `models`: classifier, translator, critic, repair, rotation and fallback;
+- `verification`: the one shared deterministic/critic/repair pipeline;
+- `state`: four YDB tables, leases, idempotency, TTL and budget;
+- `reporting`: one canonical Russian report and secret-safe diagnostics;
+- `cli`: configuration validation and dependency assembly only.
+
+Pure planners, parsers and verdict interpretation receive all bytes, time and
+configuration explicitly. Adapters own I/O. Deleted NG and legacy policy code is
+not imported or copied.
+
+### 24.22.2 Exactly four logical YDB tables
+
+This section explicitly supersedes the physical/logical decomposition in
+§24.12.1 while retaining all of its state-machine, idempotency, TTL, CAS,
+model-call and recovery obligations through the alias mapping defined there. The
+rewrite uses exactly four logical tables:
+
+1. `command_runs`: unique delivery/event identity, command, actor, resolved
+   source/translation PR, phase, fixed GitHub mutation intents and confirmations,
+   terminal outcome and report marker; reserved `LOCK#<repo>#<source-pr>` keys in
+   this same table hold the per-source lease owner/expiry;
+2. `lineages`: source manifest and SHA tuple, latest immutable main snapshot,
+   typed operator decisions, continue count, Draft/branch identity and 14-day
+   expiry;
+3. `model_calls`: call identity, role/pass/attempt, provider/model, state
+   `RESERVED`, `RESULT_RECORDED`, `UNKNOWN_BILLED` or authoritative reconciliation,
+   token usage, actual cost and Moscow budget day;
+4. `verification_results`: original case hash, exact critic results, hypothetical
+   repair evidence, interpreted issues/verdict, model metadata and 14-day expiry.
+
+There is no generic event store, candidate-owned evidence table or generic
+outbox. A fixed typed JSON field in `command_runs` may hold the small ordered set
+of GitHub effect checkpoints. Schema migration metadata is physical database
+administration and does not count as a fifth product table. Ordinary run,
+lineage, call and verification rows use the normative 14-day expiries; lock rows
+expire after two hours; the repository rotation row persists without run TTL so
+model rotation does not reset every 14 days.
+
+### 24.22.3 Concurrency and idempotency
+
+Every entry point first queries GitHub Actions for another queued or in-progress
+command belonging to the same source lineage, excluding itself. A conflict is
+rejected immediately as §23.1 requires. Native Actions `concurrency` MUST NOT be
+used in a mode that queues or cancels the second command.
+
+After preflight, one transaction compare-and-sets the reserved per-source lock
+row in `command_runs` to a two-hour lease. The unique event identity makes a
+duplicate webhook delivery resume or return the same terminal result. A second
+event that loses the lease performs no model or content mutation. Unrelated
+source PRs proceed independently.
+
+### 24.22.4 GitHub mutation checkpoints
+
+Before close-Draft, delete-branch, create/update-branch, create-Draft, push or
+comment mutation, the run stores its exact intended object and expected remote
+identity. Recovery reads actual GitHub state:
+
+- an already matching effect is confirmed without repeating it;
+- an absent effect is performed once when its preconditions still match;
+- a conflicting human or unknown effect blocks with a clear report.
+
+This is a small phase machine, not a general compensating transaction system.
+No unconditional force push is permitted. Continue uses force-with-lease against
+the observed active Draft branch. Verify has no content-writer capability.
+
+### 24.22.5 Command flows
+
+All commands remove only their one-shot label, validate both actor and
+configuration, perform the active-run check and acquire the lease before model
+work. Every accepted or rejected event updates a clear Russian comment.
+
+`translate` additionally requires a merged source PR, obtains every PR-files page
+plus exact base/head/merge SHAs, captures one current-main SHA, checks daily
+budget, creates/replaces lineage, plans and verifies bundles, then creates a new
+Draft only for a non-empty safe diff. A repeat after gates closes the old
+unfinished Draft, deletes its deterministic branch and starts a fresh lineage.
+
+`continue` validates the live lineage, correct comment location and both allowed
+actors, consumes at most one of three attempts, records typed decisions plus
+general guidance, captures latest main, rebuilds completely and updates the
+existing Draft with force-with-lease or creates the first Draft. It never keeps
+manual branch changes.
+
+`verify` requires an open PR, materializes its actual base/head bytes and invokes
+the shared verification orchestration. It only updates reports. It never creates,
+changes or deletes repository content, branch or PR state.
+
+### 24.22.6 Shared verification and read-only repair semantics
+
+One orchestration implements deterministic checks, critic parsing, severity,
+fallbacks, up to two repair attempts and three critic passes. Translate and
+continue may publish the last safe candidate. Verify runs the same sequence in
+memory with `publication_enabled=false` and `verdict_subject=ORIGINAL_BYTES`.
+
+For verify, a repaired candidate is diagnostic only. A green hypothetical
+candidate does not make the unchanged original PR green. The report includes
+only exact file/line or structural location, plain-Russian issue, a short relevant
+fragment and concrete instruction. It never publishes a full patch or replacement
+file. It ends by stating that the PR was not changed and `doc_verify` should be
+run again after manual fixes. Ordinary PR reports never suggest `doc_continue`;
+an active translation Draft may receive a ready continue command only for a
+lineage-resolvable issue.
+
+### 24.22.7 Models, failure and budget
+
+One run selects distinct model A and B identifiers. The normal sequence remains:
+A translates, B criticizes and may perform repair one, A criticizes and may
+perform repair two, B gives the final criticism. Verify begins with B criticism
+of the actual bytes and follows the same alternating repair/criticism roles in
+memory. The report records model identifiers, roles, passes, tokens and cost.
+
+Each semantic no-op classifier model is attempted once; exhaustion is fail-open
+to ordinary translation when direction is already deterministic. A bilingual or
+glossary authority classifier failure is red because no safe direction exists.
+Translator has one primary and at most one eligible fallback. A malformed critic
+gets one same-model format repair and at most one eligible fallback. Each repair
+has one primary and at most one eligible fallback. No adapter retries internally.
+
+Every paid call is durably `RESERVED` before dispatch and dispatched at most once.
+An ambiguous process boundary becomes `UNKNOWN_BILLED`, invents no usage/cost and
+blocks later paid work for the current Moscow day, while deterministic zero-call
+work remains allowed. Daily spend is the unrounded sum of authoritative
+`model_calls.actual_cost_rub` for that Moscow day and is admitted against
+`YDBDOC_DAILY_BUDGET_RUB`.
+
+### 24.22.8 Content policy
+
+Implementation MUST use the detailed rules in §23.2–§23.9.1 and
+§24.7–§24.10 directly. In particular: full current-source overwrite; no MOVE;
+`public-materials/*` opaque skip; parsed dependencies with depth 3 and hard 100;
+byte-identical images; the exact companion-language matrix; scoped lossless TOC
+edits; mandatory same-locale redirect for every removed TOC href; append-only
+redirect registry; deterministic glossary identity/harmonization; RU-to-EN
+Wikipedia mapping or red `.invalid` placeholder; missing EN internal target keeps
+the RU link as yellow. Ambiguous authority or external fact is never guessed.
+
+### 24.22.9 Reports and safe failure
+
+Green is short and says what was checked. Yellow permits merge. Red forbids merge
+and names exact file/location, fragment, reason and action in ordinary Russian.
+Model/adapter failure says the content was not translated or checked, names the
+failed role and advises the valid retry command. Secrets and raw exceptions are
+never rendered.
+
+Network outage, malformed external response, unresolved operator fact, unknown
+file type, unsafe parse or inability to reconcile a remote mutation may terminate
+safely with a red technical report. These cases do not justify another proof
+service or guessed success.
+
+### 24.22.10 Normative test pyramid
+
+- Unit tests cover all pure tables and rules: direction/SUPERSEDED, paths and git
+  modes, dependency bounds/cycles, single-language, URLs, companions, lossless
+  TOC, redirect atomicity, glossary identity, severity/reporting, continue parser,
+  budget and model-call transitions.
+- Integration tests invoke the official CLI/composition with I/O-only GitHub and
+  model fakes plus a temporary real git repository. They cover gate order, label
+  removal, duplicate events, restart checkpoints, Draft lifecycle, verify's zero
+  content mutations and shared verification identity.
+- A small real-YDB suite covers unique receipts, lease CAS/expiry, lineage TTL,
+  model-call transitions and Moscow-day budget behavior.
+- Recorded regressions use raw external payloads and blobs, especially exact
+  paginated PR 45949 data. Fakes MUST NOT replace planner, file policy, verifier
+  or command orchestration.
+- The developer commits the candidate before handoff. An independent tester runs
+  the complete suite and a read-only/dry-run PR 45949 composition against that
+  exact SHA before issuing a SHA-bound TEST PASS. Every fix is a new commit and
+  requires the complete tester scope again.
+
+Tests need not defend against malicious project code or produce signed proof
+bundles. They must observe the official CLI's inputs, external calls, output diff,
+report and exit status.
+
+### 24.22.11 PR 45949 end-to-end acceptance
+
+The frozen fixture contains the real eight-file paginated manifest and exact
+blobs/digests. The official CLI must reject a substituted or incomplete fixture.
+It expands the deletion of
+`ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md` and the
+addition of `ydb/docs/ru/core/devops/concepts/node-authorization.md` as independent
+DELETE and ADD operations.
+
+From one current-main SHA it fully translates the new RU article to the mirrored
+EN concepts path. Exact source TOC replacement is valid old-to-new redirect
+evidence. The resulting safety bundle creates/overwrites the new EN page, applies
+the scoped EN TOC change, deletes the old EN page and appends or reuses the
+same-locale EN-old to EN-new redirect. All other operations in the eight-file
+manifest are processed by their actual type. The final expected result is a Draft
+on `ydbdoc-review/pr-45949` and a Russian report with no red issue.
+
+If exact redirect evidence is absent or conflicting, independent safe bundles may
+be published, but the complete delete/TOC-removal/redirect bundle is omitted and
+the report gives an exact continue question. An authorized answer causes a full
+rebuild and completes the same Draft.
+
+### 24.22.12 Implementation and cutover order
+
+The developer first commits a candidate. The independent tester tests that exact
+commit SHA and binds TEST PASS to it. Any fix creates a new commit SHA and voids
+the earlier verdict; the complete required tester scope reruns against the new
+SHA. Only after PASS exists for the current exact SHA is an immutable version tag
+created on that same SHA.
+
+Then discover the currently deployed mutable tag or workflow reference from
+repository configuration; do not assume its name. Pin and verify the built
+artifact from the accepted SHA. Update the single workflow, prove no legacy or NG
+writer/run is active, then move only the discovered deployment alias if that is
+how the existing workflow deploys. The immutable release and
+`pre-ng-2026-08-27` recovery tags never move.
+
+After cutover, an authorized actor applies `doc_translate` to merged PR 45949 and
+the operator monitors the Action, Draft and QA report to terminal outcome.
+Rollback first disables label intake and NG write credentials, drains/reconciles
+the run, then restores the previously recorded workflow/artifact. It never enables
+legacy and NG writers together and never deletes NG audit state or Drafts.
 
 ---
 

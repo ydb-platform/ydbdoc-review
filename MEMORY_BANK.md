@@ -3,19 +3,20 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-28
-**Current focus:** three NG implementation attempts and three clean-room Stage 1
-contract-schema attempts are exhausted and failed independent acceptance. Their
-product code, in-tree tests and both clean-room repositories have been deleted.
-The tracked legacy production tree matches peeled recovery commit
-`1f04ab1c71488f53c4ad547c20c7e635d59696ad`; production is restored and no NG
-cutover occurred.
-Cutover and NG `doc_translate` are prohibited. The only authorized next step is
-the §25 Phase 0 restart in a newly created acceptance repository. No new product
-repository may exist before formal Phase 0 PASS. The discarded harnesses and
-schemas are not templates. Three independently reviewed vertical deliverables,
-A trusted conformance kernel, B atomic scenario packs and C the orchestrator plus
-pinned integrations, must produce one signed H/S/C/D artifact before any new
-product implementation or product repository.
+**Current focus:** all three NG implementation attempts and all later
+proof-platform/trust-kernel attempts failed and were deleted. The tracked legacy
+production tree remains the recovery baseline and no NG cutover occurred. The
+proof architecture, separate acceptance product, H/S/C/D artifact, authority
+daemon, malicious-claimant protocol, universal mutant gate and AC
+self-certification are historical evidence only.
+
+The authoritative replacement is the simple clean rewrite in §23.17, §24.22 and
+§25.11: one Python package, one CLI, one GitHub Actions workflow, four logical YDB
+tables, one shared verification/repair orchestration and proportionate independent
+testing. No product repository currently exists. Creating and implementing it is
+the next allowed step. A developer must commit each candidate before independent
+testing; TEST PASS binds to that exact SHA and every fix requires a new SHA and
+retest. Cutover and NG `doc_translate` remain prohibited until that PASS.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -34,14 +35,15 @@ stable cross-references — use them when linking between files.
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
 | Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
 | NG requirements | [10-ng-requirements](docs/memory-bank/10-ng-requirements.md) | 23 | Confirmed product contract, workflows, verification, operations |
-| NG specification | [11-ng-specification](docs/memory-bank/11-ng-specification.md) | 24 | Frozen behavioral/DTO/protocol baseline; failed topology and work order superseded by §25 |
-| NG clean restart | [12-ng-clean-restart](docs/memory-bank/12-ng-clean-restart.md) | 25 | Failed-attempt record, independent Phase 0 harness, clean-room architecture, vertical slices, kill criteria, integrations and cutover gates |
+| NG specification | [11-ng-specification](docs/memory-bank/11-ng-specification.md) | 24 | Behavioral baseline plus authoritative simple-rewrite profile §24.22 |
+| NG restart | [12-ng-clean-restart](docs/memory-bank/12-ng-clean-restart.md) | 25 | Preserved failure history plus authoritative implementation, testing and cutover plan §25.11 |
 | NG failure ledger | [13-ng-failure-ledger](docs/memory-bank/13-ng-failure-ledger.md) | 26 | Authoritative findings 01–26: original failures, contract mapping, reproductions, good observations, negative mutants, provenance and closure history |
 
 ## Recent changes
 
 | When | What |
 |------|------|
+| 2026-08-28 | **Simple rewrite specification ready for review**: two fresh analysts rejected another proof-platform cycle and agreed on one Python package/CLI/workflow, exactly four YDB tables with every old §24.12 entity mapped into them, small idempotent GitHub checkpoints, one shared verifier and ordinary independent tests. `doc_verify` runs the full critic and two-repair sequence only in memory, publishes no patch and keeps the verdict bound to the unchanged original PR. A developer commits first; the tester's PASS binds to that exact SHA, fixes require a new SHA/retest, and only then is an immutable release tag created on the same SHA. §23.17, §24.22 and §25.11 are authoritative. Old H/S/C/D, trust-kernel, daemon/UID, malicious-claimant, mutant and AC proof gates are historical only. No product repository exists; cutover and `doc_translate` remain blocked until independent TEST PASS |
 | 2026-08-28 | **Acceptance Trust Kernel attempt 3 TEST FAIL; clean-room project deleted**: the separate authority-daemon design built and installed as a wheel and passed 9 authored tests, while unavailable separate-UID/live-YDB proofs correctly returned BLOCKED. Independent QA nevertheless found invalid shipped JSON, open nested ObservationBundle fields, untyped `candidate_uid`, duplicate-key last-wins parsing, unrecovered listeners after daemon restart and BuildBundle accepting empty/non-digest identities. The three-attempt Deliverable A limit is exhausted. The entire clean-room project was deleted; no A1/A2/A3 code or structure may be reused. Phase 0 must restart from requirements/architecture analysis in a newly designed project. Product repository, cutover and `doc_translate` remain prohibited |
 | 2026-08-28 | **Acceptance Trust Kernel attempt 2 TEST FAIL, RCA and discard**: 15 authored tests passed only with a manual `PYTHONPATH`, but independent QA reconstructed handles from the readable in-process key, injected transport evidence through public methods, produced duplicate journal sequence heads with concurrent authority instances, proved registries and kill state did not survive restart, issued capabilities for closed listeners, and found caller-asserted commit/client outcomes plus an incomplete bundle and missing executable schema/corpus/YDB components. Both independent RCAs agreed A2 was structurally unrepairable because same-process Python privacy and HMAC were treated as a trust boundary. A2 was deleted. The final A3 attempt must use a separate authority daemon, private OS IPC/state, transactional durable registries/CAS, observer-owned typed events, exact kill recovery and a complete bundle. B/C, product repository and `doc_translate` remain blocked |
 | 2026-08-28 | **Acceptance Trust Kernel attempt 1 TEST FAIL, RCA and discard**: 24 authored tests passed, but independent read-only testing produced false passes in every required reviewer mutation class. Session capabilities could be reconstructed with forged authority/policy; acceptance endpoints accepted public production IPs; an in-memory YDB adapter self-asserted authoritative status; nested YDB/ObservationBundle state remained mutable; `CapturedBytes` could be directly constructed with false size/digest; a stale boolean barrier could kill a different process; and receipt/commit/flush were only in-memory sequencing rather than independently durable, process-correlated transport facts. Two independent RCAs agreed the public-dataclass/helper trust model was not patchable. A1 was deleted in full. Attempt 2 must use one kernel authority, opaque registry handles, an fsync append-only causal journal, one-shot process-correlated kill permits, deep canonical revalidation and registry-only bundle assembly. Deliverables B/C, product repository and `doc_translate` remain blocked |

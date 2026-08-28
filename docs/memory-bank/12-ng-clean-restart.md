@@ -2,24 +2,26 @@
 type: architecture
 date: 2026-08-28
 project: ydbdoc-review-ng
-status: reviewed-plan
-tags: [ng-clean-restart, acceptance-harness, durable-control-plane, migration]
+status: requirements-review
+tags: [ng-clean-restart, simple-rewrite, independent-testing, migration]
 ---
 
-# Memory Bank: NG clean restart after three failed implementations
+# Memory Bank: NG restart history and authoritative simple rewrite
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md). §23 remains product
-> authority. §24 v1.0.3 remains the behavioral, DTO and protocol baseline. This
-> section supersedes its failed package topology, legacy reuse allowance,
-> implementation order and migration sequence. The original independent evidence
+> authority. §24 v1.1.0 remains the behavioral, DTO and protocol baseline. This
+> section preserves its failed package and proof-platform history. The original
+> independent evidence
 > and executable observations for findings 01–26 are fixed in the
 > [§26 authoritative failure ledger](13-ng-failure-ledger.md); §25 summaries do
 > not replace that ledger.
 
-## 25. Status and non-negotiable hold
+## 25. Status and current authority
 
-This document is a clean-room restart handoff, not authorization to write product
-code.
+Sections 25.1 through 25.10 preserve the complete failed-attempt and
+proof-platform history. Their repository topology, H/S/C/D deliverables,
+trust-kernel, malicious-claimant, closed-schema, mutant and AC gates are no longer
+normative. The authoritative restart is §25.11 together with §23 and §24.22.
 
 Current state on 2026-08-28:
 
@@ -38,17 +40,19 @@ Current state on 2026-08-28:
 - the first clean-room acceptance harness and its contract stub failed two
   independent Harness RCAs, were discarded in full, and are not a template;
 - both attempted clean-room repositories were deleted after the third Stage 1
-  failure. No new product repository exists or may be created before formal
-  Phase 0 PASS;
-- Phase 0 may restart only in a newly created acceptance repository under the
-  three-deliverable architecture in §25.4;
-- no new product implementation may start before the Phase 0 harness receives
-  formal review PASS.
+  failure and no new product repository currently exists;
+- requirements analysis has selected a simple rewrite and independent ordinary
+  testing instead of a fourth proof-platform attempt;
+- no product repository exists yet;
+- product implementation may start only from the reviewed §23/§24.22 handoff;
+- cutover and production `doc_translate` remain blocked until independent TEST
+  PASS under §25.11.
 
-The allowed next work is requirements clarification, fixture preservation,
-contract authoring, acceptance-harness implementation and review, plus read-only
-provider/YDB/GitHub capability checks. A green unit suite, type checker, linter or
-traceability ledger cannot lift this hold.
+The allowed next work is the new product repository, implementation, fixture
+preservation and proportionate testing described in §25.11. Green developer tests
+alone cannot lift the cutover hold; the developer first commits a candidate, then
+an independent tester must exercise the official CLI composition at that exact
+SHA and issue a SHA-bound TEST PASS.
 
 ## 25.1 Exhausted-attempt record
 
@@ -261,6 +265,11 @@ architecture analysis for a genuinely new project; product creation, cutover and
 `doc_translate` remain prohibited.
 
 ## 25.2 Exact repository and distribution recommendation
+
+> [!warning] Historical, superseded architecture
+> Sections 25.2 through 25.10 describe the discarded proof-platform plan. They
+> remain only to explain failures and MUST NOT direct new implementation. Use
+> §25.11.
 
 Use **two repositories in sequence**, not another subproject in this repository
 and not another package in the `ydbdoc_review` distribution.
@@ -1089,6 +1098,94 @@ mutant killed and zero PASS for the malicious claimant. Only then may the produc
 repository be created.
 
 **Verdict: CLEAN RESTART PLAN PASS. PRODUCT CODING BLOCKED BY PHASE 0.**
+
+The preceding verdict is historical and superseded by §25.11.
+
+## 25.11 Authoritative restart plan: simple product, independent tester
+
+### 25.11.1 Decision
+
+Start again from scratch. Build one Python package, one CLI and one GitHub Actions
+workflow according to §24.22. Do not create a separate acceptance product,
+authority daemon, trust kernel, signed H/S/C/D bundle, malicious-candidate
+protocol or generated AC ledger. Do not inspect or reuse deleted implementation
+or harness code. The 26 findings remain a compact regression-risk checklist, not
+an obligation to recreate their failed test topology.
+
+No product repository currently exists. Its creation is the first implementation
+step after this requirements handoff is independently reviewed. The new package
+must not depend on this legacy package, but its precise repository and import name
+are implementation choices rather than product semantics.
+
+### 25.11.2 Work order
+
+1. Freeze the real paginated PR 45949 payload, its eight exact files, immutable
+   SHAs and blobs/digests. Independently verify provenance once.
+2. Create the new product repository and skeleton with one CLI/workflow and the
+   module responsibilities in §24.22.1.
+3. Implement the four YDB tables and command ingress first: ACL, label removal,
+   merged/open gates, active-run preflight, lease, receipt and terminal report.
+4. Implement official manifest/snapshot, pure planner, scope and content handlers.
+5. Implement model gateway, budget/`UNKNOWN_BILLED`, shared verifier and bounded
+   repair orchestration, including read-only in-memory `doc_verify` repairs whose
+   verdict remains attached to original bytes.
+6. Implement deterministic GitHub branch/Draft/comment mutations with the fixed
+   checkpoints and remote reconciliation in §24.22.4.
+7. Developer runs unit, CLI integration, real-YDB and recorded PR 45949 tests,
+   then commits the candidate.
+8. A tester in an independent context inspects the requirements only and tests
+   that exact commit SHA through the official composition. TEST PASS is bound to
+   that SHA. Every developer fix creates a new commit SHA and requires the full
+   tester scope again; the cycle continues until PASS or the user stops it.
+9. Only after TEST PASS for the current exact SHA perform §25.11.4 cutover and
+   run real `doc_translate` on merged PR 45949.
+
+### 25.11.3 Acceptance threshold
+
+Acceptance is observed behavior, not claimed traceability. Required evidence is:
+
+- all unit/integration/real-YDB tests pass;
+- official CLI processes the genuine PR 45949 fixture end to end and produces
+  the exact safe EN page, scoped TOC, old-page deletion and redirect shape;
+- incomplete pagination, ambiguous redirect, duplicate event, lost lease,
+  provider failure, `UNKNOWN_BILLED`, secret-bearing exception and verify mutation
+  probes fail safely;
+- `doc_verify` calls the same verification/repair orchestration, makes zero
+  content mutations, remains red for defects in original bytes and reports only
+  location, issue and instruction rather than a full generated patch;
+- all three commands enforce the allowlist; paid work enforces the Moscow-day
+  budget; reports identify models and actual/unknown cost honestly;
+- the tester gives an explicit TEST PASS for the accepted commit SHA.
+
+The test suite need not prove resistance to malicious product code, every possible
+process interleaving or a universal mutant score. A failure that cannot be made
+safe and idempotent must terminate red with a clear Russian retry instruction.
+
+### 25.11.4 Release, cutover and rollback
+
+After TEST PASS bound to the exact committed candidate SHA:
+
+1. Verify the tested SHA is still the candidate branch tip and create an
+   immutable version tag on exactly that SHA. Any byte change requires a new
+   commit and a new tester PASS before tagging.
+2. Inspect the actual workflow and tags to discover the deployed reference. Do
+   not assume the mutable deployment tag's name. Record its previous target.
+3. Build and verify the artifact from the accepted SHA. Pin the workflow to it.
+4. Disable label intake, drain legacy `doc_*` runs and prove no writer is active.
+5. Deploy the one new workflow. Move only the discovered mutable deployment alias
+   if the existing deployment requires it. Never move the immutable version tag
+   or `pre-ng-2026-08-27`.
+6. Re-enable labels with exactly one writer and apply `doc_translate` to merged
+   PR 45949 using an allowed actor. Monitor Action, Draft and QA report through
+   terminal outcome.
+
+Rollback disables intake and NG write credentials first, drains and reconciles
+the current run, restores the recorded prior workflow/artifact and only then
+restores one legacy writer if needed. Audit rows and NG Drafts remain for manual
+handling. Dual writers are forbidden.
+
+**Current verdict: SIMPLE REWRITE SPEC READY FOR INDEPENDENT REQUIREMENTS REVIEW.
+NO PRODUCT REPOSITORY EXISTS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
 
 ---
 
