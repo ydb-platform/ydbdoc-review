@@ -38,8 +38,11 @@ jobs:
           test -n "$YDBDOC_YDB_ENDPOINT"
           test -n "$YDBDOC_YDB_DATABASE"
           test -n "$YDB_SA_KEY"
-          prefix="m0_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
-          [[ "$prefix" =~ ^m0_[a-z0-9_]{12,80}$ ]]
+          suffix=$(openssl rand -hex 8)
+          [[ "$suffix" =~ ^[a-f0-9]{8,16}$ ]]
+          prefix="m0_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${suffix}"
+          [[ ${#prefix} -lt 80 ]]
+          [[ "$prefix" =~ ^m0_[0-9]+_[0-9]+_[a-f0-9]{8,16}$ ]]
           echo "YDBDOC_REAL_YDB_TABLE_PREFIX=$prefix" >> "$GITHUB_ENV"
           echo "YDBDOC_YDB_ENDPOINT=$YDBDOC_YDB_ENDPOINT" >> "$GITHUB_ENV"
           echo "YDBDOC_YDB_DATABASE=$YDBDOC_YDB_DATABASE" >> "$GITHUB_ENV"
@@ -88,7 +91,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$YDBDOC_REAL_YDB_TABLE_PREFIX" =~ ^m0_[a-z0-9_]{12,80}$ ]]
+          [[ ${#YDBDOC_REAL_YDB_TABLE_PREFIX} -lt 80 ]]
+          [[ "$YDBDOC_REAL_YDB_TABLE_PREFIX" =~ ^m0_[0-9]+_[0-9]+_[a-f0-9]{8,16}$ ]]
           timeout --signal=TERM --kill-after=3s 55s python - <<'PY'
           import os
           import ydb
@@ -136,8 +140,9 @@ jobs:
           {
             echo "### NG real YDB acceptance"
             echo
-            echo "- Accepted source SHA: \`ecc83ecf7209c7219e6a626bf70da58612c34a1c\`"
-            echo "- Workflow SHA: \`${GITHUB_SHA}\`"
+            echo "- Product source SHA: \`4f713656fd4a67bbf23f7837349eae1ee51e853d\`"
+            echo "- Integration checkout SHA: \`ecc83ecf7209c7219e6a626bf70da58612c34a1c\`"
+            echo "- Workflow/default SHA: \`${GITHUB_SHA}\`"
             echo "- Completed tests: \`${TESTS:-0}\`"
             echo "- Cleanup: \`${{ steps.cleanup.outcome }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
