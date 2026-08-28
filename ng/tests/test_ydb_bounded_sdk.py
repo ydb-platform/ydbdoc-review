@@ -181,6 +181,17 @@ class BoundedSdkContract(unittest.TestCase):
         self.assertNotIn("PRAGMA", source)
         self.assertNotIn("repository='{self.repository.canonical}'", source)
 
+    def test_not_null_expiries_unwrap_optional_interval_arithmetic(self):
+        for method in (
+            YdbState.create_lineage,
+            YdbState.record_accepted_continue,
+            YdbState.put_verification_result,
+        ):
+            source = inspect.getsource(method)
+            self.assertIn("Unwrap($now+Interval('P14D')", source)
+            self.assertNotRegex(source, r"expires_at\s*=\s*\$now\+Interval")
+            self.assertNotRegex(source, r",\$now\+Interval\('P14D'\)\)\s*;")
+
     def test_receipt_reconcile_and_effect_paths_use_prepared_legacy_queries(self):
         class Result:
             def __init__(self, rows): self.rows = rows
