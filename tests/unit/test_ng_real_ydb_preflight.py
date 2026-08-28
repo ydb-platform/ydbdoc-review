@@ -105,7 +105,10 @@ def _valid_key():
 
 def _probe_sdk(*, parse_error=None, wait_kind=None):
     stopped = []
-    exception_names = ("Unauthenticated", "Unauthorized", "PermissionDenied", "NotFound", "SchemeError", "Timeout", "Unavailable")
+    exception_names = (
+        "Unauthenticated", "Unauthorized", "PermissionDenied", "NotFound", "SchemeError",
+        "Timeout", "DeadlineExceed", "Unavailable", "ConnectionError", "ConnectionFailure", "ConnectionLost",
+    )
     issues = types.SimpleNamespace(**{name: type(name, (Exception,), {}) for name in exception_names})
     wait_error = None if wait_kind is None else (
         RuntimeError("sentinel-endpoint sentinel-database sentinel-private-key")
@@ -141,7 +144,9 @@ def test_sdk_key_parse_failure_is_categorical_and_safe(tmp_path):
     ("kind", "message"),
     (("Unauthenticated", "аутентификацию"), ("Unauthorized", "не хватает прав"),
      ("NotFound", "не найдена"), ("SchemeError", "не найдена"),
-     ("Timeout", "8 секунд"), ("Unavailable", "временно недоступен"),
+     ("Timeout", "8 секунд"), ("DeadlineExceed", "8 секунд"), ("Unavailable", "временно недоступен"),
+     ("ConnectionError", "сетевое подключение"), ("ConnectionFailure", "сетевое подключение"),
+     ("ConnectionLost", "сетевое подключение"),
      ("Unknown", "Не удалось проверить")),
 )
 def test_probe_classifies_without_leaks_and_always_stops_driver(tmp_path, kind, message):

@@ -78,8 +78,14 @@ def _validate_key_and_probe(key_path: Path, secret: str, endpoint: str, database
                 getattr(ydb.issues, "NotFound", None), getattr(ydb.issues, "SchemeError", None),
             ) if isinstance(kind, type)
         )
-        timeout = tuple(kind for kind in (getattr(ydb.issues, "Timeout", None), TimeoutError) if isinstance(kind, type))
+        timeout = tuple(kind for kind in (
+            getattr(ydb.issues, "Timeout", None), getattr(ydb.issues, "DeadlineExceed", None), TimeoutError,
+        ) if isinstance(kind, type))
         unavailable = tuple(kind for kind in (getattr(ydb.issues, "Unavailable", None),) if isinstance(kind, type))
+        connection = tuple(kind for kind in (
+            getattr(ydb.issues, "ConnectionError", None), getattr(ydb.issues, "ConnectionFailure", None),
+            getattr(ydb.issues, "ConnectionLost", None),
+        ) if isinstance(kind, type))
         if unauthenticated and isinstance(error, unauthenticated):
             message = "Ключ сервисного аккаунта не прошёл аутентификацию в YDB. Перевод не запускался."
         elif unauthorized and isinstance(error, unauthorized):
@@ -90,6 +96,8 @@ def _validate_key_and_probe(key_path: Path, secret: str, endpoint: str, database
             message = "Подключение к YDB не установлено за 8 секунд. Перевод не запускался."
         elif unavailable and isinstance(error, unavailable):
             message = "Сервис YDB временно недоступен. Перевод не запускался."
+        elif connection and isinstance(error, connection):
+            message = "Не удалось установить сетевое подключение к YDB. Перевод не запускался."
         else:
             message = "Не удалось проверить подключение к YDB. Перевод не запускался."
         raise PreflightError(message) from None
