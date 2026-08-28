@@ -29,7 +29,7 @@ class ReadPool:
     def __init__(self, row=None, error: Exception | None = None):
         self.row, self.error, self.calls = row, error, 0
 
-    def retry_operation_sync(self, operation):
+    def retry_operation_sync(self, operation, retry_settings=None):
         self.calls += 1
         if self.error:
             raise self.error
@@ -64,10 +64,12 @@ class StateContract(unittest.TestCase):
         self.clock.advance(timedelta(days=14))
 
     def reconcile_adapter(self, row=None, error=None):
+        import ydb
         adapter = object.__new__(YdbState)
         adapter.config = YdbConfig("grpcs://secret-endpoint", "/secret-db", "/secret-key")
         adapter.repository = RepoIdentity("ydb-platform", "ydb")
         adapter.pool = ReadPool(row, error)
+        adapter._ydb = ydb
         return adapter
 
     def test_a_schema_exact_four_tables_and_nonce_columns(self):
