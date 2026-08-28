@@ -843,10 +843,18 @@ def real_ydb_test_config_from_env(environment: Mapping[str, str]) -> RealYdbTest
 
 
 class _BoundedTransaction:
-    def __init__(self, transaction, settings):
-        self._transaction, self._settings = transaction, settings
+    def __init__(self, transaction, settings, session):
+        self._transaction, self._settings, self._session = transaction, settings, session
 
     def execute(self, *args, **kwargs):
+        query = args[0] if args else kwargs.get("query")
+        parameters = args[1] if len(args) > 1 else kwargs.get("parameters")
+        if isinstance(query, str) and parameters:
+            prepared = self._session.prepare(query, settings=self._settings())
+            if args:
+                args = (prepared, *args[1:])
+            else:
+                kwargs["query"] = prepared
         if len(args) < 4 and kwargs.get("settings") is None:
             kwargs["settings"] = self._settings()
         return self._transaction.execute(*args, **kwargs)
@@ -870,7 +878,7 @@ class _BoundedSession:
         return self._session.execute_scheme(*args, **kwargs)
 
     def transaction(self, *args, **kwargs):
-        return _BoundedTransaction(self._session.transaction(*args, **kwargs), self._settings)
+        return _BoundedTransaction(self._session.transaction(*args, **kwargs), self._settings, self._session)
 
     def __getattr__(self, name):
         return getattr(self._session, name)
@@ -1045,11 +1053,11 @@ class YdbState(StatePort):
         table = self._table("command_runs")
         key = f"run:{receipt.receipt_identity}"
         def op(tx):
-            params = {"$repo": self.repository.canonical, "$key": key}
-            before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT payload_sha256,receipt_identity,github_run_id,github_run_attempt,github_event_name,github_event_action,label_timeline_event_id,command,actor,source_pr,expires_at>CurrentUtcTimestamp() AS alive FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN';", params)
+            params = {"$repo": self.repository.canonical, "$key": key, "$kind": "RUN"}
+            before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT payload_sha256,receipt_identity,github_run_id,github_run_attempt,github_event_name,github_event_action,label_timeline_event_id,command,actor,source_pr,expires_at>CurrentUtcTimestamp() AS alive FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;", params)
             rows = before[0].rows if before else []
             if rows and not rows[0]["alive"]:
-                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DELETE FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN' AND expires_at<=CurrentUtcTimestamp();", params)
+                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; DELETE FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind AND expires_at<=CurrentUtcTimestamp();", params)
                 rows = []
             if rows:
                 same = (
@@ -1063,9 +1071,9 @@ class YdbState(StatePort):
                 )
                 tx.commit()
                 return ClaimResult(ClaimStatus.EXISTING_SAME if same else ClaimStatus.CONFLICT, False, "RECEIVED")
-            insert = {**params, "$receipt": receipt.receipt_identity, "$payload": receipt.payload_sha256, "$run": receipt.github_run_id, "$attempt": receipt.github_run_attempt, "$event": receipt.github_event_name, "$action": receipt.github_event_action, "$timeline": receipt.label_timeline_event_id, "$command": receipt.command, "$actor": receipt.actor, "$pr": receipt.source_pr}
-            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $receipt AS Utf8; DECLARE $payload AS Utf8; DECLARE $run AS Utf8; DECLARE $attempt AS Uint32; DECLARE $event AS Utf8; DECLARE $action AS Utf8; DECLARE $timeline AS Uint64; DECLARE $command AS Utf8; DECLARE $actor AS Utf8; DECLARE $pr AS Uint64; $now=CurrentUtcTimestamp(); INSERT INTO `{table}` (repository,record_key,row_kind,receipt_identity,github_run_id,github_run_attempt,github_event_name,github_event_action,label_timeline_event_id,payload_sha256,command,actor,source_pr,phase,created_at,updated_at,expires_at) VALUES ($repo,$key,'RUN',$receipt,$run,$attempt,$event,$action,$timeline,$payload,$command,$actor,$pr,'RECEIVED',$now,$now,$now+Interval('P14D'));", insert)
-            actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT receipt_identity FROM `{table}` WHERE repository=$repo AND record_key=$key;", params, commit_tx=True)
+            insert = {**params, "$phase": "RECEIVED", "$receipt": receipt.receipt_identity, "$payload": receipt.payload_sha256, "$run": receipt.github_run_id, "$attempt": receipt.github_run_attempt, "$event": receipt.github_event_name, "$action": receipt.github_event_action, "$timeline": receipt.label_timeline_event_id, "$command": receipt.command, "$actor": receipt.actor, "$pr": receipt.source_pr}
+            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; DECLARE $phase AS Utf8; DECLARE $receipt AS Utf8; DECLARE $payload AS Utf8; DECLARE $run AS Utf8; DECLARE $attempt AS Uint32; DECLARE $event AS Utf8; DECLARE $action AS Utf8; DECLARE $timeline AS Uint64; DECLARE $command AS Utf8; DECLARE $actor AS Utf8; DECLARE $pr AS Uint64; $now=CurrentUtcTimestamp(); INSERT INTO `{table}` (repository,record_key,row_kind,receipt_identity,github_run_id,github_run_attempt,github_event_name,github_event_action,label_timeline_event_id,payload_sha256,command,actor,source_pr,phase,created_at,updated_at,expires_at) VALUES ($repo,$key,$kind,$receipt,$run,$attempt,$event,$action,$timeline,$payload,$command,$actor,$pr,$phase,$now,$now,$now+Interval('P14D'));", insert)
+            actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT receipt_identity FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;", params, commit_tx=True)
             won = bool(actual and actual[0].rows and actual[0].rows[0]["receipt_identity"] == receipt.receipt_identity)
             return ClaimResult(ClaimStatus.CREATED if won else ClaimStatus.INCONCLUSIVE, won, "RECEIVED")
         try:
@@ -1077,8 +1085,8 @@ class YdbState(StatePort):
         table, key = self._table("command_runs"), f"run:{receipt.receipt_identity}"
         def read(session):
             result = session.transaction().execute(
-                f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT payload_sha256,receipt_identity,github_run_id,github_run_attempt,github_event_name,github_event_action,label_timeline_event_id,command,actor,source_pr,phase FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN';",
-                {"$repo": self.repository.canonical, "$key": key}, commit_tx=True,
+                f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT payload_sha256,receipt_identity,github_run_id,github_run_attempt,github_event_name,github_event_action,label_timeline_event_id,command,actor,source_pr,phase FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;",
+                {"$repo": self.repository.canonical, "$key": key, "$kind": "RUN"}, commit_tx=True,
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:
@@ -1133,19 +1141,19 @@ class YdbState(StatePort):
     def _lease_tx(self, source_pr: int, owner: LeaseOwner, release: bool) -> ClaimResult:
         table, key = self._table("command_runs"), f"lock:{self.repository.canonical}#{source_pr}"
         def op(tx):
-            params = {"$repo": self.repository.canonical, "$key": key, "$owner": owner.owner_id, "$nonce": owner.mutation_nonce}
+            params = {"$repo": self.repository.canonical, "$key": key, "$owner": owner.owner_id, "$nonce": owner.mutation_nonce, "$kind": "LOCK", "$phase": "LOCKED"}
             before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT lock_owner,mutation_nonce,lease_until,lease_until<=CurrentUtcTimestamp() AS expired FROM `{table}` WHERE repository=$repo AND record_key=$key;", {"$repo": self.repository.canonical, "$key": key})
             rows = before[0].rows if before else []
             if release:
                 owned = bool(rows and rows[0]["lock_owner"] == owner.owner_id and rows[0]["mutation_nonce"] == owner.mutation_nonce)
-                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $owner AS Utf8; DECLARE $nonce AS Utf8; DELETE FROM `{table}` WHERE repository=$repo AND record_key=$key AND lock_owner=$owner AND mutation_nonce=$nonce;", params)
+                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $owner AS Utf8; DECLARE $nonce AS Utf8; DELETE FROM `{table}` WHERE repository=$repo AND record_key=$key AND lock_owner=$owner AND mutation_nonce=$nonce;", {name: params[name] for name in ("$repo", "$key", "$owner", "$nonce")})
                 actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT lock_owner,mutation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key;", {"$repo": self.repository.canonical, "$key": key}, commit_tx=True)
                 changed = owned and (not actual or not actual[0].rows)
                 return ClaimResult(ClaimStatus.WON if changed else ClaimStatus.LOST, changed, "RELEASED" if changed else "LOCKED")
             if rows and not rows[0]["expired"]:
                 tx.commit()
                 return ClaimResult(ClaimStatus.LOST, False, "LOCKED", rows[0]["lock_owner"], rows[0]["mutation_nonce"])
-            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $owner AS Utf8; DECLARE $nonce AS Utf8; $now=CurrentUtcTimestamp(); UPSERT INTO `{table}` (repository,record_key,row_kind,source_pr,phase,lock_owner,mutation_nonce,lease_until,created_at,updated_at) VALUES ($repo,$key,'LOCK',{source_pr}u,'LOCKED',$owner,$nonce,$now+Interval('PT2H'),$now,$now);", params)
+            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $owner AS Utf8; DECLARE $nonce AS Utf8; DECLARE $kind AS Utf8; DECLARE $phase AS Utf8; $now=CurrentUtcTimestamp(); UPSERT INTO `{table}` (repository,record_key,row_kind,source_pr,phase,lock_owner,mutation_nonce,lease_until,created_at,updated_at) VALUES ($repo,$key,$kind,{source_pr}u,$phase,$owner,$nonce,$now+Interval('PT2H'),$now,$now);", params)
             actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT lock_owner,mutation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key;", {"$repo": self.repository.canonical, "$key": key}, commit_tx=True)
             won = bool(actual and actual[0].rows and actual[0].rows[0]["mutation_nonce"] == owner.mutation_nonce)
             return ClaimResult(ClaimStatus.WON if won else ClaimStatus.LOST, won, "LOCKED", owner.owner_id if won else None, owner.mutation_nonce if won else None)
@@ -1158,8 +1166,8 @@ class YdbState(StatePort):
         table, key = self._table("command_runs"), f"lock:{self.repository.canonical}#{source_pr}"
         def read(session):
             result = session.transaction().execute(
-                f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT lock_owner,mutation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='LOCK';",
-                {"$repo": self.repository.canonical, "$key": key}, commit_tx=True,
+                f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT lock_owner,mutation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;",
+                {"$repo": self.repository.canonical, "$key": key, "$kind": "LOCK"}, commit_tx=True,
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:
@@ -1234,7 +1242,7 @@ class YdbState(StatePort):
                 print("EFFECT_CHECKPOINT_EARLY_COMMIT_DONE", flush=True)
             key = {"$repo": self.repository.canonical, "$key": key_value}
             print("EFFECT_CHECKPOINT_READ_START", flush=True)
-            before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effects_schema_version,effect_checkpoints,expires_at>CurrentUtcTimestamp() AS alive FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN';", key)
+            before = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT effects_schema_version,effect_checkpoints,expires_at>CurrentUtcTimestamp() AS alive FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;", {**key, "$kind": "RUN"})
             print("EFFECT_CHECKPOINT_READ_DONE", flush=True)
             rows = before[0].rows if before else []
             if not rows or not rows[0]["alive"]:
@@ -1251,9 +1259,9 @@ class YdbState(StatePort):
                 if not _valid_effect_transition(previous, effects):
                     early_commit()
                     return ClaimResult(ClaimStatus.CONFLICT, False, "EFFECTS_RECORDED")
-                params = {**key, "$payload": payload}
+                params = {**key, "$version": "command-effects/v1", "$payload": payload}
                 print("EFFECT_CHECKPOINT_WRITE_START", flush=True)
-                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $payload AS Json; UPDATE `{table}` SET effect_checkpoints=$payload,updated_at=CurrentUtcTimestamp() WHERE repository=$repo AND record_key=$key AND effects_schema_version='command-effects/v1';", params)
+                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $version AS Utf8; DECLARE $payload AS Json; UPDATE `{table}` SET effect_checkpoints=$payload,updated_at=CurrentUtcTimestamp() WHERE repository=$repo AND record_key=$key AND effects_schema_version=$version;", params)
                 print("EFFECT_CHECKPOINT_WRITE_DONE", flush=True)
                 print("EFFECT_CHECKPOINT_VERIFY_START", flush=True)
                 actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effect_checkpoints FROM `{table}` WHERE repository=$repo AND record_key=$key;", key, commit_tx=True)
@@ -1274,7 +1282,7 @@ class YdbState(StatePort):
     def get_effect_checkpoints(self, receipt_identity: str) -> tuple[EffectCheckpoint, ...] | None:
         table, key_value = self._table("command_runs"), f"run:{receipt_identity}"
         def op(tx):
-            result = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT effects_schema_version,effect_checkpoints FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='RUN' AND expires_at>CurrentUtcTimestamp();", {"$repo": self.repository.canonical, "$key": key_value}, commit_tx=True)
+            result = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT effects_schema_version,effect_checkpoints FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind AND expires_at>CurrentUtcTimestamp();", {"$repo": self.repository.canonical, "$key": key_value, "$kind": "RUN"}, commit_tx=True)
             return result[0].rows[0] if result and result[0].rows else None
         row = self._serializable(op)
         if not row or row.get("effects_schema_version") is None:
@@ -1297,9 +1305,9 @@ class YdbState(StatePort):
                 stored = ModelCallReservation(ModelCallIdentity(rows[0]["idempotency_identity"]), rows[0]["reservation_nonce"], rows[0]["lineage_id"], rows[0]["run_receipt_identity"], rows[0]["provider"], rows[0]["model"], rows[0]["role"], rows[0]["verification_pass"], rows[0]["attempt"])
                 same = _same_model_reservation(stored, reservation)
                 return ClaimResult(ClaimStatus.EXISTING_SAME if same else ClaimStatus.CONFLICT, False, rows[0]["state"], mutation_nonce=rows[0]["reservation_nonce"])
-            params = {**key, "$identity": reservation.identity.idempotency_identity, "$nonce": reservation.reservation_nonce, "$lineage": reservation.lineage_id, "$run": reservation.run_receipt_identity, "$provider": reservation.provider, "$model": reservation.model, "$role": reservation.role, "$pass": reservation.verification_pass, "$attempt": reservation.attempt}
+            params = {**key, "$kind": "CALL", "$stored_state": "RESERVED", "$identity": reservation.identity.idempotency_identity, "$nonce": reservation.reservation_nonce, "$lineage": reservation.lineage_id, "$run": reservation.run_receipt_identity, "$provider": reservation.provider, "$model": reservation.model, "$role": reservation.role, "$pass": reservation.verification_pass, "$attempt": reservation.attempt}
             # Moscow day is derived from the same server timestamp by YDB DateTime UDF.
-            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $identity AS Utf8; DECLARE $nonce AS Utf8; DECLARE $lineage AS Utf8; DECLARE $run AS Utf8; DECLARE $provider AS Utf8; DECLARE $model AS Utf8; DECLARE $role AS Utf8; DECLARE $pass AS Uint32; DECLARE $attempt AS Uint32; $now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); INSERT INTO `{table}` (repository,record_key,row_kind,idempotency_identity,lineage_id,run_receipt_identity,provider,model,role,verification_pass,attempt,state,reserved_at,reservation_moscow_day,reservation_nonce,expires_at) VALUES ($repo,$key,'CALL',$identity,$lineage,$run,$provider,$model,$role,$pass,$attempt,'RESERVED',$now,$day,$nonce,$now+Interval('P14D'));", params)
+            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; DECLARE $stored_state AS Utf8; DECLARE $identity AS Utf8; DECLARE $nonce AS Utf8; DECLARE $lineage AS Utf8; DECLARE $run AS Utf8; DECLARE $provider AS Utf8; DECLARE $model AS Utf8; DECLARE $role AS Utf8; DECLARE $pass AS Uint32; DECLARE $attempt AS Uint32; $now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); INSERT INTO `{table}` (repository,record_key,row_kind,idempotency_identity,lineage_id,run_receipt_identity,provider,model,role,verification_pass,attempt,state,reserved_at,reservation_moscow_day,reservation_nonce,expires_at) VALUES ($repo,$key,$kind,$identity,$lineage,$run,$provider,$model,$role,$pass,$attempt,$stored_state,$now,$day,$nonce,$now+Interval('P14D'));", params)
             actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT reservation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key;", key, commit_tx=True)
             won = bool(actual and actual[0].rows and actual[0].rows[0]["reservation_nonce"] == reservation.reservation_nonce)
             return ClaimResult(ClaimStatus.CREATED if won else ClaimStatus.INCONCLUSIVE, won, ModelState.RESERVED.value, mutation_nonce=reservation.reservation_nonce if won else None)
@@ -1317,11 +1325,13 @@ class YdbState(StatePort):
             previous = rows[0]["state"] if rows else "ABSENT"
             if previous != allowed:
                 tx.commit(); return TransitionResult(False, previous, previous, "invalid_transition")
-            params = {**key, "$outcome": result.provider_outcome if result else "UNKNOWN", "$request": result.provider_request_id if result else None, "$input": result.input_tokens if result else None, "$output": result.output_tokens if result else None, "$total": result.total_tokens if result else None, "$cost": result.actual_cost_rub if result else None, "$rkind": reconciliation.kind if reconciliation else None, "$evidence": reconciliation.evidence_sha256 if reconciliation else None}
+            transition = {**key, "$rkind": reconciliation.kind if reconciliation else None, "$evidence": reconciliation.evidence_sha256 if reconciliation else None, "$target_state": target.value, "$allowed_state": allowed}
             if target == ModelState.RESULT_RECORDED:
-                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $outcome AS Utf8; DECLARE $request AS Utf8?; DECLARE $input AS Uint64?; DECLARE $output AS Uint64?; DECLARE $total AS Uint64?; DECLARE $cost AS Decimal(22,9)?; DECLARE $rkind AS Utf8?; DECLARE $evidence AS Utf8?; $now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); UPDATE `{table}` SET state='RESULT_RECORDED',provider_outcome=$outcome,provider_request_id=$request,input_tokens=$input,output_tokens=$output,total_tokens=$total,actual_cost_rub=$cost,finished_at=$now,finished_moscow_day=$day,reconciled_at=IF($rkind IS NULL,NULL,$now),reconciliation_kind=$rkind,reconciliation_evidence_sha256=$evidence WHERE repository=$repo AND record_key=$key AND state='{allowed}';", params)
+                params = {**transition, "$outcome": result.provider_outcome, "$request": result.provider_request_id, "$input": result.input_tokens, "$output": result.output_tokens, "$total": result.total_tokens, "$cost": result.actual_cost_rub}
+                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $target_state AS Utf8; DECLARE $allowed_state AS Utf8; DECLARE $outcome AS Utf8; DECLARE $request AS Utf8?; DECLARE $input AS Uint64?; DECLARE $output AS Uint64?; DECLARE $total AS Uint64?; DECLARE $cost AS Decimal(22,9)?; DECLARE $rkind AS Utf8?; DECLARE $evidence AS Utf8?; $now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); UPDATE `{table}` SET state=$target_state,provider_outcome=$outcome,provider_request_id=$request,input_tokens=$input,output_tokens=$output,total_tokens=$total,actual_cost_rub=$cost,finished_at=$now,finished_moscow_day=$day,reconciled_at=IF($rkind IS NULL,NULL,$now),reconciliation_kind=$rkind,reconciliation_evidence_sha256=$evidence WHERE repository=$repo AND record_key=$key AND state=$allowed_state;", params)
             else:
-                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $rkind AS Utf8?; DECLARE $evidence AS Utf8?; $now=CurrentUtcTimestamp(); UPDATE `{table}` SET state='{target.value}',provider_outcome='UNKNOWN',input_tokens=NULL,output_tokens=NULL,total_tokens=NULL,actual_cost_rub=NULL,finished_at=NULL,finished_moscow_day=NULL,reconciled_at=IF($rkind IS NULL,NULL,$now),reconciliation_kind=$rkind,reconciliation_evidence_sha256=$evidence WHERE repository=$repo AND record_key=$key AND state='{allowed}';", params)
+                params = {**transition, "$unknown_outcome": "UNKNOWN"}
+                tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $target_state AS Utf8; DECLARE $allowed_state AS Utf8; DECLARE $unknown_outcome AS Utf8; DECLARE $rkind AS Utf8?; DECLARE $evidence AS Utf8?; $now=CurrentUtcTimestamp(); UPDATE `{table}` SET state=$target_state,provider_outcome=$unknown_outcome,input_tokens=NULL,output_tokens=NULL,total_tokens=NULL,actual_cost_rub=NULL,finished_at=NULL,finished_moscow_day=NULL,reconciled_at=IF($rkind IS NULL,NULL,$now),reconciliation_kind=$rkind,reconciliation_evidence_sha256=$evidence WHERE repository=$repo AND record_key=$key AND state=$allowed_state;", params)
             actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT state FROM `{table}` WHERE repository=$repo AND record_key=$key;", key, commit_tx=True)
             current = actual[0].rows[0]["state"] if actual and actual[0].rows else "ABSENT"
             return TransitionResult(current == target.value, previous, current, "" if current == target.value else "inconclusive")
@@ -1361,21 +1371,21 @@ class YdbState(StatePort):
     def actual_spend_current_moscow_day(self) -> Decimal:
         table = self._table("model_calls")
         def op(tx):
-            result = tx.execute(f"$now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); SELECT COALESCE(SUM(actual_cost_rub),Decimal('0',22,9)) AS spent FROM `{table}` WHERE repository='{self.repository.canonical}' AND row_kind='CALL' AND state='RESULT_RECORDED' AND finished_moscow_day=$day AND actual_cost_rub IS NOT NULL;", commit_tx=True)
+            result = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $kind AS Utf8; DECLARE $stored_state AS Utf8; $now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); SELECT COALESCE(SUM(actual_cost_rub),Decimal('0',22,9)) AS spent FROM `{table}` WHERE repository=$repo AND row_kind=$kind AND state=$stored_state AND finished_moscow_day=$day AND actual_cost_rub IS NOT NULL;", {"$repo": self.repository.canonical, "$kind": "CALL", "$stored_state": "RESULT_RECORDED"}, commit_tx=True)
             return result[0].rows[0]["spent"]
         return Decimal(str(self._serializable(op)))
 
     def has_unknown_for_current_moscow_day(self) -> bool:
         table = self._table("model_calls")
         def op(tx):
-            result = tx.execute(f"$now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); SELECT COUNT(*) AS n FROM `{table}` WHERE repository='{self.repository.canonical}' AND row_kind='CALL' AND state='UNKNOWN_BILLED' AND reservation_moscow_day=$day;", commit_tx=True)
+            result = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $kind AS Utf8; DECLARE $stored_state AS Utf8; $now=CurrentUtcTimestamp(); $day=DateTime::MakeDate(DateTime::Split(AddTimezone($now,'Europe/Moscow'))); SELECT COUNT(*) AS n FROM `{table}` WHERE repository=$repo AND row_kind=$kind AND state=$stored_state AND reservation_moscow_day=$day;", {"$repo": self.repository.canonical, "$kind": "CALL", "$stored_state": "UNKNOWN_BILLED"}, commit_tx=True)
             return bool(result[0].rows[0]["n"])
         return self._serializable(op)
 
     def get_rotation(self, role: str) -> RotationRecord | None:
         table, key = self._table("model_calls"), f"rotation:{role}"
         def op(tx):
-            result = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT role,rotation_cursor,rotation_nonce,rotation_updated_at FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='ROTATION';", {"$repo": self.repository.canonical, "$key": key}, commit_tx=True)
+            result = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT role,rotation_cursor,rotation_nonce,rotation_updated_at FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;", {"$repo": self.repository.canonical, "$key": key, "$kind": "ROTATION"}, commit_tx=True)
             return result[0].rows[0] if result and result[0].rows else None
         row = self._serializable(op)
         return RotationRecord(row["role"], row["rotation_cursor"], row["rotation_nonce"], row["rotation_updated_at"]) if row else None
@@ -1391,8 +1401,8 @@ class YdbState(StatePort):
                 tx.commit(); return ClaimResult(ClaimStatus.EXISTING_SAME, True, str(cursor), mutation_nonce=claim.rotation_nonce)
             if cursor != claim.expected_cursor:
                 tx.commit(); return ClaimResult(ClaimStatus.LOST, False, str(cursor), mutation_nonce=rows[0]["rotation_nonce"] if rows else None)
-            params = {**key, "$role": claim.role, "$cursor": claim.next_cursor, "$nonce": claim.rotation_nonce}
-            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $role AS Utf8; DECLARE $cursor AS Uint64; DECLARE $nonce AS Utf8; UPSERT INTO `{table}` (repository,record_key,row_kind,role,state,rotation_cursor,rotation_nonce,rotation_updated_at) VALUES ($repo,$key,'ROTATION',$role,'ROTATION',$cursor,$nonce,CurrentUtcTimestamp());", params)
+            params = {**key, "$kind": "ROTATION", "$stored_state": "ROTATION", "$role": claim.role, "$cursor": claim.next_cursor, "$nonce": claim.rotation_nonce}
+            tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; DECLARE $stored_state AS Utf8; DECLARE $role AS Utf8; DECLARE $cursor AS Uint64; DECLARE $nonce AS Utf8; UPSERT INTO `{table}` (repository,record_key,row_kind,role,state,rotation_cursor,rotation_nonce,rotation_updated_at) VALUES ($repo,$key,$kind,$role,$stored_state,$cursor,$nonce,CurrentUtcTimestamp());", params)
             actual = tx.execute(f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT rotation_cursor,rotation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key;", key, commit_tx=True)
             won = bool(actual and actual[0].rows and actual[0].rows[0]["rotation_nonce"] == claim.rotation_nonce)
             return ClaimResult(ClaimStatus.WON if won else ClaimStatus.INCONCLUSIVE, won, str(actual[0].rows[0]["rotation_cursor"]), mutation_nonce=actual[0].rows[0]["rotation_nonce"])
@@ -1405,8 +1415,8 @@ class YdbState(StatePort):
         table, key = self._table("model_calls"), f"rotation:{claim.role}"
         def read(session):
             result = session.transaction().execute(
-                f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; SELECT rotation_cursor,rotation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind='ROTATION';",
-                {"$repo": self.repository.canonical, "$key": key}, commit_tx=True,
+                f"DECLARE $repo AS Utf8; DECLARE $key AS Utf8; DECLARE $kind AS Utf8; SELECT rotation_cursor,rotation_nonce FROM `{table}` WHERE repository=$repo AND record_key=$key AND row_kind=$kind;",
+                {"$repo": self.repository.canonical, "$key": key, "$kind": "ROTATION"}, commit_tx=True,
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:

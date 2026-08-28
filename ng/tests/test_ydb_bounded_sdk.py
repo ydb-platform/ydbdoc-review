@@ -6,7 +6,7 @@ from enum import Enum
 from unittest.mock import patch
 
 from ydbdoc_review_ng.state import (
-    EffectCheckpoint, RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession,
+    ClaimStatus, CommandReceipt, EffectCheckpoint, RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession,
     _BoundedTransaction, _effects_json, _safe_ydb_fingerprint,
 )
 
@@ -38,6 +38,10 @@ class FakeYdb:
     def SerializableReadWrite(): return "serializable"
 
 
+class DataQuery:
+    def __init__(self, text): self.text = text
+
+
 class Tx:
     def __init__(self): self.calls = []
     def execute(self, *args, **kwargs): self.calls.append(("execute", args, kwargs)); return "executed"
@@ -45,9 +49,12 @@ class Tx:
 
 
 class Session:
-    def __init__(self): self.tx, self.scheme = Tx(), []
+    def __init__(self): self.tx, self.scheme, self.prepared = Tx(), [], []
     def transaction(self, *args, **kwargs): return self.tx
     def execute_scheme(self, *args, **kwargs): self.scheme.append((args, kwargs)); return "schema"
+    def prepare(self, query, settings=None):
+        self.prepared.append((query, settings))
+        return DataQuery(query)
 
 
 class Pool:
@@ -122,6 +129,96 @@ class BoundedSdkContract(unittest.TestCase):
         self.assertIs(session.scheme[-1][1]["settings"], explicit)
         self.assertIs(session.tx.calls[-2][2]["settings"], explicit)
         self.assertIs(session.tx.calls[-1][2]["settings"], explicit)
+
+    def test_raw_parameterized_query_is_prepared_by_originating_legacy_session(self):
+        events = []
+        class RejectingTx(Tx):
+            def execute(self, query, parameters=None, commit_tx=False, settings=None):
+                if isinstance(query, str) and parameters:
+                    raise Permanent("legacy SDK drops raw query parameters")
+                events.append(("execute", query, parameters, commit_tx, settings))
+                return "ok"
+        class LegacySession(Session):
+            def __init__(self): self.tx, self.scheme, self.prepared = RejectingTx(), [], []
+            def prepare(self, query, settings=None):
+                events.append(("prepare", query, settings))
+                return DataQuery(query)
+        session = LegacySession()
+        settings = iter((RequestSettings().with_timeout(3), RequestSettings().with_timeout(2)))
+        tx = _BoundedSession(session, lambda: next(settings)).transaction("mode")
+        self.assertEqual(tx.execute("DECLARE $value AS Utf8; SELECT $value;", {"$value": "ok"}, commit_tx=True), "ok")
+        self.assertEqual([event[0] for event in events], ["prepare", "execute"])
+        self.assertIsInstance(events[1][1], DataQuery)
+        self.assertEqual(events[1][2], {"$value": "ok"})
+        self.assertTrue(events[1][3])
+        self.assertEqual((events[0][2].timeout, events[1][4].timeout), (3, 2))
+
+    def test_raw_query_without_parameters_and_data_query_are_not_prepared(self):
+        session = Session()
+        tx = _BoundedSession(session, RequestSettings).transaction()
+        tx.execute("SELECT 1")
+        prepared = DataQuery("DECLARE $value AS Utf8; SELECT $value;")
+        tx.execute(prepared, {"$value": "ok"})
+        self.assertEqual(session.prepared, [])
+        self.assertEqual(session.tx.calls[0][1][0], "SELECT 1")
+        self.assertIs(session.tx.calls[1][1][0], prepared)
+
+    def test_prepare_and_execute_recompute_shared_deadline_settings(self):
+        state, pool = adapter(Pool()), None
+        pool = state.pool
+        def operation(session):
+            return session.transaction().execute("DECLARE $v AS Utf8; SELECT $v;", {"$v": "ok"}, commit_tx=True)
+        with patch("ydbdoc_review_ng.state.time.monotonic", side_effect=[0.0, 1.0, 4.0, 7.0]):
+            self.assertEqual(state._pool_attempt(operation, wall_seconds=10, rpc_seconds=10, error_marker="SAFE"), "executed")
+        session = pool.sessions[0]
+        self.assertEqual(session.prepared[0][1].timeout, 6.0)
+        self.assertEqual(session.tx.calls[0][2]["settings"].timeout, 3.0)
+
+    def test_data_yql_has_no_bare_utf8_application_constants(self):
+        source = inspect.getsource(__import__("ydbdoc_review_ng.state", fromlist=["*"]))
+        for column in ("row_kind", "phase", "state", "role", "effects_schema_version", "provider_outcome", "reconciliation_kind"):
+            self.assertNotRegex(source, rf"{column}\s*=\s*'[^']+'")
+        self.assertNotIn("PRAGMA", source)
+        self.assertNotIn("repository='{self.repository.canonical}'", source)
+
+    def test_receipt_reconcile_and_effect_paths_use_prepared_legacy_queries(self):
+        class Result:
+            def __init__(self, rows): self.rows = rows
+        class ScriptedTx:
+            def __init__(self, rows): self.rows, self.executed = list(rows), []
+            def execute(self, query, parameters=None, commit_tx=False, settings=None):
+                if isinstance(query, str) and parameters:
+                    raise Permanent("legacy raw+params rejected")
+                self.executed.append(query)
+                return [Result(self.rows.pop(0))]
+            def commit(self, settings=None): return None
+        class ScriptedSession:
+            def __init__(self, rows): self.tx, self.prepared = ScriptedTx(rows), []
+            def transaction(self, *args, **kwargs): return self.tx
+            def prepare(self, query, settings=None):
+                self.prepared.append(query)
+                return DataQuery(query)
+        state = adapter(Pool())
+        receipt = CommandReceipt("receipt-1", "10", 1, "pull_request_target", "labeled", 20, "a" * 64, "DOC_TRANSLATE", "actor", 45949)
+
+        receipt_session = ScriptedSession([[], [], [{"receipt_identity": "receipt-1"}]])
+        state._serializable = lambda operation, **kwargs: operation(_BoundedSession(receipt_session, RequestSettings).transaction())
+        self.assertEqual(state.receive_command(receipt).status, ClaimStatus.CREATED)
+        self.assertEqual(len(receipt_session.prepared), 3)
+
+        reconcile_row = {"payload_sha256": "a" * 64, "receipt_identity": "receipt-1", "github_run_id": "10", "github_run_attempt": 1, "github_event_name": "pull_request_target", "github_event_action": "labeled", "label_timeline_event_id": 20, "command": "DOC_TRANSLATE", "actor": "actor", "source_pr": 45949, "phase": "RECEIVED"}
+        reconcile_session = ScriptedSession([[reconcile_row]])
+        state._pool_attempt = lambda operation, **kwargs: operation(_BoundedSession(reconcile_session, RequestSettings))
+        self.assertEqual(state._reconcile_receipt_once(receipt).status, ClaimStatus.EXISTING_SAME)
+        self.assertEqual(len(reconcile_session.prepared), 1)
+
+        effects = (EffectCheckpoint(0, "PUSH_BRANCH", "PLANNED", "branch:test", "a" * 64),)
+        payload = _effects_json(effects)
+        effect_session = ScriptedSession([[{"alive": True, "effects_schema_version": None, "effect_checkpoints": None}], [], [{"effects_schema_version": "command-effects/v1", "effect_checkpoints": payload}]])
+        state._serializable = lambda operation, **kwargs: operation(_BoundedSession(effect_session, RequestSettings).transaction())
+        with patch("builtins.print"):
+            self.assertEqual(state.put_effect_checkpoints("receipt-1", effects).status, ClaimStatus.CREATED)
+        self.assertEqual(len(effect_session.prepared), 3)
 
     def test_structural_guard_only_central_owner_calls_sdk_retry(self):
         source = inspect.getsource(__import__("ydbdoc_review_ng.state", fromlist=["*"]))
