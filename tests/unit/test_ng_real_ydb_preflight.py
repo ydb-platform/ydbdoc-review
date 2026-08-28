@@ -137,6 +137,19 @@ def test_failed_pytest_marker_is_mapped_then_outer_cleanup_runs():
     assert len(commands) == 2 and "--cleanup" in commands[1]
 
 
+def test_launcher_preload_failure_is_mapped_then_cleanup_runs_without_junit():
+    commands = []
+    def bounded(command, environment, timeout):
+        commands.append(tuple(command))
+        return 0 if "--cleanup" in command else 86
+    with patch.object(RUNNER, "_run_bounded", side_effect=bounded):
+        with pytest.raises(RUNNER.PreflightError, match="загрузить SDK YDB") as caught:
+            RUNNER.run({"YDB_SA_KEY": json.dumps(_valid_key())})
+    assert "Перевод не запускался" in str(caught.value)
+    assert len(commands) == 2 and commands[0][1] == "/app/scripts/run_ng_real_contract.py"
+    assert "--cleanup" in commands[1]
+
+
 def test_cleanup_names_are_closed_and_no_listing_or_teardown_exists():
     source = (ROOT / "scripts/run_ng_real_ydb_preflight.py").read_text()
     assert RUNNER.TABLE_SUFFIXES == ("command_runs", "lineages", "model_calls", "verification_results")

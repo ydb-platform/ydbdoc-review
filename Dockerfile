@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt \
 
 COPY entrypoint.sh /app/entrypoint.sh
 COPY scripts/run_ng_real_ydb_preflight.py /app/scripts/run_ng_real_ydb_preflight.py
+COPY scripts/run_ng_real_contract.py /app/scripts/run_ng_real_contract.py
 RUN chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
