@@ -540,8 +540,8 @@
     {
       "source_path": "src/ydbdoc_review_ng/state.py",
       "destination_path": "ng/src/ydbdoc_review_ng/state.py",
-      "sha256": "dc60178052870aa8fec09684061f2d8cd8f7dcbdecaf6d855667ce269df5c05b",
-      "source_blob_sha1": "2052cfc15bdd87059542a0d30ea1f9f248043e7d"
+      "sha256": "94bd2b5734a5f9a7cae0010ec6ce57d3a903b3926dcdf8f0008161298191f356",
+      "source_blob_sha1": "af58205b8ddc849c1445246c9f21c985c29b946c"
     },
     {
       "source_path": "tests/test_launch_contract.py",
