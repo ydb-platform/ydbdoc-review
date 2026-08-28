@@ -223,8 +223,12 @@ gateway's receipt/commit/flush sequence was only in-memory bookkeeping rather
 than an authoritative durable transport record.
 
 Verdict: **DELIVERABLE A ATTEMPT 1 TEST FAIL**. The uncommitted attempt cannot be
-frozen or used by Deliverable B. Two independent RCAs must establish a coherent
-attempt-2 trust-root and causality design before a developer changes the code.
+frozen or used by Deliverable B. Two independent RCAs agreed that its public
+dataclass/helper trust model was structurally forgeable and must be discarded,
+not patched. A1 was deleted in full. Attempt 2 must be built around one
+harness-owned authority, opaque registry handles, an fsync append-only causal
+journal, process-correlated one-shot kill permits, deep canonical revalidation
+and bundle assembly exclusively from authoritative registry snapshots.
 
 ## 25.2 Exact repository and distribution recommendation
 
