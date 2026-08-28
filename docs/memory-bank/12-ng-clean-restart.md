@@ -11,7 +11,10 @@ tags: [ng-clean-restart, acceptance-harness, durable-control-plane, migration]
 > Part of the [Memory Bank index](../../MEMORY_BANK.md). §23 remains product
 > authority. §24 v1.0.3 remains the behavioral, DTO and protocol baseline. This
 > section supersedes its failed package topology, legacy reuse allowance,
-> implementation order and migration sequence.
+> implementation order and migration sequence. The original independent evidence
+> and executable observations for findings 01–26 are fixed in the
+> [§26 authoritative failure ledger](13-ng-failure-ledger.md); §25 summaries do
+> not replace that ledger.
 
 ## 25. Status and non-negotiable hold
 
@@ -403,6 +406,12 @@ The acceptance repository has exactly 26 independently reviewed finding modules,
 - externally observable expected calls, state, report and exit result;
 - one negative control demonstrating a plausible false PASS is detected;
 - links to, but no executable dependence on, related NG-AC tests.
+
+The source statement, reproduction, observed bad output, required good
+observation, negative-control mutant, provenance and closure history for every
+module come from [§26](13-ng-failure-ledger.md). The harness may copy reviewed
+fixtures from that ledger into static test-owned data, but MUST NOT parse the
+ledger or §24 at runtime to manufacture its assertions.
 
 Phase 0 cannot pass with placeholder names, empty predicates, generated tests or
 only a CLOSED/PARTIAL/OPEN ledger. The full original text and expected
