@@ -245,6 +245,21 @@ deleted. The final A3 attempt must use a separate authority daemon with private
 OS IPC/state, transactional durable registries and CAS, observer-owned typed
 events, recoverable exact-process kill state and complete bundle export.
 
+### 25.1.10 Acceptance Trust Kernel attempt 3 and project deletion
+
+The final Deliverable A attempt used a separate authority daemon, installed from
+a wheel and passed all nine authored tests. Missing separate-UID and live-YDB
+integration correctly returned BLOCKED. Independent QA still found an invalid
+shipped JSON schema, open nested bundle fields, an untyped candidate UID,
+duplicate-key last-wins parsing, listeners not recovered after daemon death and
+bundle construction accepting empty or malformed identity digests.
+
+Verdict: **DELIVERABLE A ATTEMPT 3 TEST FAIL**. The three-attempt limit is
+exhausted. The entire clean-room project was deleted. No implementation or
+architecture from A1, A2 or A3 may be reused. Phase 0 returns to requirements and
+architecture analysis for a genuinely new project; product creation, cutover and
+`doc_translate` remain prohibited.
+
 ## 25.2 Exact repository and distribution recommendation
 
 Use **two repositories in sequence**, not another subproject in this repository
