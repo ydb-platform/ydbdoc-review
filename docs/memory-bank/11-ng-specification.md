@@ -9,11 +9,11 @@
 ## 24. Status, authority and version
 
 - **Status:** BEHAVIORAL SPEC PASS; IMPLEMENTATION NOT ACCEPTED
-- **Specification version:** 1.1.0
+- **Specification version:** 1.2.0
 - **Specification date:** 2026-08-28
 - **Product authority:** [§23 NG requirements](10-ng-requirements.md)
-- **Implementation strategy:** SIMPLE_CLEAN_REWRITE, as fixed by §23.17,
-  §24.22 and §25.11
+- **Implementation strategy:** STAGED_CLEAN_REWRITE, as fixed by §23.17,
+  §24.22 and §25.12
 - **Recovery point:** tag **pre-ng-2026-08-27**, commit
   **1f04ab1c71488f53c4ad547c20c7e635d59696ad**
 
@@ -35,12 +35,12 @@ topology in §24.2, legacy-reuse allowance, migration order in §24.17,
 topology-specific NG-AC-001..003 wording and implementation-first work breakdown
 in §24.20 are historical and MUST NOT be followed.
 The later proof-platform and trust-kernel restart also exhausted three attempts.
-Its topology, H/S/C/D artifacts and gates are historical only. §24.22 and §25.11
+Its topology, H/S/C/D artifacts and gates are historical only. §24.22 and §25.12
 supersede every old topology, harness and work-order statement without weakening
 §23 behavior.
 
 This document is normative for behavior, DTOs and protocols except where §24.22
-or §25.11 explicitly replaces topology, test ownership, work order or migration
+or §25.12 explicitly replaces topology, test ownership, work order or migration
 mechanics.
 It MUST NOT change a product decision from §23. If this document and §23
 conflict, §23 wins and implementation MUST stop until the specification is
@@ -153,7 +153,7 @@ The v1.0.3 in-repository package topology and exact-symbol legacy reuse model we
 exercised by three failed attempts and are withdrawn. They are not retained here
 as a template.
 
-The effective architecture is only §24.22 and §25.11: one new Python product,
+The effective architecture is only §24.22 and §25.12: one new Python product,
 one CLI, one workflow, four logical YDB tables and an independent tester using a
 proportionate test pyramid. There is no separate acceptance product or pre-code
 harness gate.
@@ -2579,7 +2579,8 @@ record, every decision, every GitHub mutation and final result. They are retaine
 
 ## 24.17 Migration, cutover and rollback
 
-§25.11 is the only executable migration, cutover and rollback sequence. Cutover
+§25.12 is the only executable implementation gate; §25.11.4 remains the release,
+cutover and rollback sequence after M7 TEST PASS. Cutover
 and NG `doc_translate` remain prohibited until its preconditions receive explicit
 independent TEST PASS. The user's standing direction is to cut over and rerun
 PR 45949 immediately after that PASS; no additional conversational approval is
@@ -3244,6 +3245,32 @@ changes or deletes repository content, branch or PR state.
 
 ### 24.22.6 Shared verification and read-only repair semantics
 
+All three commands construct the same immutable, byte-native
+`VerificationCase`. It contains the exact original/source/target file bytes,
+paths, git modes and digests, the immutable operation and bundle descriptors,
+configured model identifiers and rotation choice, exact prompt templates and
+every verification/content policy input. Its canonical encoding and hash exclude
+only operational call/request identities, token usage, actual cost and time.
+Identical complete cases MUST produce byte-identical canonical encodings, hashes
+and deterministic findings. Matching file bytes alone do not imply identity when
+model, prompt or policy configuration differs. Verification of an active NG
+Draft reconstructs the case from its persisted lineage; an ordinary unrelated PR
+may legitimately have a different case identity.
+
+The critic request contains the exact source and target bytes from that case.
+Path-only summaries, precomputed findings or omitted locale bytes are invalid
+requests. `VerificationOutcome` keeps the verdict for `ORIGINAL_BYTES` separate
+from any hypothetical repaired candidate.
+
+The GitHub content-writer port accepts only a `SafeBundle` constructed by the
+shared verification application service after every mandatory deterministic and
+critic gate. It MUST NOT accept a raw overlay, candidate or generic diff. A red,
+technical, ambiguous or incomplete bundle cannot become a `SafeBundle`; its
+report may still be published. This zero-mutation rule is scoped to the affected
+bundle. Other independently verified `SafeBundle` objects in the same run MAY be
+published into one Draft, whose canonical report remains red for the omitted
+unsafe bundle.
+
 One orchestration implements deterministic checks, critic parsing, severity,
 fallbacks, up to two repair attempts and three critic passes. Translate and
 continue may publish the last safe candidate. Verify runs the same sequence in
@@ -3310,15 +3337,43 @@ service or guessed success.
   modes, dependency bounds/cycles, single-language, URLs, companions, lossless
   TOC, redirect atomicity, glossary identity, severity/reporting, continue parser,
   budget and model-call transitions.
+- Contract tests are written before each adapter and run unchanged against its
+  fake and production implementations. They cover complete GitHub pagination,
+  exact-SHA git objects, lineage lookup and mutations, model request/audit,
+  reporter sanitization and YDB atomic transitions.
 - Integration tests invoke the official CLI/composition with I/O-only GitHub and
   model fakes plus a temporary real git repository. They cover gate order, label
   removal, duplicate events, restart checkpoints, Draft lifecycle, verify's zero
   content mutations and shared verification identity.
-- A small real-YDB suite covers unique receipts, lease CAS/expiry, lineage TTL,
-  model-call transitions and Moscow-day budget behavior.
+- A mandatory real-YDB GitHub Actions suite covers unique receipts, lease
+  CAS/expiry, lineage TTL, model-call transitions, Moscow-day budget behavior and
+  `UNKNOWN_BILLED`. The workflow passes
+  `vars.YDBDOC_YDB_ENDPOINT`, `vars.YDBDOC_YDB_DATABASE` and
+  `secrets.YDB_SA_KEY` to the official CLI. The CLI asserts that all three
+  effective values are non-empty and masks the secret before any diagnostic.
+  Secret values are never stored in this specification, fixtures, logs or
+  reports. Local absence of credentials is not final acceptance evidence.
 - Recorded regressions use raw external payloads and blobs, especially exact
   paginated PR 45949 data. Fakes MUST NOT replace planner, file policy, verifier
   or command orchestration.
+- Exact-byte conformance invokes the same case builder and verifier twice with
+  the same complete inputs and requires identical canonical `VerificationCase`
+  bytes/hash and deterministic findings. M2 does not require the `verify`
+  command; M6 proves the official verify route reconstructs the same complete
+  case for an active NG Draft. A model spy proves critic requests contain the
+  exact RU and EN bytes. Negative publication tests prove a red, ambiguous,
+  malformed or unsafe bundle causes zero GitHub content mutations for that
+  affected bundle while independent safe bundles may still be published.
+- Lossless golden tests prove untouched bytes are identical and edits change
+  only parsed, non-overlapping byte ranges. Pinned tree-sitter grammars provide
+  Markdown, YAML and C/C++ source spans. `ruamel.yaml` may cross-check supported
+  YAML semantics but MUST NOT serialize output. Unsafe or uncertain parsing is
+  red.
+- Git acquisition MUST NOT request or enumerate the full recursive repository
+  tree. After complete GitHub PR-files pagination, path-scoped git plumbing at
+  the exact SHA materializes only manifest paths and the computed dependency
+  closure. A synthetic repository with a very large tree proves behavior is
+  independent of recursive-tree APIs and their truncation.
 - The developer commits the candidate before handoff. An independent tester runs
   the complete suite and a read-only/dry-run PR 45949 composition against that
   exact SHA before issuing a SHA-bound TEST PASS. Every fix is a new commit and
@@ -3351,6 +3406,11 @@ the report gives an exact continue question. An authorized answer causes a full
 rebuild and completes the same Draft.
 
 ### 24.22.12 Implementation and cutover order
+
+The historical one-shot implementation order is superseded. Development follows
+the mandatory M-1 through M7 gates in §25.12. No later milestone may compensate
+for missing evidence in an earlier one, and no milestone authorizes production
+cutover by itself.
 
 The developer first commits a candidate. The independent tester tests that exact
 commit SHA and binds TEST PASS to it. Any fix creates a new commit SHA and voids

@@ -6,10 +6,10 @@ status: requirements-review
 tags: [ng-clean-restart, simple-rewrite, independent-testing, migration]
 ---
 
-# Memory Bank: NG restart history and authoritative simple rewrite
+# Memory Bank: NG restart history and authoritative staged rewrite
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md). §23 remains product
-> authority. §24 v1.1.0 remains the behavioral, DTO and protocol baseline. This
+> authority. §24 v1.2.0 remains the behavioral, DTO and protocol baseline. This
 > section preserves its failed package and proof-platform history. The original
 > independent evidence
 > and executable observations for findings 01–26 are fixed in the
@@ -21,7 +21,7 @@ tags: [ng-clean-restart, simple-rewrite, independent-testing, migration]
 Sections 25.1 through 25.10 preserve the complete failed-attempt and
 proof-platform history. Their repository topology, H/S/C/D deliverables,
 trust-kernel, malicious-claimant, closed-schema, mutant and AC gates are no longer
-normative. The authoritative restart is §25.11 together with §23 and §24.22.
+normative. The authoritative restart is §25.12 together with §23 and §24.22.
 
 Current state on 2026-08-28:
 
@@ -41,15 +41,15 @@ Current state on 2026-08-28:
   independent Harness RCAs, were discarded in full, and are not a template;
 - both attempted clean-room repositories were deleted after the third Stage 1
   failure and no new product repository currently exists;
-- requirements analysis has selected a simple rewrite and independent ordinary
-  testing instead of a fourth proof-platform attempt;
+- requirements analysis has selected a staged rewrite and independent ordinary
+  testing instead of either another proof platform or one-shot implementation;
 - no product repository exists yet;
 - product implementation may start only from the reviewed §23/§24.22 handoff;
-- cutover and production `doc_translate` remain blocked until independent TEST
-  PASS under §25.11.
+- cutover and production `doc_translate` remain blocked until M7 independent
+  TEST PASS under §25.12.
 
-The allowed next work is the new product repository, implementation, fixture
-preservation and proportionate testing described in §25.11. Green developer tests
+The allowed next work is M-1 fixture preservation followed by the gated
+implementation and testing in §25.12. Green developer tests
 alone cannot lift the cutover hold; the developer first commits a candidate, then
 an independent tester must exercise the official CLI composition at that exact
 SHA and issue a SHA-bound TEST PASS.
@@ -1229,8 +1229,126 @@ project may begin only after fresh requirements/architecture analysis explicitly
 accounts for these regressions. Release, cutover and `doc_translate` remain
 prohibited.
 
-**Current verdict: SIMPLE REWRITE ATTEMPT 1 TEST FAIL. ATTEMPT 2 REQUIRES TWO
-INDEPENDENT RCAS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
+**Historical verdict: SIMPLE REWRITE ATTEMPTS 1–3 TEST FAIL. THE PRODUCT PROJECT
+WAS DELETED. §25.12 IS THE CURRENT AUTHORITY.**
+
+## 25.12 Authoritative staged restart after exhausted simple rewrites
+
+### 25.12.1 Decision and cause
+
+Two fresh independent analysts reviewed §23, §24.22 and the exact failures in
+§25.11.5–§25.11.7 and reached one consensus. The §23 product contract is retained
+without omissions. The failed approach was the one-shot horizontal order: one
+developer built ports, adapters, orchestration and friendly tests together, while
+production-composition acceptance arrived last. That allowed fake-only lineage
+state, incomplete git acquisition, missing critic bytes, divergent verification
+identity, lossy edits and publication of unsafe content to remain green.
+
+No code, test, package structure or repository from the three deleted simple
+rewrites may be reused. The new project remains one ordinary Python CI product,
+not a proof platform or separate acceptance service. Its implementation is split
+into acceptance-first vertical milestones. Completion of a milestone means its
+independent observable gate passes; authored green tests alone are insufficient.
+
+### 25.12.2 Fixed technical foundations
+
+- Python 3.12, one locked package, one CLI and one workflow remain the production
+  shape. The exact new repository/package name is an implementation choice.
+- One immutable byte-native `VerificationCase` is constructed by one builder for
+  translate, continue and verify. It contains exact file bytes, paths, git modes,
+  digests, operations, bundle descriptors, configured model identifiers and
+  rotation choice, prompt templates and every semantic policy input. Its
+  canonical identity excludes only operational call/request IDs, tokens, cost
+  and time. Identity requires the same complete case, not merely the same file
+  bytes. An NG Draft verify reconstructs it from lineage; an ordinary PR may
+  legitimately differ.
+- GitHub content writers accept only `SafeBundle`, never raw overlay/candidate
+  data. Only the shared verifier can construct a safe bundle after all mandatory
+  gates. Reports are a separate effect. Failure blocks mutation only for the
+  affected bundle; other independent `SafeBundle` objects may still create a
+  Draft whose report is red for the omitted bundle.
+- Complete PR-files pagination is authoritative for the manifest. Exact-SHA,
+  path-scoped git plumbing reads only manifest paths and computed dependency
+  closure with `ls-tree -z` and `cat-file --batch` equivalents. Full recursive
+  repository-tree enumeration and GitHub recursive-tree APIs are forbidden.
+- Pinned tree-sitter grammars own exact Markdown, YAML and C/C++ byte spans.
+  Supported edits are ordered, non-overlapping byte splices. `ruamel.yaml` may
+  cross-check YAML meaning but never serializes output. Uncertain parsing blocks
+  the bundle red.
+- Critic requests contain the exact source and target bytes from the
+  `VerificationCase`; summaries or omitted locale bytes are invalid.
+- Real-YDB acceptance runs in GitHub Actions from the first executable milestone.
+  The workflow passes `vars.YDBDOC_YDB_ENDPOINT`,
+  `vars.YDBDOC_YDB_DATABASE` and `secrets.YDB_SA_KEY` to the official CLI. The
+  CLI asserts that all effective values are non-empty and masks the secret before
+  diagnostics. No secret value is written to the Memory Bank, repository,
+  fixture, log or report. Missing local credentials do not turn required CI
+  evidence into an accepted BLOCKED result.
+
+### 25.12.3 Mandatory milestone gates
+
+1. **M-1, immutable provenance.** An independent tester freezes the real
+   paginated PR 45949 payload, base/head/merge SHAs, all eight manifest records
+   and exact blobs/digests. Substitution, missing pages and changed bytes must be
+   detected before any model call.
+2. **M0, operational walking foot.** Implement only the official CLI/workflow,
+   four YDB migrations, durable receipt, lease/CAS/expiry, Moscow-day budget,
+   model-call state including `UNKNOWN_BILLED`, and a secret-safe error/report
+   sink. Exercise them against real YDB in GitHub Actions. There are no planner,
+   content or publication abstractions yet and no GitHub content mutation.
+3. **M1, acquisition dry run.** Add deterministic gates, complete pagination,
+   exact-SHA path-scoped git materialization and canonical `VerificationCase`.
+   A synthetic huge repository proves no dependency on a full recursive tree.
+   The command remains non-writing.
+4. **M2, PR 45949 safe-content slice.** Add only the lossless handlers, model
+   calls and shared verifier needed to compute the exact PR 45949 result.
+   Publication remains disabled. Acceptance captures critic requests containing
+   exact RU/EN bytes, invokes the same builder/verifier twice to prove complete
+   case identity without requiring the verify command, rejects Cyrillic or
+   unsafe candidates and asserts the complete expected 7-write/1-delete overlay
+   by exact paths and bytes, including scoped TOC and redirect behavior.
+5. **M3, publication and recovery.** Add the `SafeBundle`-only GitHub writer,
+   durable mutation intents, remote reconciliation, deterministic Draft/branch
+   lifecycle and report publication. Every red, ambiguous, malformed, parser or
+   model failure has a negative test proving zero mutation of the affected
+   bundle. Independently safe bundles may publish into the same red-report Draft.
+6. **M4, complete product matrix.** Expand §23 in small acceptance-first slices:
+   direction and bilingual authority, `SUPERSEDED`, single-language scope,
+   dependency limits/cycles, URLs, images, TXT/JSON/YAML/C/C++, glossary and all
+   ambiguity/questions. No requirement is deferred beyond production acceptance.
+7. **M5, continue.** Add destructive rebuild using the same acquisition,
+   planner, case builder, verifier and safe writer. Prove correct source/Draft
+   location, latest unconsumed instruction exactly once, current authority,
+   force-with-lease, three-attempt limit and source/Draft concurrency join.
+8. **M6, verify.** Add verify last with content-writer capability absent from its
+   composition root. For an active NG Draft the official route reconstructs the
+   identical complete case bytes/hash from lineage and uses the same verification
+   plus repair orchestration. An ordinary PR may have a different case identity.
+   Verify publishes no content and keeps verdict on unchanged original bytes even
+   when a hypothetical repair is green.
+9. **M7, candidate acceptance and release gate.** Build/install the immutable
+   artifact, run the complete unit, adapter-contract, CLI integration, recorded
+   PR 45949 and real-YDB suites through official composition, and obtain an
+   independent TEST PASS bound to the committed SHA. Every fix produces a new
+   SHA and reruns the complete scope. Only then may §25.11.4 release/cutover and
+   the real `doc_translate` on merged PR 45949 occur.
+
+### 25.12.4 Non-negotiable regression observations
+
+Before expansion past M2/M3, tests must directly observe exact bytes and effects,
+not call counts or candidate claims: complete fixture provenance; identical
+cross-command case identity; exact RU/EN critic payload; exact PR 45949 overlay;
+lossless TOC/YAML byte ranges; zero affected-bundle mutation for every unsafe
+outcome while independent safe bundles may publish; secret
+corpus sanitization; unique audit state for translator, critic, repair and format
+calls; `UNKNOWN_BILLED` current-day blocking on real YDB; fake/production port
+contract equivalence; source/Draft lineage collision; and C/C++ translation of
+comments plus clearly user-facing string literals while preserving every other
+byte.
+
+**Current verdict: REQUIREMENTS AND STAGED ARCHITECTURE CONSENSUS. NO NEW PRODUCT
+CODE EXISTS. M-1 IS THE NEXT ALLOWED STEP. RELEASE, CUTOVER AND PRODUCTION
+`doc_translate` REMAIN BLOCKED UNTIL M7 TEST PASS.**
 
 ---
 

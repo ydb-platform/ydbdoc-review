@@ -14,7 +14,7 @@ for NG behavior when they disagree with §23.
 
 Requirements discovery, the original gap analysis and failed-attempt RCAs are
 complete. Retrofit and restoration of deleted code are rejected. §23.17,
-§24.22 and §25.11 fix a simple clean rewrite with independent ordinary testing.
+§24.22 and §25.12 fix a staged clean rewrite with independent ordinary testing.
 No NG cutover or production `doc_translate` occurs before independent TEST PASS.
 
 ### Requirements handoff process
@@ -1280,12 +1280,12 @@ answer is replayed on the destructive rebuild.
 
 ## 23.16 Open decisions
 
-No product decisions remain open. The clean-rewrite implementation and test
-profile is fixed by §23.17, §24.22 and §25.11. Any new
+No product decisions remain open. The staged clean-rewrite implementation and
+test profile is fixed by §23.17, §24.22 and §25.12. Any new
 ambiguity found during specification, implementation or testing must be returned
 to the requirements process and recorded here before code chooses a behavior.
 
-## 23.17 Implementation strategy: simple clean rewrite
+## 23.17 Implementation strategy: staged clean rewrite
 
 The three in-tree NG implementations and the later proof-platform, schema and
 trust-kernel attempts failed and were deleted on 2026-08-28. Their code MUST NOT
@@ -1294,7 +1294,14 @@ The H/S/C/D artifact, separate authority daemon, separate-UID trust boundary,
 malicious-claimant protocol, universal closed-schema platform, mutant score and
 AC self-certification are explicitly non-normative historical experiments.
 
-The confirmed replacement is a simple rewrite from scratch as ordinary CI
+The three later simple-rewrite attempts also failed independent testing and were
+deleted. Their code, tests and repository structure MUST NOT be restored, copied
+or patched. The product behavior in this section remains unchanged; the failure
+was a one-shot horizontal implementation and acceptance order that allowed
+friendly fakes and indirect assertions to report green without observing the
+production composition.
+
+The confirmed replacement is a staged rewrite from scratch as ordinary CI
 automation:
 
 - one independently buildable Python package and one CLI;
@@ -1307,6 +1314,14 @@ automation:
   or proof outbox;
 - ordinary unit, integration, real-YDB and recorded-PR tests owned by an
   independent tester.
+
+Implementation proceeds only through the gated vertical milestones in §25.12.
+The first executable semantic object is one immutable, byte-native
+`VerificationCase` shared by translate, continue and verify. Repository content
+can reach a GitHub writer only as a `SafeBundle` produced by that shared
+verification service. Exact-byte acquisition, lossless parsed edits, model
+prompts containing the actual source and target bytes, and real-YDB operational
+transitions are acceptance prerequisites rather than end-of-project checks.
 
 No product repository currently exists. Repository location and package names
 may be chosen when implementation starts, but there MUST be no dependency on
@@ -1323,7 +1338,7 @@ distributed proof protocol to make such an outage automatically recoverable.
 
 Production cutover and NG `doc_translate` remain prohibited until the rewrite is
 implemented, committed and an independent tester gives a formal TEST PASS bound
-to that exact SHA under §24.22 and §25.11. Any fix requires a new commit and full
+to that exact SHA under §24.22 and §25.12. Any fix requires a new commit and full
 retest. Legacy and NG writers are never active simultaneously.
 
 The immutable recovery point remains Git tag `pre-ng-2026-08-27` at
