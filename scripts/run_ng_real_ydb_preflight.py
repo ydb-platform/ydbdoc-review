@@ -21,7 +21,7 @@ PREFIX_RE = re.compile(r"^m0_[a-z0-9_]{12,80}$")
 REPOSITORY_RE = re.compile(r"^acceptance/r[0-9a-f]{16}$")
 DEFAULT_TABLE_PREFIX = "m0_ydbdoc_ng_acceptance_v1"
 TABLE_SUFFIXES = ("command_runs", "lineages", "model_calls", "verification_results")
-TEST_TIMEOUT_SECONDS = 55
+TEST_TIMEOUT_SECONDS = 120
 CLEANUP_TIMEOUT_SECONDS = 20
 MAX_CLEANUP_ROWS = 1000
 SA_KEY_FIELDS = frozenset(("id", "service_account_id", "created_at", "key_algorithm", "public_key", "private_key"))
@@ -87,7 +87,7 @@ def _run_bounded(command: list[str], environment: Mapping[str, str], timeout: in
         _stop_child(child)
         if timeout == TEST_TIMEOUT_SECONDS:
             raise PreflightError(
-                "Проверка логики YDB не завершилась за 55 секунд. Перевод не запускался."
+                "Проверка логики YDB не завершилась за 120 секунд. Перевод не запускался."
             ) from None
         raise PreflightError("Очистка тестовых таблиц YDB не завершилась вовремя. Перевод не запускался.") from None
 

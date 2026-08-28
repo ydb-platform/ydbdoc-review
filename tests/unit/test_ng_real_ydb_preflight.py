@@ -89,10 +89,11 @@ def test_child_timeout_terminates_waits_kills_and_waits_again():
         def terminate(self): self.actions.append(("terminate",))
         def kill(self): self.actions.append(("kill",))
     child = Child()
+    assert RUNNER.TEST_TIMEOUT_SECONDS == 120
     with patch.object(RUNNER.subprocess, "Popen", return_value=child):
-        with pytest.raises(RUNNER.PreflightError, match="55 секунд"):
-            RUNNER._run_bounded(["child"], {}, 55)
-    assert child.actions == [("wait", 55), ("terminate",), ("wait", 3), ("kill",), ("wait", 3)]
+        with pytest.raises(RUNNER.PreflightError, match="120 секунд"):
+            RUNNER._run_bounded(["child"], {}, RUNNER.TEST_TIMEOUT_SECONDS)
+    assert child.actions == [("wait", 120), ("terminate",), ("wait", 3), ("kill",), ("wait", 3)]
 
 
 def test_cleanup_failure_is_red_even_after_green_test():

@@ -21,25 +21,39 @@ REAL_ENABLED = bool(
 class RealYdbStateContract(_contract_module.StateContract):
     """Runs the same A-H public contract against isolated real YDB tables."""
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
         config = real_ydb_test_config_from_env(os.environ)
         if config is None:
-            self.skipTest("not executed: explicit real-YDB credentials were not supplied")
+            raise unittest.SkipTest("not executed: explicit real-YDB credentials were not supplied")
         repository = os.environ.get("YDBDOC_REAL_YDB_REPOSITORY", "")
         if not re.fullmatch(r"acceptance/r[0-9a-f]{16}", repository):
             raise RuntimeError("Некорректная область данных проверки YDB.")
         owner, name = repository.split("/", 1)
-        self.state = YdbState(
+        cls.state = YdbState(
             config, RepoIdentity(owner, name),
         )
-        self.state.ensure_schema()
+        try:
+            cls.state.ensure_schema()
+        except Exception:
+            cls.state.driver.stop(timeout=5)
+            raise
+
+    def setUp(self):
+        self.state = type(self).state
         self.state.cleanup_test_rows(maximum_rows=1000)
 
     def tearDown(self):
+        self.state.cleanup_test_rows(maximum_rows=1000)
+
+    @classmethod
+    def tearDownClass(cls):
         try:
-            self.state.cleanup_test_rows(maximum_rows=1000)
+            cls.state.cleanup_test_rows(maximum_rows=1000)
         finally:
-            self.state.driver.stop(timeout=5)
+            cls.state.driver.stop(timeout=5)
+        super().tearDownClass()
 
     def _expire_run(self):
         table, key = self.state._table("command_runs"), "run:receipt-1"
