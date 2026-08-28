@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import secrets
@@ -21,6 +22,7 @@ TABLE_SUFFIXES = ("command_runs", "lineages", "model_calls", "verification_resul
 TEST_TIMEOUT_SECONDS = 55
 CLEANUP_TIMEOUT_SECONDS = 20
 MAX_CLEANUP_ROWS = 1000
+SA_KEY_FIELDS = frozenset(("id", "service_account_id", "created_at", "key_algorithm", "public_key", "private_key"))
 
 
 class PreflightError(RuntimeError):
@@ -39,6 +41,64 @@ def _configuration(environment: Mapping[str, str]) -> tuple[str, str]:
         environment.get("YDBDOC_YDB_ENDPOINT", "") or LEGACY_ENDPOINT,
         environment.get("YDBDOC_YDB_DATABASE", "") or LEGACY_DATABASE,
     )
+
+
+def _validate_key_and_probe(key_path: Path, secret: str, endpoint: str, database: str) -> None:
+    try:
+        document = json.loads(secret)
+    except (TypeError, json.JSONDecodeError):
+        raise PreflightError("Ключ сервисного аккаунта содержит некорректный JSON. Перевод не запускался.") from None
+    if not isinstance(document, dict) or any(
+        not isinstance(document.get(field), str) or not document[field].strip()
+        for field in SA_KEY_FIELDS
+    ):
+        raise PreflightError("В ключе сервисного аккаунта отсутствуют обязательные поля. Перевод не запускался.")
+
+    import ydb
+
+    try:
+        credentials = ydb.iam.ServiceAccountCredentials.from_file(str(key_path))
+    except Exception:
+        raise PreflightError("SDK YDB не смог прочитать ключ сервисного аккаунта. Перевод не запускался.") from None
+    driver = None
+    try:
+        driver = ydb.Driver(endpoint=endpoint, database=database, credentials=credentials)
+        driver.wait(timeout=8, fail_fast=True)
+    except Exception as error:
+        unauthenticated = tuple(
+            kind for kind in (getattr(ydb.issues, "Unauthenticated", None),) if isinstance(kind, type)
+        )
+        unauthorized = tuple(
+            kind for kind in (
+                getattr(ydb.issues, "Unauthorized", None), getattr(ydb.issues, "PermissionDenied", None),
+            ) if isinstance(kind, type)
+        )
+        not_found = tuple(
+            kind for kind in (
+                getattr(ydb.issues, "NotFound", None), getattr(ydb.issues, "SchemeError", None),
+            ) if isinstance(kind, type)
+        )
+        timeout = tuple(kind for kind in (getattr(ydb.issues, "Timeout", None), TimeoutError) if isinstance(kind, type))
+        unavailable = tuple(kind for kind in (getattr(ydb.issues, "Unavailable", None),) if isinstance(kind, type))
+        if unauthenticated and isinstance(error, unauthenticated):
+            message = "Ключ сервисного аккаунта не прошёл аутентификацию в YDB. Перевод не запускался."
+        elif unauthorized and isinstance(error, unauthorized):
+            message = "Сервисному аккаунту не хватает прав для проверки YDB. Перевод не запускался."
+        elif not_found and isinstance(error, not_found):
+            message = "Указанная база YDB не найдена или недоступна по заданному пути. Перевод не запускался."
+        elif timeout and isinstance(error, timeout):
+            message = "Подключение к YDB не установлено за 8 секунд. Перевод не запускался."
+        elif unavailable and isinstance(error, unavailable):
+            message = "Сервис YDB временно недоступен. Перевод не запускался."
+        else:
+            message = "Не удалось проверить подключение к YDB. Перевод не запускался."
+        raise PreflightError(message) from None
+    finally:
+        if driver is not None:
+            try:
+                driver.stop(timeout=3)
+            except Exception:
+                pass
 
 
 def _stop_child(child: subprocess.Popen[bytes]) -> None:
@@ -169,6 +229,7 @@ def run(environment: Mapping[str, str]) -> int:
         os.fchmod(key_fd, 0o600)
         with os.fdopen(key_fd, "w", encoding="utf-8") as key_file:
             key_file.write(secret)
+        _validate_key_and_probe(key_path, secret, endpoint, database)
         command = [
             sys.executable, "-m", "pytest", "/app/ng/tests/test_real_ydb_state.py",
             f"--junitxml={report_path}", "-q",
@@ -187,6 +248,8 @@ def run(environment: Mapping[str, str]) -> int:
         key_path.unlink(missing_ok=True)
         report_path.unlink(missing_ok=True)
     if cleanup_error is not None:
+        if isinstance(primary_error, PreflightError):
+            raise PreflightError(f"{primary_error} {cleanup_error}") from None
         raise PreflightError(str(cleanup_error)) from None
     if primary_error is not None:
         if isinstance(primary_error, PreflightError):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import stat
 import sys
@@ -55,7 +56,7 @@ def test_run_uses_strict_scope_0600_deletes_files_and_always_cleans():
         _junit(report, tests=3)
         return 0
 
-    with patch.object(RUNNER, "_run_bounded", side_effect=bounded):
+    with patch.object(RUNNER, "_run_bounded", side_effect=bounded), patch.object(RUNNER, "_validate_key_and_probe"):
         assert RUNNER.run({"YDB_SA_KEY": "private-json", "YDBDOC_YDB_SA_KEY_JSON": "second-raw-copy"}) == 3
     assert observed["mode"] == 0o600
     assert RUNNER.PREFIX_RE.fullmatch(observed["prefix"])
@@ -93,9 +94,71 @@ def test_cleanup_failure_is_red_even_after_green_test():
         report = Path(next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml=")))
         _junit(report)
         return 0
-    with patch.object(RUNNER, "_run_bounded", side_effect=bounded):
+    with patch.object(RUNNER, "_run_bounded", side_effect=bounded), patch.object(RUNNER, "_validate_key_and_probe"):
         with pytest.raises(RUNNER.PreflightError, match="удалить тестовые таблицы"):
             RUNNER.run({"YDB_SA_KEY": "private-json"})
+
+
+def _valid_key():
+    return {field: f"value-{field}" for field in RUNNER.SA_KEY_FIELDS}
+
+
+def _probe_sdk(*, parse_error=None, wait_kind=None):
+    stopped = []
+    exception_names = ("Unauthenticated", "Unauthorized", "PermissionDenied", "NotFound", "SchemeError", "Timeout", "Unavailable")
+    issues = types.SimpleNamespace(**{name: type(name, (Exception,), {}) for name in exception_names})
+    wait_error = None if wait_kind is None else (
+        RuntimeError("sentinel-endpoint sentinel-database sentinel-private-key")
+        if wait_kind == "Unknown" else getattr(issues, wait_kind)("sentinel-endpoint sentinel-database sentinel-private-key")
+    )
+    class Driver:
+        def __init__(self, **kwargs): pass
+        def wait(self, **kwargs):
+            if wait_error: raise wait_error
+        def stop(self, **kwargs): stopped.append(True)
+    credentials = types.SimpleNamespace(from_file=(lambda path: (_ for _ in ()).throw(parse_error)) if parse_error else (lambda path: object()))
+    return types.SimpleNamespace(iam=types.SimpleNamespace(ServiceAccountCredentials=credentials), Driver=Driver, issues=issues), stopped
+
+
+def test_key_json_and_required_authorized_key_fields_are_validated(tmp_path):
+    with pytest.raises(RUNNER.PreflightError, match="некорректный JSON"):
+        RUNNER._validate_key_and_probe(tmp_path / "key", "{sentinel", "endpoint", "database")
+    incomplete = json.dumps({"id": "sentinel"})
+    with pytest.raises(RUNNER.PreflightError, match="обязательные поля") as caught:
+        RUNNER._validate_key_and_probe(tmp_path / "key", incomplete, "endpoint", "database")
+    assert "sentinel" not in str(caught.value)
+
+
+def test_sdk_key_parse_failure_is_categorical_and_safe(tmp_path):
+    fake, stopped = _probe_sdk(parse_error=RuntimeError("sentinel-private-key"))
+    with patch.dict(sys.modules, {"ydb": fake}), pytest.raises(RUNNER.PreflightError, match="SDK YDB не смог прочитать") as caught:
+        RUNNER._validate_key_and_probe(tmp_path / "key", json.dumps(_valid_key()), "sentinel-endpoint", "sentinel-database")
+    assert "sentinel" not in str(caught.value)
+    assert not stopped
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    (("Unauthenticated", "аутентификацию"), ("Unauthorized", "не хватает прав"),
+     ("NotFound", "не найдена"), ("SchemeError", "не найдена"),
+     ("Timeout", "8 секунд"), ("Unavailable", "временно недоступен"),
+     ("Unknown", "Не удалось проверить")),
+)
+def test_probe_classifies_without_leaks_and_always_stops_driver(tmp_path, kind, message):
+    fake, stopped = _probe_sdk(wait_kind=kind)
+    with patch.dict(sys.modules, {"ydb": fake}), pytest.raises(RUNNER.PreflightError, match=message) as caught:
+        RUNNER._validate_key_and_probe(tmp_path / "key", json.dumps(_valid_key()), "sentinel-endpoint", "sentinel-database")
+    assert "sentinel" not in str(caught.value)
+    assert stopped == [True]
+
+
+def test_probe_failure_skips_pytest_but_still_runs_cleanup_and_deletes_key():
+    commands = []
+    def bounded(command, environment, timeout): commands.append(tuple(command)); return 0
+    with patch.object(RUNNER, "_validate_key_and_probe", side_effect=RUNNER.PreflightError("Диагностика не пройдена. Перевод не запускался.")), patch.object(RUNNER, "_run_bounded", side_effect=bounded):
+        with pytest.raises(RUNNER.PreflightError, match="Диагностика"):
+            RUNNER.run({"YDB_SA_KEY": json.dumps(_valid_key())})
+    assert len(commands) == 1 and "--cleanup" in commands[0]
 
 
 def test_cleanup_names_are_closed_and_no_listing_or_teardown_exists():
