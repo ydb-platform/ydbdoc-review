@@ -56,7 +56,11 @@ def _run_bounded(command: list[str], environment: Mapping[str, str], timeout: in
         return child.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         _stop_child(child)
-        raise PreflightError("Проверка YDB превысила допустимое время. Перевод не запускался.") from None
+        if timeout == TEST_TIMEOUT_SECONDS:
+            raise PreflightError(
+                "Проверка логики YDB не завершилась за 55 секунд. Перевод не запускался."
+            ) from None
+        raise PreflightError("Очистка тестовых таблиц YDB не завершилась вовремя. Перевод не запускался.") from None
 
 
 def _parse_junit(path: Path) -> int:
@@ -82,6 +86,14 @@ def _cleanup_exact_tables(environment: Mapping[str, str]) -> None:
         raise PreflightError("Не удалось доказать безопасную область очистки YDB.")
     import ydb
 
+    def confirmed_not_found(error: Exception) -> bool:
+        if isinstance(error, ydb.issues.NotFound):
+            return True
+        if not isinstance(error, ydb.issues.SchemeError):
+            return False
+        message = str(error).lower()
+        return any(marker in message for marker in ("does not exist", "path not found", "not found"))
+
     credentials = ydb.iam.ServiceAccountCredentials.from_file(environment["YDBDOC_YDB_SA_KEY_FILE"])
     driver = ydb.Driver(
         endpoint=environment["YDBDOC_YDB_ENDPOINT"],
@@ -101,8 +113,10 @@ def _cleanup_exact_tables(environment: Mapping[str, str]) -> None:
                         f"SELECT COUNT(*) AS n FROM `{name}`;", commit_tx=True
                     )
                 )
-            except ydb.issues.NotFound:
-                continue
+            except (ydb.issues.NotFound, ydb.issues.SchemeError) as error:
+                if confirmed_not_found(error):
+                    continue
+                raise
             total += int(result[0].rows[0]["n"])
             present.append(table)
         if total > MAX_CLEANUP_ROWS:
@@ -112,8 +126,9 @@ def _cleanup_exact_tables(environment: Mapping[str, str]) -> None:
                 pool.retry_operation_sync(
                     lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;")
                 )
-            except ydb.issues.NotFound:
-                pass
+            except (ydb.issues.NotFound, ydb.issues.SchemeError) as error:
+                if not confirmed_not_found(error):
+                    raise
     finally:
         driver.stop(timeout=3)
 
@@ -123,9 +138,9 @@ def _cleanup_child(environment: Mapping[str, str]) -> None:
     try:
         code = _run_bounded(command, environment, CLEANUP_TIMEOUT_SECONDS)
     except PreflightError:
-        raise PreflightError("Очистка тестовых таблиц YDB не завершилась вовремя.") from None
+        raise PreflightError("Очистка тестовых таблиц YDB не завершилась вовремя. Перевод не запускался.") from None
     if code != 0:
-        raise PreflightError("Не удалось удалить тестовые таблицы YDB.")
+        raise PreflightError("Не удалось удалить тестовые таблицы YDB. Перевод не запускался.")
 
 
 def run(environment: Mapping[str, str]) -> int:
@@ -146,6 +161,8 @@ def run(environment: Mapping[str, str]) -> int:
         YDBDOC_REAL_YDB_TABLE_PREFIX=prefix,
         YDBDOC_REAL_YDB_STATE="1",
     )
+    child_environment.pop("YDB_SA_KEY", None)
+    child_environment.pop("YDBDOC_YDB_SA_KEY_JSON", None)
     primary_error: Exception | None = None
     cleanup_error: Exception | None = None
     try:

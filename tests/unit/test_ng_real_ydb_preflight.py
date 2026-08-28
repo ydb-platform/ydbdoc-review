@@ -43,39 +43,47 @@ def test_run_uses_strict_scope_0600_deletes_files_and_always_cleans():
     def bounded(command, environment, timeout):
         if "--cleanup" in command:
             observed["cleanup"] = (tuple(command), timeout)
+            observed["cleanup_environment"] = dict(environment)
             return 0
         key = Path(environment["YDBDOC_YDB_SA_KEY_FILE"])
         observed["mode"] = stat.S_IMODE(key.stat().st_mode)
         observed["key"] = key
         observed["prefix"] = environment["YDBDOC_REAL_YDB_TABLE_PREFIX"]
+        observed["test_environment"] = dict(environment)
         report = Path(next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml=")))
         observed["report"] = report
         _junit(report, tests=3)
         return 0
 
     with patch.object(RUNNER, "_run_bounded", side_effect=bounded):
-        assert RUNNER.run({"YDB_SA_KEY": "private-json"}) == 3
+        assert RUNNER.run({"YDB_SA_KEY": "private-json", "YDBDOC_YDB_SA_KEY_JSON": "second-raw-copy"}) == 3
     assert observed["mode"] == 0o600
     assert RUNNER.PREFIX_RE.fullmatch(observed["prefix"])
     assert observed["cleanup"][1] == RUNNER.CLEANUP_TIMEOUT_SECONDS
+    for child_environment in (observed["test_environment"], observed["cleanup_environment"]):
+        assert "YDB_SA_KEY" not in child_environment
+        assert "YDBDOC_YDB_SA_KEY_JSON" not in child_environment
+        assert child_environment["YDBDOC_YDB_SA_KEY_FILE"]
     assert not observed["key"].exists()
     assert not observed["report"].exists()
 
 
-def test_child_timeout_terminates_then_kills():
+def test_child_timeout_terminates_waits_kills_and_waits_again():
     class Child:
-        def __init__(self): self.actions = []
+        def __init__(self): self.actions, self.waits = [], 0
         def wait(self, timeout):
             self.actions.append(("wait", timeout))
-            raise __import__("subprocess").TimeoutExpired("x", timeout)
+            self.waits += 1
+            if self.waits < 3:
+                raise __import__("subprocess").TimeoutExpired("x", timeout)
+            return -9
         def terminate(self): self.actions.append(("terminate",))
         def kill(self): self.actions.append(("kill",))
     child = Child()
     with patch.object(RUNNER.subprocess, "Popen", return_value=child):
-        with patch.object(RUNNER, "_stop_child") as stop:
-            with pytest.raises(RUNNER.PreflightError):
-                RUNNER._run_bounded(["child"], {}, 55)
-    stop.assert_called_once_with(child)
+        with pytest.raises(RUNNER.PreflightError, match="55 секунд"):
+            RUNNER._run_bounded(["child"], {}, 55)
+    assert child.actions == [("wait", 55), ("terminate",), ("wait", 3), ("kill",), ("wait", 3)]
 
 
 def test_cleanup_failure_is_red_even_after_green_test():
@@ -98,12 +106,17 @@ def test_cleanup_names_are_closed_and_no_listing_or_teardown_exists():
     assert "DROP TABLE" in source
 
 
-def test_cleanup_sdk_touches_only_exact_four_names_without_listing():
+def test_cleanup_partial_schema_ignores_confirmed_scheme_not_found_and_drops_existing():
     calls = []
     class NotFound(Exception): pass
+    class SchemeError(Exception): pass
     class Rows: rows = [{"n": 1}]
     class Tx:
-        def execute(self, query, commit_tx=False): calls.append(("count", query)); return [Rows()]
+        def execute(self, query, commit_tx=False):
+            calls.append(("count", query))
+            if "command_runs" in query: raise SchemeError("Path not found")
+            if "lineages" in query: raise SchemeError("table does not exist")
+            return [Rows()]
     class Session:
         def transaction(self): return Tx()
         def execute_scheme(self, query): calls.append(("drop", query))
@@ -116,7 +129,7 @@ def test_cleanup_sdk_touches_only_exact_four_names_without_listing():
         def stop(self, **kwargs): pass
     fake = types.SimpleNamespace(
         iam=types.SimpleNamespace(ServiceAccountCredentials=types.SimpleNamespace(from_file=lambda path: object())),
-        Driver=Driver, SessionPool=Pool, issues=types.SimpleNamespace(NotFound=NotFound),
+        Driver=Driver, SessionPool=Pool, issues=types.SimpleNamespace(NotFound=NotFound, SchemeError=SchemeError),
     )
     environment = {
         "YDBDOC_REAL_YDB_TABLE_PREFIX": "m0_pr45949_0123456789abcdef",
@@ -128,4 +141,27 @@ def test_cleanup_sdk_touches_only_exact_four_names_without_listing():
     touched = {name for _, query in calls for name in expected if f"`{name}`" in query}
     assert touched == expected
     assert len([call for call in calls if call[0] == "count"]) == 4
-    assert len([call for call in calls if call[0] == "drop"]) == 4
+    assert len([call for call in calls if call[0] == "drop"]) == 2
+
+
+def test_cleanup_unknown_scheme_error_is_red():
+    class NotFound(Exception): pass
+    class SchemeError(Exception): pass
+    class Tx:
+        def execute(self, query, commit_tx=False): raise SchemeError("permission denied")
+    class Session:
+        def transaction(self): return Tx()
+    class Pool:
+        def __init__(self, driver): pass
+        def retry_operation_sync(self, operation): return operation(Session())
+    class Driver:
+        def __init__(self, **kwargs): pass
+        def wait(self, **kwargs): pass
+        def stop(self, **kwargs): pass
+    fake = types.SimpleNamespace(
+        iam=types.SimpleNamespace(ServiceAccountCredentials=types.SimpleNamespace(from_file=lambda path: object())),
+        Driver=Driver, SessionPool=Pool, issues=types.SimpleNamespace(NotFound=NotFound, SchemeError=SchemeError),
+    )
+    environment = {"YDBDOC_REAL_YDB_TABLE_PREFIX":"m0_pr45949_0123456789abcdef","YDBDOC_YDB_SA_KEY_FILE":"/safe/key","YDBDOC_YDB_ENDPOINT":"endpoint","YDBDOC_YDB_DATABASE":"database"}
+    with patch.dict(sys.modules, {"ydb": fake}), pytest.raises(SchemeError, match="permission denied"):
+        RUNNER._cleanup_exact_tables(environment)
