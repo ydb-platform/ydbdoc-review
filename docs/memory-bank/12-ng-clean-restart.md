@@ -1200,6 +1200,19 @@ transitions, dependency materialization, live continue/checkpoints and the raw
 recorded PR45949 production path. No release tag, cutover or production
 `doc_translate` is authorized before attempt-2 TEST PASS.
 
+### 25.11.6 Simple rewrite attempt 2
+
+Candidate `f9cb806ad19cb52d16373d5c3bc4bfea78b69082` received independent
+**TEST FAIL**. Its build, 31 tests, Ruff, mypy and live GitHub fixture hashes were
+green. Production still failed on the truncated full-repository Git tree;
+Draft continue used fake-only lookup and could consume one comment repeatedly;
+provider-controlled text leaked a sentinel secret; model audit omitted repair and
+format calls; Actions preflight did not join Draft/source lineage; fake/YDB lease
+and cache semantics diverged; and PR45949 assertions did not prove the exact
+overlay. Real-YDB evidence remains separately BLOCKED by missing endpoint/database
+configuration. Two independent RCAs precede the final attempt 3. Cutover and
+`doc_translate` remain prohibited.
+
 **Current verdict: SIMPLE REWRITE ATTEMPT 1 TEST FAIL. ATTEMPT 2 REQUIRES TWO
 INDEPENDENT RCAS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
 
