@@ -35,10 +35,13 @@ class ReadPool:
             raise self.error
         row = self.row
         class Result: rows = [row] if row is not None else []
+        class DataQuery:
+            def __init__(self, text): self.text = text
         class Tx:
             def execute(self, *args, **kwargs): return [Result()]
         class Session:
             def transaction(self): return Tx()
+            def prepare(self, query, settings=None): return DataQuery(query)
         return operation(Session())
 
 
