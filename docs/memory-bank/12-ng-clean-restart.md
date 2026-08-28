@@ -1213,6 +1213,22 @@ overlay. Real-YDB evidence remains separately BLOCKED by missing endpoint/databa
 configuration. Two independent RCAs precede the final attempt 3. Cutover and
 `doc_translate` remain prohibited.
 
+### 25.11.7 Simple rewrite attempt 3 and project deletion
+
+Candidate `67536dd25adff9063279dbd91f9d3ea8fea539f0` received independent
+**TEST FAIL** despite 37 green tests, clean Ruff/mypy/build results, passing prior
+probes and the expected PR45949 7-write/1-delete overlay. The critic prompt omitted
+the actual RU/EN bytes and returned false green; a red Cyrillic overlay was still
+published. Actions preflight and shared internal/external case identity remained
+absent, TOC editing was string-based rather than lossless, credential patterns
+leaked, C/C++ handling was incomplete and recovery instructions were wrong.
+
+The three-attempt simple-rewrite limit is exhausted. The entire product repository
+was deleted. No implementation from attempts 1–3 may be patched or reused. A new
+project may begin only after fresh requirements/architecture analysis explicitly
+accounts for these regressions. Release, cutover and `doc_translate` remain
+prohibited.
+
 **Current verdict: SIMPLE REWRITE ATTEMPT 1 TEST FAIL. ATTEMPT 2 REQUIRES TWO
 INDEPENDENT RCAS. CUTOVER AND `doc_translate` REMAIN BLOCKED.**
 
