@@ -805,12 +805,33 @@ class YdbState(StatePort):
         self._schema_initialized = False
         try:
             import ydb
-            credentials = ydb.iam.ServiceAccountCredentials.from_file(config.sa_key_file)
-            self.driver = ydb.Driver(endpoint=config.endpoint, database=config.database, credentials=credentials)
-            self.driver.wait(timeout=15, fail_fast=True)
-            self.pool = ydb.SessionPool(self.driver)
         except Exception:
-            raise StateError("YDB state storage is unavailable") from None
+            raise StateError("YDB_INIT_IMPORT") from None
+        try:
+            credentials = ydb.iam.ServiceAccountCredentials.from_file(config.sa_key_file)
+        except Exception:
+            raise StateError("YDB_INIT_CREDENTIALS") from None
+        try:
+            driver = ydb.Driver(endpoint=config.endpoint, database=config.database, credentials=credentials)
+        except Exception:
+            raise StateError("YDB_INIT_DRIVER") from None
+        try:
+            driver.wait(timeout=15, fail_fast=True)
+        except Exception:
+            try:
+                driver.stop(timeout=3)
+            except Exception:
+                pass
+            raise StateError("YDB_INIT_WAIT") from None
+        try:
+            pool = ydb.SessionPool(driver)
+        except Exception:
+            try:
+                driver.stop(timeout=3)
+            except Exception:
+                pass
+            raise StateError("YDB_INIT_POOL") from None
+        self.driver, self.pool = driver, pool
 
     def _table(self, name: str) -> str:
         prefix = self.config.table_prefix if isinstance(self.config, RealYdbTestConfig) else ""
