@@ -25,6 +25,13 @@ fi
 MB="${INPUT_MERGE_BASE_WITH:-origin/main}"
 MODE="${INPUT_MODE:-run}"
 OPTS=""
+
+# Temporary real-YDB walking foot for the first NG translation candidate only.
+# It must finish successfully before the legacy CLI can perform any effect.
+if [ "${MODE}" = "run" ] && [ "${INPUT_PR:-}" = "45949" ]; then
+  python /app/scripts/run_ng_real_ydb_preflight.py
+fi
+
 case "${INPUT_DRY_RUN:-false}" in true|True|TRUE) OPTS="${OPTS} --dry-run" ;; esac
 case "${INPUT_NO_COMMIT:-false}" in true|True|TRUE) OPTS="${OPTS} --no-commit" ;; esac
 

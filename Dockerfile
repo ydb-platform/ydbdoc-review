@@ -17,10 +17,15 @@ ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt pyproject.toml /app/
 COPY src /app/src
+COPY ng/pyproject.toml /app/ng/
+COPY ng/src /app/ng/src
+COPY ng/tests/test_state_contract.py ng/tests/test_real_ydb_state.py /app/ng/tests/
 RUN pip install --no-cache-dir -r /app/requirements.txt \
-    && pip install --no-cache-dir /app
+    && pip install --no-cache-dir /app \
+    && pip install --no-cache-dir /app/ng pytest==8.3.5
 
 COPY entrypoint.sh /app/entrypoint.sh
+COPY scripts/run_ng_real_ydb_preflight.py /app/scripts/run_ng_real_ydb_preflight.py
 RUN chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
