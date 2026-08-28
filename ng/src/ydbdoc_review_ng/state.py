@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -795,10 +796,50 @@ def real_ydb_test_config_from_env(environment: Mapping[str, str]) -> RealYdbTest
     return RealYdbTestConfig(*values)
 
 
+class _BoundedTransaction:
+    def __init__(self, transaction, settings):
+        self._transaction, self._settings = transaction, settings
+
+    def execute(self, *args, **kwargs):
+        if len(args) < 4 and kwargs.get("settings") is None:
+            kwargs["settings"] = self._settings()
+        return self._transaction.execute(*args, **kwargs)
+
+    def commit(self, *args, **kwargs):
+        if not args and kwargs.get("settings") is None:
+            kwargs["settings"] = self._settings()
+        return self._transaction.commit(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._transaction, name)
+
+
+class _BoundedSession:
+    def __init__(self, session, settings):
+        self._session, self._settings = session, settings
+
+    def execute_scheme(self, *args, **kwargs):
+        if len(args) < 2 and kwargs.get("settings") is None:
+            kwargs["settings"] = self._settings()
+        return self._session.execute_scheme(*args, **kwargs)
+
+    def transaction(self, *args, **kwargs):
+        return _BoundedTransaction(self._session.transaction(*args, **kwargs), self._settings)
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+
 class YdbState(StatePort):
     """YDB adapter using only serializable read/write SDK transactions."""
 
     TABLES = ("command_runs", "lineages", "model_calls", "verification_results")
+    OUTER_ATTEMPTS = 3
+    OUTER_WALL_SECONDS = 12.0
+    RPC_SECONDS = 3.0
+    SCHEMA_WALL_SECONDS = 20.0
+    SCHEMA_RPC_SECONDS = 5.0
+    BACKOFF_SECONDS = 0.05
 
     def __init__(self, config: YdbConfig | RealYdbTestConfig, repository: RepoIdentity):
         self.config, self.repository = config, repository
@@ -831,7 +872,7 @@ class YdbState(StatePort):
             except Exception:
                 pass
             raise StateError("YDB_INIT_POOL") from None
-        self.driver, self.pool = driver, pool
+        self.driver, self.pool, self._ydb = driver, pool, ydb
 
     def _table(self, name: str) -> str:
         prefix = self.config.table_prefix if isinstance(self.config, RealYdbTestConfig) else ""
@@ -843,18 +884,27 @@ class YdbState(StatePort):
         # Exact columns are asserted by tests; production creates only these four tables.
         prefix = self.config.table_prefix if isinstance(self.config, RealYdbTestConfig) else ""
         statements = schema_statements(prefix)
-        try:
-            for statement in statements:
-                self.pool.retry_operation_sync(lambda session, sql=statement: session.execute_scheme(sql))
-            self._schema_initialized = True
-        except Exception:
-            raise StateError("YDB schema initialization failed") from None
+        schema_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
+        for index, statement in enumerate(statements):
+            print(f"YDB_SCHEMA_INDEX_START {index}", flush=True)
+            try:
+                self._pool_attempt(
+                    lambda session, sql=statement: session.execute_scheme(sql),
+                    wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
+                    error_marker="YDB_SCHEMA_INDEX_ERROR", absolute_deadline=schema_deadline,
+                )
+            except StateError:
+                print(f"YDB_SCHEMA_INDEX_ERROR {index}", flush=True)
+                raise
+            print(f"YDB_SCHEMA_INDEX_DONE {index}", flush=True)
+        self._schema_initialized = True
 
     def teardown_test_schema(self, maximum_rows: int = 1000) -> None:
         if not isinstance(self.config, RealYdbTestConfig) or not TABLE_PREFIX_RE.fullmatch(self.config.table_prefix):
             raise StateError("acceptance cleanup scope is invalid")
         if isinstance(maximum_rows, bool) or maximum_rows < 0:
             raise StateError("acceptance cleanup bound is invalid")
+        cleanup_deadline = time.monotonic() + self.SCHEMA_WALL_SECONDS
         tables = tuple(self._table(name) for name in self.TABLES)
         def count(tx):
             total = 0
@@ -863,22 +913,83 @@ class YdbState(StatePort):
                 total += int(result[0].rows[0]["n"])
             tx.commit()
             return total
-        if self._serializable(count) > maximum_rows:
+        if self._serializable(count, absolute_deadline=cleanup_deadline) > maximum_rows:
             raise StateError("acceptance cleanup bound exceeded")
-        try:
-            for table in tables:
-                self.pool.retry_operation_sync(lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;"))
-        except Exception:
-            raise StateError("acceptance cleanup failed") from None
+        for index, table in enumerate(tables):
+            print(f"YDB_DROP_INDEX_START {index}", flush=True)
+            try:
+                self._pool_attempt(
+                    lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;"),
+                    wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
+                    error_marker="YDB_DROP_INDEX_ERROR", absolute_deadline=cleanup_deadline,
+                )
+            except StateError:
+                print(f"YDB_DROP_INDEX_ERROR {index}", flush=True)
+                raise
+            print(f"YDB_DROP_INDEX_DONE {index}", flush=True)
 
-    def _serializable(self, operation):
-        import ydb
+    def _request_settings(self, rpc_seconds: float, absolute_deadline: float):
+        remaining = absolute_deadline - time.monotonic()
+        if remaining <= 0:
+            raise StateError("YDB_RPC_DEADLINE")
+        bounded_rpc = min(rpc_seconds, remaining)
+        return (
+            self._ydb.BaseRequestSettings()
+            .with_timeout(bounded_rpc)
+            .with_operation_timeout(bounded_rpc)
+        )
+
+    def _transient_errors(self) -> tuple[type[Exception], ...]:
+        names = (
+            "Aborted", "Unavailable", "Overloaded", "Timeout", "DeadlineExceed",
+            "ConnectionError", "ConnectionFailure", "ConnectionLost", "SessionBusy", "BadSession",
+        )
+        return tuple(
+            kind for kind in (getattr(self._ydb.issues, name, None) for name in names)
+            if isinstance(kind, type) and issubclass(kind, Exception)
+        )
+
+    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str, absolute_deadline: float | None = None):
+        deadline = absolute_deadline if absolute_deadline is not None else time.monotonic() + wall_seconds
+        transient = self._transient_errors()
+        for attempt in range(self.OUTER_ATTEMPTS):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            bounded_rpc = min(rpc_seconds, remaining)
+            retry_settings = self._ydb.RetrySettings(
+                max_retries=0,
+                max_session_acquire_timeout=bounded_rpc,
+                get_session_client_timeout=bounded_rpc,
+                idempotent=True,
+            )
+            request_settings = lambda cap=rpc_seconds, end=deadline: self._request_settings(cap, end)
+            try:
+                return self.pool.retry_operation_sync(
+                    lambda session: operation(_BoundedSession(session, request_settings)),
+                    retry_settings=retry_settings,
+                )
+            except Exception as error:
+                if not transient or not isinstance(error, transient):
+                    raise StateError(error_marker) from None
+                if attempt + 1 >= self.OUTER_ATTEMPTS:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(self.BACKOFF_SECONDS * (2 ** attempt), remaining))
+        raise StateError(error_marker) from None
+
+    def _serializable(self, operation, *, absolute_deadline: float | None = None):
         def closure(session):
-            tx = session.transaction(ydb.SerializableReadWrite())
+            tx = session.transaction(self._ydb.SerializableReadWrite())
             return operation(tx)
         try:
-            return self.pool.retry_operation_sync(closure)
-        except Exception:
+            return self._pool_attempt(
+                closure, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS,
+                error_marker="YDB_SERIALIZABLE_ERROR", absolute_deadline=absolute_deadline,
+            )
+        except StateError:
             raise StateError("YDB serializable transaction failed") from None
 
     # The adapter methods below intentionally use SELECT, conditional DML and a
@@ -924,7 +1035,7 @@ class YdbState(StatePort):
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:
-            row = self.pool.retry_operation_sync(read)
+            row = self._pool_attempt(read, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS, error_marker="YDB_RECONCILE_ERROR")
         except Exception:
             return ClaimResult(ClaimStatus.INCONCLUSIVE, False, "UNKNOWN")
         if not row:
@@ -950,7 +1061,7 @@ class YdbState(StatePort):
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:
-            row = self.pool.retry_operation_sync(read)
+            row = self._pool_attempt(read, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS, error_marker="YDB_RECONCILE_ERROR")
         except Exception:
             return ClaimResult(ClaimStatus.INCONCLUSIVE, False, "UNKNOWN")
         if not row:
@@ -1005,7 +1116,7 @@ class YdbState(StatePort):
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:
-            row = self.pool.retry_operation_sync(read)
+            row = self._pool_attempt(read, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS, error_marker="YDB_RECONCILE_ERROR")
         except Exception:
             return ClaimResult(ClaimStatus.INCONCLUSIVE, False, "UNKNOWN")
         if release:
@@ -1234,7 +1345,7 @@ class YdbState(StatePort):
             )
             return result[0].rows[0] if result and result[0].rows else None
         try:
-            row = self.pool.retry_operation_sync(read)
+            row = self._pool_attempt(read, wall_seconds=self.OUTER_WALL_SECONDS, rpc_seconds=self.RPC_SECONDS, error_marker="YDB_RECONCILE_ERROR")
         except Exception:
             return ClaimResult(ClaimStatus.INCONCLUSIVE, False, "UNKNOWN")
         if not row:
