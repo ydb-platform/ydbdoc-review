@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import itertools
 import json
 import re
 import threading
@@ -58,7 +59,7 @@ def _safe_attribute(value: object, name: str) -> object | None:
 def _bounded_children(value: object) -> list[object]:
     children = _safe_attribute(value, "issues") or ()
     try:
-        return list(children)[:16]
+        return list(itertools.islice(children, 16))
     except Exception:
         return []
 
@@ -77,6 +78,64 @@ def _safe_ydb_fingerprint(error: Exception) -> str:
             pending.extend((child, depth + 1) for child in _bounded_children(issue)[: 16 - len(fingerprints)])
     issue_text = ",".join(fingerprints) if fingerprints else "NONE"
     return f"class={safe_class} status={status_name} issues={issue_text}"
+
+
+_SCHEMA_SECRET_RE = re.compile(
+    r"(?i)(token|secret|password|credential|api[_-]?key|sa[_-]?key|(?:access|private)[_-]?key)"
+    r"\s*[:=]?\s*[^\s,;]+"
+)
+_SCHEMA_AUTH_RE = re.compile(r"(?i)\bauthorization\s*[:=]\s*(?:[A-Za-z][A-Za-z0-9_-]*\s+)?[^\s,;]+")
+_SCHEMA_BEARER_RE = re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s,;]+")
+_SCHEMA_BLOB_RE = re.compile(
+    r"-----BEGIN [^-]+-----.*|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|"
+    r"(?<![A-Za-z0-9])[A-Fa-f0-9]{40,}(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])[A-Za-z0-9_+/=-]{40,}(?![A-Za-z0-9])"
+)
+_SCHEMA_URI_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/]+(?:/[^\s?#]*)?(?:\?[^\s#]*)?")
+_SCHEMA_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])(?:/[A-Za-z0-9_.-]+){2,}(?:\.json|\.pem|\.key)?")
+_SCHEMA_QUERY_RE = re.compile(
+    r"(?i)(?:\bDECLARE\s+\$|"
+    r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:`[^`]+`|[A-Za-z_][\w.-]*)\s*\(|"
+    r"\bDROP\s+TABLE\s+(?:`[^`]+`|[A-Za-z_][\w.-]*)\s*;?\s*$|"
+    r"\b(?:INSERT|UPSERT)\s+INTO\b|\bDELETE\s+FROM\b|"
+    r"\bUPDATE\s+\S+\s+SET\b|\bSELECT\b.{0,500}\bFROM\b)"
+)
+
+
+def _safe_schema_issue_details(error: Exception) -> str:
+    """Return bounded schema-only issue text without requests or credentials."""
+    rendered: list[str] = []
+    pending = [(issue, 1) for issue in _bounded_children(error)]
+    visited = 0
+    while pending and visited < 16:
+        issue, depth = pending.pop(0)
+        visited += 1
+        message = _safe_attribute(issue, "message")
+        if isinstance(message, str):
+            message = "".join(
+                " " if ord(character) < 32 or 127 <= ord(character) <= 159
+                or 0x202A <= ord(character) <= 0x202E
+                or 0x2066 <= ord(character) <= 0x2069 else character
+                for character in message
+            )
+            message = " ".join(message.split())
+            message = _SCHEMA_AUTH_RE.sub("[REDACTED]", message)
+            message = _SCHEMA_BEARER_RE.sub("[REDACTED]", message)
+            message = _SCHEMA_SECRET_RE.sub("[REDACTED]", message)
+            message = _SCHEMA_BLOB_RE.sub("[REDACTED]", message)
+            message = _SCHEMA_URI_RE.sub(r"\1[REDACTED]", message)
+            message = _SCHEMA_PATH_RE.sub("/[REDACTED]", message)
+            if _SCHEMA_QUERY_RE.search(message):
+                message = "[REDACTED QUERY MESSAGE]"
+            if message:
+                rendered.append(
+                    f"{_bounded_number(_safe_attribute(issue, 'issue_code'))}:"
+                    f"{_bounded_number(_safe_attribute(issue, 'severity'))}:{message[:240]}"
+                )
+        if depth < 3:
+            pending.extend((child, depth + 1) for child in _bounded_children(issue))
+    value = " | ".join(rendered) if rendered else "NONE"
+    return value.encode("utf-8")[:1024].decode("utf-8", errors="ignore")
 
 
 class ClaimStatus(str, Enum):
@@ -946,6 +1005,7 @@ class YdbState(StatePort):
                     lambda session, sql=statement: session.execute_scheme(sql),
                     wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
                     error_marker="YDB_SCHEMA_INDEX_ERROR", absolute_deadline=schema_deadline,
+                    schema_diagnostics=True,
                 )
             except StateError:
                 print(f"YDB_SCHEMA_INDEX_ERROR {index}", flush=True)
@@ -976,6 +1036,7 @@ class YdbState(StatePort):
                     lambda session, name=table: session.execute_scheme(f"DROP TABLE `{name}`;"),
                     wall_seconds=self.SCHEMA_WALL_SECONDS, rpc_seconds=self.SCHEMA_RPC_SECONDS,
                     error_marker="YDB_DROP_INDEX_ERROR", absolute_deadline=cleanup_deadline,
+                    schema_diagnostics=True,
                 )
             except StateError:
                 print(f"YDB_DROP_INDEX_ERROR {index}", flush=True)
@@ -1003,7 +1064,7 @@ class YdbState(StatePort):
             if isinstance(kind, type) and issubclass(kind, Exception)
         )
 
-    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str, absolute_deadline: float | None = None):
+    def _pool_attempt(self, operation, *, wall_seconds: float, rpc_seconds: float, error_marker: str, absolute_deadline: float | None = None, schema_diagnostics: bool = False):
         deadline = absolute_deadline if absolute_deadline is not None else time.monotonic() + wall_seconds
         transient = self._transient_errors()
         for attempt in range(self.OUTER_ATTEMPTS):
@@ -1025,6 +1086,8 @@ class YdbState(StatePort):
                 )
             except Exception as error:
                 print(f"YDB_ATTEMPT_ERROR {_safe_ydb_fingerprint(error)}", flush=True)
+                if schema_diagnostics:
+                    print(f"YDB_SCHEMA_ISSUES {_safe_schema_issue_details(error)}", flush=True)
                 if not transient or not isinstance(error, transient):
                     raise StateError(error_marker) from None
                 if attempt + 1 >= self.OUTER_ATTEMPTS:

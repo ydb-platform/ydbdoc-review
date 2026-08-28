@@ -8,6 +8,7 @@ from unittest.mock import patch
 from ydbdoc_review_ng.state import (
     ClaimStatus, CommandReceipt, EffectCheckpoint, RepoIdentity, StateError, YdbConfig, YdbState, _BoundedSession,
     _BoundedTransaction, _effects_json, _safe_ydb_fingerprint,
+    _safe_schema_issue_details,
 )
 
 
@@ -303,6 +304,7 @@ class BoundedSdkContract(unittest.TestCase):
             state.ensure_schema()
         self.assertEqual([call.args[0] for call in output.call_args_list], [
             "YDB_SCHEMA_INDEX_START 0", "YDB_ATTEMPT_ERROR class=OTHER status=NONE issues=NONE",
+            "YDB_SCHEMA_ISSUES NONE",
             "YDB_SCHEMA_INDEX_ERROR 0",
         ])
         self.assertTrue(all(call.kwargs == {"flush": True} for call in output.call_args_list))
@@ -328,6 +330,69 @@ class BoundedSdkContract(unittest.TestCase):
         fingerprints = value.split("issues=", 1)[1].split(",")
         self.assertLessEqual(len(fingerprints), 16)
         self.assertFalse(any(item.startswith("400") for item in fingerprints))
+
+    def test_schema_issue_details_preserve_leaf_redact_secrets_and_bound_output(self):
+        class Issue:
+            def __init__(self, code, message, children=()):
+                self.issue_code, self.severity = code, 1
+                self.message, self.issues = message, children
+        root = Permanent("must not be read")
+        useful = Issue(1060, "schema operation quota exceeded, retry later")
+        secret = Issue(2, "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789AB")
+        query = Issue(3, "CREATE TABLE secret_table (value Utf8)")
+        too_deep = Issue(4, "must not appear")
+        root.issues = [Issue(1, "password=hunter2", [useful, secret, query, Issue(5, "level two", [Issue(6, "level three", [too_deep])])])]
+        value = _safe_schema_issue_details(root)
+        self.assertIn("schema operation quota exceeded, retry later", value)
+        self.assertNotIn("hunter2", value)
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", value)
+        self.assertNotIn("secret_table", value)
+        self.assertNotIn("must not appear", value)
+        self.assertLessEqual(len(value.encode("utf-8")), 1024)
+
+        root.issues = [Issue(index, "x" * 600) for index in range(30)]
+        self.assertLessEqual(len(_safe_schema_issue_details(root).encode("utf-8")), 1024)
+
+    def test_schema_issue_details_keep_prose_strip_controls_and_enforce_node_budget(self):
+        class Issue:
+            def __init__(self, message=None, children=()):
+                self.issue_code, self.severity = 1060, 1
+                self.message, self.issues = message, children
+        root = Permanent("ignored")
+        root.issues = [
+            Issue("cannot create requested schema operation\x00\x85\u202esecret"),
+            Issue("Authorization: Basic dXNlcjpwYXNzd29yZA=="),
+        ]
+        value = _safe_schema_issue_details(root)
+        self.assertIn("cannot create requested schema operation", value)
+        self.assertNotIn("REDACTED QUERY MESSAGE", value)
+        self.assertNotIn("\x00", value)
+        self.assertNotIn("\x85", value)
+        self.assertNotIn("\u202e", value)
+        self.assertNotIn("dXNlcjpwYXNzd29yZA", value)
+
+        root.issues = [
+            Issue("Cannot create table because the schema operation quota is exhausted"),
+            Issue("CREATE TABLE IF NOT EXISTS `private_table` (id Uint64);"),
+            Issue("DROP TABLE `private_table`;"),
+        ]
+        value = _safe_schema_issue_details(root)
+        self.assertIn("Cannot create table because the schema operation quota is exhausted", value)
+        self.assertEqual(value.count("[REDACTED QUERY MESSAGE]"), 2)
+        self.assertNotIn("private_table", value)
+
+        root.issues = [Issue(children=[
+            *[Issue() for _ in range(15)],
+            Issue(children=[Issue("seventeenth must not appear")]),
+        ])]
+        self.assertNotIn("seventeenth", _safe_schema_issue_details(root))
+
+        def bounded_generator():
+            for _ in range(16):
+                yield Issue()
+            raise AssertionError("issues iterator consumed past bound")
+        root.issues = bounded_generator()
+        self.assertEqual(_safe_schema_issue_details(root), "NONE")
 
     def test_unknown_error_prints_only_fixed_safe_fingerprint_before_rethrow(self):
         state = adapter(Pool([Permanent("sentinel-secret endpoint query")]))
