@@ -37,9 +37,11 @@ Current state on 2026-08-28:
 - no NG `doc_translate` invocation is allowed, including as a smoke test;
 - the first clean-room acceptance harness and its contract stub failed two
   independent Harness RCAs, were discarded in full, and are not a template;
-- `ydbdoc-review-ng` and `ydbdoc-review-ng-acceptance` have been recreated as
-  empty repositories. A README, package skeleton or executable is not yet
-  authorized;
+- both attempted clean-room repositories were deleted after the third Stage 1
+  failure. No new product repository exists or may be created before formal
+  Phase 0 PASS;
+- Phase 0 may restart only in a newly created acceptance repository under the
+  three-deliverable architecture in §25.4;
 - no new product implementation may start before the Phase 0 harness receives
   formal review PASS.
 
@@ -162,18 +164,18 @@ clarifications recorded in this section.
 ### 25.1.5 Stage 1 contract-schema attempt 1
 
 The first Stage 1 contract-schema attempt failed independent adversarial review
-and was discarded. It incorrectly wrote contract artifacts into the runtime
-repository, violating the rule that the runtime repository remains empty through
-formal Phase 0 PASS. The review also demonstrated that nested arbitrary payloads,
+and was discarded. It incorrectly wrote contract artifacts into the then-existing
+runtime repository, violating the then-current pre-PASS hold. The review also
+demonstrated that nested arbitrary payloads,
 embedded `NG-AC` and finding claims, and production test controls passed the
 schemas. External boundaries, real-YDB inspection and health/capabilities
 invocation were incomplete, while the meta-tests did not exercise OpenAPI,
 conditional constraints or the demonstrated evasions.
 
 Verdict: **STAGE 1 ATTEMPT 1 FAIL**. All generated runtime contents were deleted,
-the empty runtime repository was reinitialized, and Stage 1 must be authored from
-scratch only in the acceptance repository. No artifact from this attempt is a
-template, and stages 2–5 remain blocked.
+and the historical Stage 1 was restarted only in the acceptance repository. No
+artifact from this attempt is a template for the current three-deliverable
+Phase 0.
 
 ### 25.1.6 Stage 1 contract-schema attempt 2
 
@@ -187,9 +189,9 @@ only counts/digests rather than independently decoded rows, and one provider
 reconciliation response had no closed versioned schema.
 
 Verdict: **STAGE 1 ATTEMPT 2 FAIL**. The acceptance repository was deleted and
-reinitialized empty. Attempt 3 must separate candidate configuration from
-harness-owned transport, kill and native-YDB observation contracts. Stages 2–5
-and all product code remain blocked.
+reinitialized empty. The subsequent attempt 3 tried to separate candidate
+configuration from harness-owned transport, kill and native-YDB observation
+contracts, but §25.1.7 records its independent failure and deletion.
 
 ### 25.1.7 Stage 1 contract-schema attempt 3 and full restart
 
@@ -203,40 +205,41 @@ userinfo and performed an unpinned one-time DNS lookup, leaving a rebinding gap.
 
 Verdict: **STAGE 1 ATTEMPT 3 FAIL**. The agreed three-attempt limit is exhausted.
 There is no fourth patch cycle. Both clean-room repositories were deleted in full.
-Before any new repository or code exists, two independent RCA analysts must agree
-on a simpler architecture that assigns semantic validation and network pinning to
-harness-owned executable controls rather than pretending JSON Schema can prove
-them. Product implementation and `doc_translate` remain prohibited.
+Two independent RCA analysts subsequently agreed on the simpler three-deliverable
+architecture in §25.4: semantic validation, observation ownership and network
+pinning belong to harness-owned executable controls, not JSON Schema. Product
+implementation, product-repository creation and `doc_translate` remain prohibited
+until formal Phase 0 PASS.
 
 ## 25.2 Exact repository and distribution recommendation
 
-Create **two new repositories**, not another subproject in this repository and
-not another package in the `ydbdoc_review` distribution.
+Use **two repositories in sequence**, not another subproject in this repository
+and not another package in the `ydbdoc_review` distribution.
 
-1. Production repository: `ydbdoc-review-ng`.
+1. Acceptance repository first: `ydbdoc-review-ng-acceptance`.
+   - It is the only repository created during Phase 0.
+   - It owns the trust kernel, atomic scenario packs, external observers,
+     orchestration, static predicates and the 26-finding ledger.
+   - It never imports `ydbdoc_ng` or `ydbdoc_review`.
+   - It runs only supplied external executables or OCI images as separate
+     processes.
+   - Formal harness review is performed without product implementation changes.
+2. Production repository after formal Phase 0 PASS: `ydbdoc-review-ng`.
    - Python distribution: `ydbdoc-review-ng`.
    - Import root: `ydbdoc_ng`.
    - Executable: `ydbdoc-ng`.
    - Deployment artifact: one immutable OCI image pinned by digest.
    - It has no source, package, workspace or runtime dependency on this legacy
      repository.
-2. Acceptance repository: `ydbdoc-review-ng-acceptance`.
-   - It owns fixtures, protocol schemas, external spies, orchestration, static
-     predicates and the 26-finding ledger.
-   - It never imports `ydbdoc_ng` or `ydbdoc_review`.
-   - It runs a supplied executable or OCI image as a separate process.
-   - Formal harness review is performed without product implementation changes
-     in the same review.
-
 The current `ydbdoc-review` repository remains the legacy production source and
 the home of this Memory Bank until migration. Eventual workflow routing may pin
 the new OCI digest, but it MUST NOT vendor or import the new distribution.
 
-This two-repository boundary is the exact recommendation. A same-repository
+This sequential two-repository boundary is the exact recommendation. A same-repository
 subproject is rejected because it preserves shared test fixtures, editable
 imports, coverage incentives and review coupling that allowed all three failed
 attempts to claim closure. If repository creation is administratively blocked,
-work stops after Phase 0 design. A monorepo fallback is not pre-approved.
+work stops before executable Phase 0 work. A monorepo fallback is not pre-approved.
 
 ## 25.3 Clean-room architecture
 
@@ -399,39 +402,50 @@ step followed by a new complete verification pass.
 ## 25.4 Phase 0: independent executable acceptance harness
 
 Phase 0 is the first deliverable. It is not a test folder added after a package
-skeleton. The production repository remains completely empty through formal
-Phase 0 PASS. Only the acceptance repository receives the five ordered
-harness-only commits below. A product README, license, package skeleton, contract
-copy or executable before PASS is an unauthorized product-tree change.
+skeleton. No production repository exists through formal Phase 0 PASS. Only the
+acceptance repository is created during Phase 0. A product README, license,
+package skeleton, contract copy or executable before PASS is unauthorized.
 
-The recreated repositories begin empty. Phase 0 is built as five ordered,
-harness-only commits and five independent review decisions. A later stage cannot
-be authored or reviewed as complete until the preceding stage is frozen:
+Three independently reviewed vertical deliverables replace the failed five
+horizontal stages. Each deliverable has a pinned commit and review decision; a
+later deliverable cannot receive PASS until its upstream is frozen:
 
-1. **Contract schemas.** Closed versioned schemas for event, configuration,
-   terminal result, audit export and every harness service protocol. Candidate
-   output containing `satisfied`, `finding_evidence`, any AC ID or any finding ID
-   is an explicit protocol RED, including when the rest of the result is valid.
-2. **Independently frozen fixtures and provenance.** One content-addressed input
-   fixture per finding and high-risk AC scenario, including raw API pages,
-   immutable bytes, source identity, capture method and independent digest
-   verification. This stage contains no predicates or candidate-derived golden
-   data.
-3. **Per-scenario predicates.** Each finding and high-risk AC owns at least one
-   named scenario and one predicate over that scenario's harness-owned observed
-   state. No predicate may pass from generic activity such as “some GitHub call”,
-   “some provider call”, “some row” or “process restarted”.
-4. **Mutant catalog.** Each predicate has one or more executable assigned
-   must-kill mutants derived from §26 negative controls. Text descriptions and
-   “effect is visible” checks do not count.
-5. **Orchestrator and pinned integrations.** The only verdict path starts every
-   scenario, services, release target, barrier, kill/restart and observation
-   collection. It uses pinned real integrations and executes the complete frozen
-   scenario manifest.
+1. **A, trusted executable conformance kernel.** This harness-owned kernel fixes
+   the threat model, ownership matrix, closed versioned schemas and executable
+   semantic validators for session authentication, decoded bytes, digests,
+   terminal/audit text and resolved endpoints. JSON Schema proves shape only.
+   It never proves byte semantics, observation provenance, DNS routing or a
+   verdict. A implements and independently verifies the session issuer,
+   harness-owned gateway and boundary spies, native real-YDB observer component
+   and interface, external process supervisor and immutable ObservationBundle
+   builder. The kernel includes adversarial probes for every bypass from all
+   three deleted Stage 1 attempts.
+2. **B, atomic scenario packs.** Every finding and high-risk AC is frozen as one
+   content-addressed pack containing fixture bytes and provenance, launch input,
+   required harness-owned observations, static predicate source, executable
+   assigned must-kill mutants and expected RED/BLOCKED/PASS reasons. Fixture,
+   predicate and mutant cannot be reviewed or changed independently. Finding 01,
+   including the malicious claimant, is the mandatory pilot and must receive an
+   independent PASS before the remaining packs are authored.
+3. **C, orchestrator and pinned integrations.** The sole verdict path executes
+   the complete frozen B manifest by binding the already independently reviewed
+   A kernel to pinned real integrations. It adds no alternative gateway, spy,
+   YDB-observer, supervisor or ObservationBundle implementation. Through that
+   single verdict path it runs separate processes, real disposable YDB, pinned
+   gateway/network controls and every required barrier and kill/restart, then
+   produces the signed pinned H/S/C/D artifact.
 
-Stages are separate commits and separate review PRs. Squashing them into one
-review, preparing later-stage evidence in advance, or changing an earlier frozen
-stage in a later PR invalidates the sequence and returns Phase 0 to stage 1.
+The exact reopen rules are:
+
+- any A change reopens A and invalidates all B packs and C;
+- changing one B pack reopens that pack, the aggregate B manifest and C, but not
+  independently frozen unchanged packs;
+- changing a shared content-addressed blob creates a new digest and reopens every
+  pack that references it;
+- a C-only change reopens C unless it changes an A protocol or B semantics, in
+  which case the corresponding upstream deliverable also reopens;
+- an independent reviewer, never the author alone, classifies the affected scope;
+- every reopened upstream requires a complete rerun of its affected downstream.
 
 ### 25.4.1 Black-box target contract
 
@@ -449,6 +463,26 @@ The harness observes exit status, stdout/stderr schema, HTTP calls, provider
 request IDs, YDB rows, artifact bytes/digests, process restarts and GitHub state.
 It imports no production module and does not call internal functions.
 
+The threat model treats the candidate as intentionally hostile. It knows every
+public schema and may emit arbitrary terminal/audit text, encode forbidden claims,
+replay or cross-wire sessions, follow redirects, exploit URL userinfo or DNS
+rebinding, forge counts/digests/barriers and write plausible but semantically
+wrong rows. It may exit or be killed at every external-effect window. Candidate
+output, candidate-computed summaries and candidate-selected endpoints are never
+trusted observations.
+
+Ownership is exclusive:
+
+- the harness owns session identities and secrets, listeners, gateway and DNS
+  policy, raw transcripts, receipt/commit/response-flushed barriers, process
+  kill/restart, direct YDB inspection, byte decoding/digests, ObservationBundle
+  construction and every verdict predicate;
+- external services own their independently recorded receipt and flush facts;
+- the candidate owns only its documented requests and its terminal/audit product
+  output, both treated as untrusted input;
+- schemas own shape only; executable A validators own local semantic validity;
+  C owns proof through the actual pinned boundary.
+
 The orchestrator is the only owner of scenario execution and verdict input. For
 each scenario it emits an immutable `ObservationBundle` containing at least:
 
@@ -461,11 +495,61 @@ each scenario it emits an immutable `ObservationBundle` containing at least:
 - frozen time inputs, exit status, stdout/stderr digests and timeout result.
 
 The candidate cannot write, replace or name fields inside `ObservationBundle`.
-Every scenario receives unpredictable per-run service/session tokens. The target
-network can reach only the harness-owned endpoints for that session and cannot
-read fixture expectations, predicates, other scenario state or harness source.
-Calls without the current session token are rejected and do not count as
-observations.
+Every scenario receives an independently generated unpredictable session token
+with at least 256 bits of entropy through a launch-secret channel. Every
+GitHub/provider/artifact spy request carries it in one fixed authentication
+header. It is forbidden in URL, request body, terminal/audit output and logs.
+The listener validates it before recording an observation. Missing, stale,
+unknown and cross-session tokens are rejected and do not count. The candidate
+has no observation or barrier-ingestion API: receipt, commit and complete-response
+flush are derived only by the harness-owned listener. The target network can
+reach only the harness endpoints for its session and cannot read fixture
+expectations, predicates, other scenario state or harness source.
+
+Raw captured bytes are the content-addressed authority. Their manifest records
+source identity, exact length and lowercase SHA-256 calculated by the harness.
+When a protocol transports bytes as base64, A requires strict RFC 4648 standard
+or URL-safe form, one declared alphabet, canonical padding, no whitespace,
+decode/re-encode equality, exact decoded size and an independently recomputed
+digest. JSON Schema `contentEncoding` alone proves nothing. If an upstream API
+cannot provide raw response bytes, the only fallback is explicitly tagged
+canonical JSON using one pinned canonicalization version; both the parsed value
+and canonical bytes/digest are retained, and the fallback cannot masquerade as a
+raw capture. Duplicate JSON keys and invalid UTF-8 are RED.
+
+Candidate-controlled text is zero evidence. A first scans NFKC/case-folded raw
+text for reserved `NG-AC-[0-9]+` and frozen finding-ID patterns. It then examines
+only separate maximal ASCII base64-like tokens of length at least eight, using
+one strict standard or URL-safe alphabet, canonical padding and no mixed
+alphabet. An unmarked token is decoded once and inspected only when it is valid
+UTF-8 printable text; `TkctQUMtMDAx` therefore decodes to `NG-AC-001` and is RED.
+Recursion is allowed to depth three only for an explicitly marked
+`base64:<token>` chain where every next layer has the same marker. Other unknown
+encodings are inert zero-evidence, not promised RED and never PASS.
+
+Production and acceptance endpoint policies are disjoint. Production accepts
+only trusted production configuration and rejects URL userinfo in literal or
+percent-encoded form plus private, loopback, link-local, multicast, reserved and
+metadata destinations. Acceptance endpoints are never valid production config:
+the candidate may use only harness-issued, unpredictable, session-bound endpoint
+capabilities inside the isolated namespace and harness-owned gateway. No ordinary
+candidate-supplied URL can opt into the acceptance policy.
+
+For both policies A creates a harness-owned `ResolvedEndpoint` recording original
+URL or capability, canonical host, complete resolved address set, DNS transcript,
+time and policy digest. C forces every actual connection through the reviewed
+gateway to the pinned address while checking hostname, SNI and peer address.
+Later DNS answers cannot change the destination. Redirects repeat the applicable
+policy and cannot escape their original authority or session capability. Mixed
+public/private production answers, public-then-private rebinding, peer mismatch,
+userinfo and cross-session acceptance endpoints are mandatory RED probes; a
+one-time resolver check is never sufficient.
+
+YDB has no candidate-facing inspection protocol. The harness uses a separate
+least-privilege inspection identity and the real pinned driver to decode exact
+typed rows, transaction outcomes and ordering. It computes row and aggregate
+digests itself from a pinned typed canonicalization. Candidate-provided row
+counts, rows or digests cannot satisfy a predicate.
 
 The test-only process contract is limited to external clock input and boundary
 fault orchestration. It MUST NOT expose internal phases, classes, storage keys or
@@ -493,7 +577,12 @@ Before product coding, CI MUST prove:
 6. the malicious claimant from the two Harness RCAs obtains zero AC PASS and zero
    finding PASS;
 7. `satisfied`, `finding_evidence`, AC IDs and finding IDs in candidate output are
-   protocol RED rather than ignored claims.
+   protocol RED under the bounded raw/base64 policy in §25.4.1 rather than
+   accepted as evidence;
+8. after authored tests pass, an independent reviewer supplies at least one new
+   mutation in each active threat class: ownership/session, canonical bytes,
+   encoded claims, endpoint/DNS and observed persistence. A mutation incorporated
+   into authored fixtures before review does not count as reviewer-owned.
 
 A single global assertion such as “implementation unavailable” is not evidence.
 Each test records the missing observable that kept it red.
@@ -594,7 +683,7 @@ The old topology wording of NG-AC-001..003 is replaced without renumbering:
 The acceptance repository separately proves that it has no production or legacy
 imports and that production packaging cannot include acceptance code.
 
-The stage-4 mutation gate is exact:
+The atomic-pack mutation gate is exact:
 
 - every finding and every high-risk AC has at least one executable assigned
   must-kill mutant;
@@ -626,17 +715,18 @@ Product coding remains prohibited until an independent reviewer records all of:
 Formal PASS is one signed, pinned **H/S/C/D** artifact:
 
 - **H**: exact harness orchestrator commit/tree SHA and mutation-result digest;
-- **S**: complete scenario and frozen fixture/provenance manifest digest;
-- **C**: closed contract-schema bundle digest;
+- **S**: complete atomic scenario-pack manifest digest, including every fixture,
+  provenance record, predicate and assigned-mutant result;
+- **C**: trusted conformance-kernel and closed-schema bundle digest;
 - **D**: pinned dependency/integration lock containing every OCI image digest,
   real-YDB profile identity and external service protocol version.
 
-The artifact also records the five stage review PRs/approvals, exact contract-stub
-red run, malicious-claimant zero-pass run, barrier evidence and reviewer
-signature. An unpinned `latest`, mutable profile, missing stage approval or digest
-mismatch makes the artifact invalid. Any later weakening of a critical assertion,
-fixture, schema, mutant assignment or integration pin invalidates PASS and returns
-work to the corresponding stage, followed by a new full H/S/C/D review.
+The artifact also records the A, B and C review PRs/approvals, exact contract-stub
+red run, malicious-claimant zero-pass run, reviewer-owned mutation results,
+barrier evidence and reviewer signature. An unpinned `latest`, mutable profile,
+missing deliverable approval or digest mismatch makes the artifact invalid. Any
+later change follows the exact reopen rules in §25.4 and requires a new full
+H/S/C/D review after all affected downstream work reruns.
 
 ## 25.5 Integration prerequisites
 
@@ -936,14 +1026,18 @@ Rollback never imports legacy policy into NG and never permits dual writers.
 
 ## 25.10 Readiness verdict
 
-The clean restart plan is complete enough to begin Phase 0 harness work.
+The clean restart plan is complete enough to create only the acceptance
+repository and begin Phase 0 deliverable A.
 
 It is **not** product-implementation-ready, smoke-ready or cutover-ready. Those
-states require their explicit gates above. The next work is stage 1 contract
-schemas in the empty acceptance repository. The next reviewable Phase 0 outcome
-is the signed pinned H/S/C/D artifact after all five ordered stage reviews, with
-the complete high-risk and 26-finding suite RED against the contract stub for
-specific semantic reasons and zero PASS for the malicious claimant.
+states require their explicit gates above. The next work is the trusted executable
+conformance kernel in a newly created acceptance repository. Deliverable B starts
+only after independent A PASS and begins with the atomic finding-01 malicious-
+claimant pilot. The next complete Phase 0 outcome is the signed pinned H/S/C/D
+artifact after A, B and C review, with the complete high-risk and 26-finding suite
+RED against the contract stub for specific semantic reasons, every assigned
+mutant killed and zero PASS for the malicious claimant. Only then may the product
+repository be created.
 
 **Verdict: CLEAN RESTART PLAN PASS. PRODUCT CODING BLOCKED BY PHASE 0.**
 
