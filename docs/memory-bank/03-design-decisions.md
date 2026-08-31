@@ -5184,7 +5184,8 @@ reachable and defeat the guard (seen on the first Eliza relaunch after §6.224).
 ``test_apply_orphan_toc_page_checks_exempts_redirect_tombstone``,
 ``test_redirect_source_repo_md_paths_maps_public_from``,
 ``test_should_skip_redirect_tombstone_when_not_in_toc``,
-``test_completeness_gaps_redirect_tombstone_skip_satisfies``.
+``test_completeness_gaps_redirect_tombstone_skip_satisfies``,
+``test_translation_pr_scope_gaps_redirect_tombstone_already_satisfied``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
