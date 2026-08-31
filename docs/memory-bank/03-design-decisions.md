@@ -5278,4 +5278,28 @@ holes prevented the deterministic pipeline from producing the valid EN href:
 post-repair disk precedence; valid same-slot EN baseline fallback.
 
 
+### §6.228 Merged-PR tip EN + ambient link-debt filter (#40385, 2026-08-31)
+
+**Problem:** ``doc_translate`` on a merged source PR checks out the historical
+merge commit. ``load_pair_contents`` then read EN from that worktree, so
+href-parity preserve kept pre-move
+``#vklyuchenie-…`` / ``deployment-options/manual/…`` bytes even after tip main
+already had the fixed EN from [#51711](https://github.com/ydb-platform/ydb/pull/51711).
+Separately, retranslating ``authentication.md`` / ``tls.md`` re-surfaced
+tip-main fragment debt (``#account-lockout``, ``#auth-config``, …) and the
+§6.226 gate treated it as completeness gaps.
+
+**Decision:**
+
+1. When ``ru_content_ref`` is set, load ``en_text`` from ``merge_base_with``
+   (upstream tip) first; fall back to worktree/HEAD only if tip has no EN.
+2. The post-apply ``en_link_target`` gate accepts tip EN as ``baseline_text`` /
+   ``baseline_read``: findings whose ``target`` + missing file/fragment key
+   already exist on tip EN are suppressed. Newly introduced broken hrefs
+   (e.g. ``monitoring_config.md#tls`` without ``{#tls}``) still block.
+
+**Tests:** ``test_load_pair_contents_merged_pr_prefers_tip_en_over_stale_checkout``,
+``test_en_link_target_suppresses_ambient_baseline_debt``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

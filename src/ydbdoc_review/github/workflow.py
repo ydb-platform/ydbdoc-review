@@ -758,6 +758,8 @@ def run_doc_translate(
             )
 
         # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
+        # Baseline = upstream tip EN so ambient tip link debt does not block
+        # push when this PR did not introduce it (§6.228 / #40385).
         broken_links = apply_en_link_target_checks(
             pr_result,
             repo_path=repo_path,
@@ -766,6 +768,7 @@ def run_doc_translate(
                 for p in touched.written
                 if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
             },
+            baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
         )
         if broken_links:
             logger.error(
@@ -1255,6 +1258,7 @@ def run_doc_verify(
             if path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
             and path.endswith(".md")
         },
+        baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.

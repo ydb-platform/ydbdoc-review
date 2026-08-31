@@ -250,6 +250,50 @@ def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
     assert content.ru_base_text == "# RU\n"
 
 
+def test_load_pair_contents_merged_pr_prefers_tip_en_over_stale_checkout(git_repo: str):
+    """§6.228 / #40385: merged checkout EN is stale; tip EN wins."""
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    en_page = en / "a.md"
+    en_page.write_text(
+        "See [nodes](../concepts/node.md#vklyuchenie-rezhima).\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "stale merge en"], cwd=git_repo, check=True)
+    merge_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+
+    # Tip (main) fixed the EN href after the historical merge commit.
+    tip_en = "See [nodes](../concepts/node.md#enabling-mode).\n"
+    en_page.write_text(tip_en, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "tip en fixed"], cwd=git_repo, check=True)
+    tip_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+
+    # Simulate action checkout at the historical merge commit.
+    subprocess.run(["git", "checkout", "-q", merge_sha], cwd=git_repo, check=True)
+    assert "vklyuchenie" in en_page.read_text(encoding="utf-8")
+
+    pairs = build_pairs_from_changes(
+        [("ydb/docs/ru/a.md", "modified")], docs_root="ydb/docs"
+    )
+    content = load_pair_contents(
+        git_repo,
+        pairs,
+        merge_base_with=tip_sha,
+        ru_content_ref=merge_sha,
+        ru_base_ref=f"{merge_sha}^",
+    )[0]
+
+    assert content.en_text == tip_en
+    assert content.en_base_text == tip_en
+    assert "vklyuchenie" not in (content.en_text or "")
+
+
 def test_pull_request_context():
     class FakeClient:
         def get_pull(self, owner, repo, pr_number):

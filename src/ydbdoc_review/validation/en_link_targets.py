@@ -57,13 +57,36 @@ def _short_target(path: str) -> str:
     return PurePosixPath(norm).name
 
 
+def _link_target_issue_key(message: str) -> str | None:
+    """Stable key: ``target`` path + missing file/fragment (ignore line numbers)."""
+    target = None
+    detail = None
+    for line in message.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("target:"):
+            target = stripped.removeprefix("target:").strip()
+        elif stripped.startswith("missing file"):
+            detail = "missing file"
+        elif stripped.startswith("missing fragment:"):
+            detail = stripped
+    if not target or not detail:
+        return None
+    return f"{target}::{detail}"
+
+
 def check_en_page_link_targets(
     en_page_path: str,
     en_text: str,
     *,
     read_text: DocsTextReader,
+    baseline_text: str | None = None,
 ) -> list[str]:
-    """Blocking messages for broken relative EN ``.md`` links / fragments."""
+    """Blocking messages for broken relative EN ``.md`` links / fragments.
+
+    When ``baseline_text`` is set (pre-translate tip EN), suppress findings that
+    already exist on that baseline (§6.228 ambient tip debt). New broken hrefs
+    introduced by this translation still block.
+    """
     if not en_page_path or not en_text:
         return []
     issues: list[str] = []
@@ -112,7 +135,18 @@ def check_en_page_link_targets(
             f"  missing fragment: {fragment}\n"
             f"  available: {avail_txt}"
         )
-    return issues
+    if not issues or not baseline_text:
+        return issues
+    ambient = {
+        key
+        for msg in check_en_page_link_targets(
+            en_page_path, baseline_text, read_text=read_text
+        )
+        if (key := _link_target_issue_key(msg))
+    }
+    if not ambient:
+        return issues
+    return [msg for msg in issues if _link_target_issue_key(msg) not in ambient]
 
 
 def apply_en_link_target_checks(
@@ -120,12 +154,16 @@ def apply_en_link_target_checks(
     *,
     repo_path: str,
     en_md_paths: set[str] | frozenset[str] | None = None,
+    baseline_read: DocsTextReader | None = None,
 ) -> list[str]:
     """Attach ``en_link_target`` findings to pair results; return broken paths.
 
     Prefers final worktree bytes over ``pair_results`` so post-apply late
     repairs are authoritative. Falls back to in-memory text before apply.
     Independent of critic LLM (§6.226).
+
+    ``baseline_read`` supplies pre-translate tip EN for ambient-debt filtering
+    (§6.228).
     """
     from ydbdoc_review.github.git_ops import read_text
     from ydbdoc_review.pipeline.types import FileTranslationResult
@@ -156,7 +194,10 @@ def apply_en_link_target_checks(
         text = _read(path) or texts.get(path)
         if not text:
             continue
-        msgs = check_en_page_link_targets(path, text, read_text=_read)
+        baseline = baseline_read(path) if baseline_read is not None else None
+        msgs = check_en_page_link_targets(
+            path, text, read_text=_read, baseline_text=baseline
+        )
         if not msgs:
             continue
         broken.append(path)

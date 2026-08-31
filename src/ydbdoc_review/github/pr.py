@@ -487,6 +487,11 @@ def load_pair_contents(
     regress already-fixed links on the base branch. Unique ``#fragment``
     autotitle hrefs are then overlaid from the checkout RU (usually ``main``)
     so post-merge moves (Sessions → ``execution_process.md``, §6.128) still win.
+
+    For the same merged-PR path, EN mirrors are read from ``merge_base_with``
+    (upstream tip) first (§6.228). Action checkout is often the historical
+    merge commit, whose EN still carries pre-move hrefs (#40385 /
+    ``#vklyuchenie-…``) even after later translation PRs landed on main.
     """
     contents: list[PairContent] = []
     for pair in pairs:
@@ -505,7 +510,12 @@ def load_pair_contents(
                 ru_main = read_text(repo_path, pair.ru_path)
             if ru_main:
                 ru_text = overlay_autotitle_fragment_hrefs(ru_text, ru_main)
-        en_text = read_text(repo_path, pair.en_path)
+        en_text: str | None = None
+        if ru_content_ref and not pair.en_deleted:
+            # Tip EN is authoritative for existing mirrors on merged source PRs.
+            en_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
+        if en_text is None:
+            en_text = read_text(repo_path, pair.en_path)
         if en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
 
