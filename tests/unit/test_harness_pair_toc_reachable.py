@@ -141,9 +141,7 @@ def test_pr_50904_deterministic_index_patch_syncs_autotitle_hrefs_only():
         summary="source-only list insertion",
     )
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
-    parent = HarnessContext.from_options(
-        MagicMock(), glossary=load_glossary(), config=cfg
-    )
+    parent = HarnessContext.from_options(MagicMock(), glossary=load_glossary(), config=cfg)
 
     class _FakeHarness:
         def __init__(self, _profile):
@@ -238,9 +236,7 @@ def test_href_only_pair_bypasses_llm_and_repairs():
     parent = HarnessContext.from_options(
         MagicMock(),
         glossary=load_glossary(),
-        config=load_config(
-            env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}
-        ),
+        config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}),
     )
 
     with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
@@ -346,6 +342,68 @@ def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
 
     result = run_pair_plan(content, plan, parent, {})
 
+    assert result.target_text == (
+        "[registering dynamic nodes](../../devops/concepts/node.md"
+        "#enabling-node-authentication-and-authorization-mode)\n"
+    )
+
+
+def test_href_parity_preserve_repairs_missing_en_fragment():
+    """§6.227: already-applied href delta still receives fragment repair."""
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/client.md",
+        en_path="ydb/docs/en/core/reference/configuration/client.md",
+        ru_changed=True,
+    )
+    fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    old = f"../../devops/deployment-options/manual/node.md#{fragment}"
+    new = f"../../devops/concepts/node.md#{fragment}"
+    content = PairContent(
+        pair=pair,
+        ru_base_text=f"[регистрации динамических узлов]({old})\n",
+        ru_text=f"[регистрации динамических узлов]({new})\n",
+        en_base_text=f"[registering dynamic nodes]({old})\n",
+        # The source href delta is already present, so href-parity preserve wins.
+        en_text=f"[registering dynamic nodes]({new})\n",
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="already-applied href delta",
+    )
+    files = {
+        "ydb/docs/en/core/devops/concepts/node.md": (
+            "## Enabling node authentication and authorization mode\n"
+        ),
+        "ydb/docs/ru/core/devops/concepts/node.md": (
+            "## Включение режима аутентификации и авторизации узлов\n"
+        ),
+    }
+    parent = HarnessContext.from_options(
+        MagicMock(),
+        glossary=load_glossary(),
+        config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}),
+        docs_text_reader=files.get,
+    )
+
+    with (
+        patch(
+            "ydbdoc_review.harness.pair.apply_localized_mirror_delta",
+            return_value=None,
+        ),
+        patch(
+            "ydbdoc_review.harness.pair.autotitle_delta_satisfied_in_en",
+            return_value=False,
+        ),
+        patch("ydbdoc_review.harness.pair.FileHarness") as harness,
+    ):
+        result = run_pair_plan(content, plan, parent, {})
+
+    harness.assert_not_called()
     assert result.target_text == (
         "[registering dynamic nodes](../../devops/concepts/node.md"
         "#enabling-node-authentication-and-authorization-mode)\n"

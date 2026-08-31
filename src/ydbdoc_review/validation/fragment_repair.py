@@ -18,19 +18,22 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from pathlib import PurePosixPath
-
 from urllib.parse import unquote
 
+from ydbdoc_review.navigation.redirects import (
+    iter_redirect_mappings,
+    redirect_public_path_to_repo_md,
+)
 from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.ast_types import Heading
 from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
 from ydbdoc_review.validation.yfm_anchor import (
+    _iter_headings,
     diplodoc_auto_slug,
     split_heading_anchor_suffix,
 )
-from ydbdoc_review.validation.yfm_anchor import _iter_headings
 
 DocsReader = Callable[[str], str | None]
 
@@ -264,15 +267,29 @@ def _try_remap_missing_fragment_via_ru_en(
     path_part: str,
     en_page_path: str,
     ru_source: str | None,
-    en_target: str,
+    en_target: str | None,
+    en_abs: str,
     read_text: DocsReader,
-) -> str | None:
+    redirect_en_paths: dict[str, str],
+    redirect_ru_paths: dict[str, str],
+) -> tuple[str, str] | None:
     """Map a missing EN fragment via the paired RU/EN target pages."""
     ru_abs = _resolve_href_path(en_page_path.replace("/docs/en/", "/docs/ru/", 1), path_part)
     if ru_abs is None:
         return None
     ru_target = read_text(ru_abs)
+    if not ru_target and ru_abs in redirect_ru_paths:
+        ru_abs = redirect_ru_paths[ru_abs]
+        ru_target = read_text(ru_abs)
     if not ru_target:
+        return None
+    effective_en_abs = en_abs
+    redirect_en_abs = redirect_en_paths.get(en_abs)
+    redirect_en_target = read_text(redirect_en_abs) if redirect_en_abs else None
+    if redirect_en_target is not None:
+        effective_en_abs = redirect_en_abs
+        en_target = redirect_en_target
+    if not en_target:
         return None
     ru_page_path = en_page_path.replace("/docs/en/", "/docs/ru/", 1)
     ru_frag = _ru_fragment_for_same_target(
@@ -299,11 +316,11 @@ def _try_remap_missing_fragment_via_ru_en(
             and fragment_declared_in_markdown(
                 en_target,
                 new_frag,
-                page_path=_resolve_href_path(en_page_path, path_part),
+                page_path=effective_en_abs,
                 read_text=read_text,
             )
         ):
-            return new_frag
+            return new_frag, effective_en_abs
     return None
 
 
@@ -359,6 +376,79 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
     return None
 
 
+def prefer_baseline_href_when_fragment_missing(
+    en_text: str,
+    en_baseline: str | None,
+    *,
+    en_page_path: str,
+    read_text: DocsReader,
+) -> str:
+    """Restore a valid same-slot EN baseline href over a broken restored href.
+
+    ``restore_md_link_hrefs`` can copy a new RU fragment that does not exist on
+    the EN target. Keep the baseline href only when the link occupies the same
+    Markdown-link slot (and label), its fragment is declared, and the current
+    fragment is not.
+    """
+    if not en_text or not en_baseline:
+        return en_text
+    current = list(_MD_LINK.finditer(en_text))
+    baseline = list(_MD_LINK.finditer(en_baseline))
+    replacements: list[tuple[int, int, str]] = []
+    for index, match in enumerate(current):
+        if index >= len(baseline):
+            break
+        base_match = baseline[index]
+        label = " ".join(match.group(1).split()).casefold()
+        base_label = " ".join(base_match.group(1).split()).casefold()
+        if label != base_label:
+            continue
+        href = match.group(2).strip()
+        base_href = base_match.group(2).strip()
+        if href == base_href or "#" not in href or "#" not in base_href:
+            continue
+        path_part, frag = href.rsplit("#", 1)
+        base_path, base_frag = base_href.rsplit("#", 1)
+        if (
+            not frag
+            or not base_frag
+            or not path_part.endswith(".md")
+            or not base_path.endswith(".md")
+        ):
+            continue
+        abs_path = _resolve_href_path(en_page_path, path_part)
+        base_abs = _resolve_href_path(en_page_path, base_path)
+        if abs_path is None or base_abs is None:
+            continue
+        target = read_text(abs_path)
+        if target and fragment_declared_in_markdown(
+            target,
+            frag,
+            page_path=abs_path,
+            read_text=read_text,
+        ):
+            continue
+        base_target = read_text(base_abs)
+        if not base_target or not fragment_declared_in_markdown(
+            base_target,
+            base_frag,
+            page_path=base_abs,
+            read_text=read_text,
+        ):
+            continue
+        replacements.append(
+            (
+                match.start(),
+                match.end(),
+                f"[{match.group(1)}]({base_href})",
+            )
+        )
+    out = en_text
+    for start, end, replacement in reversed(replacements):
+        out = out[:start] + replacement + out[end:]
+    return out
+
+
 def repair_en_fragments(
     en_text: str,
     *,
@@ -366,6 +456,7 @@ def repair_en_fragments(
     read_text: DocsReader,
     ru_source: str | None = None,
     en_baseline: str | None = None,
+    docs_root: str = "ydb/docs",
 ) -> str:
     """Fix missing EN ``#fragment`` targets in ``en_text`` for ``en_page_path``.
 
@@ -375,9 +466,28 @@ def repair_en_fragments(
     if not en_text or not en_page_path:
         return en_text
 
-    out = en_text
+    out = prefer_baseline_href_when_fragment_missing(
+        en_text,
+        en_baseline,
+        en_page_path=en_page_path,
+        read_text=read_text,
+    )
     ru_by_frag = _autotitle_hrefs_by_frag(ru_source or "")
     en_base_by_frag = _autotitle_hrefs_by_frag(en_baseline or "")
+    redirects_yaml = read_text(f"{docs_root.strip('/')}/redirects.yaml") or ""
+    redirect_mappings = iter_redirect_mappings(redirects_yaml)
+    redirect_en_paths = {
+        redirect_public_path_to_repo_md(
+            src, locale="en", docs_root=docs_root
+        ): redirect_public_path_to_repo_md(dst, locale="en", docs_root=docs_root)
+        for src, dst in redirect_mappings.items()
+    }
+    redirect_ru_paths = {
+        redirect_public_path_to_repo_md(
+            src, locale="ru", docs_root=docs_root
+        ): redirect_public_path_to_repo_md(dst, locale="ru", docs_root=docs_root)
+        for src, dst in redirect_mappings.items()
+    }
 
     # Collect hrefs that carry a fragment (autotitle + markdown).
     candidates: list[str] = []
@@ -413,18 +523,27 @@ def repair_en_fragments(
 
         # 0) Remap missing fragments via the paired RU/EN target page. Covers
         # Cyrillic auto-slugs and LLM-invented ASCII slugs (#40385 system-view).
-        if en_target:
-            new_frag = _try_remap_missing_fragment_via_ru_en(
-                frag=frag,
-                path_part=path_part,
-                en_page_path=en_page_path,
-                ru_source=ru_source,
-                en_target=en_target,
-                read_text=read_text,
-            )
-            if new_frag:
-                out = _rewrite_href(out, href, f"{path_part}#{new_frag}")
-                continue
+        remapped = _try_remap_missing_fragment_via_ru_en(
+            frag=frag,
+            path_part=path_part,
+            en_page_path=en_page_path,
+            ru_source=ru_source,
+            en_target=en_target,
+            en_abs=abs_path,
+            read_text=read_text,
+            redirect_en_paths=redirect_en_paths,
+            redirect_ru_paths=redirect_ru_paths,
+        )
+        if remapped:
+            new_frag, effective_en_abs = remapped
+            new_path = path_part
+            if effective_en_abs != abs_path:
+                new_path = _posix_relpath(
+                    str(PurePosixPath(en_page_path).parent),
+                    effective_en_abs,
+                )
+            out = _rewrite_href(out, href, f"{new_path}#{new_frag}")
+            continue
 
         # 1) Prefer EN baseline autotitle path when it actually declares the frag.
         base_href = en_base_by_frag.get(frag) or ""

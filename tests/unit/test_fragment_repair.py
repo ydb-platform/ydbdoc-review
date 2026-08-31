@@ -106,8 +106,7 @@ def test_pr_45949_client_cert_legacy_translit_fragment():
     en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
     en_bad = (
-        "when [registering dynamic nodes]("
-        f"../../devops/concepts/node-authorization.md#{frag}).\n"
+        f"when [registering dynamic nodes](../../devops/concepts/node-authorization.md#{frag}).\n"
     )
     files = {
         "ydb/docs/en/core/devops/concepts/node-authorization.md": (
@@ -125,6 +124,51 @@ def test_pr_45949_client_cert_legacy_translit_fragment():
     )
     assert "node-authorization.md#enabling-node-authentication-and-authorization)" in fixed
     assert frag not in fixed
+
+
+def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
+    """§6.227: redirect from-path EN pairs with RU at to-path."""
+    en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    manual_href = f"../../devops/deployment-options/manual/node-authorization.md#{fragment}"
+    en_manual = "## Enabling database node authentication and authorization\n"
+    ru_concepts = "## Включение режима аутентификации и авторизации узлов\n"
+    redirects = (
+        "common:\n"
+        "  - from: /devops/deployment-options/manual/node-authorization.md\n"
+        "    to: /devops/concepts/node-authorization.md\n"
+    )
+    base_files = {
+        "ydb/docs/redirects.yaml": redirects,
+        "ydb/docs/en/core/devops/deployment-options/manual/node-authorization.md": en_manual,
+        "ydb/docs/ru/core/devops/concepts/node-authorization.md": ru_concepts,
+    }
+
+    fixed_on_manual = repair_en_fragments(
+        f"See [node authorization]({manual_href}).\n",
+        en_page_path=en_page,
+        read_text=base_files.get,
+    )
+    assert fixed_on_manual == (
+        "See [node authorization]("
+        "../../devops/deployment-options/manual/node-authorization.md"
+        "#enabling-database-node-authentication-and-authorization).\n"
+    )
+
+    files_with_live_en = {
+        **base_files,
+        "ydb/docs/en/core/devops/concepts/node-authorization.md": en_manual,
+    }
+    fixed_on_live_path = repair_en_fragments(
+        f"See [node authorization]({manual_href}).\n",
+        en_page_path=en_page,
+        read_text=files_with_live_en.get,
+    )
+    assert fixed_on_live_path == (
+        "See [node authorization]("
+        "../../devops/concepts/node-authorization.md"
+        "#enabling-database-node-authentication-and-authorization).\n"
+    )
 
 
 def test_pr_40385_system_views_users_fragment():
@@ -165,6 +209,31 @@ def test_pr_40385_system_views_localizes_to_declared_en_fragment():
         ru_source=ru_source,
     )
     assert "system-views.md#users)" in fixed
+
+
+def test_pr_40385_prefers_valid_en_baseline_href_after_ru_restore():
+    """§6.227: do not keep a restored RU fragment absent from the EN target."""
+    en_page = "ydb/docs/en/core/security/authentication.md"
+    restored = (
+        "Configure [authentication](../reference/configuration/auth_config.md#security-auth).\n"
+    )
+    baseline = (
+        "Configure [authentication](../reference/configuration/auth_config.md#authentication).\n"
+    )
+    files = {
+        "ydb/docs/en/core/reference/configuration/auth_config.md": (
+            "## Authentication {#authentication}\n"
+        ),
+    }
+
+    fixed = repair_en_fragments(
+        restored,
+        en_page_path=en_page,
+        read_text=files.get,
+        en_baseline=baseline,
+    )
+
+    assert fixed == baseline
 
 
 def test_pr_50976_sid_fragment_localizes_to_declared_en_fragment():

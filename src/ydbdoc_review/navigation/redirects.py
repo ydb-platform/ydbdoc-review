@@ -69,6 +69,36 @@ def iter_redirect_from_paths(redirects_yaml: str) -> set[str]:
     return {e["from_path"] for e in parse_redirect_entries(text)}
 
 
+def iter_redirect_mappings(redirects_yaml: str) -> dict[str, str]:
+    """Collect Diplodoc public ``from`` → ``to`` mappings.
+
+    Accepts production ``common`` / ``ru`` / ``en`` sections and the flat
+    redirect lists used by merge payloads and unit fixtures.
+    """
+    text = (redirects_yaml or "").strip()
+    if not text:
+        return {}
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception:
+        data = None
+    out: dict[str, str] = {}
+    if isinstance(data, dict):
+        for key in ("common", "ru", "en"):
+            for row in data.get(key) or []:
+                if isinstance(row, dict) and row.get("from") and row.get("to"):
+                    out[str(row["from"]).strip()] = str(row["to"]).strip()
+    elif isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and row.get("from") and row.get("to"):
+                out[str(row["from"]).strip()] = str(row["to"]).strip()
+    if out:
+        return out
+    return {entry["from_path"]: entry["to_path"] for entry in parse_redirect_entries(text)}
+
+
 def redirect_public_path_to_repo_md(
     public_path: str,
     *,

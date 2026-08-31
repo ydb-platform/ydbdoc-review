@@ -13,13 +13,13 @@ from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.qa import compose_file_verdict
 from ydbdoc_review.pipeline.types import PairRunResult
+from ydbdoc_review.translation.differential import (
+    autotitle_delta_satisfied_in_en,
+)
 from ydbdoc_review.translation.errors import TranslationError
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
-from ydbdoc_review.translation.differential import (
-    autotitle_delta_satisfied_in_en,
-)
 from ydbdoc_review.validation.href_parity import (
     apply_href_only_delta,
     apply_localized_mirror_delta,
@@ -67,20 +67,36 @@ def _try_deterministic_en_preserve(
         return localized
 
     if autotitle_delta_satisfied_in_en(ru_base, source_text, existing_target):
+        preserved = existing_target
+        if ctx.docs_text_reader is not None:
+            preserved = repair_en_fragments(
+                preserved,
+                en_page_path=plan.target_path,
+                read_text=ctx.docs_text_reader,
+                ru_source=source_text,
+                en_baseline=content.en_base_text or existing_target,
+            )
         logger.info(
             "RU autotitle delta already satisfied in EN for %s; preserving bytes",
             plan.target_path,
         )
-        return existing_target
+        return preserved
 
-    if collect_internal_hrefs(source_text) and not check_href_parity(
-        source_text, existing_target
-    ):
+    if collect_internal_hrefs(source_text) and not check_href_parity(source_text, existing_target):
+        preserved = existing_target
+        if ctx.docs_text_reader is not None:
+            preserved = repair_en_fragments(
+                preserved,
+                en_page_path=plan.target_path,
+                read_text=ctx.docs_text_reader,
+                ru_source=source_text,
+                en_baseline=content.en_base_text or existing_target,
+            )
         logger.info(
             "RU/EN href parity OK for %s despite structural drift; preserving EN",
             plan.target_path,
         )
-        return existing_target
+        return preserved
 
     return None
 
@@ -119,9 +135,7 @@ def run_pair_plan(
 
     existing_target = _read_target_text(content, plan)
     if plan.action in {"translate_to_en", "critic_only"}:
-        preserved = _try_deterministic_en_preserve(
-            content, plan, source_text, existing_target, ctx
-        )
+        preserved = _try_deterministic_en_preserve(content, plan, source_text, existing_target, ctx)
         if preserved is not None:
             return PairRunResult(
                 plan=plan,
@@ -169,8 +183,7 @@ def run_pair_plan(
     # §6.132: pass existing EN + base RU into translate so differential can seed.
     base_source: str | None = None
     if plan.action in {"translate_to_en", "critic_only"} and (
-        plan.target_lang.lower() in {"en", "english"}
-        or plan.target_path == content.pair.en_path
+        plan.target_lang.lower() in {"en", "english"} or plan.target_path == content.pair.en_path
     ):
         base_source = content.ru_base_text
     elif enable_translate and plan.action == "translate_to_ru":
@@ -183,9 +196,7 @@ def run_pair_plan(
         source_text=source_text,
         existing_target_text=existing_target,
         base_target_text=(
-            content.en_base_text
-            if plan.action == "translate_to_en"
-            else content.ru_base_text
+            content.en_base_text if plan.action == "translate_to_en" else content.ru_base_text
         ),
         base_source_text=base_source,
     )
@@ -240,8 +251,7 @@ def run_pair_plan(
     )
     target_text = existing_target if semantic_noop else file_result.final_text
     is_en_target = plan.action in ("translate_to_en", "critic_only") and (
-        plan.target_lang.lower() in {"en", "english"}
-        or plan.target_path == content.pair.en_path
+        plan.target_lang.lower() in {"en", "english"} or plan.target_path == content.pair.en_path
     )
     before_pair_repairs: str | None = None
     if target_text and content.ru_text and not semantic_noop:
@@ -260,10 +270,7 @@ def run_pair_plan(
                 en_page_path=plan.target_path,
                 en_toc_reachable=ctx.en_toc_reachable,
             )
-        if (
-            not deterministic_autotitle_patch
-            and is_en_target
-        ):
+        if not deterministic_autotitle_patch and is_en_target:
             target_text = insert_missing_autotitle_list_items(
                 target_text,
                 content.ru_text,

@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-31
-**Current focus:** §6.226 — post-apply EN link/fragment gate (catch href-only misses critic misses).
+**Current focus:** §6.227 — redirect-aware fragment repair and final-disk gate authority (#40385).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-31 | **§6.227** — repair deterministic preserves; follow redirect from→to for RU/EN fragment mapping; prefer post-repair disk bytes and valid same-slot EN baseline hrefs (#40385 / #51711) |
 | 2026-08-31 | **§6.226** — post-apply EN ``en_link_target`` gate (file+fragment existence); blocks href-only bypass / critic-green false negatives (#51711) |
 | 2026-08-31 | **§6.225** — remap RU legacy translit fragments (e.g. `#vklyuchenie-…`) to EN auto-slugs; late disk repair after apply/retarget (#45949 / #51711) |
 | 2026-08-31 | **§6.224** — skip EN at redirect from-paths; ignore pending toc seed; exclude from redirect inbound retarget + verify scope gaps (#45949 / #51703 / #51709) |

@@ -123,8 +123,9 @@ def apply_en_link_target_checks(
 ) -> list[str]:
     """Attach ``en_link_target`` findings to pair results; return broken paths.
 
-    Reads final EN text from ``pair_results`` when present, else from the
-    worktree. Independent of critic LLM (§6.226).
+    Prefers final worktree bytes over ``pair_results`` so post-apply late
+    repairs are authoritative. Falls back to in-memory text before apply.
+    Independent of critic LLM (§6.226).
     """
     from ydbdoc_review.github.git_ops import read_text
     from ydbdoc_review.pipeline.types import FileTranslationResult
@@ -152,7 +153,7 @@ def apply_en_link_target_checks(
     paths |= set(texts)
     broken: list[str] = []
     for path in sorted(paths):
-        text = texts.get(path) or _read(path)
+        text = _read(path) or texts.get(path)
         if not text:
             continue
         msgs = check_en_page_link_targets(path, text, read_text=_read)

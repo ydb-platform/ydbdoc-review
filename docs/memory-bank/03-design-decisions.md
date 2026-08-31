@@ -5247,4 +5247,35 @@ Critic LLM does not substitute for a tree check.
 ``test_apply_en_link_target_checks_blocks_href_only_pair``.
 
 
+### §6.227 Redirect-aware final fragment repair (#40385 / #51711, 2026-08-31)
+
+**Problem:** The §6.226 gate correctly blocked #40385, but four repair-order
+holes prevented the deterministic pipeline from producing the valid EN href:
+
+1. Href-parity and autotitle preserve branches returned existing EN before
+   ``repair_en_fragments``.
+2. The EN href still used a ``redirects.yaml`` ``from`` path while its RU twin
+   had moved to ``to``; locale swapping therefore found no RU page.
+3. The final gate preferred stale ``PairRunResult.target_text`` over bytes
+   changed by post-apply late repair.
+4. ``restore_md_link_hrefs`` could replace a valid EN-baseline fragment with a
+   RU fragment absent from the EN target.
+
+**Decision:**
+
+1. Every deterministic EN preserve with a docs reader runs fragment repair.
+2. Parse redirect ``from`` → ``to`` mappings. If the direct RU twin is absent,
+   remap through RU ``to``. Use EN ``to`` for heading mapping when it exists and
+   rewrite the href path to ``to`` only in that case; otherwise keep the
+   existing EN ``from`` file path and remap its fragment via RU ``to``.
+3. The post-apply gate treats readable worktree bytes as authoritative and
+   falls back to in-memory pair text only when the file is not on disk.
+4. Before general remapping, retain the same-slot EN baseline href only when
+   the restored candidate fragment is missing and the baseline target declares
+   its fragment.
+
+**Tests:** redirect ``from`` with and without EN ``to``; href-parity preserve;
+post-repair disk precedence; valid same-slot EN baseline fallback.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
