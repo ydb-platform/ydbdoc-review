@@ -5301,5 +5301,33 @@ tip-main fragment debt (``#account-lockout``, ``#auth-config``, …) and the
 **Tests:** ``test_load_pair_contents_merged_pr_prefers_tip_en_over_stale_checkout``,
 ``test_en_link_target_suppresses_ambient_baseline_debt``.
 
+### §6.229 Tip+overlay final-tree reader + Docker Hub base fallback (#40385, 2026-08-31)
+
+**Problem:** After §6.228 preserved tip EN for
+``client_certificate_authorization.md``, late fragment repair and the
+§6.226 ``en_link_target`` gate still resolved link **targets** from the
+merge-commit worktree. Tip-only siblings (e.g.
+``devops/concepts/node-authorization.md`` after the manual→concepts move)
+looked missing, so late repair rewrote good tip hrefs toward stale
+merge-era paths and the gate listed the preserved page as a completeness
+gap. Separately, ECR Public ``429 toomanyrequests`` aborted the action
+image build before any translation ran.
+
+**Decision:**
+
+1. ``_final_tree_reader``: for paths written this run, prefer worktree
+   overlays; for everything else prefer ``merge_base_with`` tip, then
+   worktree.
+2. Post-apply late ``repair_en_fragments`` and both translate/verify
+   ``apply_en_link_target_checks`` use that reader (plus tip
+   ``en_baseline`` on late repair).
+3. ``Dockerfile`` accepts ``BASE_IMAGE``; ``action-docker.sh`` tries ECR
+   Public then Docker Hub ``python:3.12-slim`` before optional GHCR
+   fallback.
+
+**Tests:** ``test_final_tree_reader_prefers_tip_for_non_overlay``,
+``test_late_repair_does_not_rewrite_tip_href_against_stale_merge``,
+``test_en_link_gate_uses_tip_targets_for_preserved_overlay``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

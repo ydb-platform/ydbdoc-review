@@ -42,6 +42,8 @@ CI (Actions captures stdout fine).
 4. Remove local build tag on exit.
 
 Base image in `Dockerfile`: `public.ecr.aws/docker/library/python:3.12-slim`
+(overridable via ``BASE_IMAGE``). ``action-docker.sh`` retries with Docker Hub
+``python:3.12-slim`` on ECR 429/outage (§6.229), then optional GHCR.
 (AWS ECR Public mirror of Docker Hub `library/python`).
 
 **Why not native `image: Dockerfile`?** GitHub builds that internally with no

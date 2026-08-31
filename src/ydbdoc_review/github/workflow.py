@@ -337,11 +337,41 @@ def _docs_text_reader(repo_path: str, merge_base_with: str):
     return _read
 
 
+def _final_tree_reader(
+    repo_path: str,
+    merge_base_with: str,
+    overlay_paths: set[str] | frozenset[str],
+):
+    """Read the intended post-translate docs tree (§6.229).
+
+    Translation branches start from upstream tip. Merged ``doc_translate``
+    checkouts are often the historical merge commit, so worktree siblings can
+    be stale or missing tip-only moves (e.g. ``node-authorization.md``). For
+    paths we did **not** write this run, prefer tip; for overlays, prefer the
+    worktree bytes we just applied.
+    """
+    overlays = {p.replace("\\", "/") for p in overlay_paths}
+
+    def _read(path: str) -> str | None:
+        norm = path.replace("\\", "/")
+        if norm in overlays:
+            text = read_text(repo_path, norm)
+            if text is not None:
+                return text
+        tip = read_text_at_ref(repo_path, merge_base_with, norm)
+        if tip is not None:
+            return tip
+        return read_text(repo_path, norm)
+
+    return _read
+
+
 def _repair_en_fragments_after_apply(
     repo_path: str,
     paths: list[str],
     *,
     dry_run: bool,
+    merge_base_with: str | None = None,
 ) -> list[str]:
     """Re-run fragment repair once all EN targets exist on disk (§6.225).
 
@@ -349,17 +379,27 @@ def _repair_en_fragments_after_apply(
     target page is written, leaving RU legacy translit fragments in place.
     Inbound redirect retarget also skips links whose path already points at
     the redirect ``to`` target. A final pass over written EN pages fixes both.
+
+    When ``merge_base_with`` is set, target resolution uses the §6.229 final
+    tree (tip + overlays) so tip-preserved pages are not rewritten against a
+    stale merge-commit worktree.
     """
     from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 
-    def _read(path: str) -> str | None:
-        return read_text(repo_path, path)
+    overlay = {p.replace("\\", "/") for p in paths}
+    if merge_base_with:
+        _read = _final_tree_reader(repo_path, merge_base_with, overlay)
+    else:
+
+        def _read(path: str) -> str | None:
+            return read_text(repo_path, path)
 
     repaired: list[str] = []
     for rel in paths:
         if not rel.endswith(".md") or "/docs/en/" not in rel:
             continue
-        en_text = _read(rel)
+        # Always edit the bytes we wrote (worktree), not tip.
+        en_text = read_text(repo_path, rel)
         if not en_text:
             continue
         ru_twin = rel.replace("/docs/en/", "/docs/ru/", 1)
@@ -368,6 +408,11 @@ def _repair_en_fragments_after_apply(
             en_page_path=rel,
             read_text=_read,
             ru_source=_read(ru_twin),
+            en_baseline=(
+                read_text_at_ref(repo_path, merge_base_with, rel)
+                if merge_base_with
+                else None
+            ),
         )
         if fixed == en_text:
             continue
@@ -745,6 +790,7 @@ def run_doc_translate(
             repo_path,
             touched.written,
             dry_run=dry_run,
+            merge_base_with=merge_base_with,
         )
         if late_repair:
             logger.info(
@@ -760,15 +806,19 @@ def run_doc_translate(
         # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
         # Baseline = upstream tip EN so ambient tip link debt does not block
         # push when this PR did not introduce it (§6.228 / #40385).
+        # Target resolution = tip + written overlays (§6.229): merge-commit
+        # checkout must not make tip-only siblings look missing.
+        en_written = {
+            p
+            for p in touched.written
+            if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
+        }
         broken_links = apply_en_link_target_checks(
             pr_result,
             repo_path=repo_path,
-            en_md_paths={
-                p
-                for p in touched.written
-                if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
-            },
+            en_md_paths=en_written,
             baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
+            docs_read=_final_tree_reader(repo_path, merge_base_with, en_written),
         )
         if broken_links:
             logger.error(
@@ -1244,21 +1294,22 @@ def run_doc_verify(
             docs_root=cfg.paths.docs_root,
         ),
     )
+    verify_en_paths = {
+        r.plan.target_path.replace("\\", "/")
+        for r in pr_result.pair_results
+        if r.plan.target_lang == "en" and r.plan.target_path.endswith(".md")
+    } | {
+        path.replace("\\", "/")
+        for path, _kind in changes
+        if path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
+        and path.endswith(".md")
+    }
     apply_en_link_target_checks(
         pr_result,
         repo_path=repo_path,
-        en_md_paths={
-            r.plan.target_path
-            for r in pr_result.pair_results
-            if r.plan.target_lang == "en" and r.plan.target_path.endswith(".md")
-        }
-        | {
-            path.replace("\\", "/")
-            for path, _kind in changes
-            if path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
-            and path.endswith(".md")
-        },
+        en_md_paths=verify_en_paths,
         baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
+        docs_read=_final_tree_reader(repo_path, merge_base_with, verify_en_paths),
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.

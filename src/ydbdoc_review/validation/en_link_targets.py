@@ -155,6 +155,7 @@ def apply_en_link_target_checks(
     repo_path: str,
     en_md_paths: set[str] | frozenset[str] | None = None,
     baseline_read: DocsTextReader | None = None,
+    docs_read: DocsTextReader | None = None,
 ) -> list[str]:
     """Attach ``en_link_target`` findings to pair results; return broken paths.
 
@@ -163,13 +164,16 @@ def apply_en_link_target_checks(
     Independent of critic LLM (§6.226).
 
     ``baseline_read`` supplies pre-translate tip EN for ambient-debt filtering
-    (§6.228).
+    (§6.228). ``docs_read`` resolves link targets (default: worktree); pass the
+    §6.229 tip+overlay reader on merged-PR checkouts.
     """
     from ydbdoc_review.github.git_ops import read_text
     from ydbdoc_review.pipeline.types import FileTranslationResult
     from ydbdoc_review.validation.heuristics import bump_verdict_for_blocking_heuristics
 
     def _read(path: str) -> str | None:
+        if docs_read is not None:
+            return docs_read(path)
         return read_text(repo_path, path)
 
     runs_by_path: dict[str, list] = {}

@@ -8,6 +8,11 @@ LOCAL_TAG="ydbdoc-review-local:$$"
 REF="${GITHUB_ACTION_REF:-v0.1.0}"
 REF="${REF#refs/tags/}"
 FALLBACK_IMAGE="ghcr.io/ydb-platform/ydbdoc-review:${REF}"
+# Prefer ECR Public mirror; on 429/outage retry Docker Hub library (§6.229).
+BASE_IMAGES=(
+  "public.ecr.aws/docker/library/python:3.12-slim"
+  "python:3.12-slim"
+)
 
 ACTION_SHA="$(git -C "${ACTION_PATH}" rev-parse HEAD 2>/dev/null || true)"
 BUILD_SHA="${YDBDOC_GIT_SHA:-${ACTION_SHA:-${REF}}}"
@@ -15,15 +20,25 @@ BUILD_SHA="${YDBDOC_GIT_SHA:-${ACTION_SHA:-${REF}}}"
 echo "ydbdoc-review: action ref=${REF} checkout=${ACTION_SHA:-unknown} build_sha=${BUILD_SHA}" >&2
 
 IMAGE=""
-if docker build -t "${LOCAL_TAG}" \
-  -f "${ACTION_PATH}/Dockerfile" \
-  --build-arg "YDBDOC_GIT_SHA=${BUILD_SHA}" \
-  "${ACTION_PATH}"; then
-  IMAGE="${LOCAL_TAG}"
-  echo "ydbdoc-review: using locally built image ${LOCAL_TAG}" >&2
-else
+BUILD_OK=0
+for BASE_IMAGE in "${BASE_IMAGES[@]}"; do
+  echo "ydbdoc-review: docker build with BASE_IMAGE=${BASE_IMAGE}" >&2
+  if docker build -t "${LOCAL_TAG}" \
+    -f "${ACTION_PATH}/Dockerfile" \
+    --build-arg "YDBDOC_GIT_SHA=${BUILD_SHA}" \
+    --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+    "${ACTION_PATH}"; then
+    IMAGE="${LOCAL_TAG}"
+    BUILD_OK=1
+    echo "ydbdoc-review: using locally built image ${LOCAL_TAG}" >&2
+    break
+  fi
+  echo "::warning::ydbdoc-review: docker build failed for BASE_IMAGE=${BASE_IMAGE}" >&2
+done
+
+if [[ "${BUILD_OK}" -ne 1 ]]; then
   if [[ "${YDBDOC_GHCR_FALLBACK:-}" != "1" ]]; then
-    echo "::error::ydbdoc-review: docker build failed and GHCR fallback is disabled (set YDBDOC_GHCR_FALLBACK=1 to allow stale fallback image ${FALLBACK_IMAGE})" >&2
+    echo "::error::ydbdoc-review: docker build failed for all base images and GHCR fallback is disabled (set YDBDOC_GHCR_FALLBACK=1 to allow stale fallback image ${FALLBACK_IMAGE})" >&2
     exit 1
   fi
   echo "::warning::ydbdoc-review: local docker build failed; pulling GHCR fallback ${FALLBACK_IMAGE} (may be stale — publish via docker-publish workflow)" >&2

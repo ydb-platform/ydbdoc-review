@@ -1,5 +1,7 @@
 # AWS ECR Public mirrors Docker Hub library images; more reliable from GitHub runners.
-FROM public.ecr.aws/docker/library/python:3.12-slim
+# Override at build time: --build-arg BASE_IMAGE=python:3.12-slim (Hub direct).
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim
+FROM ${BASE_IMAGE}
 
 ARG YDBDOC_GIT_SHA=dev
 ENV YDBDOC_GIT_SHA=${YDBDOC_GIT_SHA}
