@@ -40,6 +40,45 @@ def test_heuristic_delete_en():
     assert plan.action == "delete_en"
 
 
+def test_heuristic_pr_45949_added_ru_missing_en():
+    """New RU page with no EN mirror must translate, not skip."""
+    plan = plan_pair_heuristic(
+        _content(
+            ru_text="# Авторизация узлов\n",
+            en_text=None,
+            pair=_pair(
+                ru_path="ydb/docs/ru/core/devops/concepts/node-authorization.md",
+                en_path="ydb/docs/en/core/devops/concepts/node-authorization.md",
+                ru_changed=True,
+            ),
+        )
+    )
+    assert plan.action == "translate_to_en"
+
+
+def test_heuristic_pr_45949_deleted_ru_stale_en():
+    """Deleted RU with leftover EN must delete_en (verify planning used to skip)."""
+    plan = plan_pair_heuristic(
+        _content(
+            ru_text=None,
+            en_text="# Node authorization\n",
+            pair=_pair(
+                ru_path=(
+                    "ydb/docs/ru/core/devops/deployment-options/manual/"
+                    "node-authorization.md"
+                ),
+                en_path=(
+                    "ydb/docs/en/core/devops/deployment-options/manual/"
+                    "node-authorization.md"
+                ),
+                ru_changed=True,
+                ru_deleted=True,
+            ),
+        )
+    )
+    assert plan.action == "delete_en"
+
+
 def test_heuristic_both_changed_skip_bilingual():
     plan = plan_pair_heuristic(
         _content(

@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-08-24
-**Current focus:** §6.222 — remap LLM-invented EN link fragments via RU source (#40385 / #50976).
+**Last updated:** 2026-08-31
+**Current focus:** §6.223 — merged `doc_translate` must translate missing EN / delete stale EN (#45949).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-31 | **§6.223** — merged `doc_translate` uses real translation again; verify-only routing skipped missing EN / deleted RU (#45949 / #51696) |
 | 2026-08-24 | **§6.222** — remap LLM-invented ASCII link fragments via RU source path lookup (#40385 / #50976) |
 | 2026-08-24 | **§6.221** — remap RU autogen link fragments to EN explicit anchors; fix ``Имя=Значение`` notation; reject critic EN fixes that reintroduce Cyrillic (#40385 / #50976) |
 | 2026-08-24 | **§6.220** — critic malformed JSON: repair once on primary, then retry original prompt on configured fallback; retain fail-closed verdict (#50904) |

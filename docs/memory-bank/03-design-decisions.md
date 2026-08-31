@@ -5119,4 +5119,31 @@ EN link already matches the RU source fragment (§6.174 ``#ldap`` case).
 **Tests:** ``test_pr_40385_system_views_llm_invented_ascii_fragment``.
 
 
+### §6.223 Merged `doc_translate` must run real translation (#45949 / #51696, 2026-08-31)
+
+**Problem:** For merged source PRs, ``run_doc_translate`` routed markdown pairs
+through ``_run_verify_pairs`` (critic-only). ``PlanVerifyPairsStep`` skips any
+pair missing RU or EN text. On [#45949](https://github.com/ydb-platform/ydb/pull/45949)
+that meant:
+
+1. Added ``concepts/node-authorization.md`` (RU present, EN absent) → ``skip``
+2. Deleted ``deployment-options/manual/node-authorization.md`` (EN leftover) →
+   ``skip`` instead of ``delete_en``
+3. Modified files with both sides → ``critic_only`` + deterministic preserve,
+   no full translate
+
+Translation PR [#51696](https://github.com/ydb-platform/ydb/pull/51696) was
+created from TOC/redirect work only and failed completeness for the two EN
+mirrors. The verify-only path was a mistaken #50741 safeguard; EN preservation
+for historical drift already lives in differential translate + localized mirror
+delta with ``merge_commit^`` as RU base (§6.210).
+
+**Decision:** ``doc_translate`` always calls ``run_pr_translation``, merged or
+not. ``_run_verify_pairs`` remains for ``doc_verify`` only.
+
+**Tests:** ``test_run_doc_translate_merged_pr_uses_real_translation``,
+``test_heuristic_pr_45949_added_ru_missing_en``,
+``test_heuristic_pr_45949_deleted_ru_stale_en``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

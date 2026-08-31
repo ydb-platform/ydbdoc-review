@@ -569,27 +569,22 @@ def run_doc_translate(
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
             )
-            pair_runner = _run_verify_pairs if ctx.merged else run_pr_translation
-            runner_kwargs = {
-                "config": cfg,
-                "en_toc_reachable": en_toc_reachable,
-                "docs_text_reader": _docs_text_reader(repo_path, merge_base_with),
-                "docs_repo_path": repo_path,
-            }
-            if ctx.merged:
-                # Historical merged PRs must preserve the EN text at current
-                # main and translate only RU gaps from the immutable merge
-                # commit.  A full translate rewrites whole files from the old
-                # RU snapshot and reverts later EN work (PR #50741).
-                pr_result = pair_runner(contents, client, glossary, **runner_kwargs)
-            else:
-                pr_result = pair_runner(
-                    contents,
-                    client,
-                    glossary,
-                    use_analyze_llm=False,
-                    **runner_kwargs,
-                )
+            # Always run real translation for doc_translate, including merged
+            # source PRs. Routing merged PRs through critic-only verify planning
+            # skipped any pair missing RU or EN text — so new RU pages never got
+            # EN mirrors and deleted RU pages never removed EN (#45949 / #51696).
+            # Historical EN preservation stays in differential translate +
+            # localized mirror delta with merge_commit^ as RU base (§6.210).
+            pr_result = run_pr_translation(
+                contents,
+                client,
+                glossary,
+                use_analyze_llm=False,
+                config=cfg,
+                en_toc_reachable=en_toc_reachable,
+                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_repo_path=repo_path,
+            )
         else:
             pr_result = PRTranslationResult()
 
