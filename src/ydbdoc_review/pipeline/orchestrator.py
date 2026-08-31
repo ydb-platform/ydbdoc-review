@@ -23,6 +23,7 @@ def run_pr_translation(
     use_analyze_llm: bool = False,
     per_pr_cache: dict[str, str] | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    redirect_source_en_paths: frozenset[str] | None = None,
     docs_text_reader: DocsTextReader | None = None,
     docs_repo_path: str | None = None,
 ) -> PRTranslationResult:
@@ -37,6 +38,7 @@ def run_pr_translation(
         config=config,
         use_analyze_llm=use_analyze_llm,
         en_toc_reachable=en_toc_reachable,
+        redirect_source_en_paths=redirect_source_en_paths,
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
     )

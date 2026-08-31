@@ -5146,4 +5146,34 @@ not. ``_run_verify_pairs`` remains for ``doc_verify`` only.
 ``test_heuristic_pr_45949_deleted_ru_stale_en``.
 
 
+### §6.224 Skip EN at redirect tombstones (#45949 / #51703, 2026-08-31)
+
+**Problem:** After §6.223, translation PR
+[#51703](https://github.com/ydb-platform/ydb/pull/51703) for
+[#45949](https://github.com/ydb-platform/ydb/pull/45949) correctly created
+``concepts/node-authorization.md`` EN but also translated the RU href-only edit
+on ``maintenance/manual/dynamic-config.md``. That path is a Diplodoc redirect
+``from`` → ``configuration-v1/dynamic-config.md``; EN never existed there and
+the page is not in the EN toc graph. Creating EN failed critic with
+``orphan_toc_page``.
+
+**Decision:**
+
+1. Map ``redirects.yaml`` ``from`` public paths to repo locale md paths.
+2. ``PlanTranslatePairsStep`` rewrites ``translate_to_en`` / ``critic_only`` to
+   ``skip`` when the EN path is a redirect source and not EN-toc-reachable
+   (summary: redirect tombstone). Skipped pairs still satisfy completeness.
+3. ``apply_orphan_toc_page_checks`` accepts ``exempt_en_paths`` for the same set
+   (defense if an old translation branch already wrote the file).
+
+Live content stays at the redirect ``to`` target; href edits on RU tombstones
+are not mirrored as new EN orphans.
+
+**Tests:** ``test_run_pr_translation_skips_redirect_tombstone_en``,
+``test_apply_orphan_toc_page_checks_exempts_redirect_tombstone``,
+``test_redirect_source_repo_md_paths_maps_public_from``,
+``test_should_skip_redirect_tombstone_when_not_in_toc``,
+``test_completeness_gaps_redirect_tombstone_skip_satisfies``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

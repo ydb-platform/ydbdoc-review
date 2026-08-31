@@ -297,10 +297,13 @@ def apply_orphan_toc_page_checks(
     repo_path: str,
     docs_root: str = "ydb/docs",
     baseline_ref: str | None = None,
+    exempt_en_paths: frozenset[str] | set[str] | None = None,
 ) -> list[str]:
     """Attach blocking findings for translated EN pages missing from the toc graph.
 
     Returns orphan EN ``.md`` paths (for translate completeness gating, §6.140).
+    ``exempt_en_paths`` skips redirect tombstones (``redirects.yaml`` ``from``),
+    which must not be mirrored as EN pages (§6.224).
     """
     pending_toc_texts: dict[str, str] = {}
     extra_toc_paths: set[str] = set()
@@ -311,6 +314,7 @@ def apply_orphan_toc_page_checks(
         if nav.target_text is not None:
             pending_toc_texts[nav.en_path] = nav.target_text
 
+    exempt = {normalize_repo_path(p) for p in (exempt_en_paths or ())}
     en_md_paths: set[str] = set()
     runs_by_path: dict[str, list] = {}
     for run in result.pair_results:
@@ -320,6 +324,8 @@ def apply_orphan_toc_page_checks(
         if run.plan.target_lang != "en" or not run.plan.target_path.endswith(".md"):
             continue
         path = normalize_repo_path(run.plan.target_path)
+        if path in exempt:
+            continue
         en_md_paths.add(path)
         runs_by_path.setdefault(path, []).append(run)
 

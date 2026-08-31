@@ -188,6 +188,31 @@ def test_completeness_ok_when_existing_en_pair_is_skipped():
     assert completeness_gaps(changes, result) == []
 
 
+def test_completeness_gaps_redirect_tombstone_skip_satisfies():
+    """#45949 / §6.224: skipped redirect tombstone still closes the EN mirror gap."""
+    changes = [
+        ("ydb/docs/ru/core/maintenance/manual/dynamic-config.md", "modified"),
+    ]
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+        en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="skip",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+        summary="redirect tombstone — skip EN at redirects.yaml from path (live page is to)",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, skipped=True)],
+    )
+    assert completeness_gaps(changes, result) == []
+
+
 def test_completeness_ignores_misresolved_shared_include_mirror():
     changes = [
         (

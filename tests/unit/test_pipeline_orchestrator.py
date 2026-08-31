@@ -83,6 +83,39 @@ def test_run_pr_translation_skip_and_delete():
     by_action = {r.plan.action: r for r in result.pair_results}
     assert by_action["skip"].skipped
     assert by_action["delete_en"].deleted
+
+
+def test_run_pr_translation_skips_redirect_tombstone_en():
+    """#45949: do not create EN at redirects.yaml from path (orphan_toc_page)."""
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+        en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+        ru_changed=True,
+    )
+    content = PairContent(
+        pair=pair,
+        ru_text="# Динамическая конфигурация\n",
+        en_text=None,
+    )
+    client = _mock_client([])
+    tombstone = frozenset({pair.en_path})
+    result = run_pr_translation(
+        [content],
+        client,
+        load_glossary(),
+        use_analyze_llm=False,
+        redirect_source_en_paths=tombstone,
+        en_toc_reachable=frozenset(),
+    )
+    assert result.translated_count == 0
+    assert result.failed_count == 0
+    assert len(result.pair_results) == 1
+    run = result.pair_results[0]
+    assert run.skipped
+    assert run.plan.action == "skip"
+    assert "redirect tombstone" in run.plan.summary
+
+
 def test_run_pr_translation_missing_source():
     pair = DocPair(
         ru_path="ydb/docs/ru/missing.md",

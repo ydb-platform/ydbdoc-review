@@ -351,6 +351,44 @@ def test_apply_orphan_toc_page_checks_blocks_file_verdict(tmp_path: Path):
     assert any(m.startswith("orphan_toc_page:") for m in fr.heuristic_blocking)
 
 
+def test_apply_orphan_toc_page_checks_exempts_redirect_tombstone(tmp_path: Path):
+    """#45949 / §6.224: redirect from-paths are not orphan_toc_page blockers."""
+    repo = _init_repo(tmp_path)
+    _write(repo, "ydb/docs/en/core/toc_p.yaml", "items: []\n")
+    en_path = "ydb/docs/en/core/maintenance/manual/dynamic-config.md"
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+        en_path=en_path,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=en_path,
+        final_text="# Dynamic config\n",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, file_result=fr, target_text=fr.final_text)]
+    )
+    orphans = apply_orphan_toc_page_checks(
+        result,
+        repo_path=repo,
+        docs_root="ydb/docs",
+        exempt_en_paths={en_path},
+    )
+    assert orphans == []
+    assert fr.verdict == "ok"
+    assert fr.heuristic_blocking == []
+
+
 def test_find_locale_pages_missing_from_toc_en_and_ru(tmp_path: Path):
     """Repo-wide audit finds orphans in both locale trees."""
     repo = _init_repo(tmp_path)

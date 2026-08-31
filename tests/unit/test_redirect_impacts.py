@@ -1,10 +1,50 @@
 from pathlib import Path
 
+from ydbdoc_review.navigation.redirects import (
+    redirect_public_path_to_repo_md,
+    redirect_source_repo_md_paths,
+    should_skip_redirect_tombstone_en,
+)
 from ydbdoc_review.validation.redirect_impacts import (
     added_redirects,
     mirror_redirects_to_en,
     retarget_redirect_inbound_links,
 )
+
+
+def test_redirect_source_repo_md_paths_maps_public_from():
+    yaml_text = (
+        "ru:\n"
+        "  - from: /maintenance/manual/dynamic-config.md\n"
+        "    to: /devops/configuration-management/configuration-v1/dynamic-config.md\n"
+        "\n"
+        "en:\n"
+        "  - from: /maintenance/manual/dynamic-config.md\n"
+        "    to: /devops/configuration-management/configuration-v1/dynamic-config.md\n"
+    )
+    paths = redirect_source_repo_md_paths(yaml_text, locale="en")
+    assert paths == {
+        "ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+    }
+    assert redirect_public_path_to_repo_md(
+        "/maintenance/manual/dynamic-config.md", locale="ru"
+    ) == "ydb/docs/ru/core/maintenance/manual/dynamic-config.md"
+
+
+def test_should_skip_redirect_tombstone_when_not_in_toc():
+    en = "ydb/docs/en/core/maintenance/manual/dynamic-config.md"
+    sources = frozenset({en})
+    assert should_skip_redirect_tombstone_en(
+        en, redirect_source_en_paths=sources, en_toc_reachable=frozenset()
+    )
+    assert not should_skip_redirect_tombstone_en(
+        en, redirect_source_en_paths=sources, en_toc_reachable=frozenset({en})
+    )
+    assert not should_skip_redirect_tombstone_en(
+        "ydb/docs/en/core/other.md",
+        redirect_source_en_paths=sources,
+        en_toc_reachable=frozenset(),
+    )
 
 
 def test_added_redirects_and_inbound_retarget(tmp_path: Path):

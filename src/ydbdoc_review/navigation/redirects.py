@@ -37,6 +37,94 @@ def parse_redirect_entries(yaml_text: str) -> list[dict[str, str]]:
     return entries
 
 
+def iter_redirect_from_paths(redirects_yaml: str) -> set[str]:
+    """Collect Diplodoc redirect ``from`` public paths from full ``redirects.yaml``.
+
+    Production files use ``common`` / ``ru`` / ``en`` sections with indented
+    entries. Flat ``- from:`` lists (unit fixtures / merge payloads) are also
+    accepted. ``parse_redirect_entries`` only matches unindented ``^- from:``.
+    """
+    text = (redirects_yaml or "").strip()
+    if not text:
+        return set()
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception:
+        data = None
+    out: set[str] = set()
+    if isinstance(data, dict):
+        for key in ("common", "ru", "en"):
+            for row in data.get(key) or []:
+                if isinstance(row, dict) and row.get("from"):
+                    out.add(str(row["from"]).strip())
+    elif isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and row.get("from"):
+                out.add(str(row["from"]).strip())
+    if out:
+        return out
+    # Flat merge payloads / fixtures without a YAML mapping root.
+    return {e["from_path"] for e in parse_redirect_entries(text)}
+
+
+def redirect_public_path_to_repo_md(
+    public_path: str,
+    *,
+    locale: str,
+    docs_root: str = "ydb/docs",
+) -> str:
+    """Map Diplodoc ``/maintenance/manual/foo.md`` → repo locale md path."""
+    p = public_path.strip().replace("\\", "/")
+    if not p.startswith("/"):
+        p = "/" + p
+    root = docs_root.strip("/")
+    return f"{root}/{locale}/core{p}"
+
+
+def redirect_source_repo_md_paths(
+    redirects_yaml: str,
+    *,
+    locale: str,
+    docs_root: str = "ydb/docs",
+) -> frozenset[str]:
+    """Repo ``.md`` paths that appear as redirect ``from`` keys.
+
+    Diplodoc ``from`` values are locale-neutral public paths under ``core/``.
+    RU tombstones often remain on disk for content history while EN never had
+    a mirror; translating them creates ``orphan_toc_page`` EN files (#45949).
+    """
+    return frozenset(
+        redirect_public_path_to_repo_md(public, locale=locale, docs_root=docs_root)
+        for public in iter_redirect_from_paths(redirects_yaml)
+    )
+
+
+REDIRECT_TOMBSTONE_SKIP_SUMMARY = (
+    "redirect tombstone — skip EN at redirects.yaml from path (live page is to)"
+)
+
+
+def should_skip_redirect_tombstone_en(
+    en_path: str,
+    *,
+    redirect_source_en_paths: frozenset[str] | set[str],
+    en_toc_reachable: frozenset[str] | set[str] | None = None,
+) -> bool:
+    """True when EN at a redirect ``from`` path must not be created/updated.
+
+    If the path is still reachable from the EN toc graph, keep normal translate
+    (rare dual state). Otherwise the live page is the redirect ``to`` target.
+    """
+    path = en_path.replace("\\", "/")
+    if path not in redirect_source_en_paths:
+        return False
+    if en_toc_reachable is None:
+        return True
+    return path not in en_toc_reachable
+
+
 def redirect_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> set[str]:
     """``from`` keys whose ``to`` target must be synced for this PR.
 

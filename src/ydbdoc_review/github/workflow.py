@@ -49,6 +49,7 @@ from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.llm.client import create_llm_client
+from ydbdoc_review.navigation.redirects import redirect_source_repo_md_paths
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
     make_repo_scope_readers,
@@ -561,6 +562,19 @@ def run_doc_translate(
             len(pending_en_tocs),
         )
 
+        redirects_yaml = (
+            read_text_at_ref(repo_path, ru_ref, f"{docs_root}/redirects.yaml")
+            if ru_ref
+            else None
+        ) or (
+            read_text_at_ref(repo_path, merge_base_with, f"{docs_root}/redirects.yaml")
+            or read_text(repo_path, f"{docs_root}/redirects.yaml")
+            or ""
+        )
+        redirect_source_en = redirect_source_repo_md_paths(
+            redirects_yaml, locale="en", docs_root=docs_root
+        )
+
         if pairs:
             contents = load_pair_contents(
                 repo_path,
@@ -582,6 +596,7 @@ def run_doc_translate(
                 use_analyze_llm=False,
                 config=cfg,
                 en_toc_reachable=en_toc_reachable,
+                redirect_source_en_paths=redirect_source_en,
                 docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
                 docs_repo_path=repo_path,
             )
@@ -614,6 +629,7 @@ def run_doc_translate(
         repo_path=repo_path,
         docs_root=docs_root,
         baseline_ref=merge_base_with,
+        exempt_en_paths=redirect_source_en,
     )
     pr_result.completeness_gaps = completeness_gaps(
         changes, pr_result, docs_root=cfg.paths.docs_root
@@ -1117,10 +1133,18 @@ def run_doc_verify(
         }
         | {n.en_path for n in pr_result.navigation_results if n.target_text is not None},
     )
+    verify_redirects_yaml = (
+        read_text_at_ref(repo_path, merge_base_with, f"{cfg.paths.docs_root}/redirects.yaml")
+        or read_text(repo_path, f"{cfg.paths.docs_root}/redirects.yaml")
+        or ""
+    )
     apply_orphan_toc_page_checks(
         pr_result,
         repo_path=repo_path,
         docs_root=cfg.paths.docs_root,
+        exempt_en_paths=redirect_source_repo_md_paths(
+            verify_redirects_yaml, locale="en", docs_root=cfg.paths.docs_root
+        ),
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.

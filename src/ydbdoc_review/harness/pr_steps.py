@@ -10,9 +10,49 @@ from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.harness.context import HarnessContext
+from ydbdoc_review.navigation.redirects import (
+    REDIRECT_TOMBSTONE_SKIP_SUMMARY,
+    should_skip_redirect_tombstone_en,
+)
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, plan_pairs
 
 logger = logging.getLogger(__name__)
+
+
+def _skip_redirect_tombstone_plans(
+    plans: list[PairPlan],
+    *,
+    redirect_source_en_paths: frozenset[str] | None,
+    en_toc_reachable: frozenset[str] | None,
+) -> list[PairPlan]:
+    """Rewrite translate/critic plans that would write EN at redirect ``from`` paths."""
+    if not redirect_source_en_paths:
+        return plans
+    out: list[PairPlan] = []
+    for plan in plans:
+        if plan.action not in ("translate_to_en", "critic_only"):
+            out.append(plan)
+            continue
+        en_path = plan.pair.en_path
+        if not should_skip_redirect_tombstone_en(
+            en_path,
+            redirect_source_en_paths=redirect_source_en_paths,
+            en_toc_reachable=en_toc_reachable,
+        ):
+            out.append(plan)
+            continue
+        out.append(
+            PairPlan(
+                pair=plan.pair,
+                action="skip",
+                source_path=plan.pair.ru_path,
+                target_path=plan.pair.en_path,
+                source_lang="ru",
+                target_lang="en",
+                summary=REDIRECT_TOMBSTONE_SKIP_SUMMARY,
+            )
+        )
+    return out
 
 
 class PRHarnessStep(Protocol):
@@ -27,12 +67,16 @@ class PlanTranslatePairsStep:
     name = "plan_translate_pairs"
 
     def run(self, state: PRRunState, ctx: PRHarnessContext) -> None:
-        state.plans = plan_pairs(
-            state.contents,
-            ctx.client,
-            ctx.glossary,
-            use_analyze_llm=ctx.use_analyze_llm,
-            prompt_version=ctx.config.prompts.version,
+        state.plans = _skip_redirect_tombstone_plans(
+            plan_pairs(
+                state.contents,
+                ctx.client,
+                ctx.glossary,
+                use_analyze_llm=ctx.use_analyze_llm,
+                prompt_version=ctx.config.prompts.version,
+            ),
+            redirect_source_en_paths=ctx.redirect_source_en_paths,
+            en_toc_reachable=ctx.en_toc_reachable,
         )
 
 
