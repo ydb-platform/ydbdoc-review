@@ -8,6 +8,7 @@ the target file, and require ``#fragment`` to be declared on that page.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import PurePosixPath
 
@@ -25,6 +26,17 @@ from ydbdoc_review.validation.yfm_anchor import (
 )
 
 DocsTextReader = Callable[[str], str | None]
+
+# `{% include [label](path.md) %}` looks like a Markdown link to ``_MD_LINK``.
+_YFM_INCLUDE_DIRECTIVE = re.compile(
+    r"\{%\s*include\b.*?%\}",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _mask_yfm_include_directives(text: str) -> str:
+    """Replace YFM include directives with spaces (keep offsets stable)."""
+    return _YFM_INCLUDE_DIRECTIVE.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def list_declared_fragments(md: str) -> list[str]:
@@ -91,7 +103,8 @@ def check_en_page_link_targets(
         return []
     issues: list[str] = []
     page = en_page_path.replace("\\", "/")
-    for match in _MD_LINK.finditer(en_text):
+    scan_text = _mask_yfm_include_directives(en_text)
+    for match in _MD_LINK.finditer(scan_text):
         label, href = match.group(1), match.group(2).strip()
         if label.strip() == "{#T}":
             # Autotitle: still validate path/fragment.
@@ -107,7 +120,9 @@ def check_en_page_link_targets(
         target_md = en_text if target_path == page else read_text(target_path)
         line = _line_number(en_text, match.start())
         page_name = PurePosixPath(page).name
-        if not target_md:
+        # Empty file on disk is still a present target (tip often has empty
+        # EN include stubs). Only ``None`` means missing (§6.230 / #37673).
+        if target_md is None:
             issues.append(
                 "en_link_target: "
                 f"{page_name}:{line}\n"

@@ -5329,5 +5329,31 @@ image build before any translation ran.
 ``test_late_repair_does_not_rewrite_tip_href_against_stale_merge``,
 ``test_en_link_gate_uses_tip_targets_for_preserved_overlay``.
 
+### §6.230 YFM-include gate skip + timeout model fallback (#40385 / #37673, 2026-08-31)
+
+**Problem:**
+
+1. ``en_link_target`` treated ``{% include [overlay](_includes/….md) %}`` as
+   Markdown links. Empty tip EN include stubs (``e69de29``) were also treated
+   as missing files, so #37673 blocked on ``debug-logs.md`` after a full
+   29-file translate.
+2. ``_translate_batch_once`` advanced to the next model only on HTTP 429.
+   ``monitoring_config.md`` exhausted ``deepseek-v32`` on ``Request timed
+   out`` and never tried ``yandexgpt-5-pro``, so #40385 left tip EN without
+   ``{#tls}`` and the sibling ``tls.md`` gate failed on the new RU link.
+
+**Decision:**
+
+1. Mask YFM ``{% include … %}`` before ``_MD_LINK`` scanning; treat
+   ``target_md is None`` (not empty string) as missing file.
+2. On ``LLMRetryExhaustedError``, also fall through to the next translate
+   model when the error looks like timeout/connection.
+3. Raise default ``timeout_s`` 120 → 240; log ``en_link_target`` messages on
+   gate failure.
+
+**Tests:** ``test_en_link_target_ignores_yfm_include_directives``,
+``test_en_link_target_empty_file_is_present_not_missing``,
+``test_translate_batch_timeout_tries_fallback_model``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

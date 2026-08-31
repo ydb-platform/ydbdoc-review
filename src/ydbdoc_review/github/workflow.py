@@ -827,6 +827,16 @@ def run_doc_translate(
                 pr_number,
                 broken_links,
             )
+            for path in broken_links:
+                for run in pr_result.pair_results:
+                    if run.plan.target_path.replace("\\", "/") != path:
+                        continue
+                    fr = run.file_result
+                    if fr is None:
+                        continue
+                    for msg in fr.heuristic_blocking:
+                        if msg.startswith("en_link_target:"):
+                            logger.error("%s", msg)
             pr_result.completeness_gaps = list(
                 dict.fromkeys([*pr_result.completeness_gaps, *broken_links])
             )

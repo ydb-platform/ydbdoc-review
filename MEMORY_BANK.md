@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-08-31
-**Current focus:** §6.229 — tip+overlay final-tree reader + Docker Hub base fallback (#40385).
+**Current focus:** §6.230 — YFM-include gate skip + timeout model fallback (#40385 / #37673).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-08-31 | **§6.230** — skip YFM includes in `en_link_target`; empty file ≠ missing; timeout advances translate fallback (#40385 / #37673) |
 | 2026-08-31 | **§6.229** — late repair + link gate use tip+overlay tree; Docker Hub base fallback on ECR 429 (#40385) |
 | 2026-08-31 | **§6.228** — merged `doc_translate` loads tip EN (not merge-commit checkout); gate ignores ambient tip link debt (#40385) |
 | 2026-08-31 | **§6.227** — repair deterministic preserves; follow redirect from→to for RU/EN fragment mapping; prefer post-repair disk bytes and valid same-slot EN baseline hrefs (#40385 / #51711) |

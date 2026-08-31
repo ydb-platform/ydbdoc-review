@@ -38,18 +38,29 @@ def test_pr_51711_en_link_target_blocks_ru_translit_fragment():
     assert "available: enabling-the-node-authentication-and-authorization-mode" in msgs[0]
 
 
-def test_en_link_target_ok_when_fragment_matches():
-    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
-    target = "ydb/docs/en/core/devops/concepts/node-authorization.md"
-    href = (
-        "../../devops/concepts/node-authorization.md"
-        "#enabling-the-node-authentication-and-authorization-mode"
+def test_en_link_target_ignores_yfm_include_directives():
+    """§6.230 / #37673: `{% include [overlay](…md) %}` is not a Markdown link."""
+    page = "ydb/docs/en/core/recipes/ydb-sdk/debug-logs.md"
+    en = (
+        "Go:\n\n"
+        "{% list tabs %}\n\n"
+        "- Go\n\n"
+        "  {% include [overlay](_includes/debug-logs-go-appendix.md) %}\n\n"
+        "{% endlist %}\n"
     )
     files = {
-        target: "## Enabling the node authentication and authorization mode\n",
+        # Empty tip stub — still a present file.
+        "ydb/docs/en/core/recipes/ydb-sdk/_includes/debug-logs-go-appendix.md": "",
     }
-    en = f"See [nodes]({href}).\n"
     assert check_en_page_link_targets(page, en, read_text=files.get) == []
+
+
+def test_en_link_target_empty_file_is_present_not_missing():
+    page = "ydb/docs/en/core/a.md"
+    en = "See [stub](./b.md).\n"
+    files = {"ydb/docs/en/core/b.md": ""}
+    assert check_en_page_link_targets(page, en, read_text=files.get) == []
+    assert check_en_page_link_targets(page, en, read_text=lambda _p: None) != []
 
 
 def test_en_link_target_suppresses_ambient_baseline_debt():

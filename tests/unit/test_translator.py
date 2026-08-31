@@ -272,3 +272,28 @@ def test_translate_batch_rate_limit_tries_fallback_model():
     )
     assert out == {"s1": "Hello"}
     assert client.chat.call_count == 2
+
+
+def test_translate_batch_timeout_tries_fallback_model():
+    """§6.230 / #40385: monitoring_config timed out on deepseek-only chain."""
+    seg = _segment("s1", "Привет")
+    batch = Batch(index=0, segments=[seg])
+    good = _json_response([{"id": "s1", "text": "Hello"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+
+    exhausted = LLMRetryExhaustedError(
+        "All models exhausted (primary): Request timed out."
+    )
+
+    def chat_side_effect(*_args, **kwargs):
+        if kwargs.get("model") == "primary":
+            raise exhausted
+        return SimpleNamespace(content=good)
+
+    client.chat.side_effect = chat_side_effect
+    out = translate_batch(
+        client, batch, load_glossary(), file_path="docs/ru/x.md"
+    )
+    assert out == {"s1": "Hello"}
+    assert client.chat.call_count == 2

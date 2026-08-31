@@ -33,6 +33,7 @@
 - **§6.227:** preserve тоже repair; gate читает диск; redirect from→to для RU twin; baseline href fallback.
 - **§6.228:** gate не блокирует ambient tip-main link debt; только новые битые hrefs этого прогона.
 - **§6.229:** late repair + `en_link_target` читают **tip + written overlays**, не stale merge-commit worktree (иначе tip-only siblings «missing» и preserve ломается).
+- **§6.230:** `{% include [x](…md) %}` не Markdown-ссылка для gate; пустой файл на диске ≠ missing; timeout translate → следующий model в chain.
 - Пример #51711 / #40385: tip EN после merge translation PR; stale checkout не авторитетен.
 - Docker build: ECR Public → fallback `python:3.12-slim` (Hub) при 429 (§6.229).
 

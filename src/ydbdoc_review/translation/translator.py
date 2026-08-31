@@ -41,6 +41,12 @@ _MAX_BATCH_ATTEMPTS = 3
 _PLACEHOLDER_MISMATCH_HINT = "placeholder mismatch"
 
 
+def _is_timeout_exhausted(exc: BaseException) -> bool:
+    """True when the model chain entry failed on transport/timeout budget."""
+    msg = str(exc).lower()
+    return "timed out" in msg or "timeout" in msg or "connection" in msg
+
+
 def parse_translate_response(raw: str, *, expected_ids: set[str]) -> dict[str, str]:
     """Parse and validate translator JSON; return id → translated text."""
     parsed = parse_json_model(raw, TranslateBatchResponse)
@@ -232,9 +238,13 @@ def _translate_batch_once(
             )
         except LLMRetryExhaustedError as exc:
             last_infra_exc = exc
-            if model_idx + 1 < len(model_chain) and is_rate_limit_error(exc):
+            # Advance on rate-limit or transport timeout — same slug already
+            # burned its retry budget (§6.230 / #40385 monitoring_config).
+            if model_idx + 1 < len(model_chain) and (
+                is_rate_limit_error(exc) or _is_timeout_exhausted(exc)
+            ):
                 logger.warning(
-                    "Translate batch %s model %s rate-limited, trying fallback %s: %s",
+                    "Translate batch %s model %s exhausted, trying fallback %s: %s",
                     batch.index,
                     model,
                     model_chain[model_idx + 1],
