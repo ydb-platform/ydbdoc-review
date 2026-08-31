@@ -5167,7 +5167,10 @@ the page is not in the EN toc graph. Creating EN failed critic with
    (defense if an old translation branch already wrote the file).
 
 Live content stays at the redirect ``to`` target; href edits on RU tombstones
-are not mirrored as new EN orphans.
+are not mirrored as new EN orphans. Skip does **not** consult the translate-time
+``en_toc_reachable`` set: that set seeds pending pair targets
+(``seed_extra_md=True``), so a tombstone about to be created would look
+reachable and defeat the guard (seen on the first Eliza relaunch after §6.224).
 
 **Tests:** ``test_run_pr_translation_skips_redirect_tombstone_en``,
 ``test_apply_orphan_toc_page_checks_exempts_redirect_tombstone``,

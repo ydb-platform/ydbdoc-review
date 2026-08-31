@@ -114,15 +114,16 @@ def should_skip_redirect_tombstone_en(
 ) -> bool:
     """True when EN at a redirect ``from`` path must not be created/updated.
 
-    If the path is still reachable from the EN toc graph, keep normal translate
-    (rare dual state). Otherwise the live page is the redirect ``to`` target.
+    Live content is the redirect ``to`` target. Never write EN at ``from`` —
+    that is how #51703 produced ``orphan_toc_page`` for
+    ``maintenance/manual/dynamic-config.md``.
+
+    ``en_toc_reachable`` is ignored: the translate-time reachable set seeds
+    pending pair targets (``seed_extra_md=True``), so a tombstone about to be
+    created would look "reachable" and defeat the skip.
     """
-    path = en_path.replace("\\", "/")
-    if path not in redirect_source_en_paths:
-        return False
-    if en_toc_reachable is None:
-        return True
-    return path not in en_toc_reachable
+    del en_toc_reachable
+    return en_path.replace("\\", "/") in redirect_source_en_paths
 
 
 def redirect_translate_scope(ru_base_yaml: str, ru_pr_yaml: str) -> set[str]:

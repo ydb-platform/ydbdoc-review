@@ -26,7 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
-| 2026-08-31 | **§6.224** — skip EN at `redirects.yaml` from-paths not in EN toc; orphan check exempt (#45949 / #51703) |
+| 2026-08-31 | **§6.224** — skip EN at `redirects.yaml` from-paths (ignore pending-seeded toc reachability); orphan check exempt (#45949 / #51703) |
 | 2026-08-31 | **§6.223** — merged `doc_translate` uses real translation again; verify-only routing skipped missing EN / deleted RU (#45949 / #51696) |
 | 2026-08-24 | **§6.222** — remap LLM-invented ASCII link fragments via RU source path lookup (#40385 / #50976) |
 | 2026-08-24 | **§6.221** — remap RU autogen link fragments to EN explicit anchors; fix ``Имя=Значение`` notation; reject critic EN fixes that reintroduce Cyrillic (#40385 / #50976) |

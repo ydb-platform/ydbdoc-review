@@ -34,11 +34,12 @@ def test_redirect_source_repo_md_paths_maps_public_from():
 def test_should_skip_redirect_tombstone_when_not_in_toc():
     en = "ydb/docs/en/core/maintenance/manual/dynamic-config.md"
     sources = frozenset({en})
+    # Pending-seeded "reachable" sets must not defeat the skip (#51703).
+    assert should_skip_redirect_tombstone_en(
+        en, redirect_source_en_paths=sources, en_toc_reachable=frozenset({en})
+    )
     assert should_skip_redirect_tombstone_en(
         en, redirect_source_en_paths=sources, en_toc_reachable=frozenset()
-    )
-    assert not should_skip_redirect_tombstone_en(
-        en, redirect_source_en_paths=sources, en_toc_reachable=frozenset({en})
     )
     assert not should_skip_redirect_tombstone_en(
         "ydb/docs/en/core/other.md",
