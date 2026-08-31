@@ -941,6 +941,7 @@ def run_doc_verify(
     scope_plan = None
     expected_scope_pairs: list[DocPair] = []
     source_bilingual_skip: frozenset[str] = frozenset()
+    redirect_tombstone_en: frozenset[str] = frozenset()
     if source_changes:
         read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
         scope_plan = plan_translation_scope(
@@ -969,10 +970,18 @@ def run_doc_verify(
         source_bilingual_skip = frozenset(
             bilingual_en_mirrors(source_changes, docs_root=cfg.paths.docs_root)
         )
+        verify_redirects_yaml = (
+            read_text_at_ref(repo_path, merge_base_with, f"{cfg.paths.docs_root}/redirects.yaml")
+            or read_text(repo_path, f"{cfg.paths.docs_root}/redirects.yaml")
+            or ""
+        )
+        redirect_tombstone_en = redirect_source_repo_md_paths(
+            verify_redirects_yaml, locale="en", docs_root=cfg.paths.docs_root
+        )
         expected_scope_pairs = doc_pairs_from_plan(
             scope_plan,
             docs_root=cfg.paths.docs_root,
-            skip_en_paths=source_bilingual_skip,
+            skip_en_paths=source_bilingual_skip | redirect_tombstone_en,
         )
     job = DocJobResult(
         mode="doc_verify",
@@ -1013,7 +1022,9 @@ def run_doc_verify(
             expected_scope_pairs,
             nav_pairs,
             changes,
-            already_satisfied=source_bilingual_skip | frozenset(noop_satisfied),
+            already_satisfied=(
+                source_bilingual_skip | redirect_tombstone_en | frozenset(noop_satisfied)
+            ),
         )
         pairs, nav_pairs = filter_translation_pr_verify_scope(
             pairs,
@@ -1136,17 +1147,17 @@ def run_doc_verify(
         }
         | {n.en_path for n in pr_result.navigation_results if n.target_text is not None},
     )
-    verify_redirects_yaml = (
-        read_text_at_ref(repo_path, merge_base_with, f"{cfg.paths.docs_root}/redirects.yaml")
-        or read_text(repo_path, f"{cfg.paths.docs_root}/redirects.yaml")
-        or ""
-    )
     apply_orphan_toc_page_checks(
         pr_result,
         repo_path=repo_path,
         docs_root=cfg.paths.docs_root,
-        exempt_en_paths=redirect_source_repo_md_paths(
-            verify_redirects_yaml, locale="en", docs_root=cfg.paths.docs_root
+        exempt_en_paths=redirect_tombstone_en
+        or redirect_source_repo_md_paths(
+            read_text_at_ref(repo_path, merge_base_with, f"{cfg.paths.docs_root}/redirects.yaml")
+            or read_text(repo_path, f"{cfg.paths.docs_root}/redirects.yaml")
+            or "",
+            locale="en",
+            docs_root=cfg.paths.docs_root,
         ),
     )
     if not translation_pr:

@@ -5176,6 +5176,9 @@ reachable and defeat the guard (seen on the first Eliza relaunch after §6.224).
    ``allowed_paths``. Otherwise a historical EN tombstone still present on the
    source-PR tip is inbound-retargeted and copied onto the translation branch
    as a new orphan (second failure mode on #45949).
+4. On ``doc_verify`` of the translation PR, treat redirect tombstone EN paths as
+   ``already_satisfied`` / ``skip_en_paths`` for ``translation_pr_scope_gaps``
+   so intentional skip does not report «не переведён» (#51709).
 
 **Tests:** ``test_run_pr_translation_skips_redirect_tombstone_en``,
 ``test_apply_orphan_toc_page_checks_exempts_redirect_tombstone``,

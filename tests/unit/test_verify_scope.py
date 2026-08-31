@@ -108,6 +108,36 @@ def test_translation_pr_scope_gaps_ignore_bilingual_source_navigation():
     )
 
 
+def test_translation_pr_scope_gaps_redirect_tombstone_already_satisfied():
+    """#45949 / §6.224: skipped redirect from-path must not be a scope gap."""
+    expected_pairs = [
+        DocPair(
+            ru_path="ydb/docs/ru/core/devops/concepts/node-authorization.md",
+            en_path="ydb/docs/en/core/devops/concepts/node-authorization.md",
+            ru_changed=True,
+        ),
+        DocPair(
+            ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
+            en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
+            ru_changed=True,
+        ),
+    ]
+    translation_changes = [
+        ("ydb/docs/en/core/devops/concepts/node-authorization.md", "added"),
+    ]
+    tombstone = "ydb/docs/en/core/maintenance/manual/dynamic-config.md"
+    assert (
+        translation_pr_scope_gaps(
+            expected_pairs,
+            [],
+            translation_changes,
+            already_satisfied=frozenset({tombstone}),
+        )
+        == []
+    )
+    assert translation_pr_scope_gaps(expected_pairs, [], translation_changes) == [tombstone]
+
+
 def test_href_only_source_noop_satisfied_for_pr_50976():
     source_base = "[YDB Monitoring](../ydb-ui/ydb-monitoring.md)\n"
     source_head = "[YDB Monitoring](../embedded-ui/ydb-monitoring.md)\n"
