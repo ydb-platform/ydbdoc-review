@@ -1147,11 +1147,11 @@ def run_doc_verify(
     translation_scope_missing: list[str] = []
     if translation_pr:
         noop_satisfied: set[str] = set()
+        changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
         if source_pr is not None:
             source_pull = gh.get_pull(owner, repo, source_pr)
             source_base_sha = str(source_pull.get("base", {}).get("sha") or "")
             source_head_sha = str(source_pull.get("head", {}).get("sha") or "")
-            changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
             for pair in expected_scope_pairs:
                 if pair.en_path in changed_en_paths:
                     continue
@@ -1162,6 +1162,20 @@ def run_doc_verify(
                     read_text(repo_path, pair.en_path),
                 ):
                     noop_satisfied.add(pair.en_path)
+        # Tip-inherited EN (same as upstream main, not rewritten this run) already
+        # covers the source scope when RU/EN hrefs match (§6.231 / #51199
+        # feature-not-supported identical noop).
+        from ydbdoc_review.validation.href_parity import check_href_parity
+
+        for pair in expected_scope_pairs:
+            if pair.en_path in changed_en_paths or pair.en_path in noop_satisfied:
+                continue
+            en_tip = read_text(repo_path, pair.en_path)
+            ru_tip = read_text(repo_path, pair.ru_path)
+            if en_tip is None or ru_tip is None:
+                continue
+            if not check_href_parity(ru_tip, en_tip):
+                noop_satisfied.add(pair.en_path)
         translation_scope_missing = translation_pr_scope_gaps(
             expected_scope_pairs,
             nav_pairs,

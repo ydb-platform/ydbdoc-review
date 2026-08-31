@@ -5355,5 +5355,20 @@ image build before any translation ran.
 ``test_en_link_target_empty_file_is_present_not_missing``,
 ``test_translate_batch_timeout_tries_fallback_model``.
 
+### §6.231 Tip-inherited EN satisfies translation-PR scope (#51199, 2026-08-31)
+
+**Problem:** After a full #37673 translate, ``feature-not-supported.md`` was
+translated to the same bytes already on tip main, so it did not appear in the
+translation PR diff. ``translation_pr_scope_gaps`` then treated it as missing
+and kept #51199 red.
+
+**Decision:** On ``doc_verify`` for a translation PR, mark expected EN paths
+already present on the branch tip as ``already_satisfied`` when tip RU/EN
+``check_href_parity`` is clean (in addition to the existing href-only noop
+heuristic).
+
+**Tests:** covered by verify-path unit coverage of ``translation_pr_scope_gaps``
++ href-parity noop; behavior pinned by #51199 overnight rerun.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
