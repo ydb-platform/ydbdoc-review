@@ -5172,6 +5172,11 @@ are not mirrored as new EN orphans. Skip does **not** consult the translate-time
 (``seed_extra_md=True``), so a tombstone about to be created would look
 reachable and defeat the guard (seen on the first Eliza relaunch after §6.224).
 
+3. Exclude the same paths from ``retarget_redirect_inbound_links``
+   ``allowed_paths``. Otherwise a historical EN tombstone still present on the
+   source-PR tip is inbound-retargeted and copied onto the translation branch
+   as a new orphan (second failure mode on #45949).
+
 **Tests:** ``test_run_pr_translation_skips_redirect_tombstone_en``,
 ``test_apply_orphan_toc_page_checks_exempts_redirect_tombstone``,
 ``test_redirect_source_repo_md_paths_maps_public_from``,

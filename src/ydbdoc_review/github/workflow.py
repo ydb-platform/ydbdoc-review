@@ -670,12 +670,15 @@ def run_doc_translate(
                 read_text_at_ref(repo_path, ru_base_ref or merge_base_with, redirects_path) or ""
             )
             redirect_mappings = added_redirects(redirects_base, redirects_current)
+            # Never retarget/write EN at redirects.yaml ``from`` paths — those are
+            # tombstones. Source-branch leftovers + inbound retarget otherwise
+            # recreate orphan EN pages on the translation branch (#45949 / #51703).
             impact_paths = retarget_redirect_inbound_links(
                 repo_path,
                 redirect_mappings,
                 docs_root=cfg.paths.docs_root,
                 dry_run=dry_run,
-                allowed_paths=redirect_impact_scope,
+                allowed_paths=frozenset(redirect_impact_scope - redirect_source_en),
             )
             # Translation branches start from current upstream main. Never
             # write the historical source-merge copy of this global file:
