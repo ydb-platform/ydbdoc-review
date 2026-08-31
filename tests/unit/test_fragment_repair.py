@@ -101,6 +101,32 @@ def test_repair_keeps_valid_fragment():
     assert fixed == en_ok
 
 
+def test_pr_45949_client_cert_legacy_translit_fragment():
+    """§6.225: RU legacy translit fragment → EN Diplodoc auto-slug (#51711)."""
+    en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    en_bad = (
+        "when [registering dynamic nodes]("
+        f"../../devops/concepts/node-authorization.md#{frag}).\n"
+    )
+    files = {
+        "ydb/docs/en/core/devops/concepts/node-authorization.md": (
+            "## Enabling node authentication and authorization\n\nBody.\n"
+        ),
+        "ydb/docs/ru/core/devops/concepts/node-authorization.md": (
+            "## Включение режима аутентификации и авторизации узлов\n\nТело.\n"
+        ),
+    }
+    # No ru_source: inbound retarget / late disk pass must still remap.
+    fixed = repair_en_fragments(
+        en_bad,
+        en_page_path=en_page,
+        read_text=files.get,
+    )
+    assert "node-authorization.md#enabling-node-authentication-and-authorization)" in fixed
+    assert frag not in fixed
+
+
 def test_pr_40385_system_views_users_fragment():
     """§6.221: RU autogen slug in link → EN explicit ``{#users}``."""
     en_page = "ydb/docs/en/core/security/authentication.md"

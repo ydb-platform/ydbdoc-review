@@ -336,6 +336,46 @@ def _docs_text_reader(repo_path: str, merge_base_with: str):
     return _read
 
 
+def _repair_en_fragments_after_apply(
+    repo_path: str,
+    paths: list[str],
+    *,
+    dry_run: bool,
+) -> list[str]:
+    """Re-run fragment repair once all EN targets exist on disk (§6.225).
+
+    Pair-level ``repair_en_fragments`` can run before a newly translated EN
+    target page is written, leaving RU legacy translit fragments in place.
+    Inbound redirect retarget also skips links whose path already points at
+    the redirect ``to`` target. A final pass over written EN pages fixes both.
+    """
+    from ydbdoc_review.validation.fragment_repair import repair_en_fragments
+
+    def _read(path: str) -> str | None:
+        return read_text(repo_path, path)
+
+    repaired: list[str] = []
+    for rel in paths:
+        if not rel.endswith(".md") or "/docs/en/" not in rel:
+            continue
+        en_text = _read(rel)
+        if not en_text:
+            continue
+        ru_twin = rel.replace("/docs/en/", "/docs/ru/", 1)
+        fixed = repair_en_fragments(
+            en_text,
+            en_page_path=rel,
+            read_text=_read,
+            ru_source=_read(ru_twin),
+        )
+        if fixed == en_text:
+            continue
+        repaired.append(rel)
+        if not dry_run:
+            write_text(repo_path, rel, fixed)
+    return repaired
+
+
 def _run_verify_pairs(
     contents: list[PairContent],
     client: YandexLLMClient,
@@ -695,6 +735,24 @@ def run_doc_translate(
                     write_text(repo_path, redirects_path, mirrored_redirects)
             touched = TouchedPaths(
                 list(dict.fromkeys([*touched.written, *impact_paths])),
+                touched.deleted,
+            )
+
+        # After all EN targets and inbound retargets are on disk, remap any
+        # leftover RU translit / Cyrillic fragments (§6.225 / #45949).
+        late_repair = _repair_en_fragments_after_apply(
+            repo_path,
+            touched.written,
+            dry_run=dry_run,
+        )
+        if late_repair:
+            logger.info(
+                "Late EN fragment repair on %d path(s): %s",
+                len(late_repair),
+                late_repair,
+            )
+            touched = TouchedPaths(
+                list(dict.fromkeys([*touched.written, *late_repair])),
                 touched.deleted,
             )
 

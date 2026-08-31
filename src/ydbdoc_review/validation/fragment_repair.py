@@ -237,6 +237,27 @@ def _ru_fragment_for_same_target(
     return None
 
 
+def _frag_matches_ru_heading_slug(frag: str, ru_md: str) -> bool:
+    """True if ``frag`` is a RU Diplodoc auto-slug or legacy transliteration."""
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.validation.yfm_anchor import (
+        _heading_plain_text,
+        _iter_headings,
+        _legacy_transliterated_slug,
+        diplodoc_auto_slug,
+    )
+
+    decoded = unquote(frag)
+    for heading in _iter_headings(parse_markdown(ru_md).children):
+        ru_text = _heading_plain_text(heading)
+        ru_auto = diplodoc_auto_slug(ru_text)
+        legacy = _legacy_transliterated_slug(ru_text)
+        for slug in (ru_auto, legacy):
+            if slug and (decoded == slug or decoded.startswith(f"{slug}-")):
+                return True
+    return False
+
+
 def _try_remap_missing_fragment_via_ru_en(
     *,
     frag: str,
@@ -260,7 +281,13 @@ def _try_remap_missing_fragment_via_ru_en(
     candidates: list[str] = []
     if ru_frag:
         candidates.append(ru_frag)
-    if _CYRILLIC.search(unquote(frag)) and frag not in candidates:
+    # Cyrillic auto-slugs, LLM ASCII inventions (via ru_frag), and RU legacy
+    # transliterations preserved on EN (#45949 client_certificate → node-authorization).
+    if frag not in candidates and (
+        ru_frag is not None
+        or _CYRILLIC.search(unquote(frag))
+        or _frag_matches_ru_heading_slug(frag, ru_target)
+    ):
         candidates.append(frag)
     if not candidates:
         return None
@@ -288,6 +315,7 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
     from ydbdoc_review.validation.yfm_anchor import (
         _heading_plain_text,
         _iter_headings,
+        _legacy_transliterated_slug,
         build_heading_anchor_map,
         diplodoc_auto_slug,
     )
@@ -306,13 +334,23 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
     for src_h, tgt_h in zip(ru_heads, en_heads, strict=False):
         ru_text = _heading_plain_text(src_h)
         ru_auto = diplodoc_auto_slug(ru_text)
+        legacy = _legacy_transliterated_slug(ru_text)
         en_anchor = tgt_h.anchor
         en_auto = diplodoc_auto_slug(_heading_plain_text(tgt_h))
-        if ru_auto and (decoded == ru_auto or decoded.startswith(f"{ru_auto}-")):
+
+        def _en_id() -> str | None:
             if en_anchor and en_anchor.isascii():
                 return en_anchor
-            if en_auto:
-                return en_auto
+            return en_auto or None
+
+        if ru_auto and (decoded == ru_auto or decoded.startswith(f"{ru_auto}-")):
+            found = _en_id()
+            if found:
+                return found
+        if legacy and (decoded == legacy or decoded.startswith(f"{legacy}-")):
+            found = _en_id()
+            if found:
+                return found
         if src_h.anchor and (decoded == src_h.anchor or decoded.startswith(f"{src_h.anchor}-")):
             if en_anchor:
                 return en_anchor

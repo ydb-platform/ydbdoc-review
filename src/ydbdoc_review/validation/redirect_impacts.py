@@ -74,14 +74,15 @@ def retarget_redirect_inbound_links(
                     ru_target = root / "ru" / "core" / target_md.lstrip("/")
                     en_target = root / "en" / "core" / target_md.lstrip("/")
                     if ru_target.is_file() and en_target.is_file():
-                        from ydbdoc_review.parsing.markdown_parser import parse_markdown
-                        from ydbdoc_review.validation.yfm_anchor import build_heading_anchor_map
-
-                        anchor_map = build_heading_anchor_map(
-                            parse_markdown(ru_target.read_text(encoding="utf-8")),
-                            parse_markdown(en_target.read_text(encoding="utf-8")),
+                        from ydbdoc_review.validation.fragment_repair import (
+                            _remap_fragment_via_ru_en_pages,
                         )
-                        localized = anchor_map.get(unquote(fragment[1:]))
+
+                        localized = _remap_fragment_via_ru_en_pages(
+                            unquote(fragment[1:]),
+                            ru_target.read_text(encoding="utf-8"),
+                            en_target.read_text(encoding="utf-8"),
+                        )
                         if localized:
                             fragment = f"#{localized}"
                 return f"{match.group(1)}{new_href}{fragment}{match.group(4)}"

@@ -5188,4 +5188,37 @@ reachable and defeat the guard (seen on the first Eliza relaunch after §6.224).
 ``test_translation_pr_scope_gaps_redirect_tombstone_already_satisfied``.
 
 
+### §6.225 Remap RU legacy translit fragments after EN targets exist (#45949 / #51711, 2026-08-31)
+
+**Problem:** Translation PR [#51711](https://github.com/ydb-platform/ydb/pull/51711)
+for [#45949](https://github.com/ydb-platform/ydb/pull/45949) left
+``client_certificate_authorization.md`` linking to
+``node-authorization.md#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov``
+while the EN heading is ``## Enabling node authentication and authorization``
+(Diplodoc auto-slug ``#enabling-node-authentication-and-authorization``).
+
+Two gaps compounded:
+
+1. Pair-level ``repair_en_fragments`` only treated Cyrillic fragments (or a
+   looked-up RU source fragment) as remap candidates. A preserved RU *legacy
+   transliteration* is ASCII, so step 0 no-oped when ``ru_source`` was absent.
+2. Href-only / ``restore_md_link_hrefs`` can rewrite the path to the new EN
+   page **before** that page is written. Repair then sees a missing EN target.
+   Inbound redirect retarget only rewrites links still pointing at the redirect
+   ``from`` path, so an already-retargeted concepts path keeps the RU fragment.
+
+**Decision:**
+
+1. Treat RU Diplodoc auto-slugs **and** ``_legacy_transliterated_slug`` matches
+   as remap candidates even without ``ru_source`` (still skip bare ASCII
+   explicit ids such as ``#ldap`` without source evidence — §6.174).
+2. Zip fallback in ``_remap_fragment_via_ru_en_pages`` also matches legacy
+   translit; inbound retarget uses that helper.
+3. After ``_apply_results_to_disk`` (+ redirect inbound retarget), run
+   ``_repair_en_fragments_after_apply`` over written EN markdown so remaps see
+   all new EN targets on disk.
+
+**Tests:** ``test_pr_45949_client_cert_legacy_translit_fragment``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
