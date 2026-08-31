@@ -5221,4 +5221,30 @@ Two gaps compounded:
 **Tests:** ``test_pr_45949_client_cert_legacy_translit_fragment``.
 
 
+### §6.226 Post-apply EN link/fragment gate (§51711 quality hole, 2026-08-31)
+
+**Problem:** First [#51711](https://github.com/ydb-platform/ydb/pull/51711)
+``doc_verify`` was 🟢 while
+``client_certificate_authorization.md`` still linked to
+``#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov``. Pair-level
+``outbound_fragment`` already covers this case in unit tests, but href-only
+deterministic preserves return ``PairRunResult`` **without** running file
+heuristics, and sibling EN targets may not be on disk yet during pair order.
+Critic LLM does not substitute for a tree check.
+
+**Decision:** After disk apply (+ late fragment repair), run
+``apply_en_link_target_checks`` over written / verify-scoped EN ``.md`` pages:
+
+1. Collect relative Markdown ``[]()`` links.
+2. Resolve path; require the target file in the final tree.
+3. For ``#fragment``, require a declared EN anchor; report
+   ``missing fragment`` + ``available: …`` (Diplodoc auto-slugs / ``{#id}``).
+4. Blocking ``en_link_target:`` (independent of critic). On translate, broken
+   paths join ``completeness_gaps`` and block commit/push; on verify they block
+   the file verdict. ``doc_continue`` re-runs verify on the tip.
+
+**Tests:** ``test_pr_51711_en_link_target_blocks_ru_translit_fragment``,
+``test_apply_en_link_target_checks_blocks_href_only_pair``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

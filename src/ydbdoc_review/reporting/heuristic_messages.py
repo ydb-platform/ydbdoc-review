@@ -81,6 +81,8 @@ def heuristic_location_label(message: str) -> str:
         return "ссылки"
     if message.startswith("href_parity:") or message.startswith("inbound_fragment:"):
         return "ссылки"
+    if message.startswith("outbound_fragment:") or message.startswith("en_link_target:"):
+        return "ссылки"
     if message.startswith("anchor_parity:"):
         return "якоря"
     if message.startswith("include_parity:") or message.startswith("include_target:"):
@@ -320,6 +322,12 @@ def _humanize_heuristic_problem(message: str) -> str:
         return (
             f"Другая EN-страница ссылается на якорь, которого нет после перевода: "
             f"{detail}. Поправьте inbound-ссылку или верните якорь как в RU."
+        )
+    if message.startswith("outbound_fragment:") or message.startswith("en_link_target:"):
+        detail = message.split(":", 1)[1].strip()
+        return (
+            f"В EN битая внутренняя ссылка или якорь (детерминированная проверка): "
+            f"{detail}"
         )
 
     if message.startswith("include_parity:"):

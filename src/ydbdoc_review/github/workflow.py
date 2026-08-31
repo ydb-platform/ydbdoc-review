@@ -118,6 +118,7 @@ from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
     apply_toc_target_checks,
 )
+from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 
 logger = logging.getLogger(__name__)
 
@@ -756,6 +757,28 @@ def run_doc_translate(
                 touched.deleted,
             )
 
+        # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
+        broken_links = apply_en_link_target_checks(
+            pr_result,
+            repo_path=repo_path,
+            en_md_paths={
+                p
+                for p in touched.written
+                if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
+            },
+        )
+        if broken_links:
+            logger.error(
+                "Broken EN link targets after apply — treat as completeness gaps "
+                "for PR #%s: %s",
+                pr_number,
+                broken_links,
+            )
+            pr_result.completeness_gaps = list(
+                dict.fromkeys([*pr_result.completeness_gaps, *broken_links])
+            )
+            touched = TouchedPaths([], [])
+
     committed = pushed = False
     if touched and not dry_run and not no_commit:
         prepare_translation_branch_on_base(
@@ -1217,6 +1240,21 @@ def run_doc_verify(
             locale="en",
             docs_root=cfg.paths.docs_root,
         ),
+    )
+    apply_en_link_target_checks(
+        pr_result,
+        repo_path=repo_path,
+        en_md_paths={
+            r.plan.target_path
+            for r in pr_result.pair_results
+            if r.plan.target_lang == "en" and r.plan.target_path.endswith(".md")
+        }
+        | {
+            path.replace("\\", "/")
+            for path, _kind in changes
+            if path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
+            and path.endswith(".md")
+        },
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.

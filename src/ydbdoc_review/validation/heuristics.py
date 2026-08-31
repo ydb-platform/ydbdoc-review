@@ -457,6 +457,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "blocking"
     if message.startswith("inbound_fragment:"):
         return "blocking"
+    if message.startswith("outbound_fragment:") or message.startswith("en_link_target:"):
+        return "blocking"
     if message.startswith("unrestored_placeholder:"):
         return "blocking"
     if message.startswith("unrestored_yfmvar:"):
