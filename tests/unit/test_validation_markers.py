@@ -23,7 +23,12 @@ def test_placeholders_must_match_multiset():
     assert placeholders_match("⟦C1⟧ x", "⟦C1⟧ y")
     assert not placeholders_match("⟦C1⟧", "⟦C2⟧")
     # Reordering is legitimate translation behavior — multiset compare.
-    assert placeholders_match("⟦C1⟧ ⟦L1⟧", "⟦L1⟧ ⟦C1⟧")
+    assert placeholders_match("⟦C1⟧ ⟦C2⟧", "⟦C2⟧ ⟦C1⟧")
+    assert not placeholders_match("⟦L1⟧x⟦L1⟧", "⟦L1⟧x")
+    assert not placeholders_match(
+        "⟦L1⟧x⟦L1⟧ ⟦L2⟧y⟦L2⟧",
+        "⟦L1⟧x⟦L2⟧y⟦L2⟧⟦L1⟧",
+    )
 
 
 def test_placeholders_tolerate_legitimate_reorder():
@@ -59,10 +64,10 @@ def test_cli_tokens_inside_placeholder_ignored():
 
 
 def test_realign_placeholders_renumbers():
-    source = "See ⟦L1⟧ and ⟦C2⟧"
-    translated = "See ⟦L99⟧ and ⟦C1⟧"
+    source = "See ⟦H1⟧ and ⟦C2⟧"
+    translated = "See ⟦H99⟧ and ⟦C1⟧"
     fixed = realign_placeholders(source, translated)
-    assert fixed == "See ⟦L1⟧ and ⟦C2⟧"
+    assert fixed == "See ⟦H1⟧ and ⟦C2⟧"
     assert placeholders_match(source, fixed)
 
 

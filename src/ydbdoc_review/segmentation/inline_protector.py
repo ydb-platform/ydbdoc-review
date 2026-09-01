@@ -28,10 +28,12 @@ _BORING_HTML: frozenset[str] = frozenset(
 _PREFIX_MAP: dict[str, str] = {
     "code": "C",
     "html_inline": "H",
+    "link": "L",
     "yfm_variable": "V",
     "term_ref": "T",
 }
-# Links: anchor translated, href as ⟦U{n}⟧. Images: alt translated, src as ⟦S{n}⟧.
+# Links use paired ⟦L{n}⟧ boundaries around translatable labels while keeping
+# their wrapper, href, and title source-owned. Images keep translated alt text.
 
 
 def protect_inline(
@@ -72,8 +74,7 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
     out: list[str] = []
     for node in children:
         if isinstance(node, InlineLink):
-            inner = _protect_walk(node.children, state)
-            marker = state.next_placeholder("url")
+            marker = state.next_placeholder(node.kind)
             state.placeholders.append(
                 ProtectedInline(
                     placeholder=marker,
@@ -84,7 +85,8 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
                     ),
                 )
             )
-            out.append(f"[{inner}]({marker})")
+            inner = _protect_walk(node.children, state)
+            out.append(f"{marker}{inner}{marker}")
             continue
 
         if isinstance(node, InlineImage):

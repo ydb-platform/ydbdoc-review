@@ -25,18 +25,18 @@ def _segment_s0003():
 
 def test_repair_exposed_yfm_variable_and_link_atoms():
     seg = _segment_s0003()
-    # Typical LLM output: literals instead of placeholders.
+    # Typical LLM output: literals instead of non-link placeholders.
     translated = (
         "{{ ydb-short-name }} CLI can execute parameterized queries. "
         "To use parameters, declare them using "
-        "[the YQL `DECLARE` command](../../yql/reference/syntax/declare.md) "
+        "⟦L1⟧the YQL `DECLARE` command⟦L1⟧ "
         "in your query text."
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
     assert "⟦V1⟧" in fixed
     assert "⟦C1⟧" in fixed
-    assert "⟦U1⟧" in fixed
+    assert fixed.count("⟦L1⟧") == 2
     assert "{{ ydb-short-name }}" not in fixed
 
 
@@ -45,12 +45,12 @@ def test_repair_absolute_url_in_link():
     translated = (
         "⟦V1⟧ CLI can execute parameterized queries. "
         "To use parameters, declare them using "
-        "[the YQL `DECLARE` command](https://ydb.tech/docs/en/yql/reference/syntax/declare.md) "
+        "⟦L1⟧the YQL `DECLARE` command⟦L1⟧ "
         "in your query text."
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
-    assert "⟦U1⟧" in fixed
+    assert fixed.count("⟦L1⟧") == 2
 
 
 def test_repair_s0124_duplicate_code_atoms():
@@ -72,17 +72,7 @@ def test_repair_realigns_renumbered_placeholders():
     seg = _segment_s0003()
     translated = (
         "⟦V2⟧ CLI supports parameterized queries. "
-        "Parameters must be declared using [the YQL ⟦C3⟧ command](⟦U4⟧)."
-    )
-    fixed = repair_translation_placeholders(seg, translated)
-    assert placeholders_match(seg.text, fixed)
-
-
-def test_repair_legacy_whole_link_marker():
-    seg = _segment_s0003()
-    translated = (
-        "⟦V1⟧ CLI can execute parameterized queries. "
-        "To use parameters, you need to declare them using ⟦L1⟧ in your query text."
+        "Parameters must be declared using ⟦L1⟧the YQL ⟦C3⟧ command⟦L1⟧."
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
@@ -92,7 +82,7 @@ def test_repair_missing_leading_variable():
     seg = _segment_s0003()
     translated = (
         "YDB CLI can execute parameterized queries. "
-        "To use parameters, declare them using [the YQL DECLARE command](⟦U1⟧)."
+        "To use parameters, declare them using ⟦L1⟧the YQL DECLARE command⟦L1⟧."
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
@@ -102,7 +92,7 @@ def test_repair_wrong_marker_order():
     seg = _segment_s0003()
     translated = (
         "⟦C1⟧ ⟦V1⟧ CLI can execute parameterized queries. "
-        "To use parameters, declare them using [the YQL ⟦C2⟧ command](⟦U3⟧)."
+        "To use parameters, declare them using ⟦L1⟧the YQL command⟦L1⟧."
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
@@ -126,7 +116,7 @@ def test_repair_s0010_literals_with_link_variable():
         "This command supports passing parameters via command-line options, a file, "
         "or through `stdin`. When passing parameters via `stdin` or a file, "
         "multiple streaming executions are supported. For this, the following "
-        "parameters are provided in the [`{{ ydb-cli }}` sql](sql.md) command:"
+        "parameters are provided in the ⟦L1⟧`{{ ydb-cli }}` sql⟦L1⟧ command:"
     )
     fixed = repair_translation_placeholders(seg, translated)
     assert placeholders_match(seg.text, fixed)
@@ -145,12 +135,12 @@ def test_repair_swapped_variable_and_url_vscode_s0077():
     broken = (
         "Authentication by login and password. Specify the username in the "
         "**Username** field and the password in the **Password** field. "
-        "Used if [login and password authentication](⟦V1⟧) is enabled on the "
-        "[](../../security/authentication.md#static-credentials) server."
+        "Used if ⟦L1⟧login and password authentication⟦L1⟧ is enabled on the "
+        "⟦V1⟧ server."
     )
     fixed = repair_translation_placeholders(seg, broken)
     assert placeholders_match(seg.text, fixed)
-    assert "[login and password authentication](⟦U1⟧)" in fixed
+    assert "⟦L1⟧login and password authentication⟦L1⟧" in fixed
     assert "on the ⟦V1⟧ server" in fixed
 
 
@@ -169,9 +159,7 @@ def test_repair_s0124_all_literals():
     translated = seg.text
     for protected in seg.placeholders:
         node = protected.node
-        if _is_url_placeholder_template(node):
-            translated = translated.replace(protected.placeholder, node.href, 1)
-        else:
+        if not _is_url_placeholder_template(node):
             translated = translated.replace(
                 protected.placeholder, _render_inline_node(node), 1
             )

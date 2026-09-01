@@ -11,6 +11,7 @@ from ydbdoc_review.parsing.ast_types import (
     InlineVariable,
 )
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
+from ydbdoc_review.validation.homoglyphs import decode_percent_encoded_protect_markers
 from ydbdoc_review.validation.markers import (
     extract_placeholders,
     placeholders_match,
@@ -22,7 +23,6 @@ from ydbdoc_review.validation.yfm_anchor import split_heading_anchor_suffix
 # Markdown link destinations that are not already placeholders.
 _LINK_DEST_RE = re.compile(r"\]\((?!⟦)([^)]+)\)")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
-_LEGACY_LINK_RE = re.compile(r"⟦L\d+⟧")
 
 
 def _is_url_placeholder_template(node: InlineNode) -> bool:
@@ -42,17 +42,6 @@ def _url_placeholders(segment: Segment) -> list[ProtectedInline]:
 
 def _code_placeholders(segment: Segment) -> list[ProtectedInline]:
     return [p for p in segment.placeholders if isinstance(p.node, InlineCode)]
-
-
-def _repair_legacy_whole_link_marker(segment: Segment, text: str) -> str:
-    """Replace obsolete whole-link ``⟦L1⟧`` with the source link skeleton."""
-    if not _LEGACY_LINK_RE.search(text):
-        return text
-    src_link = _LINK_RE.search(segment.text)
-    if not src_link:
-        return text
-    replacement = f"[{src_link.group(1)}]({src_link.group(2)})"
-    return _LEGACY_LINK_RE.sub(replacement, text, count=1)
 
 
 def _prepend_missing_leading_variable(segment: Segment, text: str) -> str:
@@ -298,7 +287,7 @@ def _strip_hallucinated_url_links(segment: Segment, text: str) -> str:
 
 def _repair_core(segment: Segment, translated: str) -> str:
     """Single pass of structural fixes + atom restoration."""
-    text = _repair_legacy_whole_link_marker(segment, translated)
+    text = translated
     text = _strip_trailing_heading_anchor(segment, text)
     text = _strip_hallucinated_url_links(segment, text)
     text = _strip_stray_leading_variable(segment, text)
@@ -348,6 +337,7 @@ def repair_translation_placeholders(segment: Segment, translated: str) -> str:
     Runs before strict validation. If markers still diverge, strips placeholders
     to inline atoms and rebuilds markers from segment metadata (last resort).
     """
+    translated = decode_percent_encoded_protect_markers(translated)
     text = _repair_core(segment, translated)
     if _translation_placeholders_ok(segment, text):
         return text

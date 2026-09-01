@@ -37,8 +37,8 @@ def test_protect_link_yields_marker():
     doc = parse_markdown("See [docs](http://x) for details.\n")
     para = doc.children[0]
     text, placeholders = protect_inline(para.children)
-    assert text == "See [docs](⟦U1⟧) for details."
-    assert placeholders[0].placeholder == "⟦U1⟧"
+    assert text == "See ⟦L1⟧docs⟦L1⟧ for details."
+    assert placeholders[0].placeholder == "⟦L1⟧"
     assert placeholders[0].node.href == "http://x"
     assert placeholders[0].node.children == []
 
@@ -51,7 +51,7 @@ def test_protect_link_ru_url_roundtrip_reinsert():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    translated = "See [documentation](⟦U1⟧) here."
+    translated = "See ⟦L1⟧documentation⟦L1⟧ here."
     new_doc = reinsert_segments(doc, segments, {seg.id: translated})
     from ydbdoc_review.validation.link_locale import localize_links_in_document
 
@@ -77,7 +77,7 @@ def test_protect_multiple_mixed():
     text, placeholders = protect_inline(para.children)
     # Order: code, link, variable.
     assert "⟦C1⟧" in text
-    assert "⟦U1⟧" in text
+    assert "⟦L1⟧docs⟦L1⟧" in text
     assert "⟦V1⟧" in text
     assert len(placeholders) == 3
 
@@ -112,7 +112,16 @@ def test_restore_identity_roundtrip():
         doc = parse_markdown(sample)
         para = doc.children[0]
         text, placeholders = protect_inline(para.children)
-        restored = restore_inline_text(text, placeholders)
+        if any(p.placeholder.startswith("⟦L") for p in placeholders):
+            from ydbdoc_review.rendering.markdown_renderer import render_markdown
+            from ydbdoc_review.segmentation.reinsert import reinsert_segments
+
+            segments = extract_segments(doc)
+            restored = render_markdown(
+                reinsert_segments(doc, segments, {segments[0].id: segments[0].text})
+            ).rstrip("\n")
+        else:
+            restored = restore_inline_text(text, placeholders)
         # Round-trip through render: restored markdown text equals the
         # rendered version of the original paragraph's inline content.
         from ydbdoc_review.rendering.markdown_renderer import _render_inline

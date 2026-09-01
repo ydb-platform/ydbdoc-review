@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import unquote
 
 from ydbdoc_review.parsing.ast_types import (
@@ -68,11 +69,55 @@ def _build_inline_from_translation(
 
     # Normalize ``! [alt](src)`` before parse so image placeholders reinsert as images.
     text = fix_image_bang_spacing(text)
+    mapping = {p.placeholder: p.node for p in placeholders}
+    text, mapping = _collapse_link_boundaries(text, mapping)
     # Parse the text as inline markdown — placeholders ⟦K1⟧ will become InlineText.
     nodes = parse_inline_text(text)
     # Replace placeholder text nodes with the original protected nodes.
-    mapping = {p.placeholder: p.node for p in placeholders}
     return _substitute_placeholders(nodes, mapping)
+
+
+def _collapse_link_boundaries(
+    text: str, mapping: dict[str, InlineNode]
+) -> tuple[str, dict[str, InlineNode]]:
+    copied_mapping = dict(mapping)
+    link_entries = [
+        (key, node)
+        for key, node in mapping.items()
+        if key.startswith("⟦L") and key.endswith("⟧")
+        and isinstance(node, InlineLink)
+        and bool(node.href)
+        and not node.children
+    ]
+    link_entries.sort(key=lambda item: int(item[0][2:-1]))
+
+    for marker, template in link_entries:
+        if text.count(marker) != 2:
+            raise ReinsertError(f"invalid link boundaries for {marker}")
+        opening = text.find(marker)
+        closing = text.find(marker, opening + len(marker))
+        label_text = text[opening + len(marker) : closing]
+        if re.search(r"⟦L\d+⟧", label_text):
+            raise ReinsertError(f"invalid link boundaries for {marker}")
+
+        label_mapping = dict(mapping)
+        label_mapping.pop(marker, None)
+        label_nodes = _substitute_placeholders(
+            parse_inline_text(label_text), label_mapping
+        )
+        completed = template.model_copy(deep=True)
+        completed.children = label_nodes
+
+        index = 1
+        internal_key = f"⟦R{index}⟧"
+        while internal_key in text or internal_key in copied_mapping:
+            index += 1
+            internal_key = f"⟦R{index}⟧"
+        text = text[:opening] + internal_key + text[closing + len(marker) :]
+        copied_mapping.pop(marker, None)
+        copied_mapping[internal_key] = completed
+
+    return text, copied_mapping
 
 
 def _is_url_placeholder_template(node: InlineNode) -> bool:

@@ -27,6 +27,24 @@ def is_placeholder_only_text(text: str) -> bool:
     return remainder.strip() == ""
 
 
+def _link_boundary_sequence_valid(source: str, translated: str) -> bool:
+    source_links = [marker for marker in extract_placeholders(source) if marker[1] == "L"]
+    translated_links = [
+        marker for marker in extract_placeholders(translated) if marker[1] == "L"
+    ]
+    if not source_links and not translated_links:
+        return True
+    if translated_links != source_links:
+        return False
+    for marker in set(source_links):
+        if source_links.count(marker) != 2:
+            return False
+        first = source_links.index(marker)
+        if first + 1 >= len(source_links) or source_links[first + 1] != marker:
+            return False
+    return True
+
+
 def placeholders_match(source: str, translated: str) -> bool:
     """True when source and translated share the same placeholder multiset.
 
@@ -34,6 +52,8 @@ def placeholders_match(source: str, translated: str) -> bool:
     (e.g. RU "к таблице ⟦C1⟧ колонку ⟦C2⟧" → EN "column ⟦C2⟧ to ⟦C1⟧ table").
     Still catches lost, duplicated, or substituted blocks via count parity.
     """
+    if not _link_boundary_sequence_valid(source, translated):
+        return False
     return sorted(extract_placeholders(source)) == sorted(extract_placeholders(translated))
 
 
