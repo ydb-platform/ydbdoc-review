@@ -50,13 +50,19 @@ def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
 
+def _git_output(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
 def _repo(tmp_path: Path, *, commit_merge: bool = False) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test")
-    _put(repo, AUTH_RU, "# Authentication\n")
+    _put(repo, AUTH_RU, f"# Authentication\n\n[TLS one]({HREF})\n[TLS two]({HREF})\n")
     _put(repo, AUTH_EN, "# Authentication\n")
     include = "{% include [connect](_includes/connect.md) %}\n"
     for locale in ("ru", "en"):
@@ -84,7 +90,12 @@ def _repo(tmp_path: Path, *, commit_merge: bool = False) -> Path:
             _put(repo, path, f"# {Path(path).stem}\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "baseline")
-    _put(repo, AUTH_RU, f"# Authentication\n\n[TLS]({HREF})\n")
+    _put(
+        repo,
+        AUTH_RU,
+        f"# Authentication\n\nUpdated surrounding content.\n\n"
+        f"[TLS one]({HREF})\n[TLS two]({HREF})\n",
+    )
     for path, _kind in API_CHANGES:
         if path != AUTH_RU:
             _put(repo, path, f"# {Path(path).stem}\n\nUpdated.\n")
@@ -153,6 +164,13 @@ def test_pr_40385_queued_connect_include_translates_then_declares_tls(tmp_path: 
 
 def test_pr_40385_merged_five_api_paths_load_six_pairs_before_translation(tmp_path: Path):
     repo = _repo(tmp_path, commit_merge=True)
+    merge_sha = _git_output(repo, "rev-parse", "HEAD")
+    parent_sha = _git_output(repo, "rev-parse", "HEAD^")
+    _put(repo, AUTH_EN, "# Authentication\n\nCurrent upstream-tip EN.\n")
+    _git(repo, "add", AUTH_EN)
+    _git(repo, "commit", "-qm", "distinct upstream main tip")
+    upstream_main_ref = _git_output(repo, "rev-parse", "HEAD")
+    assert len({merge_sha, parent_sha, upstream_main_ref}) == 3
     ctx = PullRequestContext(
         owner="ydb-platform", repo="ydb", number=40385, title="docs",
         head_ref="docs/source", head_sha="source-head",
@@ -165,23 +183,29 @@ def test_pr_40385_merged_five_api_paths_load_six_pairs_before_translation(tmp_pa
     assert changes == API_CHANGES
     assert noisy_git_changes[0] not in changes
 
-    read_ru, read_en, read_ru_base = make_repo_scope_readers(
-        str(repo), "HEAD", ru_content_ref="HEAD", ru_base_ref="HEAD^",
+    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
+        str(repo), upstream_main_ref, ru_content_ref=merge_sha, ru_base_ref=f"{merge_sha}^",
     )
+    assert (read_ru(AUTH_RU) or "").count(HREF) == 2
+    assert (read_ru_base(AUTH_RU) or "").count(HREF) == 2
     plan = plan_translation_scope(
-        changes, read_ru=read_ru, read_en_base=read_en, read_ru_base=read_ru_base,
+        changes, read_ru=read_ru, read_en_base=read_en_base, read_ru_base=read_ru_base,
     )
-    assert len(plan.doc_ru_paths) == 6
-    assert len(plan.doc_from_diff) == 5
-    assert len(plan.doc_from_main) == 1
-    assert len(plan.nav_ru_paths) == 0
+    expected_diff = frozenset(path for path, _kind in API_CHANGES)
+    assert plan.doc_ru_paths == expected_diff | {OWNER_RU}
+    assert plan.doc_from_diff == expected_diff
     assert plan.doc_from_main == frozenset({OWNER_RU})
+    assert plan.nav_ru_paths == frozenset()
+    assert plan.nav_from_diff == frozenset()
+    assert plan.nav_from_main == frozenset()
 
     pairs = doc_pairs_from_plan(plan)
+    assert len(pairs) == 6
     contents = load_pair_contents(
-        str(repo), pairs, merge_base_with="HEAD",
-        ru_content_ref="HEAD", ru_base_ref="HEAD^",
+        str(repo), pairs, merge_base_with=upstream_main_ref,
+        ru_content_ref=merge_sha, ru_base_ref=f"{merge_sha}^",
     )
+    assert len(contents) == 6
     owner_content = next(content for content in contents if content.pair.ru_path == OWNER_RU)
     assert owner_content.pair.en_path == OWNER_EN
     assert "{#tls}" in (owner_content.ru_text or "")

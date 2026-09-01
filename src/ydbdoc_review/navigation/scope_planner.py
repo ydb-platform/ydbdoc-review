@@ -7,7 +7,6 @@ markdown + navigation YAML files that ``doc_translate`` must produce.
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -92,28 +91,18 @@ def _ru_include_md_targets(ru_md_path: str, ru_text: str, *, docs_root: str) -> 
     return targets
 
 
-def _new_internal_ascii_fragment_hrefs(ru_text: str, ru_base_text: str | None) -> list[str]:
-    """New exact internal ``.md#ASCII`` href occurrences, in source order."""
+def _internal_ascii_fragment_hrefs(ru_text: str) -> set[str]:
+    """Current exact internal ``.md#ASCII`` hrefs."""
     from ydbdoc_review.validation.href_parity import _iter_md_links
 
-    def collect(text: str) -> list[str]:
-        out: list[str] = []
-        for _, href, _, _ in _iter_md_links(text or ""):
-            if "#" not in href:
-                continue
-            path, frag = href.rsplit("#", 1)
-            if path.endswith(".md") and frag and frag.isascii():
-                out.append(href)
-        return out
-
-    remaining = Counter(collect(ru_base_text or ""))
-    added: list[str] = []
-    for href in collect(ru_text):
-        if remaining[href]:
-            remaining[href] -= 1
-        else:
-            added.append(href)
-    return added
+    hrefs: set[str] = set()
+    for _, href, _, _ in _iter_md_links(ru_text or ""):
+        if "#" not in href:
+            continue
+        path, frag = href.rsplit("#", 1)
+        if path.endswith(".md") and frag and frag.isascii():
+            hrefs.add(href)
+    return hrefs
 
 
 def _exact_ascii_fragment_owner_dependency(
@@ -569,20 +558,19 @@ def plan_translation_scope(
                 seen_close.add(target)
                 queue.append(target)
 
-    # Exact, non-recursive closure for new fragment hrefs introduced by diff pages.
+    # Exact, non-recursive closure for fragment hrefs on source-diff pages.
     fragment_owners: set[str] = set()
-    if read_ru_base is not None:
-        for ru_md in sorted(diff_ru_md):
-            ru_text = read_ru(ru_md)
-            if ru_text is None:
-                continue
-            for href in _new_internal_ascii_fragment_hrefs(ru_text, read_ru_base(ru_md)):
-                owner = _exact_ascii_fragment_owner_dependency(
-                    ru_md, href, read_ru=read_ru, read_en_base=read_en_base, docs_root=docs_root
-                )
-                if owner:
-                    fragment_owners.add(owner)
-                    doc_ru.add(owner)
+    for ru_md in sorted(diff_ru_md):
+        ru_text = read_ru(ru_md)
+        if ru_text is None:
+            continue
+        for href in sorted(_internal_ascii_fragment_hrefs(ru_text)):
+            owner = _exact_ascii_fragment_owner_dependency(
+                ru_md, href, read_ru=read_ru, read_en_base=read_en_base, docs_root=docs_root
+            )
+            if owner:
+                fragment_owners.add(owner)
+                doc_ru.add(owner)
     # Feed owners only through the existing locale-include closure.
     queue = sorted(fragment_owners)
     while queue:

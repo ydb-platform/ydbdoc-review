@@ -152,14 +152,28 @@ def test_pr_40385_new_tls_href_queues_effective_ru_include_owner():
     assert wrapper not in plan.doc_ru_paths
 
 
-def test_existing_ascii_fragment_href_does_not_expand_scope():
+def test_existing_ascii_fragment_href_on_unchanged_page_does_not_expand_scope():
     auth = "ydb/docs/ru/core/security/authentication.md"
+    changed = "ydb/docs/ru/core/security/index.md"
+    wrapper = "ydb/docs/ru/core/reference/ydb-cli/connect.md"
+    owner = "ydb/docs/ru/core/reference/ydb-cli/_includes/connect.md"
     text = "[TLS](../reference/ydb-cli/connect.md#tls)\n"
+    files = {
+        auth: text,
+        changed: "# Security\n",
+        wrapper: "{% include [x](_includes/connect.md) %}\n",
+        owner: "## TLS {#tls}\n",
+    }
+    en = {
+        wrapper.replace("/ru/", "/en/"): "{% include [x](_includes/connect.md) %}\n",
+        owner.replace("/ru/", "/en/"): "## TLS\n",
+    }
     plan = plan_translation_scope(
-        [(auth, "modified")], read_ru=lambda p: text if p == auth else None,
-        read_en_base=lambda p: None, read_ru_base=lambda p: text if p == auth else None,
+        [(changed, "modified")], read_ru=files.get, read_en_base=en.get,
+        read_ru_base=files.get,
     )
-    assert plan.doc_ru_paths == frozenset({auth})
+    assert plan.doc_ru_paths == frozenset({changed})
+    assert owner not in plan.doc_ru_paths
 
 
 def test_ambiguous_or_nested_fragment_owner_does_not_expand_scope():
