@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-01
-**Current focus:** §6.237 — href-parity verify EN baseline + grandfather extra rebuild (#51761).
+**Current focus:** §6.237–238 — href-parity verify baseline + human-readable critic failures (#51761 / #51199).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-01 | **§6.238** — human-readable RU critic failure/refusal messages in QA reports (#51199) |
 | 2026-09-01 | **§6.237** — href-parity verify uses merge-base EN baseline; rebuild extras after grandfather (#51761) |
 | 2026-09-01 | **§6.236** — href-parity accepts RU translit vs declared EN slug when `fragment_repair` maps the pair (#51761) |
 | 2026-09-01 | **§6.235** — YandexGPT safety refusal → heuristics-only verify, not `critic_execution_failed` (#51199) |

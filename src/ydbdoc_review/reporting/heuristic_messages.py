@@ -46,6 +46,11 @@ _LINK_LOCALE_CYRILLIC_PATH = re.compile(
     r"^link_locale: Cyrillic path on EN-locale URL: (https?://\S+)$"
 )
 _MD_LINK_PARITY = re.compile(r"^md_link_parity: EN missing RU links: (.+)$")
+_CRITIC_RAW_PREVIEW = re.compile(r"\| raw_preview=(.+)$", re.DOTALL)
+_CRITIC_EXECUTION_FAILED = re.compile(
+    r"^Critic execution failed: (.+?)(?:\s*\| raw_preview=|$)", re.DOTALL
+)
+_CRITIC_MODEL_REFUSAL_PREVIEW = re.compile(r"Preview:\s*(.+)$", re.DOTALL)
 _NAV_KIND = re.compile(
     r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|"
     r"inconsistent_indent|missing_toc_target|orphan_toc_page|toc_structure_parity|"
@@ -136,6 +141,72 @@ def _wikipedia_manual_suggestion(href: str, *, line_hint: str = "") -> str:
     if line_hint:
         return f"{base} {line_hint}"
     return base
+
+
+def _split_critic_comment(comment: str) -> tuple[str, str | None]:
+    """Return ``(reason, raw_preview)`` from a stored critic issue comment."""
+    text = (comment or "").strip()
+    preview_match = _CRITIC_RAW_PREVIEW.search(text)
+    preview = preview_match.group(1).strip() if preview_match else None
+    if preview:
+        if preview.startswith("'") and preview.endswith("'"):
+            preview = preview[1:-1].replace("\\'", "'")
+        elif preview.startswith('"') and preview.endswith('"'):
+            preview = preview[1:-1]
+        preview = preview[:200]
+    reason_match = _CRITIC_EXECUTION_FAILED.match(text)
+    reason = reason_match.group(1).strip() if reason_match else text
+    return reason, preview
+
+
+def format_critic_reviewer_detail(*, category: str, comment: str) -> HeuristicReviewerDetail:
+    """Turn critic issue codes into bilingual reviewer-facing text (§6.238)."""
+    if category == "critic_model_refusal":
+        preview_match = _CRITIC_MODEL_REFUSAL_PREVIEW.search(comment or "")
+        preview = preview_match.group(1).strip()[:200] if preview_match else None
+        problem = (
+            "Модель отказала проверять файл (safety / content policy); "
+            "перевод не оценён LLM-критиком — ориентируйтесь на эвристики."
+        )
+        if preview:
+            problem = f"{problem} Фрагмент ответа модели: «{preview}»."
+        return HeuristicReviewerDetail(
+            problem=problem,
+            suggestion=(
+                "Если эвристики 🟢, merge допустим без critic pass. "
+                "Иначе — doc_continue с уточнением или ручная правка EN."
+            ),
+        )
+
+    if category == "critic_execution_failed":
+        reason, preview = _split_critic_comment(comment)
+        reason_lower = reason.casefold()
+        if "empty" in reason_lower:
+            cause = (
+                "Критик не вернул JSON: модель прислала пустой ответ "
+                "(часто на больших батчах или при таймауте)."
+            )
+        elif "invalid json" in reason_lower or "json schema" in reason_lower:
+            cause = (
+                "Критик не вернул JSON: ответ модели не парсится как JSON "
+                "(prose, Markdown или обрезанный вывод вместо схемы critic/verify)."
+            )
+        else:
+            cause = f"Критик не выполнился: {reason}."
+        problem = (
+            f"{cause} Перевод не оценён LLM-критиком — ориентируйтесь на эвристики."
+        )
+        if preview:
+            problem = f"{problem} Фрагмент ответа модели: «{preview}»."
+        return HeuristicReviewerDetail(
+            problem=problem,
+            suggestion=(
+                "Повторите doc_verify или doc_continue; для больших страниц "
+                "уменьшите batch_chars / разбейте PR. Промпты в отчёт не выводятся."
+            ),
+        )
+
+    return HeuristicReviewerDetail(problem=comment or category.replace("_", " "))
 
 
 def format_heuristic_reviewer_detail(message: str) -> HeuristicReviewerDetail:
@@ -377,6 +448,12 @@ def _humanize_heuristic_problem(message: str) -> str:
             return (
                 f"В EN toc дублируются пункты (href/include): {detail}"
             )
+
+    if message.startswith("critic_model_refusal:"):
+        return (
+            "Модель отказала проверять файл (safety); перевод не оценён критиком — "
+            "смотрите эвристики."
+        )
 
     if message.startswith("ru_source"):
         return message.replace("ru_source", "Исходник RU", 1)

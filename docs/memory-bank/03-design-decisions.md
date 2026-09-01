@@ -5476,4 +5476,24 @@ remained.
 **Tests:** ``test_pr_51761_href_parity_survives_tip_en_baseline_grandfather``.
 
 
+### §6.238 Human-readable critic failure messages (#51199 / #51761, 2026-09-01)
+
+**Problem:** QA reports showed ``(critic execution failed) Critic execution failed:
+Invalid JSON in LLM response: Expecting value: line 1 column 1 (char 0)`` —
+reviewers could not tell refusal vs empty JSON vs parse error or what to do.
+§6.235 fixed refusal routing but old reports and ``critic_execution_failed`` still
+used raw English exception text in ``builder._format_critic_item``.
+
+**Decision:**
+
+1. ``format_critic_reviewer_detail`` in ``heuristic_messages`` — bilingual RU
+   problem + suggestion for ``critic_model_refusal`` and ``critic_execution_failed``.
+2. ``_fallback_critic_response`` stores a safe ``raw_preview`` (≤200 chars, no prompts).
+3. ``builder._format_critic_item`` uses the humanizer for those categories.
+4. ``critic_model_refusal`` finalize warning is ``warnings``, not blocking.
+
+**Tests:** ``test_format_critic_execution_failed_invalid_json``,
+``test_format_critic_model_refusal``, ``test_humanize_critic_model_refusal_finalize_warning``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

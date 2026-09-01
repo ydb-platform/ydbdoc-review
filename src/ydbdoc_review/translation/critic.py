@@ -102,8 +102,12 @@ def merge_critic_responses(responses: list[CriticResponse]) -> CriticResponse:
     return CriticResponse(verdict=verdict, issues=issues)
 
 
-def _fallback_critic_response(*, reason: str) -> CriticResponse:
+def _fallback_critic_response(*, reason: str, preview: str = "") -> CriticResponse:
     """Fail closed when critic JSON cannot be parsed after retries."""
+    comment = f"Critic execution failed: {reason}"
+    safe = (preview or "").replace("\n", " ").strip()[:200]
+    if safe:
+        comment = f"{comment} | raw_preview={safe!r}"
     logger.error("Critic failed (%s); blocking verification", reason)
     return CriticResponse(
         verdict="blocked",
@@ -111,7 +115,7 @@ def _fallback_critic_response(*, reason: str) -> CriticResponse:
             CriticIssueOut(
                 severity="blocked",
                 category="critic_execution_failed",
-                comment=f"Critic execution failed: {reason}",
+                comment=comment,
             )
         ],
     )
@@ -119,9 +123,14 @@ def _fallback_critic_response(*, reason: str) -> CriticResponse:
 
 def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
     """Skip LLM critic for this file; heuristics-only verify (§6.235)."""
+    safe = (preview or "").replace("\n", " ").strip()[:200]
     logger.warning(
         "Critic model refusal; heuristics-only verify (preview=%r)",
-        preview[:120],
+        safe[:120],
+    )
+    comment = (
+        "Model refused critic review; file verified with heuristics only. "
+        f"Preview: {safe[:160]}"
     )
     return CriticResponse(
         verdict="ok",
@@ -129,10 +138,7 @@ def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
             CriticIssueOut(
                 severity="warning",
                 category="critic_model_refusal",
-                comment=(
-                    "Model refused critic review; file verified with heuristics only. "
-                    f"Preview: {preview[:160]}"
-                ),
+                comment=comment,
             )
         ],
     )
@@ -150,6 +156,7 @@ def _fetch_critic_response(
     original_messages = list(messages)
     retry_messages = original_messages
     model_chain = client.model_chain_for_role("critic")
+    last_content = ""
     for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
         content = ""
         # First retry asks the primary model to repair its malformed response.
@@ -166,6 +173,7 @@ def _fetch_critic_response(
                 max_tokens=max_tokens,
             )
             content = (result.content or "").strip()
+            last_content = content
             if not content:
                 raise LLMParseError("Empty LLM response")
             if is_model_refusal_text(content):
@@ -201,7 +209,10 @@ def _fetch_critic_response(
                         ),
                     },
                 ]
-    return _fallback_critic_response(reason=str(last_exc or "unknown parse error"))
+    return _fallback_critic_response(
+        reason=str(last_exc or "unknown parse error"),
+        preview=last_content,
+    )
 
 
 def parse_critic_response(raw: str) -> CriticResponse:

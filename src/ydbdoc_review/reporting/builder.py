@@ -16,6 +16,7 @@ from ydbdoc_review.reporting.heuristic_context import (
 )
 from ydbdoc_review.reporting.heuristic_messages import (
     HeuristicReviewerDetail,
+    format_critic_reviewer_detail,
     format_heuristic_reviewer_detail,
     heuristic_location_label,
     humanize_heuristic,
@@ -347,8 +348,17 @@ def _format_critic_item(
         )
     else:
         location = _location_label(issue, segment_locations)
-    category = issue.category.replace("_", " ")
-    problem = f"({category}) {issue.comment}"
+    critic_detail = format_critic_reviewer_detail(
+        category=issue.category,
+        comment=issue.comment or "",
+    )
+    if issue.category in {"critic_execution_failed", "critic_model_refusal"}:
+        problem = critic_detail.problem
+        suggestion = critic_detail.suggestion
+    else:
+        category = issue.category.replace("_", " ")
+        problem = f"({category}) {issue.comment}"
+        suggestion = issue.suggested_text
     source_excerpt = (
         segment_source_excerpts.get(issue.segment_id) if issue.segment_id else None
     )
@@ -364,7 +374,7 @@ def _format_critic_item(
         target_excerpt=target_excerpt,
         source_lang=source_lang,
         target_lang=target_lang,
-        suggestion=issue.suggested_text,
+        suggestion=suggestion,
     )
 
 

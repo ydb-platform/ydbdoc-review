@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ydbdoc_review.reporting.heuristic_messages import (
+    format_critic_reviewer_detail,
     format_heuristic_reviewer_detail,
     heuristic_location_label,
     humanize_heuristic,
@@ -72,3 +73,47 @@ def test_format_heuristic_wikipedia_link_locale():
     assert "русский slug" in detail.problem
     assert detail.suggestion is not None
     assert "en.wikipedia.org" in detail.suggestion
+
+
+def test_format_critic_execution_failed_invalid_json():
+    detail = format_critic_reviewer_detail(
+        category="critic_execution_failed",
+        comment=(
+            "Critic execution failed: Invalid JSON in LLM response: "
+            "Expecting value: line 1 column 1 (char 0) | raw_preview='Я не могу'"
+        ),
+    )
+    assert "не парсится как JSON" in detail.problem
+    assert "эвристики" in detail.problem
+    assert "«Я не могу»" in detail.problem
+    assert detail.suggestion is not None
+    assert "doc_verify" in detail.suggestion
+
+
+def test_format_critic_execution_failed_empty_response():
+    detail = format_critic_reviewer_detail(
+        category="critic_execution_failed",
+        comment="Critic execution failed: Empty LLM response",
+    )
+    assert "пустой ответ" in detail.problem
+    assert "batch" in (detail.suggestion or "").casefold()
+
+
+def test_format_critic_model_refusal():
+    detail = format_critic_reviewer_detail(
+        category="critic_model_refusal",
+        comment=(
+            "Model refused critic review; file verified with heuristics only. "
+            "Preview: Я не могу обсуждать эту тему."
+        ),
+    )
+    assert "отказала" in detail.problem
+    assert "эвристики" in detail.problem
+    assert "«Я не могу обсуждать эту тему.»" in detail.problem
+
+
+def test_humanize_critic_model_refusal_finalize_warning():
+    raw = "critic_model_refusal: model declined review; heuristics only on verify"
+    text = humanize_heuristic(raw)
+    assert "отказала" in text
+    assert "эвристики" in text
