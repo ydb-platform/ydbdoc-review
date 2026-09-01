@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -430,6 +431,87 @@ def _repair_en_fragments_after_apply(
     return repaired
 
 
+def _declare_exact_ascii_fragment_targets_after_apply(
+    repo_path: str,
+    paths: list[str],
+    *,
+    dry_run: bool,
+    merge_base_with: str | None = None,
+) -> list[str]:
+    """Declare new exact ASCII targets on unique aligned direct owners."""
+    from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
+    from ydbdoc_review.validation.fragment_repair import (
+        _page_declares_fragment,
+        _resolve_href_path,
+        add_explicit_ascii_fragment_anchor,
+    )
+
+    overlay = {p.replace("\\", "/") for p in paths}
+    if merge_base_with:
+        read_candidate = _final_tree_reader(repo_path, merge_base_with, overlay)
+    else:
+
+        def read_candidate(path: str) -> str | None:
+            return read_text(repo_path, path)
+    href_re = re.compile(r"!?(?:\[[^\]]*\])\(([^)]+)\)")
+    declared: list[str] = []
+    for page in paths:
+        if not page.endswith(".md") or "/docs/en/" not in page.replace("\\", "/"):
+            continue
+        page_text = read_text(repo_path, page)
+        if not page_text:
+            continue
+        for match in href_re.finditer(page_text):
+            href = match.group(1).strip().split(maxsplit=1)[0]
+            if "#" not in href:
+                continue
+            href_path, frag = href.rsplit("#", 1)
+            if not href_path.endswith(".md") or not frag or not frag.isascii():
+                continue
+            en_wrapper = _resolve_href_path(page, href_path)
+            if en_wrapper is None:
+                continue
+            ru_wrapper = en_wrapper.replace("/docs/en/", "/docs/ru/", 1)
+            en_text, ru_text = read_candidate(en_wrapper), read_candidate(ru_wrapper)
+            if en_text is None or ru_text is None:
+                continue
+            if _page_declares_fragment(en_text, frag):
+                continue
+            en_includes = collect_yfm_includes(en_text)
+            ru_includes = collect_yfm_includes(ru_text)
+            owners: list[tuple[str, str, str, str]] = []
+            if _page_declares_fragment(ru_text, frag):
+                owners.append((en_wrapper, en_text, ru_wrapper, ru_text))
+            for index, ru_inc in enumerate(ru_includes):
+                if index >= len(en_includes):
+                    continue
+                ru_owner = resolve_locale_md_path(ru_wrapper, ru_inc.path)
+                en_owner = resolve_locale_md_path(en_wrapper, en_includes[index].path)
+                ru_owner_text = read_candidate(ru_owner) if ru_owner else None
+                en_owner_text = read_candidate(en_owner) if en_owner else None
+                if (
+                    ru_owner
+                    and en_owner
+                    and ru_owner_text
+                    and en_owner_text is not None
+                    and en_owner == ru_owner.replace("/docs/ru/", "/docs/en/", 1)
+                    and _page_declares_fragment(ru_owner_text, frag)
+                    and not collect_yfm_includes(ru_owner_text)
+                ):
+                    owners.append((en_owner, en_owner_text, ru_owner, ru_owner_text))
+            if len(owners) != 1:
+                continue
+            en_owner, en_owner_text, _, ru_owner_text = owners[0]
+            fixed = add_explicit_ascii_fragment_anchor(en_owner_text, ru_owner_text, frag)
+            if fixed is None or fixed == en_owner_text:
+                continue
+            if en_owner not in declared:
+                declared.append(en_owner)
+            if not dry_run:
+                write_text(repo_path, en_owner, fixed)
+    return declared
+
+
 def _run_verify_pairs(
     contents: list[PairContent],
     client: YandexLLMClient,
@@ -789,6 +871,18 @@ def run_doc_translate(
                     write_text(repo_path, redirects_path, mirrored_redirects)
             touched = TouchedPaths(
                 list(dict.fromkeys([*touched.written, *impact_paths])),
+                touched.deleted,
+            )
+
+        exact_declarations = _declare_exact_ascii_fragment_targets_after_apply(
+            repo_path,
+            touched.written,
+            dry_run=dry_run,
+            merge_base_with=merge_base_with,
+        )
+        if exact_declarations:
+            touched = TouchedPaths(
+                list(dict.fromkeys([*touched.written, *exact_declarations])),
                 touched.deleted,
             )
 

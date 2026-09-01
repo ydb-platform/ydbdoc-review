@@ -118,6 +118,54 @@ def test_doc_pairs_from_plan_skips_bilingual_en():
     assert pairs == []
 
 
+def test_pr_40385_new_tls_href_queues_effective_ru_include_owner():
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    wrapper = "ydb/docs/ru/core/reference/ydb-cli/connect.md"
+    owner = "ydb/docs/ru/core/reference/ydb-cli/_includes/connect.md"
+    files = {
+        auth: "[TLS](../reference/ydb-cli/connect.md#tls)\n",
+        wrapper: "{% include [x](_includes/connect.md) %}\n",
+        owner: "# Connect\n\n### TLS {#tls}\n",
+    }
+    en = {
+        wrapper.replace("/ru/", "/en/"): "{% include [x](_includes/connect.md) %}\n",
+        owner.replace("/ru/", "/en/"): "# Connect\n",
+    }
+    plan = plan_translation_scope(
+        [(auth, "modified")], read_ru=files.get, read_en_base=en.get,
+        read_ru_base=lambda p: "" if p == auth else files.get(p),
+    )
+    assert owner in plan.doc_ru_paths
+    assert owner in plan.doc_from_main
+    assert wrapper not in plan.doc_ru_paths
+
+
+def test_existing_ascii_fragment_href_does_not_expand_scope():
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    text = "[TLS](../reference/ydb-cli/connect.md#tls)\n"
+    plan = plan_translation_scope(
+        [(auth, "modified")], read_ru=lambda p: text if p == auth else None,
+        read_en_base=lambda p: None, read_ru_base=lambda p: text if p == auth else None,
+    )
+    assert plan.doc_ru_paths == frozenset({auth})
+
+
+def test_ambiguous_or_nested_fragment_owner_does_not_expand_scope():
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    wrapper = "ydb/docs/ru/core/reference/ydb-cli/connect.md"
+    files = {
+        auth: "[TLS](../reference/ydb-cli/connect.md#tls)\n",
+        wrapper: "# TLS {#tls}\n{% include [x](_includes/connect.md) %}\n",
+        "ydb/docs/ru/core/reference/ydb-cli/_includes/connect.md": "## TLS {#tls}\n",
+    }
+    en = {wrapper.replace("/ru/", "/en/"): "{% include [x](_includes/connect.md) %}\n"}
+    plan = plan_translation_scope(
+        [(auth, "modified")], read_ru=files.get, read_en_base=en.get,
+        read_ru_base=lambda p: "" if p == auth else files.get(p),
+    )
+    assert plan.doc_ru_paths == frozenset({auth})
+
+
 def test_navigation_pairs_from_plan_marks_supplement_only():
     plan = TranslationScopePlan(
         doc_ru_paths=frozenset(),

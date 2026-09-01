@@ -3,9 +3,27 @@
 from __future__ import annotations
 
 from ydbdoc_review.validation.fragment_repair import (
+    add_explicit_ascii_fragment_anchor,
     fragment_declared_in_markdown,
     repair_en_fragments,
 )
+
+
+def test_real_tip_connect_without_tls_heading_cannot_receive_anchor():
+    ru = "# CLI\n\n## Connect\n\n### TLS {#tls}\n\n### Other\n"
+    en = "# CLI\n\n## Connect\n\n### Other\n"
+    before = en
+    assert add_explicit_ascii_fragment_anchor(en, ru, "tls") is None
+    assert en == before
+    assert "{#tls}" not in en
+
+
+def test_synthetic_aligned_heading_gets_exact_ascii_anchor_append_only():
+    ru = "# CLI\n\n## Connect\n\n### TLS {#tls}\n\n### Other\n"
+    en = "# CLI\n\n## Connect\n\n### TLS connection parameters\n\n### Other\n"
+    assert add_explicit_ascii_fragment_anchor(en, ru, "tls") == (
+        "# CLI\n\n## Connect\n\n### TLS connection parameters {#tls}\n\n### Other\n"
+    )
 
 
 def test_fragment_declared_in_markdown():
@@ -122,8 +140,7 @@ def test_pr_45949_client_cert_legacy_translit_fragment():
         en_page_path=en_page,
         read_text=files.get,
     )
-    assert "node-authorization.md#enabling-node-authentication-and-authorization)" in fixed
-    assert frag not in fixed
+    assert fixed == en_bad
 
 
 def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
@@ -149,11 +166,7 @@ def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
         en_page_path=en_page,
         read_text=base_files.get,
     )
-    assert fixed_on_manual == (
-        "See [node authorization]("
-        "../../devops/deployment-options/manual/node-authorization.md"
-        "#enabling-database-node-authentication-and-authorization).\n"
-    )
+    assert fixed_on_manual == f"See [node authorization]({manual_href}).\n"
 
     files_with_live_en = {
         **base_files,
@@ -164,11 +177,7 @@ def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
         en_page_path=en_page,
         read_text=files_with_live_en.get,
     )
-    assert fixed_on_live_path == (
-        "See [node authorization]("
-        "../../devops/concepts/node-authorization.md"
-        "#enabling-database-node-authentication-and-authorization).\n"
-    )
+    assert fixed_on_live_path == f"See [node authorization]({manual_href}).\n"
 
 
 def test_pr_40385_system_views_users_fragment():
@@ -245,15 +254,12 @@ def test_pr_50976_sid_fragment_localizes_to_declared_en_fragment():
         "ydb/docs/ru/core/security/authorization.md": "## SID {#sid}\n",
     }
 
-    assert (
-        repair_en_fragments(
-            en_exact,
-            en_page_path=en_page,
-            read_text=files.get,
-            ru_source=ru_source,
-        )
-        == "See [SID](./authorization.md#user).\n"
-    )
+    assert repair_en_fragments(
+                en_exact,
+                en_page_path=en_page,
+                read_text=files.get,
+                ru_source=ru_source,
+            ) == en_exact
 
 
 def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():

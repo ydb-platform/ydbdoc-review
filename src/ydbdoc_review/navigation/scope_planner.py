@@ -7,6 +7,7 @@ markdown + navigation YAML files that ``doc_translate`` must produce.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -89,6 +90,84 @@ def _ru_include_md_targets(ru_md_path: str, ru_text: str, *, docs_root: str) -> 
         if resolved is not None and resolved.startswith(f"{docs_root.strip('/')}/ru/"):
             targets.add(_norm(resolved))
     return targets
+
+
+def _new_internal_ascii_fragment_hrefs(ru_text: str, ru_base_text: str | None) -> list[str]:
+    """New exact internal ``.md#ASCII`` href occurrences, in source order."""
+    from ydbdoc_review.validation.href_parity import _iter_md_links
+
+    def collect(text: str) -> list[str]:
+        out: list[str] = []
+        for _, href, _, _ in _iter_md_links(text or ""):
+            if "#" not in href:
+                continue
+            path, frag = href.rsplit("#", 1)
+            if path.endswith(".md") and frag and frag.isascii():
+                out.append(href)
+        return out
+
+    remaining = Counter(collect(ru_base_text or ""))
+    added: list[str] = []
+    for href in collect(ru_text):
+        if remaining[href]:
+            remaining[href] -= 1
+        else:
+            added.append(href)
+    return added
+
+
+def _exact_ascii_fragment_owner_dependency(
+    ru_page_path: str,
+    href: str,
+    *,
+    read_ru: ReadFn,
+    read_en_base: ReadFn,
+    docs_root: str,
+) -> str | None:
+    """Return the unique direct RU declaration owner missing in EN."""
+    from ydbdoc_review.validation.fragment_repair import _page_declares_fragment
+
+    if "#" not in href:
+        return None
+    target_ref, frag = href.rsplit("#", 1)
+    if not frag or not frag.isascii():
+        return None
+    ru_wrapper = resolve_locale_md_path(ru_page_path, target_ref, docs_root=docs_root)
+    if ru_wrapper is None or not ru_wrapper.startswith(f"{docs_root.strip('/')}/ru/"):
+        return None
+    ru_text = read_ru(ru_wrapper)
+    en_wrapper = counterpart(ru_wrapper, docs_root)
+    en_text = read_en_base(en_wrapper) if en_wrapper else None
+    if ru_text is None or en_text is None:
+        return None
+    ru_owners: list[tuple[int | None, str]] = []
+    if _page_declares_fragment(ru_text, frag):
+        ru_owners.append((None, ru_wrapper))
+    ru_includes = collect_yfm_includes(ru_text)
+    en_includes = collect_yfm_includes(en_text)
+    for index, inc in enumerate(ru_includes):
+        owner = resolve_locale_md_path(ru_wrapper, inc.path, docs_root=docs_root)
+        owner_text = read_ru(owner) if owner else None
+        if owner and owner_text and _page_declares_fragment(owner_text, frag):
+            # A declaration needing another include is intentionally unsupported.
+            if collect_yfm_includes(owner_text):
+                return None
+            ru_owners.append((index, owner))
+    if len(ru_owners) != 1:
+        return None
+    index, ru_owner = ru_owners[0]
+    if index is None:
+        en_owner, en_owner_text = en_wrapper, en_text
+    else:
+        if index >= len(en_includes):
+            return None
+        en_owner = resolve_locale_md_path(en_wrapper, en_includes[index].path, docs_root=docs_root)
+        en_owner_text = read_en_base(en_owner) if en_owner else None
+    if en_owner is None or en_owner_text is None or counterpart(ru_owner, docs_root) != en_owner:
+        return None
+    if _page_declares_fragment(en_owner_text, frag):
+        return None
+    return ru_owner
 
 
 def _discover_ru_tocs(
@@ -491,6 +570,33 @@ def plan_translation_scope(
             if read_en_base(en_md) is None and read_ru(target) is not None:
                 doc_ru.add(target)
                 seen_close.add(target)
+                queue.append(target)
+
+    # Exact, non-recursive closure for new fragment hrefs introduced by diff pages.
+    fragment_owners: set[str] = set()
+    if read_ru_base is not None:
+        for ru_md in sorted(diff_ru_md):
+            ru_text = read_ru(ru_md)
+            if ru_text is None:
+                continue
+            for href in _new_internal_ascii_fragment_hrefs(ru_text, read_ru_base(ru_md)):
+                owner = _exact_ascii_fragment_owner_dependency(
+                    ru_md, href, read_ru=read_ru, read_en_base=read_en_base, docs_root=docs_root
+                )
+                if owner:
+                    fragment_owners.add(owner)
+                    doc_ru.add(owner)
+    # Feed owners only through the existing locale-include closure.
+    queue = sorted(fragment_owners)
+    while queue:
+        ru_md = queue.pop(0)
+        ru_text = read_ru(ru_md)
+        if not ru_text:
+            continue
+        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
+            en_md = counterpart(target, docs_root)
+            if target not in doc_ru and en_md and read_en_base(en_md) is None and read_ru(target) is not None:
+                doc_ru.add(target)
                 queue.append(target)
 
     doc_from_diff = frozenset(diff_ru_md | deleted_ru_md)

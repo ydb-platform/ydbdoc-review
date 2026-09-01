@@ -39,6 +39,43 @@ DocsReader = Callable[[str], str | None]
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
+_RAW_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)(\r?\n|$)", re.MULTILINE)
+
+
+def add_explicit_ascii_fragment_anchor(en_md: str, ru_md: str, frag: str) -> str | None:
+    """Append an exact ASCII id only to a fully outline-aligned heading."""
+    if not frag or not frag.isascii():
+        return en_md
+    if _page_declares_fragment(en_md, frag):
+        return en_md
+    try:
+        ru_heads = list(_iter_headings(parse_markdown(ru_md).children))
+        en_heads = list(_iter_headings(parse_markdown(en_md).children))
+    except Exception:
+        return None
+    if [h.level for h in ru_heads] != [h.level for h in en_heads]:
+        return None
+    from ydbdoc_review.validation.yfm_anchor import _heading_plain_text, _legacy_transliterated_slug
+
+    matches: list[int] = []
+    for index, heading in enumerate(ru_heads):
+        title = _heading_plain_text(heading)
+        if frag in {heading.anchor, diplodoc_auto_slug(title), _legacy_transliterated_slug(title)}:
+            matches.append(index)
+    if len(matches) != 1:
+        return None
+    index = matches[0]
+    if en_heads[index].anchor is not None:
+        return None
+    raw = list(_RAW_HEADING.finditer(en_md))
+    if len(raw) != len(en_heads) or [len(m.group(1)) for m in raw] != [h.level for h in en_heads]:
+        return None
+    match = raw[index]
+    body = match.group(2)
+    if split_heading_anchor_suffix(body.strip())[1] is not None:
+        return None
+    replacement = f"{match.group(1)} {body} {{#{frag}}}{match.group(3)}"
+    return en_md[: match.start()] + replacement + en_md[match.end() :]
 
 
 def _resolve_href_path(page_path: str, href_path: str) -> str | None:
@@ -274,6 +311,8 @@ def _try_remap_missing_fragment_via_ru_en(
     redirect_ru_paths: dict[str, str],
 ) -> tuple[str, str] | None:
     """Map a missing EN fragment via the paired RU/EN target pages."""
+    if not _CYRILLIC.search(unquote(frag)):
+        return None
     ru_abs = _resolve_href_path(en_page_path.replace("/docs/en/", "/docs/ru/", 1), path_part)
     if ru_abs is None:
         return None
