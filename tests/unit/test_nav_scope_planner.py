@@ -125,11 +125,23 @@ def test_pr_40385_new_tls_href_queues_effective_ru_include_owner():
     files = {
         auth: "[TLS](../reference/ydb-cli/connect.md#tls)\n",
         wrapper: "{% include [x](_includes/connect.md) %}\n",
-        owner: "# Connect\n\n### TLS {#tls}\n",
+        owner: (
+            "### Параметры аутентификации {#authentication}\n"
+            "{% include [auth/options.md](auth/options.md) %}\n"
+            "### Параметры TLS-соединения {#tls}\n"
+            "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+            "{% include [env.md](auth/env.md) %}\n"
+        ),
     }
     en = {
         wrapper.replace("/ru/", "/en/"): "{% include [x](_includes/connect.md) %}\n",
-        owner.replace("/ru/", "/en/"): "# Connect\n",
+        owner.replace("/ru/", "/en/"): (
+            "### Authentication parameters {#authentication}\n"
+            "{% include [auth/options.md](auth/options.md) %}\n"
+            "### TLS connection parameters\n"
+            "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+            "{% include [env.md](auth/env.md) %}\n"
+        ),
     }
     plan = plan_translation_scope(
         [(auth, "modified")], read_ru=files.get, read_en_base=en.get,

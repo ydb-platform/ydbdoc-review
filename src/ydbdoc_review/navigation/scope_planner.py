@@ -149,9 +149,6 @@ def _exact_ascii_fragment_owner_dependency(
         owner = resolve_locale_md_path(ru_wrapper, inc.path, docs_root=docs_root)
         owner_text = read_ru(owner) if owner else None
         if owner and owner_text and _page_declares_fragment(owner_text, frag):
-            # A declaration needing another include is intentionally unsupported.
-            if collect_yfm_includes(owner_text):
-                return None
             ru_owners.append((index, owner))
     if len(ru_owners) != 1:
         return None

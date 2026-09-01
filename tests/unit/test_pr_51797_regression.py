@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.github.pr import load_pair_contents
+from ydbdoc_review.github.pr import (
+    PullRequestContext,
+    load_pair_contents,
+    source_pr_scope_changes,
+)
 from ydbdoc_review.github.workflow import (
     TouchedPaths,
     _apply_results_to_disk,
@@ -26,6 +30,14 @@ AUTH_EN = AUTH_RU.replace("/ru/", "/en/")
 OWNER_RU = "ydb/docs/ru/core/reference/ydb-cli/_includes/connect.md"
 OWNER_EN = OWNER_RU.replace("/ru/", "/en/")
 HREF = "../reference/ydb-cli/connect.md#tls"
+MERGE_SHA = "d9fc9f993eb7fbade94da40c7c666178abb93170"
+API_CHANGES = [
+    ("ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md", "modified"),
+    ("ydb/docs/ru/core/reference/configuration/monitoring_config.md", "modified"),
+    ("ydb/docs/ru/core/reference/configuration/tls.md", "modified"),
+    (AUTH_RU, "modified"),
+    ("ydb/docs/ru/core/security/index.md", "modified"),
+]
 
 
 def _put(root: Path, rel: str, text: str) -> None:
@@ -38,7 +50,7 @@ def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
 
-def _repo(tmp_path: Path) -> Path:
+def _repo(tmp_path: Path, *, commit_merge: bool = False) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -49,17 +61,46 @@ def _repo(tmp_path: Path) -> Path:
     include = "{% include [connect](_includes/connect.md) %}\n"
     for locale in ("ru", "en"):
         _put(repo, f"ydb/docs/{locale}/core/reference/ydb-cli/connect.md", include)
-    _put(repo, OWNER_RU, "# Connect\n\n## Options\n\n### Параметры TLS {#tls}\n")
-    _put(repo, OWNER_EN, "# Connect\n\n## Options\n")
+    _put(
+        repo,
+        OWNER_RU,
+        "### Параметры аутентификации {#authentication}\n"
+        "{% include [auth/options.md](auth/options.md) %}\n"
+        "### Параметры TLS-соединения {#tls}\n"
+        "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+        "{% include [env.md](auth/env.md) %}\n",
+    )
+    _put(
+        repo,
+        OWNER_EN,
+        "### Authentication parameters {#authentication}\n"
+        "{% include [auth/options.md](auth/options.md) %}\n"
+        "### TLS connection parameters\n"
+        "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+        "{% include [env.md](auth/env.md) %}\n",
+    )
+    for path, _kind in API_CHANGES:
+        if path != AUTH_RU:
+            _put(repo, path, f"# {Path(path).stem}\n")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "baseline")
     _put(repo, AUTH_RU, f"# Authentication\n\n[TLS]({HREF})\n")
+    for path, _kind in API_CHANGES:
+        if path != AUTH_RU:
+            _put(repo, path, f"# {Path(path).stem}\n\nUpdated.\n")
+    if commit_merge:
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "merged PR 40385 fixture")
     return repo
 
 
 def _fake_file_result(_harness, state, _ctx) -> FileTranslationResult:
     final = (
-        "# Connect\n\n## Options\n\n### TLS connection parameters\n"
+        "### Authentication parameters {#authentication}\n"
+        "{% include [auth/options.md](auth/options.md) %}\n"
+        "### TLS connection parameters\n"
+        "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+        "{% include [env.md](auth/env.md) %}\n"
         if state.file_path == OWNER_RU
         else f"# Authentication\n\n[TLS]({HREF})\n"
     )
@@ -108,6 +149,49 @@ def test_pr_40385_queued_connect_include_translates_then_declares_tls(tmp_path: 
     assert OWNER_EN in touched.written  # branch preparation and commit path input
     assert "### TLS connection parameters {#tls}" in (repo / OWNER_EN).read_text()
     assert HREF in (repo / AUTH_EN).read_text()
+
+
+def test_pr_40385_merged_five_api_paths_load_six_pairs_before_translation(tmp_path: Path):
+    repo = _repo(tmp_path, commit_merge=True)
+    ctx = PullRequestContext(
+        owner="ydb-platform", repo="ydb", number=40385, title="docs",
+        head_ref="docs/source", head_sha="source-head",
+        head_repo_full_name="ydb-platform/ydb",
+        head_repo_https_url="https://github.com/ydb-platform/ydb.git",
+        base_ref="main", merged=True, merge_commit_sha=MERGE_SHA,
+    )
+    noisy_git_changes = [("ydb/docs/ru/core/noisy-local-only.md", "modified")]
+    changes = source_pr_scope_changes(ctx, noisy_git_changes, API_CHANGES)
+    assert changes == API_CHANGES
+    assert noisy_git_changes[0] not in changes
+
+    read_ru, read_en, read_ru_base = make_repo_scope_readers(
+        str(repo), "HEAD", ru_content_ref="HEAD", ru_base_ref="HEAD^",
+    )
+    plan = plan_translation_scope(
+        changes, read_ru=read_ru, read_en_base=read_en, read_ru_base=read_ru_base,
+    )
+    assert len(plan.doc_ru_paths) == 6
+    assert len(plan.doc_from_diff) == 5
+    assert len(plan.doc_from_main) == 1
+    assert len(plan.nav_ru_paths) == 0
+    assert plan.doc_from_main == frozenset({OWNER_RU})
+
+    pairs = doc_pairs_from_plan(plan)
+    contents = load_pair_contents(
+        str(repo), pairs, merge_base_with="HEAD",
+        ru_content_ref="HEAD", ru_base_ref="HEAD^",
+    )
+    owner_content = next(content for content in contents if content.pair.ru_path == OWNER_RU)
+    assert owner_content.pair.en_path == OWNER_EN
+    assert "{#tls}" in (owner_content.ru_text or "")
+    assert "{#tls}" not in (owner_content.en_text or "")
+
+    with patch("ydbdoc_review.pipeline.orchestrator.run_pr_translation") as translate:
+        translate(contents, MagicMock(), load_glossary())
+    loaded = translate.call_args.args[0]
+    assert len(loaded) == 6
+    assert any(item.pair.ru_path == OWNER_RU and item.pair.en_path == OWNER_EN for item in loaded)
 
 
 def test_pr_40385_real_tip_without_queued_translation_stays_blocked(tmp_path: Path):
