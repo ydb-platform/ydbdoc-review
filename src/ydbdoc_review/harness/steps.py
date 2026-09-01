@@ -823,7 +823,7 @@ class HeuristicsStep:
             ignore_link_basenames=stripped_link_basenames_from_warnings(state.finalize_warnings),
             docs_text_reader=ctx.docs_text_reader,
             docs_repo_path=ctx.docs_repo_path,
-            en_baseline_text=state.existing_target_text,
+            en_baseline_text=state.base_target_text or state.existing_target_text,
             source_baseline_text=state.base_source_text,
         )
         for message in state.finalize_warnings:

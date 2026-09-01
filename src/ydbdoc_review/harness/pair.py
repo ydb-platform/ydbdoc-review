@@ -198,15 +198,23 @@ def run_pair_plan(
     elif enable_translate and plan.action == "translate_to_ru":
         base_source = content.en_base_text
 
+    is_en_target = plan.action in {"translate_to_en", "critic_only"} and (
+        plan.target_lang.lower() in {"en", "english"} or plan.target_path == content.pair.en_path
+    )
+    if is_en_target:
+        base_target = content.en_base_text
+    elif plan.action == "translate_to_ru":
+        base_target = content.ru_base_text
+    else:
+        base_target = content.ru_base_text
+
     state = FileRunState(
         mode=profile.name,  # type: ignore[arg-type]
         file_path=plan.source_path,
         raw_source_text=source_text,
         source_text=source_text,
         existing_target_text=existing_target,
-        base_target_text=(
-            content.en_base_text if plan.action == "translate_to_en" else content.ru_base_text
-        ),
+        base_target_text=base_target,
         base_source_text=base_source,
     )
     harness_ctx = HarnessContext.from_options(

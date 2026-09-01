@@ -5454,4 +5454,26 @@ path, same link position). Baseline slot match remains a fast path.
 **Tests:** ``test_pr_51761_href_parity_accepts_ru_translit_via_fragment_remap``.
 
 
+### §6.237 Href-parity grandfather must use merge-base EN baseline on verify (#51761, 2026-09-01)
+
+**Problem:** §6.236 remap never ran on ``doc_verify`` for
+``client_certificate_authorization.md``: ``HeuristicsStep`` passed
+``en_baseline_text=existing_target_text`` (tip EN with the declared EN slug).
+Grandfather subtracted that slug from ``extra`` while tip RU path overlay
+(``concepts/…`` vs source-base ``deployment-options/manual/…``) left a new
+``missing`` translit href — remap requires both sides, so only «missing in EN»
+remained.
+
+**Decision:**
+
+1. ``FileRunState.base_target_text`` on ``critic_only`` verify is
+   ``content.en_base_text`` (merge-base EN), not ``ru_base_text``.
+2. ``HeuristicsStep`` uses ``base_target_text or existing_target_text`` for
+   ``en_baseline_text``.
+3. After grandfather, rebuild position-aligned ``extra`` from ``tgt_ordered``
+   when ``missing`` remains but ``extra`` was stripped (belt-and-suspenders).
+
+**Tests:** ``test_pr_51761_href_parity_survives_tip_en_baseline_grandfather``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

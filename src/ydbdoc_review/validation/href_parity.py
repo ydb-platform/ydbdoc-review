@@ -444,6 +444,31 @@ def check_href_parity(
         extra = sorted((current_extra - old_extra).elements())
         if not missing and not extra:
             return []
+    # §6.237: grandfather can drop the EN ``extra`` when ``en_baseline_text`` is the
+    # live tip EN (verify used ``existing_target_text``) while RU path overlay from
+    # tip leaves a new ``missing``. Rebuild position-aligned extras for remap.
+    if missing and not extra and en_page_path:
+        rebuilt_extra: list[str] = []
+        for source_href in missing:
+            source_positions = [
+                pos for pos, value in enumerate(src_ordered) if value == source_href
+            ]
+            if len(source_positions) != 1:
+                continue
+            position = source_positions[0]
+            if position >= len(tgt_ordered):
+                continue
+            target_href = tgt_ordered[position]
+            source_path, _, source_fragment = source_href.partition("#")
+            target_path, _, target_fragment = target_href.partition("#")
+            if (
+                source_path == target_path
+                and source_fragment
+                and target_fragment
+                and source_fragment != target_fragment
+            ):
+                rebuilt_extra.append(target_href)
+        extra = rebuilt_extra
     # #50976: accept a same-page EN-localized fragment only when the source
     # fragment is absent and the target fragment is physically declared.
     if missing and extra and en_page_path and docs_text_reader is not None:

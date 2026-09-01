@@ -238,7 +238,7 @@ def test_href_parity_accepts_pr_50976_declared_en_fragments():
 
 
 def test_pr_51761_href_parity_accepts_ru_translit_via_fragment_remap():
-    """§6.235: RU legacy translit vs declared EN auto-slug is not a blocker."""
+    """§6.236: RU legacy translit vs declared EN auto-slug is not a blocker."""
     page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     target_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
     target_ru = target_en.replace("/docs/en/", "/docs/ru/", 1)
@@ -265,6 +265,54 @@ def test_pr_51761_href_parity_accepts_ru_translit_via_fragment_remap():
         docs_text_reader=files.get,
         en_baseline_text=f"See [nodes]({href_ru}).\n",
     ) == []
+
+
+def test_pr_51761_href_parity_survives_tip_en_baseline_grandfather():
+    """§6.237: tip EN baseline must not eat the EN extra before fragment remap (#51761)."""
+    from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
+
+    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    page_ru = page.replace("/docs/en/", "/docs/ru/", 1)
+    target_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    target_ru = target_en.replace("/docs/en/", "/docs/ru/", 1)
+    ru_frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    en_frag = "enabling-the-node-authentication-and-authorization-mode"
+    href_tip_ru = f"../../devops/concepts/node-authorization.md#{ru_frag}"
+    href_tip_en = f"../../devops/concepts/node-authorization.md#{en_frag}"
+    href_base = (
+        "../../devops/deployment-options/manual/node-authorization.md#"
+        f"{ru_frag}"
+    )
+    filler = "[TLS](https://example.com) "
+    ru_tip = filler * 8 + f"See [nodes]({href_tip_ru}).\n"
+    en_tip = filler * 8 + f"See [nodes]({href_tip_en}).\n"
+    ru_base = filler * 8 + f"See [nodes]({href_base}).\n"
+    en_merge_base = filler * 8 + f"See [nodes]({href_base}).\n"
+    files = {
+        target_en: "## Enabling the node authentication and authorization mode\n",
+        target_ru: "## Включение режима аутентификации и авторизации узлов\n",
+    }
+    reader = files.get
+
+    assert check_href_parity(
+        ru_tip,
+        en_tip,
+        en_page_path=page,
+        docs_text_reader=reader,
+        en_baseline_text=en_tip,
+        source_baseline_text=ru_base,
+    ) == []
+
+    classified = run_file_heuristics_classified(
+        ru_tip,
+        en_tip,
+        normalized_source_text=ru_tip,
+        source_file=page_ru,
+        docs_text_reader=reader,
+        en_baseline_text=en_merge_base,
+        source_baseline_text=ru_base,
+    )
+    assert not any(message.startswith("href_parity:") for message in classified.blocking)
 
 
 def test_href_parity_50976_ignores_localized_external_link_with_same_label():
