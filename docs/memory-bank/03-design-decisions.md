@@ -5370,5 +5370,19 @@ heuristic).
 **Tests:** covered by verify-path unit coverage of ``translation_pr_scope_gaps``
 + href-parity noop; behavior pinned by #51199 overnight rerun.
 
+### §6.232 critic_only no-op must not restage onto newer tip (#51761, 2026-09-01)
+
+**Problem:** Inline ``doc_verify`` always listed every ``critic_only`` path in
+``touched.written``, then ``prepare_translation_branch_on_base`` fetched the
+remote tip and overlaid the job's checkout bytes. A concurrent tip fix (manual
+href repair on #51761) was clobbered when a verify started on an older SHA
+committed ``Fixed segments: 0`` and restaged the stale ``authentication.md``.
+
+**Decision:** In ``_apply_results_to_disk``, skip ``critic_only`` paths whose
+``target_text`` is byte-identical to on-disk content — do not add them to
+``written``. Real critic/finalize edits still stage and push.
+
+**Tests:** ``test_apply_results_skips_identical_critic_only_noop``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

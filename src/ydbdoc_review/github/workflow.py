@@ -304,6 +304,14 @@ def _apply_results_to_disk(
             continue
         if run.target_text is None:
             continue
+        # §6.232: critic_only no-ops must not enter ``written``. Inline verify
+        # restages those paths onto the remote tip; overlaying unchanged
+        # checkout bytes clobbers concurrent tip fixes (e.g. a manual href
+        # repair pushed while this job still held an older SHA).
+        if run.plan.action == "critic_only":
+            on_disk = read_text(repo_path, rel)
+            if on_disk is not None and on_disk == run.target_text:
+                continue
         written.append(rel)
         if not dry_run:
             write_text(repo_path, rel, run.target_text)
