@@ -5406,5 +5406,15 @@ because the harness returned *different* (broken) bytes.
 ``test_overlay_internal_md_hrefs_prefers_tip_by_label``,
 ``test_inverted_mirror_delta_then_prefer_resolvable_keeps_tip_en``.
 
+### §6.234 Critic empty-JSON batch resplit (#51199 / #51761, 2026-09-01)
+
+**Problem:** Large critic batches sometimes returned empty LLM payloads; after
+§6.220 retries the file stayed ``critic_execution_failed`` (health-check-api,
+authentication).
+
+**Decision:** Default ``segments_per_batch_chars`` 4000→2500. On empty-JSON
+fail-closed for a batch with >1 segment, resplit once into halves and retry
+before keeping the blocked verdict.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

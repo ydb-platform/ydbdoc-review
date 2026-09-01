@@ -248,6 +248,17 @@ def _prior_issues_for_batch(
     return out
 
 
+def _is_empty_critic_failure(response: CriticResponse) -> bool:
+    """True when the batch failed solely because the LLM returned empty JSON."""
+    if not response.issues:
+        return False
+    return all(
+        issue.category == "critic_execution_failed"
+        and "empty" in (issue.comment or "").casefold()
+        for issue in response.issues
+    )
+
+
 def _run_critic_batches(
     client: YandexLLMClient,
     *,
@@ -294,14 +305,51 @@ def _run_critic_batches(
                 version=prompt_version,
             )
             label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
-        responses.append(
-            _fetch_critic_response(
-                client,
-                messages,
-                pass_label=label,
-                max_tokens=max_tokens,
-            )
+        response = _fetch_critic_response(
+            client,
+            messages,
+            pass_label=label,
+            max_tokens=max_tokens,
         )
+        # §6.234: empty JSON on a large batch → resplit once and retry halves.
+        if (
+            prior_issues is None
+            and _is_empty_critic_failure(response)
+            and len(batch.segments) > 1
+        ):
+            mid = max(1, len(batch.segments) // 2)
+            split_batches = [
+                Batch(index=batch.index, segments=batch.segments[:mid]),
+                Batch(index=batch.index, segments=batch.segments[mid:]),
+            ]
+            logger.warning(
+                "%s empty response; retrying as %s + %s segment halves",
+                label,
+                mid,
+                len(batch.segments) - mid,
+            )
+            half_responses: list[CriticResponse] = []
+            for half_i, half in enumerate(split_batches, start=1):
+                half_messages = build_critic_batch_messages(
+                    half,
+                    translations,
+                    glossary,
+                    file_path=file_path,
+                    batch_count=batch_count,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    version=prompt_version,
+                )
+                half_responses.append(
+                    _fetch_critic_response(
+                        client,
+                        half_messages,
+                        pass_label=f"{label} half {half_i}/2",
+                        max_tokens=max_tokens,
+                    )
+                )
+            response = merge_critic_responses(half_responses)
+        responses.append(response)
     return merge_critic_responses(responses)
 
 
@@ -454,7 +502,7 @@ def run_critic(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
-    max_chars: int = 4000,
+    max_chars: int = 2500,
     max_tokens: int | None = None,
     source_text: str = "",
     translated_text: str = "",
@@ -496,7 +544,7 @@ def run_verify(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
-    max_chars: int = 4000,
+    max_chars: int = 2500,
     max_tokens: int | None = None,
     source_text: str = "",
     translated_text: str = "",
@@ -544,7 +592,7 @@ def review_with_critic(
     source_lang: str = "ru",
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
-    max_chars: int = 4000,
+    max_chars: int = 2500,
     max_tokens: int | None = None,
     run_second_pass: bool = True,
     translated_text_after_fixes: str | None = None,

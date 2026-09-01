@@ -37,6 +37,7 @@
 - **§6.231:** EN уже на tip translation-ветки с чистым href-parity = scope satisfied (не требовать noop-файл в diff PR).
 - **§6.232:** critic_only noop не restage-ит на новый tip (stale verify не затирает ручной href-fix).
 - **§6.233:** tip-resolvable EN hrefs win over inverted tip→merge RU mirror delta (не затирать configuration-v1).
+- **§6.234:** critic empty-JSON → resplit batch halves; batch_chars 2500.
 - Пример #51711 / #40385: tip EN после merge translation PR; stale checkout не авторитетен.
 - Docker build: ECR Public → fallback `python:3.12-slim` (Hub) при 429 (§6.229).
 
@@ -44,3 +45,7 @@
 
 - `GITHUB_TOKEN` в env часто 403 на `gh`; unset → keyring. Запись в ydb: `YDB_GH_TOKEN`.
 - Consumer: `ydbdoc-review@v0.1.0` (force-move с логическими фиксами).
+
+## 2026-09-01 04:10 UTC
+<!-- d8e0fc1cdab0a168 -->
+- 2. **Причина в пайплайне** → фикс в `ydbdoc-review`, Memory Bank, pin `v0.1.0`
