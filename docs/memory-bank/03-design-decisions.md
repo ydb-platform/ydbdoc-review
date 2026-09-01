@@ -5384,5 +5384,27 @@ committed ``Fixed segments: 0`` and restaged the stale ``authentication.md``.
 
 **Tests:** ``test_apply_results_skips_identical_critic_only_noop``.
 
+### §6.233 Tip-resolvable EN hrefs win over inverted merge-RU mirror deltas (#51761, 2026-09-01)
+
+**Problem:** ``doc_verify`` on translation PRs used tip main as ``ru_base_text``
+and stale merge-commit RU as ``ru_text``. Deterministic localized mirror delta
+then treated tip→merge as an href-only change and rewrote tip-correct EN
+(``configuration-management/configuration-v1/node-authorization.md``) back to
+the missing historical path. Critic_only no-op staging (§6.232) could not help
+because the harness returned *different* (broken) bytes.
+
+**Decision:**
+
+1. ``load_verify_pair_contents``: ``ru_base_text`` from the *source PR base*
+   SHA; overlay tip RU internal path hrefs (and §6.128 autotitle fragments)
+   onto chosen merge RU.
+2. After localized mirror delta, ``prefer_resolvable_en_hrefs`` keeps previous
+   EN hrefs when the proposed path is missing on tip and the previous path
+   resolves.
+
+**Tests:** ``test_prefer_resolvable_en_hrefs_keeps_tip_valid_over_missing``,
+``test_overlay_internal_md_hrefs_prefers_tip_by_label``,
+``test_inverted_mirror_delta_then_prefer_resolvable_keeps_tip_en``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

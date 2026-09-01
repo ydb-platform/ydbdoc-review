@@ -680,3 +680,67 @@ def test_restore_autotitle_force_exact_skips_unreachable():
     )
     assert "state-storage-reconfiguration.md" not in fixed
     assert "static-group-self-heal.md" in fixed
+
+
+def test_prefer_resolvable_en_hrefs_keeps_tip_valid_over_missing():
+    from ydbdoc_review.validation.href_parity import prefer_resolvable_en_hrefs
+
+    previous = (
+        "See [node-broker](../devops/configuration-management/configuration-v1/"
+        "node-authorization.md).\n"
+    )
+    proposed = (
+        "See [node-broker](../devops/deployment-options/manual/"
+        "node-authorization.md).\n"
+    )
+    files = {
+        "ydb/docs/en/core/devops/configuration-management/configuration-v1/"
+        "node-authorization.md": "ok\n",
+    }
+    page = "ydb/docs/en/core/security/authentication.md"
+    assert (
+        prefer_resolvable_en_hrefs(
+            proposed, previous, en_page_path=page, read_text=files.get
+        )
+        == previous
+    )
+
+
+def test_overlay_internal_md_hrefs_prefers_tip_by_label():
+    from ydbdoc_review.validation.href_parity import overlay_internal_md_hrefs
+
+    merge = "[node-broker](../devops/deployment-options/manual/node-authorization.md)\n"
+    tip = (
+        "[node-broker](../devops/configuration-management/configuration-v1/"
+        "node-authorization.md)\n"
+    )
+    assert overlay_internal_md_hrefs(merge, tip) == tip
+
+
+def test_inverted_mirror_delta_then_prefer_resolvable_keeps_tip_en():
+    from ydbdoc_review.validation.href_parity import (
+        apply_localized_mirror_delta,
+        prefer_resolvable_en_hrefs,
+    )
+
+    ru_tip = (
+        "[node-broker](../devops/configuration-management/configuration-v1/"
+        "node-authorization.md)\n"
+    )
+    ru_merge = (
+        "[node-broker](../devops/deployment-options/manual/node-authorization.md)\n"
+    )
+    en = ru_tip.replace("node-broker", "node-broker")  # same href
+    localized = apply_localized_mirror_delta(ru_tip, ru_merge, en)
+    assert localized == ru_merge
+    files = {
+        "ydb/docs/en/core/devops/configuration-management/configuration-v1/"
+        "node-authorization.md": "ok\n",
+    }
+    page = "ydb/docs/en/core/security/authentication.md"
+    assert (
+        prefer_resolvable_en_hrefs(
+            localized, en, en_page_path=page, read_text=files.get
+        )
+        == en
+    )

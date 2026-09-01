@@ -53,12 +53,21 @@ def _try_deterministic_en_preserve(
     localized = apply_localized_mirror_delta(ru_base, source_text, existing_target)
     if localized is not None:
         if ctx.docs_text_reader is not None:
+            from ydbdoc_review.validation.href_parity import prefer_resolvable_en_hrefs
+
             localized = repair_en_fragments(
                 localized,
                 en_page_path=plan.target_path,
                 read_text=ctx.docs_text_reader,
                 ru_source=source_text,
                 en_baseline=content.en_base_text or existing_target,
+            )
+            # §6.233: inverted tip→merge RU deltas must not clobber tip-valid EN.
+            localized = prefer_resolvable_en_hrefs(
+                localized,
+                existing_target,
+                en_page_path=plan.target_path,
+                read_text=ctx.docs_text_reader,
             )
         logger.info(
             "Deterministic localized mirror delta for %s; bypassing LLM and repairs",

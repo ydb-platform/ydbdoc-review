@@ -36,6 +36,7 @@
 - **§6.230:** `{% include [x](…md) %}` не Markdown-ссылка для gate; пустой файл на диске ≠ missing; timeout translate → следующий model в chain.
 - **§6.231:** EN уже на tip translation-ветки с чистым href-parity = scope satisfied (не требовать noop-файл в diff PR).
 - **§6.232:** critic_only noop не restage-ит на новый tip (stale verify не затирает ручной href-fix).
+- **§6.233:** tip-resolvable EN hrefs win over inverted tip→merge RU mirror delta (не затирать configuration-v1).
 - Пример #51711 / #40385: tip EN после merge translation PR; stale checkout не авторитетен.
 - Docker build: ECR Public → fallback `python:3.12-slim` (Hub) при 429 (§6.229).
 

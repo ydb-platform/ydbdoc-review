@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-01
-**Current focus:** §6.232 — critic_only no-op must not restage onto newer tip (#51761).
+**Current focus:** §6.233 — tip-resolvable EN hrefs win over inverted merge-RU mirror deltas (#51761).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-01 | **§6.233** — tip-resolvable EN hrefs beat inverted merge-RU mirror deltas (#51761) |
 | 2026-09-01 | **§6.232** — critic_only no-op skip in `_apply_results_to_disk` so stale verify cannot clobber tip fixes (#51761) |
 | 2026-08-31 | **§6.231** — tip-inherited EN with clean href parity satisfies translation-PR scope gaps (#51199) |
 | 2026-08-31 | **§6.230** — skip YFM includes in `en_link_target`; empty file ≠ missing; timeout advances translate fallback (#40385 / #37673) |

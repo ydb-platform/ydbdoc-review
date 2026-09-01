@@ -456,7 +456,28 @@ def load_verify_pair_contents(
         en_diff = (
             file_diff_range(repo_path, merge_base_with, pair.en_path) if pair.en_changed else None
         )
-        ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        # Mirror delta base must be the *source PR* base, not tip main (§6.233).
+        # Tip-as-base + stale merge RU invents inverted href deltas that rewrite
+        # tip-correct EN (configuration-v1) back to missing historical paths.
+        source_base_sha = str(pull_data.get("base", {}).get("sha") or "") or None
+        ru_base_text = (
+            gh.get_file_text(owner, repo, pair.ru_path, source_base_sha)
+            if source_base_sha
+            else None
+        )
+        if ru_base_text is None:
+            ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        # Prefer tip RU path targets when tip moved after the source merge
+        # (same idea as §6.128 autotitle fragment overlay).
+        tip_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
+        if tip_ru and ru_text:
+            from ydbdoc_review.validation.autotitle_hrefs import (
+                overlay_autotitle_fragment_hrefs,
+            )
+            from ydbdoc_review.validation.href_parity import overlay_internal_md_hrefs
+
+            ru_text = overlay_autotitle_fragment_hrefs(ru_text, tip_ru)
+            ru_text = overlay_internal_md_hrefs(ru_text, tip_ru)
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         contents.append(
             PairContent(

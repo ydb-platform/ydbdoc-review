@@ -157,6 +157,87 @@ def _sync_fence_openers_from_ru(ru_text: str, en_text: str) -> str:
     return out
 
 
+def prefer_resolvable_en_hrefs(
+    proposed: str,
+    previous: str,
+    *,
+    en_page_path: str,
+    read_text: DocsTextReader,
+) -> str:
+    """Keep previous EN hrefs when a proposed path is missing on tip (§6.233).
+
+    Merged-source verify can form an inverted RU mirror delta (tip base →
+    stale merge RU) and rewrite tip-correct EN paths to historical ones that
+    no longer exist. Prefer the previous EN href whenever its file resolves
+    and the proposed one does not.
+    """
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+    if not proposed or not previous or proposed == previous:
+        return proposed
+    prev_links = list(_iter_visible_md_link_matches(previous))
+    prop_links = list(_iter_visible_md_link_matches(proposed))
+    if len(prev_links) != len(prop_links):
+        return proposed
+    replacements: list[tuple[int, int, str]] = []
+    for prev, prop in zip(prev_links, prop_links, strict=True):
+        prev_href = prev.group(2).strip()
+        prop_href = prop.group(2).strip()
+        if prev_href == prop_href or not _is_internal_href(prop_href):
+            continue
+        prop_path = resolve_internal_md_href(en_page_path, prop_href)
+        prev_path = resolve_internal_md_href(en_page_path, prev_href)
+        if prop_path is None:
+            continue
+        prop_ok = read_text(prop_path) is not None
+        prev_ok = prev_path is not None and read_text(prev_path) is not None
+        if prev_ok and not prop_ok:
+            replacements.append(
+                (prop.start(), prop.end(), f"[{prop.group(1)}]({prev_href})")
+            )
+    out = proposed
+    for start, end, replacement in reversed(replacements):
+        out = out[:start] + replacement + out[end:]
+    return out
+
+
+def overlay_internal_md_hrefs(target: str, preferred: str) -> str:
+    """Rewrite internal ``[](…md)`` hrefs in ``target`` from ``preferred`` by label.
+
+    For merged-source verify (§6.233): RU body may still carry historical paths
+    while tip main already moved them. When labels uniquely match, prefer tip.
+    """
+    if not target or not preferred or target == preferred:
+        return target
+    preferred_by_label: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for match in _iter_visible_md_link_matches(preferred):
+        label = match.group(1)
+        href = match.group(2).strip()
+        if not label or label.strip() == "{#T}" or not _is_internal_href(href):
+            continue
+        key = " ".join(label.split()).casefold()
+        if key in preferred_by_label and preferred_by_label[key] != href:
+            ambiguous.add(key)
+            continue
+        preferred_by_label[key] = href
+    for key in ambiguous:
+        preferred_by_label.pop(key, None)
+    if not preferred_by_label:
+        return target
+    out = target
+    for match in reversed(list(_iter_visible_md_link_matches(out))):
+        label = match.group(1)
+        href = match.group(2).strip()
+        if not label or label.strip() == "{#T}" or not _is_internal_href(href):
+            continue
+        key = " ".join(label.split()).casefold()
+        tip_href = preferred_by_label.get(key)
+        if tip_href and tip_href != href:
+            out = out[: match.start()] + f"[{label}]({tip_href})" + out[match.end() :]
+    return out
+
+
 def apply_localized_mirror_delta(
     source_base: str | None,
     source_current: str,
