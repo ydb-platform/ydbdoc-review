@@ -33,6 +33,25 @@ _TRUNCATED_SUGGESTION = re.compile(r"(?:…|\.\.\.)$")
 _MAX_CRITIC_ATTEMPTS = 3
 _VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
 
+# YandexGPT / safety refusals are prose, not JSON — do not fail-closed (§6.235).
+_MODEL_REFUSAL_MARKERS: tuple[str, ...] = (
+    "я не могу обсуждать",
+    "не могу обсуждать эту тему",
+    "не могу помочь с этой темой",
+    "i can't discuss",
+    "i cannot discuss",
+    "unable to discuss this",
+    "content policy",
+)
+
+
+def is_model_refusal_text(text: str) -> bool:
+    """True when the model declined the request instead of returning critic JSON."""
+    normalized = (text or "").strip().casefold()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _MODEL_REFUSAL_MARKERS)
+
 # LLMs sometimes invent verdict strings; map to the schema literals before validate.
 _VERDICT_ALIASES: dict[str, CriticVerdict] = {
     "ok": "ok",
@@ -98,6 +117,27 @@ def _fallback_critic_response(*, reason: str) -> CriticResponse:
     )
 
 
+def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
+    """Skip LLM critic for this file; heuristics-only verify (§6.235)."""
+    logger.warning(
+        "Critic model refusal; heuristics-only verify (preview=%r)",
+        preview[:120],
+    )
+    return CriticResponse(
+        verdict="ok",
+        issues=[
+            CriticIssueOut(
+                severity="warning",
+                category="critic_model_refusal",
+                comment=(
+                    "Model refused critic review; file verified with heuristics only. "
+                    f"Preview: {preview[:160]}"
+                ),
+            )
+        ],
+    )
+
+
 def _fetch_critic_response(
     client: YandexLLMClient,
     messages: list,
@@ -128,6 +168,8 @@ def _fetch_critic_response(
             content = (result.content or "").strip()
             if not content:
                 raise LLMParseError("Empty LLM response")
+            if is_model_refusal_text(content):
+                return _heuristic_only_critic_response(preview=content)
             return parse_critic_response(content)
         except LLMParseError as exc:
             last_exc = exc

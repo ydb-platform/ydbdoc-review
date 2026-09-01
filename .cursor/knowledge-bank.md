@@ -38,6 +38,8 @@
 - **§6.232:** critic_only noop не restage-ит на новый tip (stale verify не затирает ручной href-fix).
 - **§6.233:** tip-resolvable EN hrefs win over inverted tip→merge RU mirror delta (не затирать configuration-v1).
 - **§6.234:** critic empty-JSON → resplit batch halves; batch_chars 2500.
+- **§6.235:** YandexGPT safety refusal («не могу обсуждать») → heuristics-only verify, не `critic_execution_failed`.
+- **§6.236:** href-parity: RU translit + declared EN slug OK когда `fragment_repair` мапит пару (без exact baseline slot).
 - Пример #51711 / #40385: tip EN после merge translation PR; stale checkout не авторитетен.
 - Docker build: ECR Public → fallback `python:3.12-slim` (Hub) при 429 (§6.229).
 

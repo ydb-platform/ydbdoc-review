@@ -13,6 +13,7 @@ from ydbdoc_review.translation.critic import (
     _drop_impossible_code_link_issues,
     _fallback_critic_response,
     apply_critic_fixes,
+    is_model_refusal_text,
     merge_critic_responses,
     merge_verdicts,
     normalize_critic_verdict_value,
@@ -330,6 +331,26 @@ def test_run_critic_empty_response_fallback():
     )
     assert out.verdict == "blocked"
     assert out.issues[0].category == "critic_execution_failed"
+
+
+def test_is_model_refusal_text_detects_yandexgpt_decline():
+    assert is_model_refusal_text("Я не могу обсуждать эту тему.")
+    assert not is_model_refusal_text('{"verdict": "ok", "issues": []}')
+
+
+def test_run_critic_model_refusal_falls_back_to_heuristics_only():
+    client = _mock_client(["Я не могу обсуждать эту тему."])
+    seg = _segment("s1", "x")
+    out = run_critic(
+        client,
+        segments=[seg],
+        translations={"s1": "EN x"},
+        glossary=load_glossary(),
+        file_path="docs/ru/reference/ydb-sdk/health-check-api.md",
+    )
+    assert out.verdict in {"ok", "warnings"}
+    assert out.issues[0].category == "critic_model_refusal"
+    assert client._client.chat.completions.create.call_count == 1
 
 
 def test_run_critic_retries_then_parses():

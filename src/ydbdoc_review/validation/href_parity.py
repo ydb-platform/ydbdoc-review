@@ -284,6 +284,36 @@ def collect_internal_hrefs(text: str) -> list[str]:
     return found
 
 
+def _localized_en_fragment_pairs_ru_remap(
+    source_fragment: str,
+    target_fragment: str,
+    *,
+    target_abs: str | None,
+    target_md: str,
+    docs_text_reader: DocsTextReader,
+) -> bool:
+    """True when RU ``source_fragment`` maps to declared EN ``target_fragment`` (§6.235)."""
+    from ydbdoc_review.validation.fragment_repair import (
+        _remap_fragment_via_ru_en_pages,
+        fragment_declared_in_markdown,
+    )
+
+    if not source_fragment or not target_fragment:
+        return False
+    if not fragment_declared_in_markdown(target_md, target_fragment):
+        return False
+    if fragment_declared_in_markdown(target_md, source_fragment):
+        return False
+    if not target_abs or "/docs/en/" not in target_abs:
+        return False
+    ru_abs = target_abs.replace("/docs/en/", "/docs/ru/", 1)
+    ru_md = docs_text_reader(ru_abs)
+    if not ru_md:
+        return False
+    mapped = _remap_fragment_via_ru_en_pages(source_fragment, ru_md, target_md)
+    return mapped == target_fragment
+
+
 def collect_explicit_anchors(text: str) -> list[str]:
     """Explicit ``{#id}`` ids (headings and rare inline), excluding ``{#T}``."""
     out: list[str] = []
@@ -445,15 +475,29 @@ def check_href_parity(
                 position = source_positions[0]
                 if target_positions[0] != position:
                     continue
-                if position >= len(baseline_ordered) or baseline_ordered[position] != target_href:
-                    continue
                 target_abs = resolve_internal_md_href(en_page_path, target_href)
                 target_md = docs_text_reader(target_abs) if target_abs else None
                 if not target_md:
                     continue
-                if fragment_declared_in_markdown(target_md, source_fragment):
-                    continue
-                if not fragment_declared_in_markdown(target_md, target_fragment):
+                baseline_ok = (
+                    position < len(baseline_ordered)
+                    and baseline_ordered[position] == target_href
+                )
+                remap_ok = _localized_en_fragment_pairs_ru_remap(
+                    source_fragment,
+                    target_fragment,
+                    target_abs=target_abs,
+                    target_md=target_md,
+                    docs_text_reader=docs_text_reader,
+                )
+                if baseline_ok:
+                    if fragment_declared_in_markdown(target_md, source_fragment):
+                        continue
+                    if not fragment_declared_in_markdown(target_md, target_fragment):
+                        continue
+                elif remap_ok:
+                    pass
+                else:
                     continue
                 used_extra.add(idx)
                 matched = True

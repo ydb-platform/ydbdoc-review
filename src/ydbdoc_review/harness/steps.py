@@ -212,6 +212,12 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         prompt_version=ctx.prompt_version,
         max_chars=ctx.batch_chars,
     )
+    if any(issue.category == "critic_model_refusal" for issue in state.critic_initial.issues):
+        state.finalize_warnings.append(
+            "critic_model_refusal: model declined review; heuristics only on verify"
+        )
+        state.critic_unresolved = CriticResponse(verdict="ok", issues=[])
+        return
     if any(issue.category == "critic_execution_failed" for issue in state.critic_initial.issues):
         state.critic_unresolved = state.critic_initial
         return

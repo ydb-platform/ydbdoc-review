@@ -5417,4 +5417,41 @@ fail-closed for a batch with >1 segment, resplit once into halves and retry
 before keeping the blocked verdict.
 
 
+### §6.235 Critic model refusal → heuristics-only verify (#51199, 2026-09-01)
+
+**Problem:** ``health-check-api.md`` verify on #51199 called YandexGPT critic;
+every batch returned the safety refusal «Я не могу обсуждать эту тему» (HTTP
+200, non-JSON prose). §6.220 retries exhausted and the file stayed
+``critic_execution_failed`` even though heuristics were clean.
+
+**Decision:**
+
+1. Detect common refusal markers before JSON parse in ``_fetch_critic_response``.
+2. Return ``critic_model_refusal`` (warning, non-blocking) instead of
+   ``critic_execution_failed``.
+3. ``run_critic_loop`` skips critic apply/verify and records a finalize warning;
+   ``HeuristicsStep`` remains the sole gate for that file.
+
+**Tests:** ``test_run_critic_model_refusal_falls_back_to_heuristics_only``,
+``test_is_model_refusal_text_detects_yandexgpt_decline``.
+
+
+### §6.236 Href-parity accepts RU translit via fragment_repair remap (#51761, 2026-09-01)
+
+**Problem:** Translation PR #51761 / ``client_certificate_authorization.md``
+stayed 🔴 on ``href_parity`` when RU kept the legacy translit fragment
+``#vklyuchenie-rezhima-…`` while tip EN correctly linked
+``#enabling-the-node-authentication-and-authorization-mode``. §6.227/228
+fragment repair already knew the mapping; href-parity required an exact
+``en_baseline_text`` slot match and failed without it (or when baseline still
+had translit).
+
+**Decision:** In the §6.174 declared-fragment pairing branch, accept a
+missing/extra href pair when the EN fragment is declared on the target page and
+``_remap_fragment_via_ru_en_pages`` maps the RU fragment to that EN slug (same
+path, same link position). Baseline slot match remains a fast path.
+
+**Tests:** ``test_pr_51761_href_parity_accepts_ru_translit_via_fragment_remap``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
