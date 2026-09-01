@@ -862,6 +862,15 @@ def _best_paragraph_replace(en_text: str, anchor: str, en_seg: str) -> tuple[int
     return best[1], best[2]
 
 
+def _render_segment_translation(seg: Segment, translated: str) -> str:
+    from ydbdoc_review.rendering.markdown_renderer import _render_inline
+    from ydbdoc_review.segmentation.reinsert import _build_inline_from_translation
+
+    return _render_inline(
+        _build_inline_from_translation(translated, seg.placeholders)
+    ).strip()
+
+
 def patch_en_with_added_translations(
     en_text: str,
     *,
@@ -883,9 +892,10 @@ def patch_en_with_added_translations(
     for seg in pr_segments:
         if seg.id not in change_ids:
             continue
-        en_seg = (translations.get(seg.id) or "").strip()
-        if not en_seg:
+        raw_translation = translations.get(seg.id) or ""
+        if not raw_translation.strip():
             continue
+        en_seg = _render_segment_translation(seg, raw_translation)
         if en_seg in en_text:
             continue
         anchor = _preceding_heading_anchor(pr_segments, seg.id)

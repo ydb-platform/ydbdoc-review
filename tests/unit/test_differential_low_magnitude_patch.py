@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# ruff: noqa: RUF001
 from textwrap import dedent
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -182,15 +183,15 @@ subsystems, see the Metadata distribution services section.
     )
     change_ids = analysis.added_segment_ids | analysis.modified_segment_ids
     added_id = next(iter(change_ids))
-    linked = (
+    translated = (
         "For more details about the StateStorage architecture and related "
         "subsystems, see the section "
-        "[Metadata distribution services](architecture/metadata-services.md)."
+        "⟦L1⟧Metadata distribution services⟦L1⟧."
     )
     out = patch_en_with_added_translations(
         en,
         pr_segments=segs,
-        translations={added_id: linked},
+        translations={added_id: translated},
         added_segment_ids=analysis.added_segment_ids,
         modified_segment_ids=analysis.modified_segment_ids,
     )
@@ -246,7 +247,7 @@ def test_patch_en_inserts_after_anchor():
     translations = {
         added_id: (
             "For more details, see the section "
-            "[Metadata services](architecture/metadata-services.md)."
+            "⟦L1⟧Metadata services⟦L1⟧."
         )
     }
     out = patch_en_with_added_translations(
@@ -257,4 +258,86 @@ def test_patch_en_inserts_after_anchor():
         modified_segment_ids=analysis.modified_segment_ids,
     )
     assert "Metadata services" in out
+    assert "[Metadata services](architecture/metadata-services.md)" in out
     assert out.index("Metadata services") < out.index("### Board")
+
+
+def test_pr51853_low_magnitude_patch_renders_link_boundaries():
+    cases = [
+        (
+            "# Client certificate authorization {#client-certificate-authorization}\n\n"
+            "Опцию рекомендуется использовать при "
+            "[регистрации динамических узлов]"
+            "(../../devops/concepts/node-authorization.md"
+            "#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov).\n",
+            "The option is advisable to use when registering dynamic nodes.",
+            "The option is advisable to use when "
+            "⟦L1⟧registering dynamic nodes⟦L1⟧.",
+            [
+                "[registering dynamic nodes]"
+                "(../../devops/concepts/node-authorization.md"
+                "#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov)"
+            ],
+        ),
+        (
+            "# Monitoring {#monitoring}\n\n"
+            "Секция задаёт параметры "
+            "[YDB Monitoring](../ydb-ui/ydb-monitoring.md).\n",
+            "The section sets the parameters for YDB Monitoring.",
+            "The section sets the parameters for "
+            "⟦L1⟧YDB Monitoring⟦L1⟧.",
+            ["[YDB Monitoring](../ydb-ui/ydb-monitoring.md)"],
+        ),
+        (
+            "# Authentication {#authentication}\n\n"
+            "- **gRPC** и **YDB Monitoring** — можно включить запрос сертификата "
+            "клиента для аутентификации устройств, а также отдельно включить его "
+            "обязательную проверку (недоверенный сертификат отклоняется всегда). "
+            "Настройка gRPC описана в секциях "
+            "[grpc_config](../reference/configuration/tls.md#grpc) и "
+            "[client_certificate_authorization]"
+            "(../reference/configuration/client_certificate_authorization.md), а "
+            "подключение клиента — в разделе "
+            "[Параметры TLS-соединения](../reference/ydb-cli/connect.md#tls); "
+            "настройка мониторинга YDB Monitoring описана в секции "
+            "[monitoring_config]"
+            "(../reference/configuration/monitoring_config.md#tls).\n",
+            "Existing authentication overview.",
+            "- **gRPC** and **YDB Monitoring** can request a client certificate and "
+            "require its validation. gRPC is configured in the "
+            "⟦L1⟧grpc_config⟦L1⟧ and "
+            "⟦L2⟧client_certificate_authorization⟦L2⟧ sections, while "
+            "the client connection is covered in "
+            "⟦L3⟧TLS connection parameters⟦L3⟧; YDB Monitoring is "
+            "configured in ⟦L4⟧monitoring_config⟦L4⟧.",
+            [
+                "[grpc_config](../reference/configuration/tls.md#grpc)",
+                "[client_certificate_authorization]"
+                "(../reference/configuration/client_certificate_authorization.md)",
+                "[TLS connection parameters](../reference/ydb-cli/connect.md#tls)",
+                "[monitoring_config]"
+                "(../reference/configuration/monitoring_config.md#tls)",
+            ],
+        ),
+    ]
+
+    for ru, existing_paragraph, translated, expected_links in cases:
+        segments = extract_segments(parse_markdown(ru))
+        segment = segments[-1]
+        prefix = "UNCHANGED PREFIX\n\n"
+        suffix = "\n\n# Unrelated {#unrelated}\n\nUNCHANGED SUFFIX\n"
+        en = prefix + ru.splitlines()[0] + "\n\n" + existing_paragraph + suffix
+        out = patch_en_with_added_translations(
+            en,
+            pr_segments=segments,
+            translations={segment.id: translated},
+            added_segment_ids=frozenset({segment.id}),
+        )
+
+        for link in expected_links:
+            assert out.count(link) == 1
+        assert "⟦L" not in out
+        assert "%E2%9F%A6" not in out
+        assert out.startswith(prefix)
+        assert "# Unrelated {#unrelated}" in out
+        assert out.endswith("UNCHANGED SUFFIX\n")
