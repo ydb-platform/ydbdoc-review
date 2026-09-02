@@ -5572,4 +5572,29 @@ identity covered base + empty re-critic only, not an accepted repair insertion.
 ``test_accepted_repair_uses_identical_frozen_validation_context``.
 
 
+### §6.242 Map-less YFM owned_line + clean review worktree (response-v005, 2026-09-02)
+
+**Problem:** Bugbot ``response-v005`` CHANGES_REQUESTED: closes with
+``token.map is None`` still fell back to ``derived_line`` from the span under
+test, so a ``yfm_note_close`` over an unrelated ``Text`` line and a
+``yfm_tab_close`` at another line's ``content_start`` were accepted. Separately,
+dirty worktree copies of ``READY-FOR-EXTERNAL-REVIEW.md`` and untracked
+``review-request-v005.md`` made the remediation policy manifest path inventory RED.
+
+**Decision:**
+
+1. Plugins emit ``meta.owned_line`` (StateBlock line) on every map-less YFM
+   marker (note/cut/if branch/close, tab/tabs close).
+2. ``_record_from_token_map`` requires ``token.map[0]`` or ``meta.owned_line``;
+   never derives ownership solely from the candidate span.
+3. Keep independent review request/response artifacts only under
+   ``/Users/iuriisintiaev/ydbdoc-review/.ai-workflow/``; do not leave untracked
+   or dirty review copies in the implementor worktree when refreshing the
+   remediation manifest.
+
+**Tests:** ``test_mapless_yfm_close_without_owned_line_fails_closed``,
+``test_mapless_note_close_on_unrelated_line_fails_closed``,
+``test_mapless_tab_close_on_another_line_content_start_fails_closed``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

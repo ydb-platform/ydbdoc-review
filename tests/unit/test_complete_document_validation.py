@@ -414,6 +414,7 @@ def test_non_zero_virtual_close_fails_closed() -> None:
     source = "line\n"
     token = Token("yfm_tab_close", "", 0)
     token.meta = {
+        "owned_line": 0,
         "source_span": {
             "byte_start": 0,
             "byte_end": 4,
@@ -447,6 +448,7 @@ def test_wrong_zero_width_virtual_close_boundary_fails_closed() -> None:
     source = "  {% endlist %}\n"
     token = Token("yfm_tab_close", "", 0)
     token.meta = {
+        "owned_line": 0,
         "source_span": {
             "byte_start": 0,
             "byte_end": 0,
@@ -479,6 +481,7 @@ def test_exact_zero_width_virtual_close_boundary_is_accepted() -> None:
     source = "  {% endlist %}\n"
     token = Token("yfm_tab_close", "", 0)
     token.meta = {
+        "owned_line": 0,
         "source_span": {
             "byte_start": 2,
             "byte_end": 2,
@@ -497,6 +500,108 @@ def test_exact_zero_width_virtual_close_boundary_is_accepted() -> None:
     finally:
         _PARSE_SOURCE.reset(token_var)
     assert record.start_byte == record.end_byte == 2
+
+
+def test_mapless_yfm_close_without_owned_line_fails_closed() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
+
+    source = "{% note info %}\nText\n{% endnote %}\n"
+    close_start = source.index("{% endnote %}")
+    token = Token("yfm_note_close", "", -1)
+    token.meta = {
+        "source_span": {
+            "byte_start": close_start,
+            "byte_end": close_start + len("{% endnote %}"),
+            "line": 3,
+            "column": 1,
+        }
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_note_close"):
+            _record_from_token_map(
+                token,
+                _source_index_from_lines(source),
+                kind="yfm_note_close",
+                descriptor="yfm_note_close",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+
+
+def test_mapless_note_close_on_unrelated_line_fails_closed() -> None:
+    """Physical close with map=None must not relocate via derived_line alone."""
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
+
+    source = "{% note info %}\nText\n{% endnote %}\n"
+    text_start = source.index("Text")
+    token = Token("yfm_note_close", "", -1)
+    token.meta = {
+        "owned_line": 2,
+        "source_span": {
+            "byte_start": text_start,
+            "byte_end": text_start + len("Text"),
+            "line": 2,
+            "column": 1,
+        },
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_note_close"):
+            _record_from_token_map(
+                token,
+                _source_index_from_lines(source),
+                kind="yfm_note_close",
+                descriptor="yfm_note_close",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+
+
+def test_mapless_tab_close_on_another_line_content_start_fails_closed() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
+
+    source = "line0\n  boundary\n"
+    token = Token("yfm_tab_close", "", -1)
+    # Owned close is line 0; span sits at line 1 content_start (byte 8).
+    token.meta = {
+        "owned_line": 0,
+        "source_span": {
+            "byte_start": 8,
+            "byte_end": 8,
+            "line": 2,
+            "column": 3,
+        },
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_tab_close"):
+            _record_from_token_map(
+                token,
+                _source_index_from_lines(source),
+                kind="yfm_tab_close",
+                descriptor="yfm_tab_close",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
 
 
 def test_front_matter_description_and_comment_bytes_are_protected() -> None:

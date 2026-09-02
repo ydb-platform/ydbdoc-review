@@ -245,13 +245,18 @@ def _record_from_token_map(
             derived_line = _line_index_for_byte(line_starts, start)
         except ValueError as exc:
             raise ValueError(f"source_map_incomplete:{kind}") from exc
-        # Opens / includes carry StateBlock-owned line in token.map[0]. Prefer
-        # that over the self-reported source_span.line so a consistently encoded
-        # span on the wrong owned line still fails closed.
+        # Owned line must come from StateBlock identity (token.map[0] or plugin
+        # meta owned_line). Never fall back to derived_line: that trusts the
+        # span under test and lets closes with map=None relocate freely.
+        meta_owned = (token.meta or {}).get("owned_line")
         if token.map is not None and len(token.map) >= 1:
             owned_line = token.map[0]
+            if meta_owned is not None and meta_owned != owned_line:
+                raise ValueError(f"source_map_incomplete:{kind}")
+        elif isinstance(meta_owned, int) and meta_owned >= 0:
+            owned_line = meta_owned
         else:
-            owned_line = derived_line
+            raise ValueError(f"source_map_incomplete:{kind}")
         if derived_line != owned_line or source_span.line != owned_line + 1:
             raise ValueError(f"source_map_incomplete:{kind}")
         source_text = _PARSE_SOURCE.get() or ""

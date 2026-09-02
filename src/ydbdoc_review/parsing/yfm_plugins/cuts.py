@@ -80,6 +80,7 @@ def _yfm_cut_rule(
     token.markup = "{% endcut %}"
     token.block = True
     close_start = state.bMarks[close_line] + state.tShift[close_line]
+    token.meta["owned_line"] = close_line
     token.meta["source_span"] = utf8_source_span(
         state.src, close_start, state.eMarks[close_line]
     )

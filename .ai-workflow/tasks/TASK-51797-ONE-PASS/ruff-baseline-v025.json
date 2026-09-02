@@ -2888,15 +2888,15 @@
     },
     {
       "path": "src/ydbdoc_review/parsing/markdown_parser.py",
-      "sha256": "e71625f6e8b726f8b2f43143eb4dfbe42cf1ed27d2312ad1a80ac77daf326de0"
+      "sha256": "52b51442058981c7a96db9b3275d0027eea4c5c2ea07f7019d69becd67b3ad33"
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/conditionals.py",
-      "sha256": "a5b7255f9f9997c0f3dc8fd83888e2235ca0e8277c782be96a4d98d8df777a7f"
+      "sha256": "a868c91ee24dad6939e12512c34aaabb8a2ed1e8d25ac84dc837f2acb57330ef"
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/cuts.py",
-      "sha256": "6aadafc5c64df7331da9f4479e42d1b2f99a1517a81ea3c65414a4bfc775cf4c"
+      "sha256": "729e61fdd7ebb8ff98073b557432c7188216fabf735b86ba69fefd95ce452609"
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/includes.py",
@@ -2904,7 +2904,7 @@
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/notes.py",
-      "sha256": "2d12fd29eb83c567e93189dd8d81b191e4794348309b7ce5eb1a18d16e646edf"
+      "sha256": "1d90d1a907e2f5f0107c61c04dc2f6d70c13f5290d2a0d985de23a6129fc6857"
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/source_spans.py",
@@ -2912,7 +2912,7 @@
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/tabs.py",
-      "sha256": "e9b96860ffc62bf15ffbb9e725dea125da31b1d4f82cf1113237dba66c698596"
+      "sha256": "4b535d262913d799e9b816938232332507d140ab73fe11f93c9b01d6ccdce146"
     },
     {
       "path": "src/ydbdoc_review/pipeline/analyze.py",
@@ -3032,7 +3032,7 @@
     },
     {
       "path": "tests/unit/test_complete_document_validation.py",
-      "sha256": "25e1103c51d238f259cae0a2615c336878f345a43666990b93ec4340c0cc3c0b"
+      "sha256": "ff44db558b0dbd933d59a1a790276b05e627a6b91e774c55701c00480a01f8ce"
     },
     {
       "path": "tests/unit/test_config.py",

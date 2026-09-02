@@ -103,6 +103,7 @@ def _yfm_if_rule(
         branch_open.meta = {
             "condition": condition,
             "branch_kind": kind,
+            "owned_line": marker_line,
             "source_span": utf8_source_span(state.src, marker_start, marker_end),
         }
 
@@ -111,6 +112,7 @@ def _yfm_if_rule(
 
         branch_close = state.push("yfm_if_branch_close", "div", -1)
         boundary = state.bMarks[branch_body_end] + state.tShift[branch_body_end]
+        branch_close.meta["owned_line"] = branch_body_end
         branch_close.meta["source_span"] = utf8_source_span(
             state.src, boundary, boundary
         )
@@ -119,6 +121,7 @@ def _yfm_if_rule(
     outer_close.markup = "{% endif %}"
     outer_close.block = True
     close_start = state.bMarks[close_line] + state.tShift[close_line]
+    outer_close.meta["owned_line"] = close_line
     outer_close.meta["source_span"] = utf8_source_span(
         state.src, close_start, state.eMarks[close_line]
     )

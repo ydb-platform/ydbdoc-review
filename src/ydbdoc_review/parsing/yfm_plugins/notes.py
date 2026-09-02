@@ -91,6 +91,7 @@ def _yfm_note_rule(
     token.markup = "{% endnote %}"
     token.block = True
     close_start = state.bMarks[close_line] + state.tShift[close_line]
+    token.meta["owned_line"] = close_line
     token.meta["source_span"] = utf8_source_span(
         state.src, close_start, state.eMarks[close_line]
     )

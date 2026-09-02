@@ -148,6 +148,7 @@ def _yfm_tabs_rule(
             boundary = state.bMarks[body_end] + state.tShift[body_end]
             tab_close.meta = {
                 "container_id": container_id,
+                "owned_line": body_end,
                 "source_span": utf8_source_span(state.src, boundary, boundary),
             }
     finally:
@@ -161,6 +162,7 @@ def _yfm_tabs_rule(
     token.block = True
     token.meta = {
         "container_id": container_id,
+        "owned_line": close_line,
         "closing_span": utf8_source_span(
             state.src, state.bMarks[close_line], state.eMarks[close_line]
         ),
