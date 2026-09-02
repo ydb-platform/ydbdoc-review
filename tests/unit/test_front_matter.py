@@ -91,6 +91,24 @@ def test_style_preserving_different_length_update(raw, expected_value):
         assert updated[7] == raw[7]
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "description: Привет # keep\nx: 1\n",
+        "description: 'Привет' # keep\nx: 1\n",
+        'description: "Привет" # keep\nx: 1\n',
+        "description: | # keep\n  Привет\nx: 1\n",
+        "description: > # keep\n  Привет\nx: 1\n",
+    ],
+)
+def test_description_style_preserving_different_length_update(raw):
+    updated = apply_front_matter_updates(raw, {"description": "A longer English description"})
+    value = parse_front_matter(updated)["description"]
+    assert value.startswith("A longer English description")
+    assert "# keep" in updated
+    assert "x: 1" in updated
+
+
 def test_alias_backed_selected_value_is_rejected():
     with pytest.raises(ValueError, match="source_map_invalid_front_matter:title"):
         parse_front_matter_with_spans("x: &a Hello\ntitle: *a\n")

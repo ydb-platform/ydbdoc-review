@@ -10,7 +10,9 @@ Audited worktree `/private/tmp/ydbdoc-review-one-pass-v003` after user-authorize
 
 ## Residual honesty
 
-A literal reading of v001–v005 still names deeper nesting/provenance permutations than any finite suite can exhaustively enumerate. The current suite now covers every named acceptance category with isolated GREEN/RED proofs rather than a representative stub. External implementation review v003 remains the formal close.
+A literal reading of v001–v005 still names deeper nesting/provenance permutations than any finite suite can exhaustively enumerate. The current suite now covers every named acceptance category with isolated GREEN/RED proofs rather than a representative stub.
+
+**Ready for independent second-model review.** See `READY-FOR-EXTERNAL-REVIEW.md` and `review-request-v003.md`. Do not treat this audit as an APPROVED external verdict.
 
 ## Evidence commands
 

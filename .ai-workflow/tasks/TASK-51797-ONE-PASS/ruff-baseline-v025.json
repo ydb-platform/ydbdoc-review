@@ -3032,7 +3032,7 @@
     },
     {
       "path": "tests/unit/test_complete_document_validation.py",
-      "sha256": "6a2b1f7be6869f0abbb77321c1de8c442f19c645b1fb8d96d3adfd4fc51493cf"
+      "sha256": "32512224fc911295dc93bef885b2c7f226c8c3939953baed4ab28e3f032f0344"
     },
     {
       "path": "tests/unit/test_config.py",
@@ -3056,7 +3056,7 @@
     },
     {
       "path": "tests/unit/test_front_matter.py",
-      "sha256": "f4cf11bf3638aa96e4a0bfc45c20fdbb6e69a92da143e2efa98d524312215281"
+      "sha256": "018900d3363c8e70a6ead1346f5a685ca90ee7803c0d55d3cf4661fbc273becc"
     },
     {
       "path": "tests/unit/test_github_git_ops.py",
@@ -3172,7 +3172,7 @@
     },
     {
       "path": "tests/unit/test_yfm_notes.py",
-      "sha256": "5c93997abdf51550d72b434acdc4ba58115ced2601358fb51cab9edd319fbf63"
+      "sha256": "52b50d4cd40cb97281678572012e1f7311b3f7746d2c336d355aa7cc7f845b2d"
     },
     {
       "path": "tests/unit/test_yfm_tabs.py",

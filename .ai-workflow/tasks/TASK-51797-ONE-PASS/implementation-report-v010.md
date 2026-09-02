@@ -120,4 +120,4 @@ User-authorized mechanical and semantic closure on 2026-09-02:
   `ruff-baseline-v025.json` (124/89/35, 5/84/163, diagnostics 189/102/291).
 - Manifest refresh ×2 byte-identical; policy and Ruff validate GREEN.
 - Expanded R-016 isolated mutation matrix in `test_complete_document_validation.py`.
-- External implementation review request: `review-request-v003.md` (reviewer currently STOPPED).
+- Package ready for independent second-model review: see `READY-FOR-EXTERNAL-REVIEW.md` + `review-request-v003.md` (no self-APPROVED response).

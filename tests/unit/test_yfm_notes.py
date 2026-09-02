@@ -1,5 +1,7 @@
 """Tests for YFM {% note %} block construct."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import pytest
@@ -243,3 +245,26 @@ def test_note_title_span_excludes_quotes_and_uses_utf8(title):
 def test_note_without_title_has_no_title_span():
     token = create_parser().parse("{% note info %}\nText\n{% endnote %}\n")[0]
     assert "title_span" not in token.meta
+
+
+def test_indented_cyrillic_adjacent_note_owns_exact_marker_spans():
+    text = (
+        "Перед\n"
+        "\n"
+        "  {% note warning \"Заголовок\" %}\n"
+        "  Текст рядом с кириллицей.\n"
+        "  {% endnote %}\n"
+        "\n"
+        "После\n"
+    )
+    tokens = [token for token in create_parser().parse(text) if token.type.startswith("yfm_note")]
+    open_token, close_token = tokens[0], tokens[-1]
+    open_span = open_token.meta["source_span"]
+    close_span = close_token.meta["source_span"]
+    encoded = text.encode()
+    assert encoded[open_span["byte_start"] : open_span["byte_end"]].startswith(
+        b"{% note warning"
+    )
+    assert encoded[close_span["byte_start"] : close_span["byte_end"]] == b"{% endnote %}"
+    title = open_token.meta["title_span"]
+    assert encoded[title["byte_start"] : title["byte_end"]] == "Заголовок".encode()

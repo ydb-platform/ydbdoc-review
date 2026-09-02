@@ -288,3 +288,62 @@ def test_source_spans_module_forbids_re_and_text_search_apis() -> None:
             raise AssertionError(node.func.attr)
     assert "_FENCE" not in source
 
+
+def test_missing_yfm_source_span_fails_closed_without_map_fallback() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import _record_from_token_map
+
+    token = Token("yfm_note_open", "", 0)
+    token.map = [0, 1]
+    token.meta = {}
+    with pytest.raises(ValueError, match="source_map_incomplete:yfm_note_open"):
+        _record_from_token_map(
+            token,
+            (0, 10, 20),
+            kind="yfm_note_open",
+            descriptor="yfm_note_open",
+        )
+
+
+def test_zero_width_physical_yfm_marker_fails_closed() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import SourceSpan, _record_from_token_map
+
+    token = Token("yfm_include", "", 0)
+    token.meta = {
+        "source_span": SourceSpan(
+            byte_start=4, byte_end=4, line=1, column=5
+        ).model_dump()
+    }
+    with pytest.raises(ValueError, match="source_map_incomplete:yfm_include"):
+        _record_from_token_map(
+            token,
+            (0, 10, 20),
+            kind="yfm_include",
+            descriptor="yfm_include",
+        )
+
+
+def test_front_matter_description_and_comment_bytes_are_protected() -> None:
+    source = (
+        "---\n"
+        "title: Привет\n"
+        'description: "Описание" # keep\n'
+        "x: 1\n"
+        "---\n\n"
+        "Текст\n"
+    )
+    valid = (
+        "---\n"
+        "title: Hello\n"
+        'description: "Description" # keep\n'
+        "x: 1\n"
+        "---\n\n"
+        "Text\n"
+    )
+    validate_complete_document(valid, context(source))
+    with pytest.raises(OnePassTranslationError, match="fence_config_parity"):
+        validate_complete_document(valid.replace("# keep", "# changed"), context(source))
+

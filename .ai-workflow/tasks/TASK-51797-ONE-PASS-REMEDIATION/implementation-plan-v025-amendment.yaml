@@ -127,6 +127,7 @@ post_capture_control_paths_addition:
     - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v024.yaml
     - MEMORY_BANK.md
     - docs/memory-bank/03-design-decisions.md
+    - .ai-workflow/tasks/TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION-IMPLEMENTATION-AUDIT/READY-FOR-EXTERNAL-REVIEW.md
 ruff_baseline_output: .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v025.json
 forbidden: [edit_v020_baseline_bytes, weaken_fail_closed_validate, invent_partition_without_capture]
 
