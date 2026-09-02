@@ -2884,11 +2884,11 @@
     },
     {
       "path": "src/ydbdoc_review/parsing/front_matter.py",
-      "sha256": "82d8ffae3889038be051b814f5ab4161a940e195013c0525ba75719037100c80"
+      "sha256": "f82776877796007c7c3fc713830ae548b94e9ca3b7b379b0002008b61cff0e2e"
     },
     {
       "path": "src/ydbdoc_review/parsing/markdown_parser.py",
-      "sha256": "fb2297e3dc07234b4200cfe61da7e0077b66af782b61f1622ea512b8eb7c0efc"
+      "sha256": "5f12ddee7be67a862bd108ea51f26ef7f73a917fcbbb2d6fb580195888a1c625"
     },
     {
       "path": "src/ydbdoc_review/parsing/yfm_plugins/conditionals.py",
@@ -2984,7 +2984,7 @@
     },
     {
       "path": "src/ydbdoc_review/translation/one_pass.py",
-      "sha256": "2c0432abdd56f5ca882c335ecb0d5a0a7ba6e72359ed8a28c2b5af9e2670dc3b"
+      "sha256": "a3864846706623a8c94c153ec4700ec058848a848c1ac391bfdf0c47e4c5fd6e"
     },
     {
       "path": "src/ydbdoc_review/translation/translator.py",
@@ -3032,7 +3032,7 @@
     },
     {
       "path": "tests/unit/test_complete_document_validation.py",
-      "sha256": "32512224fc911295dc93bef885b2c7f226c8c3939953baed4ab28e3f032f0344"
+      "sha256": "16ab02d02ee6f8bcde0e025d59cb3290e43403c02a246a3ce0af27d8a4ed337a"
     },
     {
       "path": "tests/unit/test_config.py",
@@ -3056,7 +3056,7 @@
     },
     {
       "path": "tests/unit/test_front_matter.py",
-      "sha256": "018900d3363c8e70a6ead1346f5a685ca90ee7803c0d55d3cf4661fbc273becc"
+      "sha256": "5ecad6076e168cc1065f70f6a2812837e12bed3f97db56eefbbbdfabe8adc8e1"
     },
     {
       "path": "tests/unit/test_github_git_ops.py",

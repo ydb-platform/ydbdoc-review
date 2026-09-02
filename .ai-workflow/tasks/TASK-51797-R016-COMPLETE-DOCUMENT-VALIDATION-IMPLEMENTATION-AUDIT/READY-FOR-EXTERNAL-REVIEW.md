@@ -72,3 +72,9 @@ cd /private/tmp/ydbdoc-review-one-pass-v003
 - Historical `ruff-baseline-v020.json` must remain byte-immutable
   (`677896e7eba1af6c884fecf42a9543b40ef70b0caf3bf7e4d98521e8e6ff6ba7`).
 - Do not implement product code in the review response; verdict only.
+
+
+## Resubmission after v003 CHANGES_REQUESTED
+
+Four RED findings were fixed and covered by tests. Next review entrypoint:
+`review-request-v004.md` → `response-v004.yaml`.

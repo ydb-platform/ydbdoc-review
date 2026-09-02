@@ -309,7 +309,11 @@ def test_missing_yfm_source_span_fails_closed_without_map_fallback() -> None:
 def test_zero_width_physical_yfm_marker_fails_closed() -> None:
     from markdown_it.token import Token
 
-    from ydbdoc_review.parsing.markdown_parser import SourceSpan, _record_from_token_map
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        SourceSpan,
+        _record_from_token_map,
+    )
 
     token = Token("yfm_include", "", 0)
     token.meta = {
@@ -317,13 +321,77 @@ def test_zero_width_physical_yfm_marker_fails_closed() -> None:
             byte_start=4, byte_end=4, line=1, column=5
         ).model_dump()
     }
-    with pytest.raises(ValueError, match="source_map_incomplete:yfm_include"):
-        _record_from_token_map(
-            token,
-            (0, 10, 20),
-            kind="yfm_include",
-            descriptor="yfm_include",
-        )
+    token_var = _PARSE_SOURCE.set("abcdefghij\n")
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_include"):
+            _record_from_token_map(
+                token,
+                (0, 11, 11),
+                kind="yfm_include",
+                descriptor="yfm_include",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+
+
+def test_physical_yfm_span_outside_owned_line_fails_closed() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+    )
+
+    source = "{% note info %}\nText\n{% endnote %}\n"
+    token = Token("yfm_note_open", "", 0)
+    # Claim line 1 but point at bytes on line 2.
+    token.meta = {
+        "source_span": {
+            "byte_start": len("{% note info %}\n"),
+            "byte_end": len("{% note info %}\nText"),
+            "line": 1,
+            "column": 1,
+        }
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_note_open"):
+            _record_from_token_map(
+                token,
+                (0, len("{% note info %}\n"), len(source.encode("utf-8"))),
+                kind="yfm_note_open",
+                descriptor="yfm_note_open",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+
+
+def test_non_zero_virtual_close_fails_closed() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import _PARSE_SOURCE, _record_from_token_map
+
+    source = "line\n"
+    token = Token("yfm_tab_close", "", 0)
+    token.meta = {
+        "source_span": {
+            "byte_start": 0,
+            "byte_end": 4,
+            "line": 1,
+            "column": 1,
+        }
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_tab_close"):
+            _record_from_token_map(
+                token,
+                (0, 5, 5),
+                kind="yfm_tab_close",
+                descriptor="yfm_tab_close",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
 
 
 def test_front_matter_description_and_comment_bytes_are_protected() -> None:
@@ -347,3 +415,71 @@ def test_front_matter_description_and_comment_bytes_are_protected() -> None:
     with pytest.raises(OnePassTranslationError, match="fence_config_parity"):
         validate_complete_document(valid.replace("# keep", "# changed"), context(source))
 
+
+
+def test_absolute_ru_same_document_fragment_is_localized():
+    from ydbdoc_review.translation.one_pass import _map_expected_destination
+
+    mapped = _map_expected_destination(
+        "/ru/core/page.md#якорь",
+        "ydb/docs/ru/core/page.md",
+        (("якорь", "anchor"),),
+    )
+    assert mapped == "/en/core/page.md#anchor"
+
+
+def test_parser_failure_is_fail_closed():
+    source = "---\ntitle: Привет\n---\n\nТекст\n"
+    with pytest.raises(OnePassTranslationError, match="candidate_parse_failed"):
+        validate_complete_document(
+            "---\nx: &a Hello\ntitle: *a\n---\n\nText\n",
+            context(source),
+        )
+
+
+def test_container_reorder_and_nesting_are_rejected():
+    source = "- Один\n\n  - Вложенный\n"
+    with pytest.raises(OnePassTranslationError, match="container_structure_parity"):
+        validate_complete_document("- Nested\n\n- One\n", context(source))
+    with pytest.raises(OnePassTranslationError, match="container_structure_parity"):
+        validate_complete_document(
+            "- One\n\n  - Nested\n\n    - Deeper\n",
+            context(source),
+        )
+
+
+def test_standalone_atom_duplication_is_rejected():
+    source = "Текст `only`.\n"
+    with pytest.raises(OnePassTranslationError, match="protected_atom_parity"):
+        validate_complete_document("Text `only` and `only`.\n", context(source))
+
+
+def test_link_path_and_order_mutations_are_rejected():
+    source = "[a](first.md) [b](second.md)\n"
+    with pytest.raises(OnePassTranslationError, match="protected_atom_parity"):
+        validate_complete_document("[a](other.md) [b](second.md)\n", context(source))
+    with pytest.raises(OnePassTranslationError, match="protected_atom_parity"):
+        validate_complete_document("[b](second.md) [a](first.md)\n", context(source))
+
+
+def test_fence_body_and_closing_marker_mutations_are_rejected():
+    source = "```py\nкод\n```\n"
+    with pytest.raises(OnePassTranslationError, match="fence_config_parity"):
+        validate_complete_document("```py\nbody\n```\n", context(source))
+    with pytest.raises(OnePassTranslationError, match="fence_config_parity"):
+        validate_complete_document("```py\nкод\n````\n", context(source))
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "---\nTitle: Hello # keep\nx: 1\n---\n\nText\n",
+        "---\ntitle: Hello # changed\nx: 1\n---\n\nText\n",
+        "---\ntitle: Hello # keep\nx: 2\n---\n\nText\n",
+        "---\ndescription: D\ntitle: Hello # keep\nx: 1\n---\n\nText\n",
+    ],
+)
+def test_front_matter_fail_closed_protected_matrix(broken: str) -> None:
+    source = "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n"
+    with pytest.raises(OnePassTranslationError):
+        validate_complete_document(broken, context(source))

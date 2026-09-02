@@ -130,3 +130,24 @@ def test_encode_rejects_unknown_style():
     record = FrontMatterValueRecord("title", "!", "x", 0, 1, None, b"", b"")
     with pytest.raises(ValueError, match="front_matter_translation_requires_style_change:title"):
         _encode_front_matter_value(record, "y")
+
+
+def test_strip_block_scalar_preserves_absent_final_newline():
+    updated = apply_front_matter_updates("title: |-\n  Привет", {"title": "Hello"})
+    assert updated == "title: |-\n  Hello"
+    assert parse_front_matter(updated)["title"] == "Hello"
+
+
+def test_strip_block_scalar_keeps_structural_newline_before_next_key():
+    updated = apply_front_matter_updates("title: |-\n  Привет\nx: 1\n", {"title": "Hello"})
+    assert updated == "title: |-\n  Hello\nx: 1\n"
+
+
+def test_block_header_chomping_mutation_fails_closed():
+    source = "title: |\n  Привет\n"
+    updated = apply_front_matter_updates(source, {"title": "Hello"})
+    assert updated.startswith("title: |\n")
+    assert "title: |-" not in updated
+    assert "title: |+" not in updated
+    # Surgical encode must not rewrite the protected header bytes.
+    assert updated.encode().startswith(b"title: |\n")

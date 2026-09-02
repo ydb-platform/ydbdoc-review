@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-02
-**Current focus:** §6.239 — one-pass attempt-local validation freeze + remediation v025 (FINAL008-IMPL-007 / R-016).
+**Current focus:** §6.240 — close R-016 external-review RED quartet (absolute fragment / YFM line / strip newline / IMPL-005).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-02 | **§6.240** — absolute RU fragment map, YFM line ownership, strip newline, IMPL-005 tests |
 | 2026-09-02 | **§6.239** — attempt-local complete-document freeze; remediation v025 Ruff/policy capture |
 | 2026-09-01 | **§6.238** — human-readable RU critic failure/refusal messages in QA reports (#51199) |
 | 2026-09-01 | **§6.237** — href-parity verify uses merge-base EN baseline; rebuild extras after grandfather (#51761) |

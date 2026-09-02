@@ -180,14 +180,27 @@ def _walk_ast_preorder(node):
 def _map_expected_destination(href: str, source_file: str, expected_anchor_map: tuple[tuple[str, str], ...]) -> str:
     split = urlsplit(href)
     path = split.path
+    original_path = path
     if path.startswith("/ru/"):
         path = f"/en/{path.removeprefix('/ru/')}"
     fragment = split.fragment
     if not split.scheme and not split.netloc:
-        same_document = not split.path or posixpath.normpath(
-            posixpath.join(posixpath.dirname(source_file), split.path.lstrip("/"))
+        relative_same = not original_path or posixpath.normpath(
+            posixpath.join(posixpath.dirname(source_file), original_path.lstrip("/"))
         ) == source_file
-        if same_document and fragment:
+        public_ru = None
+        marker = "/docs/ru/"
+        if marker in source_file:
+            public_ru = "/ru/" + source_file.split(marker, 1)[1]
+        elif "/ru/" in source_file:
+            public_ru = "/ru/" + source_file.split("/ru/", 1)[1]
+        public_en = (
+            f"/en/{public_ru.removeprefix('/ru/')}" if public_ru is not None else None
+        )
+        absolute_same = public_en is not None and (
+            original_path in {public_ru, public_en} or path == public_en
+        )
+        if (relative_same or absolute_same) and fragment:
             mapping = dict(expected_anchor_map)
             # Source links may keep a percent-encoded Cyrillic fragment while the
             # anchor map uses decoded keys; look up both forms.

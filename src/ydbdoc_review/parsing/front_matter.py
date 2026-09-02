@@ -25,6 +25,7 @@ class FrontMatterValueRecord:
     block_header_end_byte: int | None
     body_indent: bytes
     newline: bytes
+    body_terminated_by_newline: bool = True
 
 
 def parse_front_matter_with_spans(
@@ -92,10 +93,12 @@ def parse_front_matter_with_spans(
             body_indent = bytes(indent) or b"  "
             body = raw_bytes[start_byte_probe:end_byte_probe]
             newline = b"\r\n" if b"\r\n" in body else b"\n"
+            body_terminated_by_newline = body.endswith(b"\n")
             records.append(
                 FrontMatterValueRecord(
                     key, style, value, header_end, end_byte_probe,
                     header_end, body_indent, newline,
+                    body_terminated_by_newline,
                 )
             )
             continue
@@ -205,14 +208,17 @@ def _encode_front_matter_value(record: FrontMatterValueRecord, value: str) -> by
     if record.style == ">" and "\n" in value.rstrip("\n"):
         raise ValueError(f"front_matter_translation_requires_style_change:{record.key}")
     if record.style in {"|", ">"}:
-        lines = value.splitlines()
+        ends_with_newline = value.endswith("\n") or record.body_terminated_by_newline
+        body = value[:-1] if value.endswith("\n") else value
+        lines = body.split("\n") if body or value.endswith("\n") else [""]
         if not lines:
             lines = [""]
         output = bytearray()
-        for line in lines:
+        for index, line in enumerate(lines):
             output.extend(record.body_indent)
             output.extend(line.encode("utf-8"))
-            output.extend(record.newline)
+            if index < len(lines) - 1 or ends_with_newline:
+                output.extend(record.newline or b"\n")
         return bytes(output)
     raise ValueError(f"front_matter_translation_requires_style_change:{record.key}")
 

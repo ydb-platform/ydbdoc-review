@@ -5521,4 +5521,27 @@ expanded ``test_complete_document_validation`` mutation matrix, remediation
 Ruff/policy gate suites.
 
 
+### §6.240 Close R-016 external-review RED quartet (2026-09-02)
+
+**Problem:** Independent review v003 CHANGES_REQUESTED four defects:
+absolute ``/ru/...#якорь`` same-document links kept Cyrillic fragments;
+YFM physical spans were not bound to their StateBlock line / virtual closes
+were not forced zero-width; strip block scalars invented a trailing newline;
+IMPL-005 evidence still missed named isolated gates.
+
+**Decision:**
+
+1. ``_map_expected_destination`` treats absolute ``/ru|/en`` public paths of the
+   source file as same-document for fragment localization.
+2. ``_record_from_token_map`` requires virtual closes to be zero-width and
+   single-line physical YFM markers to stay inside their owned line content.
+3. Block-scalar encode emits a final newline only when the semantic value ends
+   with ``\\n`` or the source body was newline-terminated.
+4. Expand complete-document / front-matter tests for the named missing gates.
+
+**Tests:** absolute-link localization, strip final-newline, YFM line/virtual
+fail-closed, parser-failure / nesting / atom-dup / link-order / fence-body /
+front-matter protected matrix.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

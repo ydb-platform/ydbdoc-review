@@ -186,11 +186,34 @@ def _record_from_token_map(
         raise ValueError(f"source_map_incomplete:{kind}")
     if start < 0 or end < start or end > line_starts[-1]:
         raise ValueError(f"source_map_incomplete:{kind}")
-    if listed_yfm and token.type not in {
-        "yfm_if_branch_close",
-        "yfm_tab_close",
-    } and start == end:
+    virtual_close = token.type in {"yfm_if_branch_close", "yfm_tab_close"}
+    if listed_yfm and virtual_close and start != end:
         raise ValueError(f"source_map_incomplete:{kind}")
+    if listed_yfm and not virtual_close and start == end:
+        raise ValueError(f"source_map_incomplete:{kind}")
+    if listed_yfm and source_span is not None:
+        line_index = source_span.line - 1
+        if line_index < 0 or line_index + 1 >= len(line_starts):
+            raise ValueError(f"source_map_incomplete:{kind}")
+        line_start = line_starts[line_index]
+        next_line_start = line_starts[line_index + 1]
+        source_text = _PARSE_SOURCE.get() or ""
+        line_bytes = source_text.encode("utf-8")[line_start:next_line_start]
+        if line_bytes.endswith(b"\r\n"):
+            content_end = next_line_start - 2
+        elif line_bytes.endswith(b"\n"):
+            content_end = next_line_start - 1
+        else:
+            content_end = next_line_start
+        if virtual_close:
+            if not (line_start <= start <= next_line_start):
+                raise ValueError(f"source_map_incomplete:{kind}")
+        elif token.type != "yfm_tab_open" and not (
+            line_start <= start < end <= content_end
+        ):
+            # Single-line physical markers must stay on their StateBlock line.
+            # yfm_tab_open owns the full tab slice across multiple lines.
+            raise ValueError(f"source_map_incomplete:{kind}")
     title_span = (token.meta or {}).get("title_span")
     if token.type in {"yfm_note_open", "yfm_cut_open", "yfm_tab_open"} and title_span is not None:
         if token.type == "yfm_note_open":
