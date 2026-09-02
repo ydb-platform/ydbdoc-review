@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-09-01
-**Current focus:** §6.237–238 — href-parity verify baseline + human-readable critic failures (#51761 / #51199).
+**Last updated:** 2026-09-02
+**Current focus:** §6.239 — one-pass attempt-local validation freeze + remediation v025 (FINAL008-IMPL-007 / R-016).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -26,6 +26,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-02 | **§6.239** — attempt-local complete-document freeze; remediation v025 Ruff/policy capture |
 | 2026-09-01 | **§6.238** — human-readable RU critic failure/refusal messages in QA reports (#51199) |
 | 2026-09-01 | **§6.237** — href-parity verify uses merge-base EN baseline; rebuild extras after grandfather (#51761) |
 | 2026-09-01 | **§6.236** — href-parity accepts RU translit vs declared EN slug when `fragment_repair` maps the pair (#51761) |

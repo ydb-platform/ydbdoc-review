@@ -17,16 +17,22 @@ from scripts.remediation_ruff_gate import (
     EXPECTED_CONFIG_SHA256,
     EXPECTED_RUFF_VERSION,
     EXPECTED_TOTAL_DIAGNOSTIC_COUNT,
+    HISTORICAL_V020_BASELINE_SHA256,
     _load_and_validate_baseline,
     _validate_baseline_payload,
 )
 
-BASELINE = Path(".ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json")
+BASELINE = Path(".ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v025.json")
+HISTORICAL_V020 = Path(".ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json")
 
 
 def test_active_partition_has_exact_five_paths() -> None:
     assert BASE == "9ff8edec9a26d3975306e20adca325c6eb9f77e6"
     assert len(ACTIVE) == 5
+
+
+def test_historical_v020_baseline_bytes_remain_immutable() -> None:
+    assert hashlib.sha256(HISTORICAL_V020.read_bytes()).hexdigest() == HISTORICAL_V020_BASELINE_SHA256
 
 
 def test_genuine_baseline_has_exact_immutable_sha_and_contract() -> None:

@@ -5,11 +5,13 @@ from __future__ import annotations
 import ast
 import inspect
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 import ydbdoc_review.parsing.front_matter as front_matter_module
 import ydbdoc_review.parsing.markdown_parser as markdown_parser_module
+import ydbdoc_review.parsing.yfm_plugins.source_spans as source_spans_module
 import ydbdoc_review.translation.one_pass as one_pass_module
 from ydbdoc_review.parsing.markdown_parser import (
     ParserSpanRecord,
@@ -169,6 +171,7 @@ def test_translatable_role_matrix_rejects_foreign_roles(kind, role):
         one_pass_module._map_expected_destination,
         one_pass_module.build_complete_document_validation_context,
         one_pass_module.validate_complete_document,
+        source_spans_module.utf8_source_span,
     ],
 )
 def test_parser_owned_validation_functions_have_no_forbidden_search(function):
@@ -181,3 +184,107 @@ def test_parser_owned_validation_functions_have_no_forbidden_search(function):
         and node.func.attr in {"find", "rfind", "index", "replace"}
     }
     assert forbidden == set()
+
+
+@pytest.mark.parametrize(
+    ("source", "candidate", "error"),
+    [
+        ("# A\n\nТекст\n", "## English\n\nText\n", "container_structure_parity"),
+        ("> Цитата\n", "- Quote\n", "container_structure_parity"),
+        ("- Один\n- Два\n", "1. One\n2. Two\n", "container_structure_parity"),
+        ("Текст `a` и `b`.\n", "Text `a` and `a`.\n", "protected_atom_parity"),
+        ("[t](a.md?x=1#f)\n", "[t](a.md?x=2#f)\n", "protected_atom_parity"),
+        ("[t](a.md?x=1#f)\n", "[t](a.md?x=1#g)\n", "protected_atom_parity"),
+        ("[t](a.md \"Титул\")\n", "[t](a.md \"Title\")\n", "protected_atom_parity"),
+        ("# Русский {#якорь}\n", "# English {#other}\n", "explicit_anchor_parity"),
+        ("```bash\nкод\n```\n", "````bash\nкод\n````\n", "fence_config_parity"),
+        ("```py\nx\n```\n", "```js\nx\n```\n", "fence_config_parity"),
+        (
+            "{% include [a](./a.md) %}\n",
+            "{% include [a](./b.md) %}\n",
+            "fence_config_parity",
+        ),
+        (
+            '{% if audience == "x" %}\nТекст\n{% endif %}\n',
+            '{% if audience == "y" %}\nText\n{% endif %}\n',
+            "container_structure_parity",
+        ),
+        (
+            "{% if a %}\nA\n{% else %}\nB\n{% endif %}\n",
+            "{% if a %}\nA\n{% endif %}\n",
+            "container_structure_parity",
+        ),
+        (
+            "---\ntitle: Привет\ndescription: D\n---\n\nТекст\n",
+            "---\ndescription: D\ntitle: Hello\n---\n\nText\n",
+            "fence_config_parity",
+        ),
+        (
+            '{% note info "T" %}\nТекст\n{% endnote %}\n',
+            '{% note tip "T" %}\nText\n{% endnote %}\n',
+            "container_structure_parity",
+        ),
+        (
+            '{% note info "T" %}\nТекст\n{% endnote %}\n',
+            "{% note info 'T' %}\nText\n{% endnote %}\n",
+            "container_structure_parity",
+        ),
+        (
+            '{% cut "T" %}\nТекст\n{% endcut %}\n',
+            '{% cut "T"  %}\nText\n{% endcut %}\n',
+            "fence_config_parity",
+        ),
+        (
+            "{% list tabs %}\n- A\n\n  Текст\n{% endlist %}\n",
+            "{% list tabs %}\n- A\n\n  Text\n{% endtabs %}\n",
+            "container_structure_parity",
+        ),
+    ],
+)
+def test_isolated_structure_atom_link_fence_yfm_front_matter_mutations(
+    source: str, candidate: str, error: str
+) -> None:
+    with pytest.raises(OnePassTranslationError, match=error):
+        validate_complete_document(
+            candidate, context(source, anchors=(("якорь", "anchor"),))
+        )
+
+
+def test_note_empty_and_absent_title_distinctions() -> None:
+    titled = '{% note info "Заголовок" %}\nТекст\n{% endnote %}\n'
+    empty = '{% note info "" %}\nТекст\n{% endnote %}\n'
+    absent = "{% note info %}\nТекст\n{% endnote %}\n"
+    validate_complete_document(
+        '{% note info "English title" %}\nText\n{% endnote %}\n', context(titled)
+    )
+    validate_complete_document('{% note info "" %}\nText\n{% endnote %}\n', context(empty))
+    validate_complete_document("{% note info %}\nText\n{% endnote %}\n", context(absent))
+    with pytest.raises(OnePassTranslationError):
+        validate_complete_document(
+            '{% note info "" %}\nText\n{% endnote %}\n', context(absent)
+        )
+
+
+def test_cut_empty_title_zero_width_span_round_trip() -> None:
+    source = '{% cut "" %}\nТекст\n{% endcut %}\n'
+    validate_complete_document('{% cut "" %}\nText\n{% endcut %}\n', context(source))
+    with pytest.raises(OnePassTranslationError, match="container_structure_parity"):
+        validate_complete_document("{% cut %}\nText\n{% endcut %}\n", context(source))
+
+
+def test_source_spans_module_forbids_re_and_text_search_apis() -> None:
+    source = Path(source_spans_module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name != "re" for alias in node.names)
+        if isinstance(node, ast.ImportFrom):
+            assert node.module != "re"
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"find", "rfind", "index", "replace"}
+        ):
+            raise AssertionError(node.func.attr)
+    assert "_FENCE" not in source
+

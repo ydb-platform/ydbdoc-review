@@ -109,3 +109,15 @@ capture R-021 deletions after proving present base and deleted final state.
 The exact-file Ruff check is GREEN, gate units are GREEN, full pytest remains
 GREEN, and the v019 manifest refresh/validate cycle is GREEN. Status remains
 **NOT READY** pending independent audit, tester and external review.
+
+
+## v025 / FINAL008-IMPL-007 closure
+
+User-authorized mechanical and semantic closure on 2026-09-02:
+
+- Attempt-local complete-document validation context before freeze (FINAL008-IMPL-007).
+- Remediation amendment `one-pass-remediation-v025` with Ruff baseline
+  `ruff-baseline-v025.json` (124/89/35, 5/84/163, diagnostics 189/102/291).
+- Manifest refresh ×2 byte-identical; policy and Ruff validate GREEN.
+- Expanded R-016 isolated mutation matrix in `test_complete_document_validation.py`.
+- External implementation review request: `review-request-v003.md` (reviewer currently STOPPED).

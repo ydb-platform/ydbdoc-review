@@ -20,13 +20,15 @@ ACTIVE = {
     "scripts/remediation_policy_gate.py",
     "tests/unit/test_remediation_policy_gate.py",
 }
-EXPECTED_BASELINE_SHA256 = "677896e7eba1af6c884fecf42a9543b40ef70b0caf3bf7e4d98521e8e6ff6ba7"
+# Live baseline is v025. Keep ruff-baseline-v020.json byte-immutable as history.
+HISTORICAL_V020_BASELINE_SHA256 = "677896e7eba1af6c884fecf42a9543b40ef70b0caf3bf7e4d98521e8e6ff6ba7"
+EXPECTED_BASELINE_SHA256 = "d32188c6ee929c77acf8f5141fda05888d9ca6c6bc34bad6438ca06579198ef7"
 EXPECTED_RUFF_VERSION = "ruff 0.16.5"
 EXPECTED_CONFIG_SHA256 = "822a7d659b893cc498725c18df0c72060f2eeba2df89725c520d4f5ed492ec29"
-EXPECTED_DELTA_COUNT, EXPECTED_PRESENT_COUNT, EXPECTED_DELETED_COUNT = 111, 76, 35
-EXPECTED_ACTIVE_COUNT, EXPECTED_FROZEN_COUNT, EXPECTED_BASE_UNTOUCHED_COUNT = 5, 71, 174
-EXPECTED_BASE_DIAGNOSTIC_COUNT, EXPECTED_FROZEN_DIAGNOSTIC_COUNT = 198, 108
-EXPECTED_TOTAL_DIAGNOSTIC_COUNT = 306
+EXPECTED_DELTA_COUNT, EXPECTED_PRESENT_COUNT, EXPECTED_DELETED_COUNT = 124, 89, 35
+EXPECTED_ACTIVE_COUNT, EXPECTED_FROZEN_COUNT, EXPECTED_BASE_UNTOUCHED_COUNT = 5, 84, 163
+EXPECTED_BASE_DIAGNOSTIC_COUNT, EXPECTED_FROZEN_DIAGNOSTIC_COUNT = 189, 102
+EXPECTED_TOTAL_DIAGNOSTIC_COUNT = 291
 FIELDS = {
     "schema_version",
     "base_commit",
@@ -241,19 +243,26 @@ def capture(base: str, ruff: str, output: Path) -> None:
     present = delta & now
     deleted = delta - now
     if (
-        (len(delta), len(present), len(deleted)) != (111, 76, 35)
+        (len(delta), len(present), len(deleted))
+        != (EXPECTED_DELTA_COUNT, EXPECTED_PRESENT_COUNT, EXPECTED_DELETED_COUNT)
         or not ACTIVE <= present
         or records(exe, Path.cwd(), ACTIVE)
     ):
-        raise ValueError("v024 active partition")
+        raise ValueError("v025 active partition")
     untouched, frozen = base_paths(base) - delta, present - ACTIVE
-    if (len(untouched), len(frozen)) != (174, 71):
-        raise ValueError("v024 paths")
+    if (len(untouched), len(frozen)) != (
+        EXPECTED_BASE_UNTOUCHED_COUNT,
+        EXPECTED_FROZEN_COUNT,
+    ):
+        raise ValueError("v025 paths")
     with archive(base) as temp:
         base_records = records(exe, Path(temp), untouched)
     frozen_records = records(exe, Path.cwd(), frozen)
-    if (len(base_records), len(frozen_records)) != (198, 108):
-        raise ValueError("v024 diagnostics")
+    if (len(base_records), len(frozen_records)) != (
+        EXPECTED_BASE_DIAGNOSTIC_COUNT,
+        EXPECTED_FROZEN_DIAGNOSTIC_COUNT,
+    ):
+        raise ValueError("v025 diagnostics")
     value = {
         "schema_version": 2,
         "base_commit": base,
@@ -265,12 +274,12 @@ def capture(base: str, ruff: str, output: Path) -> None:
         "active_python_paths": sorted(ACTIVE),
         "deleted_python_paths": sorted(deleted),
         "base_untouched_paths": sorted(untouched),
-        "base_untouched_diagnostic_count": 198,
+        "base_untouched_diagnostic_count": EXPECTED_BASE_DIAGNOSTIC_COUNT,
         "base_untouched_diagnostics": base_records,
         "frozen_current_files": [{"path": x, "sha256": sha(x)} for x in sorted(frozen)],
-        "frozen_current_diagnostic_count": 108,
+        "frozen_current_diagnostic_count": EXPECTED_FROZEN_DIAGNOSTIC_COUNT,
         "frozen_current_diagnostics": frozen_records,
-        "total_baseline_diagnostic_count": 306,
+        "total_baseline_diagnostic_count": EXPECTED_TOTAL_DIAGNOSTIC_COUNT,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -292,8 +301,10 @@ def validate(base: str, ruff: str, baseline: Path) -> None:
     present, deleted = delta & now, delta - now
     untouched, frozen = base_paths(base) - delta, present - ACTIVE
     if (
-        (len(delta), len(present), len(deleted)) != (111, 76, 35)
-        or (len(ACTIVE), len(frozen), len(untouched)) != (5, 71, 174)
+        (len(delta), len(present), len(deleted))
+        != (EXPECTED_DELTA_COUNT, EXPECTED_PRESENT_COUNT, EXPECTED_DELETED_COUNT)
+        or (len(ACTIVE), len(frozen), len(untouched))
+        != (EXPECTED_ACTIVE_COUNT, EXPECTED_FROZEN_COUNT, EXPECTED_BASE_UNTOUCHED_COUNT)
         or not ACTIVE <= present
         or value["active_python_paths"] != sorted(ACTIVE)
         or value["deleted_python_paths"] != sorted(deleted)

@@ -458,3 +458,56 @@ def test_refresh_manifest_write_failure_preserves_existing_target(
     with pytest.raises(OSError, match="write failed"):
         gate.refresh_manifest({}, {"output": {"manifest": target.as_posix()}}, {}, base, target)
     assert target.read_bytes() == original
+
+
+def test_v025_requires_exact_v024_predecessor_and_merges_R016_mappings(tmp_path: Path) -> None:
+    chain = [
+        ("implementation-plan-v006-amendment.yaml", {"plan_version": "one-pass-remediation-v006", "authoritative_inputs": {"snapshot": "old", "base_commit": "old", "snapshot_entry_count": 0}, "post_capture_control_paths": {"exact_paths": []}}),
+        ("implementation-plan-v008-amendment.yaml", {"plan_version": "one-pass-remediation-v008", "amends": "one-pass-remediation-v006", "authoritative_snapshot": {"path": "snapshot.yaml", "base_commit": "base", "entry_count": 0, "git_status_counts": {}}, "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v009-amendment.yaml", {"plan_version": "one-pass-remediation-v009", "amends": "one-pass-remediation-v008", "immutable_snapshot_output": {"path": "snapshot.yaml"}, "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v011-amendment.yaml", {"plan_version": "one-pass-remediation-v011", "amends": "one-pass-remediation-v009", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v012-amendment.yaml", {"plan_version": "one-pass-remediation-v012", "amends": "one-pass-remediation-v011", "clean_at_capture_item_baseline": {"enabled": True}, "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v013-amendment.yaml", {"plan_version": "one-pass-remediation-v013", "amends": "one-pass-remediation-v012", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v014-amendment.yaml", {"plan_version": "one-pass-remediation-v014", "amends": "one-pass-remediation-v013", "test_changes": [{"path": "tests/unit/test_chunker.py", "requirement_ids": ["R-006"]}], "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v015-amendment.yaml", {"plan_version": "one-pass-remediation-v015", "amends": "one-pass-remediation-v014", "manifest_lifecycle": {"enabled": True}, "refresh_command": "refresh", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v016-amendment.yaml", {"plan_version": "one-pass-remediation-v016", "amends": "one-pass-remediation-v015", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v017-amendment.yaml", {"plan_version": "one-pass-remediation-v017", "amends": "one-pass-remediation-v016", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v018-amendment.yaml", {"plan_version": "one-pass-remediation-v018", "amends": "one-pass-remediation-v017", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v019-amendment.yaml", {"plan_version": "one-pass-remediation-v019", "amends": "one-pass-remediation-v018", "exact_deletion_extension": {"exact_paths": []}, "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v020-amendment.yaml", {"plan_version": "one-pass-remediation-v020", "amends": "one-pass-remediation-v019", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v021-amendment.yaml", {"plan_version": "one-pass-remediation-v021", "amends": "one-pass-remediation-v020", "R004_extension": {"exact_mappings": [{"path": "old.py", "mapping_source": "v021", "ownership_class": "production", "requirement_ids": ["R-004"]}]}, "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v022-amendment.yaml", {"plan_version": "one-pass-remediation-v022", "amends": "one-pass-remediation-v021", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v023-amendment.yaml", {"plan_version": "one-pass-remediation-v023", "amends": "one-pass-remediation-v022", "post_capture_control_paths_addition": {"exact_paths": []}}),
+        ("implementation-plan-v024-amendment.yaml", {"plan_version": "one-pass-remediation-v024", "amends": "one-pass-remediation-v023", "post_capture_control_paths_addition": {"exact_paths": []}}),
+    ]
+    for name, value in chain:
+        (tmp_path / name).write_text(yaml.safe_dump(value), encoding="utf-8")
+    v025 = {
+        "plan_version": "one-pass-remediation-v025",
+        "amends": "one-pass-remediation-v024",
+        "R016_extension": {
+            "exact_mappings": [
+                {
+                    "path": "src/ydbdoc_review/parsing/front_matter.py",
+                    "mapping_source": "v025_exact_R016_mapping",
+                    "ownership_class": "production",
+                    "requirement_ids": ["R-016"],
+                }
+            ]
+        },
+        "post_capture_control_paths_addition": {"exact_paths": ["v025-a", "v025-b"]},
+    }
+    path = tmp_path / "implementation-plan-v025-amendment.yaml"
+    path.write_text(yaml.safe_dump(v025), encoding="utf-8")
+    resolved = gate._resolved_amendment(path)
+    assert resolved["v021_exact_mappings"]["old.py"][0] == "v021"
+    assert resolved["v021_exact_mappings"]["src/ydbdoc_review/parsing/front_matter.py"] == (
+        "v025_exact_R016_mapping",
+        "production",
+        ["R-016"],
+    )
+    assert resolved["post_capture_control_paths"]["exact_paths"][-2:] == ["v025-a", "v025-b"]
+    v025["amends"] = "wrong"
+    path.write_text(yaml.safe_dump(v025), encoding="utf-8")
+    with pytest.raises(ValueError, match="v025 predecessor"):
+        gate._resolved_amendment(path)

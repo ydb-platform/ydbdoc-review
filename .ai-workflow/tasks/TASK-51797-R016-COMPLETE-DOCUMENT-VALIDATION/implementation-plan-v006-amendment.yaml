@@ -1,0 +1,18 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+plan_version: r016-parser-owned-v006
+amends: r016-parser-owned-v005
+scope: freeze-complete-document-context-only-after-accepted-candidate
+resolves_review_findings: [FINAL008-IMPL-007]
+exact_change:
+  file: src/ydbdoc_review/translation/one_pass.py
+  symbol: translate_ru_to_en_once.acquisition_parser
+  behavior: attempt_local_context_then_freeze_only_on_validate_success
+related_atom_fix:
+  file: src/ydbdoc_review/translation/one_pass.py
+  symbol: _map_expected_destination
+  behavior: lookup_raw_and_unquoted_fragment_in_expected_anchor_map
+required_test:
+  - tests/unit/test_one_pass_translation.py::test_invalid_primary_cyrillic_anchor_does_not_poison_fallback_context
+forbidden: [second_long_lived_context, weaken_explicit_anchor_parity, freeze_before_validate]
+implementation_gate: user_authorized_self_implementation

@@ -1,0 +1,86 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION-IMPLEMENTATION-AUDIT
+review_type: implementation_reviewer
+specification_version: r016-parser-owned-v005
+implementation_review_version: v002
+status: reviewed
+verdict: CHANGES_REQUESTED
+implementation_authorized: false
+implementation_conformant: false
+has_unresolved_developer_choices: true
+summary: >
+  Independent re-check of /private/tmp/ydbdoc-review-one-pass-v003 confirms
+  FINAL008-IMPL-001/003/004/006 CLOSED and FINAL008-IMPL-002 only partially
+  closed. New FINAL008-IMPL-007 is RED: frozen_context is captured on the first
+  acquisition parser call using that attempt’s candidate_anchor_map before
+  validate_complete_document succeeds, so a structurally valid fallback is
+  rejected against the rejected primary’s expected anchors
+  (explicit_anchor_parity) and acquisition exhausts after both translate models.
+  FINAL008-IMPL-005 remains OPEN: the mandatory v001–v005 evidence matrix is
+  still a thin representative subset (~163-line complete-document file). Do not
+  authorize developer invention of a second context architecture; require a
+  closed lifecycle amendment for IMPL-007 plus the explicit missing tests.
+findings:
+  - id: FINAL008-IMPL-007
+    severity: RED
+    related: [FINAL-008, R-016, v001, FINAL008-IMPL-002]
+    summary: Fallback is validated against the rejected primary’s frozen anchor map.
+    detail: >
+      Code inspection: translate_ru_to_en_once builds frozen_context inside the
+      acquisition parser on the first call via
+      build_complete_document_validation_context(..., candidate_anchor_map)
+      before validate_complete_document accepts that candidate; later attempts
+      reuse frozen_context[0]. Runtime: RU `# Русский {#якорь}` with invalid
+      primary (Primary Heading + `- Broken structure`) and otherwise valid
+      fallback (Fallback Heading + English text.) raises
+      translation_acquisition_exhausted after translate-primary and
+      translate-fallback. Controlled proof: the same fallback ACCEPTS under a
+      context whose expected map is якорь→fallback-heading and REJECTS with
+      explicit_anchor_parity under якорь→primary-heading. Required: accept the
+      valid fallback and freeze/use one context whose anchor expectations
+      describe the accepted candidate, without accepting invalid bytes or
+      rebuilding context at later critic/repair/pre-stage boundaries. Publish a
+      closed amendment before implementation; add the exact adversarial test.
+  - id: FINAL008-IMPL-005
+    severity: RED
+    related: [FINAL-008, R-016, v001-v005]
+    summary: Mandatory v001–v005 evidence matrix remains materially incomplete.
+    detail: >
+      Added tests cover prior reproductions, but not the exhaustive gates named
+      by approved amendments: full parser provenance/nesting/fence spans;
+      isolated container/atom/link/fence/YFM/front-matter mutation matrix;
+      every listed YFM token multibyte nested provenance and no-map-fallback;
+      note/cut empty/absent title distinctions; full front-matter five-style
+      corruption matrix; invalid-repair / re-critic / four-boundary same-context
+      identity plus transaction rollback; and the full forbidden-shortcut AST
+      gate across every named production symbol. Passing ~197 focused cases does
+      not waive these explicit acceptance requirements.
+  - id: FINAL008-IMPL-001
+    severity: CLOSED
+    related: [FINAL-008, R-016]
+    summary: yfm_tab_open physical header with tab_title span; +/* mutations rejected.
+    detail: Reproduced REJECT fence_config_parity for +/*; non_prose includes yfm_tab_open with tab_title span.
+  - id: FINAL008-IMPL-002
+    severity: CLOSED_SUPERSEDED
+    related: [FINAL008-IMPL-007]
+    summary: Complete-document validation now runs inside acquisition; superseded by stale-context defect.
+    detail: Invalid primary advances to fallback, but frozen_context from the rejected primary breaks valid fallback acceptance (FINAL008-IMPL-007).
+  - id: FINAL008-IMPL-003
+    severity: CLOSED
+    related: [FINAL-008, R-016, v005]
+    summary: Alias-backed selected front-matter values are rejected.
+    detail: Reproduced source_map_invalid_front_matter:title for x:&a / title:*a.
+  - id: FINAL008-IMPL-004
+    severity: CLOSED
+    related: [FINAL-008, R-016]
+    summary: Role/token matrix and zero-width physical checks are fail-closed.
+    detail: Reproduced foreign note_title on yfm_if_open rejected as source_map_invalid_translatable_span.
+  - id: FINAL008-IMPL-006
+    severity: CLOSED
+    related: [FINAL-008, R-016, v005]
+    summary: Literal different-byte-length front-matter update is GREEN.
+    detail: Reproduced apply_front_matter_updates success for longer English literal title.
+non_blocking_notes:
+  - Analyst correctly requires a closed lifecycle amendment for IMPL-007 before developer choice of freeze timing vs per-attempt maps.
+follow_up_required:
+  - "Analyst: publish a closed FINAL008-IMPL-007 amendment reconciling per-attempt Cyrillic localization with the one-object lifecycle; then developer implements that amendment plus the explicit missing v001–v005 test matrix and resubmits implementation review v003."

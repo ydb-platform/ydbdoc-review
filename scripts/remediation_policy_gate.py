@@ -67,6 +67,22 @@ def _resolved_amendment(path: Path) -> dict[str, Any]:
     not an executor-selected policy.
     """
     amendment = load_plan(path)
+    if amendment.get("plan_version") == "one-pass-remediation-v025":
+        predecessor = path.with_name("implementation-plan-v024-amendment.yaml")
+        if amendment.get("amends") != "one-pass-remediation-v024":
+            raise ValueError("v025 predecessor")
+        resolved = copy.deepcopy(_resolved_amendment(predecessor))
+        resolved["post_capture_control_paths"]["exact_paths"] += list(
+            amendment["post_capture_control_paths_addition"]["exact_paths"]
+        )
+        extensions = {
+            item["path"]: (item["mapping_source"], item["ownership_class"], item["requirement_ids"])
+            for item in amendment["R016_extension"]["exact_mappings"]
+        }
+        merged = dict(resolved.get("v021_exact_mappings", {}))
+        merged.update(extensions)
+        resolved["v021_exact_mappings"] = merged
+        return resolved
     if amendment.get("plan_version") == "one-pass-remediation-v024":
         predecessor = path.with_name("implementation-plan-v023-amendment.yaml")
         if amendment.get("amends") != "one-pass-remediation-v023":
