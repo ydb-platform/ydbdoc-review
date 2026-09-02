@@ -8,7 +8,7 @@ package and write `response-v003.yaml`.
 
 - Path: `/private/tmp/ydbdoc-review-one-pass-v003`
 - Branch: `agent/task-51797-one-pass-v003`
-- Tip: `git log -1 --oneline`
+- Implementation tip: `37b9504` (evidence + handoff package). Review branch tip may include later docs-only commits.
 - Tags: `one-pass-v025-closure`, `one-pass-v003-impl007-ruff-tests`
 - Base: `9ff8edec9a26d3975306e20adca325c6eb9f77e6`
 - Canonical workflow copies: `/Users/iuriisintiaev/ydbdoc-review/.ai-workflow/tasks/`
