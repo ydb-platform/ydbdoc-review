@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import subprocess
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -21,6 +22,7 @@ from ydbdoc_review.github.workflow import (
     run_doc_translate,
     run_doc_verify,
 )
+from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 from ydbdoc_review.ops.lifecycle import begin_ops_job as begin_ops_job_with_backends
 from ydbdoc_review.ops.runs import InMemoryRunsLedger
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
@@ -481,12 +483,10 @@ def test_translate_workflow_queues_root_locale_page_with_exact_en_counterpart(
         )
 
     assert failed_guard.call_count == 2
-    failed_apply.assert_not_called()
-    assert not Path(git_repo, en_path).exists()
+    failed_apply.assert_called_once()
+    assert Path(git_repo, en_path).read_text(encoding="utf-8") == translated_text
     assert failed_result.pr_result.provenance_findings == [finding]
-    assert failed_result.pr_result.completeness_gaps == [
-        "ydb/docs/en/root-page.md"
-    ]
+    assert failed_result.pr_result.completeness_gaps == []
 
 
 def test_run_doc_translate_exercises_in_memory_ops_lifecycle(git_repo: str):
@@ -603,6 +603,386 @@ def test_run_doc_translate_merged_pr_uses_real_translation(git_repo: str):
     assert result.pr_result.translated_count == 1
     translate_pairs.assert_called_once()
     verify_pairs.assert_not_called()
+
+
+@pytest.mark.usefixtures("ops_isolation")
+def test_history_diverged_blocks_before_model_translation_and_apply(git_repo: str):
+    sha = _git_head(git_repo)
+    pull = {
+        "title": "docs",
+        "head": {"ref": "feature", "sha": sha, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": sha},
+    }
+    finding = ProvenanceFinding("translation_provenance", "history_diverged", "", "", sha, sha, None, None, ())
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[("ydb/docs/ru/core/a.md", "modified")]
+    ), patch("ydbdoc_review.github.workflow.guard_publication_provenance", return_value=(finding,)), patch(
+        "ydbdoc_review.github.workflow.create_llm_client"
+    ) as client, patch("ydbdoc_review.github.workflow.run_pr_translation") as translate, patch(
+        "ydbdoc_review.github.workflow._apply_results_to_disk"
+    ) as apply:
+        gh.return_value.get_pull.return_value = pull
+        result = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=1, merge_base_with="HEAD", dry_run=True, config=load_config(env=_env()))
+
+    assert result.pr_result.completeness_gaps == [""]
+    client.assert_not_called()
+    translate.assert_not_called()
+    apply.assert_not_called()
+
+
+@pytest.mark.usefixtures("ops_isolation")
+def test_source_pr_en_conflict_blocks_before_model_translation_and_apply(git_repo: str):
+    sha = _git_head(git_repo)
+    pull = {
+        "title": "docs",
+        "head": {"ref": "feature", "sha": sha, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": sha},
+    }
+    finding = ProvenanceFinding("translation_provenance", "source_pr_en_conflict", "ydb/docs/ru/core/a.md", "ydb/docs/en/core/a.md", None, None, None, None, ())
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[("ydb/docs/ru/core/a.md", "modified")]
+    ), patch("ydbdoc_review.github.workflow.guard_publication_provenance", return_value=(finding,)), patch(
+        "ydbdoc_review.github.workflow.create_llm_client"
+    ) as client, patch("ydbdoc_review.github.workflow.run_pr_translation") as translate, patch(
+        "ydbdoc_review.github.workflow._apply_results_to_disk"
+    ) as apply:
+        gh.return_value.get_pull.return_value = pull
+        result = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=1, merge_base_with="HEAD", dry_run=True, config=load_config(env=_env()))
+
+    assert result.pr_result.completeness_gaps == ["ydb/docs/en/core/a.md"]
+    client.assert_not_called()
+    translate.assert_not_called()
+    apply.assert_not_called()
+
+
+@pytest.mark.usefixtures("ops_isolation")
+def test_merged_initial_ru_missing_from_pinned_publication_fails_before_all_readers(git_repo: str):
+    sha = _git_head(git_repo)
+    ru_path = "ydb/docs/ru/core/missing.md"
+    Path(git_repo, ru_path).write_text("HEAD sentinel\n", encoding="utf-8")
+    subprocess.run(["git", "add", ru_path], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "head sentinel"], cwd=git_repo, check=True)
+    Path(git_repo, ru_path).write_text("worktree sentinel\n", encoding="utf-8")
+    pull = {
+        "title": "old merged docs",
+        "head": {"ref": "feature", "sha": sha, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": sha},
+        "merged": True,
+        "state": "closed",
+        "merge_commit_sha": sha,
+    }
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh, patch(
+        "ydbdoc_review.github.workflow.ensure_commit", return_value=True
+    ), patch("ydbdoc_review.github.workflow.resolve_sha", return_value="publication"), patch(
+        "ydbdoc_review.github.workflow.paths_at_tree", side_effect=[{ru_path}, set(), set()]
+    ), patch("ydbdoc_review.github.workflow.source_pr_scope_changes", return_value=[(ru_path, "modified")]), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]
+    ), patch(
+        "ydbdoc_review.github.workflow.make_repo_scope_readers"
+    ) as readers, patch("ydbdoc_review.github.workflow.plan_dependency_queue") as dependency, patch(
+        "ydbdoc_review.github.workflow.plan_translation_scope"
+    ) as scope_planner, patch(
+        "ydbdoc_review.github.workflow.doc_pairs_from_plan"
+    ) as pairs, patch("ydbdoc_review.github.workflow.build_en_toc_reachable_from_repo") as toc, patch(
+        "ydbdoc_review.github.workflow.run_navigation_merges"
+    ) as navigation_merges, patch(
+        "ydbdoc_review.github.workflow.retarget_redirect_inbound_links"
+    ) as redirects, patch(
+        "ydbdoc_review.github.workflow.create_llm_client"
+    ) as client, patch("ydbdoc_review.github.workflow.run_pr_translation") as translate, patch(
+        "ydbdoc_review.github.workflow._apply_results_to_disk"
+    ) as apply, patch("ydbdoc_review.github.workflow.git_commit_paths") as commit, patch(
+        "ydbdoc_review.github.workflow.push_branch"
+    ) as push:
+        gh.return_value.get_pull.return_value = pull
+        result = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=2, merge_base_with="moving", dry_run=True, config=load_config(env=_env()))
+
+    assert result.pr_result.completeness_gaps == ["ydb/docs/en/core/missing.md"]
+    assert result.pr_result.pair_results[0].error == f"missing RU source: {ru_path}"
+    assert result.pr_result.pair_results[0].plan.summary == "RU source missing; transaction will block"
+    readers.assert_not_called()
+    dependency.assert_not_called()
+    scope_planner.assert_not_called()
+    pairs.assert_not_called()
+    toc.assert_not_called()
+    navigation_merges.assert_not_called()
+    redirects.assert_not_called()
+    client.assert_not_called()
+    translate.assert_not_called()
+    apply.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+
+
+@pytest.mark.usefixtures("ops_isolation")
+@pytest.mark.parametrize("current_ru", ["absent", "restored"])
+def test_merged_source_pr_deleted_ru_never_deletes_current_en(git_repo: str, current_ru: str):
+    ru_path = "ydb/docs/ru/core/deleted.md"
+    en_path = "ydb/docs/en/core/deleted.md"
+    Path(git_repo, en_path).write_text("Current EN\n", encoding="utf-8")
+    if current_ru == "restored":
+        Path(git_repo, ru_path).write_text("Restored RU\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "publication state"], cwd=git_repo, check=True)
+    publication = _git_head(git_repo)
+    pull = {
+        "title": "old merged deletion",
+        "head": {"ref": "feature", "sha": publication, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": publication}, "merged": True, "state": "closed", "merge_commit_sha": publication,
+    }
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[(ru_path, "deleted")]
+    ), patch("ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[(ru_path, "deleted")]), patch(
+        "ydbdoc_review.github.workflow.create_llm_client"
+    ) as client, patch("ydbdoc_review.github.workflow._apply_results_to_disk") as apply:
+        gh.return_value.get_pull.return_value = pull
+        result = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=3, merge_base_with="HEAD", dry_run=True, config=load_config(env=_env()))
+
+    assert result.pr_result.pair_results == []
+    assert result.pr_result.completeness_gaps == []
+    assert Path(git_repo, en_path).read_text(encoding="utf-8") == "Current EN\n"
+    client.assert_not_called()
+    apply.assert_not_called()
+
+
+@pytest.mark.usefixtures("ops_isolation")
+def test_merged_old_pr_translates_publication_tip_ru_and_preserves_provenance_warnings(git_repo: str):
+    ru_path = "ydb/docs/ru/core/a.md"
+    en_path = "ydb/docs/en/core/a.md"
+    Path(git_repo, ru_path).write_text("Old merged RU.\n", encoding="utf-8")
+    Path(git_repo, en_path).write_text("Old merged EN.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "old merge"], cwd=git_repo, check=True)
+    source = _git_head(git_repo)
+    Path(git_repo, ru_path).write_text("Current publication RU.\n", encoding="utf-8")
+    Path(git_repo, en_path).write_text("Current publication EN.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "current publication"], cwd=git_repo, check=True)
+    publication = _git_head(git_repo)
+    pull = {
+        "title": "old merged docs",
+        "head": {"ref": "feature", "sha": source, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": publication}, "merged": True, "state": "closed", "merge_commit_sha": source,
+    }
+    observed = []
+
+    def translate(contents, *_args, **_kwargs):
+        observed.extend(contents)
+        return _fake_pr_result()
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[(ru_path, "modified")]
+    ), patch("ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[(ru_path, "modified")]), patch(
+        "ydbdoc_review.github.workflow.run_pr_translation", side_effect=translate
+    ) as _translation, patch(
+        "ydbdoc_review.github.workflow._apply_results_to_disk", wraps=workflow._apply_results_to_disk
+    ) as apply:
+        gh.return_value.get_pull.return_value = pull
+        result = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=4, merge_base_with=publication, dry_run=True, config=load_config(env=_env()))
+
+    assert observed[0].ru_text == "Current publication RU.\n"
+    assert observed[0].en_text == "Current publication EN.\n"
+    apply.assert_called_once()
+    assert result.pr_result.completeness_gaps == []
+    assert any(finding.reason == "newer_ru" for finding in result.pr_result.provenance_findings)
+
+
+@pytest.mark.usefixtures("ops_isolation")
+def test_final_nonblocking_provenance_warning_does_not_cancel_publication(git_repo: str):
+    sha = _git_head(git_repo)
+    ru_path = "ydb/docs/ru/core/a.md"
+    finding = ProvenanceFinding("translation_provenance", "newer_en", ru_path, "ydb/docs/en/core/a.md", None, None, "old", "new", ())
+    pull = {
+        "title": "docs",
+        "head": {"ref": "feature", "sha": sha, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": sha},
+    }
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[(ru_path, "modified")]
+    ), patch("ydbdoc_review.github.workflow.guard_publication_provenance", side_effect=[(), (finding,)]), patch(
+        "ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()
+    ), patch("ydbdoc_review.github.workflow._apply_results_to_disk", wraps=workflow._apply_results_to_disk) as apply, patch(
+        "ydbdoc_review.github.workflow.prepare_translation_branch_on_base"
+    ) as prepare, patch(
+        "ydbdoc_review.github.workflow.git_commit_paths", return_value=True
+    ) as commit, patch(
+        "ydbdoc_review.github.workflow.push_branch"
+    ) as push, patch(
+        "ydbdoc_review.github.workflow._safe_post_issue_comment", return_value=None
+    ):
+        gh.return_value.get_pull.return_value = pull
+        gh.return_value.create_pull.return_value = None
+        result = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=5, merge_base_with="HEAD", dry_run=False, config=load_config(env=_env()))
+
+    apply.assert_called_once()
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    assert result.committed is True
+    assert result.pushed is True
+    assert result.pr_result.completeness_gaps == []
+    assert finding in result.pr_result.provenance_findings
+
+
+@pytest.mark.usefixtures("ops_isolation")
+def test_translate_workflow_passes_publication_sha_to_every_reader_and_gate(git_repo: str):
+    ru_path = "ydb/docs/ru/core/a.md"
+    en_path = "ydb/docs/en/core/a.md"
+    redirects_path = "ydb/docs/redirects.yaml"
+    source_base = "source-base"
+    translation = "translation-tree"
+    publication = "publication-tree"
+    nav_ru_path = "ydb/docs/ru/core/toc_p.yaml"
+    nav_en_path = "ydb/docs/en/core/toc_p.yaml"
+    tip_sibling = "ydb/docs/en/core/tip-only.md"
+    pull = {
+        "title": "docs",
+        "head": {"ref": "feature", "sha": translation, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main", "sha": source_base},
+    }
+    read_calls = []
+
+    def read_pinned(repo_path: str, ref: str, path: str) -> str | None:
+        read_calls.append((repo_path, ref, path))
+        if path == redirects_path:
+            return {
+                translation: "source redirects\n",
+                source_base: "source-base redirects\n",
+                publication: "publication redirects\n",
+            }.get(ref)
+        return None
+
+    def toc_reachable(_repo_path: str, *, read_text, **_kwargs):
+        read_text("ydb/docs/en/core/toc_p.yaml")
+        return frozenset({en_path})
+
+    def read_ru(_path: str) -> str:
+        return "RU source.\n"
+
+    def exercise_final_reader(_result, *, docs_read, **_kwargs):
+        assert docs_read(tip_sibling) is None
+        return []
+
+    with ExitStack() as stack:
+        gh = stack.enter_context(patch("ydbdoc_review.github.workflow.GitHubClient"))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.ensure_commit", return_value=True))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.resolve_sha", return_value=publication))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.paths_at_tree", side_effect=[
+            {ru_path, redirects_path}, {en_path}, {ru_path, redirects_path}
+        ]))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]))
+        stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.source_pr_scope_changes",
+            return_value=[(ru_path, "modified"), (redirects_path, "modified")],
+        ))
+        readers = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.make_repo_scope_readers",
+            return_value=(read_ru, lambda _path: None, lambda _path: "RU base.\n"),
+        ))
+        scope_planner = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.plan_translation_scope",
+            return_value=TranslationScopePlan(
+                doc_ru_paths=frozenset({ru_path}),
+                doc_from_diff=frozenset({ru_path}),
+                doc_from_main=frozenset(),
+                nav_ru_paths=frozenset({nav_ru_path}),
+                nav_from_diff=frozenset({nav_ru_path}),
+                nav_from_main=frozenset(),
+            ),
+        ))
+        stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.guard_publication_provenance", side_effect=[(), ()]
+        ))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.read_text_at_ref", side_effect=read_pinned))
+        toc = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.build_en_toc_reachable_from_repo", side_effect=toc_reachable
+        ))
+        contents = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.load_pair_contents", return_value=[object()]
+        ))
+        translate = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()
+        ))
+        navigation_merges = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.run_navigation_merges", return_value=[]
+        ))
+        orphan_gate = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks", return_value=[]
+        ))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.completeness_gaps", return_value=[]))
+        stack.enter_context(patch(
+            "ydbdoc_review.github.workflow._apply_results_to_disk",
+            return_value=workflow.TouchedPaths([en_path], []),
+        ))
+        redirects = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.added_redirects", return_value={}
+        ))
+        retarget = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.retarget_redirect_inbound_links", return_value=[]
+        ))
+        mirror = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.mirror_redirects_to_en", return_value=""
+        ))
+        link_gate = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.apply_en_link_target_checks",
+            side_effect=exercise_final_reader,
+        ))
+        prepare = stack.enter_context(patch(
+            "ydbdoc_review.github.workflow.prepare_translation_branch_on_base"
+        ))
+        stack.enter_context(patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=False))
+        stack.enter_context(patch(
+            "ydbdoc_review.github.workflow._safe_post_issue_comment", return_value=None
+        ))
+        gh.return_value.get_pull.return_value = pull
+        run_doc_translate(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=6,
+            merge_base_with="moving",
+            dry_run=False,
+            config=load_config(env=_env()),
+        )
+
+    assert toc.call_count == 1
+    assert readers.call_args.args == (git_repo, publication)
+    assert readers.call_args.kwargs == {
+        "ru_content_ref": translation,
+        "ru_base_ref": source_base,
+    }
+    assert scope_planner.call_args.kwargs["read_ru"] is read_ru
+    assert scope_planner.call_args.kwargs["read_en_base"]("unused.md") is None
+    assert scope_planner.call_args.kwargs["read_ru_base"]("unused.md") == "RU base.\n"
+    assert contents.call_args.kwargs == {
+        "merge_base_with": publication,
+        "ru_content_ref": translation,
+        "ru_base_ref": source_base,
+    }
+    translated = translate.call_args.kwargs
+    translated["docs_text_reader"](en_path)
+    translated["read_pinned_en"](en_path)
+    navigation_merges.assert_called_once()
+    merged_nav = navigation_merges.call_args
+    assert merged_nav.args[0][0].ru_path == nav_ru_path
+    assert merged_nav.args[0][0].en_path == nav_en_path
+    assert merged_nav.kwargs["merge_base_with"] == publication
+    assert merged_nav.kwargs["ru_content_ref"] == translation
+    assert merged_nav.kwargs["ru_base_ref"] == source_base
+    assert orphan_gate.call_args.kwargs["baseline_ref"] == publication
+    assert retarget.call_args.kwargs["publication_ref"] == publication
+    redirects.assert_called_once_with("source-base redirects\n", "source redirects\n")
+    assert mirror.call_args.args == ("publication redirects\n", {})
+    link_gate.call_args.kwargs["baseline_read"](en_path)
+    link_gate.call_args.kwargs["docs_read"](en_path)
+    assert prepare.call_args.kwargs["base_commit_sha"] == publication
+    assert read_calls
+    assert all(ref in {source_base, translation, publication} for _, ref, _ in read_calls)
+    assert all(ref != "HEAD" for _, ref, _ in read_calls)
+    assert (git_repo, publication, "ydb/docs/en/core/toc_p.yaml") in read_calls
+    assert (git_repo, translation, redirects_path) in read_calls
+    assert (git_repo, source_base, redirects_path) in read_calls
+    assert (git_repo, publication, redirects_path) in read_calls
+    assert (git_repo, publication, tip_sibling) in read_calls
 
 
 @pytest.mark.usefixtures("ops_isolation")

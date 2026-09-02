@@ -92,6 +92,7 @@ def _read_navigation_baselines(
     ru_path: str,
     en_path: str,
     ru_base_ref: str | None = None,
+    pinned: bool = False,
 ) -> tuple[str, str]:
     """RU at PR merge-base; EN from current upstream main (§6.44, §6.111).
 
@@ -102,6 +103,10 @@ def _read_navigation_baselines(
     EN baseline drops those entries (YFM003 / #46845). Fall back to merge-base
     EN only when the file is still absent on upstream main (new sidebar).
     """
+    if pinned:
+        ru_text = read_text_at_ref(repo_path, ru_base_ref, ru_path)
+        en_text = read_text_at_ref(repo_path, merge_base_with, en_path)
+        return ru_text or "", en_text or ""
     mb = ru_base_ref or merge_base(repo_path, merge_base_with, "HEAD")
     ru_text = read_text_at_ref(repo_path, mb, ru_path)
     ru_base = ru_text if ru_text is not None else ""
@@ -314,12 +319,13 @@ def merge_navigation_pair(
             verdict="ok",
         )
 
+    pinned = ru_content_ref is not None and ru_base_ref is not None
     ru_pr: str | None = None
     if ru_content_ref:
         ru_pr = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
-    if ru_pr is None:
+    if ru_pr is None and not pinned:
         ru_pr = read_text(repo_path, pair.ru_path)
-    if ru_pr is None:
+    if ru_pr is None and not pinned:
         ru_pr = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
     if ru_pr is None:
         return NavigationRunResult(
@@ -336,6 +342,7 @@ def merge_navigation_pair(
         ru_path=pair.ru_path,
         en_path=pair.en_path,
         ru_base_ref=ru_base_ref,
+        pinned=pinned,
     )
 
     if kind == "toc":
@@ -378,7 +385,8 @@ def merge_navigation_pair(
                     continue
                 target = resolve_toc_target_path(pair.en_path, href)
                 if (
-                    read_text_at_upstream_tip(repo_path, merge_base_with, target)
+                    (read_text_at_ref(repo_path, merge_base_with, target) if pinned else
+                     read_text_at_upstream_tip(repo_path, merge_base_with, target))
                     is not None
                 ):
                     scope = scope.with_extra_hrefs({href})
@@ -414,7 +422,8 @@ def merge_navigation_pair(
                 continue
             target = resolve_toc_target_path(pair.en_path, href)
             if (
-                read_text_at_upstream_tip(repo_path, merge_base_with, target)
+                (read_text_at_ref(repo_path, merge_base_with, target) if pinned else
+                 read_text_at_upstream_tip(repo_path, merge_base_with, target))
                 is not None
             ):
                 keep_en_hrefs.add(href)

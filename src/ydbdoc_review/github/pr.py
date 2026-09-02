@@ -517,7 +517,21 @@ def load_pair_contents(
     ``#vklyuchenie-…``) even after later translation PRs landed on main.
     """
     contents: list[PairContent] = []
+    pinned = ru_content_ref is not None and ru_base_ref is not None
     for pair in pairs:
+        if pinned:
+            contents.append(
+                PairContent(
+                    pair=pair,
+                    ru_text=read_text_at_ref(repo_path, ru_content_ref, pair.ru_path),
+                    en_text=read_text_at_ref(repo_path, merge_base_with, pair.en_path),
+                    ru_diff_vs_base=None,
+                    en_diff_vs_base=None,
+                    ru_base_text=read_text_at_ref(repo_path, ru_base_ref, pair.ru_path),
+                    en_base_text=read_text_at_ref(repo_path, merge_base_with, pair.en_path),
+                )
+            )
+            continue
         ru_text: str | None = None
         if ru_content_ref:
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)

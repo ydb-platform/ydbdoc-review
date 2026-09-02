@@ -15,6 +15,7 @@ from ydbdoc_review.navigation.scope_planner import (
     TranslationScopePlan,
     changes_from_manifest,
     doc_pairs_from_plan,
+    make_repo_scope_readers,
     navigation_pairs_from_plan,
     plan_translation_scope,
     planned_toc_extras_for_pair,
@@ -223,6 +224,46 @@ def test_pr_50904_deleted_ru_page_queues_delete_en_pair():
         plan_pair_heuristic(PairContent(pair=pairs[0], ru_text=None, en_text="# stale EN\n")).action
         == "delete_en"
     )
+
+
+def test_make_repo_scope_readers_pinned_snapshot_has_no_fallback(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def read_at_ref(_repo: str, ref: str, path: str) -> str | None:
+        calls.append((ref, path))
+        return {
+            ("translation", "ru.md"): "current RU",
+            ("publication", "en.md"): "EN",
+            ("source-base", "base.md"): "base RU",
+        }.get((ref, path))
+
+    monkeypatch.setattr("ydbdoc_review.github.git_ops.read_text_at_ref", read_at_ref)
+    monkeypatch.setattr(
+        "ydbdoc_review.github.git_ops.read_text",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("worktree read")),
+    )
+    monkeypatch.setattr(
+        "ydbdoc_review.github.git_ops.read_text_at_upstream_tip",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("upstream read")),
+    )
+    monkeypatch.setattr(
+        "ydbdoc_review.github.git_ops.merge_base",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("merge base")),
+    )
+    read_ru, read_en, read_base = make_repo_scope_readers(
+        "/repo", "publication", ru_content_ref="translation", ru_base_ref="source-base"
+    )
+
+    assert read_ru("ru.md") == "current RU"
+    assert read_en("en.md") == "EN"
+    assert read_base("base.md") == "base RU"
+    assert read_ru("missing.md") is None
+    assert calls == [
+        ("translation", "ru.md"),
+        ("publication", "en.md"),
+        ("source-base", "base.md"),
+        ("translation", "missing.md"),
+    ]
 
 
 def test_case_44820_plans_sqs_from_direct_diff():

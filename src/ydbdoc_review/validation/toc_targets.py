@@ -168,7 +168,6 @@ def check_orphan_pages_for_locale(
     """
     from ydbdoc_review.github.git_ops import (
         read_text_at_ref,
-        read_text_at_upstream_tip,
     )
 
     loc = locale.strip("/").lower()
@@ -192,10 +191,8 @@ def check_orphan_pages_for_locale(
         key = normalize_repo_path(path)
         if key in pending_tocs:
             return pending_tocs[key]
-        if baseline_ref:
-            tip = read_text_at_upstream_tip(repo_path, baseline_ref, key)
-            if tip is not None:
-                return tip
+        if baseline_ref is not None:
+            return read_text_at_ref(repo_path, baseline_ref, key)
         head = read_text_at_ref(repo_path, "HEAD", key)
         if head is not None:
             return head

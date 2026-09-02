@@ -764,19 +764,24 @@ def test_verify_fixup_comment_bilingual_vs_translation():
 def test_provenance_finding_is_preserved_in_source_and_full_reports():
     finding = ProvenanceFinding(
         category="stale_source_or_newer_translation",
-        reason="newer_en",
+        reason="newer_ru",
         ru_path="ydb/docs/ru/a.md",
         en_path="ydb/docs/en/a.md",
         baseline_ru_oid="ru-base",
         current_ru_oid="ru-current",
-        baseline_en_oid="en-base",
+        baseline_en_oid=None,
         current_en_oid="en-current",
         touching_commits=("commit-one", "commit-two"),
     )
-    result = PRTranslationResult(
-        completeness_gaps=[finding.en_path],
-        provenance_findings=[finding],
-    )
+    result = _sample_result()
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    file_result.verdict = "ok"
+    file_result.critic_unresolved = None
+    file_result.manual_actions = []
+    file_result.heuristic_blocking = []
+    file_result.heuristic_warnings = []
+    result.provenance_findings = [finding]
     meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1)
 
     source = build_source_pr_comment(
@@ -788,9 +793,48 @@ def test_provenance_finding_is_preserved_in_source_and_full_reports():
     full = build_full_report(result, meta=meta, config=_cfg())
 
     for report in (source, full):
-        assert "newer_en" in report
+        assert "⚠️ Перевод запущен по старому исходному PR" in report
+        assert "Блокировка provenance" not in report
+        assert "EN `absent` → `en-current`" in report
+        assert "newer_ru" in report
         assert finding.ru_path in report
         assert finding.en_path in report
         assert "ru-base" in report and "ru-current" in report
-        assert "en-base" in report and "en-current" in report
+        assert "en-current" in report
         assert "commit-one" in report and "commit-two" in report
+        assert "Переведена текущая RU-версия из закреплённой базы публикации" in report
+        assert "Текущий EN будет полностью заменён one-pass переводом" in report
+    assert "🟢 можно мержить" in full
+
+
+def test_hard_provenance_finding_reports_red_blocking_status():
+    finding = ProvenanceFinding(
+        category="translation_provenance",
+        reason="history_diverged",
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        baseline_ru_oid=None,
+        current_ru_oid=None,
+        baseline_en_oid=None,
+        current_en_oid=None,
+        touching_commits=(),
+    )
+    result = PRTranslationResult(
+        completeness_gaps=[finding.en_path], provenance_findings=[finding]
+    )
+    meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1)
+
+    source = build_source_pr_comment(
+        result,
+        translation_pr_number=None,
+        meta=meta,
+        config=_cfg(),
+    )
+    full = build_full_report(result, meta=meta, config=_cfg())
+
+    assert "Блокировка происхождения" in source
+    assert "history_diverged" in source
+    assert "🔴 не мержить" in source
+    assert "Блокировка происхождения перевода" in full
+    assert "history_diverged" in full
+    assert "## Рекомендация: 🔴" in full

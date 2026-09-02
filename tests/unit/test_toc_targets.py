@@ -6,14 +6,15 @@ import subprocess
 from pathlib import Path
 from textwrap import dedent
 
+from ydbdoc_review.github.git_ops import read_text_at_ref
 from ydbdoc_review.navigation.toc import collect_toc_link_targets, resolve_toc_target_path
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     NavigationRunResult,
-    PRTranslationResult,
     PairRunResult,
+    PRTranslationResult,
 )
 from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
@@ -269,6 +270,64 @@ def test_check_orphan_translated_pages_ignores_disconnected_pending_child_toc(
     assert page in orphans
 
 
+def test_orphan_gate_pinned_baseline_reads_nested_tocs_and_href_targets(
+    tmp_path: Path, monkeypatch
+):
+    repo = _init_repo(tmp_path)
+    root_toc = "ydb/docs/en/core/toc_p.yaml"
+    child_toc = "ydb/docs/en/core/concepts/toc_i.yaml"
+    nested_toc = "ydb/docs/en/core/concepts/nested/toc_i.yaml"
+    page = "ydb/docs/en/core/concepts/nested/page.md"
+    first_target = "ydb/docs/en/core/concepts/nested/first-target.md"
+    _write(repo, page, "# Page\n")
+    _write(repo, first_target, "# First target\n")
+    _write(
+        repo,
+        root_toc,
+        "items:\n- include:\n    path: concepts/toc_i.yaml\n",
+    )
+    _write(
+        repo,
+        child_toc,
+        "items:\n- include:\n    path: nested/toc_i.yaml\n",
+    )
+    _write(
+        repo,
+        nested_toc,
+        "items:\n"
+        "- name: Page\n"
+        "  href: page.md\n"
+        "- name: First target\n"
+        "  href: first-target.md\n",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "publication nested toc"], cwd=repo, check=True)
+    publication = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+    _write(repo, root_toc, "worktree sentinel\n")
+    reads: list[tuple[str, str]] = []
+
+    def pinned_read(repo_path: str, ref: str, path: str) -> str | None:
+        reads.append((ref, path))
+        return read_text_at_ref(repo_path, ref, path)
+
+    monkeypatch.setattr("ydbdoc_review.github.git_ops.read_text_at_ref", pinned_read)
+
+    orphans = check_orphan_translated_pages(
+        {page}, repo_path=repo, docs_root="ydb/docs", baseline_ref=publication
+    )
+
+    assert orphans == {}
+    assert reads == [
+        (publication, root_toc),
+        (publication, child_toc),
+        (publication, nested_toc),
+        (publication, page),
+        (publication, first_target),
+    ]
+
+
 def test_check_orphan_uses_head_not_stale_worktree(tmp_path: Path):
     """§6.133: committed EN toc on HEAD wins over a main-like dirty worktree."""
     repo = _init_repo(tmp_path)
@@ -418,4 +477,3 @@ def test_find_locale_pages_missing_from_toc_en_and_ru(tmp_path: Path):
     both = find_pages_missing_from_toc(repo, locales=("en", "ru"))
     assert both["en"] == en
     assert both["ru"] == ru
-

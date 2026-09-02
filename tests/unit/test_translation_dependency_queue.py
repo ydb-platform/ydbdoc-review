@@ -60,6 +60,20 @@ def test_existing_en_is_not_read_or_queued_and_missing_ru_is_reported():
     assert warning.original_href == "missing.md"
 
 
+def test_dependency_only_in_current_ru_uses_pinned_publication_state():
+    root = "ydb/docs/ru/root.md"
+    dependency = "ydb/docs/ru/current-only.md"
+    plan = _plan(
+        {root: "[Current](current-only.md)\n", dependency: "Current only.\n"},
+        [root],
+        en=(),
+    )
+
+    assert [entry.ru_path for entry in plan.entries] == [root, dependency]
+    assert plan.auto_added_count == 1
+    assert _plan.__kwdefaults__["budget"] == 20
+
+
 def test_non_markdown_and_external_targets_do_not_consume_budget():
     files = {
         "ydb/docs/ru/root.md": (
@@ -81,7 +95,7 @@ def test_parser_edges_keep_every_duplicate_occurrence_with_utf8_coordinates():
         ("link", "missing.md"),
         ("link", "missing.md"),
     ]
-    assert edges[1].source_span.byte_start == len("Ё ".encode("utf-8"))
+    assert edges[1].source_span.byte_start == len("Ё ".encode())
     assert edges[1].source_span.line == 1
     assert edges[1].source_span.column == 3
 

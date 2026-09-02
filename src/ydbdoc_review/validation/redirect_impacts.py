@@ -9,6 +9,8 @@ from urllib.parse import unquote
 
 import yaml
 
+from ydbdoc_review.github.git_ops import read_text_at_ref
+
 _LINK = re.compile(r"(\[[^\]]*\]\()([^)#]+)(#[^)]*)?(\))")
 
 
@@ -39,8 +41,85 @@ def retarget_redirect_inbound_links(
     docs_root: str = "ydb/docs",
     dry_run: bool = False,
     allowed_paths: frozenset[str] | None = None,
+    publication_ref: str | None = None,
 ) -> list[str]:
     """Retarget source-scoped links covered by new redirects."""
+    if publication_ref is not None:
+        if allowed_paths is None:
+            raise ValueError("allowed_paths is required with publication_ref")
+
+        docs_root_posix = docs_root.replace("\\", "/").strip("/")
+        candidates: list[tuple[str, str, PurePosixPath]] = []
+        for raw_path in sorted(allowed_paths):
+            candidate = PurePosixPath(raw_path.replace("\\", "/"))
+            rel = candidate.as_posix()
+            valid = (
+                not candidate.is_absolute()
+                and ".." not in candidate.parts
+                and rel.endswith(".md")
+                and rel.startswith(
+                    (
+                        f"{docs_root_posix}/ru/core/",
+                        f"{docs_root_posix}/en/core/",
+                    )
+                )
+            )
+            if not valid:
+                continue
+            locale = "ru" if rel.startswith(f"{docs_root_posix}/ru/core/") else "en"
+            rel_dir = PurePosixPath(rel).relative_to(
+                f"{docs_root_posix}/{locale}/core"
+            ).parent
+            candidates.append((rel, locale, rel_dir))
+
+        changed: list[str] = []
+        for rel, locale, rel_dir in candidates:
+            text = read_text_at_ref(repo_path, publication_ref, rel)
+            if text is None:
+                continue
+
+            def _replace(
+                match: re.Match[str],
+                *,
+                _rel_dir: PurePosixPath = rel_dir,
+                _locale: str = locale,
+            ) -> str:
+                href = match.group(2)
+                if href.startswith(("/", "http://", "https://")):
+                    return match.group(0)
+                resolved = "/" + posixpath.normpath((_rel_dir / href).as_posix())
+                target = mappings.get(resolved) or mappings.get(resolved.removesuffix(".md"))
+                if target is None:
+                    return match.group(0)
+                target_md = target if target.endswith(".md") else f"{target}.md"
+                new_href = posixpath.relpath(target_md.lstrip("/"), _rel_dir.as_posix())
+                fragment = match.group(3) or ""
+                if _locale == "en" and fragment:
+                    target_suffix = target_md.lstrip("/")
+                    ru_target = f"{docs_root_posix}/ru/core/{target_suffix}"
+                    en_target = f"{docs_root_posix}/en/core/{target_suffix}"
+                    ru_text = read_text_at_ref(repo_path, publication_ref, ru_target)
+                    en_text = read_text_at_ref(repo_path, publication_ref, en_target)
+                    if ru_text is not None and en_text is not None:
+                        from ydbdoc_review.validation.href_parity import (
+                            map_ru_fragment_to_declared_en_fragment,
+                        )
+
+                        localized = map_ru_fragment_to_declared_en_fragment(
+                            unquote(fragment[1:]), ru_text, en_text
+                        )
+                        if localized:
+                            fragment = f"#{localized}"
+                return f"{match.group(1)}{new_href}{fragment}{match.group(4)}"
+
+            updated = _LINK.sub(_replace, text)
+            if updated == text:
+                continue
+            changed.append(rel)
+            if not dry_run:
+                (Path(repo_path) / rel).write_text(updated, encoding="utf-8", newline="")
+        return changed
+
     root = Path(repo_path) / docs_root
     changed: list[str] = []
     for locale in ("ru", "en"):

@@ -11,6 +11,8 @@ from ydbdoc_review.github.pr import (
     PullRequestContext,
     build_pairs_from_changes,
     is_fork_head,
+    is_translation_pr_branch,
+    is_verify_fixup_branch,
     list_pr_file_changes_api,
     load_pair_contents,
     parse_repo,
@@ -18,10 +20,8 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
-    is_translation_pr_branch,
-    is_verify_fixup_branch,
-    translation_pr_base,
     translation_branch_base,
+    translation_pr_base,
     verify_fixup_pr_base,
 )
 
@@ -228,7 +228,7 @@ def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
     base_sha = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
     ).strip()
-    ru.write_text("# RU\n\nНовый раздел.\n", encoding="utf-8")
+    ru.write_text("# RU\n\n\u041d\u043e\u0432\u044b\u0439 \u0440\u0430\u0437\u0434\u0435\u043b.\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
     subprocess.run(["git", "commit", "-m", "merged source"], cwd=git_repo, check=True)
     merge_sha = subprocess.check_output(
@@ -246,7 +246,7 @@ def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
         ru_base_ref=base_sha,
     )[0]
 
-    assert content.ru_text == "# RU\n\nНовый раздел.\n"
+    assert content.ru_text == "# RU\n\n\u041d\u043e\u0432\u044b\u0439 \u0440\u0430\u0437\u0434\u0435\u043b.\n"
     assert content.ru_base_text == "# RU\n"
 
 
@@ -292,6 +292,75 @@ def test_load_pair_contents_merged_pr_prefers_tip_en_over_stale_checkout(git_rep
     assert content.en_text == tip_en
     assert content.en_base_text == tip_en
     assert "vklyuchenie" not in (content.en_text or "")
+
+
+def test_load_pair_contents_pinned_snapshot_has_no_checkout_or_head_fallback(git_repo: str):
+    ru_path = "ydb/docs/ru/a.md"
+    en_path = "ydb/docs/en/a.md"
+    Path(git_repo, en_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(git_repo, en_path).write_text("source base EN\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "source base"], cwd=git_repo, check=True)
+    source_base = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    Path(git_repo, ru_path).write_text("translation RU\n", encoding="utf-8")
+    Path(git_repo, en_path).write_text("translation EN\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "translation"], cwd=git_repo, check=True)
+    translation = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    Path(git_repo, ru_path).write_text("publication RU\n", encoding="utf-8")
+    Path(git_repo, en_path).write_text("publication EN\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "publication"], cwd=git_repo, check=True)
+    publication = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    Path(git_repo, ru_path).write_text("HEAD RU\n", encoding="utf-8")
+    Path(git_repo, en_path).write_text("HEAD EN\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "head"], cwd=git_repo, check=True)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=git_repo, text=True
+    ).strip()
+    Path(git_repo, ru_path).write_text("worktree sentinel\n", encoding="utf-8")
+    Path(git_repo, en_path).write_text("worktree sentinel\n", encoding="utf-8")
+
+    assert len({translation, publication, head}) == 3
+
+    pair = build_pairs_from_changes([(ru_path, "modified")], docs_root="ydb/docs")[0]
+    content = load_pair_contents(
+        git_repo,
+        [pair],
+        merge_base_with=publication,
+        ru_content_ref=translation,
+        ru_base_ref=source_base,
+    )[0]
+
+    assert content.ru_text == "translation RU\n"
+    assert content.en_text == "publication EN\n"
+    assert content.ru_base_text == "# RU\n"
+    assert content.en_base_text == "publication EN\n"
+    assert content.ru_diff_vs_base is None
+    assert content.en_diff_vs_base is None
+    missing_pair = build_pairs_from_changes(
+        [("ydb/docs/ru/missing.md", "modified")], docs_root="ydb/docs"
+    )[0]
+    missing = load_pair_contents(
+        git_repo,
+        [missing_pair],
+        merge_base_with=publication,
+        ru_content_ref=translation,
+        ru_base_ref=source_base,
+    )[0]
+    assert (missing.ru_text, missing.en_text, missing.ru_base_text, missing.en_base_text) == (
+        None,
+        None,
+        None,
+        None,
+    )
 
 
 def test_pull_request_context():

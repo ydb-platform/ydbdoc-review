@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_for_pair,
     extra_toc_hrefs_from_md_targets,
@@ -15,7 +16,6 @@ from ydbdoc_review.pipeline.navigation_merge import (
     verify_navigation_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
-from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.translation.glossary import load_glossary
 
 RU_BASE = dedent("""
@@ -338,6 +338,61 @@ def test_merge_fork_pr_toc_uses_upstream_en_main_fallback():
         if "href:" in line
     ]
     assert "topics.md" not in hrefs
+
+
+def test_navigation_merge_pinned_snapshot_has_no_fallback():
+    """Pinned translation reads only the three immutable snapshots."""
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    pair = NavigationPair(
+        ru_path="ydb/docs/ru/core/alter_table/toc_i.yaml",
+        en_path="ydb/docs/en/core/alter_table/toc_i.yaml",
+        ru_changed=True,
+    )
+    reads: list[tuple[str, str]] = []
+
+    def read_at_ref(_repo: str, ref: str | None, path: str) -> str | None:
+        reads.append((str(ref), path))
+        return {
+            ("translation", pair.ru_path): RU_PR,
+            ("source-base", pair.ru_path): RU_BASE,
+            ("publication", pair.en_path): EN_MAIN,
+        }.get((ref, path))
+
+    with (
+        patch("ydbdoc_review.pipeline.navigation_merge.read_text_at_ref", side_effect=read_at_ref),
+        patch("ydbdoc_review.pipeline.navigation_merge.read_text") as worktree_read,
+        patch("ydbdoc_review.pipeline.navigation_merge.read_text_at_upstream_tip") as tip_read,
+        patch("ydbdoc_review.pipeline.navigation_merge._translate_menu_labels", return_value={"COMPACT": "COMPACT"}),
+    ):
+        result = merge_navigation_pair(
+            pair,
+            repo_path="/repo",
+            merge_base_with="publication",
+            ru_content_ref="translation",
+            ru_base_ref="source-base",
+            client=MagicMock(),
+            glossary=load_glossary(),
+            config=cfg,
+        )
+        missing = merge_navigation_pair(
+            pair,
+            repo_path="/repo",
+            merge_base_with="publication",
+            ru_content_ref="missing-translation",
+            ru_base_ref="source-base",
+            client=MagicMock(),
+            glossary=load_glossary(),
+            config=cfg,
+        )
+
+    assert result.target_text is not None and "compact.md" in result.target_text
+    assert ("translation", pair.ru_path) in reads
+    assert ("source-base", pair.ru_path) in reads
+    assert ("publication", pair.en_path) in reads
+    assert missing.verdict == "blocked"
+    assert missing.error == f"RU navigation text missing for {pair.ru_path!r}"
+    worktree_read.assert_not_called()
+    tip_read.assert_not_called()
 
 
 OBSERVABILITY_RU_TOC = dedent("""

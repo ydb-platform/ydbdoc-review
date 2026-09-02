@@ -9,6 +9,7 @@ from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import gap_label
+from ydbdoc_review.pipeline.provenance import partition_provenance_findings
 from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 from ydbdoc_review.reporting.heuristic_context import (
     format_heuristic_location,
@@ -53,6 +54,26 @@ class ReportMeta:
 def _format_duration(seconds: float) -> str:
     mins, secs = divmod(int(seconds), 60)
     return f"{mins}m {secs}s" if mins else f"{secs}s"
+
+
+def _provenance_lines(findings) -> str:
+    lines = []
+    for finding in findings:
+        lines.append(
+            f"- `{finding.reason}`: RU `{finding.ru_path or '—'}`, EN `{finding.en_path or '—'}`; "
+            f"RU `{finding.baseline_ru_oid or 'absent'}` → `{finding.current_ru_oid or 'absent'}`, "
+            f"EN `{finding.baseline_en_oid or 'absent'}` → `{finding.current_en_oid or 'absent'}`; commits: "
+            f"{', '.join(f'`{commit}`' for commit in finding.touching_commits) or '—'}"
+        )
+        if finding.baseline_ru_oid != finding.current_ru_oid:
+            lines.append("  Переведена текущая RU-версия из закреплённой базы публикации.")
+        if finding.baseline_en_oid != finding.current_en_oid:
+            lines.append("  Текущий EN будет полностью заменён one-pass переводом.")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _provenance_warning_section(findings) -> str:
+    return "\n⚠️ Перевод запущен по старому исходному PR\n\n" + _provenance_lines(findings)
 
 
 def _verdict_emoji(verdict: str) -> str:
@@ -754,6 +775,9 @@ def build_source_pr_comment(
     """Short summary comment for the source PR after ``doc_translate``."""
     total, new_count, updated_count = _file_translation_counts(result)
     bilingual_skip = _bilingual_skip_count(result)
+    blocking_findings, warning_findings = partition_provenance_findings(
+        tuple(result.provenance_findings)
+    )
 
     if total == 0 and bilingual_skip and translation_pr_number is None:
         pairs_label = (
@@ -767,7 +791,7 @@ def build_source_pr_comment(
             f"автоперевод пропущен ({BILINGUAL_SKIP_MARKER}). "
             "Translation PR не создаётся.\n\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
-        )
+        ) + (_provenance_warning_section(warning_findings) if warning_findings else "")
 
     if result.completeness_gaps and translation_pr_number is None:
         body = (
@@ -785,18 +809,9 @@ def build_source_pr_comment(
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
-        if result.provenance_findings:
+        if blocking_findings:
             body += "\n**Блокировка происхождения:**\n\n"
-            for finding in result.provenance_findings:
-                body += (
-                    f"- `{finding.reason}`: RU `{finding.ru_path or '—'}`, "
-                    f"EN `{finding.en_path or '—'}`; "
-                    f"RU `{finding.baseline_ru_oid or 'absent'}` → "
-                    f"`{finding.current_ru_oid or 'absent'}`, "
-                    f"EN `{finding.baseline_en_oid or 'absent'}` → "
-                    f"`{finding.current_en_oid or 'absent'}`; commits: "
-                    f"{', '.join(f'`{commit}`' for commit in finding.touching_commits) or '—'}\n"
-                )
+            body += _provenance_lines(blocking_findings)
         errors = [r for r in result.pair_results if r.error]
         if errors:
             body += "\n**Ошибки pipeline:**\n\n"
@@ -809,7 +824,7 @@ def build_source_pr_comment(
             )
             if cost_label:
                 body += f"\n| Стоимость перевода | {cost_label} |\n"
-        return body
+        return body + (_provenance_warning_section(warning_findings) if warning_findings else "")
 
     # No translation PR and nothing to push: RU toc reorder / no-op merge (§6.141).
     if translation_pr_number is None and (
@@ -835,7 +850,7 @@ def build_source_pr_comment(
             f"| Файлов | {total} |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             f"{cost_line}"
-        )
+        ) + (_provenance_warning_section(warning_findings) if warning_findings else "")
 
     if total:
         if new_count and updated_count:
@@ -887,7 +902,7 @@ def build_source_pr_comment(
             f"\n{bilingual_skip} пар(ы) пропущены — bilingual update в source PR "
             f"({BILINGUAL_SKIP_MARKER}).\n"
         )
-    return body
+    return body + (_provenance_warning_section(warning_findings) if warning_findings else "")
 
 
 def build_full_report(
@@ -901,6 +916,9 @@ def build_full_report(
 ) -> str:
     """Reviewer-focused QA report: open problems per file with location and advice."""
     del glossary
+    blocking_findings, warning_findings = partition_provenance_findings(
+        tuple(result.provenance_findings)
+    )
     rec_emoji, rec_label = _merge_recommendation(result)
 
     checkout_line = ""
@@ -932,19 +950,12 @@ def build_full_report(
         completeness_section = "## Что исправить: отсутствующие EN-зеркала\n\n"
         for i, path in enumerate(result.completeness_gaps, start=1):
             completeness_section += f"{i}. **{gap_label(path)}**\n\n"
-    if result.provenance_findings:
+    if blocking_findings:
         completeness_section += "## Блокировка происхождения перевода\n\n"
-        for finding in result.provenance_findings:
-            completeness_section += (
-                f"- `{finding.reason}`: RU `{finding.ru_path or '—'}`, "
-                f"EN `{finding.en_path or '—'}`; "
-                f"RU `{finding.baseline_ru_oid or 'absent'}` → "
-                f"`{finding.current_ru_oid or 'absent'}`, "
-                f"EN `{finding.baseline_en_oid or 'absent'}` → "
-                f"`{finding.current_en_oid or 'absent'}`; commits: "
-                f"{', '.join(f'`{commit}`' for commit in finding.touching_commits) or '—'}\n"
-            )
+        completeness_section += _provenance_lines(blocking_findings)
         completeness_section += "\n"
+    if warning_findings:
+        completeness_section += _provenance_warning_section(warning_findings) + "\n"
 
     if not file_runs and not nav_runs:
         errors = [r for r in result.pair_results if r.error]

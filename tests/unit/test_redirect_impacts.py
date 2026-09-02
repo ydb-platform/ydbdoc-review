@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from ydbdoc_review.navigation.redirects import (
@@ -5,6 +6,7 @@ from ydbdoc_review.navigation.redirects import (
     redirect_source_repo_md_paths,
     should_skip_redirect_tombstone_en,
 )
+from ydbdoc_review.validation import redirect_impacts
 from ydbdoc_review.validation.redirect_impacts import (
     added_redirects,
     mirror_redirects_to_en,
@@ -119,3 +121,93 @@ def test_pr_50904_retarget_is_source_scoped_and_localizes_en_fragment(tmp_path: 
     assert "deployment-options/manual/node-authorization.md" in unrelated.read_text(
         encoding="utf-8"
     )
+
+
+def test_retarget_redirect_inbound_links_pinned_publication_sha_ignores_worktree_and_moving_ref(
+    tmp_path: Path, monkeypatch
+):
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, text=True, capture_output=True
+        ).stdout.strip()
+
+    def write(path: str, text: str) -> None:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+    source = "ydb/docs/en/core/reference/configuration/source.md"
+    ru_target = "ydb/docs/ru/core/devops/concepts/node.md"
+    en_target = "ydb/docs/en/core/devops/concepts/node.md"
+    missing_source = "ydb/docs/en/core/reference/configuration/missing-source.md"
+    unrelated = "ydb/docs/en/core/security/unrelated.md"
+    old = "../../devops/manual/node.md"
+    fragment = "#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+
+    git("init")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test User")
+    write(
+        source,
+        f"publication source [node]({old}{fragment}) "
+        "[missing](../../devops/manual/missing.md#old-fragment)\n",
+    )
+    write(ru_target, "## Включение режима аутентификации и авторизации узлов\n")
+    write(en_target, "## Publication fragment\n")
+    write(unrelated, "publication unrelated\n")
+    git("add", ".")
+    git("commit", "-m", "publication")
+    publication_tree_sha = git("rev-parse", "HEAD")
+
+    git("checkout", "-b", "moving-ref")
+    write(source, "moving-ref source sentinel\n")
+    write(ru_target, "## Moving ref fragment\n")
+    write(en_target, "## Moving ref fragment\n")
+    write(missing_source, "moving-ref missing source sentinel\n")
+    write("ydb/docs/ru/core/devops/concepts/missing.md", "## moving target\n")
+    write("ydb/docs/en/core/devops/concepts/missing.md", "## moving target\n")
+    write(unrelated, "moving-ref unrelated sentinel\n")
+    git("add", ".")
+    git("commit", "-m", "moving ref")
+    moving_ref_sha = git("rev-parse", "HEAD")
+
+    write(source, "worktree source sentinel\n")
+    write(ru_target, "## Worktree fragment\n")
+    write(en_target, "## Worktree fragment\n")
+    write(missing_source, "worktree missing source sentinel\n")
+    write("ydb/docs/ru/core/devops/concepts/missing.md", "## worktree target\n")
+    write("ydb/docs/en/core/devops/concepts/missing.md", "## worktree target\n")
+    write(unrelated, "worktree unrelated sentinel\n")
+
+    calls: list[tuple[str, str]] = []
+    original_read = redirect_impacts.read_text_at_ref
+
+    def pinned_read(repo_path: str, ref: str, path: str) -> str | None:
+        calls.append((ref, path))
+        return original_read(repo_path, ref, path)
+
+    monkeypatch.setattr(redirect_impacts, "read_text_at_ref", pinned_read)
+    changed = retarget_redirect_inbound_links(
+        str(tmp_path),
+        {
+            "/devops/manual/node.md": "/devops/concepts/node.md",
+            "/devops/manual/missing.md": "/devops/concepts/missing.md",
+        },
+        allowed_paths=frozenset({source, missing_source}),
+        publication_ref=publication_tree_sha,
+    )
+
+    assert changed == [source]
+    updated = (tmp_path / source).read_text(encoding="utf-8")
+    assert "publication source" in updated
+    assert "../../devops/concepts/node.md#publication-fragment" in updated
+    assert "../../devops/concepts/missing.md#old-fragment" in updated
+    assert "moving-ref" not in updated
+    assert "worktree" not in updated
+    assert all(ref == publication_tree_sha for ref, _path in calls)
+    assert moving_ref_sha not in {ref for ref, _path in calls}
+    assert {path for _ref, path in calls} == {source, ru_target, en_target, missing_source,
+                                               "ydb/docs/ru/core/devops/concepts/missing.md",
+                                               "ydb/docs/en/core/devops/concepts/missing.md"}
+    assert unrelated not in {path for _ref, path in calls}
+    assert (tmp_path / unrelated).read_text(encoding="utf-8") == "worktree unrelated sentinel\n"

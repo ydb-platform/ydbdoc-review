@@ -541,6 +541,18 @@ def make_repo_scope_readers(
         read_text_at_upstream_tip,
     )
 
+    if ru_content_ref is not None and ru_base_ref is not None:
+        def read_ru(path: str) -> str | None:
+            return read_text_at_ref(repo_path, ru_content_ref, path)
+
+        def read_en_base(path: str) -> str | None:
+            return read_text_at_ref(repo_path, merge_base_with, path)
+
+        def read_ru_base(path: str) -> str | None:
+            return read_text_at_ref(repo_path, ru_base_ref, path)
+
+        return read_ru, read_en_base, read_ru_base
+
     mb = "HEAD"
     try:
         mb = merge_base(repo_path, merge_base_with, "HEAD")

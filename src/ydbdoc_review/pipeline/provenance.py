@@ -19,6 +19,21 @@ class ProvenanceFinding:
     touching_commits: tuple[str, ...]
 
 
+BLOCKING_PROVENANCE_REASONS = frozenset({
+    "history_diverged",
+    "source_pr_en_conflict",
+})
+
+
+def partition_provenance_findings(
+    findings: tuple[ProvenanceFinding, ...],
+) -> tuple[tuple[ProvenanceFinding, ...], tuple[ProvenanceFinding, ...]]:
+    """Split hard provenance failures from stale-source warnings."""
+    blocking = tuple(f for f in findings if f.reason in BLOCKING_PROVENANCE_REASONS)
+    warnings = tuple(f for f in findings if f.reason not in BLOCKING_PROVENANCE_REASONS)
+    return blocking, warnings
+
+
 def _git(repo: str, *args: str, check: bool = True) -> str:
     result = subprocess.run(
         ["git", *args], cwd=repo, check=check, capture_output=True, text=True

@@ -93,6 +93,7 @@ from ydbdoc_review.pipeline.pairs import (
 )
 from ydbdoc_review.pipeline.provenance import (
     guard_publication_provenance,
+    partition_provenance_findings,
     resolve_sha,
 )
 from ydbdoc_review.pipeline.translate_file import translate_file
@@ -347,8 +348,10 @@ def _docs_text_reader(repo_path: str, merge_base_with: str):
 
 def _final_tree_reader(
     repo_path: str,
-    merge_base_with: str,
+    baseline_ref: str,
     overlay_paths: set[str] | frozenset[str],
+    *,
+    legacy_fallback: bool = False,
 ):
     """Read the intended post-translate docs tree (§6.229).
 
@@ -366,9 +369,9 @@ def _final_tree_reader(
             text = read_text(repo_path, norm)
             if text is not None:
                 return text
-        tip = read_text_at_ref(repo_path, merge_base_with, norm)
-        if tip is not None:
-            return tip
+        text = read_text_at_ref(repo_path, baseline_ref, norm)
+        if text is not None or not legacy_fallback:
+            return text
         return read_text(repo_path, norm)
 
     return _read
@@ -474,67 +477,92 @@ def run_doc_translate(
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
-    ru_ref = translate_ru_content_ref(ctx) or ctx.head_sha
-    ru_base_ref: str | None = None
-    if ru_ref:
-        if ensure_commit(repo_path, ru_ref):
-            if ctx.merged:
-                ru_base_ref = f"{ru_ref}^"
-            logger.info(
-                "Source PR #%s: reading RU from immutable tree %s",
-                pr_number,
-                ru_ref[:12],
-            )
-        else:
-            raise RuntimeError(
-                f"source_tree_sha is not fetchable for one-pass translation: {ru_ref}"
-            )
+    source_tree_sha = translate_ru_content_ref(ctx) or ctx.head_sha
+    source_base_sha = f"{source_tree_sha}^" if ctx.merged else ctx.base_sha
+    publication_tree_sha = resolve_sha(repo_path, merge_base_with)
+    translation_ru_sha = publication_tree_sha if ctx.merged else source_tree_sha
+    for name, sha in (
+        ("source_tree_sha", source_tree_sha),
+        ("source_base_sha", source_base_sha),
+        ("publication_tree_sha", publication_tree_sha),
+        ("translation_ru_sha", translation_ru_sha),
+    ):
+        if not sha:
+            raise RuntimeError(f"{name} is required for one-pass translation")
+        if not ensure_commit(repo_path, sha):
+            raise RuntimeError(f"{name} is not fetchable for one-pass translation: {sha}")
+    source_tree_paths = paths_at_tree(repo_path, source_tree_sha)
+    publication_tree_paths = paths_at_tree(repo_path, publication_tree_sha)
+    translation_ru_paths = paths_at_tree(repo_path, translation_ru_sha)
+    logger.info(
+        "Pinned trees for PR #%s: source=%s paths, publication=%s paths, translation-RU=%s paths",
+        pr_number,
+        len(source_tree_paths),
+        len(publication_tree_paths),
+        len(translation_ru_paths),
+    )
 
-    changes = source_pr_scope_changes(
+    source_changes = source_pr_scope_changes(
         ctx,
-        list_pr_file_changes_git(repo_path, merge_base_with),
+        list_pr_file_changes_git(repo_path, publication_tree_sha),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
     docs_root = cfg.paths.docs_root
+    initial_ru_md = sorted({
+        path for path, kind in source_changes
+        if kind != "deleted" and path.startswith(f"{docs_root}/ru/") and path.endswith(".md")
+    })
+    scope_changes = [
+        (path, kind) for path, kind in source_changes
+        if not (kind == "deleted" and path.startswith(f"{docs_root}/ru/") and path.endswith(".md"))
+    ]
+    job = DocJobResult(
+        mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
+        pr_number=pr_number, source_pr_number=pr_number,
+        translation_branch=branch, dry_run=dry_run,
+    )
+    missing_initial_ru_md = sorted(set(initial_ru_md) - translation_ru_paths)
+    if missing_initial_ru_md:
+        runs = []
+        gaps = []
+        for ru_path in missing_initial_ru_md:
+            en_path = ru_path.replace(f"{docs_root}/ru/", f"{docs_root}/en/", 1)
+            gaps.append(en_path)
+            runs.append(PairRunResult(
+                plan=PairPlan(
+                    pair=DocPair(ru_path=ru_path, en_path=en_path),
+                    action="translate_ru_to_en_once", source_path=ru_path, target_path=en_path,
+                    source_lang="ru", target_lang="en",
+                    summary="RU source missing; transaction will block",
+                ), error=f"missing RU source: {ru_path}",
+            ))
+        job.pr_result = PRTranslationResult(completeness_gaps=gaps, pair_results=runs)
+        return job
     read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
         repo_path,
-        merge_base_with,
-        ru_content_ref=ru_ref,
-        ru_base_ref=ru_base_ref,
+        publication_tree_sha,
+        ru_content_ref=translation_ru_sha,
+        ru_base_ref=source_base_sha,
     )
     scope_plan = plan_translation_scope(
-        changes,
+        scope_changes,
         read_ru=read_ru,
         read_en_base=read_en_base,
         read_ru_base=read_ru_base,
         docs_root=docs_root,
     )
-    if not ru_ref:
-        raise RuntimeError("source_tree_sha is required for one-pass translation")
-    source_tree_paths = paths_at_tree(repo_path, ru_ref)
-    initial_ru_md = [
-        path
-        for path, kind in changes
-        if kind != "deleted"
-        and path.startswith(f"{docs_root}/ru/")
-        and path.endswith(".md")
-    ]
     dependency_plan = plan_dependency_queue(
         initial_ru_md,
-        read_ru=lambda path: read_ru(path) or "",
-        ru_exists=lambda path: path in source_tree_paths,
-        en_paths={p for p in source_tree_paths if p.startswith(f"{docs_root}/en/")},
+        read_ru=read_ru,
+        ru_exists=lambda path: path in translation_ru_paths,
+        en_paths={p for p in publication_tree_paths if p.startswith(f"{docs_root}/en/")},
         docs_root=docs_root,
     )
-    source_base_sha = ru_base_ref or ctx.base_sha
-    publication_tree_sha = resolve_sha(repo_path, merge_base_with)
-    source_pr_paths = {path for path, _kind in changes}
-    if not source_base_sha:
-        raise RuntimeError("source_base_sha is required for provenance guard")
+    source_pr_paths = {path for path, _kind in source_changes}
     provenance_findings = guard_publication_provenance(
         repo_path=repo_path,
         merged=ctx.merged,
-        source_tree_sha=ru_ref,
+        source_tree_sha=source_tree_sha,
         source_base_sha=source_base_sha,
         publication_tree_sha=publication_tree_sha,
         initial_ru_paths=set(initial_ru_md),
@@ -544,6 +572,7 @@ def run_doc_translate(
     )
     from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 
+    blocking_findings, provenance_warnings = partition_provenance_findings(provenance_findings)
     planned_docs = frozenset(entry.ru_path for entry in dependency_plan.entries)
     scope_plan = TranslationScopePlan(
         doc_ru_paths=planned_docs,
@@ -570,33 +599,26 @@ def run_doc_translate(
     )
     nav_pairs = merge_navigation_pair_lists(
         navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
-        build_navigation_pairs(changes, docs_root=docs_root),
+        build_navigation_pairs(scope_changes, docs_root=docs_root),
     )
     # Redirect retargeting is authorized only for EN mirrors of files changed
     # by the source PR, never synthetic dependency pages added by scope closure.
     redirect_impact_scope = frozenset(
         en_path
-        for path, kind in changes
+        for path, kind in scope_changes
         if kind != "deleted"
         and (en_path := counterpart(path, docs_root)) is not None
         and en_path.endswith(".md")
     )
-    changes = merge_pr_file_changes(changes, synthetic_changes_from_plan(scope_plan))
-    job = DocJobResult(
-        mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
-        pr_number=pr_number,
-        source_pr_number=pr_number,
-        translation_branch=branch,
-        dry_run=dry_run,
-    )
-    if provenance_findings:
+    changes = merge_pr_file_changes(scope_changes, synthetic_changes_from_plan(scope_plan))
+    if blocking_findings:
         job.pr_result = PRTranslationResult(
             completeness_gaps=sorted(
-                {finding.en_path or finding.ru_path for finding in provenance_findings}
+                {finding.en_path or finding.ru_path for finding in blocking_findings}
             ),
             provenance_findings=list(provenance_findings),
         )
-        logger.error("Translation provenance guard blocked before model use: %s", provenance_findings)
+        logger.error("Translation provenance guard blocked before model use: %s", blocking_findings)
         return job
     if not pairs and not nav_pairs:
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
@@ -604,8 +626,9 @@ def run_doc_translate(
         # ``skip_en_paths`` before analyze — still post «перевод не требуется»
         # (§6.76 / #48751). Without this early path the comment never appeared.
         pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
+        pr_result.provenance_findings.extend(provenance_warnings)
         job.pr_result = pr_result
-        if pr_result.pair_results and not dry_run:
+        if (pr_result.pair_results or pr_result.provenance_findings) and not dry_run:
             elapsed = time.monotonic() - started
             meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
             job.source_comment_url = _safe_post_issue_comment(
@@ -638,21 +661,12 @@ def run_doc_translate(
         pending_en_md = {p.en_path for p in pairs}
         pending_en_tocs = {nav.en_path for nav in nav_pairs}
 
-        def _read_en_toc_graph(path: str) -> str | None:
-            # Prefer upstream main for EN toc/pages so strip_unreachable does not
-            # use a stale source-PR checkout (#47108 bare ``{#T}`` after strip).
-            if path.replace("\\", "/").startswith(f"{docs_root}/en/"):
-                text = read_text_at_ref(repo_path, merge_base_with, path)
-                if text is not None:
-                    return text
-            return read_text(repo_path, path)
-
         en_toc_reachable = build_en_toc_reachable_from_repo(
             repo_path,
             docs_root=docs_root,
             pending_en_md=pending_en_md,
             pending_en_tocs=pending_en_tocs,
-            read_text=_read_en_toc_graph,
+            read_text=lambda path: read_text_at_ref(repo_path, publication_tree_sha, path),
         )
         logger.info(
             "EN toc reachability: %s md paths (%s pending md, %s pending toc)",
@@ -661,15 +675,9 @@ def run_doc_translate(
             len(pending_en_tocs),
         )
 
-        redirects_yaml = (
-            read_text_at_ref(repo_path, ru_ref, f"{docs_root}/redirects.yaml")
-            if ru_ref
-            else None
-        ) or (
-            read_text_at_ref(repo_path, merge_base_with, f"{docs_root}/redirects.yaml")
-            or read_text(repo_path, f"{docs_root}/redirects.yaml")
-            or ""
-        )
+        redirects_yaml = read_text_at_ref(
+            repo_path, translation_ru_sha, f"{docs_root}/redirects.yaml"
+        ) or ""
         redirect_source_en = redirect_source_repo_md_paths(
             redirects_yaml, locale="en", docs_root=docs_root
         )
@@ -678,9 +686,9 @@ def run_doc_translate(
             contents = load_pair_contents(
                 repo_path,
                 pairs,
-                merge_base_with=merge_base_with,
-                ru_content_ref=ru_ref,
-                ru_base_ref=ru_base_ref,
+                merge_base_with=publication_tree_sha,
+                ru_content_ref=translation_ru_sha,
+                ru_base_ref=source_base_sha,
             )
             # Always run real translation for doc_translate, including merged
             # source PRs. Routing merged PRs through critic-only verify planning
@@ -695,13 +703,13 @@ def run_doc_translate(
                 config=cfg,
                 en_toc_reachable=en_toc_reachable,
                 redirect_source_en_paths=redirect_source_en,
-                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_text_reader=lambda path: read_text_at_ref(repo_path, publication_tree_sha, path),
                 docs_repo_path=repo_path,
                 manifest=manifest,
                 dependency_plan=dependency_plan,
                 pinned_en_paths={
                     path
-                    for path in paths_at_tree(repo_path, publication_tree_sha)
+                    for path in publication_tree_paths
                     if path.startswith(f"{docs_root}/en/") and path.endswith(".md")
                 },
                 read_pinned_en=lambda path: read_text_at_ref(
@@ -716,14 +724,14 @@ def run_doc_translate(
             pr_result.navigation_results = run_navigation_merges(
                 nav_pairs,
                 repo_path=repo_path,
-                merge_base_with=merge_base_with,
+                merge_base_with=publication_tree_sha,
                 client=client,
                 glossary=glossary,
                 config=cfg,
                 manifest=manifest,
                 scope_plan=scope_plan,
-                ru_content_ref=ru_ref,
-                ru_base_ref=ru_base_ref,
+                ru_content_ref=translation_ru_sha,
+                ru_base_ref=source_base_sha,
                 active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
 
@@ -732,9 +740,10 @@ def run_doc_translate(
         pr_result,
         repo_path=repo_path,
         docs_root=docs_root,
-        baseline_ref=merge_base_with,
+        baseline_ref=publication_tree_sha,
         exempt_en_paths=redirect_source_en,
     )
+    pr_result.provenance_findings.extend(provenance_warnings)
     pr_result.completeness_gaps = completeness_gaps(
         changes, pr_result, docs_root=cfg.paths.docs_root
     )
@@ -760,7 +769,7 @@ def run_doc_translate(
     final_provenance_findings = guard_publication_provenance(
         repo_path=repo_path,
         merged=ctx.merged,
-        source_tree_sha=ru_ref,
+        source_tree_sha=source_tree_sha,
         source_base_sha=source_base_sha,
         publication_tree_sha=publication_tree_sha,
         initial_ru_paths=set(initial_ru_md),
@@ -770,6 +779,7 @@ def run_doc_translate(
             f"{docs_root}/ru/", f"{docs_root}/en/", 1
         ),
     )
+    final_blocking, _final_warnings = partition_provenance_findings(final_provenance_findings)
     if final_provenance_findings:
         logger.error(
             "Translation provenance guard blocked before publication: %s",
@@ -779,7 +789,7 @@ def run_doc_translate(
             sorted(
                 {
                     finding.en_path or finding.ru_path
-                    for finding in final_provenance_findings
+                    for finding in final_blocking
                 }
             )
         )
@@ -806,12 +816,10 @@ def run_doc_translate(
         redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
         if any(path == redirects_path for path, _kind in changes):
             redirects_current = (
-                read_text_at_ref(repo_path, ru_ref, redirects_path)
-                if ru_ref
-                else read_text(repo_path, redirects_path)
+                read_text_at_ref(repo_path, translation_ru_sha, redirects_path)
             ) or ""
             redirects_base = (
-                read_text_at_ref(repo_path, ru_base_ref or merge_base_with, redirects_path) or ""
+                read_text_at_ref(repo_path, source_base_sha, redirects_path) or ""
             )
             redirect_mappings = added_redirects(redirects_base, redirects_current)
             # Never retarget/write EN at redirects.yaml ``from`` paths — those are
@@ -823,14 +831,14 @@ def run_doc_translate(
                 docs_root=cfg.paths.docs_root,
                 dry_run=dry_run,
                 allowed_paths=frozenset(redirect_impact_scope - redirect_source_en),
+                publication_ref=publication_tree_sha,
             )
             # Translation branches start from current upstream main. Never
             # write the historical source-merge copy of this global file:
             # doing so reverted unrelated redirects in #50901.
             redirects_worktree = (
-                read_text_at_ref(repo_path, merge_base_with, redirects_path)
-                or read_text(repo_path, redirects_path)
-                or redirects_current
+                read_text_at_ref(repo_path, publication_tree_sha, redirects_path)
+                or ""
             )
             mirrored_redirects = mirror_redirects_to_en(redirects_worktree, redirect_mappings)
             if mirrored_redirects != redirects_worktree:
@@ -856,8 +864,8 @@ def run_doc_translate(
             pr_result,
             repo_path=repo_path,
             en_md_paths=en_written,
-            baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
-            docs_read=_final_tree_reader(repo_path, merge_base_with, en_written),
+            baseline_read=lambda p: read_text_at_ref(repo_path, publication_tree_sha, p),
+            docs_read=_final_tree_reader(repo_path, publication_tree_sha, en_written),
         )
         if broken_links:
             logger.error(
@@ -1357,7 +1365,9 @@ def run_doc_verify(
         repo_path=repo_path,
         en_md_paths=verify_en_paths,
         baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
-        docs_read=_final_tree_reader(repo_path, merge_base_with, verify_en_paths),
+        docs_read=_final_tree_reader(
+            repo_path, merge_base_with, verify_en_paths, legacy_fallback=True
+        ),
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.

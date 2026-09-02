@@ -1,8 +1,11 @@
 import subprocess
 from pathlib import Path
 
-from ydbdoc_review.pipeline.provenance import guard_publication_provenance
-
+from ydbdoc_review.pipeline.provenance import (
+    ProvenanceFinding,
+    guard_publication_provenance,
+    partition_provenance_findings,
+)
 
 RU = "ydb/docs/ru/a.md"
 EN = "ydb/docs/en/a.md"
@@ -62,20 +65,27 @@ def test_merged_unchanged_source_and_en_proceeds(tmp_path: Path):
     assert _guard(repo, source=source, base=base, publication=publication) == ()
 
 
-def test_newer_ru_blocks_with_touching_commit(tmp_path: Path):
+def test_newer_ru_is_detected_as_nonblocking_provenance_warning(tmp_path: Path):
     repo, base = _repo(tmp_path)
     source = _commit(repo, "source", {RU: "source\n"})
     publication = _commit(repo, "newer ru", {RU: "newer\n"})
     finding = _guard(repo, source=source, base=base, publication=publication)[0]
     assert finding.reason == "newer_ru"
     assert finding.touching_commits
+    blocking, warnings = partition_provenance_findings((finding,))
+    assert blocking == ()
+    assert warnings == (finding,)
 
 
-def test_newer_en_blocks(tmp_path: Path):
+def test_newer_en_is_detected_as_nonblocking_provenance_warning(tmp_path: Path):
     repo, base = _repo(tmp_path)
     source = _commit(repo, "source", {RU: "source\n"})
     publication = _commit(repo, "newer en", {EN: "New English\n"})
-    assert _guard(repo, source=source, base=base, publication=publication)[0].reason == "newer_en"
+    finding = _guard(repo, source=source, base=base, publication=publication)[0]
+    assert finding.reason == "newer_en"
+    blocking, warnings = partition_provenance_findings((finding,))
+    assert blocking == ()
+    assert warnings == (finding,)
 
 
 def test_source_pr_en_conflict_blocks(tmp_path: Path):
@@ -99,3 +109,40 @@ def test_diverged_history_blocks(tmp_path: Path):
     publication = _commit(repo, "other", {"README.md": "other\n"})
     finding = _guard(repo, source=source, base=base, publication=publication)[0]
     assert finding.reason == "history_diverged"
+
+
+def test_partition_provenance_findings_preserves_interleaved_reason_order():
+    findings = tuple(
+        ProvenanceFinding(
+            category="translation_provenance",
+            reason=reason,
+            ru_path=RU,
+            en_path=EN,
+            baseline_ru_oid=None,
+            current_ru_oid=None,
+            baseline_en_oid=None,
+            current_en_oid=None,
+            touching_commits=(),
+        )
+        for reason in (
+            "newer_ru",
+            "history_diverged",
+            "en_created",
+            "source_pr_en_conflict",
+            "newer_en",
+            "en_deleted",
+        )
+    )
+
+    blocking, warnings = partition_provenance_findings(findings)
+
+    assert [finding.reason for finding in blocking] == [
+        "history_diverged",
+        "source_pr_en_conflict",
+    ]
+    assert [finding.reason for finding in warnings] == [
+        "newer_ru",
+        "en_created",
+        "newer_en",
+        "en_deleted",
+    ]
