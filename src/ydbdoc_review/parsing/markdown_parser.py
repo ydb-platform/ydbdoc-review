@@ -140,6 +140,55 @@ def _source_index_from_lines(text: str) -> tuple[int, ...]:
     return tuple(starts)
 
 
+def _line_index_for_byte(line_starts: tuple[int, ...], byte_offset: int) -> int:
+    """Return the 0-based line that owns ``byte_offset`` within ``line_starts``."""
+    if byte_offset < 0 or byte_offset > line_starts[-1]:
+        raise ValueError("source_map_incomplete:byte_offset")
+    # Last entry is EOF. Treat EOF as belonging to the final content line when
+    # present; otherwise reject (empty document).
+    if byte_offset == line_starts[-1]:
+        if len(line_starts) < 2:
+            raise ValueError("source_map_incomplete:byte_offset")
+        return len(line_starts) - 2
+    low = 0
+    high = len(line_starts) - 2
+    while low <= high:
+        mid = (low + high) // 2
+        if line_starts[mid] <= byte_offset < line_starts[mid + 1]:
+            return mid
+        if byte_offset < line_starts[mid]:
+            high = mid - 1
+        else:
+            low = mid + 1
+    raise ValueError("source_map_incomplete:byte_offset")
+
+
+def _line_content_bounds(
+    raw: bytes, line_starts: tuple[int, ...], line_index: int
+) -> tuple[int, int, int]:
+    """Return ``(line_start, content_start, content_end)`` for a 0-based line.
+
+    ``content_start`` matches StateBlock ``bMarks[line] + tShift[line]``:
+    the first non-indent byte on the line (or ``line_start`` when empty).
+    ``content_end`` matches ``eMarks[line]`` (excludes the line terminator).
+    """
+    if line_index < 0 or line_index + 1 >= len(line_starts):
+        raise ValueError("source_map_incomplete:line")
+    line_start = line_starts[line_index]
+    next_line_start = line_starts[line_index + 1]
+    line_bytes = raw[line_start:next_line_start]
+    if line_bytes.endswith(b"\r\n"):
+        content_end = next_line_start - 2
+    elif line_bytes.endswith(b"\n"):
+        content_end = next_line_start - 1
+    else:
+        content_end = next_line_start
+    content_start = line_start
+    while content_start < content_end and raw[content_start] in (0x20, 0x09):
+        content_start += 1
+    return line_start, content_start, content_end
+
+
 def _record_from_token_map(
     token: Token,
     line_starts: tuple[int, ...],
@@ -192,27 +241,37 @@ def _record_from_token_map(
     if listed_yfm and not virtual_close and start == end:
         raise ValueError(f"source_map_incomplete:{kind}")
     if listed_yfm and source_span is not None:
-        line_index = source_span.line - 1
-        if line_index < 0 or line_index + 1 >= len(line_starts):
-            raise ValueError(f"source_map_incomplete:{kind}")
-        line_start = line_starts[line_index]
-        next_line_start = line_starts[line_index + 1]
-        source_text = _PARSE_SOURCE.get() or ""
-        line_bytes = source_text.encode("utf-8")[line_start:next_line_start]
-        if line_bytes.endswith(b"\r\n"):
-            content_end = next_line_start - 2
-        elif line_bytes.endswith(b"\n"):
-            content_end = next_line_start - 1
+        try:
+            derived_line = _line_index_for_byte(line_starts, start)
+        except ValueError as exc:
+            raise ValueError(f"source_map_incomplete:{kind}") from exc
+        # Opens / includes carry StateBlock-owned line in token.map[0]. Prefer
+        # that over the self-reported source_span.line so a consistently encoded
+        # span on the wrong owned line still fails closed.
+        if token.map is not None and len(token.map) >= 1:
+            owned_line = token.map[0]
         else:
-            content_end = next_line_start
+            owned_line = derived_line
+        if derived_line != owned_line or source_span.line != owned_line + 1:
+            raise ValueError(f"source_map_incomplete:{kind}")
+        source_text = _PARSE_SOURCE.get() or ""
+        raw = source_text.encode("utf-8")
+        try:
+            line_start, content_start, content_end = _line_content_bounds(
+                raw, line_starts, owned_line
+            )
+        except ValueError as exc:
+            raise ValueError(f"source_map_incomplete:{kind}") from exc
         if virtual_close:
-            if not (line_start <= start <= next_line_start):
+            # Exact bMarks[L] + tShift[L] boundary; anywhere-on-line is fail-open.
+            if start != content_start:
                 raise ValueError(f"source_map_incomplete:{kind}")
-        elif token.type != "yfm_tab_open" and not (
-            line_start <= start < end <= content_end
-        ):
-            # Single-line physical markers must stay on their StateBlock line.
-            # yfm_tab_open owns the full tab slice across multiple lines.
+        elif token.type == "yfm_tab_open":
+            # Tab open owns the full multi-line slice from bMarks[header].
+            if start != line_start or end < start:
+                raise ValueError(f"source_map_incomplete:{kind}")
+        elif not (start == content_start and start < end <= content_end):
+            # Single-line physical markers begin at bMarks+tShift and stay on L.
             raise ValueError(f"source_map_incomplete:{kind}")
     title_span = (token.meta or {}).get("title_span")
     if token.type in {"yfm_note_open", "yfm_cut_open", "yfm_tab_open"} and title_span is not None:

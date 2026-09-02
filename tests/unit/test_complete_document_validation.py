@@ -340,6 +340,7 @@ def test_physical_yfm_span_outside_owned_line_fails_closed() -> None:
     from ydbdoc_review.parsing.markdown_parser import (
         _PARSE_SOURCE,
         _record_from_token_map,
+        _source_index_from_lines,
     )
 
     source = "{% note info %}\nText\n{% endnote %}\n"
@@ -358,7 +359,42 @@ def test_physical_yfm_span_outside_owned_line_fails_closed() -> None:
         with pytest.raises(ValueError, match="source_map_incomplete:yfm_note_open"):
             _record_from_token_map(
                 token,
-                (0, len("{% note info %}\n"), len(source.encode("utf-8"))),
+                _source_index_from_lines(source),
+                kind="yfm_note_open",
+                descriptor="yfm_note_open",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+
+
+def test_consistently_encoded_physical_span_on_wrong_owned_line_fails_closed() -> None:
+    """map[0] owns line 0; a self-consistent span on line 1 must still fail."""
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
+
+    source = "{% note info %}\nText\n{% endnote %}\n"
+    text_start = source.index("Text")
+    token = Token("yfm_note_open", "", 0)
+    token.map = [0, 3]
+    token.meta = {
+        "source_span": {
+            "byte_start": text_start,
+            "byte_end": text_start + len("Text"),
+            "line": 2,
+            "column": 1,
+        }
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_note_open"):
+            _record_from_token_map(
+                token,
+                _source_index_from_lines(source),
                 kind="yfm_note_open",
                 descriptor="yfm_note_open",
             )
@@ -369,7 +405,11 @@ def test_physical_yfm_span_outside_owned_line_fails_closed() -> None:
 def test_non_zero_virtual_close_fails_closed() -> None:
     from markdown_it.token import Token
 
-    from ydbdoc_review.parsing.markdown_parser import _PARSE_SOURCE, _record_from_token_map
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
 
     source = "line\n"
     token = Token("yfm_tab_close", "", 0)
@@ -386,12 +426,77 @@ def test_non_zero_virtual_close_fails_closed() -> None:
         with pytest.raises(ValueError, match="source_map_incomplete:yfm_tab_close"):
             _record_from_token_map(
                 token,
-                (0, 5, 5),
+                _source_index_from_lines(source),
                 kind="yfm_tab_close",
                 descriptor="yfm_tab_close",
             )
     finally:
         _PARSE_SOURCE.reset(token_var)
+
+
+def test_wrong_zero_width_virtual_close_boundary_fails_closed() -> None:
+    """Zero-width close must sit at bMarks+tShift, not merely somewhere on the line."""
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
+
+    source = "  {% endlist %}\n"
+    token = Token("yfm_tab_close", "", 0)
+    token.meta = {
+        "source_span": {
+            "byte_start": 0,
+            "byte_end": 0,
+            "line": 1,
+            "column": 1,
+        }
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        with pytest.raises(ValueError, match="source_map_incomplete:yfm_tab_close"):
+            _record_from_token_map(
+                token,
+                _source_index_from_lines(source),
+                kind="yfm_tab_close",
+                descriptor="yfm_tab_close",
+            )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+
+
+def test_exact_zero_width_virtual_close_boundary_is_accepted() -> None:
+    from markdown_it.token import Token
+
+    from ydbdoc_review.parsing.markdown_parser import (
+        _PARSE_SOURCE,
+        _record_from_token_map,
+        _source_index_from_lines,
+    )
+
+    source = "  {% endlist %}\n"
+    token = Token("yfm_tab_close", "", 0)
+    token.meta = {
+        "source_span": {
+            "byte_start": 2,
+            "byte_end": 2,
+            "line": 1,
+            "column": 3,
+        }
+    }
+    token_var = _PARSE_SOURCE.set(source)
+    try:
+        record = _record_from_token_map(
+            token,
+            _source_index_from_lines(source),
+            kind="yfm_tab_close",
+            descriptor="yfm_tab_close",
+        )
+    finally:
+        _PARSE_SOURCE.reset(token_var)
+    assert record.start_byte == record.end_byte == 2
 
 
 def test_front_matter_description_and_comment_bytes_are_protected() -> None:
@@ -471,15 +576,57 @@ def test_fence_body_and_closing_marker_mutations_are_rejected():
 
 
 @pytest.mark.parametrize(
-    "broken",
+    ("source", "broken"),
     [
-        "---\nTitle: Hello # keep\nx: 1\n---\n\nText\n",
-        "---\ntitle: Hello # changed\nx: 1\n---\n\nText\n",
-        "---\ntitle: Hello # keep\nx: 2\n---\n\nText\n",
-        "---\ndescription: D\ntitle: Hello # keep\nx: 1\n---\n\nText\n",
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            "---\nTitle: Hello # keep\nx: 1\n---\n\nText\n",
+        ),
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            "---\ntitle: Hello # changed\nx: 1\n---\n\nText\n",
+        ),
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            "---\ntitle: Hello # keep\nx: 2\n---\n\nText\n",
+        ),
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            "---\ndescription: D\ntitle: Hello # keep\nx: 1\n---\n\nText\n",
+        ),
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            "----\ntitle: Hello # keep\nx: 1\n----\n\nText\n",
+        ),
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            "---\ntitle : Hello # keep\nx: 1\n---\n\nText\n",
+        ),
+        (
+            "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n",
+            '---\ntitle: "Hello" # keep\nx: 1\n---\n\nText\n',
+        ),
+        (
+            '---\ntitle: "Привет"\n---\n\nТекст\n',
+            "---\ntitle: 'Hello'\n---\n\nText\n",
+        ),
+        (
+            "---\ntitle: |\n  Привет\n---\n\nТекст\n",
+            "---\ntitle: |-\n  Hello\n---\n\nText\n",
+        ),
+    ],
+    ids=[
+        "key",
+        "comment",
+        "unselected_value",
+        "order",
+        "delimiter",
+        "colon_spacing",
+        "added_quotes",
+        "quote_style",
+        "block_header_chomping",
     ],
 )
-def test_front_matter_fail_closed_protected_matrix(broken: str) -> None:
-    source = "---\ntitle: Привет # keep\nx: 1\n---\n\nТекст\n"
+def test_front_matter_fail_closed_protected_matrix(source: str, broken: str) -> None:
     with pytest.raises(OnePassTranslationError):
         validate_complete_document(broken, context(source))

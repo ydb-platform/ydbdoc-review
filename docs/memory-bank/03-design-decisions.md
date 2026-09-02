@@ -5544,4 +5544,32 @@ fail-closed, parser-failure / nesting / atom-dup / link-order / fence-body /
 front-matter protected matrix.
 
 
+### §6.241 YFM exact boundary + repair context identity (response-v004, 2026-09-02)
+
+**Problem:** Bugbot ``response-v004`` still CHANGES_REQUESTED: virtual YFM
+closes only had to be zero-width somewhere on the self-reported line (byte 0
+accepted when ``bMarks+tShift`` was 2); physical spans trusted
+``source_span.line`` even when ``token.map[0]`` owned a different line; front-matter
+matrix lacked delimiter / colon-spacing / quote / block-header cases; context
+identity covered base + empty re-critic only, not an accepted repair insertion.
+
+**Decision:**
+
+1. ``_record_from_token_map`` derives the line from span bytes, prefers
+   ``token.map[0]`` as owned line, requires ``source_span.line == owned_line + 1``,
+   binds virtual closes to exact ``content_start`` (``bMarks+tShift``), and binds
+   single-line physical markers to ``start == content_start`` on that owned line
+   (``yfm_tab_open`` remains multi-line from ``bMarks[header]``).
+2. Expand adversarial YFM tests for wrong owned-line + wrong zero-width boundary.
+3. Expand front-matter fail-closed matrix with delimiter, colon spacing, quotes,
+   quote-style, and ``|``→``|-`` chomping mutations.
+4. Prove accepted local-repair validates against the identical frozen
+   ``validation_context`` object (``is`` identity across base / repair / re-critic).
+
+**Tests:** ``test_consistently_encoded_physical_span_on_wrong_owned_line_fails_closed``,
+``test_wrong_zero_width_virtual_close_boundary_fails_closed``, expanded
+``test_front_matter_fail_closed_protected_matrix``,
+``test_accepted_repair_uses_identical_frozen_validation_context``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

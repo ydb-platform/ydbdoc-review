@@ -798,3 +798,83 @@ def test_base_and_recritic_use_one_validation_context_identity(monkeypatch):
     )
     assert len(observed) >= 2
     assert all(item is result.validation_context for item in observed)
+
+
+def test_accepted_repair_uses_identical_frozen_validation_context(monkeypatch):
+    """Base accept, repair-candidate validate, and post-repair re-critic share one context."""
+    observed: list[object] = []
+    real_validate = one_pass_module.validate_complete_document
+
+    def validate_spy(text, validation_context):
+        observed.append(validation_context)
+        return real_validate(text, validation_context)
+
+    monkeypatch.setattr(one_pass_module, "validate_complete_document", validate_spy)
+
+    class RepairingClient:
+        def __init__(self):
+            self.critic_calls = 0
+
+        def chat_once(self, messages, *, explicit_model, role, **kwargs):
+            body = json.loads(messages[-1]["content"])
+            if role == "translate":
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "segments": [
+                                {"id": item["id"], "text": "Bad grammar."}
+                                for item in body["segments"]
+                            ]
+                        }
+                    )
+                )
+            if role == "critic":
+                self.critic_calls += 1
+                if self.critic_calls > 1:
+                    return SimpleNamespace(content=json.dumps({"findings": []}))
+                block_id, record = next(iter(body["block_records"].items()))
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {
+                            "findings": [
+                                {
+                                    "finding_id": "f1",
+                                    "rule_id": "grammar",
+                                    "severity": "RED",
+                                    "block_id": block_id,
+                                    "range": {
+                                        "start": 0,
+                                        "end": len(
+                                            record["en_editable_prose"].encode()
+                                        ),
+                                    },
+                                    "atom_ids": [],
+                                    "message": "grammar",
+                                    "required_rule": "English grammar",
+                                    "context": "Bad grammar.",
+                                    "repair_class": "prose",
+                                }
+                            ]
+                        }
+                    )
+                )
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "finding_id": body["finding_id"],
+                        "block_id": body["block_id"],
+                        "replacement": "Good grammar.",
+                    }
+                )
+            )
+
+    result = translate_ru_to_en_once(
+        "Плохая грамматика.\n",
+        RepairingClient(),
+        file_path="ydb/docs/ru/a.md",
+        manifest=MANIFEST,
+    )
+    assert "Good grammar." in result.text
+    # At least: base acquire validate, repair insertion validate, post-repair clear.
+    assert len(observed) >= 3
+    assert all(item is result.validation_context for item in observed)
