@@ -21,7 +21,6 @@ from ydbdoc_review.translation.prompts import (
     DEFAULT_PROMPT_VERSION,
     build_translate_messages,
 )
-from ydbdoc_review.translation.repair import repair_segment_translation
 from ydbdoc_review.translation.schemas import TranslateBatchResponse
 from ydbdoc_review.validation.cli_tokens import cli_tokens_preserved
 from ydbdoc_review.validation.heuristics import (
@@ -307,21 +306,7 @@ def _recover_or_fallback_segment(
     failed_attempt: str | None,
     manual_actions: list[ManualAction] | None,
 ) -> dict[str, str]:
-    """Repair-pass, then table fail-soft; otherwise re-raise."""
-    if isinstance(exc, TranslationValidationError):
-        repaired = repair_segment_translation(
-            client,
-            seg,
-            glossary,
-            validation_error=str(exc),
-            failed_attempt=failed_attempt,
-            file_path=file_path,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            prompt_version=prompt_version,
-        )
-        if repaired is not None:
-            return {seg.id: repaired}
+    """Use the read-only table fallback; otherwise re-raise."""
 
     if seg.kind in {
         SegmentKind.TABLE_HEADER_CELL,

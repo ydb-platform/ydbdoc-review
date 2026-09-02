@@ -1,0 +1,45 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v022
+amends: one-pass-remediation-v021
+scope: v021-metadata-race-closure-only
+resolver:
+  input_plan_version: one-pass-remediation-v022
+  required_predecessor_file: implementation-plan-v021-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v021
+  operation: resolve_predecessor_then_assert_two_exact_metadata_closures
+metadata_closures:
+  Ruff_artifact_mapping_source:
+    exact_value: v021_exact_R004_Ruff_artifact_mapping
+    exact_paths:
+      - scripts/remediation_ruff_gate.py
+      - tests/unit/test_remediation_ruff_gate.py
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json
+  predecessor_review_control_path:
+    exact_path: .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v020.yaml
+    ownership_class: control_artifact
+    requirement_ids: [workflow-protocol-provenance]
+    lifecycle: byte_immutable
+    manifest_cardinality: exactly_one
+allowed_support_changes:
+  - path: scripts/remediation_policy_gate.py
+    symbols: [_resolved_amendment]
+    operation: add_exact_v022_to_v021_resolution_step
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [amendment_resolution_tests]
+    operation: prove_exact_mapping_source_and_single_response_v020_entry
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v022-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v022-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v022.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v022.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v021.yaml
+ruff_validation_command: identical_to_v021
+refresh_command: identical_to_v021_except_amendment_is_implementation-plan-v022-amendment.yaml
+validation_command: identical_to_v021_except_amendment_is_implementation-plan-v022-amendment.yaml
+forbidden: [Ruff_semantic_change, product_change, extra_mapping, duplicate_manifest_entry, unrelated_change]
+

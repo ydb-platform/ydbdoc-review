@@ -1,0 +1,56 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-REMEDIATION"
+review_type: "specification"
+specification_version: "one-pass-remediation-v002"
+reviewed_iteration: "one-pass-remediation-v002"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT/response-v002.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/response-v010.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/response-v008.yaml"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Remediation specification v002 and normative implementation-plan.yaml close all
+  21 confirmed audit findings with explicit root cause, production/test change,
+  preserve/delete decision, acceptance condition and dependency order. R-001
+  through R-021 map one-to-one to AUDIT-001 through AUDIT-021. Same-file
+  restoration (R-001/R-010), removal of regex href mutation (R-002), real
+  workflow TOC forwarding (R-003), truthful report and Ruff gate (R-004),
+  traceable fragment retirement with public read-only mapper (R-005), fail-closed
+  YFM-tabs (R-006), scoped ops fixtures (R-007), root-locale coverage (R-008),
+  NOTE/CUT/unknown segment policy (R-009), navigation-local acquisition without
+  shared chat or raw-RU fallback (R-011), pre-accept protocol gates (R-012/R-013),
+  minimal repair context (R-014), complete image/inline atoms (R-015), full
+  global repair validation (R-016), cancellation propagation (R-017), provider
+  unavailable normalization (R-018), parser dependency closure (R-019),
+  structured provenance reporting (R-020), and legacy config deletion (R-021) are
+  all closed without developer choice. The plan adds machine-enforced allowlists,
+  exact deletions, policy gates, analyst audit before tester, and forbids
+  developer edits to protocol files. Approval does not authorize implementation.
+findings: []
+confirmations:
+  all_twenty_one_audit_findings_have_closed_remediation_items: true
+  implementation_plan_is_normative_with_allowlists_and_policy_gates: true
+  fixed_phase_order_and_prerequisites_are_explicit: true
+  same_file_migration_without_legacy_semantics: true
+  regex_href_mutation_forbidden_with_parser_atom_contract: true
+  real_workflow_toc_test_required_without_forwarding_mocks: true
+  navigation_uses_translation_local_acquisition_not_shared_chat: true
+  pre_accept_protocol_gates_and_duplicate_id_rules_closed: true
+  minimal_repair_and_critic_context_closed: true
+  image_and_inline_container_atom_matrix_closed: true
+  full_global_validation_after_repair_closed: true
+  cancellation_and_model_unavailable_typed_errors_closed: true
+  parser_based_dependency_closure_closed: true
+  structured_provenance_reporting_closed: true
+  legacy_config_deletion_closed: true
+  static_closure_must_cover_all_entrypoints_not_six_file_allowlist: true
+  developer_may_not_edit_specs_or_spawn_subagents: true
+  reviewer_verdict_does_not_authorize_implementation: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

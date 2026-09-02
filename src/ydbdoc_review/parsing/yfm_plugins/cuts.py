@@ -7,6 +7,7 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
+from ydbdoc_review.parsing.yfm_plugins.source_spans import utf8_source_span
 
 # Opening: {% cut "Title text" %}
 _CUT_OPEN_RE = re.compile(r"^\{%\s*cut\s+\"([^\"]*)\"\s*%\}\s*$")
@@ -65,13 +66,23 @@ def _yfm_cut_rule(
     token.markup = first_line
     token.block = True
     token.map = [start_line, close_line + 1]
-    token.meta = {"title": title}
+    token.meta = {
+        "title": title,
+        "source_span": utf8_source_span(state.src, pos, max_pos),
+        "title_span": utf8_source_span(
+            state.src, pos + m_open.start(1), pos + m_open.end(1)
+        ),
+    }
 
     state.md.block.tokenize(state, start_line + 1, close_line)
 
     token = state.push("yfm_cut_close", "div", -1)
     token.markup = "{% endcut %}"
     token.block = True
+    close_start = state.bMarks[close_line] + state.tShift[close_line]
+    token.meta["source_span"] = utf8_source_span(
+        state.src, close_start, state.eMarks[close_line]
+    )
 
     state.parentType = old_parent
     state.lineMax = old_line_max
@@ -87,4 +98,3 @@ def yfm_cut_plugin(md: MarkdownIt) -> None:
         _yfm_cut_rule,
         {"alt": ["paragraph", "reference", "blockquote", "list"]},
     )
-

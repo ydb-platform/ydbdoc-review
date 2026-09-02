@@ -13,11 +13,9 @@ from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION, build_anal
 from ydbdoc_review.translation.schemas import AnalyzeBatchResponse, AnalyzePairResult
 
 PairAction = Literal[
-    "translate_to_en",
-    "translate_to_ru",
-    "critic_only",
-    "skip",
+    "translate_ru_to_en_once",
     "delete_en",
+    "read_only_qa",
 ]
 
 BILINGUAL_SKIP_MARKER = "§6.76"
@@ -38,7 +36,7 @@ class PairContent:
     en_text: str | None = None
     ru_diff_vs_base: str | None = None
     en_diff_vs_base: str | None = None
-    # Merge-base bodies for §6.132 differential translation (optional).
+    # Historical bodies retained only for read-only non-translation consumers.
     ru_base_text: str | None = None
     en_base_text: str | None = None
 
@@ -61,19 +59,9 @@ def _non_trivial(text: str | None) -> bool:
 
 
 def plan_pair_heuristic(content: PairContent) -> PairPlan:
-    """Deterministic plan: translate from PR source language (§6.30 + §6.132).
-
-    ``doc_translate`` still renders the target from the source AST. When base RU
-    and existing EN are available, ``TranslateStep`` may **differentially** seed
-    unchanged segments (§6.132) instead of calling the LLM for every segment.
-
-    Source language: whichever side the PR authors edited. RU→EN when only RU
-    changed; EN→RU when only EN changed. When **both** sides changed in the
-    source PR, skip auto-translate (§6.76) — authors updated the bilingual pair.
-    """
+    """Plan universal RU one-pass generation or read-only EN QA."""
     pair = content.pair
     ru_ok = _non_trivial(content.ru_text)
-    en_ok = _non_trivial(content.en_text)
 
     if pair.ru_deleted:
         return PairPlan(
@@ -86,100 +74,29 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             summary="RU file deleted in PR — remove EN mirror",
         )
 
-    if pair.ru_changed and pair.en_changed:
-        return PairPlan(
-            pair=pair,
-            action="skip",
-            source_path=pair.ru_path,
-            target_path=pair.en_path,
-            source_lang="ru",
-            target_lang="en",
-            summary=BILINGUAL_SKIP_SUMMARY,
-        )
-
-    if not ru_ok and not en_ok:
-        if pair.en_changed and not pair.ru_changed:
-            return PairPlan(
-                pair=pair,
-                action="translate_to_ru",
-                source_path=pair.en_path,
-                target_path=pair.ru_path,
-                source_lang="en",
-                target_lang="ru",
-                summary="EN changed but source text missing",
-            )
-        if pair.ru_changed:
-            return PairPlan(
-                pair=pair,
-                action="translate_to_en",
-                source_path=pair.ru_path,
-                target_path=pair.en_path,
-                source_lang="ru",
-                target_lang="en",
-                summary="RU changed but source text missing",
-            )
-        return PairPlan(
-            pair=pair,
-            action="skip",
-            source_path=pair.ru_path,
-            target_path=pair.en_path,
-            source_lang="ru",
-            target_lang="en",
-            summary="Both sides empty",
-        )
-
-    if not pair.ru_changed and not pair.en_changed:
-        return PairPlan(
-            pair=pair,
-            action="skip",
-            source_path=pair.ru_path,
-            target_path=pair.en_path,
-            source_lang="ru",
-            target_lang="en",
-            summary="No changes on either side",
-        )
-
     if pair.en_changed and not pair.ru_changed:
         return PairPlan(
             pair=pair,
-            action="translate_to_ru",
+            action="read_only_qa",
             source_path=pair.en_path,
-            target_path=pair.ru_path,
-            source_lang="en",
-            target_lang="ru",
-            summary="EN changed — full re-translate to RU (ignore existing RU)",
-        )
-
-    if ru_ok:
-        return PairPlan(
-            pair=pair,
-            action="translate_to_en",
-            source_path=pair.ru_path,
             target_path=pair.en_path,
-            source_lang="ru",
-            target_lang="en",
-            summary="RU changed — full re-translate to EN",
-        )
-
-    if en_ok:
-        return PairPlan(
-            pair=pair,
-            action="translate_to_ru",
-            source_path=pair.en_path,
-            target_path=pair.ru_path,
             source_lang="en",
-            target_lang="ru",
-            summary="EN changed — full re-translate to RU (RU text missing)",
+            target_lang="en",
+            summary="EN-only source change receives read-only QA",
         )
 
     return PairPlan(
         pair=pair,
-        action="skip",
+        action="translate_ru_to_en_once",
         source_path=pair.ru_path,
         target_path=pair.en_path,
         source_lang="ru",
         target_lang="en",
-        summary="No translatable source text",
+        summary=(
+            "RU-authoritative one-pass translation"
+            if ru_ok
+            else "RU source missing; transaction will block"
+        ),
     )
 
 
@@ -205,22 +122,16 @@ def _pair_to_analyze_payload(content: PairContent) -> dict[str, object]:
 
 def _action_from_analyze(result: AnalyzePairResult) -> PairAction:
     if result.needs_generation_for == "en":
-        return "translate_to_en"
-    if result.needs_generation_for == "ru":
-        return "translate_to_ru"
-    if result.ru_present and result.en_present and result.semantically_aligned:
-        return "critic_only"
-    return "skip"
+        return "translate_ru_to_en_once"
+    return "read_only_qa"
 
 
 def plan_from_analyze(content: PairContent, result: AnalyzePairResult) -> PairPlan:
     action = _action_from_analyze(result)
-    if action == "translate_to_en":
+    if action == "translate_ru_to_en_once":
         src, tgt, sl, tl = content.pair.ru_path, content.pair.en_path, "ru", "en"
-    elif action == "translate_to_ru":
-        src, tgt, sl, tl = content.pair.en_path, content.pair.ru_path, "en", "ru"
     else:
-        src, tgt, sl, tl = content.pair.ru_path, content.pair.en_path, "ru", "en"
+        src, tgt, sl, tl = content.pair.en_path, content.pair.en_path, "en", "en"
     return PairPlan(
         pair=content.pair,
         action=action,
@@ -260,9 +171,9 @@ def plan_pairs(
 ) -> list[PairPlan]:
     """Build execution plans for ``doc_translate`` (deterministic full re-translate).
 
-    ``use_analyze_llm=True`` is deprecated: it may yield ``critic_only`` (no full
-    render) and is not used in CI. ``run_analyze_batch`` / ``plan_from_analyze``
-    remain for tests and tooling only.
+    ``use_analyze_llm=True`` is deprecated and is not used in CI.
+    ``run_analyze_batch`` / ``plan_from_analyze`` remain for read-only tests and
+    tooling only.
     """
     del client, glossary, prompt_version  # reserved for deprecated analyze path
     if use_analyze_llm:

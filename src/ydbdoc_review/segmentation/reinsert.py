@@ -19,16 +19,20 @@ from ydbdoc_review.parsing.ast_types import (
     YfmCut,
     YfmIf,
     YfmNote,
-    YfmTab,
     YfmTabs,
 )
 from ydbdoc_review.parsing.front_matter import apply_front_matter_updates
 from ydbdoc_review.parsing.inline_parser import parse_inline_text
+from ydbdoc_review.segmentation.inline_protector import restore_inline_text
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 
 
 class ReinsertError(Exception):
     """Raised when a segment cannot be re-inserted into the AST."""
+
+
+class UnknownSegmentKindError(ReinsertError):
+    """Raised before rendering when no reinsertion rule owns a segment kind."""
 
 
 def reinsert_segments(
@@ -66,6 +70,7 @@ def _build_inline_from_translation(
     """Parse translated text and substitute placeholders for original nodes."""
     from ydbdoc_review.validation.markdown_layout import fix_image_bang_spacing
 
+    text, placeholders = _restore_link_boundaries(text, placeholders)
     # Normalize ``! [alt](src)`` before parse so image placeholders reinsert as images.
     text = fix_image_bang_spacing(text)
     # Parse the text as inline markdown — placeholders ⟦K1⟧ will become InlineText.
@@ -73,6 +78,22 @@ def _build_inline_from_translation(
     # Replace placeholder text nodes with the original protected nodes.
     mapping = {p.placeholder: p.node for p in placeholders}
     return _substitute_placeholders(nodes, mapping)
+
+
+def _restore_link_boundaries(
+    text: str, placeholders: list[ProtectedInline]
+) -> tuple[str, list[ProtectedInline]]:
+    """Restore complete source-owned link wrappers around translated labels."""
+    text = unquote(text)
+    retained = [
+        placeholder
+        for placeholder in placeholders
+        if "BEGIN_" not in placeholder.placeholder and "END_" not in placeholder.placeholder
+    ]
+    try:
+        return restore_inline_text(text, placeholders, target_locale=True), retained
+    except ValueError as exc:
+        raise ReinsertError(str(exc)) from exc
 
 
 def _is_url_placeholder_template(node: InlineNode) -> bool:
@@ -346,6 +367,15 @@ def _set_inline_at_ast_path(
         if not isinstance(tab_idx, int):
             raise ReinsertError(f"Bad tab index in {path}")
         tabs.children[tab_idx].title = new_inline
+    elif kind in (SegmentKind.NOTE_TITLE, SegmentKind.CUT_TITLE):
+        node = _navigate_to_doc_index(doc, path[:-1])
+        if kind == SegmentKind.NOTE_TITLE and not isinstance(node, YfmNote):
+            raise ReinsertError(f"Expected YfmNote, got {type(node).__name__}")
+        if kind == SegmentKind.CUT_TITLE and not isinstance(node, YfmCut):
+            raise ReinsertError(f"Expected YfmCut, got {type(node).__name__}")
+        from ydbdoc_review.rendering.markdown_renderer import _render_inline
+
+        node.title = _render_inline(new_inline)
     elif kind == SegmentKind.LIST_ITEM:
         node = _navigate_to_doc_index(doc, path)
         if isinstance(node, ListItem):
@@ -367,7 +397,7 @@ def _set_inline_at_ast_path(
             )
         node.children = new_inline
     else:
-        raise ReinsertError(f"Unsupported segment kind: {kind}")
+        raise UnknownSegmentKindError(f"Unsupported segment kind: {kind}")
 
 
 def _navigate_to_doc_index(doc: Document, path: list) -> object:

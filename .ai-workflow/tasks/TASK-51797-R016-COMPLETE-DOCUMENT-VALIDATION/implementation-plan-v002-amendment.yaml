@@ -1,0 +1,50 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+plan_version: r016-parser-owned-v002
+amends: r016-parser-owned-v001
+resolver:
+  predecessor_plan: implementation-plan.yaml
+  predecessor_response: response-v001.yaml
+  operation: resolve_v001_then_apply_two_exact_closures
+closures:
+  - finding: R016-V001-001
+    exact_supersessions:
+      source_container_signature_element_0: canonical_structural_descriptor_kind_level_tag_markup_variant
+      source_fence_config_signature_element_0: canonical_non_prose_descriptor
+      ValidationAtomRecord_sha256: sha256_of_structured_canonical_atom_payload
+      residual_cyrillic_allowed_ranges: exact_projection_of_parser_owned_source_non_prose_records_not_candidate_mask
+    schema_addition:
+      expected_anchors: 'tuple[str, ...]'
+    forbidden: [choose_v018_or_v002, raw_model_dump_json_hash, candidate_source_range_projection, string_normalization]
+  - finding: R016-V001-002
+    validator_order_additions:
+      - exact_context_projection_check_for_residual_ranges
+      - candidate_non_prose_descriptors_and_hashes_tied_to_projection
+      - exact_href_equality
+      - conditional_en_toc_reachability_via_existing_resolve_internal_md_href
+      - anchors_then_extracted_prose_cyrillic
+    en_toc_contract:
+      resolver: src/ydbdoc_review/validation/glossary_toc_links.py::resolve_internal_md_href
+      resolver_file_edit: forbidden
+      call_arguments: [context.source_file, candidate_href]
+      none_result: exempt
+      normalized_target_present: accept
+      normalized_target_absent: 'reject unreachable_en_internal_link:<target>'
+    residual_contract:
+      context_projection: 'tuple((start,end,descriptor) for descriptor,start,end,sha in source_fence_config_signature)'
+      mismatch: 'reject validation_context_invalid:residual_cyrillic_ranges'
+      candidate_non_prose: exact_order_descriptor_and_slice_hash
+      candidate_prose: extract_segments_then_reject_cyrillic
+      source_offsets_applied_to_candidate: forbidden
+required_new_tests:
+  - residual_projection_mutation_rejected
+  - identical_cyrillic_non_prose_allowed_but_prose_rejected
+  - toc_none_skips_only_reachability
+  - normalized_relative_md_fragment_reachable
+  - normalized_relative_md_fragment_unreachable
+  - resolver_none_classes_exempt
+  - resolver_called_once_per_expected_candidate_href
+allowed_files_and_commands: inherit_implementation_plan_yaml_unchanged
+implementation_gate: response-v002.yaml_verdict_APPROVED
+developer_discretion: none
+product_code_edit_by_analyst: forbidden

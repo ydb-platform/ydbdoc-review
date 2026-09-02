@@ -1,0 +1,45 @@
+---
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+review_type: specification_reviewer
+specification_version: "r016-parser-owned-v002"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: FINAL-008 / R-016 v002
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v002 closes both CHANGES_REQUESTED findings. Resolved together with v001, the
+contract explicitly supersedes the four affected v018 meanings (container/
+fence element-0 descriptors, canonical atom hash, residual-range projection)
+while keeping frozen field types and adding `expected_anchors`. Retained fields
+now have exact validate-time duties: residual ranges must project from
+`source_fence_config_signature` and gate non-prose allowlisting plus
+`extract_segments` prose rejection; `en_toc_reachable` is a conditional
+membership check via unmodified
+`resolve_internal_md_href(context.source_file, candidate_href)`. The ordered
+validator and required tests cover every new branch. No developer reconciliation
+choice remains. Product implementation still requires this APPROVED response;
+this does not authorize code edits by the reviewer.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v002.md`; read v002 amendments against
+  `response-v001.yaml` findings R016-V001-001 and R016-V001-002.
+- Confirmed `resolve_internal_md_href(from_file, href) -> str | None` exists and
+  matches the closed call contract.
+- Confirmed residual projection `(start,end,descriptor)` from fence signature
+  tuples and the ten-step fail-closed order.

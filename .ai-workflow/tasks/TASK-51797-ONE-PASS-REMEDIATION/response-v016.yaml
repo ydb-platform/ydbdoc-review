@@ -1,0 +1,48 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v016"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: chunker batch-count contract v016
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v016 correctly reclassifies the universal `batch_count < 100` assertion as an
+obsolete size-independent threshold, not a production regression. Spot-check of
+current chunker and fixtures matches the stated facts:
+`ru/core/concepts/glossary.md` → 437 segments / 175 batches;
+`en/core/concepts/glossary.md` → 421 / 116; zero multi-segment oversized batches.
+Production `_HEAVY_PLACEHOLDER_COUNT = 8` and greedy packing intentionally force
+dense-segment isolation, which alone exceeds 100 batches on the RU glossary.
+
+The replacement contract verifies each non-final batch boundary against the
+documented algorithm (dense singleton, oversized singleton, next-dense forced
+boundary, or budget overflow), forbids inventing a new numeric threshold,
+preserves v014 exact EN negative-fixture handling, and leaves production
+chunker/fixtures unchanged. Predecessor is exact `one-pass-remediation-v015`
+with four-path self-seal and required refresh-manifest + validate after
+materialization. No developer choice remains.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v016.md`; read v016 amendments and current
+  `chunker.py` / `test_chunker.py`.
+- Measured RU/EN glossary segment and batch counts; confirmed dense isolation.
+- Verified replacement rules map to the live greedy algorithm and that `< 100`
+  remains the only obsolete assertion targeted.
+- Confirmed v015 predecessor, self-seal and refresh requirement.

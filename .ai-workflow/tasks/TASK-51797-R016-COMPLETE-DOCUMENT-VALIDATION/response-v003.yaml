@@ -1,0 +1,48 @@
+---
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+review_type: specification_reviewer
+specification_version: "r016-parser-owned-v003"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: FINAL-008 / R-016 v003
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v003 correctly closes the YFM provenance contradiction that would otherwise
+make parser-owned R-016 impossible. Independent token inspection shows branch/
+close/include/tabs-close tokens currently emit `map=None` without
+`source_span`, while open tokens often carry whole-container maps unsuitable as
+marker spans.
+
+The amendment is closed: exact plugin allowlist plus shared
+`utf8_source_span`; physical markers get StateBlock line-owned UTF-8 spans at
+emission; virtual branch/tab closes get exact zero-width boundaries and are
+structural-only (no slice hash / residual range); `_record_from_token_map`
+must prefer required `source_span` with no `map` fallback for listed YFM
+tokens; existing grammar recognition and tabs metadata are preserved; tests
+cover multibyte, nesting, every token, corruption and forbidden later
+regex/find/index. No developer choice remains. This does not authorize
+implementation by the reviewer.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v003.md`; read v003 amendments against resolved
+  v001/v002.
+- Reproduced current YFM token provenance gaps (`map=None` / missing
+  `source_span`) for if/note/cut/include/tabs closes and branches.
+- Verified physical vs virtual span rules, fail-closed no-map-fallback, and
+  test/command allowlist extension.

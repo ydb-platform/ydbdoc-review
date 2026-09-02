@@ -1,0 +1,70 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v016
+amends: one-pass-remediation-v015
+scope: chunker-real-fixture-obsolete-count-assertion-only
+observed_facts:
+  ru_glossary: {segments: 437, batches: 175, oversized_batches: 0}
+  en_glossary: {segments: 421, batches: 116, oversized_batches: 0}
+  dense_placeholder_threshold: 8
+  max_chars: 4000
+classification: obsolete_size_independent_test_threshold
+test_change:
+  path: tests/unit/test_chunker.py
+  allowed_symbol: test_chunker_reasonable_batch_count_on_real_files
+  remove_exact_assertion: "assert n < 100"
+  replacement: verify_each_batch_boundary_is_required_by_exact_greedy_contract
+  rules:
+    dense_singleton: len(batch.segments)==1_and_len(placeholders)>=8
+    oversized_singleton: len(batch.segments)==1_and_len(text)>4000
+    next_dense_boundary: len(next_first.placeholders)>=8
+    budget_boundary: batch.total_chars_plus_len(next_first.text)>4000
+    for_each_nonfinal_batch: one_of_dense_singleton_oversized_singleton_next_dense_boundary_budget_boundary
+  preserve_v014_exact_negative_fixture_handling: true
+  new_numeric_batch_count_threshold: forbidden
+resolver:
+  input_plan_version: one-pass-remediation-v016
+  required_predecessor_file: implementation-plan-v015-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v015
+  operation: resolve_predecessor_then_append_exact_v016_self_sealing_paths
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v016-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v016-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v016.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v016.yaml
+allowed_code_changes:
+  - path: tests/unit/test_chunker.py
+    symbols: [test_chunker_reasonable_batch_count_on_real_files]
+    operation: replace_fixed_count_with_exact_greedy_boundary_property
+  - path: scripts/remediation_policy_gate.py
+    symbols: [_resolved_amendment]
+    operation: add_exact_v016_to_v015_resolution_step
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [amendment_resolution_tests]
+    operation: prove_v016_predecessor_and_four_self_sealing_paths
+required_tests:
+  - RU_glossary_175_batches_satisfy_every_required_boundary
+  - EN_glossary_116_batches_satisfy_every_required_boundary
+  - unnecessary_non_dense_non_budget_boundary_fails
+  - v014_exact_EN_negative_fixture_behavior_preserved
+  - existing_chunker_unit_and_real_fixture_tests_GREEN
+  - v016_requires_v015_predecessor_and_self_seals_four_paths
+  - refresh_manifest_v016_then_validate_GREEN
+unchanged:
+  - production_chunker_algorithm
+  - parser_and_fixture_bytes
+  - max_chars_4000
+  - dense_threshold_8
+  - all_other_tests_and_requirements
+forbidden:
+  - new_numeric_batch_count_threshold
+  - production_or_fixture_edit
+  - weaken_or_remove_dense_isolation
+  - skip_or_xfail
+  - wildcard_negative_fixture
+  - generic_amendment_discovery
+  - unrelated_change

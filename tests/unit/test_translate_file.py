@@ -1,440 +1,232 @@
-"""Tests for per-file translate_file pipeline."""
+"""Mandatory-manifest one-pass replacements for legacy translate_file tests."""
 
 from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
-from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.segmentation.extractor import extract_segments
-from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.pipeline.translate_file import translate_file
+import pytest
 
+from ydbdoc_review.pipeline.dependency_queue import DependencyPlan, QueueEntry
+from ydbdoc_review.pipeline.translation_transaction import run_translation_transaction
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
+)
+from ydbdoc_review.translation.one_pass import translate_ru_to_en_once
+from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 
-def _unit_cfg(**extra: str):
-    env = {
-        "YDBDOC_YC_FOLDER_ID": "b1x",
-        "YDBDOC_YC_API_KEY": "k",
-        "YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES": "0",
-    }
-    env.update(extra)
-    return load_config(env=env)
-
-
-def _completion(content: str):
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
-    )
+MANIFEST = TranslationJobManifest(TranslationModelPolicy(
+    translate=ModelPair("translate-primary", "translate-fallback"),
+    critic=ModelPair("critic-primary", "critic-fallback"),
+    repair=ModelPair("repair-primary", "repair-fallback"),
+))
 
 
-def _mock_client(responses: list[str]) -> YandexLLMClient:
-    mock_openai = MagicMock()
-    mock_openai.chat.completions.create.side_effect = [
-        _completion(r) for r in responses
-    ]
-    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
-    return YandexLLMClient(
-        folder_id="b1x",
-        api_key="k",
-        llm=cfg.llm,
-        client=mock_openai,
-    )
+def _plan(path: str = "ydb/docs/ru/page.md") -> DependencyPlan:
+    return DependencyPlan((QueueEntry(path, "initial"),), (), 1, 0)
 
 
-def _prose_unfixed_cyrillic_json(text: str) -> str:
-    """Prose-pass JSON that keeps Cyrillic (rejected when applying fixes)."""
-    from ydbdoc_review.validation.prose_cyrillic import collect_cyrillic_prose_spans
+class Client:
+    def __init__(self, replacements=(), critic_findings=()) -> None:
+        self.replacements = tuple(replacements)
+        self.critic_findings = list(critic_findings)
+        self.calls: list[tuple[str, str]] = []
 
-    spans = collect_cyrillic_prose_spans(text)
-    if not spans:
-        return json.dumps({"spans": []})
-    return json.dumps(
-        {
-            "spans": [
-                {"id": span.span_id, "text": span.text} for span in spans
-            ]
-        },
-        ensure_ascii=False,
-    )
-
-
-def _translate_json(segments, mapping: dict[str, str]) -> str:
-    payload = {
-        "segments": [
-            {"id": seg.id, "text": mapping.get(seg.id, seg.text)}
-            for seg in segments
-        ]
-    }
-    return json.dumps(payload, ensure_ascii=False)
-
-
-from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
+    def chat_once(self, messages, *, explicit_model, role, **_kwargs):
+        self.calls.append((role, explicit_model))
+        body = json.loads(messages[-1]["content"])
+        if role == "translate":
+            translated = []
+            for item in body["segments"]:
+                text = item["text"]
+                for source, target in self.replacements:
+                    text = text.replace(source, target)
+                translated.append({"id": item["id"], "text": text})
+            return SimpleNamespace(content=json.dumps({"segments": translated}, ensure_ascii=False))
+        if role == "critic":
+            findings = self.critic_findings.pop(0) if self.critic_findings else []
+            return SimpleNamespace(content=json.dumps({"findings": findings}))
+        return SimpleNamespace(content=json.dumps({
+            "finding_id": body["finding_id"],
+            "block_id": body["block_id"],
+            "replacement": "Correct term translation.",
+        }))
 
 
 def test_translate_file_no_segments():
-    source = "```bash\necho hi\n```\n"
-    client = _mock_client([])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/code.md",
-        enable_critic=False,
-        config=_unit_cfg(),
+    """Empty/non-prose RU blocks before a model call and stages nothing."""
+    client = Client()
+    result = run_translation_transaction(
+        _plan("ydb/docs/ru/code.md"),
+        read_ru=lambda _path: "```bash\necho hi\n```\n",
+        client=client,
+        to_en_path=lambda path: path.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
     )
-    assert result.segments_count == 0
-    assert result.final_text == source
-    assert result.verdict == "ok"
+    assert not result.publishable
+    assert result.staged == {}
+    assert client.calls == []
+    assert result.report["failures"][0]["message"] == "empty_or_unparseable_ru"
 
 
 def test_translate_file_end_to_end_no_critic_issues():
-    source = "Привет, мир.\n"
-    segments = extract_segments(parse_markdown(source))
-    assert len(segments) == 1
-    seg_id = segments[0].id
-
-    translate_raw = _translate_json(segments, {seg_id: "Hello, world."})
-    critic_raw = json.dumps({"verdict": "ok", "issues": []})
-
-    client = _mock_client([translate_raw, critic_raw])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/hello.md",
-        config=_unit_cfg(),
-        enable_critic=True,
+    """Accepted full-file payload renders once under the mandatory manifest."""
+    client = Client((("Привет, мир", "Hello, world"),))
+    result = translate_ru_to_en_once(
+        "Привет, мир.\n", client, file_path="ydb/docs/ru/hello.md", manifest=MANIFEST
     )
-
-    assert result.segments_count == 1
-    assert "Hello, world." in result.final_text
-    assert result.verdict == "ok"
-    assert result.critic_initial is not None
-    assert result.critic_unresolved is None or result.critic_unresolved.issues == []
-    assert result.input_tokens > 0
+    assert result.text == "Hello, world.\n"
+    assert result.prose_count == 1
+    assert [role for role, _model in client.calls] == ["translate", "critic"]
+    assert client.calls == [("translate", "translate-primary"), ("critic", "critic-primary")]
 
 
 def test_translate_file_applies_critic_fix():
-    source = "Неверный перевод термина.\n"
-    segments = extract_segments(parse_markdown(source))
-    seg_id = segments[0].id
-
-    translate_raw = _translate_json(segments, {seg_id: "Wrong term translation."})
-    critic_raw = json.dumps(
-        {
-            "verdict": "warnings",
-            "issues": [
-                {
-                    "segment_id": seg_id,
-                    "severity": "warning",
-                    "category": "terminology",
-                    "comment": "fix term",
-                    "suggested_text": "Correct term translation.",
-                }
-            ],
-        }
+    """Bounded local repair may edit one allowed prose block, never retranslate."""
+    finding = {
+        "finding_id": "model-id-is-not-trusted",
+        "rule_id": "terminology",
+        "severity": "RED",
+        "block_id": "s0001",
+        "range": {"start": 0, "end": len(b"Wrong term translation.")},
+        "atom_ids": [],
+        "message": "Use the required term",
+        "required_rule": "Use the approved terminology",
+        "context": "Wrong term translation.",
+        "repair_class": "prose",
+    }
+    client = Client(
+        (("Неверный перевод термина", "Wrong term translation"),),
+        critic_findings=([finding], []),
     )
-    verify_raw = json.dumps({"verdict": "ok", "issues": []})
-
-    client = _mock_client([translate_raw, critic_raw, verify_raw])
-    result = translate_file(
-        source,
+    result = translate_ru_to_en_once(
+        "Неверный перевод термина.\n",
         client,
-        load_glossary(),
-        file_path="docs/ru/terms.md",
-        config=_unit_cfg(),
-        enable_critic=True,
+        file_path="ydb/docs/ru/terms.md",
+        manifest=MANIFEST,
     )
-
-    assert "Correct term translation." in result.final_text
-    assert len(result.critic_applied) == 1
-    assert result.critic_unresolved is not None
-    assert result.verdict == "ok"
+    assert result.text == "Correct term translation.\n"
+    assert [role for role, _model in client.calls].count("translate") == 1
+    assert [role for role, _model in client.calls].count("repair") == 1
+    assert [role for role, _model in client.calls].count("critic") == 2
 
 
 def test_translate_file_skips_critic_when_disabled():
-    source = "Текст.\n"
-    segments = extract_segments(parse_markdown(source))
-    translate_raw = _translate_json(segments, {segments[0].id: "Text."})
-
-    client = _mock_client([translate_raw])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        enable_critic=False,
-        config=_unit_cfg(),
+    """Legacy optional-critic identity: critic is now mandatory and read-only."""
+    client = Client((("Текст", "Text"),))
+    result = translate_ru_to_en_once(
+        "Текст.\n", client, file_path="ydb/docs/ru/text.md", manifest=MANIFEST
     )
-
-    assert result.critic_initial is None
-    assert "Text." in result.final_text
+    assert result.text == "Text.\n"
+    assert [role for role, _model in client.calls].count("critic") == 1
 
 
 def test_translate_file_verdict_blocked_on_unresolved():
-    source = "Проблема.\n"
-    segments = extract_segments(parse_markdown(source))
-    seg_id = segments[0].id
-
-    translate_raw = _translate_json(segments, {seg_id: "Problem."})
-    critic_raw = json.dumps(
-        {
-            "verdict": "blocked",
-            "issues": [
-                {
-                    "segment_id": seg_id,
-                    "severity": "blocked",
-                    "category": "meaning",
-                    "comment": "still wrong",
-                    "suggested_text": None,
-                }
-            ],
-        }
+    """A non-repairable RED finding blocks the all-or-nothing transaction."""
+    finding = {
+        "finding_id": "ignored",
+        "rule_id": "protected_atom",
+        "severity": "RED",
+        "block_id": "s0001",
+        "range": {"start": 0, "end": len(b"Problem.")},
+        "atom_ids": [],
+        "message": "Protected atom changed",
+        "required_rule": "Preserve every source atom",
+        "context": "Problem.",
+        "repair_class": "not_repairable",
+    }
+    client = Client((("Проблема", "Problem"),), critic_findings=([finding],))
+    result = run_translation_transaction(
+        _plan("ydb/docs/ru/bad.md"),
+        read_ru=lambda _path: "Проблема.\n",
+        client=client,
+        to_en_path=lambda path: path.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
     )
-    verify_raw = json.dumps(
-        {
-            "verdict": "blocked",
-            "issues": [
-                {
-                    "segment_id": seg_id,
-                    "severity": "blocked",
-                    "category": "meaning",
-                    "comment": "unresolved",
-                    "suggested_text": None,
-                }
-            ],
-        }
-    )
-
-    client = _mock_client([translate_raw, critic_raw, verify_raw])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/bad.md",
-        config=_unit_cfg(),
-        enable_critic=True,
-    )
-
-    assert result.verdict == "blocked"
-    assert result.critic_unresolved is not None
-
-
-def test_translate_file_critic_only_alignment_mismatch_blocks():
-    source = "Первый.\n\nВторой.\n"
-    target = "Only one paragraph.\n"
-    client = _mock_client([])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        enable_translate=False,
-        existing_target_text=target,
-        config=_unit_cfg(),
-    )
-    assert result.verdict == "blocked"
-    assert result.segment_alignment_error
-    assert "segment count mismatch" in result.segment_alignment_error
-    assert result.critic_initial is None
-
-
-def test_translate_file_critic_only_mode():
-    source = "Привет.\n"
-    target = "Hello.\n"
-    segments = extract_segments(parse_markdown(source))
-    critic_raw = json.dumps({"verdict": "ok", "issues": []})
-    # critic_only: no translate call — only critic
-    client = _mock_client([critic_raw])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        enable_translate=False,
-        existing_target_text=target,
-        config=_unit_cfg(),
-    )
-    assert result.final_text == target
-    assert result.critic_initial is not None
+    assert not result.publishable
+    assert result.staged == {}
+    assert "local_repair_failed" in result.report["failures"][0]["message"]
 
 
 def test_translate_file_verify_preserves_en_fence_bodies():
-    """Regression for the doc_verify bug where critic fixes caused EN fence
-    contents (mermaid `participant Topic`, etc.) to be overwritten by RU
-    fence bodies. See PR ydb-platform/ydb#43399 fixup. The EN AST must be
-    the render base in verify mode so its fenced code blocks survive.
-    """
-    source = (
-        "Введение.\n\n"
-        "```mermaid\n"
-        "sequenceDiagram\n"
-        "    participant Топик\n"
-        "    participant Запрос v1\n"
-        "```\n\n"
-        "Заключение.\n"
-    )
-    target = (
-        "Intro.\n\n"
-        "```mermaid\n"
-        "sequenceDiagram\n"
-        "    participant Topic\n"
-        "    participant Query v1\n"
-        "```\n\n"
-        "Conclusion.\n"
-    )
-    ru_segs = extract_segments(parse_markdown(source))
-    en_segs = extract_segments(parse_markdown(target))
-    # Critic fixes the second paragraph but leaves the first alone.
-    fixed_id = ru_segs[1].id
-    critic_raw = json.dumps(
-        {
-            "verdict": "warnings",
-            "issues": [
-                {
-                    "segment_id": fixed_id,
-                    "severity": "warning",
-                    "category": "style",
-                    "comment": "tighten",
-                    "suggested_text": "Wrap-up.",
-                }
-            ],
-        }
-    )
-    # Verify pass: no further issues, and the residual-prose helper is also
-    # called after re-render for EN targets.
-    prose_raw_after = json.dumps({"spans": []})
-    verify_raw = json.dumps({"verdict": "ok", "issues": []})
-    client = _mock_client([critic_raw, prose_raw_after, verify_raw])
-
-    result = translate_file(
+    """Legacy verify identity: read-only QA reports without mutating EN bytes."""
+    source = "Введение.\n\n```mermaid\nparticipant Топик\n```\n"
+    target = "Intro.\n\n```mermaid\nparticipant Topic\n```\n"
+    before = target.encode()
+    classified = run_file_heuristics_classified(
         source,
-        client,
-        load_glossary(),
+        target,
+        normalized_source_text=source,
+        source_lang="ru",
         target_lang="en",
-        enable_translate=False,
-        existing_target_text=target,
-        config=_unit_cfg(),
+        source_file="ydb/docs/ru/diagram.md",
     )
-
-    # Fence body must remain English.
-    assert "participant Topic" in result.final_text
-    assert "participant Query v1" in result.final_text
-    assert "Топик" not in result.final_text
-    assert "Запрос" not in result.final_text
-    # Critic fix to the closing paragraph must have been applied.
-    assert "Wrap-up." in result.final_text
-    assert "Conclusion." not in result.final_text
-    # And the untouched paragraph keeps its EN text.
-    assert "Intro." in result.final_text
+    assert target.encode() == before
+    assert classified.all_non_info
 
 
-def test_translate_file_heuristics_bump_verdict_to_warnings():
+@pytest.mark.parametrize("initial_verdict", ["ok", "blocked"])
+def test_translate_file_heuristics_block_residual_cyrillic_without_writer(initial_verdict):
+    """Legacy heuristic warning/downgrade identities now share one blocking gate."""
     source = "Текст для перевода.\n"
-    # Model an already-existing EN mirror with residual Cyrillic. New
-    # translations reject this fail-closed before rendering, while verify mode
-    # must still classify legacy targets through the downstream heuristics.
-    translated = "Text with привет inside."
-    critic_raw = json.dumps({"verdict": "ok", "issues": []})
-
-    client = _mock_client(
-        [_prose_unfixed_cyrillic_json(translated), critic_raw]
-    )
-    result = translate_file(
+    target = "Text with привет inside.\n"
+    before = target.encode()
+    classified = run_file_heuristics_classified(
         source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/heuristics.md",
+        target,
+        normalized_source_text=source,
+        source_lang="ru",
         target_lang="en",
-        enable_translate=False,
-        existing_target_text=translated,
-        config=_unit_cfg(),
-        enable_critic=True,
+        source_file="ydb/docs/ru/heuristics.md",
     )
-
-    assert result.verdict == "blocked"
-    assert result.heuristic_blocking
-    assert any("Кириллица в EN-тексте" in w for w in result.heuristic_blocking)
-
-
-def test_translate_file_heuristics_do_not_downgrade_blocked():
-    source = "Проблема.\n"
-    segments = extract_segments(parse_markdown(source))
-    seg_id = segments[0].id
-
-    translated = "Problem with привет."
-    critic_raw = json.dumps(
-        {
-            "verdict": "blocked",
-            "issues": [
-                {
-                    "segment_id": seg_id,
-                    "severity": "blocked",
-                    "category": "meaning",
-                    "comment": "wrong",
-                    "suggested_text": None,
-                }
-            ],
-        }
-    )
-    verify_raw = json.dumps(
-        {
-            "verdict": "blocked",
-            "issues": [
-                {
-                    "segment_id": seg_id,
-                    "severity": "blocked",
-                    "category": "meaning",
-                    "comment": "still wrong",
-                    "suggested_text": None,
-                }
-            ],
-        }
-    )
-
-    prose_raw = _prose_unfixed_cyrillic_json(translated)
-    client = _mock_client(
-        [
-            prose_raw,
-            critic_raw,
-            prose_raw,
-            verify_raw,
-        ]
-    )
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/blocked.md",
-        target_lang="en",
-        enable_translate=False,
-        existing_target_text=translated,
-        config=_unit_cfg(),
-        enable_critic=True,
-    )
-
-    assert result.verdict == "blocked"
-    assert result.heuristic_blocking or result.heuristic_warnings
+    assert classified.blocking
+    assert any("Кириллица в EN-тексте" in finding for finding in classified.blocking)
+    assert target.encode() == before
+    assert initial_verdict in {"ok", "blocked"}
 
 
 def test_translate_file_blocks_on_empty_critic_response():
-    source = "Привет.\n"
-    segments = extract_segments(parse_markdown(source))
-    seg_id = segments[0].id
-    translate_raw = _translate_json(segments, {seg_id: "Hello."})
+    """Invalid critic protocol exhausts bounded acquisition and publishes nothing."""
+    class EmptyCriticClient(Client):
+        def chat_once(self, messages, *, explicit_model, role, **kwargs):
+            if role == "critic":
+                self.calls.append((role, explicit_model))
+                return SimpleNamespace(content="")
+            return super().chat_once(messages, explicit_model=explicit_model, role=role, **kwargs)
 
-    client = _mock_client([translate_raw, "", "", ""])
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/hello.md",
-        config=_unit_cfg(),
-        enable_critic=True,
+    client = EmptyCriticClient((("Привет", "Hello"),))
+    result = run_translation_transaction(
+        _plan("ydb/docs/ru/hello.md"),
+        read_ru=lambda _path: "Привет.\n",
+        client=client,
+        to_en_path=lambda path: path.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
     )
+    assert not result.publishable
+    assert result.staged == {}
+    assert [role for role, _model in client.calls].count("critic") == 2
+    assert "translation_acquisition_exhausted: role=critic" in result.report["failures"][0]["message"]
 
-    assert "Hello." in result.final_text
-    assert result.verdict == "blocked"
-    assert result.critic_initial is not None
-    assert result.critic_initial.issues[0].category == "critic_execution_failed"
+
+def test_legacy_critic_only_entry_points_are_not_supported():
+    """Legacy alignment/critic_only tests retire optional translate semantics."""
+    with pytest.raises(TypeError):
+        translate_ru_to_en_once(
+            "Привет.\n",
+            Client((("Привет", "Hello"),)),
+            file_path="ydb/docs/ru/hello.md",
+            enable_translate=False,
+            existing_target_text="Hello.\n",
+        )
+
+
+def test_manifest_is_mandatory():
+    """The old optional-manifest compatibility path is absent."""
+    with pytest.raises(TypeError):
+        translate_ru_to_en_once(
+            "Привет.\n",
+            Client((("Привет", "Hello"),)),
+            file_path="ydb/docs/ru/hello.md",
+        )

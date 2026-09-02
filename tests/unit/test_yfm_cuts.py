@@ -5,12 +5,11 @@ from __future__ import annotations
 import pytest
 
 from ydbdoc_review.parsing.ast_types import (
-    FencedCode,
     Paragraph,
     YfmCut,
     YfmNote,
 )
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.parsing.markdown_parser import create_parser, parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
 
@@ -195,4 +194,9 @@ def test_round_trip_cut_inside_tabs():
         "{% endlist %}\n"
     )
     assert_stable(text)
-
+@pytest.mark.parametrize("title", ["Раздел", ""])
+def test_cut_title_span_excludes_quotes_and_uses_utf8(title):
+    text = f'{{% cut "{title}" %}}\nText\n{{% endcut %}}\n'
+    token = create_parser().parse(text)[0]
+    span = token.meta["title_span"]
+    assert text.encode()[span["byte_start"] : span["byte_end"]] == title.encode()

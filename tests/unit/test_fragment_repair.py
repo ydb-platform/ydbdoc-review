@@ -1,11 +1,71 @@
-"""Tests for EN fragment repair (§6.142 / #48047)."""
+# ruff: noqa: RUF001
+"""Read-only fragment detection and v010 source-owned href contracts."""
 
 from __future__ import annotations
 
-from ydbdoc_review.validation.fragment_repair import (
-    fragment_declared_in_markdown,
-    repair_en_fragments,
+import json
+import re
+from types import SimpleNamespace
+
+import pytest
+
+from ydbdoc_review.pipeline.dependency_queue import DependencyPlan, QueueEntry
+from ydbdoc_review.pipeline.translation_transaction import run_translation_transaction
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
 )
+from ydbdoc_review.translation.one_pass import translate_ru_to_en_once
+from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+
+MANIFEST = TranslationJobManifest(TranslationModelPolicy(
+    translate=ModelPair("translate-primary", "translate-fallback"),
+    critic=ModelPair("critic-primary", "critic-fallback"),
+    repair=ModelPair("repair-primary", "repair-fallback"),
+))
+
+
+class Client:
+    def __init__(self, replacements=()) -> None:
+        self.replacements = tuple(replacements)
+
+    def chat_once(self, messages, *, explicit_model, role, **_kwargs):
+        if role == "critic":
+            return SimpleNamespace(content=json.dumps({"findings": []}))
+        payload = json.loads(messages[-1]["content"])
+        translated = []
+        for item in payload["segments"]:
+            text = item["text"]
+            for source, target in self.replacements:
+                text = text.replace(source, target)
+            translated.append({"id": item["id"], "text": text})
+        return SimpleNamespace(content=json.dumps({"segments": translated}, ensure_ascii=False))
+
+
+class RaisingSpy:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.calls = 0
+
+    def __call__(self, *_args, **_kwargs):
+        self.calls += 1
+        raise AssertionError(f"retired {self.name} must be unreachable")
+
+
+def _plan(*paths: str) -> DependencyPlan:
+    return DependencyPlan(
+        tuple(QueueEntry(path, "initial" if index == 0 else "auto_added") for index, path in enumerate(paths)),
+        (),
+        1,
+        max(0, len(paths) - 1),
+    )
+
+
+def _href_atom(text: str) -> str:
+    match = re.search(r"\[[^]]*]\([^\n]+\)", text)
+    assert match is not None
+    return match.group(0)
 
 
 def test_fragment_declared_in_markdown():
@@ -13,326 +73,138 @@ def test_fragment_declared_in_markdown():
     assert not fragment_declared_in_markdown("## Sessions {#sessions}\n", "ldap")
 
 
-def test_pr_48047_sessions_prefers_en_baseline_path():
-    """Stale RU/force_exact left index.md#sessions; EN baseline + target page win."""
-    en_page = "ydb/docs/en/core/concepts/glossary.md"
-    en_bad = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
-    en_baseline = (
-        "Sessions are described in [{#T}](query_execution/execution_process.md#sessions).\n"
+def test_v010_preserves_exact_ru_href_atom_without_fragment_writer():
+    """Legacy identity: test_repair_keeps_valid_fragment."""
+    source = 'See [node details](../node.md?q=a%20b#sessions "Title quoted").\n'
+    baseline_reader = RaisingSpy("baseline EN reader")
+    fragment_writer = RaisingSpy("fragment writer")
+    result = translate_ru_to_en_once(
+        source,
+        Client(),
+        file_path="ydb/docs/ru/core/concepts/glossary.md",
+        manifest=MANIFEST,
     )
-    ru_stale = "Сессии описаны в [{#T}](query_execution/index.md#sessions).\n"
-    files = {
-        "ydb/docs/en/core/concepts/query_execution/index.md": (
-            "# Query execution\n\n## Tables {#tables}\n"
-        ),
-        "ydb/docs/en/core/concepts/query_execution/execution_process.md": (
-            "# Process\n\n## Sessions {#sessions}\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        en_bad,
-        en_page_path=en_page,
-        read_text=files.get,
-        ru_source=ru_stale,
-        en_baseline=en_baseline,
-    )
-    assert "execution_process.md#sessions" in fixed
-    assert "index.md#sessions" not in fixed
+    assert _href_atom(result.text) == _href_atom(source)
+    assert baseline_reader.calls == 0
+    assert fragment_writer.calls == 0
 
 
-def test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares():
-    """RU source already points at execution_process; retarget EN."""
-    en_page = "ydb/docs/en/core/concepts/glossary.md"
-    en_bad = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
-    ru_ok = "Сессии описаны в [{#T}](query_execution/execution_process.md#sessions).\n"
-    files = {
-        "ydb/docs/en/core/concepts/query_execution/index.md": (
-            "# Query execution\n\n## Tables {#tables}\n"
-        ),
-        "ydb/docs/en/core/concepts/query_execution/execution_process.md": (
-            "# Process\n\n## Sessions {#sessions}\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        en_bad,
-        en_page_path=en_page,
-        read_text=files.get,
-        ru_source=ru_ok,
-        en_baseline=en_bad,
-    )
-    assert "execution_process.md#sessions" in fixed
-    assert "index.md#sessions" not in fixed
-
-
-def test_pr_48047_ldap_does_not_remap_to_en_only_fragment():
-    """§6.174: keep RU ``#ldap``; do not invent ``#ldap-auth-provider``."""
-    en_page = "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md"
-    en_text = "For more information, see [{#T}](../../../security/authentication.md#ldap).\n"
-    files = {
-        "ydb/docs/en/core/security/authentication.md": (
-            "## LDAP directory integration {#ldap-auth-provider}\n\n### TLS {#ldap-tls}\n"
-        ),
-        "ydb/docs/ru/core/security/authentication.md": (
-            "## Аутентификация с использованием LDAP-каталога {#ldap}\n\n### TLS {#ldap-tls}\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        en_text,
-        en_page_path=en_page,
-        read_text=files.get,
-    )
-    assert "authentication.md#ldap)" in fixed or "authentication.md#ldap\n" in fixed
-    assert "ldap-auth-provider" not in fixed
-
-
-def test_repair_keeps_valid_fragment():
-    en_page = "ydb/docs/en/core/concepts/glossary.md"
-    en_ok = "See [{#T}](query_execution/execution_process.md#sessions).\n"
-    files = {
-        "ydb/docs/en/core/concepts/query_execution/execution_process.md": (
-            "## Sessions {#sessions}\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        en_ok,
-        en_page_path=en_page,
-        read_text=files.get,
-    )
-    assert fixed == en_ok
-
-
-def test_pr_45949_client_cert_legacy_translit_fragment():
-    """§6.225: RU legacy translit fragment → EN Diplodoc auto-slug (#51711)."""
-    en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
-    frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
-    en_bad = (
-        f"when [registering dynamic nodes](../../devops/concepts/node-authorization.md#{frag}).\n"
-    )
-    files = {
-        "ydb/docs/en/core/devops/concepts/node-authorization.md": (
-            "## Enabling node authentication and authorization\n\nBody.\n"
+def test_v010_cyrillic_anchor_proposal_rewrites_staged_inbound_links():
+    """Legacy identity: test_pr_45949_client_cert_legacy_translit_fragment."""
+    anchor = "включение-режима-аутентификации-и-авторизации-узлов"
+    sources = {
+        "ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md": (
+            f"when [registering dynamic nodes](../../devops/concepts/node-authorization.md#{anchor}).\n"
         ),
         "ydb/docs/ru/core/devops/concepts/node-authorization.md": (
-            "## Включение режима аутентификации и авторизации узлов\n\nТело.\n"
+            f"## Включение режима аутентификации и авторизации узлов {{#{anchor}}}\n\nТело.\n"
         ),
     }
-    # No ru_source: inbound retarget / late disk pass must still remap.
-    fixed = repair_en_fragments(
-        en_bad,
-        en_page_path=en_page,
-        read_text=files.get,
+    result = run_translation_transaction(
+        _plan(*sources),
+        read_ru=sources.__getitem__,
+        client=Client((("Включение режима аутентификации и авторизации узлов", "Enabling node authentication and authorization"), ("Тело", "Body"))),
+        to_en_path=lambda path: path.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
+        pinned_en_paths={path.replace("/ru/", "/en/") for path in sources},
+        read_pinned_en=lambda _path: None,
     )
-    assert "node-authorization.md#enabling-node-authentication-and-authorization)" in fixed
-    assert frag not in fixed
+    proposed = "enabling-node-authentication-and-authorization"
+    assert result.publishable
+    assert f"node-authorization.md#{proposed}" in result.staged[
+        "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    ]
+    assert f"{{#{proposed}}}" in result.staged[
+        "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    ]
+    assert anchor not in "".join(result.staged.values())
+    assert result.report["link_findings"] == []
 
 
-def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
-    """§6.227: redirect from-path EN pairs with RU at to-path."""
-    en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
-    fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
-    manual_href = f"../../devops/deployment-options/manual/node-authorization.md#{fragment}"
-    en_manual = "## Enabling database node authentication and authorization\n"
-    ru_concepts = "## Включение режима аутентификации и авторизации узлов\n"
-    redirects = (
-        "common:\n"
-        "  - from: /devops/deployment-options/manual/node-authorization.md\n"
-        "    to: /devops/concepts/node-authorization.md\n"
-    )
-    base_files = {
-        "ydb/docs/redirects.yaml": redirects,
-        "ydb/docs/en/core/devops/deployment-options/manual/node-authorization.md": en_manual,
-        "ydb/docs/ru/core/devops/concepts/node-authorization.md": ru_concepts,
-    }
-
-    fixed_on_manual = repair_en_fragments(
-        f"See [node authorization]({manual_href}).\n",
-        en_page_path=en_page,
-        read_text=base_files.get,
-    )
-    assert fixed_on_manual == (
-        "See [node authorization]("
-        "../../devops/deployment-options/manual/node-authorization.md"
-        "#enabling-database-node-authentication-and-authorization).\n"
-    )
-
-    files_with_live_en = {
-        **base_files,
-        "ydb/docs/en/core/devops/concepts/node-authorization.md": en_manual,
-    }
-    fixed_on_live_path = repair_en_fragments(
-        f"See [node authorization]({manual_href}).\n",
-        en_page_path=en_page,
-        read_text=files_with_live_en.get,
-    )
-    assert fixed_on_live_path == (
-        "See [node authorization]("
-        "../../devops/concepts/node-authorization.md"
-        "#enabling-database-node-authentication-and-authorization).\n"
-    )
-
-
-def test_pr_40385_system_views_users_fragment():
-    """§6.221: RU autogen slug in link → EN explicit ``{#users}``."""
-    en_page = "ydb/docs/en/core/security/authentication.md"
-    en_bad = "See the [system view](../dev/system-views.md#информация-о-пользователях-users).\n"
-    files = {
-        "ydb/docs/en/core/dev/system-views.md": ("### Information about users {#users}\n\nBody.\n"),
-        "ydb/docs/ru/core/dev/system-views.md": (
-            "### Информация о пользователях {#users}\n\nТело.\n"
+def test_v010_out_of_scope_inbound_anchor_change_blocks_transaction():
+    """Legacy identity: test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale."""
+    source_path = "ydb/docs/ru/core/concepts/query_execution/execution_process.md"
+    anchor = "сессии"
+    outside = "ydb/docs/en/core/concepts/glossary.md"
+    publish_calls: list[dict[str, str]] = []
+    result = run_translation_transaction(
+        _plan(source_path),
+        read_ru=lambda _path: f"## Сессии {{#{anchor}}}\n",
+        client=Client((("Сессии", "Sessions"),)),
+        to_en_path=lambda path: path.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
+        pinned_en_paths={source_path.replace("/ru/", "/en/"), outside},
+        read_pinned_en=lambda path: (
+            f"[Sessions](query_execution/execution_process.md#{anchor})\n" if path == outside else None
         ),
-    }
-    fixed = repair_en_fragments(
-        en_bad,
-        en_page_path=en_page,
-        read_text=files.get,
     )
-    assert "system-views.md#users)" in fixed
-    assert "информация-о-пользователях" not in fixed
+    if result.publishable:
+        publish_calls.append(result.staged)
+    assert not result.publishable
+    assert result.staged == {}
+    assert publish_calls == []
+    assert result.report["anchor_findings"] == [{
+        "category": "local_repair_failed",
+        "terminal_reason": "out_of_scope_link",
+        "source_file": outside,
+        "original_href": f"query_execution/execution_process.md#{anchor}",
+        "manual_action": "update this inbound fragment in an explicitly authorized source job",
+    }]
 
 
-def test_pr_40385_system_views_localizes_to_declared_en_fragment():
-    en_page = "ydb/docs/en/core/security/authentication.md"
-    ru_source = (
-        "См. [системного представления](../dev/system-views.md#информация-о-пользователях-users).\n"
+def test_v010_never_prefers_or_mutates_to_baseline_en_href():
+    """Legacy identity: test_pr_40385_prefers_valid_en_baseline_href_after_ru_restore."""
+    source = "Configure [authentication](../reference/configuration/auth_config.md#security-auth).\n"
+    baseline_href = "../reference/configuration/auth_config.md#authentication"
+    baseline_reader = RaisingSpy("baseline EN reader")
+    prefer_writer = RaisingSpy("prefer baseline href writer")
+    fragment_writer = RaisingSpy("fragment writer")
+    path = "ydb/docs/ru/core/security/authentication.md"
+    result = run_translation_transaction(
+        _plan(path),
+        read_ru=lambda _path: source,
+        client=Client(),
+        to_en_path=lambda value: value.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
+        pinned_en_paths={path.replace("/ru/", "/en/")},
+        read_pinned_en=baseline_reader,
     )
-    en_bad = "See the [system view](../dev/system-views.md#информация-о-пользователях-users).\n"
-    files = {
-        "ydb/docs/en/core/dev/system-views.md": ("### Information about users {#users}\n\nBody.\n"),
-        "ydb/docs/ru/core/dev/system-views.md": (
-            "### Информация о пользователях {#users}\n\nТело.\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        en_bad,
-        en_page_path=en_page,
-        read_text=files.get,
-        ru_source=ru_source,
+    assert result.publishable
+    assert "#security-auth" in result.staged[path.replace("/ru/", "/en/")]
+    assert baseline_href not in result.staged[path.replace("/ru/", "/en/")]
+    assert baseline_reader.calls == prefer_writer.calls == fragment_writer.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("source", "replacements"),
+    [
+        ("Сессии [{#T}](query_execution/index.md#sessions).\n", (("Сессии", "Sessions"),)),
+        ("Сессии [{#T}](query_execution/execution_process.md#sessions).\n", (("Сессии", "Sessions"),)),
+        ("See [{#T}](../../../security/authentication.md#ldap).\n", ()),
+        ("See [node](../../devops/deployment-options/manual/node-authorization.md#legacy).\n", ()),
+        ("См. [view](../dev/system-views.md#информация-о-пользователях-users).\n", (("См", "See"),)),
+        ("См. [SID](./authorization.md#sid).\n", (("См", "See"),)),
+        ("See [table](../concepts/datamodel/table.md#partitioning).\n", ()),
+    ],
+    ids=[
+        "test_pr_48047_sessions_prefers_en_baseline_path",
+        "test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares",
+        "test_pr_48047_ldap_does_not_remap_to_en_only_fragment",
+        "test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target",
+        "test_pr_40385_system_views_users_fragment-and-localizes_to_declared_en_fragment",
+        "test_pr_50976_sid_fragment_localizes_to_declared_en_fragment",
+        "test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames",
+    ],
+)
+def test_remaining_legacy_writer_cases_preserve_exact_ru_href_atom(source, replacements):
+    translated = translate_ru_to_en_once(
+        source,
+        Client(replacements),
+        file_path="ydb/docs/ru/core/reference/page.md",
+        manifest=MANIFEST,
     )
-    assert "system-views.md#users)" in fixed
-
-
-def test_pr_40385_prefers_valid_en_baseline_href_after_ru_restore():
-    """§6.227: do not keep a restored RU fragment absent from the EN target."""
-    en_page = "ydb/docs/en/core/security/authentication.md"
-    restored = (
-        "Configure [authentication](../reference/configuration/auth_config.md#security-auth).\n"
-    )
-    baseline = (
-        "Configure [authentication](../reference/configuration/auth_config.md#authentication).\n"
-    )
-    files = {
-        "ydb/docs/en/core/reference/configuration/auth_config.md": (
-            "## Authentication {#authentication}\n"
-        ),
-    }
-
-    fixed = repair_en_fragments(
-        restored,
-        en_page_path=en_page,
-        read_text=files.get,
-        en_baseline=baseline,
-    )
-
-    assert fixed == baseline
-
-
-def test_pr_50976_sid_fragment_localizes_to_declared_en_fragment():
-    en_page = "ydb/docs/en/core/security/index.md"
-    ru_source = "См. [SID](./authorization.md#sid).\n"
-    en_exact = "See [SID](./authorization.md#sid).\n"
-    files = {
-        "ydb/docs/en/core/security/authorization.md": "## User {#user}\n",
-        "ydb/docs/ru/core/security/authorization.md": "## SID {#sid}\n",
-    }
-
-    assert (
-        repair_en_fragments(
-            en_exact,
-            en_page_path=en_page,
-            read_text=files.get,
-            ru_source=ru_source,
-        )
-        == "See [SID](./authorization.md#user).\n"
-    )
-
-
-def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
-    """§6.158 / #48223: existing table.md / classifier.md must not become
-    unreachable ``topic.md`` / ``create-resource-pool.md`` under ``en/core/dev/``.
-    """
-    en_page = "ydb/docs/en/core/dev/system-views.md"
-    good = (
-        "about [partitions](../concepts/datamodel/table.md#partitioning) of tables.\n"
-        "about [settings](../yql/reference/syntax/create-resource-pool-classifier.md"
-        "#parameters) of classifiers.\n"
-    )
-    files = {
-        "ydb/docs/en/core/concepts/datamodel/table.md": (
-            "{% include [table.md](_includes/table.md) %}\n"
-        ),
-        "ydb/docs/en/core/concepts/datamodel/_includes/table.md": (
-            "### Partitioning Row-Oriented Tables {#partitioning_row_table}\n"
-        ),
-        "ydb/docs/en/core/concepts/datamodel/topic.md": ("## Partitioning {#partitioning}\n"),
-        "ydb/docs/en/core/concepts/datamodel/toc_i.yaml": (
-            "items:\n- { name: Tables, href: table.md }\n- { name: Topics, href: topic.md }\n"
-        ),
-        "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md": (
-            "### Parameters\n\nRank and pool.\n"
-        ),
-        "ydb/docs/en/core/yql/reference/syntax/create-resource-pool.md": (
-            "### Parameters {#parameters}\n"
-        ),
-        "ydb/docs/en/core/yql/reference/syntax/toc_i.yaml": (
-            "items:\n"
-            "- { name: CREATE RESOURCE POOL, href: create-resource-pool.md }\n"
-            "- { name: CREATE RESOURCE POOL CLASSIFIER, "
-            "href: create-resource-pool-classifier.md }\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        good,
-        en_page_path=en_page,
-        read_text=files.get,
-    )
-    # Existing targets must stay under datamodel / yql paths — not bare basenames.
-    assert "topic.md#partitioning" not in fixed
-    assert "](create-resource-pool.md#parameters)" not in fixed
-    assert "](topic.md#" not in fixed
-    # Classifier keeps path; Parameters auto-slug counts as declared.
-    assert "create-resource-pool-classifier.md#parameters" in fixed
-    # §6.174: do not invent EN-only ``#partitioning_row_table`` — keep RU frag.
-    assert "table.md#partitioning)" in fixed or "table.md#partitioning\n" in fixed
-    assert "partitioning_row_table" not in fixed
+    assert _href_atom(translated.text) == _href_atom(source).replace("См.", "See.")
 
 
 def test_fragment_declared_accepts_diplodoc_auto_slug():
     assert fragment_declared_in_markdown("### Parameters\n\nbody\n", "parameters")
-
-
-def test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale():
-    """§6.153 / #48012: both RU and EN still say index.md#sessions — use toc sibling."""
-    en_page = "ydb/docs/en/core/concepts/glossary.md"
-    stale = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
-    files = {
-        "ydb/docs/en/core/concepts/query_execution/index.md": (
-            "# Query execution\n\nSee [{#T}](execution_process.md).\n"
-        ),
-        "ydb/docs/en/core/concepts/query_execution/execution_process.md": (
-            "# Process\n\n## Sessions {#sessions}\n"
-        ),
-        "ydb/docs/en/core/concepts/query_execution/toc_i.yaml": (
-            "items:\n"
-            "- { name: Overview, href: index.md }\n"
-            "- { name: Process, href: execution_process.md }\n"
-        ),
-    }
-    fixed = repair_en_fragments(
-        stale,
-        en_page_path=en_page,
-        read_text=files.get,
-        ru_source=stale.replace("Sessions are", "Сессии"),
-        en_baseline=stale,
-    )
-    assert "execution_process.md#sessions" in fixed
-    assert "index.md#sessions" not in fixed

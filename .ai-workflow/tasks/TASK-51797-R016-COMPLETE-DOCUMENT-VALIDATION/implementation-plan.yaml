@@ -1,0 +1,48 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+plan_version: r016-parser-owned-v001
+scope: FINAL-008-R-016-only
+authoritative_predecessors:
+  - .ai-workflow/tasks/TASK-51797-ONE-PASS-FINAL-DIFF-AUDIT/analyst-final-diff-audit.md
+  - .ai-workflow/tasks/TASK-51797-ONE-PASS-FINAL-DIFF-AUDIT/response-v001.yaml
+  - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v017-amendment.md
+  - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v017.yaml
+  - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v018-amendment.md
+  - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v018.yaml
+requirements:
+  - id: R016-PARSER-MAP
+    files: [src/ydbdoc_review/parsing/markdown_parser.py, tests/unit/test_parser_round_trip.py]
+    symbols: [ParserSpanRecord, ParsedMarkdownSourceMap, _source_index_from_lines, _record_from_token_map, _build_parser_source_map, parse_markdown_with_source_map, parse_markdown]
+    operation: derive exhaustive container and non-prose span records from the same Markdown-it token stream and plugin SourceSpan metadata
+    forbidden: [regex_source_discovery, find, index, guessed_substring_offset, top_level_child_index_as_span, second_parser]
+  - id: R016-CONTEXT
+    files: [src/ydbdoc_review/translation/one_pass.py, tests/unit/test_complete_document_validation.py]
+    symbols: [ValidationAtomRecord, CompleteDocumentValidationContext, build_complete_document_validation_context, _walk_ast_preorder]
+    operation: build exactly once the frozen parser-owned context, adding only expected_anchors to the approved v018 schema
+    forbidden: [mutable_context, dict_context, reconstruction, implicit_AST_reflection, unhandled_node_acceptance]
+  - id: R016-VALIDATOR
+    files: [src/ydbdoc_review/translation/one_pass.py, tests/unit/test_complete_document_validation.py]
+    symbols: [_canonical_atom_payload, _map_expected_destination, validate_complete_document]
+    operation: fail closed on protect tokens, parser/source-map, containers, atoms, non-prose slices, structured links, explicit anchors and extracted-prose Cyrillic in exact order
+    forbidden: [_FENCE, re, string_replace_URL, string_replace_JSON, range_blanking, count_only_comparison]
+  - id: R016-LIFECYCLE
+    files: [src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/translation/local_repair.py, src/ydbdoc_review/pipeline/translation_transaction.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_transaction.py]
+    symbols: [translate_ru_to_en_once, OnePassResult, run_bounded_local_repair, TranslationTransaction]
+    operation: use the same context object at base, every repair and recritic, final assembly and immediate pre-stage boundaries
+    forbidden: [validator_callback_override, context_copy, validation_bypass, render_invalid, insert_invalid, stage_invalid, publish_invalid]
+allowed_production_files:
+  - src/ydbdoc_review/parsing/markdown_parser.py
+  - src/ydbdoc_review/translation/one_pass.py
+  - src/ydbdoc_review/translation/local_repair.py
+  - src/ydbdoc_review/pipeline/translation_transaction.py
+allowed_test_files:
+  - tests/unit/test_parser_round_trip.py
+  - tests/unit/test_complete_document_validation.py
+  - tests/unit/test_one_pass_translation.py
+  - tests/unit/test_translation_transaction.py
+required_commands:
+  - .venv/bin/python -m pytest tests/unit/test_parser_round_trip.py tests/unit/test_complete_document_validation.py tests/unit/test_one_pass_translation.py tests/unit/test_translation_transaction.py -q
+  - .venv/bin/python -m ruff check src/ydbdoc_review/parsing/markdown_parser.py src/ydbdoc_review/translation/one_pass.py src/ydbdoc_review/translation/local_repair.py src/ydbdoc_review/pipeline/translation_transaction.py tests/unit/test_parser_round_trip.py tests/unit/test_complete_document_validation.py tests/unit/test_one_pass_translation.py tests/unit/test_translation_transaction.py
+implementation_gate: external_response_v001_must_be_APPROVED
+developer_discretion: none
+product_code_edit_by_analyst: forbidden

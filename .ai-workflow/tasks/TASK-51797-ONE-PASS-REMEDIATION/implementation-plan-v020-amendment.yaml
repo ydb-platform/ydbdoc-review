@@ -1,0 +1,105 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v020
+amends: one-pass-remediation-v019
+scope: fail-closed-Ruff-baseline-only
+resolver:
+  input_plan_version: one-pass-remediation-v020
+  required_predecessor_file: implementation-plan-v019-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v019
+  operation: resolve_predecessor_then_append_exact_v020_paths_and_self_seal
+ruff_gate:
+  script: scripts/remediation_ruff_gate.py
+  tests: tests/unit/test_remediation_ruff_gate.py
+  artifact: .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json
+  executable: .venv/bin/ruff
+  ruff_args: [check, --no-cache, --output-format=json]
+  base_commit: 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  baseline_source: git_archive_exact_base_into_temporary_directory_read_only
+  capture_timing: after_all_approved_Python_edits_and_v020_protocol_materialization
+  capture_existing_output: RED
+  expected_untouched_diagnostic_count: 306
+  changed_python_paths:
+    derivation: sorted_unique_complete_tracked_and_untracked_*.py_delta_against_base
+    present_paths: require_zero_Ruff_diagnostics
+    deleted_paths: record_but_do_not_lint
+  artifact_schema:
+    exact_top_level_fields: [schema_version, base_commit, ruff_version, command, changed_python_paths, untouched_diagnostic_count, untouched_diagnostics]
+    schema_version: 1
+    diagnostic_exact_fields: [path, row, column, end_row, end_column, code, message]
+    path_format: repository_relative_POSIX
+    ordering: lexicographic_by_all_seven_fields_duplicates_retained
+    serialization: json_utf8_ensure_ascii_false_sort_keys_true_indent_2_final_newline
+  validation:
+    artifact_base_version_command_schema: exact
+    current_changed_python_path_set: exact_equal_artifact
+    current_present_changed_python_diagnostics: zero
+    current_untouched_diagnostics: multiset_subset_of_baseline
+    current_untouched_count: at_most_306
+    any_new_moved_changed_or_duplicate_increase: RED
+  forbidden: [count_only_comparison, noqa, per_file_ignore, Ruff_config_change, blanket_waiver, unrelated_formatting, branch_switch, worktree_mutation, baseline_overwrite]
+capture_command: >-
+  .venv/bin/python -m scripts.remediation_ruff_gate capture-baseline
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  --ruff .venv/bin/ruff
+  --output .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json
+ruff_validation_command: >-
+  .venv/bin/python -m scripts.remediation_ruff_gate validate
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  --ruff .venv/bin/ruff
+  --baseline .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json
+allowed_changes:
+  - path: scripts/remediation_ruff_gate.py
+    symbols: [DiagnosticRecord, enumerate_changed_python_paths, materialize_base_archive, run_ruff_json, normalize_diagnostics, capture_baseline, validate, main]
+    operation: implement_exact_capture_and_fail_closed_validation
+  - path: tests/unit/test_remediation_ruff_gate.py
+    symbols: [ruff_gate_tests]
+    operation: test_exact_schema_capture_and_every_RED_condition
+  - path: .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v020.json
+    symbols: [generated_immutable_Ruff_baseline]
+    operation: generated_once_by_exact_capture_command
+  - path: scripts/remediation_policy_gate.py
+    symbols: [_resolved_amendment]
+    operation: add_exact_v020_to_v019_resolution_step
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [amendment_resolution_tests]
+    operation: prove_v020_predecessor_self_seal_and_three_Ruff_artifact_paths
+required_tests:
+  - capture_refuses_existing_output
+  - wrong_base_or_Ruff_version_is_RED
+  - capture_count_other_than_306_is_RED_without_output
+  - artifact_schema_order_and_serialization_are_deterministic
+  - changed_present_Python_diagnostic_is_RED
+  - changed_path_set_drift_is_RED
+  - new_untouched_diagnostic_is_RED
+  - moved_or_changed_diagnostic_is_RED
+  - duplicate_count_increase_is_RED
+  - removed_baseline_diagnostic_is_allowed
+  - deleted_changed_Python_path_is_recorded_not_linted
+  - temporary_archive_never_mutates_worktree
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v020-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v020-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v020.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v020.yaml
+refresh_command: >-
+  .venv/bin/python -m scripts.remediation_policy_gate refresh-manifest
+  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v020-amendment.yaml
+  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  --output .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+validation_command: >-
+  .venv/bin/python -m scripts.remediation_policy_gate validate
+  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v020-amendment.yaml
+  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  --manifest .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+completion_order: [implement_gate_and_tests, focused_gate_tests, full_pytest, capture_baseline_once, Ruff_validate_GREEN, refresh_manifest_v020, immediate_policy_validate]
+forbidden_global: [unrelated_change, developer_waiver, baseline_overwrite, commit, tag, publish]
+

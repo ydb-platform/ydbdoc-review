@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ydbdoc_review.harness.render import finalize_en_target
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
@@ -184,11 +183,7 @@ def test_repair_drops_only_renderer_inserted_fence_markers():
 def test_verify_finalize_uses_ru_layout_with_en_fence_body_authority():
     source = "    ```python\n    source()\n      ```\n"
     existing_en = "  ```python\n  translated()\n    ```\n  ```\n"
-    fixed = finalize_en_target(
-        existing_en,
-        existing_en,
-        layout_source_text=source,
-    )
+    fixed = repair_generated_markdown_layout(source, existing_en)
     assert fixed == "    ```python\n    translated()\n    ```\n"
 
 

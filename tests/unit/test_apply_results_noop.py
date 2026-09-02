@@ -1,4 +1,4 @@
-"""§6.232: critic_only no-op must not stage disk overlays."""
+"""Byte-identical one-pass output must not stage disk overlays."""
 
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 
 
-def test_apply_results_skips_identical_critic_only_noop(tmp_path: Path):
+def test_apply_results_skips_identical_one_pass_output_without_action_special_case(
+    tmp_path: Path,
+):
     rel = "ydb/docs/en/core/security/authentication.md"
     path = tmp_path / rel
     path.parent.mkdir(parents=True)
@@ -23,7 +25,7 @@ def test_apply_results_skips_identical_critic_only_noop(tmp_path: Path):
     )
     plan = PairPlan(
         pair=pair,
-        action="critic_only",
+        action="translate_ru_to_en_once",
         source_path=pair.ru_path,
         target_path=rel,
         source_lang="ru",

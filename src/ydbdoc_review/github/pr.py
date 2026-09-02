@@ -56,6 +56,7 @@ class PullRequestContext:
     head_repo_full_name: str
     head_repo_https_url: str
     base_ref: str
+    base_sha: str = ""
     merged: bool = False
     state: str = "open"
     merge_commit_sha: str | None = None
@@ -82,6 +83,7 @@ def pull_request_context(
         head_repo_full_name=str(head_repo.get("full_name") or f"{owner}/{repo}"),
         head_repo_https_url=clone_url,
         base_ref=str(base.get("ref") or ""),
+        base_sha=str(base.get("sha") or ""),
         merged=bool(data.get("merged")),
         state=str(data.get("state") or "open"),
         merge_commit_sha=merge_sha,

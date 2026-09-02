@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from ydbdoc_review.parsing.ast_types import AmbiguousYfmStructureError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.extractor import extract_segments
-from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
+from ydbdoc_review.segmentation.types import Segment, SegmentKind
 
 
 def make_seg(idx: int, text: str) -> Segment:
@@ -116,6 +117,13 @@ def test_total_chars_property():
 # --- Real fixtures ---
 
 
+EXPECTED_AMBIGUOUS_YFM_FILES = {"en/core/reference/ydb-sdk/topic.md"}
+
+
+def test_expected_ambiguous_yfm_file_set_is_exact():
+    assert EXPECTED_AMBIGUOUS_YFM_FILES == {"en/core/reference/ydb-sdk/topic.md"}
+
+
 def test_chunker_on_real_fixtures():
     """Chunker must produce valid batches on every real fixture."""
     fixtures = Path(__file__).parent.parent / "fixtures" / "markdown_files"
@@ -124,6 +132,11 @@ def test_chunker_on_real_fixtures():
 
     for f in files:
         text = f.read_text(encoding="utf-8")
+        relative_path = f.relative_to(fixtures).as_posix()
+        if relative_path in EXPECTED_AMBIGUOUS_YFM_FILES:
+            with pytest.raises(AmbiguousYfmStructureError, match="unowned direct-depth"):
+                parse_markdown(text)
+            continue
         doc = parse_markdown(text)
         segs = extract_segments(doc)
         batches = chunk_segments(segs, max_chars=4000)
@@ -147,19 +160,38 @@ def test_chunker_on_real_fixtures():
 
 
 def test_chunker_reasonable_batch_count_on_real_files():
-    """Sanity: typical files should produce a small number of batches."""
+    """Every real-fixture batch boundary is required by greedy packing."""
     fixtures = Path(__file__).parent.parent / "fixtures" / "markdown_files"
     files = list(fixtures.rglob("*.md"))
 
-    stats: dict[str, int] = {}
     for f in files:
         text = f.read_text(encoding="utf-8")
+        relative_path = f.relative_to(fixtures).as_posix()
+        if relative_path in EXPECTED_AMBIGUOUS_YFM_FILES:
+            with pytest.raises(AmbiguousYfmStructureError, match="unowned direct-depth"):
+                parse_markdown(text)
+            continue
         doc = parse_markdown(text)
         segs = extract_segments(doc)
         batches = chunk_segments(segs, max_chars=4000)
-        stats[f.name] = len(batches)
 
-    # No file should explode into 100+ batches with default settings.
-    for name, n in stats.items():
-        assert n < 100, f"{name}: too many batches ({n})"
-
+        for batch_index, batch in enumerate(batches[:-1]):
+            next_batch = batches[batch_index + 1]
+            segment = batch.segments[0]
+            next_segment = next_batch.segments[0]
+            dense_singleton = (
+                len(batch.segments) == 1 and len(segment.placeholders) >= 8
+            )
+            oversized_singleton = (
+                len(batch.segments) == 1 and len(segment.text) > 4000
+            )
+            next_segment_is_dense = len(next_segment.placeholders) >= 8
+            next_segment_exceeds_budget = (
+                batch.total_chars + len(next_segment.text) > 4000
+            )
+            assert (
+                dense_singleton
+                or oversized_singleton
+                or next_segment_is_dense
+                or next_segment_exceeds_budget
+            ), f"{f.name}: unnecessary batch boundary after {batch.index}"

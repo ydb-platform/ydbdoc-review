@@ -1,0 +1,73 @@
+---
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+review_type: specification_reviewer
+specification_version: "r016-parser-owned-v001"
+status: completed
+verdict: CHANGES_REQUESTED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: true
+implementation_authorized: false
+---
+
+# Review response: FINAL-008 / R-016 parser-owned validation
+
+## Verdict
+
+**CHANGES_REQUESTED**
+
+## Summary
+
+The direction correctly targets FINAL-008: Markdown-it/`SourceSpan` ownership
+without regex/`find`/`index`, structured URL/atom normalization, fail-closed
+ordered invariants, isolated corruption tests, and one frozen context used by
+identity at the four boundaries including transaction pre-stage. Allowed files,
+symbols and forbidden shortcuts are otherwise tight.
+
+It is not yet closed against approved v018. The text claims
+`expected_anchors` is the sole schema refinement, but it also changes existing
+v018 field meanings and algorithms, and leaves two retained context fields
+without an exact validate-time role.
+
+## Findings
+
+- id: R016-V001-001
+  severity: RED
+  related: [FINAL-008, R-016, v018]
+  summary: >
+    “Sole `expected_anchors` refinement” conflicts with redefined v018 contracts.
+  detail: >
+    Approved v018 freezes `source_container_signature` as
+    `(parser node kind, start, end)`, `source_fence_config_signature` as
+    `(kind, start, end, sha256)`, and atom hashes as SHA-256 of
+    `placeholder.node.model_dump_json()`. This pair replaces kind with a
+    composite `descriptor`, and replaces atom hashing / residual-Cyrillic
+    checking with `_canonical_atom_payload` and `extract_segments` prose checks.
+    Those may be the right FINAL-008 fixes, but they are not a single-field
+    addition. Explicitly amend the v018 field-type and hash/residual semantics
+    (or keep kind as element 0 and add a separate closed nesting/descriptor
+    field) so the implementor is not reconciling two approved contracts.
+
+- id: R016-V001-002
+  severity: RED
+  related: [FINAL-008, v018]
+  summary: >
+    Retained `en_toc_reachable` and `residual_cyrillic_allowed_ranges` have no
+    closed validate-time duty.
+  detail: >
+    Both fields remain in the kept v018 schema and constructor, but the ordered
+    `validate_complete_document` steps never compare them. FINAL-008 explicitly
+    called out missing `en_toc_reachable` validation; v018 says Cyrillic outside
+    `residual_cyrillic_allowed_ranges` is invalid. Close each field as either
+    (a) an exact compare/reject step in the ordered validator, or (b) an
+    explicit context-only passthrough with named owner outside this validator
+    (for example read-only href/TOC validators). Do not leave populate-only
+    dead fields.
+
+## Checks performed
+
+- Claimed `review-request-v001.md`; read this pair against FINAL-008,
+  v017 item 8, v018 context schema and post-v024 audit notes.
+- Verified parser-map / no-regex / four-boundary / structured-link intent.
+- Confirmed sole-refinement claim vs descriptor, hash and residual algorithm
+  changes; confirmed unused retained fields.

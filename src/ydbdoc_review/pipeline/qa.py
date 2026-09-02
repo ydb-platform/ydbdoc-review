@@ -100,7 +100,7 @@ def align_translations_from_target(
     mismatch" reports when word order shifts in translation.
 
     Requires matching segment **count and kinds** (positional). Kind drift with
-    equal length rejects align so differential translation falls back to full.
+    equal length rejects alignment so malformed output is blocked.
     """
     target_segments_raw = extract_segments(parse_markdown(target_text))
     if _segment_structure_mismatch(source_segments, target_segments_raw):

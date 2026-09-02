@@ -16,15 +16,16 @@ def test_image_alt_is_translatable_src_protected():
     )
     segments = extract_segments(doc)
     seg = segments[0]
-    assert "⟦S1⟧" in seg.text
+    assert "⟦IMGBEGIN_1⟧" in seg.text
+    assert "⟦IMGEND_1⟧" in seg.text
+    assert "⟦S1⟧" not in seg.text
     assert "Ручная установка" in seg.text
-    assert "⟦I" not in seg.text
 
     doc2 = copy.deepcopy(doc)
     reinsert_segments(
         doc2,
         segments,
-        {seg.id: "![Manual installation, nodes](⟦S1⟧)"},
+        {seg.id: "⟦IMGBEGIN_1⟧Manual installation, nodes⟦IMGEND_1⟧"},
     )
     rendered = render_markdown(doc2)
     assert "Manual installation" in rendered

@@ -7,6 +7,7 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
+from ydbdoc_review.parsing.yfm_plugins.source_spans import utf8_source_span
 
 # Match a full include directive on a single line.
 # Examples:
@@ -49,6 +50,7 @@ def _yfm_include_rule(
         "notitle": bool(notitle_word),
         "text": text,
         "path": path,
+        "source_span": utf8_source_span(state.src, pos, max_pos),
     }
 
     state.line = start_line + 1
@@ -63,4 +65,3 @@ def yfm_include_plugin(md: MarkdownIt) -> None:
         _yfm_include_rule,
         {"alt": ["paragraph", "reference", "blockquote", "list"]},
     )
-

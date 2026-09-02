@@ -5,10 +5,9 @@ from __future__ import annotations
 import pytest
 
 from ydbdoc_review.parsing.ast_types import (
-    FencedCode,
+    AmbiguousYfmStructureError,
     InlineText,
     Paragraph,
-    YfmTab,
     YfmTabs,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -166,6 +165,64 @@ def test_tabs_unclosed_falls_back():
     assert not any(isinstance(c, YfmTabs) for c in doc.children)
 
 
+def test_direct_depth_leading_content_is_rejected_before_tab_ownership() -> None:
+    text = (
+        "{% list tabs %}\n"
+        "orphan at container depth\n"
+        "- Python\n"
+        "  body\n"
+        "{% endlist %}\n"
+    )
+    with pytest.raises(AmbiguousYfmStructureError, match="unowned direct-depth"):
+        parse_markdown(text)
+
+
+def test_unindented_sibling_between_source_owned_tab_ranges_stays_in_that_tab() -> None:
+    text = (
+        "{% list tabs %}\n"
+        "- Python\n"
+        "unindented source-owned body\n"
+        "- Go\n"
+        "  indented body\n"
+        "{% endlist %}\n"
+    )
+    tabs = parse_markdown(text).children[0]
+    assert isinstance(tabs, YfmTabs)
+    assert [tab.title[0].content for tab in tabs.children] == ["Python", "Go"]
+    assert "unindented source-owned body" in round_trip(text)
+
+
+def test_nested_tabs_are_child_container_tokens_not_outer_tab_headers() -> None:
+    text = (
+        "{% list tabs %}\n"
+        "- Outer\n"
+        "\n"
+        "  {% list tabs %}\n"
+        "  - Inner\n"
+        "    inner body\n"
+        "  {% endlist %}\n"
+        "{% endlist %}\n"
+    )
+    outer = parse_markdown(text).children[0]
+    assert isinstance(outer, YfmTabs)
+    assert len(outer.children) == 1
+    nested = next(child for child in outer.children[0].children if isinstance(child, YfmTabs))
+    assert nested.parent_container_id == outer.container_id
+    assert nested.children[0].title[0].content == "Inner"
+    assert_stable(text)
+
+
+def test_tab_spans_use_utf8_offsets_and_keep_empty_tabs() -> None:
+    text = "{% list tabs %}\n- Ё\n{% endlist %}\n"
+    tabs = parse_markdown(text).children[0]
+    assert isinstance(tabs, YfmTabs)
+    tab = tabs.children[0]
+    assert tab.children == []
+    assert tab.title_span is not None
+    assert tab.title_span.byte_start == len(b"{% list tabs %}\n- ")
+    assert tab.title_span.byte_end == tab.title_span.byte_start + len("Ё".encode())
+
+
 # --- Round-trip ---
 
 
@@ -245,4 +302,3 @@ def test_round_trip_tabs_with_note_inside():
         "{% endlist %}\n"
     )
     assert_stable(text)
-

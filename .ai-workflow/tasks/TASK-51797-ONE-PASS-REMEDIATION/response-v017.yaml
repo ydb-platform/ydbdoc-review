@@ -1,0 +1,82 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v017"
+status: completed
+verdict: CHANGES_REQUESTED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: true
+implementation_authorized: false
+---
+
+# Review response: final diff remediation v017
+
+## Verdict
+
+**CHANGES_REQUESTED**
+
+## Summary
+
+v017 correctly targets FINAL-001 through FINAL-010 one-to-one, keeps predecessor
+`one-pass-remediation-v016`, lists the required seven control artifacts, and
+requires refresh-manifest then immediate validate. Most correction texts match
+the APPROVED final-diff audit and the corresponding R-IDs.
+
+Three unresolved developer/protocol choices remain, so the amendment is not
+closed.
+
+## Findings
+
+- id: REMEDIATION-V017-001
+  severity: RED
+  related: [FINAL-005, R-011]
+  summary: >
+    `AcquisitionController(role="navigation")` is not a closed change against
+    the approved three-value role Literals.
+  detail: >
+    LLM-WIRING freezes `TranslationChatOnce.chat_once(..., role:
+    Literal["translate","critic","repair"])`. Current
+    `AcquisitionRole` is the same three values, and `AcquisitionController`
+    passes `role` straight into `chat_once`. R-011 requires the manifest
+    `translate` ModelPair plus a distinct role metadata value without a seventh
+    model slug. v017 demands `role="navigation"` but does not explicitly amend
+    both Literals to include `"navigation"`, nor state that navigation still
+    binds only `manifest.translate` / `TranslationModelPolicy.translate`, nor
+    define the exact alternative if the Literals stay three-valued (for example
+    `role="translate"` plus another closed metadata channel). The implementor
+    must invent the cross-contract reconciliation.
+
+- id: REMEDIATION-V017-002
+  severity: RED
+  related: [FINAL-008, R-016]
+  summary: >
+    `validation_context` for `validate_complete_document` has no closed schema.
+  detail: >
+    FINAL-008 defines
+    `validate_complete_document(document, validation_context) -> None` and the
+    invariant order, but neither the specification nor the plan names the exact
+    fields, types, immutability, or construction site of `validation_context`
+    needed for atom hash/order, fence/config equality, link/href rules and
+    residual-Cyrillic classification. That leaves an API/architecture choice.
+
+- id: REMEDIATION-V017-003
+  severity: YELLOW
+  related: [FINAL-001, R-001]
+  summary: >
+    Disposition of `tests/unit/test_fence_comments_read_only.py` is unspecified.
+  detail: >
+    FINAL-001 correctly restores `tests/unit/test_fence_comments.py` and forbids
+    filename-only replacement. The plan lists
+    `test_fence_comments_read_only.py` among allowed files with operation
+    `restore_required_original_path_and_keep_read_only_cases` but does not say
+    whether the alternate file must be deleted after cases live in the original
+    path, emptied, or kept as a second suite. Close that exact final state.
+
+## Checks performed
+
+- Claimed `review-request-v017.md`; read v017 amendments against APPROVED
+  final-diff audit response-v001 and R-001..R-021 / LLM-WIRING role contracts.
+- Confirmed one-to-one finding coverage and seven-path seal / v016 predecessor.
+- Spot-checked live `AcquisitionRole` and `chat_once` role threading in
+  `acquisition.py`.

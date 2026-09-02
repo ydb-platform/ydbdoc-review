@@ -1,0 +1,39 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v022"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: v021 metadata race closure v022
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v022 correctly freezes only the two protocol fields that raced during v021
+review: literal `mapping_source: v021_exact_R004_Ruff_artifact_mapping` on all
+three Ruff artifact mappings, and explicit byte-immutable exactly-once control
+mapping of `response-v020.yaml` (no duplicate manifest entry). No Ruff or
+product semantics change. Predecessor is exact `one-pass-remediation-v021`;
+self-seal is four v022 protocol files plus `response-v021.yaml`. Final gate
+order remains Ruff validate, refresh, immediate policy validate. No developer
+choice remains.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v022.md`; read v022 amendments against current v021
+  artifacts and `response-v021.yaml`.
+- Confirmed the two metadata closures match the race-added v021 fields without
+  broadening scope.

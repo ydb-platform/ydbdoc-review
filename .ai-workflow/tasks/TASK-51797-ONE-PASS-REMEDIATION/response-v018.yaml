@@ -1,0 +1,59 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v018"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: close v017 findings v018
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v018 closes all three CHANGES_REQUESTED findings from `response-v017.yaml`
+without reopening other v017 instructions.
+
+1. **REMEDIATION-V017-001:** Both `TranslationChatOnce.chat_once.role` and
+   `AcquisitionRole` are explicitly amended to
+   `Literal["translate","critic","repair","navigation"]`. Navigation remains
+   metadata-only: `model_pair=manifest.model_policy.translate`,
+   `role="navigation"`, still six slugs / three policy pairs, no navigation
+   config key or seventh slug. Required attempt-slug and rejection tests are
+   closed.
+2. **REMEDIATION-V017-002:** Frozen slotted `ValidationAtomRecord` and
+   `CompleteDocumentValidationContext` schemas, tuple semantics, single
+   constructor `build_complete_document_validation_context`, single
+   post-anchor construction site, and same-object four-boundary lifecycle leave
+   no API or architecture choice. Dict/lazy/mutable/reconstruction paths are
+   forbidden.
+3. **REMEDIATION-V017-003:** Unique alternate fence cases move into restored
+   `tests/unit/test_fence_comments.py`, combined file must be GREEN, then
+   `test_fence_comments_read_only.py` is deleted. Final tree and migration
+   evidence are exact.
+
+Predecessor is exact `one-pass-remediation-v017`. Control seal is the four
+v018 protocol files plus `response-v017.yaml`. Completion still requires v018
+refresh-manifest then immediate validate. No developer choice remains.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v018.md`; read v018 amendments against
+  `response-v017.yaml` findings REMEDIATION-V017-001..003.
+- Verified Literal expansion + translate-pair binding closes the LLM-WIRING
+  conflict.
+- Verified validation-context schema/constructor/lifecycle are fully closed.
+- Verified alternate fence-file final state is delete-after-GREEN with case
+  conservation.
+- Confirmed v017 predecessor and five-path seal including `response-v017.yaml`.

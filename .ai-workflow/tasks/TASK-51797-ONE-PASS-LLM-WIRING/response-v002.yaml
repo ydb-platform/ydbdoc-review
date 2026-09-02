@@ -1,0 +1,83 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-LLM-WIRING"
+review_type: "specification"
+specification_version: "llm-wiring-v002"
+reviewed_iteration: "llm-wiring-v002"
+reviewed_at: "2026-09-01"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/review-request-v002.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/response-v001.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/response-v010.yaml"
+  - "src/ydbdoc_review/llm/client.py"
+verdict: "APPROVED"
+implementation_authorized: false
+prerequisite_status: "BLOCKED_IN_CURRENT_CHECKOUT"
+summary: >
+  Amendment llm-wiring-v002 resolves all three v001 specification findings.
+  TranslationChatOnce now has exact translation-owned protocol shape and strict
+  one-provider-request semantics, and the amendment explicitly forbids creating
+  or emulating it in this task. The current checkout does not expose chat_once,
+  so implementation must report the declared prerequisite blocker rather than
+  edit the shared client. The dedicated translation_model_policy namespace,
+  exact six scalar keys, sole loader, fail-closed validation, and prohibition on
+  shared ModelChoice chains remove configuration choice. The exhaustive outcome
+  table now defines transient retry, model-unavailable advance, permanent block,
+  protocol-invalid advance, first-valid acceptance, and exhaustion. Approval is
+  of the amendment policy only and does not authorize implementation.
+findings: []
+resolved_findings:
+  - id: "LLM-WIRING-V001-001"
+    resolution: >
+      ydbdoc_review.translation.model_policy owns the exact TranslationChatOnce
+      Protocol signature. One call is exactly one provider request with no
+      retry, fallback, chain lookup, or config reread. The amendment forbids
+      shared-client edits, private-call wrapping, shared-chat emulation, and SDK
+      duplication; absence of the prerequisite is a terminal task blocker.
+  - id: "LLM-WIRING-V001-002"
+    resolution: >
+      The sole serialized namespace is translation_model_policy with exact
+      translate/critic/repair primary and fallback scalar keys. The named
+      translation-owned loader accepts no aliases, lists, inherited defaults,
+      environment-only overrides, legacy chains, unknown keys, or missing and
+      invalid values, and freezes the result in the manifest before reads/calls.
+  - id: "LLM-WIRING-V001-003"
+    resolution: >
+      The exhaustive table now distinguishes registered transient retry,
+      model-unavailable immediate fallback/exhaustion, permanent auth/config
+      immediate block, protocol-invalid immediate fallback/exhaustion, first
+      valid acceptance, and fail-closed unknown errors, with four requests max.
+unresolved_questions: []
+confirmations:
+  shared_client_semantics_config_retry_and_chains_unchanged: true
+  non_translation_consumers_retain_shared_behavior: true
+  translation_chat_once_protocol_owner_and_signature_exact: true
+  one_invocation_means_exactly_one_provider_network_request: true
+  chat_once_has_no_retry_fallback_chain_lookup_or_config_reread: true
+  missing_chat_once_blocks_instead_of_editing_shared_client: true
+  chat_once_prerequisite_is_absent_in_current_checkout: true
+  translation_never_emulates_chat_once_with_shared_or_private_calls: true
+  translation_model_policy_namespace_and_six_keys_exact: true
+  loader_is_translation_owned_and_accepts_only_raw_namespace: true
+  loader_cannot_fall_back_to_modelchoice_chain_or_dynamic_lists: true
+  missing_repair_unknown_keys_aliases_and_invalid_values_fail_closed: true
+  six_slugs_resolved_once_and_frozen_before_ru_en_read_or_model_call: true
+  acquisition_transient_retry_is_same_model_once: true
+  acquisition_model_unavailable_advances_immediately: true
+  acquisition_auth_config_error_blocks_immediately: true
+  acquisition_protocol_invalid_advances_immediately: true
+  acquisition_first_protocol_valid_value_is_only_accepted_value: true
+  acquisition_unknown_error_fails_closed_and_four_requests_is_maximum: true
+  production_translation_uses_typed_pairs_and_one_controller_only: true
+  critic_is_read_only_and_translation_controller_owns_repair_transition: true
+  deterministic_writers_cannot_invoke_model_mutation: true
+  physical_deletion_and_retained_shared_symbol_boundary_exact: true
+  ast_reachability_covers_imports_aliases_callbacks_factories_and_dependency_injection: true
+  runtime_spies_cover_hidden_shared_calls_config_reread_and_old_en_reads: true
+  v010_cardinality_atoms_dependencies_anchors_provenance_transaction_reports_and_caps_retained: true
+  no_unresolved_specification_developer_choices: true
+  reviewer_approval_does_not_authorize_implementation: true
+  explicit_user_acceptance_still_required: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

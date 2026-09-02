@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.parsing.ast_types import AmbiguousYfmStructureError
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "markdown_files"
@@ -27,12 +28,21 @@ def _file_id(path: Path) -> str:
 
 
 REAL_FILES = _collect_files()
+EXPECTED_AMBIGUOUS_YFM_FILES = {"en/core/reference/ydb-sdk/topic.md"}
+
+
+def test_expected_ambiguous_yfm_file_set_is_exact() -> None:
+    assert EXPECTED_AMBIGUOUS_YFM_FILES == {"en/core/reference/ydb-sdk/topic.md"}
 
 
 @pytest.mark.parametrize("path", REAL_FILES, ids=[_file_id(p) for p in REAL_FILES])
 def test_parse_does_not_crash(path: Path) -> None:
     """Parser must not crash on any real file (may produce imperfect AST)."""
     text = path.read_text(encoding="utf-8")
+    if _file_id(path) in EXPECTED_AMBIGUOUS_YFM_FILES:
+        with pytest.raises(AmbiguousYfmStructureError, match="unowned direct-depth"):
+            parse_markdown(text)
+        return
     try:
         parse_markdown(text)
     except ValueError as e:
@@ -43,6 +53,10 @@ def test_parse_does_not_crash(path: Path) -> None:
 def test_round_trip_stable(path: Path) -> None:
     """parse→render→parse→render must be stable (idempotent after first pass)."""
     text = path.read_text(encoding="utf-8")
+    if _file_id(path) in EXPECTED_AMBIGUOUS_YFM_FILES:
+        with pytest.raises(AmbiguousYfmStructureError, match="unowned direct-depth"):
+            parse_markdown(text)
+        return
     first = render_markdown(parse_markdown(text))
     second = render_markdown(parse_markdown(first))
     if first != second:

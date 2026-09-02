@@ -1,0 +1,62 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS"
+review_type: "specification"
+specification_version: "one-pass-v010"
+reviewed_iteration: "one-pass-v010"
+reviewed_at: "2026-09-01"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/review-request-v010.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/response-v009.yaml"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Version one-pass-v010 resolves the sole v009 blocker. The title and both
+  decision-gate references consistently identify v010, and the gate requires
+  both explicit user acceptance of the bounded acquisition, stale-source, and
+  bounded local repair policy and an external APPROVED verdict for v010. The
+  previously reviewed architecture remains internally consistent, including
+  logical repair-attempt accounting, exact zero-to-two terminal attempt records,
+  anchor-localization ownership, role-scoped acquisition, global invariants,
+  and all-or-nothing publication. This approval does not authorize implementation.
+findings: []
+resolved_findings:
+  - id: "ONE-PASS-V009-001"
+    resolution: >
+      The specification title now names v010, the decision gate calls the
+      document v010, and its external-review condition requires APPROVED for
+      v010. No stale v007, v008, or v009 version reference remains in the
+      specification.
+  - id: "ONE-PASS-V008-001"
+    resolution: >
+      Per-finding limits and oscillation rules remain expressed in logical
+      repair attempts, with every issued request consuming the attempt.
+  - id: "ONE-PASS-V008-002"
+    resolution: >
+      The terminal report continues to contain exactly the zero, one, or two
+      requests actually issued and never synthesizes missing attempt records.
+unresolved_questions: []
+confirmations:
+  specification_title_identifies_v010: true
+  decision_gate_identifies_v010: true
+  decision_gate_requires_external_approved_for_v010: true
+  decision_gate_requires_explicit_user_policy_acceptance: true
+  reviewer_approval_alone_does_not_authorize_implementation: true
+  implementation_authorized: false
+  bounded_translation_acquisition_policy_retained: true
+  zero_or_one_accepted_payload_and_render_cardinality_retained: true
+  role_specific_translate_critic_repair_model_pairs_retained: true
+  canonical_read_only_critic_and_minimal_one_block_repair_retained: true
+  two_logical_attempts_per_finding_and_document_2_4_8_9_caps_retained: true
+  deterministic_order_recritic_conflict_and_oscillation_guards_retained: true
+  anchor_exception_ascii_parity_and_global_inbound_integrity_retained: true
+  exact_zero_to_two_terminal_attempt_report_retained: true
+  immutable_provenance_guard_and_no_old_en_template_retained: true
+  shared_link_include_bfs_seen_and_twenty_file_budget_retained: true
+  protected_atom_and_only_writer_invariants_retained: true
+  warning_only_failed_artifact_and_all_or_nothing_transaction_retained: true
+  no_incremental_full_magnitude_splice_or_old_en_seed_mode_retained: true
+  complete_previously_reviewed_architecture_is_internally_consistent: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

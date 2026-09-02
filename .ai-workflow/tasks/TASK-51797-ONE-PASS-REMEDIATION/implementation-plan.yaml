@@ -1,0 +1,375 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v005
+base_commit: 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+implementation_manifest:
+  path: .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+  ownership: developer_report_artifact
+  protocol_artifact: false
+  inside_executor_allowlist: true
+  inside_changed_code_allowlist: false
+  scope: entire_final_worktree_delta_against_base_including_untracked
+  observed_start_inventory: {tracked_paths: 85, untracked_paths: 29}
+  entry_schema:
+    required_fields: [path, git_status, ownership_class, baseline_state, final_state, requirement_ids]
+    ownership_classes: [production, test, configuration, script, implementation_report, control_artifact]
+    state_required_fields: [kind, sha256]
+    state_allowed_kinds: [present, absent, deleted]
+    requirement_ids: non_empty_for_all_non_control_entries
+    control_extra_fields: [authoritative_task, authoritative_version]
+  control_artifact_rules:
+    preexisting_untracked_task_artifacts: inventory_with_sha256_then_keep_byte_identical
+    mutable_paths: [.ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml, .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml, .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md]
+    protected_owners: [analyst, specification_reviewer, workflow_protocol]
+  validation_command: "python -m scripts.remediation_policy_gate validate --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml --manifest .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6"
+baseline_snapshot:
+  path: .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  ownership: developer_report_artifact
+  capture_once_after_R004_gate_implementation_before_all_other_remediation_edits: true
+  overwrite: forbidden
+  capture_command: "python -m scripts.remediation_policy_gate capture --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6 --output .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml"
+  developer_may_edit_after_capture: false
+  bootstrap_allowed_changes:
+    - scripts/remediation_policy_gate.py
+    - tests/unit/test_remediation_policy_gate.py
+    - remove_untracked_uv.lock
+default_policy:
+  paths_outside_allowlist: RED_unless_exact_unchanged_baseline_contract_inventory_entry
+  undeclared_deletion: RED
+  undeclared_new_production_symbol: RED
+  unmapped_changed_file: RED
+  developer_may_edit_protocol_or_specs: false
+  developer_may_spawn_subagents: false
+  ambiguity_action: write_question_and_stop_only_item
+  analyst_audit_before_tester: true
+  tester_policy_gates_before_functional_tests: true
+baseline_contract_inventory:
+  semantics: listed_state_may_remain_but_does_not_authorize_executor_edit
+  frozen_modified_production:
+    - {path: src/ydbdoc_review/cli.py, requirement_ids: [ONE-PASS-v010-orchestrator], exact_symbols: [translate_file_cmd]}
+    - {path: src/ydbdoc_review/github/git_ops.py, requirement_ids: [ONE-PASS-v010-transaction], exact_symbols: [prepare_translation_branch_on_base]}
+    - {path: src/ydbdoc_review/github/pr.py, requirement_ids: [ONE-PASS-v010-provenance], exact_symbols: [PullRequestContext, pull_request_context]}
+    - {path: src/ydbdoc_review/llm/__init__.py, requirement_ids: [CHAT-ONCE-v003-public-types], exact_symbols: [__all__, ChatOnceFailureKind, LLMModelUnavailableError, LLMProtocolResponseError]}
+    - {path: src/ydbdoc_review/pipeline/analyze.py, requirement_ids: [ONE-PASS-v010-remove-differential-planning], exact_symbols: [PairAction, PairContent, plan_pair_heuristic, _action_from_analyze, plan_from_analyze, plan_pairs]}
+    - {path: src/ydbdoc_review/pipeline/orchestrator.py, requirement_ids: [ONE-PASS-v010-orchestrator], exact_symbols: [run_pr_translation]}
+    - {path: src/ydbdoc_review/pipeline/qa.py, requirement_ids: [ONE-PASS-v010-segment-contract, R-009], exact_symbols: [align_translations_from_target]}
+    - {path: src/ydbdoc_review/pipeline/translate_file.py, requirement_ids: [ONE-PASS-v010-file-entrypoint], exact_symbols: [translate_file]}
+    - {path: src/ydbdoc_review/translation/translator.py, requirement_ids: [ONE-PASS-v010-remove-recovery], exact_symbols: [_recover_or_fallback_segment]}
+    - {path: src/ydbdoc_review/validation/fence_comments.py, requirement_ids: [COVERAGE-DELETION-v008-fragment-B], exact_symbols: [collect_cyrillic_fence_comment_lines, check_cyrillic_in_en_fence_comments, collect_cyrillic_text_fence_lines, check_cyrillic_in_en_text_fences]}
+    - {path: src/ydbdoc_review/validation/fence_integrity.py, requirement_ids: [COVERAGE-DELETION-v008-fragment-B], exact_symbols: [check_fence_body_copy]}
+    - {path: src/ydbdoc_review/validation/prose_cyrillic.py, requirement_ids: [COVERAGE-DELETION-v008-fragment-B], exact_symbols: [collect_cyrillic_prose_spans]}
+  approved_deleted_production:
+    requirement_ids: [ONE-PASS-v010-retirement, COVERAGE-DELETION-v008]
+    exact_paths:
+      - src/ydbdoc_review/harness/__init__.py
+      - src/ydbdoc_review/harness/cases.py
+      - src/ydbdoc_review/harness/context.py
+      - src/ydbdoc_review/harness/critic_verdict.py
+      - src/ydbdoc_review/harness/pair.py
+      - src/ydbdoc_review/harness/pr_context.py
+      - src/ydbdoc_review/harness/pr_profiles.py
+      - src/ydbdoc_review/harness/pr_runner.py
+      - src/ydbdoc_review/harness/pr_state.py
+      - src/ydbdoc_review/harness/pr_steps.py
+      - src/ydbdoc_review/harness/profiles.py
+      - src/ydbdoc_review/harness/render.py
+      - src/ydbdoc_review/harness/runner.py
+      - src/ydbdoc_review/harness/state.py
+      - src/ydbdoc_review/harness/steps.py
+      - src/ydbdoc_review/translation/critic_retranslate.py
+      - src/ydbdoc_review/translation/differential.py
+      - src/ydbdoc_review/translation/repair.py
+      - src/ydbdoc_review/validation/structural_repair.py
+  frozen_modified_tests:
+    requirement_ids: [CHAT-ONCE-v003, LLM-WIRING-v002, ONE-PASS-v010, COVERAGE-DELETION-v008]
+    exact_paths:
+      - tests/unit/test_apply_results_noop.py
+      - tests/unit/test_fence_integrity.py
+      - tests/unit/test_final_tree_reader.py
+      - tests/unit/test_github_git_ops.py
+      - tests/unit/test_link_locale.py
+      - tests/unit/test_markdown_layout.py
+      - tests/unit/test_pipeline_analyze.py
+      - tests/unit/test_pipeline_orchestrator.py
+      - tests/unit/test_prose_cyrillic.py
+      - tests/unit/test_qa.py
+      - tests/unit/test_translate_file.py
+      - tests/unit/test_translator.py
+      - tests/unit/test_fence_comments_read_only.py
+    authorized_executor_symbols: []
+  approved_deleted_tests_and_fixtures:
+    requirement_ids: [COVERAGE-DELETION-v008]
+    exact_paths:
+      - tests/harness/cases/44268_formula_align/case.yaml
+      - tests/harness/cases/44268_formula_align/source.ru.md
+      - tests/harness/cases/44268_formula_align/target.en.md
+      - tests/harness/cases/44872_format_template/case.yaml
+      - tests/harness/cases/44872_format_template/source.ru.md
+      - tests/harness/cases/44872_format_template/target.en.md
+      - tests/harness/cases/simple_translate/case.yaml
+      - tests/harness/cases/simple_translate/source.ru.md
+      - tests/unit/test_critic_retranslate.py
+      - tests/unit/test_differential_low_magnitude_patch.py
+      - tests/unit/test_differential_partial_seed.py
+      - tests/unit/test_differential_translation.py
+      - tests/unit/test_low_magnitude_structure_gate.py
+      - tests/unit/test_repair.py
+      - tests/unit/test_structural_repair.py
+  immutable_control_artifacts:
+    requirement_ids: [workflow-protocol-provenance]
+    exact_paths:
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/implementation-report.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/response-v003.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/specification.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/response-v008.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/review-request-v008.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/specification.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT/analyst-audit.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT/response-v002.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT/review-request-v002.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/implementation-report-v002.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/response-v002.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/specification.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/questions/R-004.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v002.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v004.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v004.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS/response-v010.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS/response.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS/review-request.md
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS/specification.md
+  planned_analyst_publication_before_capture:
+    requirement_ids: [workflow-protocol-provenance]
+    exact_paths:
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v005.yaml
+      - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v005.md
+    ownership: immutable_after_byte_identical_publication
+  required_absent:
+    - {path: uv.lock, reason: no_approved_requirement_or_dependency_change}
+items:
+  - requirement_id: R-001
+    allowed_files: [tests/unit/test_fence_comments.py, tests/unit/test_glossary_verify_alignment.py, tests/unit/test_harness.py, tests/unit/test_harness_pair_toc_reachable.py, tests/unit/test_harness_pr.py, tests/unit/test_verify_partial_realign.py, tests/unit/test_verify_realign_cap.py, tests/harness/test_regression_cases.py, tests/harness/cases/**, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_transaction.py, tests/unit/test_github_workflow.py, tests/unit/test_href_parity.py]
+    allowed_symbols: [legacy_same_file_tests, traceable_v010_replacements]
+    operation: restore_rewrite_green_move_then_delete
+    exact_target: v008 same-file migration manifest for every deleted blocker identity
+    required_tests: [all restored same-file suites, final destination suites]
+    allowed_deletions: [tests/unit/test_glossary_verify_alignment.py, tests/unit/test_harness.py, tests/unit/test_harness_pair_toc_reachable.py, tests/unit/test_harness_pr.py, tests/unit/test_verify_partial_realign.py, tests/unit/test_verify_realign_cap.py, tests/harness/test_regression_cases.py, tests/harness/cases/**]
+    forbidden_approaches: [restore production harness, skip, xfail, cross-file replacement without same-file GREEN]
+    prerequisites: []
+    order: 1
+  - requirement_id: R-002
+    allowed_files: [src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/segmentation/inline_protector.py, src/ydbdoc_review/segmentation/reinsert.py, tests/unit/test_atom_round_trip.py, tests/unit/test_segmentation.py, tests/unit/test_one_pass_translation.py]
+    allowed_symbols: [_restore_source_hrefs, _HREF, protect_inline, restore_inline_text, _restore_link_boundaries]
+    operation: delete_forbidden_writer_and_replace_with_parser_atom_restore
+    exact_target: one parser-owned link restoration with locale mapping only for absolute /ru/
+    required_tests: [complete link atom matrix, static absence of _restore_source_hrefs]
+    allowed_deletions: ["src/ydbdoc_review/translation/one_pass.py::_restore_source_hrefs", "src/ydbdoc_review/translation/one_pass.py::_HREF"]
+    forbidden_approaches: [regex href rewrite, positional pairing, post-restore mutation]
+    prerequisites: [R-015]
+    order: 3
+  - requirement_id: R-003
+    allowed_files: [tests/unit/test_github_workflow.py, tests/unit/test_one_pass_migration.py]
+    allowed_symbols: [test_translate_workflow_forwards_en_toc_reachable_to_read_only_validators]
+    operation: replace_weakened_test
+    exact_target: run_doc_translate builder-to-validator sentinel identity assertion
+    required_tests: [real workflow TOC forwarding]
+    allowed_deletions: []
+    forbidden_approaches: [direct run_pr_translation only, mocking forwarding edges]
+    prerequisites: [R-011, R-020]
+    order: 7
+  - requirement_id: R-004
+    allowed_files: [.ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md, .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml, .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml, scripts/remediation_policy_gate.py, tests/unit/test_remediation_policy_gate.py]
+    allowed_symbols: [implementation_status, implementation_manifest_entries, approved_ruff_command, main, load_plan, capture_baseline, load_manifest, enumerate_delta, validate_path_inventory, validate_edit_allowlist, validate_control_hashes, validate_requirement_mapping, validate_symbol_changes, validate_deletions]
+    operation: correct_report_and_add_gate
+    exact_target: NOT READY until all gates; no Ruff waiver without approved amendment
+    required_tests: [policy gate self-tests, approved Ruff command]
+    allowed_deletions: []
+    forbidden_approaches: [claim READY early, developer-created waiver]
+    prerequisites: [R-001]
+    order: 1
+  - requirement_id: R-005
+    allowed_files: [src/ydbdoc_review/validation/fragment_repair.py, src/ydbdoc_review/validation/href_parity.py, src/ydbdoc_review/validation/redirect_impacts.py, tests/unit/test_fragment_repair.py, tests/unit/test_href_parity.py, tests/unit/test_redirect_impacts.py, tests/unit/test_translation_transaction.py]
+    allowed_symbols: [fragment_declared_in_markdown, _remap_fragment_via_ru_en_pages, map_ru_fragment_to_declared_en_fragment]
+    operation: preserve_detector_publicize_read_only_mapper_restore_traceability
+    exact_target: pure comparison helper reachable only from read-only validators
+    required_tests: [all legacy fragment case IDs, call-graph allowlist]
+    allowed_deletions: ["src/ydbdoc_review/validation/fragment_repair.py::_remap_fragment_via_ru_en_pages"]
+    forbidden_approaches: [translation writer, baseline substitution, untraceable test deletion]
+    prerequisites: [R-001]
+    order: 3
+  - requirement_id: R-006
+    allowed_files: [src/ydbdoc_review/parsing/yfm_plugins/tabs.py, src/ydbdoc_review/parsing/markdown_parser.py, src/ydbdoc_review/parsing/ast_types.py, src/ydbdoc_review/rendering/markdown_renderer.py, tests/unit/test_yfm_tabs.py, tests/unit/test_parser_round_trip.py, tests/integration/test_real_files_round_trip.py, tests/fixtures/markdown_files/ru/core/reference/ydb-sdk/topic.md]
+    allowed_symbols: [_yfm_tabs_rule, yfm_tab_open, yfm_tab_close, SourceSpan, YfmTab, YfmTabs, _parse_yfm_tabs, _render_yfm_tabs, AmbiguousYfmStructureError]
+    operation: constrain_parser_fail_closed
+    exact_target: plugin emits source-sliced container/tab ownership tokens before recursive block parsing; parser consumes only paired same-container tokens
+    required_tests: [real topic.md all nested occurrences, leading-sibling regression, nested fence/list/YFM ownership, true direct-depth orphan, empty tab, comments/blanks, zero-loss hash/count, deterministic roundtrip]
+    allowed_deletions: []
+    forbidden_approaches: [post-AST sibling-order ownership inference, attach arbitrary siblings, append-to-previous heuristic, synthetic empty-title tab, silent leading-content assignment, data loss]
+    prerequisites: []
+    order: 9
+  - requirement_id: R-007
+    allowed_files: [tests/unit/test_github_workflow.py, tests/unit/test_ops_lifecycle.py]
+    allowed_symbols: [_disable_external_ops_ledger, explicit_ops_isolation, workflow_in_memory_ledger_test]
+    operation: remove_autouse_add_explicit_isolation_and_integration
+    exact_target: no module-wide ops bypass; one workflow lifecycle test
+    required_tests: [GitHub workflow suite, ops lifecycle suite]
+    allowed_deletions: ["tests/unit/test_github_workflow.py::_disable_external_ops_ledger"]
+    forbidden_approaches: [autouse ops bypass, external YDB in unit tests]
+    prerequisites: []
+    order: 9
+  - requirement_id: R-008
+    allowed_files: [tests/unit/test_github_workflow.py, tests/unit/test_translation_dependency_queue.py]
+    allowed_symbols: [root_locale_markdown_case]
+    operation: add_coverage
+    exact_target: ydb/docs/ru/root-page.md queues and publishes atomically
+    required_tests: [root locale path, core TOC path]
+    allowed_deletions: []
+    forbidden_approaches: [hard-code /core/ in production]
+    prerequisites: [R-019]
+    order: 9
+  - requirement_id: R-009
+    allowed_files: [src/ydbdoc_review/segmentation/extractor.py, src/ydbdoc_review/segmentation/reinsert.py, src/ydbdoc_review/segmentation/types.py, tests/unit/test_segmentation.py, tests/unit/test_reinsert.py, .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md]
+    allowed_symbols: [NOTE_TITLE, CUT_TITLE, _set_inline_at_ast_path, UnknownSegmentKindError]
+    operation: close_and_document_behavior
+    exact_target: titles are prose slots; unknown kind blocks before render
+    required_tests: [note title roundtrip, cut title roundtrip, unknown kind zero-stage]
+    allowed_deletions: []
+    forbidden_approaches: [ignore unknown kind, fallback raw title]
+    prerequisites: [R-015]
+    order: 9
+  - requirement_id: R-010
+    allowed_files: [tests/unit/test_placeholder_repair.py, tests/unit/test_renderer_coverage.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_transaction.py]
+    allowed_symbols: [placeholder_detection_tests, table_cell_repair_parity_test]
+    operation: restore_preserved_coverage
+    exact_target: read-only placeholder blocking plus table-cell atom rollback
+    required_tests: [placeholder detector suite, table cell corrupt candidate]
+    allowed_deletions: [writer-only placeholder repair test cases]
+    forbidden_approaches: [delete detector tests, replace table test with generic prose test]
+    prerequisites: [R-001]
+    order: 1
+  - requirement_id: R-011
+    allowed_files: [src/ydbdoc_review/pipeline/navigation_merge.py, src/ydbdoc_review/github/workflow.py, src/ydbdoc_review/translation/acquisition.py, src/ydbdoc_review/translation/model_policy.py, tests/unit/test_navigation_merge.py, tests/unit/test_github_workflow.py, tests/unit/test_translation_model_wiring.py]
+    allowed_symbols: [_translate_menu_labels, run_navigation_merges, TranslationJobManifest]
+    operation: replace_shared_chat_with_translation_local_acquisition
+    exact_target: translate model pair only; malformed/exhausted navigation blocks transaction
+    required_tests: [navigation real workflow transition matrix, shared chat raising spy]
+    allowed_deletions: [raw RU label fallback, shared client.chat navigation call]
+    forbidden_approaches: [seventh model slug, shared chain, raw RU success fallback]
+    prerequisites: [R-017, R-018]
+    order: 6
+  - requirement_id: R-012
+    allowed_files: [src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/translation/local_repair.py, src/ydbdoc_review/translation/acquisition.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_model_wiring.py]
+    allowed_symbols: [_parse_translate_response, validate, validate_repair, AcquisitionController]
+    operation: move_all_protocol_gates_pre_accept
+    exact_target: invalid candidate advances without acceptance/render/insertion
+    required_tests: [token, empty, Cyrillic, range, atom invalid-primary valid-fallback]
+    allowed_deletions: [post_accept_protocol_checks]
+    forbidden_approaches: [accept then block, render rejected candidate]
+    prerequisites: [R-017, R-018, R-013, R-015]
+    order: 4
+  - requirement_id: R-013
+    allowed_files: [src/ydbdoc_review/translation/one_pass.py, tests/unit/test_one_pass_translation.py]
+    allowed_symbols: [_parse_translate_response]
+    operation: replace_set_validation_with_exact_frequency_validation
+    exact_target: each expected ID exactly once
+    required_tests: [duplicate, missing, extra, ordered cardinality]
+    allowed_deletions: []
+    forbidden_approaches: [set-only comparison, dict collapse]
+    prerequisites: []
+    order: 2
+  - requirement_id: R-014
+    allowed_files: [src/ydbdoc_review/translation/local_repair.py, src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/segmentation/types.py, tests/unit/test_one_pass_translation.py, tests/unit/test_atom_round_trip.py]
+    allowed_symbols: [Finding, block_records, atom_manifest, run_bounded_local_repair]
+    operation: minimize_and_validate_model_context
+    exact_target: one RU prose block and verified atom manifest only
+    required_tests: [repair secret non-disclosure, atom ID membership]
+    allowed_deletions: [full ru_text repair payload]
+    forbidden_approaches: [send full RU doc, send code/config/directive bytes]
+    prerequisites: [R-015, R-012]
+    order: 4
+  - requirement_id: R-015
+    allowed_files: [src/ydbdoc_review/parsing/ast_types.py, src/ydbdoc_review/parsing/markdown_parser.py, src/ydbdoc_review/rendering/markdown_renderer.py, src/ydbdoc_review/segmentation/inline_protector.py, src/ydbdoc_review/segmentation/reinsert.py, src/ydbdoc_review/segmentation/types.py, tests/unit/test_parser_round_trip.py, tests/unit/test_renderer_coverage.py, tests/unit/test_atom_round_trip.py, tests/unit/test_segmentation.py]
+    allowed_symbols: [InlineStrike, InlineNode, _parse_inline_until, _render_inline_node, protect_inline, restore_inline_text, structural_boundary_tokens]
+    operation: replace_broken_image_and_inline_container_atoms
+    exact_target: single image node restoration plus InlineStrike recursive AST and paired protected boundaries
+    required_tests: [complete image matrix, InlineStrike parse/render/model serialization, emphasis/strong/strike/link/code nesting, crossing/loss]
+    allowed_deletions: [broken image wrapper marker logic]
+    forbidden_approaches: [nested wrapper restoration, editable structural delimiters, regex repair]
+    prerequisites: []
+    order: 3
+  - requirement_id: R-016
+    allowed_files: [src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/translation/local_repair.py, src/ydbdoc_review/pipeline/translation_transaction.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_transaction.py]
+    allowed_symbols: [validate_complete_document, run_bounded_local_repair]
+    operation: add_single_full_read_only_global_validator
+    exact_target: full invariants before/after every repair and before staging
+    required_tests: [one corruption test per global invariant]
+    allowed_deletions: [protect_token_only_global_gate]
+    forbidden_approaches: [partial global validation, mutation in validator]
+    prerequisites: [R-002, R-014, R-015]
+    order: 5
+  - requirement_id: R-017
+    allowed_files: [src/ydbdoc_review/translation/acquisition.py, src/ydbdoc_review/llm/acquisition.py, tests/unit/test_llm_chat_once.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_model_wiring.py]
+    allowed_symbols: [AcquisitionController.acquire]
+    operation: propagate_control_flow_exceptions
+    exact_target: CancelledError KeyboardInterrupt SystemExit unchanged; no next call
+    required_tests: [cancellation matrix for translate critic repair navigation]
+    allowed_deletions: [BaseException catch]
+    forbidden_approaches: [wrap cancellation, record replacement error]
+    prerequisites: []
+    order: 2
+  - requirement_id: R-018
+    allowed_files: [src/ydbdoc_review/llm/client.py, src/ydbdoc_review/llm/errors.py, tests/unit/test_llm_chat_once.py, tests/unit/test_translation_model_wiring.py]
+    allowed_symbols: [_normalize_yandex_once_error, LLMModelUnavailableError, ChatOnceFailureKind]
+    operation: implement_status_code_based_typed_normalization
+    exact_target: fixed priority table for MODEL_NOT_FOUND/MODEL_UNAVAILABLE, HTTP classes, narrow anchored legacy message, and fail-closed unknowns
+    required_tests: [full provider status/code/message table, conflict priority rows, exact message boundaries, retry/sleep/fallback/terminal counts]
+    allowed_deletions: [message_only_unavailable_classification]
+    forbidden_approaches: [inject only pretyped error, substring-only mapping]
+    prerequisites: []
+    order: 2
+  - requirement_id: R-019
+    allowed_files: [src/ydbdoc_review/pipeline/dependency_queue.py, src/ydbdoc_review/parsing/markdown_parser.py, src/ydbdoc_review/parsing/ast_types.py, tests/unit/test_translation_dependency_queue.py]
+    allowed_symbols: [SourceSpan, DependencyOccurrence, InlineLink.source_span, YfmInclude.source_span, parse_markdown, _parse_inline_children, plan_dependency_queue, parser_link_edge_walker, UnresolvedDependency.occurrences]
+    operation: replace_regex_with_ast_edge_traversal
+    exact_target: parser-populated UTF-8 half-open spans and 1-based line/column; AST-only aggregation of every occurrence
+    required_tests: [Markdown syntax matrix, repeated same-line destinations, multibyte offsets, link/include occurrence aggregation, model serialization, cycles, 20/21]
+    allowed_deletions: ["src/ydbdoc_review/pipeline/dependency_queue.py::_LINK"]
+    forbidden_approaches: [regex discovery, dependency-layer source rescan, substring search, dropped occurrence, duplicate unresolved rows]
+    prerequisites: [R-015]
+    order: 5
+  - requirement_id: R-020
+    allowed_files: [src/ydbdoc_review/pipeline/types.py, src/ydbdoc_review/pipeline/provenance.py, src/ydbdoc_review/github/workflow.py, src/ydbdoc_review/reporting/builder.py, tests/unit/test_translation_provenance.py, tests/unit/test_github_workflow.py, tests/unit/test_reporting_builder.py]
+    allowed_symbols: [ProvenanceFinding, PRTranslationResult, DocJobResult, build_source_pr_comment, build_full_report]
+    operation: preserve_and_surface_structured_findings
+    exact_target: all OIDs/reasons/commits in report with zero model/stage/publish
+    required_tests: [six provenance reasons through real workflow and report]
+    allowed_deletions: [completeness_gap_only_early_return]
+    forbidden_approaches: [log-only detail, model call on provenance block]
+    prerequisites: []
+    order: 7
+  - requirement_id: R-021
+    allowed_files: [src/ydbdoc_review/config/loader.py, src/ydbdoc_review/config/default.yaml, src/ydbdoc_review/github/workflow.py, src/ydbdoc_review/pipeline/skip_paths.py, src/ydbdoc_review/navigation/scope_planner.py, src/ydbdoc_review/pipeline/navigation_merge.py, tests/unit/test_config.py, tests/unit/test_translate_skip_paths.py, tests/unit/test_github_workflow.py, tests/unit/test_navigation_merge.py, tests/unit/test_translation_model_wiring.py]
+    allowed_symbols: [LLMConfig, PathsConfig, navigation_only_exclusions, run_doc_verify, run_navigation_verifies, _drop_skipped_from_toc_scope]
+    operation: delete_legacy_translation_configuration
+    exact_target: delete four run_doc_verify skip call sites and all reachable navigation skip plumbing; universal translate and read-only verify Markdown scope
+    required_tests: [strict removed-key rejection, four workflow call-site regressions, universal RU translate queue, universal RU/EN verify pairs, navigation-only isolation, static forbidden reachability]
+    allowed_deletions: [segments_per_batch_chars, critic_feedback_retries, translate_skip_globs, legacy config tests]
+    forbidden_approaches: [ignore removed keys, RU or EN Markdown skip, empty-default compatibility alias, assigning workflow call sites to R-011 or R-020]
+    prerequisites: [R-011]
+    order: 8
+policy_gates:
+  - changed_path_union_allowlist
+  - exact_allowed_deletions
+  - declared_new_production_symbols
+  - every_changed_file_has_requirement_mapping
+  - developer_protocol_files_immutable
+  - developer_subagents_forbidden
+  - ambiguity_question_and_item_stop
+  - analyst_post_implementation_diff_audit
+  - tester_policy_before_functional
+  - manifest_covers_entire_tracked_and_untracked_diff_against_base
+  - manifest_has_exactly_one_entry_per_path
+  - manifest_status_hash_and_ownership_match_worktree
+  - preexisting_control_artifacts_are_inventoried_and_immutable

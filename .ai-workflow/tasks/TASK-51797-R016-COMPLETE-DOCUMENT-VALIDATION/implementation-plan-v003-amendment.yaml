@@ -1,0 +1,55 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+plan_version: r016-parser-owned-v003
+amends: r016-parser-owned-v002
+scope: close-YFM-source-provenance-contradiction-only
+allowed_production_additions:
+  - path: src/ydbdoc_review/parsing/yfm_plugins/source_spans.py
+    symbols: [utf8_source_span]
+    operation: construct validated SourceSpan payload from parser-owned character offsets only
+  - path: src/ydbdoc_review/parsing/yfm_plugins/conditionals.py
+    symbols: [_yfm_if_rule]
+    tokens: [yfm_if_open, yfm_if_branch_open, yfm_if_branch_close, yfm_if_close]
+  - path: src/ydbdoc_review/parsing/yfm_plugins/notes.py
+    symbols: [_yfm_note_rule]
+    tokens: [yfm_note_open, yfm_note_close]
+  - path: src/ydbdoc_review/parsing/yfm_plugins/cuts.py
+    symbols: [_yfm_cut_rule]
+    tokens: [yfm_cut_open, yfm_cut_close]
+  - path: src/ydbdoc_review/parsing/yfm_plugins/tabs.py
+    symbols: [_yfm_tabs_rule]
+    tokens: [yfm_tabs_open, yfm_tab_open, yfm_tab_close, yfm_tabs_close]
+    remove_symbol: _span
+  - path: src/ydbdoc_review/parsing/yfm_plugins/includes.py
+    symbols: [_yfm_include_rule]
+    tokens: [yfm_include]
+span_contract:
+  physical: utf8_source_span(state.src, state.bMarks[line] + state.tShift[line], state.eMarks[line])
+  virtual_branch_close: zero_width_at_state_bMarks_branch_body_end_plus_tShift
+  virtual_tab_close: zero_width_at_state_bMarks_body_end_plus_tShift
+  metadata_key: source_span
+  physical_non_prose: included_once_in_token_order
+  virtual_close: structural_only_no_hash_no_residual_range
+  listed_yfm_token_fallback_to_map: forbidden
+parser_consumption_exception:
+  existing_plugin_grammar_regex: allowed_unchanged_inside_active_StateBlock_rule_only
+  new_regex: forbidden
+  later_raw_scan: forbidden
+allowed_test_additions:
+  - tests/unit/test_yfm_conditionals.py
+  - tests/unit/test_yfm_notes.py
+  - tests/unit/test_yfm_cuts.py
+  - tests/unit/test_yfm_tabs.py
+  - tests/unit/test_yfm_includes.py
+required_tests:
+  - exact_multibyte_physical_token_spans
+  - exact_zero_width_virtual_boundaries
+  - nested_token_ownership_order
+  - every_marker_hash_mutation_rejected
+  - missing_or_corrupt_meta_span_no_map_fallback
+  - tabs_existing_metadata_preserved
+  - no_later_regex_find_rfind_index
+inherit: [specification.md, specification-v002-amendment.md, implementation-plan.yaml, implementation-plan-v002-amendment.yaml]
+implementation_gate: response-v003.yaml_verdict_APPROVED
+developer_discretion: none
+product_code_edit_by_analyst: forbidden

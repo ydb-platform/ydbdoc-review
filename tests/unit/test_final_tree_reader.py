@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ydbdoc_review.github.git_ops import read_text_at_ref
-from ydbdoc_review.github.workflow import _final_tree_reader, _repair_en_fragments_after_apply
+from ydbdoc_review.github.workflow import _final_tree_reader
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
@@ -112,13 +112,8 @@ def test_late_repair_does_not_rewrite_tip_href_against_stale_merge(git_repo: str
     rel = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     page.write_text(tip_body, encoding="utf-8")
 
-    repaired = _repair_en_fragments_after_apply(
-        git_repo,
-        [rel],
-        dry_run=False,
-        merge_base_with=tip_sha,
-    )
-    assert repaired == []
+    read = _final_tree_reader(git_repo, tip_sha, {rel})
+    assert read(rel) == tip_body
     assert page.read_text(encoding="utf-8") == tip_body
 
 

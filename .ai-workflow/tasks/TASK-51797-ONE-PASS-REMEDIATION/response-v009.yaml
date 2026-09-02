@@ -1,0 +1,38 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-REMEDIATION"
+review_type: "specification"
+specification_version: "one-pass-remediation-v009"
+reviewed_iteration: "one-pass-remediation-v009"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v009-amendment.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v009-amendment.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v008-amendment.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v008-amendment.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v006-amendment.yaml"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/.ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Independent check confirms the immutable snapshot does not contain its own
+  path or the implementation-manifest path, and its SHA-256 still equals the
+  v008 digest 7b04e01da5ee9762548b3c1c58c9e37a9135312e55100e3939d6389439d12336.
+  v009 closes only the missing mapping for that current-delta snapshot output:
+  dedicated immutable-snapshot-output classification after manifest-self, absent
+  baseline, literal verified final digest, exactly-once manifest membership,
+  and forbidden recapture/self-hash/self-entry. v009 protocol paths are added to
+  post-capture control classification. No unrelated scope expansion or developer
+  choice remains. Approval does not authorize implementation.
+findings: []
+confirmations:
+  snapshot_does_not_contain_self_path: true
+  snapshot_sha256_still_matches_v008: true
+  dedicated_immutable_snapshot_output_mapping_closed: true
+  literal_final_digest_not_normalized_self_hash: true
+  no_recapture_or_snapshot_mutation: true
+  v009_protocol_paths_classified: true
+  has_unresolved_developer_choices: false
+  reviewer_verdict_does_not_authorize_implementation: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

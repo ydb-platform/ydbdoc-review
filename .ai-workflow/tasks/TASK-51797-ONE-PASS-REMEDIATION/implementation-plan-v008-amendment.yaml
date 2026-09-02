@@ -1,0 +1,76 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v008
+amends: one-pass-remediation-v006
+scope: R-004-bootstrap-snapshot-count-and-protocol-paths-only
+authoritative_snapshot:
+  path: .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  review_source_path: /private/tmp/ydbdoc-review-one-pass-v003/.ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  sha256: 7b04e01da5ee9762548b3c1c58c9e37a9135312e55100e3939d6389439d12336
+  base_commit: 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  entry_count: 138
+  tracked_entry_count: 93
+  untracked_entry_count: 45
+  git_status_counts: {M: 50, D: 43, "??": 45}
+  unique_paths_required: true
+  mutation: forbidden
+historical_observation:
+  source: implementation-plan.yaml#implementation_manifest.observed_start_inventory
+  tracked_paths: 85
+  untracked_paths: 29
+  total: 114
+  semantics: aggregate_question_time_observation_only
+  use_as_snapshot_count_or_path_inventory: forbidden
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v007.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v007.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v008-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v008-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v008.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v008.yaml
+allowed_code_changes:
+  - path: scripts/remediation_policy_gate.py
+    symbols: [bootstrap_manifest, load_snapshot, validate_path_inventory, main]
+    operation: read_entry_count_138_from_v008_amendment_and_preserve_existing_checks
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [manifest_bootstrap_tests]
+    operation: replace_114_expectation_and_cover_exact_new_control_paths
+bootstrap_changes:
+  expected_snapshot_entry_count: 138
+  require_snapshot_base_equals_cli_base: true
+  require_unique_snapshot_paths: true
+  snapshot_write: forbidden
+  merge_post_capture_paths: v006_exact_paths_plus_v008_addition_exact_paths
+validation_changes:
+  expected_snapshot_entry_count: 138
+  require_snapshot_base_equals_cli_base: true
+  require_unique_snapshot_paths: true
+  require_every_current_delta_path_exactly_once: unchanged
+  post_capture_mapping: control_artifact_with_workflow_protocol_provenance
+unchanged:
+  - v006_classification_precedence
+  - v006_manifest_schema_and_order
+  - v006_normalized_manifest_self_hash
+  - v006_required_absent_uv_lock
+  - v006_output_overwrite_refusal
+  - all_v005_requirements_and_allowlists
+required_tests:
+  - immutable_snapshot_with_138_unique_entries_is_accepted
+  - snapshot_with_114_entries_is_refused
+  - snapshot_base_mismatch_is_refused
+  - duplicate_snapshot_path_is_refused
+  - snapshot_bytes_are_unchanged_after_bootstrap_and_validate
+  - v007_request_and_response_map_to_control_artifact
+  - all_v008_protocol_paths_map_to_control_artifact
+forbidden:
+  - snapshot_recapture
+  - snapshot_rewrite
+  - infer_24_historical_paths
+  - use_observed_start_inventory_as_snapshot_contract
+  - developer_selected_mapping
+  - default_mapping
+  - unrelated_change

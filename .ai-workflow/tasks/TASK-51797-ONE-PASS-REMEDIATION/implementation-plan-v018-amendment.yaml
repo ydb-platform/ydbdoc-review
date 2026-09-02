@@ -1,0 +1,101 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v018
+amends: one-pass-remediation-v017
+scope: close-only-REMEDIATION-V017-001-through-003
+resolver:
+  input_plan_version: one-pass-remediation-v018
+  required_predecessor_file: implementation-plan-v017-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v017
+  operation: resolve_predecessor_then_apply_three_exact_closures
+closures:
+  - finding: REMEDIATION-V017-001
+    requirement_id: R-011
+    files:
+      - src/ydbdoc_review/translation/model_policy.py
+      - src/ydbdoc_review/translation/acquisition.py
+      - src/ydbdoc_review/pipeline/navigation_merge.py
+      - tests/unit/test_translation_model_wiring.py
+      - tests/unit/test_navigation_merge.py
+    symbols: [TranslationChatOnce.chat_once, AcquisitionRole, _translate_menu_labels, TranslationModelPolicy, TranslationJobManifest]
+    exact_change:
+      role_literals: 'Literal["translate", "critic", "repair", "navigation"]'
+      navigation_controller_model_pair: manifest.model_policy.translate
+      navigation_controller_role: navigation
+      policy_roles_unchanged: [translate, critic, repair]
+      manifest_pair_count: 3
+      manifest_slug_count: 6
+    required_tests: [navigation_role_reaches_chat_once, exact_translate_pair_attempt_slugs, policy_yaml_rejects_navigation_key, manifest_still_six_slugs]
+    forbidden: [navigation_model_pair, navigation_config_key, seventh_slug, role_translate_for_navigation, shared_chat]
+  - finding: REMEDIATION-V017-002
+    requirement_id: R-016
+    files:
+      - src/ydbdoc_review/translation/one_pass.py
+      - src/ydbdoc_review/translation/local_repair.py
+      - src/ydbdoc_review/pipeline/translation_transaction.py
+      - tests/unit/test_one_pass_translation.py
+      - tests/unit/test_translation_transaction.py
+    symbols: [ValidationAtomRecord, CompleteDocumentValidationContext, build_complete_document_validation_context, validate_complete_document, run_bounded_local_repair]
+    exact_types:
+      ValidationAtomRecord:
+        decorator: 'dataclass(frozen=True, slots=True)'
+        fields: {block_id: str, atom_id: str, sha256: str}
+      CompleteDocumentValidationContext:
+        decorator: 'dataclass(frozen=True, slots=True)'
+        fields:
+          source_text: str
+          source_file: str
+          source_container_signature: 'tuple[tuple[str, int, int], ...]'
+          source_atoms: 'tuple[ValidationAtomRecord, ...]'
+          source_fence_config_signature: 'tuple[tuple[str, int, int, str], ...]'
+          expected_links: 'tuple[tuple[str, str], ...]'
+          expected_anchor_map: 'tuple[tuple[str, str], ...]'
+          en_toc_reachable: 'frozenset[str] | None'
+          residual_cyrillic_allowed_ranges: 'tuple[tuple[int, int, str], ...]'
+    construction_site: translate_ru_to_en_once_immediately_after_anchor_localization_before_first_complete_validation
+    construction_inputs: [source_text, file_path, source_segments, anchor_map, en_toc_reachable]
+    lifecycle: one_instance_passed_unchanged_to_all_four_validation_boundaries
+    required_tests: [frozen_and_slotted_context, exact_tuple_order_and_hashes, no_model_call_during_construction, same_object_identity_at_four_boundaries, one_corruption_per_invariant]
+    forbidden: [dict_context, mutable_AST_field, lazy_callback, repair_time_reconstruction, missing_field, extra_field]
+  - finding: REMEDIATION-V017-003
+    requirement_id: R-001
+    files: [tests/unit/test_fence_comments.py, tests/unit/test_fence_comments_read_only.py, .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md]
+    symbols: [same_file_fence_comment_read_only_tests, same_file_migration_evidence]
+    exact_final_state:
+      tests/unit/test_fence_comments.py: present_with_base_read_only_cases_plus_every_unique_alternate_case
+      tests/unit/test_fence_comments_read_only.py: deleted_after_combined_file_GREEN
+    required_tests: [exact_unique_case_name_or_parameter_id_conservation, combined_original_path_GREEN, no_retired_writer_import_or_call]
+    forbidden: [keep_duplicate_alternate_file, empty_alternate_file, delete_before_case_move, coverage_loss]
+allowed_support_changes:
+  - path: scripts/remediation_policy_gate.py
+    symbols: [_resolved_amendment]
+    operation: add_exact_v018_to_v017_resolution_step
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [amendment_resolution_tests]
+    operation: prove_v018_predecessor_and_five_new_control_paths
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v018-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v018-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v018.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v018.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v017.yaml
+refresh_command: >-
+  .venv/bin/python -m scripts.remediation_policy_gate refresh-manifest
+  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v018-amendment.yaml
+  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  --output .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+validation_command: >-
+  .venv/bin/python -m scripts.remediation_policy_gate validate
+  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v018-amendment.yaml
+  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  --manifest .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+forbidden_global: [other_v017_change, product_code_implementation_by_analyst, developer_choice, commit, tag, publish]
+

@@ -1,0 +1,50 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-REMEDIATION"
+review_type: "specification"
+specification_version: "one-pass-remediation-v006"
+reviewed_iteration: "one-pass-remediation-v006"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v006-amendment.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v006-amendment.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v006.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v005.yaml"
+verdict: "CHANGES_REQUESTED"
+implementation_authorized: false
+summary: >
+  The v006 amendment package is mostly closed and narrowly scoped to R-004
+  manifest bootstrap: fixed classification precedence, normalized self-hash,
+  immutable 114-entry snapshot handling, uv.lock required_absent, exact
+  bootstrap/validate commands, and prohibition on uv/dependency regeneration.
+  Unrelated v005 requirements are correctly left unchanged. However the review
+  request and plan both require questions/R-004-manifest-bootstrap.md as a
+  reviewed artifact and post-capture control path, and that file is absent from
+  the task tree. Without it, external review cannot verify the amendment closes
+  the exact open developer choices. Publish the question file byte-identically
+  and resubmit; if the question content is already fully absorbed, still publish
+  the frozen provenance artifact listed in the plan.
+findings:
+  - id: "REMEDIATION-V006-001"
+    severity: RED
+    problem: >
+      review-request-v006.md and implementation-plan-v006-amendment.yaml require
+      questions/R-004-manifest-bootstrap.md, but that path does not exist under
+      TASK-51797-ONE-PASS-REMEDIATION/. The amendment claims to close that
+      question, yet the question artifact itself is missing from the review
+      package and from post_capture_control_paths materialization.
+    required_change: >
+      Add .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/questions/R-004-manifest-bootstrap.md
+      as the immutable developer question provenance artifact, then re-request
+      review for v006. Do not widen unrelated v005 scope.
+resolved_findings: []
+confirmations:
+  scope_limited_to_r004_manifest_bootstrap: true
+  v005_requirements_left_unchanged: true
+  normalized_self_hash_rule_is_executable: true
+  classification_precedence_forbids_developer_choice: true
+  uv_commands_forbidden_and_required_absent_closed: true
+  snapshot_overwrite_forbidden: true
+  developer_question_artifact_present_for_review: false
+has_unresolved_developer_choices: true
+functional_ok: false
+minimality_ok: true

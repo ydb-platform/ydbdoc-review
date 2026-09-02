@@ -217,6 +217,7 @@ def prepare_translation_branch_on_base(
     base_remote_name: str,
     base_branch: str,
     paths: list[str],
+    base_commit_sha: str | None = None,
     deleted_paths: list[str] | None = None,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="ydbdoc-review-staging-") as staging:
@@ -230,9 +231,12 @@ def prepare_translation_branch_on_base(
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
             saved.append(rel)
-        ensure_remote(repo, base_remote_name, base_remote_url)
-        tip_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
-        checkout_branch_at_ref(repo, translation_branch, tip_ref)
+        if base_commit_sha is None:
+            ensure_remote(repo, base_remote_name, base_remote_url)
+            start_ref = fetch_remote_branch(repo, base_remote_name, base_branch)
+        else:
+            start_ref = base_commit_sha
+        checkout_branch_at_ref(repo, translation_branch, start_ref)
         for rel in saved:
             src = root / rel.replace("/", os.sep)
             if not src.is_file():

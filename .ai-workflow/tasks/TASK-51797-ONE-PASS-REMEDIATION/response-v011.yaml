@@ -1,0 +1,36 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-REMEDIATION"
+review_type: "specification"
+specification_version: "one-pass-remediation-v011"
+reviewed_iteration: "one-pass-remediation-v011"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v011-amendment.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v011-amendment.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v010-amendment.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v009-amendment.yaml"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/scripts/remediation_policy_gate.py"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Code inspection of _resolved_amendment confirms the R-004 chain currently
+  composes only v006/v008/v009, so the four v010 protocol artifacts remain
+  unmapped despite being declared in the v010 plan. v011 closes that gap with an
+  exact predecessor step to v009 and an exact eight-path append: four v010
+  subject artifacts plus four self-sealing v011 protocol artifacts, all as
+  control_artifact with workflow-protocol-provenance and absent baseline. No
+  wildcard, generic discovery, snapshot/manifest mutation or unrelated scope is
+  authorized; only _resolved_amendment and its resolver tests may change.
+  Approval does not authorize implementation.
+findings: []
+confirmations:
+  root_cause_confirmed_in_current_resolver: true
+  exact_four_v010_subject_paths: true
+  exact_four_v011_self_sealing_paths: true
+  no_wildcard_or_generic_discovery: true
+  no_snapshot_or_manifest_contract_change: true
+  has_unresolved_developer_choices: false
+  reviewer_verdict_does_not_authorize_implementation: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

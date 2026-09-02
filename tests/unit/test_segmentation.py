@@ -37,8 +37,11 @@ def test_protect_link_yields_marker():
     doc = parse_markdown("See [docs](http://x) for details.\n")
     para = doc.children[0]
     text, placeholders = protect_inline(para.children)
-    assert text == "See [docs](⟦U1⟧) for details."
-    assert placeholders[0].placeholder == "⟦U1⟧"
+    assert text == "See ⟦LBEGIN_1⟧docs⟦LEND_1⟧ for details."
+    assert [item.placeholder for item in placeholders] == [
+        "⟦LBEGIN_1⟧",
+        "⟦LEND_1⟧",
+    ]
     assert placeholders[0].node.href == "http://x"
     assert placeholders[0].node.children == []
 
@@ -51,7 +54,7 @@ def test_protect_link_ru_url_roundtrip_reinsert():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    translated = "See [documentation](⟦U1⟧) here."
+    translated = "See ⟦LBEGIN_1⟧documentation⟦LEND_1⟧ here."
     new_doc = reinsert_segments(doc, segments, {seg.id: translated})
     from ydbdoc_review.validation.link_locale import localize_links_in_document
 
@@ -77,26 +80,28 @@ def test_protect_multiple_mixed():
     text, placeholders = protect_inline(para.children)
     # Order: code, link, variable.
     assert "⟦C1⟧" in text
-    assert "⟦U1⟧" in text
+    assert "⟦LBEGIN_1⟧" in text
+    assert "⟦LEND_1⟧" in text
     assert "⟦V1⟧" in text
-    assert len(placeholders) == 3
+    assert len(placeholders) == 4
 
 
-def test_protect_emphasis_kept_inline():
+def test_protect_emphasis_boundaries_are_source_owned():
     doc = parse_markdown("This is *italic* text.\n")
     para = doc.children[0]
     text, placeholders = protect_inline(para.children)
-    # Emphasis markers stay; no placeholders.
-    assert text == "This is *italic* text."
-    assert placeholders == []
+    assert text == "This is ⟦EMBEGIN_1⟧italic⟦EMEND_1⟧ text."
+    assert len(placeholders) == 2
 
 
 def test_protect_strong_with_nested_code():
     doc = parse_markdown("Use **bold `code` here**.\n")
     para = doc.children[0]
     text, placeholders = protect_inline(para.children)
-    assert text == "Use **bold ⟦C1⟧ here**."
-    assert len(placeholders) == 1
+    assert text == "Use ⟦STRONGBEGIN_1⟧bold ⟦C1⟧ here⟦STRONGEND_1⟧."
+    assert [p.placeholder for p in placeholders] == [
+        "⟦C1⟧", "⟦STRONGBEGIN_1⟧", "⟦STRONGEND_1⟧"
+    ]
 
 
 def test_restore_identity_roundtrip():

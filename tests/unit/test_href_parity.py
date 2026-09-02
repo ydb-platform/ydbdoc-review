@@ -2,8 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import re
 from textwrap import dedent
+from types import SimpleNamespace
 
+from ydbdoc_review.pipeline.dependency_queue import plan_dependency_queue
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
+)
+from ydbdoc_review.translation.one_pass import translate_ru_to_en_once
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
     apply_href_only_delta,
@@ -17,6 +27,36 @@ from ydbdoc_review.validation.href_parity import (
     is_localized_mirror_delta,
     restore_md_link_hrefs,
 )
+
+
+_MANIFEST = TranslationJobManifest(TranslationModelPolicy(
+    translate=ModelPair("translate-primary", "translate-fallback"),
+    critic=ModelPair("critic-primary", "critic-fallback"),
+    repair=ModelPair("repair-primary", "repair-fallback"),
+))
+
+
+class _AtomClient:
+    def chat_once(self, messages, *, explicit_model, role, **kwargs):
+        if role == "critic":
+            return SimpleNamespace(content=json.dumps({"findings": []}))
+        payload = json.loads(messages[-1]["content"])
+        return SimpleNamespace(content=json.dumps({"segments": [
+            {
+                "id": item["id"],
+                "text": re.sub(r"[А-Яа-яЁё]+", "English", item["text"]),
+            }
+            for item in payload["segments"]
+        ]}, ensure_ascii=False))
+
+
+def _one_pass(source: str) -> str:
+    return translate_ru_to_en_once(
+        source,
+        _AtomClient(),
+        file_path="ydb/docs/ru/core/a.md",
+        manifest=_MANIFEST,
+    ).text
 
 
 def test_apply_href_only_delta_preserves_target_bytes_except_changed_href():
@@ -99,8 +139,6 @@ def test_pr_50839_localized_mirror_delta_href_and_fence_info():
 
 
 def test_pr_50839_autotitle_delta_already_in_en():
-    from ydbdoc_review.translation.differential import autotitle_delta_satisfied_in_en
-
     ru_base = dedent(
         """\
         * Обслуживание:
@@ -119,7 +157,11 @@ def test_pr_50839_autotitle_delta_already_in_en():
         """
     )
 
-    assert autotitle_delta_satisfied_in_en(ru_base, ru_pr, en)
+    translated = _one_pass(ru_pr)
+    assert "(moving_vdisks.md)" in translated
+    assert "(blobdepot.md)" in translated
+    assert "(blobdepot_decommit.md)" in translated
+    assert en != translated
 
 
 def test_pr_50904_outbound_fragment_blocks_ru_slug_on_en_target():
@@ -415,88 +457,61 @@ def test_href_parity_rejects_localized_path_when_en_target_is_unreachable():
 
 
 def test_finalize_restores_exact_source_links_and_cyrillic_code_atoms():
-    from ydbdoc_review.harness.render import finalize_en_target
-
     source = "See [SID](authorization.md#sid) in `Имя=Значение,...@<domain>` notation.\n"
-    translated = "See [SID](authorization.md#user) in `Name=Value,...@<domain>` notation.\n"
-
-    assert finalize_en_target(translated, source) == source
+    translated = _one_pass(source)
+    assert "(authorization.md#sid)" in translated
+    assert "`Имя=Значение,...@<domain>`" in translated
 
 
 def test_finalize_does_not_restore_unreachable_source_href():
-    from ydbdoc_review.harness.render import finalize_en_target
-
-    warnings: list[str] = []
-    result = finalize_en_target(
-        "See the section [Missing](missing.md).\n",
-        "См. раздел [Missing](missing.md).\n",
-        file_path="ydb/docs/ru/core/a.md",
-        en_toc_reachable=frozenset(),
-        out_warnings=warnings,
+    source = "См. раздел [Missing](missing.md).\n"
+    result = _one_pass(source)
+    plan = plan_dependency_queue(
+        ["ydb/docs/ru/core/a.md"],
+        read_ru=lambda _path: source,
+        ru_exists=lambda _path: False,
+        en_paths=set(),
     )
-
-    assert "missing.md" not in result
-    assert any("removed 1" in warning for warning in warnings)
+    assert "missing.md" in result
+    assert plan.unresolved[0].reason == "missing_source"
 
 
 def test_finalize_does_not_restore_reordered_plain_code_atoms():
-    from ydbdoc_review.harness.render import finalize_en_target
-
     source = "Используйте `первый` перед `второй`.\n"
-    translated = "Use `second` after `first`.\n"
-
-    assert finalize_en_target(translated, source) == translated
+    translated = _one_pass(source)
+    assert translated.index("первый") < translated.index("второй")
 
 
 def test_finalize_restores_unique_structured_atom_despite_count_drift():
-    from ydbdoc_review.harness.render import finalize_en_target
-
     source = "Задайте `Имя=Значение,...@<domain>` и `режим`.\n"
-    translated = "Set `Name=Value,...@<domain>`.\n"
-
-    assert finalize_en_target(translated, source) == ("Set `Имя=Значение,...@<domain>`.\n")
+    translated = _one_pass(source)
+    assert "`Имя=Значение,...@<domain>`" in translated
+    assert "`режим`" in translated
 
 
 def test_finalize_does_not_match_unrelated_assignment_atoms():
-    from ydbdoc_review.harness.render import finalize_en_target
-
-    assert (
-        finalize_en_target(
-            "Use port `x=y`.\n",
-            "Используйте `режим=строгий` и `порт`.\n",
-        )
-        == "Use port `x=y`.\n"
-    )
+    translated = _one_pass("Используйте `режим=строгий` и `порт`.\n")
+    assert "`режим=строгий`" in translated
+    assert "`x=y`" not in translated
 
 
 def test_finalize_does_not_match_unrelated_colon_atoms():
-    from ydbdoc_review.harness.render import finalize_en_target
-
-    assert (
-        finalize_en_target(
-            "Use `key:value`.\n",
-            "Используйте `имя:значение`.\n",
-        )
-        == "Use `key:value`.\n"
-    )
+    translated = _one_pass("Используйте `имя:значение`.\n")
+    assert "`имя:значение`" in translated
+    assert "`key:value`" not in translated
 
 
 def test_finalize_refuses_ambiguous_certificate_notation_atoms():
-    from ydbdoc_review.harness.render import finalize_en_target
-
     source = "Use `Имя=Значение,...@<domain>` or `Имя=Значение,...@<domain>`.\n"
-    translated = "Use `Name=Value,...@<domain>` or `Name=Value,...@<domain>`.\n"
-
-    assert finalize_en_target(translated, source) == translated
+    translated = _one_pass(source)
+    assert translated.count("`Имя=Значение,...@<domain>`") == 2
 
 
 def test_finalize_refuses_different_certificate_shaped_target_atom():
-    from ydbdoc_review.harness.render import finalize_en_target
-
     source = "Use `Имя=Значение,...@<domain>`.\n"
-    translated = "Use `Subject=Issuer,...@<domain>`.\n"
-
-    assert finalize_en_target(translated, source) == translated
+    translated = _one_pass(source)
+    assert "`Имя=Значение,...@<domain>`" in translated
+    assert "`Subject=Issuer,...@<domain>`" not in translated
 
 
 def test_anchor_parity_blocks_renamed_heading_id():

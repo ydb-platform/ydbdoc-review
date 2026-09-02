@@ -1,0 +1,81 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v009
+amends: one-pass-remediation-v008
+scope: R-004-immutable-snapshot-self-path-only
+immutable_snapshot_output:
+  path: .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  mapping_source: immutable-snapshot-output
+  ownership_class: implementation_report
+  requirement_ids: [R-004]
+  git_status: "??"
+  baseline_state: {kind: absent, sha256: ""}
+  final_state:
+    kind: present
+    sha256: 7b04e01da5ee9762548b3c1c58c9e37a9135312e55100e3939d6389439d12336
+    hash_semantics: literal_sha256_of_current_snapshot_file_bytes
+  manifest_cardinality: exactly_once
+  snapshot_membership: forbidden
+  mutation: forbidden
+  recapture: forbidden
+  normalized_self_hash: forbidden
+  validation_prerequisites:
+    base_commit: 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+    entry_count: 138
+    unique_paths: 138
+    git_status_counts: {M: 50, D: 43, "??": 45}
+classification_precedence_addition:
+  after: manifest-self
+  before: post-capture-control
+  exact_path: .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  result:
+    mapping_source: immutable-snapshot-output
+    ownership_class: implementation_report
+    requirement_ids: [R-004]
+baseline_state_rule:
+  exact_path: .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  value: {kind: absent, sha256: ""}
+  reason: capture_output_did_not_exist_in_the_delta_it_captured
+final_state_rule:
+  exact_path: .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  value_source: literal_current_file_sha256_after_verified_immutable_snapshot_load
+  required_value: 7b04e01da5ee9762548b3c1c58c9e37a9135312e55100e3939d6389439d12336
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v009-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v009-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v009.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v009.yaml
+allowed_code_changes:
+  - path: scripts/remediation_policy_gate.py
+    symbols: [classify_manifest_entry, bootstrap_manifest, validate_manifest, main]
+    operation: add_exact_immutable_snapshot_output_mapping_and_state_validation
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [manifest_bootstrap_tests]
+    operation: cover_exact_snapshot_output_contract_and_v009_control_paths
+required_tests:
+  - immutable_snapshot_output_maps_exactly_once
+  - immutable_snapshot_output_baseline_is_absent
+  - immutable_snapshot_output_final_sha_is_literal_verified_digest
+  - immutable_snapshot_output_missing_is_RED
+  - immutable_snapshot_output_tampering_is_RED
+  - immutable_snapshot_never_contains_its_own_path
+  - bootstrap_and_validate_never_rewrite_or_recapture_snapshot
+  - all_v009_protocol_paths_map_to_control_artifact
+unchanged:
+  - v008_authoritative_snapshot_count_base_digest_and_status_contract
+  - v006_manifest_schema_and_manifest_normalized_self_hash
+  - v006_required_absent_uv_lock
+  - v006_output_overwrite_refusal
+  - all_v005_requirements_and_allowlists
+forbidden:
+  - snapshot_recapture
+  - snapshot_rewrite
+  - snapshot_self_entry
+  - snapshot_normalized_self_hash
+  - developer_selected_mapping
+  - default_mapping
+  - unrelated_change

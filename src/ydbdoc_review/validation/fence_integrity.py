@@ -345,34 +345,6 @@ def check_fence_body_copy(
     return warnings
 
 
-def _copy_fence_body_from_source(
-    src: FencedCode | IndentedCode, tgt: FencedCode | IndentedCode
-) -> bool:
-    """Return False for ``text`` diagram fences — keep EN translation (§6.59)."""
-    if isinstance(src, FencedCode):
-        return _fence_lang(src.info) != "text"
-    return True
-
-
-def enforce_source_fenced_blocks(target_text: str, source_text: str) -> str:
-    """Re-render EN with code block bodies copied verbatim from source."""
-    src_doc = parse_markdown(source_text)
-    tgt_doc = parse_markdown(target_text)
-    src_blocks = collect_code_blocks(src_doc)
-    tgt_blocks = collect_code_blocks(tgt_doc)
-    if len(src_blocks) != len(tgt_blocks):
-        return target_text
-    for src, tgt in zip(src_blocks, tgt_blocks, strict=True):
-        if not _copy_fence_body_from_source(src, tgt):
-            continue
-        tgt.content = src.content
-        if isinstance(src, FencedCode) and isinstance(tgt, FencedCode):
-            tgt.info = src.info
-            tgt.fence_char = src.fence_char
-            tgt.fence_len = src.fence_len
-    return render_markdown(tgt_doc)
-
-
 def check_absolute_paths_in_fences(source_text: str, target_text: str) -> list[str]:
     """Warn when RU fence lines use /opt/ydb/... but EN counterpart line lost the prefix."""
     warnings: list[str] = []

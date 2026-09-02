@@ -44,11 +44,7 @@ from ydbdoc_review.github.pr import (
     verify_fixup_branch,
     verify_fixup_pr_base,
 )
-from ydbdoc_review.harness.pr_context import PRHarnessContext
-from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
-from ydbdoc_review.harness.pr_runner import PRHarness
-from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.llm.client import create_llm_client
+from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
 from ydbdoc_review.navigation.redirects import redirect_source_repo_md_paths
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
@@ -78,6 +74,10 @@ from ydbdoc_review.pipeline.completeness import (
     href_only_source_noop_satisfied,
     translation_pr_scope_gaps,
 )
+from ydbdoc_review.pipeline.dependency_queue import (
+    paths_at_tree,
+    plan_dependency_queue,
+)
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
@@ -91,7 +91,11 @@ from ydbdoc_review.pipeline.pairs import (
     counterpart,
     filter_translation_pr_verify_scope,
 )
-from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
+from ydbdoc_review.pipeline.provenance import (
+    guard_publication_provenance,
+    resolve_sha,
+)
+from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
@@ -104,6 +108,12 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.translation.model_policy import (
+    TranslationJobManifest,
+    load_serialized_translation_model_policy,
+    require_translation_chat_once,
+)
+from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
@@ -118,7 +128,6 @@ from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
     apply_toc_target_checks,
 )
-from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +290,6 @@ def _apply_results_to_disk(
     docs_root: str = "ydb/docs",
 ) -> TouchedPaths:
     """Write translated markdown, navigation YAML, locale assets, and deletes."""
-    from ydbdoc_review.translation.file_profiles import is_glossary_file
     from ydbdoc_review.validation.locale_assets import apply_locale_asset_copies
 
     written: list[str] = []
@@ -290,10 +298,6 @@ def _apply_results_to_disk(
         if run.skipped or run.error:
             continue
         rel = run.plan.target_path
-        # Glossary hub: never rewrite EN from verify (critic/finalize can
-        # hybridize 400+ segments; §6.189 / #49578).
-        if run.plan.action == "critic_only" and is_glossary_file(rel):
-            continue
         if run.deleted:
             deleted.append(rel)
             if dry_run:
@@ -304,14 +308,10 @@ def _apply_results_to_disk(
             continue
         if run.target_text is None:
             continue
-        # §6.232: critic_only no-ops must not enter ``written``. Inline verify
-        # restages those paths onto the remote tip; overlaying unchanged
-        # checkout bytes clobbers concurrent tip fixes (e.g. a manual href
-        # repair pushed while this job still held an older SHA).
-        if run.plan.action == "critic_only":
-            on_disk = read_text(repo_path, rel)
-            if on_disk is not None and on_disk == run.target_text:
-                continue
+        # Generic stale-safe no-op: identical v010 output must not be restaged.
+        on_disk = read_text(repo_path, rel)
+        if on_disk is not None and on_disk == run.target_text:
+            continue
         written.append(rel)
         if not dry_run:
             write_text(repo_path, rel, run.target_text)
@@ -374,62 +374,6 @@ def _final_tree_reader(
     return _read
 
 
-def _repair_en_fragments_after_apply(
-    repo_path: str,
-    paths: list[str],
-    *,
-    dry_run: bool,
-    merge_base_with: str | None = None,
-) -> list[str]:
-    """Re-run fragment repair once all EN targets exist on disk (§6.225).
-
-    Pair-level ``repair_en_fragments`` can run before a newly translated EN
-    target page is written, leaving RU legacy translit fragments in place.
-    Inbound redirect retarget also skips links whose path already points at
-    the redirect ``to`` target. A final pass over written EN pages fixes both.
-
-    When ``merge_base_with`` is set, target resolution uses the §6.229 final
-    tree (tip + overlays) so tip-preserved pages are not rewritten against a
-    stale merge-commit worktree.
-    """
-    from ydbdoc_review.validation.fragment_repair import repair_en_fragments
-
-    overlay = {p.replace("\\", "/") for p in paths}
-    if merge_base_with:
-        _read = _final_tree_reader(repo_path, merge_base_with, overlay)
-    else:
-
-        def _read(path: str) -> str | None:
-            return read_text(repo_path, path)
-
-    repaired: list[str] = []
-    for rel in paths:
-        if not rel.endswith(".md") or "/docs/en/" not in rel:
-            continue
-        # Always edit the bytes we wrote (worktree), not tip.
-        en_text = read_text(repo_path, rel)
-        if not en_text:
-            continue
-        ru_twin = rel.replace("/docs/en/", "/docs/ru/", 1)
-        fixed = repair_en_fragments(
-            en_text,
-            en_page_path=rel,
-            read_text=_read,
-            ru_source=_read(ru_twin),
-            en_baseline=(
-                read_text_at_ref(repo_path, merge_base_with, rel)
-                if merge_base_with
-                else None
-            ),
-        )
-        if fixed == en_text:
-            continue
-        repaired.append(rel)
-        if not dry_run:
-            write_text(repo_path, rel, fixed)
-    return repaired
-
-
 def _run_verify_pairs(
     contents: list[PairContent],
     client: YandexLLMClient,
@@ -440,17 +384,42 @@ def _run_verify_pairs(
     docs_text_reader=None,
     docs_repo_path: str | None = None,
 ) -> PRTranslationResult:
-    """Critic-only QA for existing RU/EN pairs."""
-    state = PRRunState(contents=contents)
-    ctx = PRHarnessContext.from_options(
-        client,
-        glossary=glossary,
-        config=config,
-        en_toc_reachable=en_toc_reachable,
-        docs_text_reader=docs_text_reader,
-        docs_repo_path=docs_repo_path,
-    )
-    return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
+    """Read-only QA for existing RU/EN pairs; never mutate target bytes."""
+    result = PRTranslationResult()
+    for content in contents:
+        pair = content.pair
+        plan = PairPlan(
+            pair=pair,
+            action="read_only_qa",
+            source_path=pair.en_path,
+            target_path=pair.en_path,
+            source_lang="en",
+            target_lang="en",
+            summary="read-only verification",
+        )
+        if content.ru_text is None or content.en_text is None:
+            result.pair_results.append(
+                PairRunResult(plan=plan, error="missing RU or EN source")
+            )
+            continue
+        file_result = translate_file(
+            content.ru_text,
+            client,
+            glossary,
+            file_path=pair.ru_path,
+            config=config,
+            enable_translate=False,
+            existing_target_text=content.en_text,
+        )
+        result.pair_results.append(
+            PairRunResult(
+                plan=plan,
+                target_text=content.en_text,
+                file_result=file_result,
+                source_text=content.ru_text,
+            )
+        )
+    return result
 
 
 def run_doc_translate(
@@ -468,6 +437,7 @@ def run_doc_translate(
 ) -> DocJobResult:
     """Full ``doc_translate`` workflow for a source PR."""
     started = time.monotonic()
+    manifest = TranslationJobManifest(load_serialized_translation_model_policy())
     cfg = config or load_config()
     api_token, push_token = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
@@ -504,34 +474,27 @@ def run_doc_translate(
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
 
-    ru_ref = translate_ru_content_ref(ctx)
+    ru_ref = translate_ru_content_ref(ctx) or ctx.head_sha
     ru_base_ref: str | None = None
-    if ru_ref is not None:
+    if ru_ref:
         if ensure_commit(repo_path, ru_ref):
+            if ctx.merged:
+                ru_base_ref = f"{ru_ref}^"
             logger.info(
-                "Merged source PR #%s: reading RU from merge commit %s",
+                "Source PR #%s: reading RU from immutable tree %s",
                 pr_number,
                 ru_ref[:12],
             )
-            # A merged PR's original RU delta is merge_commit^..merge_commit.
-            # Comparing it with current main makes old source changes look like
-            # no-ops and silently preserves stale EN (§6.210 / #40385).
-            ru_base_ref = f"{ru_ref}^"
         else:
-            logger.warning(
-                "Merged source PR #%s: merge commit %s not fetchable; "
-                "falling back to checkout HEAD for RU",
-                pr_number,
-                ru_ref[:12],
+            raise RuntimeError(
+                f"source_tree_sha is not fetchable for one-pass translation: {ru_ref}"
             )
-            ru_ref = None
 
     changes = source_pr_scope_changes(
         ctx,
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
-    changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
     read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
         repo_path,
@@ -546,19 +509,51 @@ def run_doc_translate(
         read_ru_base=read_ru_base,
         docs_root=docs_root,
     )
-    skip_globs = cfg.paths.translate_skip_globs
-    if skip_globs:
-        from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+    if not ru_ref:
+        raise RuntimeError("source_tree_sha is required for one-pass translation")
+    source_tree_paths = paths_at_tree(repo_path, ru_ref)
+    initial_ru_md = [
+        path
+        for path, kind in changes
+        if kind != "deleted"
+        and path.startswith(f"{docs_root}/ru/")
+        and path.endswith(".md")
+    ]
+    dependency_plan = plan_dependency_queue(
+        initial_ru_md,
+        read_ru=lambda path: read_ru(path) or "",
+        ru_exists=lambda path: path in source_tree_paths,
+        en_paths={p for p in source_tree_paths if p.startswith(f"{docs_root}/en/")},
+        docs_root=docs_root,
+    )
+    source_base_sha = ru_base_ref or ctx.base_sha
+    publication_tree_sha = resolve_sha(repo_path, merge_base_with)
+    source_pr_paths = {path for path, _kind in changes}
+    if not source_base_sha:
+        raise RuntimeError("source_base_sha is required for provenance guard")
+    provenance_findings = guard_publication_provenance(
+        repo_path=repo_path,
+        merged=ctx.merged,
+        source_tree_sha=ru_ref,
+        source_base_sha=source_base_sha,
+        publication_tree_sha=publication_tree_sha,
+        initial_ru_paths=set(initial_ru_md),
+        auto_added_ru_paths={e.ru_path for e in dependency_plan.entries if e.origin == "auto_added"},
+        source_pr_paths=source_pr_paths,
+        to_en_path=lambda path: path.replace(f"{docs_root}/ru/", f"{docs_root}/en/", 1),
+    )
+    from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 
-        scope_plan = TranslationScopePlan(
-            doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
-            doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
-            doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
-            nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
-            nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
-            nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
-            doc_deleted=filter_path_set(scope_plan.doc_deleted, skip_globs),
-        )
+    planned_docs = frozenset(entry.ru_path for entry in dependency_plan.entries)
+    scope_plan = TranslationScopePlan(
+        doc_ru_paths=planned_docs,
+        doc_from_diff=frozenset(initial_ru_md),
+        doc_from_main=planned_docs - frozenset(initial_ru_md),
+        nav_ru_paths=scope_plan.nav_ru_paths,
+        nav_from_diff=scope_plan.nav_from_diff,
+        nav_from_main=scope_plan.nav_from_main,
+        doc_deleted=scope_plan.doc_deleted,
+    )
     logger.info(
         "Scope plan for PR #%s: %s doc paths (%s diff + %s main), %s nav paths",
         pr_number,
@@ -567,7 +562,7 @@ def run_doc_translate(
         len(scope_plan.doc_from_main),
         len(scope_plan.nav_ru_paths),
     )
-    bilingual_skip = frozenset(bilingual_en_mirrors(changes, docs_root=docs_root))
+    bilingual_skip: frozenset[str] = frozenset()
     pairs = doc_pairs_from_plan(
         scope_plan,
         docs_root=docs_root,
@@ -594,6 +589,15 @@ def run_doc_translate(
         translation_branch=branch,
         dry_run=dry_run,
     )
+    if provenance_findings:
+        job.pr_result = PRTranslationResult(
+            completeness_gaps=sorted(
+                {finding.en_path or finding.ru_path for finding in provenance_findings}
+            ),
+            provenance_findings=list(provenance_findings),
+        )
+        logger.error("Translation provenance guard blocked before model use: %s", provenance_findings)
+        return job
     if not pairs and not nav_pairs:
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
         # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
@@ -625,6 +629,7 @@ def run_doc_translate(
         return job
 
     client = create_llm_client(cfg)
+    require_translation_chat_once(client)
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
@@ -681,8 +686,7 @@ def run_doc_translate(
             # source PRs. Routing merged PRs through critic-only verify planning
             # skipped any pair missing RU or EN text — so new RU pages never got
             # EN mirrors and deleted RU pages never removed EN (#45949 / #51696).
-            # Historical EN preservation stays in differential translate +
-            # localized mirror delta with merge_commit^ as RU base (§6.210).
+            # The immutable source tree is the only translation input.
             pr_result = run_pr_translation(
                 contents,
                 client,
@@ -693,15 +697,20 @@ def run_doc_translate(
                 redirect_source_en_paths=redirect_source_en,
                 docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
                 docs_repo_path=repo_path,
+                manifest=manifest,
+                dependency_plan=dependency_plan,
+                pinned_en_paths={
+                    path
+                    for path in paths_at_tree(repo_path, publication_tree_sha)
+                    if path.startswith(f"{docs_root}/en/") and path.endswith(".md")
+                },
+                read_pinned_en=lambda path: read_text_at_ref(
+                    repo_path, publication_tree_sha, path
+                ),
+                read_ru_source=read_ru,
             )
         else:
             pr_result = PRTranslationResult()
-
-        md_en_paths = {
-            r.plan.target_path
-            for r in pr_result.pair_results
-            if r.target_text is not None and not r.error
-        }
 
         if nav_pairs:
             pr_result.navigation_results = run_navigation_merges(
@@ -711,6 +720,7 @@ def run_doc_translate(
                 client=client,
                 glossary=glossary,
                 config=cfg,
+                manifest=manifest,
                 scope_plan=scope_plan,
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
@@ -738,6 +748,46 @@ def run_doc_translate(
             dict.fromkeys([*pr_result.completeness_gaps, *orphan_paths])
         )
     job.pr_result = pr_result
+
+    if dependency_plan.unresolved:
+        pr_result.completeness_gaps.extend(
+            sorted({item.output_file for item in dependency_plan.unresolved})
+        )
+
+    # Revalidate the immutable source/publication snapshot immediately before
+    # any repository mutation. Publication itself is also based on the pinned
+    # publication commit below, never on a newly fetched moving branch tip.
+    final_provenance_findings = guard_publication_provenance(
+        repo_path=repo_path,
+        merged=ctx.merged,
+        source_tree_sha=ru_ref,
+        source_base_sha=source_base_sha,
+        publication_tree_sha=publication_tree_sha,
+        initial_ru_paths=set(initial_ru_md),
+        auto_added_ru_paths={e.ru_path for e in dependency_plan.entries if e.origin == "auto_added"},
+        source_pr_paths=source_pr_paths,
+        to_en_path=lambda path: path.replace(
+            f"{docs_root}/ru/", f"{docs_root}/en/", 1
+        ),
+    )
+    if final_provenance_findings:
+        logger.error(
+            "Translation provenance guard blocked before publication: %s",
+            final_provenance_findings,
+        )
+        pr_result.completeness_gaps.extend(
+            sorted(
+                {
+                    finding.en_path or finding.ru_path
+                    for finding in final_provenance_findings
+                }
+            )
+        )
+        pr_result.provenance_findings.extend(
+            finding
+            for finding in final_provenance_findings
+            if finding not in pr_result.provenance_findings
+        )
 
     if pr_result.completeness_gaps:
         logger.error(
@@ -792,25 +842,6 @@ def run_doc_translate(
                 touched.deleted,
             )
 
-        # After all EN targets and inbound retargets are on disk, remap any
-        # leftover RU translit / Cyrillic fragments (§6.225 / #45949).
-        late_repair = _repair_en_fragments_after_apply(
-            repo_path,
-            touched.written,
-            dry_run=dry_run,
-            merge_base_with=merge_base_with,
-        )
-        if late_repair:
-            logger.info(
-                "Late EN fragment repair on %d path(s): %s",
-                len(late_repair),
-                late_repair,
-            )
-            touched = TouchedPaths(
-                list(dict.fromkeys([*touched.written, *late_repair])),
-                touched.deleted,
-            )
-
         # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
         # Baseline = upstream tip EN so ambient tip link debt does not block
         # push when this PR did not introduce it (§6.228 / #40385).
@@ -859,6 +890,7 @@ def run_doc_translate(
             base_remote_name="ydbdoc-review-upstream",
             base_branch=branch_start_ref,
             paths=touched.written,
+            base_commit_sha=publication_tree_sha,
             deleted_paths=touched.deleted,
         )
         msg = build_commit_message(pr_number, pr_result, config=cfg)
@@ -1073,14 +1105,11 @@ def run_doc_verify(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
-    changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     source_changes = (
         list_pr_file_changes_api(gh, owner, repo, source_pr)
         if source_pr is not None
         else (None if translation_pr else changes)
     )
-    if source_changes is not None:
-        source_changes = filter_translate_changes(source_changes, cfg.paths.translate_skip_globs)
     # On verify-* continue/re-verify: re-check the original bilingual source scope
     # (not only the narrow fixup diff).
     pair_changes = source_changes if verify_fixup_pr and source_changes is not None else changes
@@ -1103,18 +1132,6 @@ def run_doc_verify(
             read_ru_base=read_ru_base,
             docs_root=cfg.paths.docs_root,
         )
-        skip_globs = cfg.paths.translate_skip_globs
-        if skip_globs:
-            from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
-
-            scope_plan = TranslationScopePlan(
-                doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
-                doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
-                doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
-                nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
-                nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
-                nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
-            )
         nav_pairs = merge_navigation_pair_lists(
             navigation_pairs_from_plan(scope_plan, docs_root=cfg.paths.docs_root),
             nav_pairs,
@@ -1290,7 +1307,6 @@ def run_doc_verify(
             ),
             docs_root=cfg.paths.docs_root,
             active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
-            skip_globs=cfg.paths.translate_skip_globs,
         )
 
     apply_include_parity_repair(

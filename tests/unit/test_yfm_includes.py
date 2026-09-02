@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ydbdoc_review.parsing.ast_types import YfmInclude
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.parsing.markdown_parser import create_parser, parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
 
@@ -160,4 +160,9 @@ def test_include_not_in_inline_code():
     kinds = [c.kind for c in para.children]
     assert "code" in kinds
     assert "yfm_include" not in kinds
-
+def test_include_token_exact_utf8_source_span():
+    text = "{% include [текст](a.md) %}\n"
+    token = create_parser().parse(text)[0]
+    span = token.meta["source_span"]
+    assert span["byte_start"] == 0
+    assert span["byte_end"] == len(text.rstrip("\n").encode())

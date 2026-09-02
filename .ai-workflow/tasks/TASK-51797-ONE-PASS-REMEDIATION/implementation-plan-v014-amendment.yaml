@@ -1,0 +1,78 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v014
+amends: one-pass-remediation-v013
+scope: exact-five-legacy-test-expectation-alignments-only
+test_changes:
+  - requirement_ids: [R-006]
+    path: tests/unit/test_chunker.py
+    allowed_symbols:
+      - EXPECTED_AMBIGUOUS_YFM_FILES
+      - test_expected_ambiguous_yfm_file_set_is_exact
+      - test_chunker_on_real_fixtures
+      - test_chunker_reasonable_batch_count_on_real_files
+    exact_negative_path: en/core/reference/ydb-sdk/topic.md
+    exact_exception: AmbiguousYfmStructureError
+    exact_message_match: unowned direct-depth
+    operation: assert_exact_failure_then_continue_in_each_of_two_loops
+    all_other_fixtures: existing_assertions_unchanged
+  - requirement_ids: [R-015]
+    path: tests/unit/test_image_alt_protect.py
+    allowed_symbols: [test_image_alt_is_translatable_src_protected]
+    operation: replace_obsolete_S1_assertion_and_input_with_approved_image_boundaries
+    source_segment_exact_shape: "⟦IMGBEGIN_1⟧Ручная установка, узлы⟦IMGEND_1⟧"
+    translated_segment_exact_shape: "⟦IMGBEGIN_1⟧Manual installation, nodes⟦IMGEND_1⟧"
+    required_assertions:
+      - IMGBEGIN_1_present
+      - IMGEND_1_present
+      - S1_absent
+      - existing_rendered_alt_and_src_preservation
+  - requirement_ids: [R-012]
+    path: tests/unit/test_pipeline_orchestrator.py
+    allowed_symbols: [test_run_pr_translation_isolates_validation_failure]
+    operation: replace_only_obsolete_error_substring_assertion
+    old_expected_substring: protect-token sequence
+    new_expected_substring: "translation_acquisition_exhausted: role=translate"
+    existing_count_assertions: unchanged
+environment_rerun:
+  failures: 3
+  class: sandbox_cache_PermissionError
+  action: rerun_same_tests_with_writable_isolated_XDG_CACHE_HOME
+  product_or_test_edit_authorized: false
+resolver:
+  input_plan_version: one-pass-remediation-v014
+  required_predecessor_file: implementation-plan-v013-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v013
+  operation: resolve_predecessor_then_append_exact_v014_self_sealing_paths
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v014-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v014-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v014.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v014.yaml
+allowed_code_changes:
+  - {path: tests/unit/test_chunker.py, symbols: [EXPECTED_AMBIGUOUS_YFM_FILES, test_expected_ambiguous_yfm_file_set_is_exact, test_chunker_on_real_fixtures, test_chunker_reasonable_batch_count_on_real_files]}
+  - {path: tests/unit/test_image_alt_protect.py, symbols: [test_image_alt_is_translatable_src_protected]}
+  - {path: tests/unit/test_pipeline_orchestrator.py, symbols: [test_run_pr_translation_isolates_validation_failure]}
+  - {path: scripts/remediation_policy_gate.py, symbols: [_resolved_amendment]}
+  - {path: tests/unit/test_remediation_policy_gate.py, symbols: [amendment_resolution_tests]}
+required_tests:
+  - two_chunker_loops_assert_exact_one_path_ambiguity
+  - every_other_chunker_fixture_behavior_unchanged
+  - image_test_uses_exact_IMGBEGIN_IMGEND_atom
+  - orchestrator_test_asserts_exact_R012_acquisition_exhaustion
+  - focused_five_product_tests_GREEN
+  - three_Eliza_TLS_tests_rerun_in_writable_cache_environment
+  - v014_requires_v013_predecessor_and_self_seals_four_paths
+forbidden:
+  - production_or_fixture_edit
+  - wildcard_negative_fixture
+  - skip_or_xfail
+  - broad_exception_acceptance
+  - weaken_image_atom_or_acquisition_contract
+  - test_change_for_environment_PermissionError
+  - generic_amendment_discovery
+  - unrelated_change

@@ -1,0 +1,141 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT"
+review_type: "implementation_audit"
+specification_version: "implementation-audit-v002"
+reviewed_iteration: "implementation-audit-v002"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT/analyst-audit.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-IMPLEMENTATION-AUDIT/review-request-v002.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/response-v003.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-LLM-WIRING/response-v002.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/response-v010.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/response-v008.yaml"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/src/ydbdoc_review/translation/one_pass.py"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/tests/unit/test_one_pass_migration.py"
+verdict: "APPROVED"
+implementation_authorized: false
+implementation_conformant: false
+summary: >
+  The analyst audit v002 is complete, accurate, and materially aligned with the
+  four authoritative APPROVED specifications. Independent spot-checks on the
+  audited worktree confirm the highest-severity findings: blocker suites were
+  deleted without same-file GREEN migration (AUDIT-001); _restore_source_hrefs
+  performs forbidden post-restore regex href mutation (AUDIT-002); the TOC
+  forwarding test exercises run_pr_translation with a pre-built sentinel rather
+  than GitHub workflow -> build_en_toc_reachable_from_repo (AUDIT-003);
+  acquisition.py catches BaseException and can wrap asyncio.CancelledError
+  (AUDIT-017); navigation_merge still calls shared client.chat for labels
+  (AUDIT-011). The audit correctly distinguishes audit approval from
+  implementation approval. implementation_conformant remains false. This verdict
+  approves the audit document, not the implementation.
+findings: []
+confirmed_audit_findings:
+  - id: "AUDIT-001"
+    severity: RED
+    confirmed: true
+    evidence: >
+      test_fence_comments.py and six other blocker files deleted; replacement is
+      test_fence_comments_read_only.py in a new file, not v008 same-file rewrite.
+  - id: "AUDIT-002"
+    severity: RED
+    confirmed: true
+    evidence: "one_pass.py:92-102,265 _restore_source_hrefs regex positional rewrite after restore_inline_text."
+  - id: "AUDIT-003"
+    severity: RED
+    confirmed: true
+    evidence: >
+      test_one_pass_migration.py:212-242 passes en_toc_reachable into run_pr_translation;
+      does not invoke GitHub workflow or spy build_en_toc_reachable_from_repo.
+  - id: "AUDIT-004"
+    severity: RED
+    confirmed: true
+    evidence: "Implementation report claims readiness while gate tests deleted; Ruff waiver not in approved specs."
+  - id: "AUDIT-005"
+    severity: RED
+    confirmed: true
+    evidence: "Fragment test identities largely replaced rather than traceable parametrized case IDs per v008."
+  - id: "AUDIT-010"
+    severity: RED
+    confirmed: true
+    evidence: "test_placeholder_repair.py deleted; docs still reference it."
+  - id: "AUDIT-011"
+    severity: RED
+    confirmed: true
+    evidence: "navigation_merge.py:261 client.chat(role=translate) reachable from workflow navigation path."
+  - id: "AUDIT-012"
+    severity: RED
+    confirmed: true
+    evidence: "Protocol validity split between acquisition parser and post-accept checks in one_pass controller."
+  - id: "AUDIT-013"
+    severity: RED
+    confirmed: true
+    evidence: "Duplicate ID set comparison can collapse ordered duplicates."
+  - id: "AUDIT-014"
+    severity: RED
+    confirmed: true
+    evidence: "local_repair serializes full ru_text; critic lacks protected atom manifest per v010."
+  - id: "AUDIT-015"
+    severity: RED
+    confirmed: true
+    evidence: "Image atom round-trip incomplete; nested wrapper failure class cited in audit."
+  - id: "AUDIT-016"
+    severity: RED
+    confirmed: true
+    evidence: "global_validate after repair limited to protect-token check."
+  - id: "AUDIT-017"
+    severity: RED
+    confirmed: true
+    evidence: "acquisition.py:101 except BaseException wraps CancelledError from chat_once path."
+  - id: "AUDIT-018"
+    severity: YELLOW
+    confirmed: true
+    evidence: "Provider normalization to MODEL_UNAVAILABLE needs live provider-status tests."
+  - id: "AUDIT-019"
+    severity: RED
+    confirmed: true
+    evidence: "dependency_queue regex scanner vs parser-recognized link contract."
+  - id: "AUDIT-020"
+    severity: YELLOW
+    confirmed: true
+    evidence: "Provenance rich findings reduced to completeness_gaps in workflow early return."
+  - id: "AUDIT-021"
+    severity: YELLOW
+    confirmed: true
+    evidence: "Legacy incremental config fields remain in loader/default.yaml."
+  - id: "AUDIT-006"
+    severity: YELLOW
+    confirmed: true
+    note: "YFM-tabs ownership rule is a new grammar decision requiring analyst amendment."
+  - id: "AUDIT-007"
+    severity: YELLOW
+    confirmed: true
+    note: "Module-wide YDBDOC_SKIP_OPS_GATES autouse needs scoped fixtures."
+  - id: "AUDIT-008"
+    severity: YELLOW
+    confirmed: true
+    note: "Root-level ydb/docs/{ru,en} path coverage narrowed to core/ subtree."
+  - id: "AUDIT-009"
+    severity: YELLOW
+    confirmed: true
+    note: "NOTE/CUT segmentation in scope but under-documented in implementation report."
+missing_audit_issues: []
+required_corrections_summary: >
+  Follow analyst-audit acceptance gate: restore v008 same-file migration evidence,
+  remove _restore_source_hrefs, add real workflow TOC-forwarding test, restore
+  preserved read-only coverage, fix acquisition/cancellation/repair/protocol
+  gates, complete atom matrix including images, and produce corrected
+  implementation report before any commit/tag/production use.
+unresolved_questions: []
+confirmations:
+  audit_covers_all_four_authoritative_specs: true
+  audit_distinguishes_audit_approval_from_implementation_approval: true
+  red_findings_independently_reproduced_on_worktree: true
+  yellow_findings_are_valid_specification_gaps: true
+  implementation_conformant_is_false: true
+  reviewer_verdict_does_not_authorize_implementation: true
+has_unresolved_developer_choices: false
+functional_ok: true
+audit_complete: true
+audit_accurate: true
+minimality_ok: true

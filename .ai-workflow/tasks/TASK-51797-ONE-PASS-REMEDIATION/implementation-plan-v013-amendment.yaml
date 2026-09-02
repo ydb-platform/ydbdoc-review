@@ -1,0 +1,67 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v013
+amends: one-pass-remediation-v012
+scope: R-006-reinsert-single-negative-fixture-propagation-only
+r006_test_adjustment:
+  allowed_file: tests/unit/test_reinsert.py
+  allowed_symbols:
+    - EXPECTED_AMBIGUOUS_YFM_FILES
+    - test_expected_ambiguous_yfm_file_set_is_exact
+    - test_identity_on_real_fixtures
+  exact_negative_relative_path: en/core/reference/ydb-sdk/topic.md
+  required_exception: AmbiguousYfmStructureError
+  required_message_match: unowned direct-depth
+  classified_path_operation: assert_exact_exception_then_continue_without_identity_pipeline
+  all_other_paths_operation: preserve_existing_direct_render_and_identity_comparison
+  fixture_mutation: forbidden
+  parser_or_reinsert_change: forbidden
+resolver:
+  input_plan_version: one-pass-remediation-v013
+  required_predecessor_file: implementation-plan-v012-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v012
+  operation: resolve_predecessor_then_append_exact_v013_self_sealing_paths
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v013-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v013-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v013.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v013.yaml
+allowed_code_changes:
+  - path: tests/unit/test_reinsert.py
+    symbols:
+      - EXPECTED_AMBIGUOUS_YFM_FILES
+      - test_expected_ambiguous_yfm_file_set_is_exact
+      - test_identity_on_real_fixtures
+    operation: propagate_exact_v010_negative_fixture_classification
+  - path: scripts/remediation_policy_gate.py
+    symbols: [_resolved_amendment]
+    operation: add_exact_v013_to_v012_resolution_step
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [amendment_resolution_tests]
+    operation: prove_exact_v013_predecessor_and_self_sealing_paths
+required_tests:
+  - exact_negative_set_equals_one_v010_path
+  - reinsert_real_fixture_test_asserts_exact_ambiguity_for_EN_topic
+  - all_other_real_fixtures_keep_identity_contract
+  - no_parser_fixture_or_reinsert_behavior_change
+  - v013_requires_v012_predecessor
+  - exact_four_v013_protocol_paths_self_sealed
+unchanged:
+  - all_v010_strict_parser_semantics
+  - all_fixture_bytes
+  - identity_pipeline
+  - all_resolved_v012_R004_rules
+  - all_other_requirements
+forbidden:
+  - broad_exception_acceptance
+  - xfail
+  - skip
+  - wildcard_fixture_classification
+  - parser_fallback
+  - parser_reinsert_or_fixture_edit
+  - generic_amendment_discovery
+  - unrelated_change

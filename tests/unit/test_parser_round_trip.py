@@ -7,6 +7,7 @@ import pytest
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
+
 def test_table_cell_with_escaped_pipe():
     """A literal '|' inside a cell (written as '\\|') must round-trip."""
     text = (

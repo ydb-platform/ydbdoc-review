@@ -7,6 +7,7 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
+from ydbdoc_review.parsing.yfm_plugins.source_spans import utf8_source_span
 
 # Opening: {% note TYPE %} or {% note TYPE "Title" %}
 _NOTE_OPEN_RE = re.compile(
@@ -73,7 +74,15 @@ def _yfm_note_rule(
     token.markup = first_line
     token.block = True
     token.map = [start_line, close_line + 1]
-    token.meta = {"note_type": note_type, "title": title}
+    token.meta = {
+        "note_type": note_type,
+        "title": title,
+        "source_span": utf8_source_span(state.src, pos, max_pos),
+    }
+    if m_open.group(2) is not None:
+        token.meta["title_span"] = utf8_source_span(
+            state.src, pos + m_open.start(2), pos + m_open.end(2)
+        )
 
     # Recursively tokenize inner lines (start_line + 1 .. close_line - 1).
     state.md.block.tokenize(state, start_line + 1, close_line)
@@ -81,6 +90,10 @@ def _yfm_note_rule(
     token = state.push("yfm_note_close", "div", -1)
     token.markup = "{% endnote %}"
     token.block = True
+    close_start = state.bMarks[close_line] + state.tShift[close_line]
+    token.meta["source_span"] = utf8_source_span(
+        state.src, close_start, state.eMarks[close_line]
+    )
 
     state.parentType = old_parent
     state.lineMax = old_line_max
@@ -96,4 +109,3 @@ def yfm_note_plugin(md: MarkdownIt) -> None:
         _yfm_note_rule,
         {"alt": ["paragraph", "reference", "blockquote", "list"]},
     )
-

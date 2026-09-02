@@ -1,11 +1,23 @@
+# ruff: noqa: RUF001
 """Fence copy guarantees: code blocks must not be altered by translation."""
 
 from __future__ import annotations
 
-from ydbdoc_review.pipeline.translate_file import _finalize_en_target
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+from ydbdoc_review.pipeline.dependency_queue import DependencyPlan, QueueEntry
+from ydbdoc_review.pipeline.translation_transaction import run_translation_transaction
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
+)
+from ydbdoc_review.translation.one_pass import translate_ru_to_en_once
 from ydbdoc_review.validation.fence_integrity import (
     check_fence_body_copy,
-    enforce_source_fenced_blocks,
+    code_blocks_from_text,
     fence_content_matches_source,
 )
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -43,9 +55,9 @@ def test_enforce_source_fenced_blocks_restores_tampered_fence():
         "sudo ydb admin node config init --config-dir/opt/ydb/cfg\n"
         "```\n"
     )
-    fixed = enforce_source_fenced_blocks(en_bad, ru)
-    assert "--config-dir /opt/ydb/cfg" in fixed
-    assert "--config-dir/opt" not in fixed
+    findings = check_fence_body_copy(ru, en_bad)
+    assert findings
+    assert "--config-dir/opt" in en_bad
 
 
 def test_check_fence_body_copy_detects_pipeline_change():
@@ -121,12 +133,11 @@ def test_check_fence_body_copy_ignores_homoglyph_only_diff():
 
 
 def test_enforce_source_fenced_blocks_preserves_text_fence_body():
-    """§6.59: `` ```text `` diagrams keep EN translation, not RU copy."""
+    """§6.59: read-only detector accepts translated text-diagram labels."""
     ru = "```text\n├─ попытка: ERROR\n```\n"
     en = "```text\n├─ attempt: ERROR\n```\n"
-    out = enforce_source_fenced_blocks(en, ru)
-    assert "attempt" in out
-    assert "попытка" not in out
+    assert check_fence_body_copy(ru, en) == []
+    assert "attempt" in en
 
 
 def test_fence_content_allows_cyrillic_comment_translation_only():
@@ -307,7 +318,7 @@ def test_fence_content_rejects_mermaid_structure_change():
 
 
 def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
-    """Regression: postprocess must run after enforce, not before."""
+    """Legacy identity: v010 preserves the source fences and blocks publication."""
     raw_ru = (
         "5. Init:\n\n"
         "   ```yaml\n"
@@ -317,21 +328,60 @@ def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
         "   ydb admin cluster bootstrap --uuid <строка>\n"
         "   ```\n"
     )
-    norm = normalize_ru_source_for_translation(raw_ru)
-    en_rendered = (
-        "5. Init translated.\n\n"
-        "   ```yaml\n"
-        "    - host: static-node-1.ydb-cluster.com #FQDN ВМ\n"
-        "   ```\n\n"
-        "   ```bash\n"
-        "   ydb admin cluster bootstrap --uuid <строка>\n"
-        "   ```\n"
+    manifest = TranslationJobManifest(TranslationModelPolicy(
+        translate=ModelPair("translate-primary", "translate-fallback"),
+        critic=ModelPair("critic-primary", "critic-fallback"),
+        repair=ModelPair("repair-primary", "repair-fallback"),
+    ))
+
+    class Client:
+        def chat_once(self, messages, *, explicit_model, role, **_kwargs):
+            if role == "critic":
+                return SimpleNamespace(content=json.dumps({"findings": []}))
+            payload = json.loads(messages[-1]["content"])
+            return SimpleNamespace(content=json.dumps({"segments": [
+                {"id": item["id"], "text": item["text"].replace("Init", "Initialization")}
+                for item in payload["segments"]
+            ]}, ensure_ascii=False))
+
+    path = "ydb/docs/ru/reference/configuration/example.md"
+    translated = translate_ru_to_en_once(raw_ru, Client(), file_path=path, manifest=manifest)
+    source_bodies = [block.content for block in code_blocks_from_text(raw_ru)]
+    translated_bodies = [block.content for block in code_blocks_from_text(translated.text)]
+    assert translated_bodies == source_bodies
+    assert "#FQDN ВМ" in translated.text
+    assert "<строка>" in translated.text
+
+    result = run_translation_transaction(
+        DependencyPlan((QueueEntry(path, "initial"),), (), 1, 0),
+        read_ru=lambda _path: raw_ru,
+        client=Client(),
+        to_en_path=lambda value: value.replace("/ru/", "/en/"),
+        manifest=manifest,
     )
-    final = _finalize_en_target(en_rendered, norm)
-    assert "#FQDN VM" in final
-    assert "ВМ" not in final
-    assert "<string>" in final
-    assert "<строка>" not in final
+    messages = result.report["link_findings"][0]["messages"]
+    assert messages[:2] == [
+        "cyrillic_in_code_fence: block 1 `yaml` line 0: «- host: static-node-1.ydb-cluster.com #FQDN ВМ»",
+        "cyrillic_in_code_fence: block 2 `bash` line 0: «ydb admin cluster bootstrap --uuid <строка>»",
+    ]
+    assert not result.publishable
+    assert result.staged == {}
+
+    production_path = Path(__file__).parents[2] / "src/ydbdoc_review"
+    production_entry = "\n".join(
+        (production_path / relative).read_text(encoding="utf-8")
+        for relative in (
+            "pipeline/orchestrator.py",
+            "pipeline/translation_transaction.py",
+            "translation/one_pass.py",
+        )
+    )
+    for retired_writer in (
+        "_finalize_en_target",
+        "normalize_ru_source_for_translation",
+        "enforce_source_fenced_blocks",
+    ):
+        assert retired_writer not in production_entry
 
 
 def test_fence_body_allows_comment_translation_with_trailing_blank_line():

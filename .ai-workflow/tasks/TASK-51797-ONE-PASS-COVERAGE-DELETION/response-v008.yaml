@@ -1,0 +1,53 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-COVERAGE-DELETION"
+review_type: "specification"
+specification_version: "coverage-deletion-v008"
+reviewed_iteration: "coverage-deletion-v008"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/review-request-v008.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/review-request.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-COVERAGE-DELETION/response-v007.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/response-v010.yaml"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Version coverage-deletion-v008 is the authoritative amendment. It retains all
+  v007 eight-blocker, same-file, fence, and fragment contracts and adds closed
+  atomic ordering for critic_only apply-safeguard retirement in
+  github/workflow.py::_apply_results_to_disk: same-file harness replacements
+  GREEN first; migrate callers and delete harness before touching apply guards;
+  dedicated reachability test; rewrite apply-results noop test without action
+  special case; only then remove critic_only branches in one change with caller
+  removals. Compatibility parsers, default mappings, and removal of generic
+  identical-output protection are forbidden. Sections A-H remain internally
+  consistent with one-pass-v010. Every useful legacy invariant has a named v010
+  replacement; forbidden reachability scans are mandatory; shims and skip/xfail
+  are forbidden. Approval does not authorize implementation.
+findings: []
+resolved_findings:
+  - id: "COVERAGE-V008-CRITIC-ONLY-001"
+    resolution: >
+      Section C.1 critic_only subsection defines six ordered steps, names
+      test_critic_only_has_no_producer_or_apply_reachability and the rewritten
+      test_apply_results_skips_identical_one_pass_output_without_action_special_case,
+      and forbids premature safeguard removal or compatibility parsing.
+confirmations:
+  critic_only_safeguards_remain_until_producers_migrated: true
+  six_step_atomic_ordering_is_closed: true
+  dedicated_reachability_test_before_removal: true
+  apply_results_noop_rewritten_without_action_special_case: true
+  compatibility_parser_and_default_mapping_forbidden: true
+  v007_eight_blocker_contracts_retained: true
+  delete_after_replacement_ordering_sections_e_f_g_closed: true
+  mixed_github_reporting_validation_navigation_preserved: true
+  no_compatibility_shim_or_skip_xfail: true
+  specification_does_not_modify_one_pass_v010: true
+  reviewer_verdict_does_not_authorize_implementation: true
+  explicit_user_acceptance_still_required: true
+has_unresolved_developer_choices: false
+functional_ok: true
+coverage_preserved: true
+legacy_reachability_forbidden: true
+minimality_ok: true

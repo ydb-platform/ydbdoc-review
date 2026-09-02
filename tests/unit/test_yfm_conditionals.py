@@ -1,3 +1,5 @@
+# ruff: noqa: RUF001
+
 """Tests for YFM {% if %} ... {% endif %} block construct."""
 
 from __future__ import annotations
@@ -7,9 +9,8 @@ import pytest
 from ydbdoc_review.parsing.ast_types import (
     Paragraph,
     YfmIf,
-    YfmIfBranch,
 )
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.parsing.markdown_parser import create_parser, parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
 
@@ -246,4 +247,24 @@ def test_round_trip_if_inside_note():
         "{% endnote %}\n"
     )
     assert_stable(text)
+def test_conditional_tokens_own_exact_utf8_physical_and_virtual_spans():
+    text = "{% if условие %}\nТекст\n{% else %}\nText\n{% endif %}\n"
+    tokens = [token for token in create_parser().parse(text) if token.type.startswith("yfm_if")]
+    by_type = {}
+    for token in tokens:
+        by_type.setdefault(token.type, []).append(token)
+    assert by_type["yfm_if_open"][0].meta["source_span"] == {
+        "byte_start": 0,
+        "byte_end": len("{% if условие %}".encode()),
+        "line": 1,
+        "column": 1,
+    }
+    assert len(by_type["yfm_if_branch_open"]) == 2
+    assert all(
+        token.meta["source_span"]["byte_start"]
+        == token.meta["source_span"]["byte_end"]
+        for token in by_type["yfm_if_branch_close"]
+    )
+    close = by_type["yfm_if_close"][0].meta["source_span"]
+    assert text.encode()[close["byte_start"] : close["byte_end"]] == b"{% endif %}"
 

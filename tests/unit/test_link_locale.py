@@ -6,8 +6,6 @@ import pytest
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
-from ydbdoc_review.segmentation.reinsert import reinsert_segments
-from ydbdoc_review.segmentation.extractor import extract_segments
 from unittest.mock import MagicMock
 
 from ydbdoc_review.validation.link_locale import (
@@ -38,7 +36,6 @@ def test_localize_links_in_text_fixes_percent_encoded_wikipedia_slug(monkeypatch
     out = localize_links_in_text(md)
     assert "Copy-on-write" in out
     assert check_link_locale_in_en(out) == []
-
 
 def test_localize_links_fixes_broken_en_wikipedia_slug(monkeypatch):
     resolver = MagicMock()
@@ -154,16 +151,3 @@ def test_localize_links_explicit_anchor_remaps_fragment():
     out = render_markdown(en)
     assert "[Fields](#fields-Description)" in out
     assert check_link_locale_in_en(out) == []
-
-
-def test_localize_links_in_document_table_cell():
-    md = (
-        "| RU |\n"
-        "| --- |\n"
-        "| [wiki](https://ru.wikipedia.org/wiki/X) |\n"
-    )
-    doc = parse_markdown(md)
-    localize_links_in_document(doc)
-    out = render_markdown(doc)
-    assert "en.wikipedia.org" in out
-    assert "ru.wikipedia.org" not in out

@@ -188,6 +188,42 @@ def test_prepare_translation_branch_removes_deleted_on_base(tmp_path: Path):
     assert read_text(str(work), "ydb/docs/en/stale.md") is None
 
 
+def test_prepare_translation_branch_uses_pinned_publication_commit(tmp_path: Path):
+    upstream = tmp_path / "upstream.git"
+    upstream.mkdir()
+    subprocess.run(["git", "init", "--bare", "-b", "main"], cwd=upstream, check=True)
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", str(upstream), str(work)], check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=work, check=True)
+
+    write_text(str(work), "ydb/docs/en/base.md", "# Base\n")
+    subprocess.run(["git", "add", "."], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-m", "pinned publication"], cwd=work, check=True)
+    pinned = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True).strip()
+    subprocess.run(["git", "push", "origin", "main"], cwd=work, check=True)
+
+    write_text(str(work), "ydb/docs/en/later.md", "# Later\n")
+    subprocess.run(["git", "add", "."], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-m", "moving tip"], cwd=work, check=True)
+    subprocess.run(["git", "push", "origin", "main"], cwd=work, check=True)
+    write_text(str(work), "ydb/docs/en/generated.md", "# Generated\n")
+
+    prepare_translation_branch_on_base(
+        str(work),
+        translation_branch="ydbdoc-review/pinned",
+        base_remote_url=str(upstream),
+        base_remote_name="ydbdoc-review-upstream",
+        base_branch="main",
+        base_commit_sha=pinned,
+        paths=["ydb/docs/en/generated.md"],
+    )
+
+    assert read_text(str(work), "ydb/docs/en/generated.md") == "# Generated\n"
+    assert read_text(str(work), "ydb/docs/en/base.md") == "# Base\n"
+    assert read_text(str(work), "ydb/docs/en/later.md") is None
+
+
 def test_file_diff_range_after_edit(git_repo: str):
     write_text(git_repo, "ydb/docs/ru/a.md", "# Hi v2\n")
     subprocess.run(["git", "-C", git_repo, "add", "ydb/docs/ru/a.md"], check=True)

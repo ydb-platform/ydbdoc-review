@@ -1,0 +1,93 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v012
+amends: one-pass-remediation-v011
+scope: R-004-clean-at-capture-exact-item-baseline-only
+resolver:
+  input_plan_version: one-pass-remediation-v012
+  required_predecessor_file: implementation-plan-v011-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v011
+  operation: resolve_predecessor_then_add_clean_at_capture_rule_and_exact_self_sealing_paths
+clean_at_capture_item_baseline:
+  applicability:
+    current_delta_path: required
+    absent_from_verified_immutable_snapshot: required
+    exact_literal_item_allowed_files_match: required
+    glob_or_pattern_only_match: forbidden
+    higher_precedence_special_path: forbidden
+  literal_definition:
+    forbidden_metacharacters: ["*", "?", "["]
+    comparison: byte_exact_repository_relative_path
+  base_source:
+    commit: 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+    lookup: exact_git_object_at_base_colon_path
+    blob_state: {kind: present, sha256: sha256_of_raw_blob_bytes}
+    missing_state: {kind: absent, sha256: ""}
+    tree_submodule_ambiguous_or_lookup_error: RED
+    working_tree_as_baseline_source: forbidden
+  mapping:
+    mapping_source: clean-at-capture-exact-item
+    requirement_ids: lexical_unique_union_of_exact_literal_matching_items_only
+    ownership_class:
+      tests_prefix: test
+      scripts_prefix: script
+      src_ydbdoc_review_config_prefix: configuration
+      src_prefix: production
+      other_prefix: RED
+    final_state: current_delta_enumeration
+    require_baseline_differs_from_final: true
+    deletion: require_exact_path_in_allowed_deletions
+  first_required_real_path:
+    path: src/ydbdoc_review/parsing/yfm_plugins/tabs.py
+    requirement_ids: [R-006]
+    ownership_class: production
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v012-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v012-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v012.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v012.yaml
+allowed_code_changes:
+  - path: scripts/remediation_policy_gate.py
+    symbols:
+      - _resolved_amendment
+      - _exact_item_allowlist_mapping
+      - _git_blob_state_at_base
+      - classify_manifest_entry
+      - bootstrap_manifest
+      - validate_v006_manifest
+    operation: implement_exact_clean_at_capture_baseline_derivation_and_validation
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [clean_at_capture_baseline_tests, amendment_resolution_tests]
+    operation: cover_every_required_GREEN_and_RED_case
+required_tests:
+  - tabs_py_uses_base_blob_baseline_and_R006_mapping
+  - exact_base_absent_new_file_uses_absent_baseline
+  - multiple_exact_item_matches_union_requirement_ids_lexically
+  - wildcard_only_match_is_RED
+  - path_outside_exact_item_allowlist_is_RED
+  - deletion_without_exact_allowed_deletions_is_RED
+  - exact_allowed_deletion_uses_base_blob_baseline
+  - base_lookup_error_is_RED
+  - base_tree_or_submodule_is_RED
+  - derived_baseline_equal_to_final_is_RED
+  - v012_requires_v011_predecessor
+  - v012_four_protocol_paths_are_self_sealed
+unchanged:
+  - all_resolved_v011_mappings
+  - immutable_snapshot_bytes_and_v008_verification
+  - manifest_and_snapshot_special_path_rules
+  - required_absent_uv_lock
+  - existing_item_operations_and_symbol_allowlists
+forbidden:
+  - wildcard_as_clean_baseline_authorization
+  - unlisted_path_authorization
+  - working_tree_baseline
+  - snapshot_recapture_or_rewrite
+  - generic_amendment_discovery
+  - default_mapping
+  - implicit_deletion
+  - unrelated_change

@@ -1,0 +1,25 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+review_type: specification_reviewer
+specification_version: r016-parser-owned-v004
+status: reviewed
+verdict: APPROVED
+implementation_authorized: false
+has_unresolved_developer_choices: false
+summary: >
+  v004 correctly closes the note/cut title conflict left by v002 raw exact-slice
+  hashing versus approved NOTE_TITLE/CUT_TITLE translation. ParserSpanRecord gains
+  an exact translatable_spans field; notes/cuts emit quote-excluding title_span from
+  the active regex match groups (notes omit when title absent; cuts always include,
+  including empty); _canonical_source_slice replaces only those parser-owned title
+  bytes with a fixed ASCII sentinel and leaves all surrounding syntax byte-identical;
+  every other non-zero physical marker stays raw-hashed. Empty versus absent titles,
+  invalid/misattached spans, and residual-Cyrillic titles remain fail-closed through
+  metadata and existing prose validation. Tests and forbidden rescans leave no
+  developer choice. Spec review only; does not authorize implementation.
+findings: []
+non_blocking_notes:
+  - Confirm implementation uses m_open group offsets plus pos only; do not derive spans from title string values.
+  - Canonical digest exception applies only to yfm_note_open / yfm_cut_open with parser-owned title spans.
+follow_up_required:
+  - "Developer: implement v004 against the closed allowlist, then submit implementation review with GREEN tests including different-length title translation and syntax-mutation rejection."

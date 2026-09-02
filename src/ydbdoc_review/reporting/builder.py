@@ -785,6 +785,18 @@ def build_source_pr_comment(
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
+        if result.provenance_findings:
+            body += "\n**Блокировка происхождения:**\n\n"
+            for finding in result.provenance_findings:
+                body += (
+                    f"- `{finding.reason}`: RU `{finding.ru_path or '—'}`, "
+                    f"EN `{finding.en_path or '—'}`; "
+                    f"RU `{finding.baseline_ru_oid or 'absent'}` → "
+                    f"`{finding.current_ru_oid or 'absent'}`, "
+                    f"EN `{finding.baseline_en_oid or 'absent'}` → "
+                    f"`{finding.current_en_oid or 'absent'}`; commits: "
+                    f"{', '.join(f'`{commit}`' for commit in finding.touching_commits) or '—'}\n"
+                )
         errors = [r for r in result.pair_results if r.error]
         if errors:
             body += "\n**Ошибки pipeline:**\n\n"
@@ -920,6 +932,19 @@ def build_full_report(
         completeness_section = "## Что исправить: отсутствующие EN-зеркала\n\n"
         for i, path in enumerate(result.completeness_gaps, start=1):
             completeness_section += f"{i}. **{gap_label(path)}**\n\n"
+    if result.provenance_findings:
+        completeness_section += "## Блокировка происхождения перевода\n\n"
+        for finding in result.provenance_findings:
+            completeness_section += (
+                f"- `{finding.reason}`: RU `{finding.ru_path or '—'}`, "
+                f"EN `{finding.en_path or '—'}`; "
+                f"RU `{finding.baseline_ru_oid or 'absent'}` → "
+                f"`{finding.current_ru_oid or 'absent'}`, "
+                f"EN `{finding.baseline_en_oid or 'absent'}` → "
+                f"`{finding.current_en_oid or 'absent'}`; commits: "
+                f"{', '.join(f'`{commit}`' for commit in finding.touching_commits) or '—'}\n"
+            )
+        completeness_section += "\n"
 
     if not file_runs and not nav_runs:
         errors = [r for r in result.pair_results if r.error]

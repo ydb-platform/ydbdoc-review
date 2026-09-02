@@ -3,29 +3,27 @@
 from __future__ import annotations
 
 from ydbdoc_review.config.loader import Config
-from ydbdoc_review.harness import (
-    TRANSLATE_PROFILE,
-    TRANSLATE_WITH_QA_PROFILE,
-    VERIFY_PROFILE,
-    FileHarness,
-    FileRunState,
-    HarnessContext,
-)
-from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
-from ydbdoc_review.harness.render import (
-    finalize_en_target,
-    remap_translations_by_position,
-    render_with_translations,
-)
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.pipeline.qa import compose_file_verdict, gate_round_trip
 from ydbdoc_review.pipeline.types import FileTranslationResult
+from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import Glossary
+from ydbdoc_review.translation.model_policy import TranslationJobManifest
+from ydbdoc_review.translation.one_pass import translate_ru_to_en_once
+from ydbdoc_review.translation.schemas import CriticResponse
+from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
+from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
-# Backward-compatible re-exports for tests and internal callers.
-_compute_critic_verdict = compute_critic_verdict
-_finalize_en_target = finalize_en_target
-_render_with_translations = render_with_translations
-_remap_translations_by_position = remap_translations_by_position
+
+def _compute_critic_verdict(
+    *, initial: CriticResponse | None, unresolved: CriticResponse | None
+) -> str:
+    """Map read-only critic reports to the common file verdict."""
+    active = unresolved or initial
+    if active is None or not active.issues:
+        return "ok"
+    return "blocked" if active.verdict == "blocked" else "warnings"
 
 
 def translate_file(
@@ -45,41 +43,48 @@ def translate_file(
     enable_translate: bool = True,
     existing_target_text: str | None = None,
     base_source_text: str | None = None,
+    manifest: TranslationJobManifest | None = None,
 ) -> FileTranslationResult:
-    """Run the per-file harness.
-
-    ``doc_translate`` uses translate-only; ``doc_verify`` uses critic QA on disk.
-    Pass ``enable_critic=True`` for local ``translate-file --with-critic``.
-    Optional ``base_source_text`` + ``existing_target_text`` enable §6.132
-    differential seeding on translate.
-    """
-    critic_on = True if not enable_translate else enable_critic
-    ctx = HarnessContext.from_options(
+    """Translate once from RU, or return an existing EN target read-only for QA."""
+    if not enable_translate:
+        target = existing_target_text or ""
+        normalized = normalize_ru_source_for_translation(source_text)
+        segments = extract_segments(parse_markdown(normalized))
+        _translations, alignment_error = gate_round_trip(segments, target)
+        heuristics = run_file_heuristics_classified(
+            source_text,
+            target,
+            normalized_source_text=normalized,
+            source_file=file_path,
+        )
+        return FileTranslationResult(
+            file_path=file_path,
+            final_text=target,
+            segments_count=len(segments),
+            verdict=compose_file_verdict(
+                critic_verdict="ok",
+                alignment_error=alignment_error,
+                heuristics=heuristics,
+                manual_actions=False,
+            ),
+            prompt_version=prompt_version or "one-pass-v1",
+            heuristic_blocking=heuristics.blocking,
+            heuristic_warnings=heuristics.warnings,
+            heuristic_info=heuristics.info,
+            segment_alignment_error=alignment_error,
+        )
+    if manifest is None:
+        raise ValueError("translation manifest is required before model use")
+    result = translate_ru_to_en_once(
+        source_text,
         client,
-        glossary=glossary,
-        config=config,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        max_chars=max_chars,
-        prompt_version=prompt_version,
-        cache=cache,
-        max_parallel_batches=max_parallel_batches,
-        enable_critic=critic_on,
-        # The single-file critic-only API is diagnostic and must not silently
-        # turn an alignment failure into an unrequested translation LLM call.
-        # PR doc_verify explicitly keeps realignment enabled via PRHarness.
-        allow_verify_realign=enable_translate,
-    )
-    if enable_translate:
-        profile = TRANSLATE_WITH_QA_PROFILE if enable_critic else TRANSLATE_PROFILE
-    else:
-        profile = VERIFY_PROFILE
-    state = FileRunState(
-        mode=profile.name,  # type: ignore[arg-type]
         file_path=file_path,
-        raw_source_text=source_text,
-        source_text=source_text,
-        existing_target_text=existing_target_text,
-        base_source_text=base_source_text if enable_translate else None,
+        manifest=manifest,
     )
-    return FileHarness(profile).run(state, ctx)
+    return FileTranslationResult(
+        file_path=file_path,
+        final_text=result.text,
+        segments_count=result.prose_count,
+        verdict="ok",
+        prompt_version=prompt_version or "one-pass-v1",
+    )

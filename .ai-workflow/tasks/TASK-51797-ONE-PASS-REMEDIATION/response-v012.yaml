@@ -1,0 +1,52 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v012"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: clean-at-capture item baseline v012
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v012 correctly closes the R-004 gap for paths that were clean at snapshot capture
+(hence absent from the immutable inventory) and later changed under an exact
+literal `items[].allowed_files` entry. Root cause matches evidence:
+`src/ydbdoc_review/parsing/yfm_plugins/tabs.py` is a literal R-006 allowlist
+path, exists as a blob at base `9ff8edec…`, and is absent from
+`baseline-snapshot-remediation-v005.yaml` (only `test_yfm_tabs.py` appears).
+
+The rule is fail-closed: exact byte path only (no `* ? [`), higher-precedence
+protocol/snapshot/manifest paths excluded, verified snapshot required first,
+base object lookup via `<base>:<path>` only (blob→present+sha256, missing→absent,
+tree/submodule/error→RED), requirement IDs = lexical unique union of exact
+literal matching items, existing prefix ownership, deletion only via exact
+`allowed_deletions`, and baseline must differ from final.
+
+Resolver and self-seal are exact: predecessor must be
+`implementation-plan-v011-amendment.yaml` / `one-pass-remediation-v011`; only
+four v012 protocol paths are added. Code/test scope is gate + unit tests only.
+No developer choice or unrelated authorization remains.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v012.md`; read specification and plan amendments.
+- Confirmed `tabs.py` literal in R-006 `allowed_files` in `implementation-plan.yaml`.
+- Confirmed `tabs.py` absent from immutable snapshot; related path is only
+  `tests/unit/test_yfm_tabs.py`.
+- Confirmed blob at `9ff8edec…:src/ydbdoc_review/parsing/yfm_plugins/tabs.py`.
+- Spot-checked current gate still lacks this mapping path (v012 work pending).
+- Verified v011 predecessor composition and four-path self-seal contract.

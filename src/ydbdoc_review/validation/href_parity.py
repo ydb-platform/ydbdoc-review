@@ -14,8 +14,50 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
+from ydbdoc_review.validation.yfm_anchor import (
+    _heading_plain_text,
+    _iter_headings,
+    _legacy_transliterated_slug,
+    build_heading_anchor_map,
+    diplodoc_auto_slug,
+)
 
 DocsTextReader = Callable[[str], str | None]
+
+
+def map_ru_fragment_to_declared_en_fragment(
+    frag: str, ru_md: str, en_md: str
+) -> str | None:
+    """Return comparison metadata mapping a RU fragment to a declared EN fragment."""
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+
+    decoded = unquote(frag)
+    ru_doc = parse_markdown(ru_md)
+    en_doc = parse_markdown(en_md)
+    anchor_map = build_heading_anchor_map(ru_doc, en_doc)
+    if decoded in anchor_map:
+        return anchor_map[decoded]
+    if frag in anchor_map:
+        return anchor_map[frag]
+
+    ru_heads = list(_iter_headings(ru_doc.children))
+    en_heads = list(_iter_headings(en_doc.children))
+    for src_h, tgt_h in zip(ru_heads, en_heads, strict=False):
+        ru_text = _heading_plain_text(src_h)
+        ru_auto = diplodoc_auto_slug(ru_text)
+        legacy = _legacy_transliterated_slug(ru_text)
+        en_anchor = tgt_h.anchor
+        en_auto = diplodoc_auto_slug(_heading_plain_text(tgt_h))
+        en_id = en_anchor if en_anchor and en_anchor.isascii() else en_auto or None
+        if ru_auto and (decoded == ru_auto or decoded.startswith(f"{ru_auto}-")):
+            return en_id
+        if legacy and (decoded == legacy or decoded.startswith(f"{legacy}-")):
+            return en_id
+        if src_h.anchor and (
+            decoded == src_h.anchor or decoded.startswith(f"{src_h.anchor}-")
+        ):
+            return en_anchor or en_auto or None
+    return None
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
@@ -293,10 +335,7 @@ def _localized_en_fragment_pairs_ru_remap(
     docs_text_reader: DocsTextReader,
 ) -> bool:
     """True when RU ``source_fragment`` maps to declared EN ``target_fragment`` (§6.235)."""
-    from ydbdoc_review.validation.fragment_repair import (
-        _remap_fragment_via_ru_en_pages,
-        fragment_declared_in_markdown,
-    )
+    from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
 
     if not source_fragment or not target_fragment:
         return False
@@ -310,7 +349,7 @@ def _localized_en_fragment_pairs_ru_remap(
     ru_md = docs_text_reader(ru_abs)
     if not ru_md:
         return False
-    mapped = _remap_fragment_via_ru_en_pages(source_fragment, ru_md, target_md)
+    mapped = map_ru_fragment_to_declared_en_fragment(source_fragment, ru_md, target_md)
     return mapped == target_fragment
 
 

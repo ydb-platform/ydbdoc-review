@@ -1,0 +1,26 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+review_type: specification_reviewer
+specification_version: r016-parser-owned-v005
+status: reviewed
+verdict: APPROVED
+implementation_authorized: false
+has_unresolved_developer_choices: false
+summary: >
+  v005 correctly closes the remaining front-matter conflict between raw hashing of
+  the full front_matter record and existing title/description extraction. The sole
+  key source and nonempty-string predicate match
+  TRANSLATABLE_FRONT_MATTER_KEYS / translatable_front_matter_fields. Spans are
+  YAML-node/mark/style owned with Markdown-it body shift and a character-to-byte
+  table; quote/header bytes stay protected. Canonical digest replaces only those
+  selected value spans; apply_front_matter_updates becomes descending
+  style-preserving surgical replacement plus mandatory full reparse/digest check,
+  never dump_front_matter. Tests cover style matrix, different-length GREEN,
+  protected-mutation RED, and forbidden rescans. No developer choice remains.
+  Spec review only; does not authorize implementation.
+findings: []
+non_blocking_notes:
+  - Keep _KEY_LINE / dump_front_matter only for the legacy standalone dump API; never for span build, surgical updates or R-016 validation.
+  - one_pass source-template FRONT_MATTER slot replacement is outside this amendment’s file allowlist; surgical apply_front_matter_updates is the closed front-matter update algorithm for reinsert/fixtures under this task.
+follow_up_required:
+  - "Developer: implement front_matter span/encode/surgical-update helpers and the exact tests, wire parser-owned front_matter translatable_spans into the existing markdown_parser allowlist, then submit implementation review with baseline SHA/digest evidence."

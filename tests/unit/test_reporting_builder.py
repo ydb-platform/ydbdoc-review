@@ -5,6 +5,7 @@ from __future__ import annotations
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.provenance import ProvenanceFinding
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     ManualAction,
@@ -760,3 +761,36 @@ def test_verify_fixup_comment_bilingual_vs_translation():
     assert "ветку перевода" in translation
     assert "полный QA-отчёт" in translation
     assert "на #99" in translation
+def test_provenance_finding_is_preserved_in_source_and_full_reports():
+    finding = ProvenanceFinding(
+        category="stale_source_or_newer_translation",
+        reason="newer_en",
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        baseline_ru_oid="ru-base",
+        current_ru_oid="ru-current",
+        baseline_en_oid="en-base",
+        current_en_oid="en-current",
+        touching_commits=("commit-one", "commit-two"),
+    )
+    result = PRTranslationResult(
+        completeness_gaps=[finding.en_path],
+        provenance_findings=[finding],
+    )
+    meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1)
+
+    source = build_source_pr_comment(
+        result,
+        translation_pr_number=None,
+        meta=meta,
+        config=_cfg(),
+    )
+    full = build_full_report(result, meta=meta, config=_cfg())
+
+    for report in (source, full):
+        assert "newer_en" in report
+        assert finding.ru_path in report
+        assert finding.en_path in report
+        assert "ru-base" in report and "ru-current" in report
+        assert "en-base" in report and "en-current" in report
+        assert "commit-one" in report and "commit-two" in report

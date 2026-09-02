@@ -1,0 +1,131 @@
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+plan_version: one-pass-remediation-v017
+amends: one-pass-remediation-v016
+scope: externally-confirmed-final-diff-findings-FINAL-001-through-FINAL-010-only
+resolver:
+  input_plan_version: one-pass-remediation-v017
+  required_predecessor_file: implementation-plan-v016-amendment.yaml
+  required_predecessor_version: one-pass-remediation-v016
+  operation: resolve_predecessor_then_append_exact_v017_paths_and_rules
+items:
+  - finding: FINAL-001
+    requirement_id: R-001
+    files: [tests/unit/test_fence_comments.py, tests/unit/test_fence_comments_read_only.py, .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md]
+    symbols: [same_file_fence_comment_read_only_tests, same_file_migration_evidence]
+    operation: restore_required_original_path_and_keep_read_only_cases
+    required_tests: [tests/unit/test_fence_comments.py_GREEN, same_file_manifest_records_present_final_state]
+    forbidden: [filename_only_replacement, retired_writer_restoration, skip, xfail]
+  - finding: FINAL-002
+    requirement_id: R-003
+    files: [tests/unit/test_one_pass_migration.py, tests/unit/test_github_workflow.py]
+    symbols: [test_translate_workflow_forwards_en_toc_reachable_to_read_only_validators, run_doc_translate, build_en_toc_reachable_from_repo]
+    operation: replace_direct-transaction_test_with_real-workflow-sentinel-test
+    required_tests: [builder_unique_object_identity_reaches_all_final_read_only_validators]
+    forbidden: [direct_run_pr_translation_only, intermediate_forwarding_mock]
+  - finding: FINAL-003
+    requirement_id: R-008
+    files: [tests/unit/test_github_workflow.py]
+    symbols: [root_locale_markdown_case, run_doc_translate]
+    operation: add_exact_root-page-workflow-coverage
+    required_tests: [root-page_queued, en_counterpart_exact, provenance_guard, atomic_success, provenance_failure_zero_publication]
+    forbidden: [production_core_prefix_rule, dependency_queue_unit_only]
+  - finding: FINAL-004
+    requirement_id: R-010
+    files: [tests/unit/test_placeholder_repair.py]
+    symbols: [placeholder_detection_tests, placeholder_publication_blocking_tests, table_cell_repair_parity_test]
+    operation: restore_same_file_read_only_suite_and_table_cell_rollback
+    required_tests: [protect_marker_detection, protect_marker_blocks_publication, invalid_primary_valid_fallback_table_cell, exhausted_corruption_byte_exact_rollback]
+    forbidden: [delete_detector_tests, restore_writer_expectations, generic_prose_substitute]
+  - finding: FINAL-005
+    requirement_id: R-011
+    files: [src/ydbdoc_review/pipeline/navigation_merge.py, src/ydbdoc_review/github/workflow.py, tests/unit/test_navigation_merge.py, tests/unit/test_github_workflow.py, tests/unit/test_translation_model_wiring.py]
+    symbols: [_translate_menu_labels, merge_navigation_pair, run_navigation_merges, TranslationJobManifest, TranslationChatOnce, AcquisitionController]
+    operation: wire_navigation_to_manifest_translate_pair_and_bounded_acquisition
+    required_tests: [shared_chat_raising_spy, exact_manifest_model_pair, malformed_primary_valid_fallback, partial_or_extra_labels_protocol_invalid, exhaustion_zero_stage_and_publish, no_RU_success_fallback]
+    forbidden: [YandexLLMClient_chat_on_reachable_path, setdefault_RU_fill, JSON_error_RU_mapping, seventh_model_slug, bespoke_retry_loop]
+  - finding: FINAL-006
+    requirement_id: R-012
+    files: [src/ydbdoc_review/translation/local_repair.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_transaction.py]
+    symbols: [run_bounded_local_repair, validate_repair, validate_complete_document, AcquisitionController]
+    operation: move_all_repair-validity-gates_inside-acquisition-parser
+    parser_gate_order: [identity, non_empty, atom_equality, allowed_range, unique_target, construct_proposed, complete_document_validation]
+    required_tests: [one_invalid-primary-valid-fallback_per_gate, rejected_never_inserted, exact_attempt_records, exhaustion_rollback]
+    forbidden: [post_accept_gate, accept_then_block, rejected_candidate_render_or_insert]
+  - finding: FINAL-007
+    requirement_id: R-014
+    files: [src/ydbdoc_review/translation/local_repair.py, src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/segmentation/types.py, tests/unit/test_one_pass_translation.py]
+    symbols: [block_records, atom_manifest, run_bounded_local_repair]
+    operation: build_minimal_critic_and_repair_payloads
+    payload_allowlist: [block_id, en_editable_prose, corresponding_ru_prose, allowed_range, atom_ids, atom_hashes, finding, applicable_glossary_context]
+    required_tests: [code_config_directive_fence_unique_secrets_absent_from_every_model_message]
+    forbidden: [full_rendered_document, whole_RU_document, raw_code, raw_config, raw_directive, raw_fence]
+  - finding: FINAL-008
+    requirement_id: R-016
+    files: [src/ydbdoc_review/translation/one_pass.py, src/ydbdoc_review/translation/local_repair.py, src/ydbdoc_review/pipeline/translation_transaction.py, tests/unit/test_one_pass_translation.py, tests/unit/test_translation_transaction.py]
+    symbols: [validate_complete_document, run_bounded_local_repair]
+    operation: add_and_wire_single_complete_read_only_validator
+    exact_boundaries: [after_base_render, inside_repair_parser_pre_accept, after_insertion_and_recritic, immediately_before_stage]
+    invariant_order: [protect_token_absence, parser_success, markdown_yfm_container_parity, source_atom_hash_and_order, link_href_fragment_anchor, fence_config_byte_equality, residual_cyrillic_classification]
+    required_tests: [one_corruption_per_invariant, all_fail_closed, atomic_rollback]
+    forbidden: [multiple_partial_validators_as_substitute, protect_token_only_gate, validator_mutation]
+  - finding: FINAL-009
+    requirement_id: R-021
+    files: [src/ydbdoc_review/pipeline/skip_paths.py, tests/unit/test_translate_skip_paths.py, src/ydbdoc_review/github/workflow.py, src/ydbdoc_review/navigation/scope_planner.py, src/ydbdoc_review/pipeline/navigation_merge.py, tests/unit/test_github_workflow.py, tests/unit/test_navigation_merge.py, tests/unit/test_config.py]
+    symbols: [matches_translate_skip, filter_translate_changes, filter_path_set, translate_skip_globs, navigation_only_exclusions]
+    operation: delete_dead_translation-skip-module-suite-and-all-references
+    exact_deletions: [src/ydbdoc_review/pipeline/skip_paths.py, tests/unit/test_translate_skip_paths.py]
+    required_tests: [static_absence_of_four_legacy_names, universal_RU_markdown_translation, universal_RU_EN_read_only_verify, navigation_only_exclusions_preserved]
+    forbidden: [leave_dead_helper, compatibility_alias, markdown_skip, delete_navigation_only_exclusion]
+  - finding: FINAL-010
+    requirement_id: R-009
+    files: [.ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md]
+    symbols: [R-009_behavior_record]
+    operation: record_existing_note_cut_unknown-kind-decisions-and-exact-tests
+    required_tests: [note_title_roundtrip, cut_title_roundtrip, unknown_kind_zero_stage]
+    forbidden: [production_change_for_FINAL-010, unverified_GREEN_claim]
+allowed_support_changes:
+  - path: scripts/remediation_policy_gate.py
+    symbols: [_resolved_amendment]
+    operation: add_exact_v017_to_v016_resolution_step
+  - path: tests/unit/test_remediation_policy_gate.py
+    symbols: [amendment_resolution_tests]
+    operation: prove_exact_v016_predecessor_and_v017_seven-artifact-seal
+post_capture_control_paths_addition:
+  ownership_class: control_artifact
+  requirement_ids: [workflow-protocol-provenance]
+  baseline_state: {kind: absent, sha256: ""}
+  exact_paths:
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v017-amendment.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v017-amendment.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/review-request-v017.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/response-v017.yaml
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-FINAL-DIFF-AUDIT/analyst-final-diff-audit.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-FINAL-DIFF-AUDIT/review-request-v001.md
+    - .ai-workflow/tasks/TASK-51797-ONE-PASS-FINAL-DIFF-AUDIT/response-v001.yaml
+refresh_command: >-
+  .venv/bin/python -m scripts.remediation_policy_gate refresh-manifest
+  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v017-amendment.yaml
+  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+  --output .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+validation_command: >-
+  .venv/bin/python -m scripts.remediation_policy_gate validate
+  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml
+  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v017-amendment.yaml
+  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml
+  --manifest .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml
+  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
+completion_order:
+  - implement_exact_items
+  - run_focused_tests
+  - run_full_suite_and_ruff_contract
+  - update_same_file_evidence_and_report
+  - refresh_manifest_v017
+  - validate_v017_without_intervening_write
+  - analyst_whole_diff_reaudit
+  - independent_tester
+  - external_implementation_review
+forbidden_global: [unrelated_change, developer_architecture_choice, developer_protocol_edit, commit, tag, publish, translation_rerun]
+

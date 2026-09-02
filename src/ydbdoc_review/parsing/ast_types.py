@@ -51,6 +51,15 @@ class InlineStrong(BaseModel):
     marker: Literal["**", "__"] = "**"
 
 
+class InlineStrike(BaseModel):
+    """~~strikethrough~~ with recursively parsed inline children."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["strike"] = "strike"
+    children: list["InlineNode"]
+    marker: Literal["~~"] = "~~"
+
+
 class InlineLink(BaseModel):
     """[text](url "title")."""
 
@@ -59,6 +68,7 @@ class InlineLink(BaseModel):
     href: str
     title: str | None = None
     children: list["InlineNode"]
+    source_span: "SourceSpan | None" = None
 
 
 class InlineImage(BaseModel):
@@ -120,6 +130,7 @@ InlineNode = Annotated[
         InlineCode,
         InlineEmphasis,
         InlineStrong,
+        InlineStrike,
         InlineLink,
         InlineImage,
         InlineHTML,
@@ -251,6 +262,20 @@ class YfmNote(BaseModel):
     title: str | None = None
     children: list["BlockNode"]
 
+
+class SourceSpan(BaseModel):
+    """A half-open source range in UTF-8 bytes, with its human location."""
+
+    model_config = ConfigDict(extra="forbid")
+    byte_start: int
+    byte_end: int
+    line: int
+    column: int
+
+
+class AmbiguousYfmStructureError(ValueError):
+    """A tabs container has direct-depth content with no unambiguous owner."""
+
 class YfmTab(BaseModel):
     """A single tab inside a {% list tabs %} container."""
 
@@ -260,6 +285,8 @@ class YfmTab(BaseModel):
     # but can contain code, links, variables).
     title: list["InlineNode"]
     children: list["BlockNode"]
+    source_span: SourceSpan | None = None
+    title_span: SourceSpan | None = None
 
 
 class YfmTabs(BaseModel):
@@ -270,6 +297,11 @@ class YfmTabs(BaseModel):
     # Variant: "tabs" or "tabs accordion" or "tabs radio" etc.
     variant: str = "tabs"
     children: list[YfmTab]
+    container_id: int | None = None
+    parent_container_id: int | None = None
+    opening_span: SourceSpan | None = None
+    closing_span: SourceSpan | None = None
+    opening_indent: int = 0
 
 class YfmInclude(BaseModel):
     """YFM include directive: {% include [text](path) %} or {% include notitle [text](path) %}."""
@@ -279,6 +311,7 @@ class YfmInclude(BaseModel):
     text: str       # description in [brackets], not user-facing
     path: str       # the included file path
     notitle: bool = False
+    source_span: SourceSpan | None = None
 
 class YfmIfBranch(BaseModel):
     """One branch of an {% if %} block.
@@ -361,6 +394,7 @@ BlockQuote.model_rebuild()
 ListItem.model_rebuild()
 InlineEmphasis.model_rebuild()
 InlineStrong.model_rebuild()
+InlineStrike.model_rebuild()
 InlineLink.model_rebuild()
 YfmNote.model_rebuild()
 YfmTab.model_rebuild()

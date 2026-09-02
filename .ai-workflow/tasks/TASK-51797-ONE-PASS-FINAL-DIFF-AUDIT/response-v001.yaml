@@ -1,0 +1,147 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-FINAL-DIFF-AUDIT
+review_type: implementation_audit
+specification_version: "final-diff-audit-v001"
+status: completed
+verdict: APPROVED
+reviewer: implementation_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+implementation_conformant: false
+---
+
+# Review response: final diff-conformance audit v001
+
+## Verdict
+
+**APPROVED** (audit accuracy only)
+
+## Summary
+
+The analyst final-diff audit is complete and accurate against worktree
+`/private/tmp/ydbdoc-review-one-pass-v003` (base `9ff8edec…`) and the approved
+remediation contract through v016. Independent spot-checks confirm FINAL-001
+through FINAL-010. The central distinction holds: a GREEN path/hash policy gate
+and a 187-entry structurally truthful manifest do not imply semantic
+conformance when a mapped requirement forbids the recorded final state.
+
+`implementation_conformant: false`. This verdict does not authorize commit, tag,
+publish, tester release candidacy, or a clean translation run.
+
+## Findings
+
+[]
+
+## Confirmed audit findings
+
+- id: FINAL-001
+  severity: RED
+  requirement: R-001
+  confirmed: true
+  evidence: >
+    `tests/unit/test_fence_comments.py` is deleted (`git status D`); replacement
+    is only `test_fence_comments_read_only.py`. Manifest maps the deletion to
+    R-001. R-001 requires retaining `test_fence_comments.py` as the mixed
+    read-only file and forbids filename-only replacement.
+
+- id: FINAL-002
+  severity: RED
+  requirement: R-003
+  confirmed: true
+  evidence: >
+    `test_one_pass_migration.py:212-242` injects `en_toc_reachable=sentinel`
+    into `run_pr_translation` and never invokes `run_doc_translate` or spies
+    `build_en_toc_reachable_from_repo`. Matches the exact weak pattern R-003
+    requires replacing.
+
+- id: FINAL-003
+  severity: RED
+  requirement: R-008
+  confirmed: true
+  evidence: >
+    No `ydb/docs/ru/root-page.md` workflow case under `tests/`. Only
+    dependency-queue unit uses of `root.md` exist; they do not prove workflow
+    queueing, EN counterpart, provenance guard or atomic publication.
+
+- id: FINAL-004
+  severity: RED
+  requirement: R-010
+  confirmed: true
+  evidence: >
+    `tests/unit/test_placeholder_repair.py` is deleted; manifest maps that `D`
+    entry to R-010. R-010 requires restoring the original file and preserving
+    detector/blocking coverage.
+
+- id: FINAL-005
+  severity: RED
+  requirement: R-011
+  confirmed: true
+  evidence: >
+    `navigation_merge.py::_translate_menu_labels` still calls
+    `client.chat(..., role="translate")`, fills missing with RU via
+    `setdefault`, and on JSON failure returns `{label: label}`. Reachable from
+    `merge_navigation_pair`. No TranslationJobManifest / AcquisitionController
+    on this path.
+
+- id: FINAL-006
+  severity: RED
+  requirement: R-012
+  confirmed: true
+  evidence: >
+    `local_repair.py` `validate_repair` only checks finding/block IDs and
+    non-empty string inside acquisition. Token equality, range, unique
+    replacement and `global_validate(proposed)` run only after
+    `.acquire(...).payload` acceptance.
+
+- id: FINAL-007
+  severity: RED
+  requirement: R-014
+  confirmed: true
+  evidence: >
+    Critic messages serialize `{"document": current, "block_records": ...}`
+    where `current` is the full rendered document, exposing protected
+    code/config/directive bytes contrary to the minimal critic contract.
+
+- id: FINAL-008
+  severity: RED
+  requirement: R-016
+  confirmed: true
+  evidence: >
+    No production symbol `validate_complete_document` under `src/`.
+    `one_pass.py` passes only `assert_no_protect_token` as `global_validate`.
+
+- id: FINAL-009
+  severity: RED
+  requirement: R-021
+  confirmed: true
+  evidence: >
+    `skip_paths.py` still defines `filter_translate_changes` /
+    `filter_path_set` / `matches_translate_skip`;
+    `tests/unit/test_translate_skip_paths.py` still asserts public-material
+    Markdown is dropped. R-021 requires removal, not mere call-site
+    disconnection.
+
+- id: FINAL-010
+  severity: YELLOW
+  requirement: R-009
+  confirmed: true
+  evidence: >
+    Production has `NOTE_TITLE`, `CUT_TITLE` and `UnknownSegmentKindError`, but
+    `implementation-report-v010.md` only counts R-009 paths and does not record
+    the required behavior decisions/tests.
+
+## Independently corroborated non-contradictions
+
+- R-002: `_restore_source_hrefs` absent from `src/`.
+- R-004 report status remains **NOT READY**; manifest entry count 187;
+  `uv.lock` absent.
+- R-009 production note/cut/unknown-kind code present (report gap is FINAL-010).
+
+## Severity and required next step
+
+Nine RED findings (FINAL-001..009) and one YELLOW (FINAL-010) block
+implementation conformance. After this audit approval, the analyst must publish
+a closed remediation amendment for FINAL-001 through FINAL-010 before any further
+restricted implementation, then whole-diff re-audit, independent tester, and
+external implementation review.

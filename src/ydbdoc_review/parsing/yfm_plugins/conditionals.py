@@ -7,6 +7,7 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
+from ydbdoc_review.parsing.yfm_plugins.source_spans import utf8_source_span
 
 # Opening: {% if EXPR %}
 _IF_OPEN_RE = re.compile(r"^\{%\s*if\s+(.+?)\s*%\}\s*$")
@@ -80,6 +81,7 @@ def _yfm_if_rule(
     outer_open.markup = first_line
     outer_open.block = True
     outer_open.map = [start_line, close_line + 1]
+    outer_open.meta["source_span"] = utf8_source_span(state.src, pos, max_pos)
 
     # For each branch, emit branch_open, tokenize inner lines, emit branch_close.
     for idx, (marker_line, kind, condition) in enumerate(markers):
@@ -96,16 +98,30 @@ def _yfm_if_rule(
             else "{% else %}"
         )
         branch_open.block = True
-        branch_open.meta = {"condition": condition, "branch_kind": kind}
+        marker_start = state.bMarks[marker_line] + state.tShift[marker_line]
+        marker_end = state.eMarks[marker_line]
+        branch_open.meta = {
+            "condition": condition,
+            "branch_kind": kind,
+            "source_span": utf8_source_span(state.src, marker_start, marker_end),
+        }
 
         state.lineMax = branch_body_end
         state.md.block.tokenize(state, branch_body_start, branch_body_end)
 
-        state.push("yfm_if_branch_close", "div", -1)
+        branch_close = state.push("yfm_if_branch_close", "div", -1)
+        boundary = state.bMarks[branch_body_end] + state.tShift[branch_body_end]
+        branch_close.meta["source_span"] = utf8_source_span(
+            state.src, boundary, boundary
+        )
 
     outer_close = state.push("yfm_if_close", "div", -1)
     outer_close.markup = "{% endif %}"
     outer_close.block = True
+    close_start = state.bMarks[close_line] + state.tShift[close_line]
+    outer_close.meta["source_span"] = utf8_source_span(
+        state.src, close_start, state.eMarks[close_line]
+    )
 
     state.parentType = old_parent
     state.lineMax = old_line_max
@@ -121,4 +137,3 @@ def yfm_if_plugin(md: MarkdownIt) -> None:
         _yfm_if_rule,
         {"alt": ["paragraph", "reference", "blockquote", "list"]},
     )
-

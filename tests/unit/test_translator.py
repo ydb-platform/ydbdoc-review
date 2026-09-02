@@ -245,9 +245,9 @@ def test_translate_batch_all_models_with_cyrillic_fail_closed():
             client, batch, load_glossary(), file_path="docs/ru/x.md"
         )
 
-    # Three batch attempts plus the existing per-segment repair path. No bad
-    # candidate may be accepted from either model.
-    assert client.chat.call_count >= 6
+    # Legacy per-segment writer repair is retired. The remaining isolated
+    # translator validation fails closed after its bounded batch attempts.
+    assert client.chat.call_count == 3
 
 
 def test_translate_batch_rate_limit_tries_fallback_model():

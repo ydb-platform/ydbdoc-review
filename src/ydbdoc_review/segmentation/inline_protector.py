@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from ydbdoc_review.parsing.ast_types import (
-    InlineCode,
     InlineEmphasis,
     InlineHardBreak,
     InlineHTML,
@@ -11,10 +10,9 @@ from ydbdoc_review.parsing.ast_types import (
     InlineLink,
     InlineNode,
     InlineSoftBreak,
+    InlineStrike,
     InlineStrong,
-    InlineTermRef,
     InlineText,
-    InlineVariable,
 )
 from ydbdoc_review.segmentation.types import ProtectedInline
 
@@ -31,7 +29,8 @@ _PREFIX_MAP: dict[str, str] = {
     "yfm_variable": "V",
     "term_ref": "T",
 }
-# Links: anchor translated, href as ⟦U{n}⟧. Images: alt translated, src as ⟦S{n}⟧.
+# Containers retain their own parser-owned wrapper atoms. Only their nested
+# prose is exposed to a model.
 
 
 def protect_inline(
@@ -67,16 +66,21 @@ class _ProtectState:
         self.counters[prefix] = self.counters.get(prefix, 0) + 1
         return f"⟦{prefix}{self.counters[prefix]}⟧"
 
+    def next_boundaries(self, prefix: str) -> tuple[str, str]:
+        self.counters[prefix] = self.counters.get(prefix, 0) + 1
+        identity = self.counters[prefix]
+        return f"⟦{prefix}BEGIN_{identity}⟧", f"⟦{prefix}END_{identity}⟧"
+
 
 def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
     out: list[str] = []
     for node in children:
         if isinstance(node, InlineLink):
             inner = _protect_walk(node.children, state)
-            marker = state.next_placeholder("url")
+            begin, end = state.next_boundaries("L")
             state.placeholders.append(
                 ProtectedInline(
-                    placeholder=marker,
+                    placeholder=begin,
                     node=InlineLink(
                         href=node.href,
                         title=node.title,
@@ -84,19 +88,24 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
                     ),
                 )
             )
-            out.append(f"[{inner}]({marker})")
+            state.placeholders.append(
+                ProtectedInline(
+                    placeholder=end,
+                    node=InlineLink(
+                        href=node.href,
+                        title=node.title,
+                        children=[],
+                    ),
+                )
+            )
+            out.append(f"{begin}{inner}{end}")
             continue
 
         if isinstance(node, InlineImage):
-            marker = state.next_placeholder("src")
-            size = ""
-            if node.width is not None or node.height is not None:
-                w = node.width or ""
-                h = node.height or ""
-                size = f" ={w}x{h}"
+            begin, end = state.next_boundaries("IMG")
             state.placeholders.append(
                 ProtectedInline(
-                    placeholder=marker,
+                    placeholder=begin,
                     node=InlineImage(
                         src=node.src,
                         title=node.title,
@@ -106,8 +115,19 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
                     ),
                 )
             )
-            title = f' "{node.title}"' if node.title else ""
-            out.append(f"![{node.alt}]({marker}{size}{title})")
+            state.placeholders.append(
+                ProtectedInline(
+                    placeholder=end,
+                    node=InlineImage(
+                        src=node.src,
+                        title=node.title,
+                        alt="",
+                        width=node.width,
+                        height=node.height,
+                    ),
+                )
+            )
+            out.append(f"{begin}{node.alt}{end}")
             continue
 
         kind = node.kind
@@ -126,10 +146,31 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
             out.append(node.content)
         elif isinstance(node, InlineEmphasis):
             inner_text = _protect_walk(node.children, state)
-            out.append(f"{node.marker}{inner_text}{node.marker}")
+            begin, end = state.next_boundaries("EM")
+            template = InlineEmphasis(children=[], marker=node.marker)
+            state.placeholders.extend((
+                ProtectedInline(placeholder=begin, node=template),
+                ProtectedInline(placeholder=end, node=template),
+            ))
+            out.append(f"{begin}{inner_text}{end}")
         elif isinstance(node, InlineStrong):
             inner_text = _protect_walk(node.children, state)
-            out.append(f"{node.marker}{inner_text}{node.marker}")
+            begin, end = state.next_boundaries("STRONG")
+            template = InlineStrong(children=[], marker=node.marker)
+            state.placeholders.extend((
+                ProtectedInline(placeholder=begin, node=template),
+                ProtectedInline(placeholder=end, node=template),
+            ))
+            out.append(f"{begin}{inner_text}{end}")
+        elif isinstance(node, InlineStrike):
+            inner_text = _protect_walk(node.children, state)
+            begin, end = state.next_boundaries("STRIKE")
+            template = InlineStrike(children=[])
+            state.placeholders.extend((
+                ProtectedInline(placeholder=begin, node=template),
+                ProtectedInline(placeholder=end, node=template),
+            ))
+            out.append(f"{begin}{inner_text}{end}")
         elif isinstance(node, InlineSoftBreak):
             out.append("\n")
         elif isinstance(node, InlineHardBreak):
@@ -141,7 +182,9 @@ def _protect_walk(children: list[InlineNode], state: _ProtectState) -> str:
     return "".join(out)
 
 
-def restore_inline_text(text: str, placeholders: list[ProtectedInline]) -> str:
+def restore_inline_text(
+    text: str, placeholders: list[ProtectedInline], *, target_locale: bool = False
+) -> str:
     """Restore the original markdown by replacing placeholders with rendered atoms.
 
     Used in tests and for diagnostics; the main pipeline uses
@@ -150,7 +193,37 @@ def restore_inline_text(text: str, placeholders: list[ProtectedInline]) -> str:
     from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
 
     result = text
+    by_marker = {placeholder.placeholder: placeholder.node for placeholder in placeholders}
+    for marker, node in by_marker.items():
+        if "BEGIN_" not in marker:
+            continue
+        prefix, identity = marker[1:-1].split("BEGIN_", 1)
+        end = f"⟦{prefix}END_{identity}⟧"
+        if result.count(marker) != 1 or result.count(end) != 1:
+            raise ValueError("missing, duplicated, or reordered structural boundary")
+        if result.index(marker) > result.index(end):
+            raise ValueError("crossing structural boundary")
+        if isinstance(node, InlineLink):
+            href = node.href
+            if target_locale and href.startswith("/ru/"):
+                href = "/en/" + href.removeprefix("/ru/")
+            title = f' "{node.title}"' if node.title else ""
+            opening, closing = "[", f"]({href}{title})"
+        elif isinstance(node, InlineImage):
+            title = f' "{node.title}"' if node.title else ""
+            size = ""
+            if node.width is not None or node.height is not None:
+                size = f" ={node.width or ''}x{node.height or ''}"
+            opening, closing = "![", f"]({node.src}{size}{title})"
+        elif isinstance(node, (InlineEmphasis, InlineStrong, InlineStrike)):
+            marker_text = node.marker
+            opening = closing = marker_text
+        else:
+            raise ValueError("unsupported structural boundary template")
+        result = result.replace(marker, opening, 1).replace(end, closing, 1)
     for p in placeholders:
+        if "BEGIN_" in p.placeholder or "END_" in p.placeholder:
+            continue
         if (
             isinstance(p.node, InlineLink)
             and not p.node.children

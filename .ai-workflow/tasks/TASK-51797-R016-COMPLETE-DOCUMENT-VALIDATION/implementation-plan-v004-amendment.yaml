@@ -1,0 +1,46 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+plan_version: r016-parser-owned-v004
+amends: r016-parser-owned-v003
+scope: reconcile-note-cut-title-translation-with-structural-marker-hash-only
+schema_refinement:
+  type: ParserSpanRecord
+  append_field: 'translatable_spans: tuple[tuple[int, int, str], ...] = ()'
+  tuple_semantics: [absolute_utf8_start, absolute_utf8_end, segment_kind]
+  allowed_token_kinds:
+    yfm_note_open: note_title
+    yfm_cut_open: cut_title
+  all_other_tokens: empty_tuple
+plugin_changes:
+  - path: src/ydbdoc_review/parsing/yfm_plugins/notes.py
+    symbol: _yfm_note_rule
+    exact_span: 'pos + m_open.start(2), pos + m_open.end(2) when group 2 is present'
+    absent_optional_title: omit_title_span
+  - path: src/ydbdoc_review/parsing/yfm_plugins/cuts.py
+    symbol: _yfm_cut_rule
+    exact_span: 'pos + m_open.start(1), pos + m_open.end(1) always'
+canonical_digest:
+  file: src/ydbdoc_review/parsing/markdown_parser.py
+  symbol: _canonical_source_slice
+  operates_on: utf8_bytes_and_parser_owned_absolute_offsets_only
+  replacement: 'NUL + YDBDOC_TRANSLATABLE: + ascii_segment_kind + NUL'
+  raw_hash_exception: [yfm_note_open, yfm_cut_open]
+  unchanged_hash_rule: every_other_non_zero_physical_record_exact_raw_UTF8_slice
+fail_closed:
+  - unordered_overlapping_or_outside_span
+  - non_title_token_has_translatable_span
+  - AST_title_without_required_metadata
+  - absent_note_title_with_synthesized_span
+forbidden: [later_regex, find, rfind, index, title_value_search, decode_for_slicing, translated_length_assumption, syntax_normalization]
+required_tests:
+  - exact_multibyte_note_and_cut_title_spans
+  - titled_empty_and_absent_title_distinction
+  - different_length_translation_same_canonical_digest
+  - every_surrounding_syntax_mutation_rejected
+  - invalid_metadata_fail_closed
+  - residual_cyrillic_title_rejected_as_prose
+  - forbidden_source_inspection_absent
+inherit: [specification.md, specification-v002-amendment.md, specification-v003-amendment.md, implementation-plan.yaml, implementation-plan-v002-amendment.yaml, implementation-plan-v003-amendment.yaml]
+implementation_gate: response-v004.yaml_verdict_APPROVED
+developer_discretion: none
+product_code_edit_by_analyst: forbidden

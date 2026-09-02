@@ -100,39 +100,6 @@ def test_table_cell_backtick_inline_code_round_trip():
     assert "`````" not in first.replace("`` ` ``", "")
 
 
-def test_critic_fix_survives_table_cell_render_round_trip():
-    """§6.60: apply_critic_fixes + render + gate_round_trip keeps placeholders."""
-    from ydbdoc_review.pipeline.qa import gate_round_trip
-    from ydbdoc_review.pipeline.translate_file import _render_with_translations
-    from ydbdoc_review.segmentation.extractor import extract_segments
-    from ydbdoc_review.translation.critic import apply_critic_fixes
-    from ydbdoc_review.translation.schemas import CriticIssueOut
-    from ydbdoc_review.validation.markers import extract_placeholders
-
-    ru_cell = "Санитизация: пробелы, ⟦C1⟧, ⟦C2⟧, ⟦C3⟧ → ⟦C4⟧"
-    ru_doc = parse_markdown(
-        "| a | b | c |\n| --- | --- | --- |\n| x | y | " + ru_cell + " |\n"
-    )
-    segments = extract_segments(ru_doc)
-    seg = next(s for s in segments if "Санитиз" in s.text)
-    broken = "Sanitization: spaces, ⟦C1⟧, ⟦C2⟧, ````` → ⟦C3⟧"
-    suggested = "Sanitization: spaces, ⟦C1⟧, ⟦C2⟧, ⟦C3⟧ → ⟦C4⟧"
-    issue = CriticIssueOut(
-        segment_id=seg.id,
-        severity="blocked",
-        category="placeholder corruption",
-        comment="Placeholder ⟦C3⟧ was replaced with literal backticks",
-        suggested_text=suggested,
-    )
-    translations = {seg.id: broken}
-    translations, applied, skipped = apply_critic_fixes(translations, segments, [issue])
-    assert applied and not skipped
-    rendered = _render_with_translations(ru_doc, segments, translations, target_lang="en")
-    realigned, err = gate_round_trip(segments, rendered)
-    assert err is None
-    assert extract_placeholders(realigned[seg.id]) == extract_placeholders(seg.text)
-
-
 def test_hard_line_break():
     text = "line one  \nline two\n"
     out = round_trip(text)

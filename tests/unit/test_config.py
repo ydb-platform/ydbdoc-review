@@ -7,8 +7,7 @@ from textwrap import dedent
 
 import pytest
 
-from ydbdoc_review.config.loader import Config, ModelChoice, load_config
-
+from ydbdoc_review.config.loader import ModelChoice, load_config
 
 # --- ModelChoice ---
 
@@ -152,23 +151,6 @@ def test_override_fallbacks_list_from_csv():
     assert cfg.llm.models.translate.fallbacks == ["gpt-oss-120b", "deepseek-v32"]
 
 
-def test_override_translation_chars():
-    cfg = load_config(env={
-        "YDBDOC_TRANSLATION_SEGMENTS_PER_BATCH_CHARS": "2000",
-    })
-    assert cfg.translation.segments_per_batch_chars == 2000
-
-
-def test_override_critic_feedback_retries():
-    cfg = load_config(env={"YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES": "2"})
-    assert cfg.translation.critic_feedback_retries == 2
-
-
-def test_default_critic_feedback_retries():
-    cfg = load_config(env={})
-    assert cfg.translation.critic_feedback_retries == 2
-
-
 def test_secret_vars_not_treated_as_overrides():
     """YDBDOC_YC_* must populate secrets, not crash on validation."""
     cfg = load_config(env={
@@ -240,4 +222,3 @@ def test_base_url_trailing_slash_stripped():
         "YDBDOC_LLM_BASE_URL": "https://example.com/v1/",
     })
     assert cfg.llm.base_url == "https://example.com/v1"
-

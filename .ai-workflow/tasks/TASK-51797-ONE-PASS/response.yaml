@@ -1,0 +1,71 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS"
+review_type: "specification"
+specification_version: "one-pass-v003"
+reviewed_iteration: "one-pass-v003"
+reviewed_at: "2026-09-01"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS/review-request.md"
+verdict: "APPROVED"
+summary: >
+  Version one-pass-v003 is functionally complete. Direct YFM Markdown includes
+  and Markdown links now use the same canonical seen set, breadth-first queue,
+  recursive scanning, deterministic ordering, and single 20-file auto-added
+  budget. The removal scope explicitly names all render-time fence/text/Cyrillic
+  LLM writers, EN-mutating fragment and structural repair writers, and every
+  translation-role retry, model-chain, cross-model fallback, and fallback-config
+  path, with static-search and call-graph tests. Failed or unresolved jobs expose
+  only the structured warning report; staged EN cannot be uploaded, attached,
+  committed, pushed, or otherwise published. The prior v002 invariants remain
+  explicit, including the universal RU queue and the single immutable
+  source_tree_sha used for RU reads and EN existence.
+findings: []
+resolved_findings:
+  - id: "ONE-PASS-003"
+    resolution: >
+      Parser-recognized direct YFM .md includes now resolve with the Markdown
+      link rules and share the same BFS, seen_ru_paths set, recursive admission,
+      duplicate handling, and job-wide 20-file budget. Includes have no ambient
+      graph walk or separate budget, and boundary/alias cases are tested.
+  - id: "ONE-PASS-004"
+    resolution: >
+      The mandatory-removal and migration sections explicitly delete the three
+      named render-time translation helpers, all named fragment/structural EN
+      repair writers, translation transport retries, model-chain iteration,
+      cross-model fallback, and translation fallback configuration. Static and
+      call-graph tests prove absence from translate and verify production paths.
+  - id: "ONE-PASS-005"
+    resolution: >
+      The transaction contract now states that the structured warning report is
+      the only inspectable artifact for failed or unresolved jobs. Staged EN is
+      never uploaded, attached to a PR, committed, pushed, or otherwise
+      published, and the required tests cover each prohibited publication path.
+unresolved_questions: []
+confirmations:
+  exactly_one_request_and_one_ru_derived_render_per_queued_file: true
+  non_prose_atoms_protected_and_restored_only_from_same_ru_file: true
+  old_en_bytes_forbidden_except_same_tree_boolean_path_existence: true
+  one_immutable_source_tree_sha_supplies_ru_and_en_existence: true
+  universal_ru_queue_has_no_legacy_or_skip_bypass: true
+  markdown_links_and_direct_yfm_md_includes_share_bfs_seen_and_budget: true
+  direct_yfm_include_discovery_is_recursive_only_through_admitted_queue_nodes: true
+  include_link_aliases_and_duplicates_enqueue_once: true
+  shared_auto_added_budget_is_exactly_20_excluding_initial_files: true
+  unresolved_includes_restore_exact_readable_directive_and_structured_warning: true
+  render_time_fence_text_and_cyrillic_llm_writers_deleted: true
+  fragment_anchor_and_structural_en_repair_writers_deleted: true
+  atom_restoration_is_only_source_owned_structure_writer: true
+  translation_transport_retries_deleted: true
+  translation_model_chain_and_cross_model_fallback_deleted: true
+  translation_fallback_environment_and_config_fields_deleted: true
+  one_translation_request_means_one_network_attempt_to_one_model_slug: true
+  static_search_and_call_graph_removal_tests_required: true
+  failed_or_unresolved_job_exposes_only_structured_warning_report: true
+  staged_en_never_uploaded_attached_committed_pushed_or_published: true
+  all_or_nothing_transaction_and_no_partial_publication: true
+  no_hidden_compatibility_route: true
+  no_unresolved_developer_choice: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

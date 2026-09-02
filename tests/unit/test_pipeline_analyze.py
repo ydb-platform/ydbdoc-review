@@ -29,7 +29,7 @@ def test_heuristic_translate_ru_only_changed():
     plan = plan_pair_heuristic(
         _content(ru_text="RU", en_text="EN", pair=_pair(ru_changed=True, en_changed=False))
     )
-    assert plan.action == "translate_to_en"
+    assert plan.action == "translate_ru_to_en_once"
     assert plan.source_path.endswith("/ru/a.md")
 
 
@@ -53,7 +53,7 @@ def test_heuristic_pr_45949_added_ru_missing_en():
             ),
         )
     )
-    assert plan.action == "translate_to_en"
+    assert plan.action == "translate_ru_to_en_once"
 
 
 def test_heuristic_pr_45949_deleted_ru_stale_en():
@@ -79,7 +79,7 @@ def test_heuristic_pr_45949_deleted_ru_stale_en():
     assert plan.action == "delete_en"
 
 
-def test_heuristic_both_changed_skip_bilingual():
+def test_heuristic_both_changed_still_uses_ru_once():
     plan = plan_pair_heuristic(
         _content(
             ru_text="RU",
@@ -87,11 +87,11 @@ def test_heuristic_both_changed_skip_bilingual():
             pair=_pair(ru_changed=True, en_changed=True),
         )
     )
-    assert plan.action == "skip"
-    assert "§6.76" in plan.summary
+    assert plan.action == "translate_ru_to_en_once"
+    assert "one-pass" in plan.summary
 
 
-def test_plan_from_analyze_critic_only():
+def test_plan_from_analyze_read_only_qa():
     result = AnalyzePairResult(
         ru_path="ydb/docs/ru/a.md",
         en_path="ydb/docs/en/a.md",
@@ -102,10 +102,10 @@ def test_plan_from_analyze_critic_only():
         summary="aligned",
     )
     plan = plan_from_analyze(_content(), result)
-    assert plan.action == "critic_only"
+    assert plan.action == "read_only_qa"
 
 
-def test_plan_pairs_skip_when_both_changed():
+def test_plan_pairs_translate_ru_when_both_changed():
     content = _content(
         ru_text="RU body",
         en_text="EN body",
@@ -113,7 +113,7 @@ def test_plan_pairs_skip_when_both_changed():
     )
     plans = plan_pairs([content])
     assert len(plans) == 1
-    assert plans[0].action == "skip"
+    assert plans[0].action == "translate_ru_to_en_once"
 
 
 def test_plan_pairs_rejects_analyze_llm():
@@ -126,15 +126,15 @@ def test_plan_pairs_rejects_analyze_llm():
         plan_pairs([content], use_analyze_llm=True)
 
 
-def test_heuristic_translate_en_only_changed():
+def test_heuristic_en_only_changed_is_read_only_qa():
     plan = plan_pair_heuristic(
         _content(en_text="EN only", pair=_pair(en_changed=True, ru_changed=False))
     )
-    assert plan.action == "translate_to_ru"
+    assert plan.action == "read_only_qa"
     assert plan.source_path.endswith("/en/a.md")
 
 
-def test_plan_from_analyze_translate_en():
+def test_plan_from_analyze_translate_ru_to_en_once():
     result = AnalyzePairResult(
         ru_path="ydb/docs/ru/a.md",
         en_path="ydb/docs/en/a.md",
@@ -145,22 +145,22 @@ def test_plan_from_analyze_translate_en():
         summary="need en",
     )
     plan = plan_from_analyze(_content(), result)
-    assert plan.action == "translate_to_en"
+    assert plan.action == "translate_ru_to_en_once"
 
 
-def test_heuristic_both_changed_en_only_text():
+def test_heuristic_both_changed_missing_ru_still_enters_transaction():
     plan = plan_pair_heuristic(
         _content(
             en_text="EN only",
             pair=_pair(ru_changed=True, en_changed=True),
         )
     )
-    assert plan.action == "skip"
-    assert "§6.76" in plan.summary
+    assert plan.action == "translate_ru_to_en_once"
+    assert "transaction will block" in plan.summary
 
 
-def test_heuristic_skip_when_unchanged():
+def test_heuristic_helper_has_only_universal_ru_action():
     plan = plan_pair_heuristic(
         _content(ru_text="RU", en_text="EN", pair=_pair(ru_changed=False, en_changed=False))
     )
-    assert plan.action == "skip"
+    assert plan.action == "translate_ru_to_en_once"

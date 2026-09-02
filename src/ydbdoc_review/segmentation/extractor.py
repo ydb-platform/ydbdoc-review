@@ -145,15 +145,34 @@ class _ExtractState:
         elif isinstance(block, Table):
             self.walk_table(block, ast_path, path)
         elif isinstance(block, YfmNote):
-            # Note titles are plain strings, not inline lists — we don't
-            # segment them here. Future work: add a separate pass for them.
+            if block.title:
+                self.segments.append(
+                    Segment(
+                        id=self.next_id(),
+                        kind=SegmentKind.NOTE_TITLE,
+                        path=path + [f"note:{block.note_type}:title"],
+                        text=block.title,
+                        placeholders=[],
+                        ast_path=ast_path + ["title"],
+                    )
+                )
             self.walk_blocks(
                 block.children, ast_path, path + [f"note:{block.note_type}"]
             )
         elif isinstance(block, YfmTabs):
             self.walk_tabs(block, ast_path, path)
         elif isinstance(block, YfmCut):
-            # Cut titles are plain strings — not segmented in B.1.
+            if block.title:
+                self.segments.append(
+                    Segment(
+                        id=self.next_id(),
+                        kind=SegmentKind.CUT_TITLE,
+                        path=path + ["cut:title"],
+                        text=block.title,
+                        placeholders=[],
+                        ast_path=ast_path + ["title"],
+                    )
+                )
             self.walk_blocks(block.children, ast_path, path + ["cut"])
         elif isinstance(block, YfmIf):
             for k, branch in enumerate(block.branches):

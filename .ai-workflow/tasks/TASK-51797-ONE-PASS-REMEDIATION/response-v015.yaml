@@ -1,0 +1,57 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v015"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: final manifest lifecycle v015
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v015 correctly separates the immutable capture-once baseline snapshot from the
+refreshable final-delta manifest. Root cause matches current gate behavior:
+`bootstrap_manifest` refuses an existing output, while validation requires exact
+path equality with the current delta, so a creation-only manifest cannot remain
+authoritative after later authorized work.
+
+The two-command lifecycle is closed: bootstrap stays creation-only; new
+`refresh-manifest` requires an existing output, verifies the snapshot contract
+first, builds a complete in-memory replacement under fail-closed mappings,
+pre-validates, then writes via sibling temp + fsync + atomic replace of only the
+exact configured manifest path, leaving prior bytes on any error. Idempotency
+via normalized self-hash is required. Unclassified, wildcard-only, forbidden
+deletion or unexpected protocol paths RED-block refresh without silent omission
+or generic protocol trust.
+
+Quiescent timing is exact: refresh only after all currently approved code,
+tests, reports and reviewed protocol artifacts are materialized; validate
+immediately after; later delta changes require refresh+validate again. Self-seal
+of the four v015 protocol paths plus the stated sequence (materialize response,
+implement refresh, refresh once, validate) stops this amendment from
+invalidating its own final manifest without inventing future-path trust.
+Predecessor must be exact `one-pass-remediation-v014`. No developer choice
+remains.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v015.md`; read v015 amendments and spot-checked v006
+  bootstrap/manifest path plus current `bootstrap_manifest` / validate path-match
+  behavior in `remediation_policy_gate.py`.
+- Verified snapshot immutability, atomic failure semantics, idempotency and
+  fail-closed mapping gates in the plan.
+- Verified v014 predecessor and four-path v015 self-seal; no production-scope
+  expansion beyond the gate.

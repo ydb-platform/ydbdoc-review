@@ -1,0 +1,45 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION
+plan_version: r016-parser-owned-v005
+amends: r016-parser-owned-v004
+scope: reconcile-selected-front-matter-translation-with-structural-hash-only
+selected_values:
+  key_source: src/ydbdoc_review/parsing/front_matter.py::TRANSLATABLE_FRONT_MATTER_KEYS
+  current_exact_keys: [title, description]
+  predicate: top_level_string_and_strip_nonempty
+allowed_production_addition:
+  path: src/ydbdoc_review/parsing/front_matter.py
+  symbols: [FrontMatterValueRecord, parse_front_matter_with_spans, parse_front_matter, translatable_front_matter_fields, _encode_front_matter_value, apply_front_matter_updates]
+  block_record_fields: ['body_indent: bytes', 'newline: bytes']
+span_owner:
+  yaml_api: [yaml.compose, MappingNode, ScalarNode, start_mark, end_mark, style]
+  utf8_conversion: precomputed_character_to_byte_boundary_table
+  document_shift: markdown_it_front_matter_token_map_body_start
+  parser_record_roles: ['front_matter:title', 'front_matter:description']
+styles:
+  plain: complete_scalar_node_span
+  single_quoted: exclude_open_and_close_quote
+  double_quoted: exclude_open_and_close_quote
+  literal: body_after_protected_header
+  folded: body_after_protected_header_single_semantic_line_only
+canonical_digest:
+  exception: selected_front_matter_value_spans_only
+  raw_protected: [front_and_back_delimiters, keys, colon_spacing, quote_bytes, scalar_style_header, untranslated_values, comments, order]
+reinsertion:
+  operation: descending_parser_owned_span_replacements_then_full_reparse_and_canonical_validation
+  whole_mapping_dump: forbidden
+  impossible_style_change: 'front_matter_translation_requires_style_change:<key>'
+forbidden: [second_key_list, regex_span_search, find, rfind, index, raw_key_search, raw_value_search, dump_front_matter_from_one_pass, normalize_comments_or_order]
+allowed_test_addition: tests/unit/test_front_matter.py
+required_tests:
+  - different_length_selected_values_all_styles_GREEN
+  - selected_value_only_bytes_change
+  - key_syntax_style_comment_order_unselected_mutations_RED
+  - nonselected_values_have_no_span
+  - duplicate_or_invalid_span_fail_closed
+  - residual_cyrillic_selected_value_RED
+  - forbidden_source_inspection_absent
+inherit: [specification.md, specification-v002-amendment.md, specification-v003-amendment.md, specification-v004-amendment.md, implementation-plan.yaml, implementation-plan-v002-amendment.yaml, implementation-plan-v003-amendment.yaml, implementation-plan-v004-amendment.yaml]
+implementation_gate: response-v005.yaml_verdict_APPROVED
+developer_discretion: none
+product_code_edit_by_analyst: forbidden

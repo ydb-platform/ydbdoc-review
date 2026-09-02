@@ -93,13 +93,6 @@ class TranslationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_lang: str = "ru"
     target_lang: str = "en"
-    segments_per_batch_chars: int = 4000
-    critic_feedback_retries: int = 2
-    # §6.132 differential translation (override via YDBDOC_TRANSLATION_*)
-    differential_enabled: bool = True
-    differential_stale_days: int = 90
-    differential_change_magnitude: float = 0.5
-    differential_min_en_ratio: float = 0.3
     continue_feedback: str = ""
 
 
@@ -130,15 +123,6 @@ class PathsConfig(BaseModel):
     docs_root: str = "ydb/docs"
     translation_branch_prefix: str = "ydbdoc-review/pr-"
     verify_fixup_branch_prefix: str = "ydbdoc-review/verify-"
-    # §6.167 — never translate / never reorder these trees (toc href/include too)
-    translate_skip_globs: list[str] = Field(
-        default_factory=lambda: [
-            "**/public-materials/**",
-            "public-materials/**",
-            "**/guide-to-public-material.md",
-            "guide-to-public-material.md",
-        ]
-    )
 
 
 class ReportingConfig(BaseModel):
@@ -419,7 +403,10 @@ def load_config(
     data = _load_yaml(yaml_path)
     data = _apply_env_overrides(data, env)
 
-    cfg = Config.model_validate(data)
+    # The translation-local model namespace has its own strict loader and must
+    # never be normalized into shared LLMConfig/ModelChoice semantics.
+    shared_data = {k: v for k, v in data.items() if k != "translation_model_policy"}
+    cfg = Config.model_validate(shared_data)
     cfg.secrets = _resolve_secrets(env)
     # Flat env aliases used by GitHub Actions (not YDBDOC_OPS_* path form).
     if env.get("YDBDOC_ALLOWED_ACTORS"):
@@ -445,4 +432,3 @@ def _load_yaml(yaml_path: Path | None) -> dict[str, Any]:
     pkg = resources.files("ydbdoc_review.config")
     text = (pkg / "default.yaml").read_text(encoding="utf-8")
     return yaml.safe_load(text) or {}
-

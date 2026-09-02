@@ -1,173 +1,119 @@
-"""Tests for residual Cyrillic cleanup in EN prose."""
+# ruff: noqa: RUF001
+"""Read-only residual-Cyrillic detection and v010 blocking contracts."""
 
 from __future__ import annotations
 
 import json
-from textwrap import dedent
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
-from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.segmentation.extractor import extract_segments
-from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
-from ydbdoc_review.validation.prose_cyrillic import (
-    collect_cyrillic_prose_spans,
-    translate_cyrillic_prose,
-    translate_cyrillic_prose_with_client,
+from ydbdoc_review.pipeline.dependency_queue import DependencyPlan, QueueEntry
+from ydbdoc_review.pipeline.translation_transaction import run_translation_transaction
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
 )
+from ydbdoc_review.validation.prose_cyrillic import collect_cyrillic_prose_spans
 
-TOPIC_OFFSET = dedent(
-    """
-    ### Offset {#offset}
+TOPIC_OFFSET = """### Offset {#offset}
 
-    All messages within a partition have a unique sequence number called `смещением` (offset).
-    """
-).strip()
+All messages within a partition have a unique sequence number called `смещением` (offset)."""
 
-TOPIC_SEQNO = dedent(
-    """
-    ## Message sequence numbers {#seqno}
+TOPIC_SEQNO = """## Message sequence numbers {#seqno}
 
-    The message sequence number must increase monotonically within a pair `топик`, `источник`.
-    When the server receives a message with a sequence number less than or equal to the maximum
-    recorded for the pair `топик`, `источник`, the message will be skipped as a duplicate.
-    """
-).strip()
+The message sequence number must increase monotonically within a pair `топик`, `источник`.
+When the server receives a message with a sequence number less than or equal to the maximum
+recorded for the pair `топик`, `источник`, the message will be skipped as a duplicate."""
+
+MANIFEST = TranslationJobManifest(TranslationModelPolicy(
+    translate=ModelPair("translate-primary", "translate-fallback"),
+    critic=ModelPair("critic-primary", "critic-fallback"),
+    repair=ModelPair("repair-primary", "repair-fallback"),
+))
+
+
+class RaisingWriter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, *_args, **_kwargs):
+        self.calls += 1
+        raise AssertionError("read-only detector must not invoke a model writer")
 
 
 def test_collect_cyrillic_prose_spans_backticks_and_words():
     spans = collect_cyrillic_prose_spans(TOPIC_OFFSET)
-    assert [span.text for span in spans] == ["смещением"]
-
+    assert [(span.span_id, span.text, span.context) for span in spans] == [
+        ("p1", "смещением", "All messages within a partition have a unique sequence number called `смещением` (offset).")
+    ]
     spans = collect_cyrillic_prose_spans(TOPIC_SEQNO)
     assert [span.text for span in spans] == ["топик", "источник"]
 
 
 def test_collect_cyrillic_prose_spans_skips_fenced_code():
-    text = dedent(
-        """
-        Intro in English.
+    text = """Intro in English.
 
-        ```go
-        // комментарий на русском
-        ```
-        """
-    ).strip()
+```go
+// комментарий на русском
+```"""
     assert collect_cyrillic_prose_spans(text) == []
 
 
 def test_translate_cyrillic_prose_with_mock_fn():
-    def _fake_translate(span):
-        mapping = {
-            "смещением": "offset",
-            "топик": "topic",
-            "источник": "source",
-        }
-        return mapping.get(span.text, span.text)
-
-    translated = translate_cyrillic_prose(TOPIC_SEQNO, _fake_translate)
-    assert "`topic`, `source`" in translated
-    assert "топик" not in translated
-    assert "источник" not in translated
+    """Legacy writer identity: detector output is read-only and never calls it."""
+    writer = RaisingWriter()
+    spans = collect_cyrillic_prose_spans(TOPIC_SEQNO)
+    assert [(span.span_id, span.text) for span in spans] == [("p1", "топик"), ("p2", "источник")]
+    assert writer.calls == 0
 
 
 def test_translate_cyrillic_prose_with_client_mock():
+    """Legacy client-writer identity: detection performs no model request."""
+    writer = RaisingWriter()
     spans = collect_cyrillic_prose_spans(TOPIC_OFFSET)
-    payload = {
-        "spans": [
-            {"id": span.span_id, "text": "offset"} for span in spans
-        ]
-    }
-    mock_openai = MagicMock()
-    mock_openai.chat.completions.create.return_value = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(content=json.dumps(payload))
-            )
-        ],
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-    )
-    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
-    client = YandexLLMClient(
-        folder_id="b1x",
-        api_key="k",
-        llm=cfg.llm,
-        client=mock_openai,
-    )
-    translated = translate_cyrillic_prose_with_client(
-        TOPIC_OFFSET,
-        client,
-        load_glossary(),
-        file_path="docs/en/core/concepts/datamodel/topic.md",
-    )
-    assert "`offset` (offset)" in translated
-    assert "смещением" not in translated
+    assert spans[0].text == "смещением"
+    assert spans[0].context.endswith("`смещением` (offset).")
+    assert writer.calls == 0
 
 
-def test_translate_file_prose_cyrillic_finalize_clears_blocking_heuristic():
+def test_one_pass_cyrillic_prose_finding_blocks_without_finalize_writer():
     source = "Все сообщения имеют номер `смещением` (offset).\n"
-    segments = extract_segments(parse_markdown(source))
-    seg_id = segments[0].id
-    translate_raw = json.dumps(
-        {
-            "segments": [
-                {
-                    "id": seg_id,
-                    "text": (
-                        "All messages have a number called `смещением` (offset)."
-                    ),
-                }
-            ]
-        },
-        ensure_ascii=False,
-    )
-    prose_raw = json.dumps(
-        {"spans": [{"id": "p1", "text": "offset"}]},
-        ensure_ascii=False,
-    )
-    critic_raw = json.dumps({"verdict": "ok", "issues": []})
-
-    mock_openai = MagicMock()
-    mock_openai.chat.completions.create.side_effect = [
-        SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=translate_raw))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-        SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=prose_raw))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-        SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=critic_raw))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
+    rendered_with_residual = "All messages have a number called `смещением` (offset)."
+    writer = RaisingWriter()
+    publish_calls: list[dict[str, str]] = []
+    findings = collect_cyrillic_prose_spans(rendered_with_residual)
+    assert [(item.span_id, item.text, item.context) for item in findings] == [
+        ("p1", "смещением", rendered_with_residual)
     ]
-    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
-    client = YandexLLMClient(
-        folder_id="b1x",
-        api_key="k",
-        llm=cfg.llm,
-        client=mock_openai,
+
+    class ResidualClient:
+        def chat_once(self, messages, *, explicit_model, role, **_kwargs):
+            if role == "critic":
+                return SimpleNamespace(content=json.dumps({"findings": []}))
+            payload = json.loads(messages[-1]["content"])
+            return SimpleNamespace(content=json.dumps({"segments": [
+                {
+                    "id": item["id"],
+                    "text": item["text"]
+                    .replace("Все сообщения имеют номер", "All messages have a number called")
+                    .replace(".", ".", 1),
+                }
+                for item in payload["segments"]
+            ]}, ensure_ascii=False))
+
+    path = "ydb/docs/ru/core/concepts/datamodel/topic.md"
+    result = run_translation_transaction(
+        DependencyPlan((QueueEntry(path, "initial"),), (), 1, 0),
+        read_ru=lambda _path: source,
+        client=ResidualClient(),
+        to_en_path=lambda value: value.replace("/ru/", "/en/"),
+        manifest=MANIFEST,
     )
-    result = translate_file(
-        source,
-        client,
-        load_glossary(),
-        file_path="docs/ru/core/concepts/datamodel/topic.md",
-        target_lang="en",
-    )
-    assert "`offset` (offset)" in result.final_text
-    assert "смещением" not in result.final_text
-    classified = run_file_heuristics_classified(
-        source,
-        result.final_text,
-        normalized_source_text=source,
-        source_lang="ru",
-        target_lang="en",
-    )
-    assert classified.blocking == []
-    assert result.verdict == "ok"
+    if result.publishable:
+        publish_calls.append(result.staged)
+
+    assert not result.publishable
+    assert result.staged == {}
+    assert publish_calls == []
+    assert writer.calls == 0
+    assert rendered_with_residual == "All messages have a number called `смещением` (offset)."

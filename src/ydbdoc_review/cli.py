@@ -22,9 +22,9 @@ from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.shutdown import install_shutdown_handlers
+from ydbdoc_review.translation.glossary import load_glossary
 
 app = typer.Typer(
     name="ydbdoc-review",
@@ -348,9 +348,17 @@ def translate_file_cmd(
     config: Annotated[Path | None, typer.Option("--config")] = None,
 ) -> None:
     """Translate one markdown file locally (no GitHub)."""
+    from ydbdoc_review.translation.model_policy import (
+        TranslationJobManifest,
+        load_serialized_translation_model_policy,
+        require_translation_chat_once,
+    )
+
+    manifest = TranslationJobManifest(load_serialized_translation_model_policy(config))
     cfg = load_config(yaml_path=config)
     try:
         client = create_llm_client(cfg)
+        require_translation_chat_once(client)
     except (RuntimeError, LLMConfigError) as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -366,6 +374,7 @@ def translate_file_cmd(
             source_lang=source_lang,
             target_lang=target_lang,
             enable_critic=with_critic and not no_critic,
+            manifest=manifest,
         )
     except (LLMError, ValueError) as exc:
         console.print(f"[red]Translation failed:[/red] {exc}")

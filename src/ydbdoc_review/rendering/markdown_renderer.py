@@ -24,6 +24,7 @@ from ydbdoc_review.parsing.ast_types import (
     InlineLink,
     InlineNode,
     InlineSoftBreak,
+    InlineStrike,
     InlineStrong,
     InlineText,
     ListItem,
@@ -424,6 +425,8 @@ def _render_inline_node(n: InlineNode) -> str:
     if isinstance(n, InlineStrong):
         inner = _render_inline(n.children)
         return f"{n.marker}{inner}{n.marker}"
+    if isinstance(n, InlineStrike):
+        return f"~~{_render_inline(n.children)}~~"
     if isinstance(n, InlineLink):
         inner = _render_inline(n.children)
         title = f' "{n.title}"' if n.title else ""

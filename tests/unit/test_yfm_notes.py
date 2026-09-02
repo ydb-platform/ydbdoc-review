@@ -5,12 +5,10 @@ from __future__ import annotations
 import pytest
 
 from ydbdoc_review.parsing.ast_types import (
-    FencedCode,
-    Heading,
     Paragraph,
     YfmNote,
 )
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.parsing.markdown_parser import create_parser, parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 
 
@@ -232,4 +230,16 @@ def test_round_trip_note_with_list():
         "{% endnote %}\n"
     )
     assert_stable(text)
+@pytest.mark.parametrize("title", ["Заголовок", ""])
+def test_note_title_span_excludes_quotes_and_uses_utf8(title):
+    text = f'{{% note info "{title}" %}}\nText\n{{% endnote %}}\n'
+    token = create_parser().parse(text)[0]
+    span = token.meta["title_span"]
+    assert text.encode()[span["byte_start"] : span["byte_end"]] == title.encode()
+    assert text.encode()[span["byte_start"] - 1 : span["byte_start"]] == b'"'
+    assert text.encode()[span["byte_end"] : span["byte_end"] + 1] == b'"'
 
+
+def test_note_without_title_has_no_title_span():
+    token = create_parser().parse("{% note info %}\nText\n{% endnote %}\n")[0]
+    assert "title_span" not in token.meta

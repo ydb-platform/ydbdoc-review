@@ -19,25 +19,28 @@ from ydbdoc_review.navigation.redirects import (
     merge_en_redirects_yaml,
     redirect_translate_scope,
 )
+from ydbdoc_review.navigation.scope_planner import (
+    TranslationScopePlan,
+    planned_toc_extras_for_pair,
+)
 from ydbdoc_review.navigation.toc import (
     TocTranslateScope,
     en_toc_is_absent,
     merge_en_toc_yaml,
     parse_toc_items,
-    preserve_en_order_for_skipped_toc_entries,
     resolve_toc_target_path,
     toc_entry_paths,
     toc_reordered_shared_hrefs,
     toc_translate_scope,
 )
-from ydbdoc_review.navigation.scope_planner import (
-    TranslationScopePlan,
-    planned_toc_extras_for_pair,
-)
 from ydbdoc_review.pipeline.pairs import NavigationPair
-from ydbdoc_review.pipeline.skip_paths import matches_translate_skip, toc_entry_is_skipped
 from ydbdoc_review.pipeline.types import FileVerdict, NavigationRunResult
+from ydbdoc_review.translation.acquisition import AcquisitionController, AcquisitionProtocolError
 from ydbdoc_review.translation.glossary import Glossary
+from ydbdoc_review.translation.model_policy import (
+    TranslationJobManifest,
+    require_translation_chat_once,
+)
 from ydbdoc_review.validation.heuristics import validate_navigation_merge_warnings
 
 logger = logging.getLogger(__name__)
@@ -153,9 +156,9 @@ def _resolve_toc_merge_scope(
     """Return merge scope and whether gap-fill is restricted to that scope.
 
     When EN sidebar yaml is absent, mirror the full RU structure (§6.85).
-    Otherwise scope = ``toc_translate_scope`` (RU base→PR diff) ∪ planned
+    Otherwise scope = ``toc_translate_scope`` (RU base-to-PR diff) U planned
     extras from the translation plan. ``supplement_only`` no longer expands to
-    every RU−EN missing href (§6.72 / #46878).
+    every RU-EN missing href (§6.72 / #46878).
 
     When the source PR also changed EN toc (``pair.en_changed``, bilingual),
     drop href/include entries that already exist on EN main from the *name*
@@ -197,26 +200,11 @@ def _resolve_toc_merge_scope(
         scope = TocTranslateScope(keep_hrefs, keep_includes)
 
     # Always restrict gap-fill to ``scope`` (§6.82). For ``supplement_only``
-    # parents (§6.72 / #46878) do **not** expand scope with every RU−EN missing
+    # parents (§6.72 / #46878) do **not** expand scope with every RU-EN missing
     # href — that pulled ``secondary_indexes.md`` / stale flat paths into EN and
     # failed ``missing_toc_target``. Planned extras already list the pages/includes
     # that caused the parent to be queued.
     return scope, True
-
-
-def _drop_skipped_from_toc_scope(
-    scope: TocTranslateScope,
-    skip_globs: list[str] | tuple[str, ...] | None,
-) -> TocTranslateScope:
-    """Remove href/include targets under ``translate_skip_globs`` (§6.167)."""
-    if not skip_globs:
-        return scope
-    return TocTranslateScope(
-        frozenset(h for h in scope.hrefs if not matches_translate_skip(h, skip_globs)),
-        frozenset(
-            p for p in scope.include_paths if not matches_translate_skip(p, skip_globs)
-        ),
-    )
 
 
 def _toc_label_names(
@@ -243,6 +231,7 @@ def _translate_menu_labels(
     glossary: Glossary,
     *,
     config: Config,
+    manifest: TranslationJobManifest | None = None,
 ) -> dict[str, str]:
     if not labels:
         return {}
@@ -257,24 +246,37 @@ def _translate_menu_labels(
             {"role": "system", "content": f"Glossary:\n{glossary_block}"}
         )
     messages.append({"role": "user", "content": user})
-    try:
-        response = client.chat(messages, role="translate")
+    unique_set = set(unique)
+
+    def validate(response: object) -> dict[str, str]:
         raw = response.content.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         data = json.loads(raw)
+        if not isinstance(data, dict) or not isinstance(data.get("translations"), list):
+            raise AcquisitionProtocolError("navigation response shape")
         mapping: dict[str, str] = {}
         for item in data.get("translations", []):
+            if not isinstance(item, dict):
+                raise AcquisitionProtocolError("navigation translation item")
             ru = str(item.get("ru", "")).strip()
             en = str(item.get("en", "")).strip()
-            if ru and en:
-                mapping[ru] = en
-        for label in unique:
-            mapping.setdefault(label, label)
+            if not ru or not en or ru not in unique_set or ru in mapping:
+                raise AcquisitionProtocolError("navigation label mapping")
+            mapping[ru] = en
+        if set(mapping) != unique_set:
+            raise AcquisitionProtocolError("navigation labels incomplete or extra")
         return mapping
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        logger.warning("Menu label translation failed, using RU labels: %s", exc)
-        return {label: label for label in unique}
+
+    if manifest is None:
+        raise AcquisitionProtocolError("navigation requires translation job manifest")
+    chat_client = require_translation_chat_once(client)
+    return AcquisitionController(
+        chat_client,
+        manifest.model_policy.translate,
+        role="navigation",
+        parser=validate,
+    ).acquire(messages).payload
 
 
 def merge_navigation_pair(
@@ -285,6 +287,7 @@ def merge_navigation_pair(
     client: YandexLLMClient,
     glossary: Glossary,
     config: Config,
+    manifest: TranslationJobManifest | None = None,
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
@@ -357,7 +360,6 @@ def merge_navigation_pair(
             pair_extra_hrefs=pair_extra_hrefs,
             pair_extra_includes=pair_extra_includes,
         )
-        scope = _drop_skipped_from_toc_scope(scope, config.paths.translate_skip_globs)
         en_main_hrefs = {it["href"] for it in parse_toc_items(en_main) if it.get("href")}
         ru_base_hrefs = {it["href"] for it in parse_toc_items(ru_base) if it.get("href")}
         ru_base_include_paths = {
@@ -397,9 +399,10 @@ def merge_navigation_pair(
         labels = _toc_label_names(ru_pr, scope, gap_hrefs=label_gaps)
         if en_toc_is_absent(en_main):
             labels = [it["name"] for it in parse_toc_items(ru_pr) if it.get("name")]
-        name_map = _translate_menu_labels(
-            client, labels, glossary, config=config
-        )
+        label_kwargs = {"config": config}
+        if manifest is not None:
+            label_kwargs["manifest"] = manifest
+        name_map = _translate_menu_labels(client, labels, glossary, **label_kwargs)
         # Keep ambient EN-main hrefs whose page still exists, but never retain
         # an entry explicitly removed by this RU source change (#45949).
         removed_ru_hrefs = ru_base_hrefs - {
@@ -426,13 +429,6 @@ def merge_navigation_pair(
             restrict_gap_fill_to_scope=restrict_gap_fill,
             keep_en_hrefs=keep_en_hrefs,
         )
-        skip_globs = list(config.paths.translate_skip_globs or ())
-        if skip_globs:
-            merged = preserve_en_order_for_skipped_toc_entries(
-                en_main,
-                merged,
-                entry_is_skipped=lambda it: toc_entry_is_skipped(it, skip_globs),
-            )
         warnings = validate_navigation_merge_warnings(
             pair.ru_path,
             ru_pr,
@@ -494,7 +490,6 @@ def verify_navigation_pair(
     extra_toc_hrefs: set[str] | None = None,
     docs_root: str = "ydb/docs",
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
-    skip_globs: list[str] | tuple[str, ...] | None = None,
 ) -> NavigationRunResult:
     """Validate committed EN navigation YAML against RU PR scope (no LLM merge)."""
     kind = navigation_yaml_kind(pair.ru_path)
@@ -532,11 +527,9 @@ def verify_navigation_pair(
                 pair_extra_hrefs=pair_extra_hrefs,
                 pair_extra_includes=pair_extra_includes,
             )
-            scope = _drop_skipped_from_toc_scope(scope, skip_globs)
         else:
             pair_extra = extra_toc_hrefs_for_pair(ru_pr, extra_toc_hrefs or set())
             scope = toc_translate_scope(ru_base, ru_pr).with_extra_hrefs(pair_extra)
-            scope = _drop_skipped_from_toc_scope(scope, skip_globs)
     else:
         scope = redirect_translate_scope(ru_base, ru_pr)
 
@@ -578,7 +571,6 @@ def run_navigation_verifies(
     extra_toc_hrefs: set[str] | None = None,
     docs_root: str = "ydb/docs",
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
-    skip_globs: list[str] | tuple[str, ...] | None = None,
 ) -> list[NavigationRunResult]:
     """Validate navigation YAML pairs for ``doc_verify``.
 
@@ -648,7 +640,6 @@ def run_navigation_verifies(
                 extra_toc_hrefs=hrefs if scope_plan is None else None,
                 docs_root=docs_root,
                 active_doc_ru_paths=active_doc_ru_paths,
-                skip_globs=skip_globs,
             )
         )
     return results
@@ -662,6 +653,7 @@ def run_navigation_merges(
     client: YandexLLMClient,
     glossary: Glossary,
     config: Config,
+    manifest: TranslationJobManifest | None = None,
     scope_plan: TranslationScopePlan | None = None,
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
@@ -692,6 +684,7 @@ def run_navigation_merges(
                 client=client,
                 glossary=glossary,
                 config=config,
+                manifest=manifest,
                 scope_plan=scope_plan,
                 extra_toc_hrefs=extra_toc_hrefs,
                 ru_content_ref=ru_content_ref,

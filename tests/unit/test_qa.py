@@ -20,11 +20,25 @@ from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
+)
 from ydbdoc_review.validation.heuristics import (
     ClassifiedHeuristics,
     run_file_heuristics_classified,
 )
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
+
+
+MANIFEST = TranslationJobManifest(
+    TranslationModelPolicy(
+        translate=ModelPair("translate-primary", "translate-fallback"),
+        critic=ModelPair("critic-primary", "critic-fallback"),
+        repair=ModelPair("repair-primary", "repair-fallback"),
+    )
+)
 
 
 def test_describe_segment_alignment_extra_ru_segment():
@@ -175,8 +189,8 @@ def test_translate_and_verify_same_verdict_on_identical_en():
     translate_raw = json.dumps(
         {"segments": [{"id": seg_id, "text": "Hello world."}]}
     )
-    critic_raw = json.dumps({"verdict": "ok", "issues": []})
-    client = _mock_client([translate_raw])
+    critic_raw = json.dumps({"findings": []})
+    client = _mock_client([translate_raw, critic_raw])
 
     translated = translate_file(
         source,
@@ -185,6 +199,7 @@ def test_translate_and_verify_same_verdict_on_identical_en():
         file_path="docs/ru/a.md",
         enable_translate=True,
         enable_critic=False,
+        manifest=MANIFEST,
     )
     final_en = translated.final_text
 

@@ -10,22 +10,25 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
-from openai import OpenAI
 import requests
+from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from ydbdoc_review.config.loader import Config, LLMConfig
 from ydbdoc_review.llm.errors import (
     LLMConfigError,
+    LLMModelUnavailableError,
+    LLMProtocolResponseError,
     LLMRequestError,
     LLMRetryableRequestError,
     LLMRetryExhaustedError,
 )
-from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV
 from ydbdoc_review.llm.retry import (
     HTTP_RATE_LIMIT,
     classify_api_error,
@@ -39,14 +42,13 @@ from ydbdoc_review.llm.retry import (
     should_advance_eliza_model_chain,
 )
 from ydbdoc_review.llm.role_chains import ensure_disjoint_translate_critic_chains
-from ydbdoc_review.shutdown import interruptible_sleep
+from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV, eliza_tls_verify
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
+from ydbdoc_review.shutdown import interruptible_sleep
 
 logger = logging.getLogger(__name__)
 
-LLMRole = Literal["analyze", "translate", "critic"]
-
-from ydbdoc_review.llm.tls import eliza_tls_verify
+LLMRole = Literal["analyze", "translate", "critic", "repair"]
 
 
 def _message_char_count(messages: list[ChatCompletionMessageParam]) -> tuple[int, int]:
@@ -108,6 +110,111 @@ class ChatResult:
     model_slug: str
     model_uri: str
     usage: LLMUsage
+
+
+class LLMClientProtocol(Protocol):
+    """Shared client surface; calls on one instance must be serialized."""
+
+    def chat_once(
+        self,
+        messages: Sequence[ChatCompletionMessageParam],
+        *,
+        explicit_model: str,
+        role: LLMRole | None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResult: ...
+
+
+def _chat_once_arguments(
+    messages: Sequence[ChatCompletionMessageParam],
+    *,
+    explicit_model: str,
+    default_temperature: float,
+    default_max_tokens: int,
+    temperature: float | None,
+    max_tokens: int | None,
+) -> tuple[list[ChatCompletionMessageParam], str, float, int]:
+    """Validate and copy inputs before transport dispatch."""
+    slug = explicit_model.strip()
+    if not slug:
+        raise LLMConfigError("explicit_model must be non-empty")
+    temp = default_temperature if temperature is None else temperature
+    tokens = default_max_tokens if max_tokens is None else max_tokens
+    if isinstance(temp, bool) or not isinstance(temp, (int, float)):
+        raise LLMConfigError("temperature must be a number")
+    if not 0 <= float(temp) <= 2:
+        raise LLMConfigError("temperature must be between 0 and 2")
+    if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
+        raise LLMConfigError("max_tokens must be a positive integer")
+    try:
+        request_messages = list(tuple(messages))
+    except TypeError as exc:
+        raise LLMConfigError("messages must be a sequence") from exc
+    return request_messages, slug, float(temp), tokens
+
+
+def _record_usage_safely(tracker: UsageTracker, usage: LLMUsage) -> None:
+    try:
+        tracker.add(usage)
+    except Exception:
+        logger.debug("usage tracker failed", exc_info=True)
+
+
+def _failure_usage(slug: str, role: LLMRole | None, started: float) -> LLMUsage:
+    return LLMUsage(
+        model_slug=slug,
+        input_tokens=0,
+        output_tokens=0,
+        latency_ms=(time.perf_counter() - started) * 1000,
+        retries=0,
+        success=False,
+        role=role,
+    )
+
+
+def _normalize_yandex_once_error(exc: Exception) -> LLMRequestError:
+    """Map one Yandex dispatch failure by the approved provider evidence table."""
+    if isinstance(exc, LLMRequestError):
+        return exc
+
+    response = getattr(exc, "response", None)
+    status = getattr(exc, "status_code", None)
+    if status is None and response is not None:
+        status = getattr(response, "status_code", None)
+    code = getattr(exc, "code", None)
+    if code is None:
+        body = getattr(exc, "body", None)
+        if isinstance(body, dict):
+            error = body.get("error", body)
+            if isinstance(error, dict):
+                code = error.get("code")
+    if code is None and response is not None:
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            error = payload.get("error", payload)
+            if isinstance(error, dict):
+                code = error.get("code")
+
+    if status in {401, 403}:
+        return LLMRequestError(str(exc))
+    if status in {408, 429, 500, 502, 503, 504}:
+        retry_after = None
+        if response is not None:
+            retry_after = parse_retry_after_s(getattr(response, "headers", {}).get("Retry-After"))
+        return LLMRetryableRequestError(str(exc), status_code=status, retry_after_s=retry_after)
+    if code in {"MODEL_NOT_FOUND", "MODEL_UNAVAILABLE"} and status in {None, 400, 404}:
+        return LLMModelUnavailableError(str(exc))
+    if code is None and status in {None, 400, 404} and re.match(
+        r"^failed to get model(?:\s*[:.]|$)", str(exc).strip(), re.IGNORECASE
+    ):
+        return LLMModelUnavailableError(str(exc))
+    if isinstance(status, int) and 400 <= status < 500:
+        return LLMRequestError(str(exc))
+    return LLMRequestError(str(exc))
 
 
 class YandexLLMClient:
@@ -253,6 +360,70 @@ class YandexLLMClient:
         raise LLMRetryExhaustedError(
             f"All models exhausted ({models}): {last_error}"
         ) from last_error
+
+    def chat_once(
+        self,
+        messages: Sequence[ChatCompletionMessageParam],
+        *,
+        explicit_model: str,
+        role: LLMRole | None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResult:
+        """Make exactly one request against ``explicit_model``."""
+        request_messages, slug, temp, tokens = _chat_once_arguments(
+            messages,
+            explicit_model=explicit_model,
+            default_temperature=self._llm.temperature,
+            default_max_tokens=self._llm.max_tokens,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        started = time.perf_counter()
+        uri = self.model_uri(slug)
+        try:
+            completion = self._client.chat.completions.create(
+                model=uri,
+                messages=request_messages,
+                temperature=temp,
+                max_tokens=tokens,
+            )
+            try:
+                choice = completion.choices[0]
+                content = choice.message.content or ""
+                if not content.strip():
+                    raise LLMProtocolResponseError("Empty LLM completion")
+                usage_obj = completion.usage
+                input_tokens = int(usage_obj.prompt_tokens or 0) if usage_obj else 0
+                output_tokens = int(usage_obj.completion_tokens or 0) if usage_obj else 0
+            except LLMProtocolResponseError:
+                raise
+            except (AttributeError, IndexError, TypeError, ValueError) as exc:
+                raise LLMProtocolResponseError(f"Invalid LLM completion envelope: {exc}") from exc
+        except Exception as exc:
+            _record_usage_safely(self._usage, _failure_usage(slug, role, started))
+            normalized = _normalize_yandex_once_error(exc)
+            if normalized is exc:
+                raise
+            raise normalized from exc
+        usage = LLMUsage(
+            model_slug=slug,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            retries=0,
+            success=True,
+            role=role,
+        )
+        _record_usage_safely(self._usage, usage)
+        result = ChatResult(content=content, model_slug=slug, model_uri=uri, usage=usage)
+        self._record_transcript(
+            role=role,
+            messages=request_messages,
+            content=result.content,
+            model_slug=result.model_slug,
+        )
+        return result
 
     def _record_transcript(
         self,
@@ -401,37 +572,27 @@ class ElizaLLMClient(YandexLLMClient):
     def _parse_eliza_completion_content(data: object) -> str:
         """Extract assistant text from Eliza chat completion JSON."""
         if not isinstance(data, dict):
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: response is not a JSON object"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: response is not a JSON object")
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise LLMRetryableRequestError("Eliza HTTP 200: empty choices")
         first = choices[0]
         if not isinstance(first, dict):
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: invalid choice entry"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: invalid choice entry")
         message = first.get("message")
         if not isinstance(message, dict):
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: missing message in choice"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: missing message in choice")
         if "content" not in message:
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: missing content in message"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: missing content in message")
         content = str(message.get("content") or "")
         if not content.strip():
-            raise LLMRetryableRequestError(
-                "Eliza HTTP 200: empty content in message"
-            )
+            raise LLMRetryableRequestError("Eliza HTTP 200: empty content in message")
         return content
 
     def _model_chain_for_role(self, role: LLMRole) -> list[str]:
         if role == "analyze":
             raise LLMConfigError(
-                f'role "analyze" has no internal Eliza model '
+                'role "analyze" has no internal Eliza model '
                 "(doc_translate uses deterministic planning — §6.30); "
                 "pass model= explicitly or use yandex_cloud provider"
             )
@@ -544,6 +705,120 @@ class ElizaLLMClient(YandexLLMClient):
             "ElizaLLMClient must use chat() over requests.Session, not _call_once()"
         )
 
+    def chat_once(
+        self,
+        messages: Sequence[ChatCompletionMessageParam],
+        *,
+        explicit_model: str,
+        role: LLMRole | None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResult:
+        """Make exactly one Eliza POST against ``explicit_model``."""
+        request_messages, slug, temp, tokens = _chat_once_arguments(
+            messages,
+            explicit_model=explicit_model,
+            default_temperature=self._llm.temperature,
+            default_max_tokens=self._llm.max_tokens,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        url = f"{self._internal_base_url(slug)}/chat/completions"
+        headers = {
+            "authorization": f"OAuth {self._oauth_token}",
+            "content-type": "application/json",
+        }
+        payload = {
+            "messages": request_messages,
+            "temperature": temp,
+            "max_tokens": tokens,
+        }
+        started = time.perf_counter()
+        try:
+            resp = self._http.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=float(self._llm.timeout_s),
+            )
+            if resp.status_code >= 400:
+                err = self._eliza_http_error(resp, oauth_token=self._oauth_token)
+                if not hasattr(err, "status_code"):
+                    err.status_code = resp.status_code  # type: ignore[attr-defined]
+                if is_eliza_model_overloaded(err):
+                    unavailable = LLMModelUnavailableError(str(err))
+                    unavailable.status_code = resp.status_code  # type: ignore[attr-defined]
+                    if isinstance(err, LLMRetryableRequestError):
+                        unavailable.retry_after_s = err.retry_after_s  # type: ignore[attr-defined]
+                    raise unavailable from err
+                raise err
+            try:
+                data = resp.json()
+                content = self._parse_eliza_completion_content_once(data)
+                usage_obj = data.get("usage") or {}
+                input_tokens = int(usage_obj.get("prompt_tokens") or 0)
+                output_tokens = int(usage_obj.get("completion_tokens") or 0)
+            except LLMProtocolResponseError:
+                raise
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise LLMProtocolResponseError(f"Eliza HTTP 200: invalid response: {exc}") from exc
+        except requests.exceptions.SSLError as exc:
+            _record_usage_safely(self._usage, _failure_usage(slug, role, started))
+            raise LLMRequestError(
+                f"Eliza TLS verification failed (set {ELIZA_CA_BUNDLE_ENV}): {exc}"
+            ) from exc
+        except requests.exceptions.Timeout as exc:
+            _record_usage_safely(self._usage, _failure_usage(slug, role, started))
+            raise LLMRetryableRequestError(str(exc)) from exc
+        except requests.exceptions.ConnectionError as exc:
+            _record_usage_safely(self._usage, _failure_usage(slug, role, started))
+            if is_requests_ssl_error(exc):
+                raise LLMRequestError(
+                    f"Eliza TLS verification failed (set {ELIZA_CA_BUNDLE_ENV}): {exc}"
+                ) from exc
+            raise LLMRetryableRequestError(str(exc)) from exc
+        except LLMRequestError:
+            _record_usage_safely(self._usage, _failure_usage(slug, role, started))
+            raise
+
+        usage = LLMUsage(
+            model_slug=slug,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            retries=0,
+            success=True,
+            role=role,
+        )
+        _record_usage_safely(self._usage, usage)
+        result = ChatResult(content=content, model_slug=slug, model_uri=url, usage=usage)
+        self._record_transcript(
+            role=role,
+            messages=request_messages,
+            content=result.content,
+            model_slug=result.model_slug,
+        )
+        return result
+
+    @staticmethod
+    def _parse_eliza_completion_content_once(data: object) -> str:
+        """Parse a completed response without inheriting chat's retry category."""
+        if not isinstance(data, dict):
+            raise LLMProtocolResponseError("Eliza HTTP 200: response is not a JSON object")
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise LLMProtocolResponseError("Eliza HTTP 200: empty choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise LLMProtocolResponseError("Eliza HTTP 200: invalid choice entry")
+        message = first.get("message")
+        if not isinstance(message, dict) or "content" not in message:
+            raise LLMProtocolResponseError("Eliza HTTP 200: missing content in choice")
+        content = str(message.get("content") or "")
+        if not content.strip():
+            raise LLMProtocolResponseError("Eliza HTTP 200: empty content in message")
+        return content
+
     def chat(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -605,9 +880,7 @@ class ElizaLLMClient(YandexLLMClient):
                     latency_ms = (time.perf_counter() - started) * 1000
 
                     if resp.status_code >= 400:
-                        http_err = self._eliza_http_error(
-                            resp, oauth_token=self._oauth_token
-                        )
+                        http_err = self._eliza_http_error(resp, oauth_token=self._oauth_token)
                         raise http_err
 
                     data = resp.json()
@@ -644,22 +917,18 @@ class ElizaLLMClient(YandexLLMClient):
                     last_error = exc
                 except requests.exceptions.SSLError as exc:
                     raise LLMRequestError(
-                        "Eliza TLS verification failed "
-                        f"(set {ELIZA_CA_BUNDLE_ENV}): {exc}"
+                        f"Eliza TLS verification failed (set {ELIZA_CA_BUNDLE_ENV}): {exc}"
                     ) from exc
                 except requests.exceptions.Timeout as exc:
                     last_error = exc
                 except requests.exceptions.ConnectionError as exc:
                     if is_requests_ssl_error(exc):
                         raise LLMRequestError(
-                            "Eliza TLS verification failed "
-                            f"(set {ELIZA_CA_BUNDLE_ENV}): {exc}"
+                            f"Eliza TLS verification failed (set {ELIZA_CA_BUNDLE_ENV}): {exc}"
                         ) from exc
                     last_error = exc
                 except ValueError as exc:
-                    raise LLMRequestError(
-                        f"Eliza response is not valid JSON: {exc}"
-                    ) from exc
+                    raise LLMRequestError(f"Eliza response is not valid JSON: {exc}") from exc
 
                 latency_ms = (time.perf_counter() - started) * 1000
                 self._usage.add(
@@ -701,10 +970,7 @@ class ElizaLLMClient(YandexLLMClient):
                     )
 
                 if failure_no >= max_tries:
-                    if (
-                        model_idx + 1 < len(chain)
-                        and should_advance_eliza_model_chain(last_error)
-                    ):
+                    if model_idx + 1 < len(chain) and should_advance_eliza_model_chain(last_error):
                         logger.warning(
                             "Eliza model %s exhausted retries, trying next model in chain: %s",
                             slug,
@@ -768,6 +1034,4 @@ def create_llm_client(
         return YandexLLMClient.from_config(config, usage_tracker=usage_tracker)
     if provider == "eliza":
         return ElizaLLMClient.from_config(config, usage_tracker=usage_tracker)
-    raise LLMConfigError(
-        "Unknown YDBDOC_MODEL_PROVIDER. Expected 'yandex_cloud' or 'eliza'."
-    )
+    raise LLMConfigError("Unknown YDBDOC_MODEL_PROVIDER. Expected 'yandex_cloud' or 'eliza'.")

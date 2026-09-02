@@ -1,0 +1,46 @@
+---
+protocol_version: 1
+task_id: TASK-51797-ONE-PASS-REMEDIATION
+review_type: specification_reviewer
+specification_version: "one-pass-remediation-v021"
+status: completed
+verdict: APPROVED
+reviewer: specification_reviewer
+has_unresolved_developer_choices: false
+implementation_authorized: false
+---
+
+# Review response: Ruff artifact mapping v021
+
+## Verdict
+
+**APPROVED**
+
+## Summary
+
+v021 closes `REMEDIATION-V020-001` without changing the reviewed v020 Ruff
+semantics. Resolved R-004 gains exactly the three literal files and the v020
+symbol set. Highest-precedence exact mappings close ownership, requirement IDs
+and absent→present states for the script (`script`/`[R-004]`), test
+(`test`/`[R-004]`) and baseline JSON (`control_artifact` /
+`[R-004, workflow-protocol-provenance]` with mandatory authoritative
+task/version). The JSON is capture-once via the approved v020
+`capture-baseline` command and byte-immutable afterward; fourth artifact,
+wildcard/generic mapping, hand-edit, overwrite or recapture are RED.
+
+Predecessor is exact `one-pass-remediation-v020`; self-seal is four v021
+protocol paths (`response-v020.yaml` already sealed by v020). Completion order
+keeps Ruff validate before refresh then immediate policy validate. No developer
+choice remains.
+
+## Findings
+
+[]
+
+## Checks performed
+
+- Claimed `review-request-v021.md`; read v021 amendments against
+  `response-v020.yaml` finding REMEDIATION-V020-001.
+- Verified exact three-path R-004 extension, mapping table and capture-once
+  lifecycle.
+- Confirmed v020 predecessor, four-path seal and unchanged Ruff semantics.

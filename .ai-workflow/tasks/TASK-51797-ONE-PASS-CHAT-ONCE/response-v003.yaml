@@ -1,0 +1,65 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-CHAT-ONCE"
+review_type: "specification"
+specification_version: "chat-once-v003"
+reviewed_iteration: "chat-once-v003"
+reviewed_at: "2026-09-01"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/review-request-v003.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-CHAT-ONCE/response-v002.yaml"
+  - "src/ydbdoc_review/llm/errors.py"
+  - "src/ydbdoc_review/llm/retry.py"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Version chat-once-v003 resolves the sole v002 compatibility finding.
+  LLMModelUnavailableError remains the existing direct LLMRequestError subclass;
+  only its typed MODEL_UNAVAILABLE class attribute is added, with explicit MRO,
+  isinstance, is_retryable, and is_model_unavailable compatibility goldens. The
+  distinct LLMProtocolResponseError remains a non-retryable LLMRequestError for
+  malformed or empty completed responses. The full prerequisite contract is
+  internally complete: exact API and provider mappings, zero-or-one dispatch,
+  four typed outcomes without message parsing, transport/cancellation/telemetry
+  behavior, concurrency, unchanged chat semantics, narrow mutation boundary,
+  spies/static checks/goldens, and closed handoff to llm-wiring-v002. Approval
+  does not authorize implementation.
+findings: []
+resolved_findings:
+  - id: "CHAT-ONCE-V002-001"
+    resolution: >
+      The normative declaration now preserves
+      LLMModelUnavailableError(LLMRequestError), explicitly forbids recreating
+      the class or changing its MRO, and adds only chat_once_kind. Compatibility
+      tests pin the existing MRO, isinstance relationships, and retry/model-
+      unavailable predicate results before and after the addition.
+  - id: "CHAT-ONCE-V001-001"
+    resolution: >
+      The closed four-value ChatOnceFailureKind, distinct protocol-response
+      subtype, exact provider mappings, and acquisition-transition tests remain
+      present and require no exception-message parsing.
+unresolved_questions: []
+confirmations:
+  exact_public_api_and_yandex_eliza_provider_mappings_complete: true
+  zero_or_one_provider_request_cardinality_complete: true
+  hidden_retry_fallback_chain_cache_repair_and_recursive_chat_forbidden: true
+  closed_transient_model_unavailable_protocol_invalid_permanent_enum_complete: true
+  protocol_invalid_subtype_is_distinct_non_retryable_llmrequesterror: true
+  malformed_empty_eliza_http_success_is_protocol_invalid_for_chat_once: true
+  existing_eliza_chat_malformed_response_behavior_unchanged: true
+  llm_model_unavailable_parent_remains_llmrequesterror: true
+  llm_model_unavailable_mro_and_isinstance_behavior_unchanged: true
+  is_retryable_and_is_model_unavailable_behavior_unchanged: true
+  only_model_unavailable_chat_once_kind_attribute_added: true
+  acquisition_distinguishes_all_four_outcomes_without_message_parsing: true
+  auth_tls_transport_timeout_cancellation_and_telemetry_contract_complete: true
+  concurrency_constraints_complete: true
+  existing_chat_semantics_and_non_translation_compatibility_unchanged: true
+  precise_shared_file_mutation_boundary_complete: true
+  runtime_spies_static_checks_compatibility_goldens_and_conformance_report_complete: true
+  handoff_to_llm_wiring_v002_and_one_pass_v010_has_no_developer_choice: true
+  reviewer_verdict_does_not_authorize_implementation: true
+  explicit_user_acceptance_still_required: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

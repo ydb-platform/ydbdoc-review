@@ -1,0 +1,78 @@
+protocol_version: 1
+task_id: TASK-51797-R016-COMPLETE-DOCUMENT-VALIDATION-IMPLEMENTATION-AUDIT
+review_type: implementation_reviewer
+specification_version: r016-parser-owned-v005
+implementation_review_version: v001
+status: reviewed
+verdict: CHANGES_REQUESTED
+implementation_authorized: false
+implementation_conformant: false
+has_unresolved_developer_choices: true
+summary: >
+  Independent re-check of /private/tmp/ydbdoc-review-one-pass-v003 confirms the
+  analyst audit: all six FINAL008-IMPL RED findings remain. Tab list markers
+  +/*/- validate; yfm_tab_open is absent from non-prose hashing; complete-document
+  validation runs only after acquire; selected front-matter aliases span
+  unselected anchor bytes; foreign note_title roles and thin evidence suites
+  remain fail-open/incomplete; literal different-length title update still raises
+  style-change. Implementation is not conformant to approved v001–v005.
+findings:
+  - id: FINAL008-IMPL-001
+    severity: RED
+    related: [FINAL-008, R-016, v003, v004]
+    summary: Physical tab list markers are not protected; +/* header mutations validate.
+    detail: >
+      Reproduced ACCEPT for candidates that only change `-` to `+` or `*` with
+      English title/body. Source-map non_prose is only yfm_tabs_open/close;
+      yfm_tab_open is excluded from physical non-prose hashing. Require a
+      parser-owned tab header record with tab_title translatable span and
+      marker/spacing/boundary protection.
+  - id: FINAL008-IMPL-002
+    severity: RED
+    related: [FINAL-008, R-016, v001]
+    summary: Complete-document failure is outside the translation acquisition parser.
+    detail: >
+      translate_ru_to_en_once still acquires after _parse_translate_response only;
+      validate_complete_document runs after acquire returns. Structurally invalid
+      primary cannot raise AcquisitionProtocolError and advance to fallback.
+      Move render/localize/complete-validate inside acquisition acceptance without
+      rebuilding the frozen context or adding extra call sites.
+  - id: FINAL008-IMPL-003
+    severity: RED
+    related: [FINAL-008, R-016, v005]
+    summary: Alias-backed selected front-matter values reuse unselected anchor spans.
+    detail: >
+      Reproduced: title record for `x: &a Hello\ntitle: *a\n` spans bytes
+      `&a Hello`. Reject alias-backed selected values with
+      source_map_invalid_front_matter:<key>; add alias/cross-key-anchor tests.
+  - id: FINAL008-IMPL-004
+    severity: RED
+    related: [FINAL-008, R-016, v003, v004]
+    summary: Translatable role/token ownership remains fail-open.
+    detail: >
+      Reproduced: _canonical_source_slice accepts note_title on a non-note record.
+      Enforce the exact role matrix, reject foreign metadata, and reject
+      zero-width physical markers while keeping approved virtual-close /
+      empty-title exceptions.
+  - id: FINAL008-IMPL-005
+    severity: RED
+    related: [FINAL-008, R-016, v001-v005]
+    summary: Mandatory evidence suite from v001–v005 is largely unimplemented.
+    detail: >
+      test_complete_document_validation.py remains 93 lines;
+      test_front_matter.py 66 lines without the v005 style/alias/corruption
+      matrix; missing four-boundary identity and invalid-primary/fallback
+      complete-validation tests. GREEN counts do not waive absent gates.
+  - id: FINAL008-IMPL-006
+    severity: RED
+    related: [FINAL-008, R-016, v005]
+    summary: Literal front-matter different-length update is RED against required GREEN.
+    detail: >
+      Reproduced: apply_front_matter_updates on `|` title with a longer English
+      value raises front_matter_translation_requires_style_change:title. Fix
+      style-preserving literal emission and add the required all-style GREEN
+      matrix case.
+non_blocking_notes:
+  - Partial wiring of frozen context, note/cut title spans, structured URLs and validator call sites is acknowledged and does not clear the RED set.
+follow_up_required:
+  - "Developer: remediate FINAL008-IMPL-001..006 against approved v001–v005, then submit implementation review v002 with literal runtime proofs."

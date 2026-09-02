@@ -1,0 +1,39 @@
+protocol_version: 1
+task_id: "TASK-51797-ONE-PASS-REMEDIATION"
+review_type: "specification"
+specification_version: "one-pass-remediation-v010"
+reviewed_iteration: "one-pass-remediation-v010"
+reviewed_at: "2026-09-02"
+reviewed_artifacts:
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification-v010-amendment.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v010-amendment.yaml"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification.md"
+  - ".ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/tests/fixtures/markdown_files/en/core/reference/ydb-sdk/topic.md"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/tests/fixtures/markdown_files/ru/core/reference/ydb-sdk/topic.md"
+  - "/private/tmp/ydbdoc-review-one-pass-v003/tests/integration/test_real_files_round_trip.py"
+verdict: "APPROVED"
+implementation_authorized: false
+summary: >
+  Direct fixture inspection confirms the EN topic.md is genuinely ambiguous under
+  R-006: after `{% list tabs group=lang %}` at line 251, nonblank prose at line
+  253 precedes the first `- C++` tab at line 255, so no tab owns that prose. The
+  RU counterpart places the same prose before the tabs opener and remains valid.
+  v010 correctly resolves the legacy generic-test conflict with a test-only exact
+  negative classification of en/core/reference/ydb-sdk/topic.md asserting
+  AmbiguousYfmStructureError matching `unowned direct-depth`, an exact-set guard,
+  forbidden fixture/parser mutation, and no skip/xfail/wildcard/fallback. Scope
+  stays limited to one integration-test classification. Approval does not
+  authorize implementation.
+findings: []
+confirmations:
+  en_fixture_is_truly_ambiguous_under_r006: true
+  ru_counterpart_prose_before_tabs_remains_valid: true
+  test_only_exact_path_negative_classification: true
+  no_parser_or_fixture_byte_change: true
+  skip_xfail_wildcard_and_prose_attachment_forbidden: true
+  has_unresolved_developer_choices: false
+  reviewer_verdict_does_not_authorize_implementation: true
+has_unresolved_developer_choices: false
+functional_ok: true
+minimality_ok: true

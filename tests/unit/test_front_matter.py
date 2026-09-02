@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ydbdoc_review.parsing.front_matter import (
+    FrontMatterValueRecord,
+    _encode_front_matter_value,
     apply_front_matter_updates,
     dump_front_matter,
     parse_front_matter,
+    parse_front_matter_with_spans,
     translatable_front_matter_fields,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -64,3 +69,46 @@ def test_dump_front_matter_key_order():
     fields = {"title": "T", "vcsPath": "p", "description": "D"}
     body = dump_front_matter(fields, key_order=["title", "vcsPath", "description"])
     assert body.index("title:") < body.index("vcsPath:") < body.index("description:")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_value"),
+    [
+        ("title: Привет # keep\nx: 1\n", "A longer English title"),
+        ("title: 'Привет' # keep\nx: 1\n", "A longer English title"),
+        ('title: "Привет" # keep\nx: 1\n', "A longer English title"),
+        ("title: | # keep\n  Привет\nx: 1\n", "A longer English title\n"),
+        ("title: > # keep\n  Привет\nx: 1\n", "A longer English title\n"),
+    ],
+)
+def test_style_preserving_different_length_update(raw, expected_value):
+    updated = apply_front_matter_updates(raw, {"title": "A longer English title"})
+    assert parse_front_matter(updated)["title"] == expected_value
+    assert "# keep" in updated
+    assert "x: 1" in updated
+    assert updated.startswith("title: ")
+    if raw[7] in "'\"|>":
+        assert updated[7] == raw[7]
+
+
+def test_alias_backed_selected_value_is_rejected():
+    with pytest.raises(ValueError, match="source_map_invalid_front_matter:title"):
+        parse_front_matter_with_spans("x: &a Hello\ntitle: *a\n")
+
+
+def test_empty_non_string_and_unselected_values_have_no_spans():
+    _fields, records = parse_front_matter_with_spans(
+        "title: ''\ndescription: [a]\nx: text\n"
+    )
+    assert records == ()
+
+
+def test_impossible_folded_multiline_update_fails_closed():
+    with pytest.raises(ValueError, match="front_matter_translation_requires_style_change:title"):
+        apply_front_matter_updates("title: >-\n  one\n", {"title": "line one\nline two"})
+
+
+def test_encode_rejects_unknown_style():
+    record = FrontMatterValueRecord("title", "!", "x", 0, 1, None, b"", b"")
+    with pytest.raises(ValueError, match="front_matter_translation_requires_style_change:title"):
+        _encode_front_matter_value(record, "y")

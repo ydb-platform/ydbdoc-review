@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from ydbdoc_review.parsing.ast_types import AmbiguousYfmStructureError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
-from ydbdoc_review.segmentation.reinsert import reinsert_segments
+from ydbdoc_review.segmentation.reinsert import (
+    UnknownSegmentKindError,
+    _set_inline_at_ast_path,
+    reinsert_segments,
+)
+
+EXPECTED_AMBIGUOUS_YFM_FILES = frozenset({"en/core/reference/ydb-sdk/topic.md"})
 
 
 def identity_pipeline(text: str) -> str:
@@ -158,6 +166,10 @@ def test_identity_complex_mixed():
 # --- Real-world identity ---
 
 
+def test_expected_ambiguous_yfm_file_set_is_exact():
+    assert EXPECTED_AMBIGUOUS_YFM_FILES == {"en/core/reference/ydb-sdk/topic.md"}
+
+
 def test_identity_on_real_fixtures():
     """All fixture files must round-trip through extract+reinsert identically."""
     fixtures = Path(__file__).parent.parent / "fixtures" / "markdown_files"
@@ -167,6 +179,11 @@ def test_identity_on_real_fixtures():
     failures: list[tuple[Path, str]] = []
     for f in files:
         text = f.read_text(encoding="utf-8")
+        relative_path = f.relative_to(fixtures).as_posix()
+        if relative_path in EXPECTED_AMBIGUOUS_YFM_FILES:
+            with pytest.raises(AmbiguousYfmStructureError, match="unowned direct-depth"):
+                parse_markdown(text)
+            continue
         try:
             direct = render_markdown(parse_markdown(text))
             via = identity_pipeline(text)
@@ -183,7 +200,7 @@ def test_identity_on_real_fixtures():
                     )[:40]
                 )
                 failures.append((f, diff))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             failures.append((f, f"exception: {e!r}"))
 
     if failures:
@@ -227,7 +244,7 @@ def test_translate_with_link_placeholder():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    translated = "See [documentation](⟦U1⟧) for details."
+    translated = "See ⟦LBEGIN_1⟧documentation⟦LEND_1⟧ for details."
     translations = {seg.id: translated}
     new_doc = reinsert_segments(doc, segments, translations)
     out = render_markdown(new_doc)
@@ -242,17 +259,17 @@ def test_translate_image_bang_space_and_encoded_placeholder():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    assert any(p.placeholder.startswith("⟦S") for p in seg.placeholders)
-    ph = next(p.placeholder for p in seg.placeholders if p.placeholder.startswith("⟦S"))
+    assert any(p.placeholder.startswith("⟦IMGBEGIN") for p in seg.placeholders)
+    ph = next(p.placeholder for p in seg.placeholders if p.placeholder.startswith("⟦IMGBEGIN"))
     # Space after bang + URL-encoded placeholder (as seen on #46848 topic.md).
-    translated = f"Diagram: ! [topic-design]({quote(ph)})."
+    translated = f"Diagram: {quote(ph)}topic-design⟦IMGEND_1⟧."
     translations = {seg.id: translated}
     new_doc = reinsert_segments(doc, segments, translations)
     out = render_markdown(new_doc)
     assert "![" in out
     assert "_images/topic.svg" in out
     assert "%E2%9F%A6" not in out
-    assert "⟦S" not in out
+    assert "⟦IMG" not in out
 
 
 def test_translate_with_multiple_placeholders():
@@ -260,7 +277,7 @@ def test_translate_with_multiple_placeholders():
     doc = parse_markdown(text)
     segments = extract_segments(doc)
     seg = segments[0]
-    translated = "Run ⟦C1⟧ then see [docs](⟦U1⟧) with ⟦V1⟧."
+    translated = "Run ⟦C1⟧ then see ⟦LBEGIN_1⟧docs⟦LEND_1⟧ with ⟦V1⟧."
     translations = {seg.id: translated}
     new_doc = reinsert_segments(doc, segments, translations)
     out = render_markdown(new_doc)
@@ -297,3 +314,12 @@ def test_translate_heading_keeps_anchor():
     out = render_markdown(new_doc)
     assert "## Раздел {#sec-id}\n" in out
 
+
+def test_unknown_segment_kind_is_typed_and_fail_closed():
+    doc = parse_markdown("Text.\n")
+    unknown = SimpleNamespace(kind="future_kind", ast_path=[0])
+
+    with pytest.raises(UnknownSegmentKindError, match="future_kind"):
+        _set_inline_at_ast_path(doc, unknown, [])
+
+    assert render_markdown(doc) == "Text.\n"

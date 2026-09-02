@@ -12,6 +12,17 @@ from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.translation.model_policy import (
+    ModelPair,
+    TranslationJobManifest,
+    TranslationModelPolicy,
+)
+
+MANIFEST = TranslationJobManifest(TranslationModelPolicy(
+    translate=ModelPair("translate-primary", "translate-fallback"),
+    critic=ModelPair("critic-primary", "critic-fallback"),
+    repair=ModelPair("repair-primary", "repair-fallback"),
+))
 
 
 def _completion(content: str):
@@ -44,7 +55,7 @@ def test_run_pr_translation_sequential():
     )
     content = PairContent(pair=pair, ru_text="Привет.\n", en_text=None)
     translate_raw = _translate_json("s0001", "Hello.")
-    critic_raw = json.dumps({"verdict": "ok", "issues": []})
+    critic_raw = json.dumps({"findings": []})
 
     client = _mock_client([translate_raw, critic_raw])
     cache: dict[str, str] = {}
@@ -54,39 +65,32 @@ def test_run_pr_translation_sequential():
         load_glossary(),
         use_analyze_llm=False,
         per_pr_cache=cache,
+        manifest=MANIFEST,
     )
 
     assert result.translated_count == 1
     assert result.pair_results[0].target_text is not None
     assert "Hello." in result.pair_results[0].target_text
-    assert len(cache) >= 1
 
 
-def test_run_pr_translation_skip_and_delete():
-    skip_pair = DocPair(
-        ru_path="ydb/docs/ru/skip.md",
-        en_path="ydb/docs/en/skip.md",
-    )
+def test_run_pr_translation_delete_is_non_model_action():
     del_pair = DocPair(
         ru_path="ydb/docs/ru/gone.md",
         en_path="ydb/docs/en/gone.md",
         ru_changed=True,
         ru_deleted=True,
     )
-    contents = [
-        PairContent(pair=skip_pair, ru_text="x", en_text="y"),
-        PairContent(pair=del_pair),
-    ]
+    contents = [PairContent(pair=del_pair)]
     client = _mock_client([])
-    result = run_pr_translation(contents, client, load_glossary(), use_analyze_llm=False)
+    result = run_pr_translation(
+        contents, client, load_glossary(), use_analyze_llm=False, manifest=MANIFEST
+    )
 
     by_action = {r.plan.action: r for r in result.pair_results}
-    assert by_action["skip"].skipped
     assert by_action["delete_en"].deleted
 
 
-def test_run_pr_translation_skips_redirect_tombstone_en():
-    """#45949: do not create EN at redirects.yaml from path (orphan_toc_page)."""
+def test_run_pr_translation_uses_universal_ru_action_for_previous_tombstone():
     pair = DocPair(
         ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
         en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
@@ -97,7 +101,10 @@ def test_run_pr_translation_skips_redirect_tombstone_en():
         ru_text="# Динамическая конфигурация\n",
         en_text=None,
     )
-    client = _mock_client([])
+    client = _mock_client([
+        _translate_json("s0001", "# Dynamic configuration"),
+        json.dumps({"findings": []}),
+    ])
     tombstone = frozenset({pair.en_path})
     result = run_pr_translation(
         [content],
@@ -106,14 +113,14 @@ def test_run_pr_translation_skips_redirect_tombstone_en():
         use_analyze_llm=False,
         redirect_source_en_paths=tombstone,
         en_toc_reachable=frozenset(),
+        manifest=MANIFEST,
     )
-    assert result.translated_count == 0
+    assert result.translated_count == 1
     assert result.failed_count == 0
     assert len(result.pair_results) == 1
     run = result.pair_results[0]
-    assert run.skipped
-    assert run.plan.action == "skip"
-    assert "redirect tombstone" in run.plan.summary
+    assert not run.skipped
+    assert run.plan.action == "translate_ru_to_en_once"
 
 
 def test_run_pr_translation_missing_source():
@@ -124,7 +131,9 @@ def test_run_pr_translation_missing_source():
     )
     content = PairContent(pair=pair, ru_text=None)
     client = _mock_client([])
-    result = run_pr_translation([content], client, load_glossary(), use_analyze_llm=False)
+    result = run_pr_translation(
+        [content], client, load_glossary(), use_analyze_llm=False, manifest=MANIFEST
+    )
     assert result.failed_count == 1
     assert result.pair_results[0].error is not None
 
@@ -144,8 +153,9 @@ def test_run_pr_translation_isolates_validation_failure():
         client,
         load_glossary(),
         use_analyze_llm=False,
+        manifest=MANIFEST,
     )
     assert result.failed_count == 1
     assert result.translated_count == 0
     err = result.pair_results[0].error or ""
-    assert "placeholder" in err.lower()
+    assert "translation_acquisition_exhausted: role=translate" in err
