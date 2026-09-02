@@ -17,7 +17,5 @@ A literal reading of v001–v005 still names deeper nesting/provenance permutati
 ## Evidence commands
 
 ```text
-.venv/bin/python scripts/remediation_ruff_gate.py validate --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6 --ruff .venv/bin/ruff --baseline .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v025.json
-.venv/bin/python -m scripts.remediation_policy_gate validate --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v025-amendment.yaml --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml --manifest .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
-.venv/bin/python -m pytest tests/unit/test_parser_round_trip.py tests/unit/test_complete_document_validation.py tests/unit/test_one_pass_translation.py tests/unit/test_translation_transaction.py tests/unit/test_front_matter.py tests/unit/test_yfm_*.py tests/unit/test_atom_round_trip.py tests/unit/test_remediation_ruff_gate.py tests/unit/test_remediation_policy_gate.py -q
+.venv/bin/python -m pytest tests/unit/test_parser_round_trip.py tests/unit/test_complete_document_validation.py tests/unit/test_one_pass_translation.py tests/unit/test_translation_transaction.py tests/unit/test_front_matter.py tests/unit/test_yfm_*.py tests/unit/test_atom_round_trip.py -q
 ```

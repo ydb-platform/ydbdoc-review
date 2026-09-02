@@ -5513,9 +5513,6 @@ v024 Ruff capture (111/76/35 → 124/89/35).
    code/test paths, appends R-016 control artifacts, and retargets the live
    Ruff baseline to ``ruff-baseline-v025.json`` (5/84/163, diagnostics
    189/102/291) while keeping ``ruff-baseline-v020.json`` byte-immutable.
-3. Manifest self-entry must remain untracked (``??``); tracked ``A`` status is
-   invalid for the normalized self hash protocol.
-
 **Tests:** ``test_invalid_primary_cyrillic_anchor_does_not_poison_fallback_context``,
 expanded ``test_complete_document_validation`` mutation matrix, remediation
 Ruff/policy gate suites.

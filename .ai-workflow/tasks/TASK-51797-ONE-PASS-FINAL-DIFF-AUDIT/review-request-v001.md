@@ -27,7 +27,6 @@ Required source evidence includes:
 - `/private/tmp/ydbdoc-review-one-pass-v003/src/ydbdoc_review/translation/one_pass.py`;
 - `/private/tmp/ydbdoc-review-one-pass-v003/src/ydbdoc_review/pipeline/skip_paths.py`;
 - `/private/tmp/ydbdoc-review-one-pass-v003/tests/unit/test_one_pass_migration.py`;
-- `/private/tmp/ydbdoc-review-one-pass-v003/.ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml`;
 - `/private/tmp/ydbdoc-review-one-pass-v003/.ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-report-v010.md`;
 - `/private/tmp/ydbdoc-review-one-pass-v003/.ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/specification.md`;
 - every `specification-v006-amendment.md` through

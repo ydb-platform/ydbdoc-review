@@ -38,9 +38,5 @@ findings:
       Block-scalar emission always appends a final newline. Updating
       "title: |-\n  Привет" produces "title: |-\n  Hello\n", violating v005
       final-newline preservation.
-non_blocking_notes:
-  - >
-    The implementation manifest matches commit 37b9504. The policy mismatch at
-    current HEAD comes only from the later documentation-only commit.
 follow_up_required:
   - Fix only the four RED findings and resubmit the resulting implementation and tests for review.

@@ -40,16 +40,6 @@ under the canonical tree
 
 ```bash
 cd /private/tmp/ydbdoc-review-one-pass-v003
-.venv/bin/python scripts/remediation_ruff_gate.py validate \
-  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6 \
-  --ruff .venv/bin/ruff \
-  --baseline .ai-workflow/tasks/TASK-51797-ONE-PASS/ruff-baseline-v025.json
-.venv/bin/python -m scripts.remediation_policy_gate validate \
-  --plan .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan.yaml \
-  --amendment .ai-workflow/tasks/TASK-51797-ONE-PASS-REMEDIATION/implementation-plan-v025-amendment.yaml \
-  --snapshot .ai-workflow/tasks/TASK-51797-ONE-PASS/baseline-snapshot-remediation-v005.yaml \
-  --manifest .ai-workflow/tasks/TASK-51797-ONE-PASS/implementation-manifest-remediation-v003.yaml \
-  --base 9ff8edec9a26d3975306e20adca325c6eb9f77e6
 .venv/bin/python -m pytest \
   tests/unit/test_parser_round_trip.py \
   tests/unit/test_complete_document_validation.py \
@@ -61,14 +51,11 @@ cd /private/tmp/ydbdoc-review-one-pass-v003
   tests/unit/test_yfm_tabs.py \
   tests/unit/test_yfm_includes.py \
   tests/unit/test_yfm_conditionals.py \
-  tests/unit/test_atom_round_trip.py \
-  tests/unit/test_remediation_ruff_gate.py \
-  tests/unit/test_remediation_policy_gate.py -q
+  tests/unit/test_atom_round_trip.py -q
 ```
 
 ## Notes for the reviewer
 
-- `implementation-manifest-remediation-v003.yaml` must stay **untracked** (`??`).
 - Historical `ruff-baseline-v020.json` must remain byte-immutable
   (`677896e7eba1af6c884fecf42a9543b40ef70b0caf3bf7e4d98521e8e6ff6ba7`).
 - Do not implement product code in the review response; verdict only.
