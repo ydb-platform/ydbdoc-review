@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 import certifi
@@ -38,7 +39,7 @@ def _internal_ca_path() -> str | None:
 
 
 def _merge_ca_bundles(*paths: str) -> str:
-    """Concatenate PEM bundles into a cached file under ``~/.cache/ydbdoc-review/``."""
+    """Concatenate PEM bundles into a cached file with a writable temp fallback."""
     existing = [p for p in paths if p and os.path.isfile(p)]
     if not existing:
         return certifi.where()
@@ -54,15 +55,21 @@ def _merge_ca_bundles(*paths: str) -> str:
             parts[-1] += "\n"
         mtimes.append(str(p.stat().st_mtime_ns))
 
+    digest = hashlib.sha256("".join(existing + mtimes).encode()).hexdigest()[:16]
+    filename = f"ca-merged-{digest}.pem"
     cache_root = Path(
         os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
     ) / "ydbdoc-review"
-    cache_root.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256("".join(existing + mtimes).encode()).hexdigest()[:16]
-    out = cache_root / f"ca-merged-{digest}.pem"
-    if not out.is_file():
-        out.write_text("".join(parts), encoding="utf-8")
-    return str(out)
+    for root in (cache_root, Path(tempfile.gettempdir()) / "ydbdoc-review"):
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            out = root / filename
+            if not out.is_file():
+                out.write_text("".join(parts), encoding="utf-8")
+            return str(out)
+        except OSError:
+            continue
+    raise OSError("unable to write merged Eliza CA bundle")
 
 
 def eliza_tls_verify() -> bool | str:

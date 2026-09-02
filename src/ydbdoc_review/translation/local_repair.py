@@ -251,11 +251,17 @@ def run_bounded_local_repair(
     critic_models: ModelPair,
     repair_models: ModelPair,
     validation_context,
+    validate_complete_document=None,
     source_file: str = "",
     repair_calls_used: int = 0,
     repair_findings_used: int = 0,
 ) -> LocalRepairResult:
-    from ydbdoc_review.translation.one_pass import validate_complete_document
+    if validate_complete_document is None:
+        from ydbdoc_review.translation.one_pass import (
+            validate_complete_document as document_validator,
+        )
+    else:
+        document_validator = validate_complete_document
 
     ru_segments = extract_segments(parse_markdown(ru_text))
     ru_blocks = {segment.id: segment.text for segment in ru_segments}
@@ -329,7 +335,7 @@ def run_bounded_local_repair(
             cached_findings = None
         red = sorted((f for f in findings if f.severity == "RED"), key=lambda f: (list(blocks).index(f.block_id), f.start, f.rule_id, f.finding_id))
         if not red:
-            validate_complete_document(current, validation_context)
+            document_validator(current, validation_context)
             return LocalRepairResult(current, evaluations, repairs, tuple(reports))
         finding = red[0]
         owner_id = budget_owner_by_block.setdefault(finding.block_id, finding.finding_id)
@@ -388,7 +394,7 @@ def run_bounded_local_repair(
                 proposed_document = current_document.replace(
                     current_before, replacement, 1
                 )
-                validate_complete_document(proposed_document, current_validation_context)
+                document_validator(proposed_document, current_validation_context)
                 return _ValidatedRepairCandidate(
                     replacement=replacement,
                     proposed_document=proposed_document,

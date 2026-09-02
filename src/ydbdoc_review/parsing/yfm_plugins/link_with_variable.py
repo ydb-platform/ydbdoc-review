@@ -14,14 +14,10 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_core import StateCore
 
-
-# Placeholder pattern: we use a token that markdown-it accepts in URLs.
-# Format: yfmvar-{index}- (lowercase, alphanumeric + dash, URL-safe).
-_PLACEHOLDER_PREFIX = "yfmvar-"
-_PLACEHOLDER_SUFFIX = "-yfmvarend"
-_PLACEHOLDER_RE = re.compile(
-    rf"{re.escape(_PLACEHOLDER_PREFIX)}(\d+){re.escape(_PLACEHOLDER_SUFFIX)}"
-)
+# Placeholder pattern: markdown-it accepts this URL-safe token. It is exactly
+# as long as the replaced variable, keeping StateBlock offsets aligned with the
+# original source consumed later by the source-map validator.
+_PLACEHOLDER_RE = re.compile(r"y([0-9a-z]+)-+")
 
 # Find [text](url) where url contains {{ ... }}.
 # The URL part allows {{...}}, slashes, letters, digits, dashes, dots.
@@ -44,7 +40,9 @@ def _preprocess_substitute(state: StateCore) -> None:
         def _sub(vm: re.Match[str]) -> str:
             idx = len(substitutions)
             substitutions.append(vm.group(0))
-            return f"{_PLACEHOLDER_PREFIX}{idx}{_PLACEHOLDER_SUFFIX}"
+            encoded_idx = _base36(idx)
+            length = len(vm.group(0))
+            return f"y{encoded_idx}" + "-" * (length - len(encoded_idx) - 1)
 
         new_url = _VAR_RE.sub(_sub, url)
         return f"{prefix}{new_url}{suffix}"
@@ -52,6 +50,17 @@ def _preprocess_substitute(state: StateCore) -> None:
     new_src = _LINK_WITH_VAR_RE.sub(replace_in_url, src)
     state.src = new_src
     state.env["__yfm_var_substitutions__"] = substitutions
+
+
+def _base36(value: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    if value == 0:
+        return "0"
+    encoded = ""
+    while value:
+        value, remainder = divmod(value, len(digits))
+        encoded = digits[remainder] + encoded
+    return encoded
 
 
 def _restore_in_tokens(state: StateCore) -> None:
@@ -62,7 +71,7 @@ def _restore_in_tokens(state: StateCore) -> None:
 
     def restore(text: str) -> str:
         def _back(m: re.Match[str]) -> str:
-            idx = int(m.group(1))
+            idx = int(m.group(1), 36)
             if 0 <= idx < len(substitutions):
                 return substitutions[idx]
             return m.group(0)
@@ -74,11 +83,11 @@ def _restore_in_tokens(state: StateCore) -> None:
             for child in token.children:
                 if child.type == "link_open":
                     href = child.attrGet("href")
-                    if href and _PLACEHOLDER_PREFIX in href:
+                    if href and _PLACEHOLDER_RE.search(href):
                         child.attrSet("href", restore(href))
                 elif child.type == "image":
                     src = child.attrGet("src")
-                    if src and _PLACEHOLDER_PREFIX in src:
+                    if src and _PLACEHOLDER_RE.search(src):
                         child.attrSet("src", restore(src))
 
 
@@ -94,4 +103,3 @@ def yfm_link_with_variable_plugin(md: MarkdownIt) -> None:
         "yfm_var_restore",
         _restore_in_tokens,
     )
-

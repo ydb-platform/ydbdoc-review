@@ -791,7 +791,19 @@ def test_merged_old_pr_translates_publication_tip_ru_and_preserves_provenance_wa
 def test_final_nonblocking_provenance_warning_does_not_cancel_publication(git_repo: str):
     sha = _git_head(git_repo)
     ru_path = "ydb/docs/ru/core/a.md"
-    finding = ProvenanceFinding("translation_provenance", "newer_en", ru_path, "ydb/docs/en/core/a.md", None, None, "old", "new", ())
+    # This is the shape emitted by the final publication revalidation when the
+    # publication tip has newer RU content than the immutable source snapshot.
+    finding = ProvenanceFinding(
+        "stale_source_or_newer_translation",
+        "newer_ru",
+        ru_path,
+        "ydb/docs/en/core/a.md",
+        "old",
+        "new",
+        None,
+        None,
+        (),
+    )
     pull = {
         "title": "docs",
         "head": {"ref": "feature", "sha": sha, "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},

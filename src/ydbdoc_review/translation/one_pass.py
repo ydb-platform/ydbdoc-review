@@ -557,6 +557,12 @@ def translate_ru_to_en_once(
                 )
             except UnknownSegmentKindError:
                 raise
+            except OnePassTranslationError as exc:
+                # A leaked protect marker is a publication gate, not a malformed
+                # model payload that a fallback may turn into a valid translation.
+                if str(exc) == "unrestored_protect_token":
+                    raise
+                raise AcquisitionProtocolError(str(exc)) from exc
             except Exception as exc:
                 raise AcquisitionProtocolError(str(exc)) from exc
 

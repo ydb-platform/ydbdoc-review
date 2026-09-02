@@ -779,11 +779,11 @@ def run_doc_translate(
             f"{docs_root}/ru/", f"{docs_root}/en/", 1
         ),
     )
-    final_blocking, _final_warnings = partition_provenance_findings(final_provenance_findings)
-    if final_provenance_findings:
+    final_blocking, final_warnings = partition_provenance_findings(final_provenance_findings)
+    if final_blocking:
         logger.error(
             "Translation provenance guard blocked before publication: %s",
-            final_provenance_findings,
+            final_blocking,
         )
         pr_result.completeness_gaps.extend(
             sorted(
@@ -793,6 +793,12 @@ def run_doc_translate(
                 }
             )
         )
+    if final_warnings:
+        logger.warning(
+            "Translation provenance warnings before publication (continuing): %s",
+            final_warnings,
+        )
+    if final_provenance_findings:
         pr_result.provenance_findings.extend(
             finding
             for finding in final_provenance_findings
