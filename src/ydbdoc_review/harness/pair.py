@@ -234,11 +234,27 @@ def run_pair_plan(
                 plan.target_path,
                 exc,
             )
+            # Soft-keep must not look like a clean translate: tip EN is retained,
+            # but the pair carries an explicit warning (#52077 auth_config).
+            from ydbdoc_review.pipeline.types import FileTranslationResult
+
+            soft_msg = (
+                f"translate_soft_keep: translate failed; kept tip EN unchanged "
+                f"({exc})"
+            )
             return PairRunResult(
                 plan=plan,
                 target_text=existing_target,
                 source_text=source_text,
                 error=None,
+                file_result=FileTranslationResult(
+                    file_path=plan.target_path,
+                    final_text=existing_target,
+                    segments_count=0,
+                    verdict="warnings",
+                    prompt_version="soft-keep",
+                    heuristic_warnings=[soft_msg],
+                ),
             )
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))

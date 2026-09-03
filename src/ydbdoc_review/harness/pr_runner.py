@@ -21,4 +21,16 @@ class PRHarness:
     def run(self, state: PRRunState, ctx: PRHarnessContext) -> PRTranslationResult:
         for step in self._profile.steps:
             step.run(state, ctx)
-        return PRTranslationResult(pair_results=state.pair_results)
+        yellow: list[str] = []
+        for run in state.pair_results:
+            fr = run.file_result
+            if fr is None:
+                continue
+            for warning in fr.heuristic_warnings or []:
+                text = str(warning)
+                if text.startswith("translate_soft_keep:"):
+                    yellow.append(f"`{run.plan.target_path}` — {text}")
+        return PRTranslationResult(
+            pair_results=state.pair_results,
+            yellow_warnings=yellow,
+        )

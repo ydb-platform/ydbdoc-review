@@ -151,6 +151,15 @@ class ExecutePairPlansStep:
             result = run_pair_plan(content, plan, file_ctx, state.cache)
             elapsed = time.monotonic() - started
             status = "error" if result.error else ("skip" if result.skipped else "ok")
+            soft_keep = bool(
+                result.file_result
+                and any(
+                    str(w).startswith("translate_soft_keep:")
+                    for w in (result.file_result.heuristic_warnings or [])
+                )
+            )
+            if soft_keep and status == "ok":
+                status = "soft_keep"
             logger.info(
                 "pair %s/%s done status=%s elapsed=%.1fs target=%s%s",
                 idx,

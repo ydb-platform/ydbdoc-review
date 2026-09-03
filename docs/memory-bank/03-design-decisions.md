@@ -5640,10 +5640,14 @@ commit.
    diff PR», puts 🟢 files under ``<details>`` when gaps exist, and steers
    operators to re-``doc_translate`` instead of ``doc_continue`` for
    diff-only gaps.
+3. Soft-keep after translate failure (``Invalid JSON`` / timeout) keeps tip EN
+   without aborting the PR (§6.80) but must emit ``translate_soft_keep``
+   warning + ``status=soft_keep`` / yellow QA — never a silent ``ok``.
 
 **Tests:** ``test_tip_en_covers_inbound_fragments_from_changed``,
 ``test_merge_recommendation_red_when_scope_file_missing_despite_green_files``,
-``test_format_completeness_gap_item_mentions_ru_twin``.
+``test_format_completeness_gap_item_mentions_ru_twin``,
+``test_translate_soft_keep_sets_warning_not_error``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
