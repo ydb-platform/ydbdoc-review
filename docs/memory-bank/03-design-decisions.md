@@ -5789,4 +5789,27 @@ through to the generic missing/extra contract report.
 ``test_pr_52077_reports_both_ascii_fragment_changes`` production-shape fixture.
 
 
+### §6.250 Declared stable owners from current diff pages (#40385 / R-GL-10, 2026-09-03)
+
+**Production failure:** Clean translate run ``33760371867`` processed all six pairs but
+skipped publication. R-GL-9 correctly stopped retargeting fragments, exposing two missing
+targets in ``security/authentication.md``: ambient broken RU
+``auth_config.md#security-auth`` and valid explicit RU
+``auth_config.md#certificate-auth-config``. The latter owner was excluded by R-GL-4a
+because the href predated the source PR. The former should not enqueue ``auth_config`` at
+all because that RU target does not declare ``#security-auth``; tip EN already has a valid
+``security_config.md#security-auth`` path with the identical stable fragment.
+
+**Decision:** Scan all stable-fragment hrefs on source-diff pages for a unique declared RU
+owner missing in EN, not only positive href deltas and include owners. This remains bounded:
+an absent/ambiguous RU declaration produces no dependency, and an already satisfied EN
+fragment produces no dependency. Extend §6.233 path fallback to test complete
+``path#fragment`` resolution. A resolvable tip EN path may replace a broken proposed path
+only when both decoded fragments are identical; it never authorizes fragment substitution.
+
+**Tests:** ``test_preexisting_stable_fragment_missing_in_en_queues_declared_ru_owner``,
+``test_pr_40385_queues_only_declared_owner_for_preexisting_auth_fragments``, and
+``test_prefer_resolvable_en_hrefs_keeps_same_fragment_on_valid_tip_path``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

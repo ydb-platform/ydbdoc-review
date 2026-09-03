@@ -117,12 +117,7 @@ def _new_internal_ascii_fragment_hrefs(
     return current - _internal_ascii_fragment_hrefs(base_text)
 
 
-def _is_include_repo_md(path: str) -> bool:
-    norm = path.replace("\\", "/")
-    return "/_includes/" in norm and norm.endswith(".md")
-
-
-def _include_fragment_owners_for_diff_pages(
+def _stable_fragment_owners_for_diff_pages(
     diff_ru_md: set[str],
     *,
     read_ru: ReadFn,
@@ -145,7 +140,7 @@ def _include_fragment_owners_for_diff_pages(
                 docs_root=docs_root,
                 redirects_yaml=redirects_yaml,
             )
-            if owner and _is_include_repo_md(owner):
+            if owner:
                 owners.add(owner)
     return owners
 
@@ -661,7 +656,7 @@ def plan_translation_scope(
             if owner:
                 fragment_owners.add(owner)
                 doc_ru.add(owner)
-    include_owners = _include_fragment_owners_for_diff_pages(
+    stable_fragment_owners = _stable_fragment_owners_for_diff_pages(
         diff_ru_md,
         read_ru=read_ru,
         read_en_base=read_en_base,
@@ -669,7 +664,7 @@ def plan_translation_scope(
         docs_root=docs_root,
         redirects_yaml=redirects_yaml,
     )
-    for owner in sorted(include_owners):
+    for owner in sorted(stable_fragment_owners):
         fragment_owners.add(owner)
         doc_ru.add(owner)
     # Feed owners only through the existing locale-include closure.

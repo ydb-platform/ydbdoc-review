@@ -179,6 +179,7 @@ def prefer_resolvable_en_hrefs(
     no longer exist. Prefer the previous EN href whenever its file resolves
     and the proposed one does not.
     """
+    from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
     from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
 
     if not proposed or not previous or proposed == previous:
@@ -197,8 +198,30 @@ def prefer_resolvable_en_hrefs(
         prev_path = resolve_internal_md_href(en_page_path, prev_href)
         if prop_path is None:
             continue
-        prop_ok = read_text(prop_path) is not None
-        prev_ok = prev_path is not None and read_text(prev_path) is not None
+        prop_text = read_text(prop_path)
+        prev_text = read_text(prev_path) if prev_path is not None else None
+        prop_fragment = unquote(prop_href.partition("#")[2])
+        prev_fragment = unquote(prev_href.partition("#")[2])
+        if prop_fragment and prop_fragment.isascii() and prop_fragment != prev_fragment:
+            continue
+        prop_ok = prop_text is not None and (
+            not prop_fragment
+            or fragment_declared_in_markdown(
+                prop_text,
+                prop_fragment,
+                page_path=prop_path,
+                read_text=read_text,
+            )
+        )
+        prev_ok = prev_text is not None and (
+            not prev_fragment
+            or fragment_declared_in_markdown(
+                prev_text,
+                prev_fragment,
+                page_path=prev_path,
+                read_text=read_text,
+            )
+        )
         if prev_ok and not prop_ok:
             replacements.append((prop.start(), prop.end(), f"[{prop.group(1)}]({prev_href})"))
     out = proposed

@@ -271,7 +271,7 @@ def test_r_gl_2_tip_redirect_retargets_fragment_owner_to_concepts():
     assert manual not in plan.doc_ru_paths
 
 
-def test_r_gl_4_preexisting_auth_config_fragment_href_does_not_queue_owner():
+def test_preexisting_stable_fragment_missing_in_en_queues_declared_ru_owner():
     auth = "ydb/docs/ru/core/security/authentication.md"
     auth_config = "ydb/docs/ru/core/reference/configuration/auth_config.md"
     lockout_href = "[lockout](../reference/configuration/auth_config.md#account-lockout)"
@@ -280,7 +280,7 @@ def test_r_gl_4_preexisting_auth_config_fragment_href_does_not_queue_owner():
         auth_config: "## Account lockout {#account-lockout}\n",
     }
     en = {
-        auth_config.replace("/ru/", "/en/"): "## Account lockout\n",
+        auth_config.replace("/ru/", "/en/"): "## Locking users\n",
     }
     plan = plan_translation_scope(
         [(auth, "modified")],
@@ -288,8 +288,28 @@ def test_r_gl_4_preexisting_auth_config_fragment_href_does_not_queue_owner():
         read_en_base=en.get,
         read_ru_base=lambda p: files.get(auth) if p == auth else files.get(p),
     )
-    assert auth_config not in plan.doc_ru_paths
-    assert auth_config not in plan.doc_from_main
+    assert auth_config in plan.doc_ru_paths
+    assert auth_config in plan.doc_from_main
+
+
+def test_pr_40385_queues_only_declared_owner_for_preexisting_auth_fragments():
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    auth_config = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    files = {
+        auth: (
+            "[anonymous](../reference/configuration/auth_config.md#security-auth)\n"
+            "[certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        ),
+        auth_config: "## Certificate auth {#certificate-auth-config}\n",
+    }
+    en = {auth_config.replace("/ru/", "/en/"): "## IAM {#iam-auth-config}\n"}
+    plan = plan_translation_scope(
+        [(auth, "modified")],
+        read_ru=files.get,
+        read_en_base=en.get,
+        read_ru_base=files.get,
+    )
+    assert auth_config in plan.doc_from_main
 
 
 def test_r_gl_4_new_auth_config_fragment_href_queues_owner():

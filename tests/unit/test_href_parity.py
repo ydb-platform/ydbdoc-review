@@ -1060,6 +1060,26 @@ def test_prefer_resolvable_en_hrefs_keeps_tip_valid_over_missing():
     )
 
 
+def test_prefer_resolvable_en_hrefs_keeps_same_fragment_on_valid_tip_path():
+    from ydbdoc_review.validation.href_parity import prefer_resolvable_en_hrefs
+
+    page = "ydb/docs/en/core/security/authentication.md"
+    proposed = "See [auth](../reference/configuration/auth_config.md#security-auth).\n"
+    previous = "See [auth](../reference/configuration/security_config.md#security-auth).\n"
+    files = {
+        "ydb/docs/en/core/reference/configuration/auth_config.md": "# auth_config\n",
+        "ydb/docs/en/core/reference/configuration/security_config.md": (
+            "## Authentication {#security-auth}\n"
+        ),
+    }
+    assert (
+        prefer_resolvable_en_hrefs(
+            proposed, previous, en_page_path=page, read_text=files.get
+        )
+        == previous
+    )
+
+
 def test_overlay_internal_md_hrefs_prefers_tip_by_label():
     from ydbdoc_review.validation.href_parity import overlay_internal_md_hrefs
 
