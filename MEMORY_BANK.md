@@ -3,10 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.240 — translation-PR verify scoped to source-PR EN (#40385 / #52055).
+**Current focus:** §6.241 — exact-ASCII declare owns legacy RU translit headings (#40385 / R-GL-1).
 
-Prior focus: §6.237–238 — href-parity verify baseline + human-readable critic failures (#51761 / #51199).
-**Current focus:** §6.240 — translation-PR verify scoped to source-PR EN; ambient tip restore (#40385 / #52055).
+Prior focus: §6.240 — translation-PR verify scoped to source-PR EN; ambient tip restore (#40385 / #52055).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -29,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.241** — `_page_declares_fragment` treats `_legacy_transliterated_slug` as ownership so exact-ASCII declare runs (#40385 / R-GL-1) |
 | 2026-09-03 | **§6.240** — translation-PR `doc_verify` only criticizes source-PR EN; restores tip-ambient EN to merge-base (#40385 / #52055) |
 
 | 2026-09-01 | **§6.239** — canonicalize encoded protect atoms; exact ASCII/translit fragments get explicit EN target anchors; only Cyrillic fragments remap (#51797) |

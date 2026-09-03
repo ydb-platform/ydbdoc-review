@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from ydbdoc_review.pipeline.analyze import PairPlan
+from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
+from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 from ydbdoc_review.validation.fragment_repair import (
+    _page_declares_fragment,
     add_explicit_ascii_fragment_anchor,
     fragment_declared_in_markdown,
     repair_en_fragments,
 )
+
+_LEGACY_NODE_AUTH_FRAG = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
 
 
 def test_real_tip_connect_without_tls_heading_cannot_receive_anchor():
@@ -122,7 +131,7 @@ def test_repair_keeps_valid_fragment():
 def test_pr_45949_client_cert_legacy_translit_fragment():
     """TASK-51797: RU ASCII translit remains exact; target is declared later."""
     en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
-    frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    frag = _LEGACY_NODE_AUTH_FRAG
     en_bad = (
         f"when [registering dynamic nodes](../../devops/concepts/node-authorization.md#{frag}).\n"
     )
@@ -141,6 +150,73 @@ def test_pr_45949_client_cert_legacy_translit_fragment():
         read_text=files.get,
     )
     assert fixed == en_bad
+
+
+def test_page_declares_fragment_accepts_legacy_translit_slug():
+    """R-GL-1: bare RU heading owns its legacy ASCII translit id."""
+    ru = "## Включение режима аутентификации и авторизации узлов\n\nТело.\n"
+    assert _page_declares_fragment(ru, _LEGACY_NODE_AUTH_FRAG)
+    assert not _page_declares_fragment(
+        "## Enabling the node authentication and authorization mode\n",
+        _LEGACY_NODE_AUTH_FRAG,
+    )
+
+
+def test_pr_40385_legacy_translit_declare_writes_exact_ascii_and_clears_gate(tmp_path: Path):
+    """#40385 / R-GL-1: declare finds legacy RU owner and anchors EN target."""
+    from ydbdoc_review.github.workflow import _declare_exact_ascii_fragment_targets_after_apply
+
+    frag = _LEGACY_NODE_AUTH_FRAG
+    repo = tmp_path / "repo"
+    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    en_target = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    ru_target = en_target.replace("/docs/en/", "/docs/ru/", 1)
+    href = f"../../devops/concepts/node-authorization.md#{frag}"
+    page_text = f"when [registering dynamic nodes]({href}).\n"
+    en_heading = "## Enabling the node authentication and authorization mode\n\nBody.\n"
+    ru_heading = "## Включение режима аутентификации и авторизации узлов\n\nТело.\n"
+
+    for rel, text in (
+        (page, page_text),
+        (en_target, en_heading),
+        (ru_target, ru_heading),
+        (page.replace("/docs/en/", "/docs/ru/", 1), f"когда [узлы]({href}).\n"),
+    ):
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    assert not _page_declares_fragment(en_heading, frag)
+    assert _page_declares_fragment(ru_heading, frag)
+
+    declared = _declare_exact_ascii_fragment_targets_after_apply(
+        str(repo), [page], dry_run=False
+    )
+    assert declared == [en_target]
+    en_after = (repo / en_target).read_text(encoding="utf-8")
+    assert f"{{#{frag}}}" in en_after
+    assert "enabling-the-node-authentication-and-authorization-mode" not in en_after
+
+    pair = DocPair(
+        ru_path=page.replace("/docs/en/", "/docs/ru/", 1),
+        en_path=page,
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=page,
+        source_lang="ru",
+        target_lang="en",
+        summary="legacy-translit-declare",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, target_text=page_text)]
+    )
+    assert apply_en_link_target_checks(
+        result, repo_path=str(repo), en_md_paths={page, en_target}
+    ) == []
 
 
 def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():

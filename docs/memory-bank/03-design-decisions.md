@@ -5574,5 +5574,23 @@ a separate docs sync, not critic fixes on the auto-translate branch.
 ``test_restore_out_of_scope_en_from_base``.
 
 
+### §6.241 Exact-ASCII declare owns legacy translit headings (#40385 / R-GL-1, 2026-09-03)
+
+**Problem:** ``_declare_exact_ascii_fragment_targets_after_apply`` skipped
+``#vklyuchenie-…`` targets because ``_page_declares_fragment`` /
+``_heading_declares_frag`` accepted only explicit ``{#id}`` and Diplodoc
+auto-slug, not ``_legacy_transliterated_slug``. ``add_explicit_ascii_fragment_anchor``
+already matched legacy, so owner discovery and add semantics diverged and
+``en_link_target`` blocked publish after a clean translate.
+
+**Decision:** Bare headings also declare their
+``_legacy_transliterated_slug`` (same three-way ownership as
+``add_explicit_ascii_fragment_anchor``). ASCII→EN-slug remapping stays
+forbidden (§6.239 п.4). Ambiguous owners still fail closed.
+
+**Tests:** ``test_page_declares_fragment_accepts_legacy_translit_slug``,
+``test_pr_40385_legacy_translit_declare_writes_exact_ascii_and_clears_gate``.
+
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

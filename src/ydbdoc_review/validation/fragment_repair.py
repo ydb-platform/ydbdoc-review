@@ -114,13 +114,17 @@ def _posix_relpath(from_dir: str, to_file: str) -> str:
 
 def _heading_declares_frag(heading: Heading, frag: str) -> bool:
     from ydbdoc_review.rendering.markdown_renderer import _render_inline
+    from ydbdoc_review.validation.yfm_anchor import _legacy_transliterated_slug
 
     plain = _render_inline(heading.children).strip()
     title, explicit = split_heading_anchor_suffix(plain)
     if explicit == frag:
         return True
-    # Diplodoc auto-slug when no explicit ``{#…}``.
-    if explicit is None and diplodoc_auto_slug(title) == frag:
+    # Bare heading: Diplodoc auto-slug or legacy RU translit (§6.239 / R-GL-1).
+    if explicit is None and frag in {
+        diplodoc_auto_slug(title),
+        _legacy_transliterated_slug(title),
+    }:
         return True
     return False
 
@@ -144,8 +148,10 @@ def fragment_declared_in_markdown(
 ) -> bool:
     """True if ``md`` (or a locale ``{% include %}`` it pulls in) declares ``frag``.
 
-    Accepts explicit ``{#frag}`` and Diplodoc auto-slugs from bare headings
-    (§6.158 — ``### Parameters`` ⇒ ``#parameters``).
+    Accepts explicit ``{#frag}``, Diplodoc auto-slugs from bare headings
+    (§6.158 — ``### Parameters`` ⇒ ``#parameters``), and
+    ``_legacy_transliterated_slug`` matches (same ownership as
+    ``add_explicit_ascii_fragment_anchor`` / R-GL-1).
     """
     if _page_declares_fragment(md, frag):
         return True
