@@ -264,7 +264,8 @@ def test_translate_step_skipped_in_verify_profile():
         mock_tr.assert_not_called()
 
 
-def test_translate_semantic_noop_preserves_existing_en_link_exactly():
+def test_translate_step_does_not_semantic_noop_preserve_existing_en():
+    """REQUIREMENTS §5/§13: formatting-only RU delta still full-reconstructs EN."""
     base = (
         "{% note warning %}\n\n"
         "Секреты необходимо [создавать](../../create-secret.md). \n\n"
@@ -282,8 +283,6 @@ def test_translate_semantic_noop_preserves_existing_en_link_exactly():
         raw_source_text=source,
         source_text=source,
         existing_target_text=existing,
-        # Production #49933 currently resolves the same normalized base text;
-        # the low-magnitude analysis must still preserve EN exactly.
         base_source_text=source,
     )
     ctx = HarnessContext.from_options(
@@ -292,10 +291,20 @@ def test_translate_semantic_noop_preserves_existing_en_link_exactly():
     )
     ParseStep().run(state, ctx)
 
-    with patch("ydbdoc_review.harness.steps.finalize_en_target") as finalize:
-        TranslateStep().run(state, ctx)
+    with patch("ydbdoc_review.harness.steps.translate_segments") as mock_tr:
+        mock_tr.return_value = {
+            s.id: "Secrets must be [created](../../create-secret.md)."
+            for s in state.segments
+        }
+        with patch(
+            "ydbdoc_review.harness.steps.finalize_en_target",
+            side_effect=lambda text, *a, **k: text,
+        ):
+            TranslateStep().run(state, ctx)
+        passed = mock_tr.call_args.args[0]
+        assert {s.id for s in passed} == {s.id for s in state.segments}
 
-    assert state.stopped_early is True
-    assert state.differential_meta["semantic_noop"] is True
-    assert state.translated_text == existing
-    finalize.assert_not_called()
+    assert state.stopped_early is False
+    assert state.differential_meta["semantic_noop"] is False
+    assert state.differential_meta["mode"] == "full"
+    assert state.differential_meta["low_magnitude_patch"] is False

@@ -604,6 +604,56 @@ def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
     assert "требует правок" not in body
 
 
+def test_merge_recommendation_green_when_stale_blocked_verdict_all_files_ok():
+    """#52055: all-green file list must not recommend 🔴 from stale verdict=blocked."""
+    cfg = _cfg()
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="Hello",
+        segments_count=1,
+        verdict="blocked",
+        critic_initial=CriticResponse(verdict="blocked", issues=[]),
+        critic_unresolved=CriticResponse(verdict="blocked", issues=[]),
+        prompt_version="v1",
+    )
+    nav = NavigationRunResult(
+        ru_path="ydb/docs/ru/a/toc_i.yaml",
+        en_path="ydb/docs/en/a/toc_i.yaml",
+        kind="toc",
+        target_text="items:\n",
+        warnings=[],
+        verdict="blocked",
+    )
+    body = build_full_report(
+        PRTranslationResult(
+            pair_results=[PairRunResult(plan=plan, file_result=fr)],
+            navigation_results=[nav],
+        ),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    rec = body.split("Рекомендация:")[1].split("\n", 1)[0]
+    assert "🟢" in rec
+    assert "можно мержить" in rec
+    assert "🔴" not in rec
+    assert "не мержить" not in body
+    assert "По всем файлам открытых замечаний нет" in body
+    assert "- 🟢 `ydb/docs/en/a.md`" in body
+
+
 def test_build_full_report_all_ok():
     cfg = _cfg()
     pair = DocPair(

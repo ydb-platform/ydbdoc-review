@@ -55,6 +55,8 @@ class TranslationScopePlan:
     nav_from_diff: frozenset[str]
     nav_from_main: frozenset[str]
     doc_deleted: frozenset[str] = frozenset()
+    # §6 Markdown-link dependency budget warnings (yellow / manual action).
+    link_dep_warnings: tuple[str, ...] = ()
 
     @property
     def all_ru_paths(self) -> frozenset[str]:
@@ -362,7 +364,7 @@ def plan_translation_scope(
 ) -> TranslationScopePlan:
     """Plan markdown + navigation scope from a source PR change list.
 
-    Rules (§22):
+    Rules (§22 + REQUIREMENTS §6):
     1. Seed from PR diff (RU ``.md`` + nav yaml).
     2. Discover related ``toc_p`` / ``toc_i`` via ancestors + ``include.path``.
     3. Per discovered sidebar (§22.5): toc in PR diff → **new** ``href``
@@ -372,6 +374,8 @@ def plan_translation_scope(
     5. Queue nav yaml merge when toc is in diff, EN absent, or missing href for
        a changed page; then queue any parent that ``include.path``s a needed
        child while EN lacks that include (§6.116 / #46569).
+    6. Close Markdown-link dependencies missing from the frozen EN tree
+       (redirect/existing EN skip; dedup; 20-extra budget; §6).
     """
     root = docs_root.strip("/")
     diff_ru_md: set[str] = set()
@@ -558,6 +562,21 @@ def plan_translation_scope(
                 seen_close.add(target)
                 queue.append(target)
 
+    # §6 Markdown-link dependencies: missing EN → queue RU; redirect/existing EN
+    # → skip; dedup; budget 20 extras (source-PR files do not consume budget).
+    from ydbdoc_review.navigation.link_deps import collect_md_link_dependencies
+
+    redirects_yaml = read_ru(f"{root}/redirects.yaml") or read_en_base(f"{root}/redirects.yaml")
+    link_deps = collect_md_link_dependencies(
+        diff_ru_md,
+        read_ru=read_ru,
+        read_en=read_en_base,
+        redirects_yaml=redirects_yaml,
+        docs_root=docs_root,
+        already_queued=doc_ru,
+    )
+    doc_ru.update(link_deps.queued_ru_paths)
+
     # Exact, non-recursive closure for fragment hrefs on source-diff pages.
     fragment_owners: set[str] = set()
     for ru_md in sorted(diff_ru_md):
@@ -596,6 +615,7 @@ def plan_translation_scope(
         nav_ru_paths=frozenset(nav_ru),
         nav_from_diff=frozenset(nav_from_diff),
         nav_from_main=nav_from_main,
+        link_dep_warnings=link_deps.warnings,
     )
 
 

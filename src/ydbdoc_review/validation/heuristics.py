@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.redirects import (
@@ -16,6 +16,9 @@ from ydbdoc_review.navigation.toc import TocValidationIssue, validate_toc_merge
 from ydbdoc_review.parsing.ast_types import FencedCode
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.validation.ru_source_bugs import normalize_legacy_markdown_structure
+
+if TYPE_CHECKING:
+    from ydbdoc_review.translation.glossary import Glossary
 
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 _FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
@@ -204,6 +207,18 @@ def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
             f"… и ещё {len(matches) - 12} вхождений кириллицы (всего {len(matches)} символов)"
         )
     return warnings
+
+
+def check_glossary_term_violations(
+    target_text: str,
+    *,
+    target_lang: str,
+    glossary: Glossary | None,
+) -> list[str]:
+    """Delegate to ``glossary_terms`` (lazy import avoids translation↔heuristics cycle)."""
+    from ydbdoc_review.validation.glossary_terms import check_glossary_term_violations as _check
+
+    return _check(target_text, target_lang=target_lang, glossary=glossary)
 
 
 def check_cyrillic_in_en_all_fences(target_text: str, *, target_lang: str) -> list[str]:
@@ -465,6 +480,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "blocking"
     if message.startswith("unrestored_yfmvar:"):
         return "blocking"
+    if message.startswith("glossary_violation:"):
+        return "blocking"
     if message.startswith("broken_inline_code:"):
         return "blocking"
     if message.startswith("include_parity:"):
@@ -488,6 +505,7 @@ def _collect_raw_heuristics(
     docs_repo_path: str | None = None,
     en_baseline_text: str | None = None,
     source_baseline_text: str | None = None,
+    glossary: Glossary | None = None,
 ) -> list[str]:
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
@@ -520,6 +538,11 @@ def _collect_raw_heuristics(
     raw.extend(check_cyrillic_in_en(target_text, target_lang=target_lang))
     raw.extend(check_unrestored_placeholders(target_text, target_lang=target_lang))
     raw.extend(check_unrestored_yfmvar_placeholders(target_text, target_lang=target_lang))
+    raw.extend(
+        check_glossary_term_violations(
+            target_text, target_lang=target_lang, glossary=glossary
+        )
+    )
     raw.extend(check_broken_inline_code_markup(target_text, target_lang=target_lang))
     # Any fence language (yaml/yql/go/text/…) — hard gate for residual RU (§6.164).
     # Comment / text-fence helpers still auto-translate; this catches leftovers
@@ -643,6 +666,7 @@ def run_file_heuristics_classified(
     docs_repo_path: str | None = None,
     en_baseline_text: str | None = None,
     source_baseline_text: str | None = None,
+    glossary: Glossary | None = None,
 ) -> ClassifiedHeuristics:
     """Run heuristics and split by blocking / warnings / info (RU-source hints)."""
     out = ClassifiedHeuristics()
@@ -659,6 +683,7 @@ def run_file_heuristics_classified(
         docs_repo_path=docs_repo_path,
         en_baseline_text=en_baseline_text,
         source_baseline_text=source_baseline_text,
+        glossary=glossary,
     ):
         bucket = _classify_heuristic(message)
         getattr(out, bucket).append(message)
@@ -685,6 +710,7 @@ def run_file_heuristics(
     target_lang: str = "en",
     source_file: str | None = None,
     en_toc_reachable: frozenset[str] | None = None,
+    glossary: Glossary | None = None,
 ) -> list[str]:
     """Run all markdown file heuristics; return non-info warning strings."""
     from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -702,6 +728,7 @@ def run_file_heuristics(
         target_lang=target_lang,
         source_file=source_file,
         en_toc_reachable=en_toc_reachable,
+        glossary=glossary,
     )
     return classified.all_non_info
 

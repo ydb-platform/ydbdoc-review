@@ -20,6 +20,8 @@ class SegmentKind(str, Enum):
     TABLE_BODY_CELL = "table_body_cell"
     BLOCKQUOTE_PARAGRAPH = "blockquote_paragraph"
     TAB_TITLE = "tab_title"
+    NOTE_TITLE = "note_title"
+    CUT_TITLE = "cut_title"
     TERM_DEFINITION = "term_definition"
     FRONT_MATTER = "front_matter"
 

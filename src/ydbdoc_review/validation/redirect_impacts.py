@@ -96,6 +96,66 @@ def retarget_redirect_inbound_links(
     return changed
 
 
+def propose_redirect_inbound_link_writes(
+    paths: frozenset[str],
+    mappings: dict[str, str],
+    *,
+    read_text,
+    docs_root: str = "ydb/docs",
+) -> dict[str, str]:
+    """Pure redirect retarget producer over a CandidateOverlay reader.
+
+    Same-run RU/EN targets are resolved exclusively through ``read_text``;
+    callers may therefore expose pages that do not yet exist on disk (SPEC-008).
+    """
+    writes: dict[str, str] = {}
+    root = docs_root.strip("/")
+    for rel in sorted(paths):
+        norm = rel.replace("\\", "/")
+        locale_marker = next(
+            (marker for marker in ("/ru/core/", "/en/core/") if marker in norm), None
+        )
+        if locale_marker is None or not norm.endswith(".md"):
+            continue
+        locale = "en" if locale_marker == "/en/core/" else "ru"
+        text = read_text(norm)
+        if text is None:
+            continue
+        rel_core = norm.split(locale_marker, 1)[1]
+        rel_dir = PurePosixPath(rel_core).parent
+
+        def _replace(match: re.Match[str]) -> str:
+            href = match.group(2)
+            if href.startswith(("/", "http://", "https://")):
+                return match.group(0)
+            resolved = "/" + posixpath.normpath((rel_dir / href).as_posix())
+            target = mappings.get(resolved) or mappings.get(resolved.removesuffix(".md"))
+            if target is None:
+                return match.group(0)
+            target_md = target if target.endswith(".md") else f"{target}.md"
+            new_href = posixpath.relpath(target_md.lstrip("/"), rel_dir.as_posix())
+            fragment = match.group(3) or ""
+            if locale == "en" and fragment:
+                ru_target = f"{root}/ru/core/{target_md.lstrip('/')}"
+                en_target = f"{root}/en/core/{target_md.lstrip('/')}"
+                ru_md = read_text(ru_target)
+                en_md = read_text(en_target)
+                if ru_md is not None and en_md is not None:
+                    from ydbdoc_review.validation.fragment_repair import (
+                        _remap_fragment_via_ru_en_pages,
+                    )
+
+                    localized = _remap_fragment_via_ru_en_pages(unquote(fragment[1:]), ru_md, en_md)
+                    if localized:
+                        fragment = f"#{localized}"
+            return f"{match.group(1)}{new_href}{fragment}{match.group(4)}"
+
+        updated = _LINK.sub(_replace, text)
+        if updated != text:
+            writes[norm] = updated
+    return writes
+
+
 def mirror_redirects_to_en(text: str, mappings: dict[str, str]) -> str:
     """Append missing locale-neutral source redirects to the EN list."""
     data = yaml.safe_load(text) or {}

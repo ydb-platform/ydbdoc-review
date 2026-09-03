@@ -8,6 +8,7 @@ from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.harness.context import DocsTextReader
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 
 @dataclass
@@ -20,6 +21,7 @@ class PRHarnessContext:
     redirect_source_en_paths: frozenset[str] | None = None
     docs_text_reader: DocsTextReader | None = None
     docs_repo_path: str | None = None
+    job_anchor_dictionary: JobAnchorDictionary | None = None
 
     @classmethod
     def from_options(
@@ -33,6 +35,7 @@ class PRHarnessContext:
         redirect_source_en_paths: frozenset[str] | None = None,
         docs_text_reader: DocsTextReader | None = None,
         docs_repo_path: str | None = None,
+        job_anchor_dictionary: JobAnchorDictionary | None = None,
     ) -> PRHarnessContext:
         return cls(
             client=client,
@@ -43,4 +46,5 @@ class PRHarnessContext:
             redirect_source_en_paths=redirect_source_en_paths,
             docs_text_reader=docs_text_reader,
             docs_repo_path=docs_repo_path,
+            job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
         )

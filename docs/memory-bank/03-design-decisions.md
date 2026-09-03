@@ -5496,12 +5496,63 @@ used raw English exception text in ``builder._format_critic_item``.
 ``test_format_critic_model_refusal``, ``test_humanize_critic_model_refusal_finalize_warning``.
 
 
+
+### §6.239 Protect-atom publish boundary and exact ASCII fragments (#51797, 2026-09-01)
+
+**Problem:** translation PR #51797 lost two Markdown link wrappers and published
+four URL protect markers as percent-encoded ``%E2%9F%A6U…%E2%9F%A7``. The
+pipeline recognized literal markers during validation, while Markdown parsing
+could encode them. Separately, §6.225 remapped the ASCII RU transliteration
+``#vklyuchenie-…`` to an EN-only auto-slug, conflicting with §6.174 and the
+user-selected exact internal-link contract.
+
+**Decision:**
+
+1. Canonicalize encoded protect markers before placeholder multiset/role repair.
+   Reinsert remains source-owned and no literal or encoded marker may publish.
+2. Internal ASCII fragments, including RU legacy transliteration and explicit
+   ids such as ``#sid``, remain byte-identical. They are never remapped.
+3. When an exact ASCII fragment is missing, the final-tree workflow pairs RU/EN
+   headings deterministically, adds ``{#exact-id}`` to the EN target, and adds
+   that target page to the touched candidate overlay. Ambiguous pairing fails
+   closed and the existing §6.226 ``en_link_target`` gate blocks publication.
+4. Only fragments containing a Unicode Cyrillic character use deterministic
+   RU/EN heading remapping. This narrows and supersedes the ASCII portion of
+   §6.225 while preserving §6.174, §6.226, and §6.237 baseline semantics.
+5. Whole Markdown wrappers are source-owned link slots. Finalization pairs RU
+   current links with EN baseline links by ordinal, keeps the trusted EN label,
+   and bounds restoration to the translated segment with the same
+   `extract_segments` list ordinal and `SegmentKind` as the EN-baseline segment
+   that owns the slot. Exactly one case-sensitive label occurrence inside that
+   segment is required. Matches elsewhere are ignored; zero/two matches or
+   ordinal/kind drift produce `missing_link_wrapper`. It never copies a RU
+   label or guesses an ambiguous occurrence (SPEC-007).
+6. The final-tree gate checks RU/EN link parity and marker exhaustion in
+   addition to target existence. Thus ambiguous/deleted/reordered/extra
+   wrappers and literal or encoded protect markers block before commit/push,
+   including deterministic pair early returns.
+
+**Tests:** ``test_pr_51797_percent_encoded_url_atoms_are_canonicalized_before_repair``,
+``test_pr_51797_ascii_translit_is_declared_not_remapped``,
+``test_pr_51797_candidate_overlay_adds_node_authorization_target``,
+``test_pr_51797_cyrillic_fragment_is_the_only_remap_exception``,
+``test_pr_51797_real_client_wrapper_full``,
+``test_pr_51797_real_monitoring_wrapper_full``,
+``test_pr_51797_final_missing_wrapper_blocks``,
+``test_pr_51797_final_reordered_extra_and_marker_block``, and the
+``test_pr_51797_linkslot_bounded_span_{zero,one,two}_exact_match*`` matrix.
+
+
 ### §6.240 Translation-PR verify stays inside source-PR EN scope (#40385 / #52055, 2026-09-03)
 
 **Problem:** On translation PR ``ydbdoc-review/pr-*``, ``doc_verify`` built pairs
 from the tip diff vs ``main``. Tip-ambient EN pages that drifted into the branch
 were verified against current RU, produced unrelated 🔴 findings, and critic
 pushed further ambient rewrites.
+(stale ``compare-configs``, ``auth_config``, ``tracing/setup``, …) were verified
+against current RU, produced unrelated 🔴 findings, and critic pushed further
+ambient rewrites. Manual tip surgery then looked like “the translation failed”
+even when the source-PR twins were fine.
 
 **Decision:**
 
@@ -5510,6 +5561,14 @@ pushed further ambient rewrites.
 2. ``verify_en_paths`` for late link gates excludes the same ambient set.
 3. After critic apply, tip-ambient EN outside source scope is restored from
    ``merge_base_with`` and included in the inline fixup commit.
+source-PR expected EN set (``expected_scope_pairs`` / ``scope_plan`` nav).
+2. ``verify_en_paths`` for late link gates excludes the same ambient set.
+3. After critic apply, tip-ambient EN outside source scope is restored from
+   ``merge_base_with`` and included in the inline fixup commit so the
+   translation PR stays scoped without operator strip.
+
+Ambient RU/EN drift on ``main`` is out of scope for a translation PR; it needs
+a separate docs sync, not critic fixes on the auto-translate branch.
 
 **Tests:** ``test_filter_drops_tip_ambient_outside_source_pr_scope``,
 ``test_restore_out_of_scope_en_from_base``.

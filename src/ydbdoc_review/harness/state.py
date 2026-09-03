@@ -11,6 +11,7 @@ from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.validation.heuristics import ClassifiedHeuristics
+from ydbdoc_review.validation.link_contract import LinkContractIssue
 
 HarnessMode = Literal["translate", "verify"]
 
@@ -39,6 +40,7 @@ class FileRunState:
 
     translations: dict[str, str] = field(default_factory=dict)
     translated_text: str = ""
+    link_contract_issues: list[LinkContractIssue] = field(default_factory=list)
 
     render_base_doc: Document | None = None
     render_base_segments: list[Segment] = field(default_factory=list)

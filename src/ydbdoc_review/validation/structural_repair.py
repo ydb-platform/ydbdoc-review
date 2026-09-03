@@ -12,7 +12,9 @@ import re
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import _render_inline
 from ydbdoc_review.validation.yfm_anchor import (
+    JobAnchorDictionary,
     _iter_headings,
+    is_ascii_yfm_anchor,
     split_heading_anchor_suffix,
 )
 
@@ -30,8 +32,17 @@ def _heading_plain(heading) -> str:
     return _render_inline(heading.children).strip()
 
 
-def restore_explicit_heading_anchors(translated: str, source: str) -> str:
-    """Copy missing explicit ``{#id}`` from RU headings onto EN twins by position."""
+def restore_explicit_heading_anchors(
+    translated: str,
+    source: str,
+    *,
+    dictionary: JobAnchorDictionary | None = None,
+) -> str:
+    """Copy missing explicit ``{#id}`` from RU headings onto EN twins by position.
+
+    ASCII RU anchors stay byte-identical (REQUIREMENTS §8). Cyrillic RU anchors
+    become English ids via *dictionary* (or a transient dict when omitted).
+    """
     if not translated or not source:
         return translated
 
@@ -42,6 +53,7 @@ def restore_explicit_heading_anchors(translated: str, source: str) -> str:
     if not ru_heads or not en_heads:
         return translated
 
+    dict_ = dictionary if dictionary is not None else JobAnchorDictionary()
     out = translated
     for ru_h, en_h in zip(ru_heads, en_heads, strict=False):
         ru_anchor = ru_h.anchor
@@ -50,25 +62,27 @@ def restore_explicit_heading_anchors(translated: str, source: str) -> str:
             continue
         if ru_h.level != en_h.level:
             continue
-        if en_anchor == ru_anchor:
-            continue
         en_title = _heading_plain(en_h)
         en_title, _ = split_heading_anchor_suffix(en_title)
+        if is_ascii_yfm_anchor(ru_anchor):
+            desired = ru_anchor
+        else:
+            desired = dict_.lookup_or_insert(ru_anchor, en_title)
+        if en_anchor == desired:
+            continue
         if en_anchor:
-            # §6.174 / #37673: overwrite EN-only ids (e.g. fields-Response)
-            # with the RU twin (fields-Описание).
             pattern = re.compile(
                 rf"^(#{{{ru_h.level}}}\s+{re.escape(en_title)})\s*"
                 rf"\{{#{re.escape(en_anchor)}\}}\s*$",
                 re.MULTILINE,
             )
-            repl = rf"\1 {{#{ru_anchor}}}"
+            repl = rf"\1 {{#{desired}}}"
         else:
             pattern = re.compile(
                 rf"^(#{{{ru_h.level}}}\s+{re.escape(en_title)})\s*$",
                 re.MULTILINE,
             )
-            repl = rf"\1 {{#{ru_anchor}}}"
+            repl = rf"\1 {{#{desired}}}"
         new_out, n = pattern.subn(repl, out, count=1)
         if n:
             out = new_out
@@ -128,8 +142,13 @@ def sync_missing_signature_sections(translated: str, source: str) -> str:
     return out
 
 
-def repair_en_structure_from_ru(en_text: str, ru_text: str) -> str:
+def repair_en_structure_from_ru(
+    en_text: str,
+    ru_text: str,
+    *,
+    dictionary: JobAnchorDictionary | None = None,
+) -> str:
     """Run deterministic structural repairs (anchors + signature blocks)."""
-    out = restore_explicit_heading_anchors(en_text, ru_text)
+    out = restore_explicit_heading_anchors(en_text, ru_text, dictionary=dictionary)
     out = sync_missing_signature_sections(out, ru_text)
     return out

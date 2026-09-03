@@ -9,7 +9,11 @@ from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import gap_label
-from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
+from ydbdoc_review.pipeline.types import (
+    NavigationRunResult,
+    PairRunResult,
+    PRTranslationResult,
+)
 from ydbdoc_review.reporting.heuristic_context import (
     format_heuristic_location,
     heuristic_context_for_message,
@@ -69,8 +73,7 @@ def _count_verdicts(result: PRTranslationResult) -> tuple[int, int, int]:
     for run in result.pair_results:
         if run.skipped or run.deleted or run.error or run.file_result is None:
             continue
-        fr = run.file_result
-        if fr.verdict == "blocked":
+        if _file_has_blocking_findings(run):
             blocked += 1
         elif _file_has_open_issues(run):
             warn += 1
@@ -79,19 +82,44 @@ def _count_verdicts(result: PRTranslationResult) -> tuple[int, int, int]:
     return ok, warn, blocked
 
 
+def _nav_has_blocking_findings(nav: NavigationRunResult) -> bool:
+    """True for nav errors or blocked verdict with reviewer-visible warnings."""
+    if nav.error:
+        return True
+    return nav.verdict == "blocked" and bool(nav.warnings)
+
+
+def result_has_blocking_findings(result: PRTranslationResult) -> bool:
+    """True when merge must stay 🔴: gaps, pair errors, or open blocking findings.
+
+    Ignores stale ``file_result.verdict == "blocked"`` / nav ``verdict == "blocked"``
+    when the report would list no open findings (#52055 false-RED).
+    """
+    if result.completeness_gaps or result.failed_count:
+        return True
+    if any(_file_has_blocking_findings(run) for run in result.pair_results):
+        return True
+    return any(_nav_has_blocking_findings(nav) for nav in result.navigation_results)
+
+
 def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
     """Return (emoji, short Russian label) for merge readiness."""
     if result.completeness_gaps:
         return "🔴", "не мержить — не все файлы source PR переведены"
     ok, warn, blocked = _count_verdicts(result)
     nav_blocked = any(
-        n.verdict == "blocked" or n.error for n in result.navigation_results
+        _nav_has_blocking_findings(n) for n in result.navigation_results
     )
     nav_warn = any(
         n.verdict == "warnings" and not n.error for n in result.navigation_results
     )
     nav_ok = any(
-        n.verdict == "ok" and not n.error for n in result.navigation_results
+        not n.error
+        and (
+            n.verdict == "ok"
+            or (n.verdict == "blocked" and not n.warnings)
+        )
+        for n in result.navigation_results
     )
     if blocked or nav_blocked:
         return "🔴", "не мержить — есть блокирующие проблемы"
@@ -398,6 +426,26 @@ def _file_has_open_issues(run: PairRunResult) -> bool:
     if fr.heuristic_blocking:
         return True
     return bool(fr.heuristic_warnings)
+
+
+def _file_has_blocking_findings(run: PairRunResult) -> bool:
+    """True when the file still has reviewer-visible blocking findings.
+
+    Stale ``verdict == "blocked"`` with empty heuristics / no remaining blocked
+    critic issues must not count (QA list would be all 🟢).
+    """
+    if run.skipped or run.deleted or run.error:
+        return False
+    fr = run.file_result
+    if fr is None:
+        return False
+    if fr.segment_alignment_error:
+        return True
+    if fr.heuristic_blocking:
+        return True
+    return any(
+        issue.severity == "blocked" for issue in _remaining_critic_issues(fr)
+    )
 
 
 def _file_reviewer_section(
@@ -790,6 +838,10 @@ def build_source_pr_comment(
             body += "\n**Ошибки pipeline:**\n\n"
             for run in errors:
                 body += f"- `{run.plan.target_path}`: {run.error}\n"
+        if result.yellow_warnings:
+            body += "\n**Жёлтые предупреждения (не блокируют):**\n\n"
+            for warning in result.yellow_warnings:
+                body += f"- {warning}\n"
         if config.reporting.include_cost:
             cost_label = _format_cost_estimate(
                 usage=usage,
@@ -911,9 +963,11 @@ def build_full_report(
 
     nav_runs = [n for n in result.navigation_results if not n.error]
     nav_problems = [
-        n for n in nav_runs if n.warnings or n.verdict != "ok"
+        n for n in nav_runs if n.warnings or n.verdict == "warnings"
     ]
-    nav_ok = [n for n in nav_runs if not n.warnings and n.verdict == "ok"]
+    nav_ok = [
+        n for n in nav_runs if not n.warnings and n.verdict != "warnings"
+    ]
 
     completeness_section = ""
     if result.completeness_gaps:
@@ -921,26 +975,39 @@ def build_full_report(
         for i, path in enumerate(result.completeness_gaps, start=1):
             completeness_section += f"{i}. **{gap_label(path)}**\n\n"
 
+    yellow_section = ""
+    if result.yellow_warnings:
+        yellow_section = (
+            "## Жёлтые предупреждения (не блокируют commit/push)\n\n"
+        )
+        for i, warning in enumerate(result.yellow_warnings, start=1):
+            yellow_section += f"{i}. {warning}\n\n"
+
     if not file_runs and not nav_runs:
         errors = [r for r in result.pair_results if r.error]
         nav_errors = [n for n in result.navigation_results if n.error]
         if errors or nav_errors:
-            body = header + completeness_section + "## Ошибки pipeline\n\n"
+            body = (
+                header
+                + completeness_section
+                + yellow_section
+                + "## Ошибки pipeline\n\n"
+            )
             for run in errors:
                 body += f"- `{run.plan.target_path}`: {run.error}\n"
             for nav in nav_errors:
                 body += f"- `{nav.en_path}`: {nav.error}\n"
             body += f"\n---\n\nGenerated by {action_release_label()}\n"
             return body
-        if completeness_section:
+        if completeness_section or yellow_section:
             usage_block = _usage_section(config, result, usage)
-            body = header + completeness_section
+            body = header + completeness_section + yellow_section
             if usage_block:
                 body += usage_block
             return body + f"---\n\nGenerated by {action_release_label()}\n"
         return header + "Нет обработанных файлов.\n"
 
-    body = header + completeness_section
+    body = header + completeness_section + yellow_section
     if not problem_runs and not nav_problems:
         if completeness_section:
             body += "В обработанных файлах открытых замечаний нет.\n\n"

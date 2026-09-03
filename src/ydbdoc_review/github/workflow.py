@@ -46,6 +46,15 @@ from ydbdoc_review.github.pr import (
     verify_fixup_pr_base,
 )
 from ydbdoc_review.harness.pr_context import PRHarnessContext
+from ydbdoc_review.ops.job_state import (
+    CONTINUABILITY_STORE_KEY,
+    clear_continuability,
+    dump_continuability_json,
+    load_continuability,
+    load_continuability_from_bytes,
+    mark_continuable,
+    relative_state_path,
+)
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
@@ -102,6 +111,7 @@ from ydbdoc_review.reporting.builder import (
     build_translation_pr_body,
     build_verify_fixup_pr_body,
     build_verify_fixup_source_comment,
+    result_has_blocking_findings,
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
@@ -155,6 +165,8 @@ class DocJobResult:
     committed: bool = False
     pushed: bool = False
     dry_run: bool = False
+    # Ops deny, continue refused, or other hard stop (§2 / §11).
+    blocked: bool = False
 
 
 def _github_tokens(config: Config) -> tuple[str, str]:
@@ -576,6 +588,131 @@ def _run_verify_pairs(
         docs_repo_path=docs_repo_path,
     )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
+
+
+def job_requires_nonzero_exit(job: DocJobResult, *, no_commit: bool = False) -> bool:
+    """§11: do not exit success when blockers skipped commit/push/PR creation."""
+    if job.dry_run or no_commit:
+        return False
+    if job.blocked:
+        return True
+    if job.mode == "doc_verify":
+        return _pr_result_has_blockers(job.pr_result)
+    if job.mode not in ("doc_translate", "doc_continue"):
+        return False
+    if job.translation_pr_number is not None:
+        return False
+    return not _allowed_success_without_translation_pr(job)
+
+
+def _allowed_success_without_translation_pr(job: DocJobResult) -> bool:
+    """Bilingual no-op / empty scope: publish was not required (§11 / P7)."""
+    if job.blocked or _pr_result_has_blockers(job.pr_result):
+        return False
+    pairs = job.pr_result.pair_results
+    nav = job.pr_result.navigation_results
+    if not pairs and not nav:
+        return True
+    if pairs and all(p.plan.action == "skip" for p in pairs) and not nav:
+        return True
+    return False
+
+
+def _pr_result_has_blockers(result: PRTranslationResult) -> bool:
+    return result_has_blocking_findings(result)
+
+
+def _persist_continuability(
+    repo_path: str,
+    *,
+    source_pr: int,
+    fixed_shas: dict[str, str],
+    translation_pr: int | None,
+    unfinished: bool,
+    unfinished_stage: str = "verify",
+    ops_ctx: object | None = None,
+) -> str | None:
+    """Write continuability artifact; return relative path when written."""
+    if not fixed_shas or source_pr <= 0:
+        return None
+    if unfinished:
+        path = mark_continuable(
+            repo_path,
+            source_pr=source_pr,
+            unfinished_stage=unfinished_stage,
+            fixed_shas=fixed_shas,
+            translation_pr=translation_pr,
+        )
+    else:
+        path = clear_continuability(repo_path, source_pr)
+    if path is None:
+        return None
+    rel = relative_state_path(source_pr)
+    if ops_ctx is not None:
+        store = getattr(ops_ctx, "store", None)
+        run_id = getattr(ops_ctx, "run_id", None)
+        if store is not None and run_id:
+            state = load_continuability(repo_path, source_pr)
+            if state is not None:
+                try:
+                    store.put(run_id, CONTINUABILITY_STORE_KEY, dump_continuability_json(state))
+                except Exception as exc:
+                    logger.warning("Failed to store continuability in transcript: %s", exc)
+    return rel
+
+
+def _load_continuability_for_continue(
+    repo_path: str,
+    source_pr: int,
+    *,
+    ops_store: object | None = None,
+    parent_run_id: str | None = None,
+) -> object | None:
+    state = load_continuability(repo_path, source_pr)
+    if state is not None and state.allows_continue():
+        return state
+    if ops_store is not None and parent_run_id:
+        try:
+            raw = ops_store.get(parent_run_id, CONTINUABILITY_STORE_KEY)
+        except Exception as exc:
+            logger.warning("Failed to load continuability from parent run: %s", exc)
+            raw = None
+        stored = load_continuability_from_bytes(raw)
+        if stored is not None and stored.allows_continue():
+            return stored
+    return state
+
+
+def _collect_fixed_shas(
+    repo_path: str,
+    *,
+    merge_base_with: str,
+    ru_ref: str | None,
+    head_sha: str | None,
+) -> dict[str, str]:
+    """SHAs frozen for this job (must be non-empty before continuability)."""
+    shas: dict[str, str] = {}
+    if head_sha:
+        shas["head"] = head_sha
+    if ru_ref:
+        shas["ru_ref"] = ru_ref
+    resolved_mb = merge_base_with
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["git", "rev-parse", merge_base_with],
+            cwd=repo_path,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            resolved_mb = proc.stdout.strip()
+    except OSError:
+        pass
+    shas["merge_base"] = resolved_mb
+    return shas
 
 
 def run_doc_translate(

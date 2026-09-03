@@ -32,9 +32,15 @@ from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
 )
+from ydbdoc_review.validation.link_contract import LinkContractResult
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
+)
+from ydbdoc_review.validation.yfm_anchor import (
+    JobAnchorDictionary,
+    apply_job_anchors_to_document,
+    build_heading_anchor_map,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,13 +76,24 @@ def render_with_translations(
     translations: dict[str, str],
     *,
     target_lang: str = "en",
-) -> str:
+    job_anchor_dictionary: JobAnchorDictionary | None = None,
+) -> LinkContractResult:
     doc = copy.deepcopy(base_doc)
     reinsert_segments(doc, segments, translations)
+    anchor_map = None
+    dictionary = None
+    tgt = target_lang.strip().lower()
+    if tgt in {"en", "english"}:
+        dictionary = job_anchor_dictionary or JobAnchorDictionary()
+        apply_job_anchors_to_document(doc, dictionary=dictionary, source_doc=base_doc)
+        anchor_map = build_heading_anchor_map(base_doc, doc)
+        anchor_map.update(dictionary.as_map())
     localize_links_in_document(
         doc,
         target_lang=target_lang,
         source_doc=base_doc,
+        anchor_map=anchor_map,
+        dictionary=dictionary,
     )
     return render_markdown(doc, target_lang=target_lang)
 
@@ -94,7 +111,7 @@ def remap_translations_by_position(
     }
 
 
-def finalize_en_target(
+def finalize_en_target_result(
     text: str,
     normalized_source_text: str,
     *,
@@ -108,7 +125,9 @@ def finalize_en_target(
     en_toc_reachable: frozenset[str] | None = None,
     layout_source_text: str | None = None,
     protected_source_text: str | None = None,
-) -> str:
+    source_base_text: str | None = None,
+    target_baseline_text: str | None = None,
+) -> LinkContractResult:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
     if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
         text = enforce_source_fenced_blocks(text, normalized_source_text)
@@ -147,7 +166,13 @@ def finalize_en_target(
     text = postprocess_en_target_markdown(text)
     text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
     protected = protected_source_text or normalized_source_text
-    text = restore_md_link_hrefs(text, protected)
+    link_result = restore_md_link_hrefs(
+        text,
+        protected,
+        source_ru_base=source_base_text,
+        target_baseline=target_baseline_text,
+    )
+    text = link_result.text
     text = _restore_cyrillic_source_code_atoms(text, protected)
     if en_toc_reachable is not None and target_lang.lower() in {"en", "english"}:
         stripped: list[str] = []
@@ -177,4 +202,9 @@ def finalize_en_target(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
-    return text
+    return LinkContractResult(text, link_result.issues)
+
+
+def finalize_en_target(*args, **kwargs) -> str:
+    """Compatibility API for strict Markdown consumers expecting a real str."""
+    return finalize_en_target_result(*args, **kwargs).text

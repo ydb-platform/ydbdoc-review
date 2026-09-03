@@ -43,9 +43,17 @@ def test_cyrillic_anchor_parsed_and_rendered_in_english():
         segments,
         {heading_seg.id: "Description of fields in the response"},
     )
+    from ydbdoc_review.validation.yfm_anchor import (
+        JobAnchorDictionary,
+        apply_job_anchors_to_document,
+    )
+
+    dictionary = JobAnchorDictionary()
+    apply_job_anchors_to_document(new_doc, dictionary=dictionary, source_doc=doc)
     out = render_markdown(new_doc, target_lang="en")
-    # §6.174 / §6.192: keep RU explicit ids on EN headings (no english_yfm_anchor).
-    assert "### Description of fields in the response {#fields-Описание}" in out
+    # REQUIREMENTS §8: Cyrillic RU id → English id (not kept as Cyrillic).
+    assert "### Description of fields in the response {#fields-Description}" in out
+    assert dictionary.get("fields-Описание") == "fields-Description"
 
 
 def test_build_heading_anchor_map_maps_ru_autogen_to_en_explicit():

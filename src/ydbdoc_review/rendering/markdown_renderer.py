@@ -225,10 +225,9 @@ def _render_paragraph(p: Paragraph, indent: str) -> str:
 
 
 def _render_heading(h: Heading, indent: str) -> str:
-    # Keep explicit ``{#id}`` identical to RU (§6.174 / #48792). Do not map
-    # Cyrillic ids through ``english_yfm_anchor`` — that produced
-    # ``{#fields-Response}`` vs RU ``{#fields-Описание}`` and failed
-    # ``anchor_parity`` (#37673 / #50684).
+    # Explicit ``{#id}`` comes from the AST. Cyrillic RU ids are rewritten to
+    # English via ``JobAnchorDictionary`` before render (REQUIREMENTS §8);
+    # ASCII ids stay byte-identical.
     prefix = "#" * h.level
     text = _render_inline(h.children)
     anchor_id = h.anchor

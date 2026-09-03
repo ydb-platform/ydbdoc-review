@@ -120,7 +120,7 @@ def test_repair_keeps_valid_fragment():
 
 
 def test_pr_45949_client_cert_legacy_translit_fragment():
-    """§6.225: RU legacy translit fragment → EN Diplodoc auto-slug (#51711)."""
+    """TASK-51797: RU ASCII translit remains exact; target is declared later."""
     en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
     en_bad = (
@@ -134,7 +134,7 @@ def test_pr_45949_client_cert_legacy_translit_fragment():
             "## Включение режима аутентификации и авторизации узлов\n\nТело.\n"
         ),
     }
-    # No ru_source: inbound retarget / late disk pass must still remap.
+    # Pair repair must not invent an EN-only slug.
     fixed = repair_en_fragments(
         en_bad,
         en_page_path=en_page,
@@ -245,7 +245,7 @@ def test_pr_40385_prefers_valid_en_baseline_href_after_ru_restore():
     assert fixed == baseline
 
 
-def test_pr_50976_sid_fragment_localizes_to_declared_en_fragment():
+def test_pr_50976_ascii_explicit_fragment_is_not_localized():
     en_page = "ydb/docs/en/core/security/index.md"
     ru_source = "См. [SID](./authorization.md#sid).\n"
     en_exact = "See [SID](./authorization.md#sid).\n"

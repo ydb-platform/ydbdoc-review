@@ -210,19 +210,21 @@ def test_pr_50904_critic_only_receives_ru_merge_base():
     assert captured["base_source_text"] == content.ru_base_text
 
 
-def test_href_only_pair_bypasses_llm_and_repairs():
-    """#45949: href-only source deltas are deterministic and byte-preserving."""
+def test_href_only_pair_runs_full_translate_not_old_en_patch():
+    """REQUIREMENTS §5/§13: href-only RU delta must not publish patched old EN."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/maintenance/manual/dynamic-config.md",
         en_path="ydb/docs/en/core/maintenance/manual/dynamic-config.md",
         ru_changed=True,
     )
+    old_en = "Before [nodes](../manual/node.md).\nOLD_EN_HREF_ONLY_MARKER\n"
+    fresh = "Fresh full translate [nodes](../concepts/node.md).\n"
     content = PairContent(
         pair=pair,
         ru_base_text="До [узлы](../manual/node.md).\n",
         ru_text="До [узлы](../concepts/node.md).\n",
-        en_base_text="Before [nodes](../manual/node.md).\n",
-        en_text="Before [nodes](../manual/node.md).\n",
+        en_base_text=old_en,
+        en_text=old_en,
     )
     plan = PairPlan(
         pair=pair,
@@ -238,12 +240,49 @@ def test_href_only_pair_bypasses_llm_and_repairs():
         glossary=load_glossary(),
         config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}),
     )
+    calls = {"n": 0}
 
-    with patch("ydbdoc_review.harness.pair.FileHarness") as harness:
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del ctx
+            calls["n"] += 1
+            assert state.existing_target_text == old_en  # QA may read old EN
+            result = MagicMock()
+            result.final_text = fresh
+            result.differential_meta = {
+                "mode": "full",
+                "semantic_noop": False,
+                "enabled": False,
+            }
+            result.link_contract_issues = ()
+            result.critic_initial = None
+            result.critic_unresolved = None
+            result.segment_alignment_error = None
+            result.manual_actions = []
+            result.heuristic_blocking = []
+            result.heuristic_warnings = []
+            result.heuristic_info = []
+            return result
+
+    with (
+        patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
+        patch(
+            "ydbdoc_review.validation.href_parity.apply_href_only_delta",
+            return_value=old_en.replace("../manual/", "../concepts/"),
+        ) as href_delta,
+    ):
         result = run_pair_plan(content, plan, parent, {})
 
-    harness.assert_not_called()
-    assert result.target_text == "Before [nodes](../concepts/node.md).\n"
+    assert calls["n"] == 1
+    # Helper may still exist for unit tests / verify tooling, but translate
+    # must not consult it (pair.run_pair_plan no longer imports/calls it).
+    href_delta.assert_not_called()
+    assert result.target_text is not None
+    assert "OLD_EN_HREF_ONLY_MARKER" not in result.target_text
+    assert "Fresh full translate" in result.target_text
 
 
 def test_semantic_noop_bypasses_pair_link_stripping_exactly():
@@ -301,7 +340,8 @@ def test_semantic_noop_bypasses_pair_link_stripping_exactly():
     strip.assert_not_called()
 
 
-def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
+def test_pr_50904_href_only_delta_goes_through_full_translate():
+    """Href destination moves still require one-pass translate (§5/§13)."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/reference/configuration/client.md",
         en_path="ydb/docs/en/core/reference/configuration/client.md",
@@ -310,12 +350,14 @@ def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
     fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
     old = f"../../devops/deployment-options/manual/node.md#{fragment}"
     new = f"../../devops/concepts/node.md#{fragment}"
+    old_en = f"[registering dynamic nodes]({old})\nOLD_EN_MARKER\n"
+    fresh = f"[registering dynamic nodes]({new})\n"
     content = PairContent(
         pair=pair,
         ru_base_text=f"[регистрации динамических узлов]({old})\n",
         ru_text=f"[регистрации динамических узлов]({new})\n",
-        en_base_text=f"[registering dynamic nodes]({old})\n",
-        en_text=f"[registering dynamic nodes]({old})\n",
+        en_base_text=old_en,
+        en_text=old_en,
     )
     plan = PairPlan(
         pair=pair,
@@ -339,17 +381,39 @@ def test_pr_50904_href_only_delta_localizes_fragment_against_en_target():
         config=cfg,
         docs_text_reader=files.get,
     )
+    calls = {"n": 0}
 
-    result = run_pair_plan(content, plan, parent, {})
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
 
-    assert result.target_text == (
-        "[registering dynamic nodes](../../devops/concepts/node.md"
-        "#enabling-node-authentication-and-authorization-mode)\n"
-    )
+        def run(self, state, ctx):
+            del state, ctx
+            calls["n"] += 1
+            result = MagicMock()
+            result.final_text = fresh
+            result.differential_meta = {"mode": "full", "semantic_noop": False}
+            result.link_contract_issues = ()
+            result.critic_initial = None
+            result.critic_unresolved = None
+            result.segment_alignment_error = None
+            result.manual_actions = []
+            result.heuristic_blocking = []
+            result.heuristic_warnings = []
+            result.heuristic_info = []
+            return result
+
+    with patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness):
+        result = run_pair_plan(content, plan, parent, {})
+
+    assert calls["n"] == 1
+    assert result.target_text is not None
+    assert "OLD_EN_MARKER" not in result.target_text
+    assert f"]({new})" in result.target_text
 
 
-def test_href_parity_preserve_repairs_missing_en_fragment():
-    """§6.227: already-applied href delta still receives fragment repair."""
+def test_href_parity_preserve_does_not_publish_old_en_on_translate():
+    """REQUIREMENTS §5/§13: href-parity preserve must not bypass translate."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/reference/configuration/client.md",
         en_path="ydb/docs/en/core/reference/configuration/client.md",
@@ -358,13 +422,16 @@ def test_href_parity_preserve_repairs_missing_en_fragment():
     fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
     old = f"../../devops/deployment-options/manual/node.md#{fragment}"
     new = f"../../devops/concepts/node.md#{fragment}"
+    preserved_bait = (
+        f"[registering dynamic nodes]({new})\nDETERMINISTIC_PRESERVE_MARKER\n"
+    )
+    fresh = f"[registering dynamic nodes]({new})\nFull one-pass translate.\n"
     content = PairContent(
         pair=pair,
         ru_base_text=f"[регистрации динамических узлов]({old})\n",
         ru_text=f"[регистрации динамических узлов]({new})\n",
         en_base_text=f"[registering dynamic nodes]({old})\n",
-        # The source href delta is already present, so href-parity preserve wins.
-        en_text=f"[registering dynamic nodes]({new})\n",
+        en_text=preserved_bait,
     )
     plan = PairPlan(
         pair=pair,
@@ -389,25 +456,43 @@ def test_href_parity_preserve_repairs_missing_en_fragment():
         config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}),
         docs_text_reader=files.get,
     )
+    calls = {"n": 0}
+
+    class _FakeHarness:
+        def __init__(self, _profile):
+            pass
+
+        def run(self, state, ctx):
+            del ctx
+            calls["n"] += 1
+            assert state.existing_target_text == preserved_bait
+            result = MagicMock()
+            result.final_text = fresh
+            result.differential_meta = {"mode": "full", "semantic_noop": False}
+            result.link_contract_issues = ()
+            result.critic_initial = None
+            result.critic_unresolved = None
+            result.segment_alignment_error = None
+            result.manual_actions = []
+            result.heuristic_blocking = []
+            result.heuristic_warnings = []
+            result.heuristic_info = []
+            return result
 
     with (
         patch(
-            "ydbdoc_review.harness.pair.apply_localized_mirror_delta",
-            return_value=None,
-        ),
-        patch(
-            "ydbdoc_review.harness.pair.autotitle_delta_satisfied_in_en",
-            return_value=False,
-        ),
-        patch("ydbdoc_review.harness.pair.FileHarness") as harness,
+            "ydbdoc_review.harness.pair._try_deterministic_en_preserve",
+            return_value=preserved_bait,
+        ) as preserve,
+        patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
     ):
         result = run_pair_plan(content, plan, parent, {})
 
-    harness.assert_not_called()
-    assert result.target_text == (
-        "[registering dynamic nodes](../../devops/concepts/node.md"
-        "#enabling-node-authentication-and-authorization-mode)\n"
-    )
+    preserve.assert_not_called()
+    assert calls["n"] == 1
+    assert result.target_text is not None
+    assert "DETERMINISTIC_PRESERVE_MARKER" not in result.target_text
+    assert "Full one-pass translate" in result.target_text
 
 
 def test_run_pair_plan_restores_missing_heading_anchor_after_translate():
@@ -496,7 +581,7 @@ def test_pair_postprocess_repairs_fences_after_structural_repair():
         patch("ydbdoc_review.harness.pair.FileHarness", _FakeHarness),
         patch(
             "ydbdoc_review.harness.pair.repair_en_structure_from_ru",
-            side_effect=lambda text, _source: text + "```\n",
+            side_effect=lambda text, _source, **_kw: text + "```\n",
         ),
     ):
         result = run_pair_plan(content, plan, parent, {})

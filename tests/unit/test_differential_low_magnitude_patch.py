@@ -8,12 +8,15 @@ from textwrap import dedent
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.differential import (
+    DifferentialTranslationConfig,
     analyze_ru_diff,
     patch_en_with_added_translations,
     patch_en_with_source_added_autotitle_lines,
     prepare_differential_seed,
     slim_pending_for_low_magnitude_patch,
 )
+
+_DIFF_ON = DifferentialTranslationConfig(enabled=True)
 
 
 def test_pr_50904_autotitle_addition_preserves_unrelated_en_bytes():
@@ -71,6 +74,7 @@ def test_glossary_zero_diff_seeds_most_segments():
         ru_pr_text=ru,
         en_current_text=en,
         ru_base_text=ru,
+        config=_DIFF_ON,
     )
     assert len(seeded) > len(pending)
     assert len(pending) < 100
@@ -94,6 +98,7 @@ def test_slim_pending_activates_even_when_pending_equals_changes():
         ru_pr_text=ru_pr,
         en_current_text=en,
         ru_base_text=ru_base,
+        config=_DIFF_ON,
     )
     # Pretend all unseeded segments were already filtered to the change set.
     analysis = analyze_ru_diff(ru_base, ru_pr)
@@ -127,6 +132,7 @@ def test_slim_pending_keeps_only_added_for_tiny_glossary_edit():
         ru_pr_text=ru_pr,
         en_current_text=en,
         ru_base_text=ru_base,
+        config=_DIFF_ON,
     )
     slim = slim_pending_for_low_magnitude_patch(pending, ru_base_text=ru_base, ru_pr_text=ru_pr)
     assert slim is not None

@@ -156,7 +156,10 @@ def test_localize_links_explicit_anchor_remaps_fragment():
     assert check_link_locale_in_en(out) == []
 
 
-def test_localize_links_in_document_table_cell():
+def test_localize_links_in_document_table_cell(monkeypatch):
+    resolver = MagicMock()
+    resolver.resolve_title.return_value = "X"
+    monkeypatch.setattr(wikipedia_links, "get_wikipedia_resolver", lambda: resolver)
     md = (
         "| RU |\n"
         "| --- |\n"

@@ -21,6 +21,7 @@ from ydbdoc_review.pipeline.pairs import (
     NavigationPair,
     build_doc_pairs,
 )
+from ydbdoc_review.pipeline.tip_newer import apply_tip_newer_policy
 from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
@@ -559,6 +560,13 @@ def load_pair_contents(
                 en_base_text=en_base_text,
             )
         )
+    # REQUIREMENTS §10/§12: tip newer than source PR → yellow warn + full overwrite.
+    contents, _ = apply_tip_newer_policy(
+        repo_path,
+        contents,
+        source_ref=ru_content_ref,
+        tip_ref=merge_base_with,
+    )
     return contents
 
 

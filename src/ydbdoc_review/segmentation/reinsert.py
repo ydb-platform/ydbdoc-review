@@ -54,11 +54,39 @@ def reinsert_segments(
             if isinstance(key, str):
                 fm_updates[key] = translated
             continue
+        if seg.kind in {SegmentKind.NOTE_TITLE, SegmentKind.CUT_TITLE}:
+            _set_string_title_at_ast_path(doc, seg, translated)
+            continue
         new_inline = _build_inline_from_translation(translated, seg.placeholders)
         _set_inline_at_ast_path(doc, seg, new_inline)
     if fm_updates and doc.front_matter is not None:
         doc.front_matter = apply_front_matter_updates(doc.front_matter, fm_updates)
     return doc
+
+
+def _set_string_title_at_ast_path(
+    doc: Document, seg: Segment, translated: str
+) -> None:
+    """Reinsert plain-string YFM note/cut titles without touching markers."""
+    path = seg.ast_path
+    if not path or path[-1] != "title":
+        raise ReinsertError(f"Bad title path: {path}")
+    node = _navigate_to_doc_index(doc, path[:-1])
+    if seg.kind == SegmentKind.NOTE_TITLE:
+        if not isinstance(node, YfmNote):
+            raise ReinsertError(
+                f"Expected YfmNote at {path[:-1]}, got {type(node).__name__}"
+            )
+        node.title = translated
+        return
+    if seg.kind == SegmentKind.CUT_TITLE:
+        if not isinstance(node, YfmCut):
+            raise ReinsertError(
+                f"Expected YfmCut at {path[:-1]}, got {type(node).__name__}"
+            )
+        node.title = translated
+        return
+    raise ReinsertError(f"Unsupported string-title kind: {seg.kind}")
 
 
 def _build_inline_from_translation(

@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from ydbdoc_review.github.git_ops import read_text_at_ref
-from ydbdoc_review.github.workflow import _final_tree_reader, _repair_en_fragments_after_apply
+from ydbdoc_review.github.workflow import (
+    CandidateOverlay,
+    _final_tree_reader,
+    _repair_en_fragments_in_candidate,
+)
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
@@ -69,7 +73,7 @@ def test_final_tree_reader_prefers_tip_for_non_overlay(git_repo: str):
     assert "Enabling the node authentication" in text
 
 
-def test_late_repair_does_not_rewrite_tip_href_against_stale_merge(git_repo: str):
+def test_candidate_repair_does_not_rewrite_tip_href_against_stale_merge(git_repo: str):
     """#40385: preserved tip EN must not be retargeted to merge-era paths."""
     en = Path(git_repo) / "ydb" / "docs" / "en" / "core"
     cfg = en / "reference" / "configuration"
@@ -112,13 +116,14 @@ def test_late_repair_does_not_rewrite_tip_href_against_stale_merge(git_repo: str
     rel = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     page.write_text(tip_body, encoding="utf-8")
 
-    repaired = _repair_en_fragments_after_apply(
-        git_repo,
-        [rel],
-        dry_run=False,
-        merge_base_with=tip_sha,
+    base_reader = lambda path: read_text_at_ref(git_repo, tip_sha, path)
+    overlay = CandidateOverlay(base_reader, {rel: tip_body}, frozenset())
+    repaired = _repair_en_fragments_in_candidate(
+        overlay,
+        frozenset({rel}),
+        base_reader,
     )
-    assert repaired == []
+    assert repaired.overlay.writes[rel] == tip_body
     assert page.read_text(encoding="utf-8") == tip_body
 
 
@@ -170,9 +175,7 @@ def test_en_link_gate_uses_tip_targets_for_preserved_overlay(git_repo: str):
         target_lang="en",
         summary="preserve",
     )
-    result = PRTranslationResult(
-        pair_results=[PairRunResult(plan=plan, target_text=tip_body)]
-    )
+    result = PRTranslationResult(pair_results=[PairRunResult(plan=plan, target_text=tip_body)])
     broken = apply_en_link_target_checks(
         result,
         repo_path=git_repo,

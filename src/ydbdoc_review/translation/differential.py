@@ -173,7 +173,7 @@ def patch_en_with_source_added_autotitle_lines(
 class DifferentialTranslationConfig:
     """Thresholds for full vs differential (task § Configuration)."""
 
-    enabled: bool = True
+    enabled: bool = False
     stale_days_threshold: int = 90
     change_magnitude_threshold: float = 0.5
     min_en_file_ratio: float = 0.3
@@ -190,8 +190,9 @@ class DifferentialTranslationConfig:
         min_en_file_ratio: float = 0.3,
     ) -> DifferentialTranslationConfig:
         if enabled is None:
-            raw = (os.environ.get(_ENV_ENABLE) or "1").strip().lower()
-            enabled = raw not in {"0", "false", "no", "off"}
+            # Default off: REQUIREMENTS_RU.md §5 / §13 forbid EN stitch.
+            raw = (os.environ.get(_ENV_ENABLE) or "0").strip().lower()
+            enabled = raw in {"1", "true", "yes", "on"}
         return cls(
             enabled=enabled,
             stale_days_threshold=stale_days_threshold,

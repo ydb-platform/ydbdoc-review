@@ -15,6 +15,7 @@ from ydbdoc_review.navigation.redirects import (
     should_skip_redirect_tombstone_en,
 )
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, plan_pairs
+from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,7 @@ class ExecutePairPlansStep:
             en_toc_reachable=ctx.en_toc_reachable,
             docs_text_reader=ctx.docs_text_reader,
             docs_repo_path=ctx.docs_repo_path,
+            job_anchor_dictionary=ctx.job_anchor_dictionary or JobAnchorDictionary(),
         )
         results = []
         total = len(state.plans)

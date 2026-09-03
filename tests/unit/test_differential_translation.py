@@ -241,21 +241,14 @@ def test_prepare_seed_falls_back_full_on_kind_mismatch() -> None:
     assert len(pending) == len(extract_segments(parse_markdown(pr)))
 
 
-def test_translate_step_differential_calls_llm_only_for_pending() -> None:
+def test_translate_step_full_one_pass_calls_llm_for_all_segments() -> None:
+    """REQUIREMENTS §5/§13: translate path never differentially seeds from old EN."""
     base = "## Title\n\nStable.\n"
     pr = "## Title\n\nStable.\n\nНовый абзац.\n"
     en = "## Title\n\nStable EN.\n"
 
     pr_segs = extract_segments(parse_markdown(pr))
-    strategy, seeded, pending = prepare_differential_seed(
-        pr_segments=pr_segs,
-        ru_pr_text=pr,
-        en_current_text=en,
-        ru_base_text=base,
-        config=_cfg(),
-    )
-    assert strategy.mode == "differential"
-    pending_ids = {s.id for s in pending}
+    all_ids = {s.id for s in pr_segs}
 
     translated_ids: list[str] = []
 
@@ -268,6 +261,12 @@ def test_translate_step_differential_calls_llm_only_for_pending() -> None:
 
     monkey = pytest.MonkeyPatch()
     monkey.setattr(steps_mod, "translate_segments", _fake_translate)
+    monkey.setattr(
+        steps_mod,
+        "finalize_en_target",
+        lambda text, *a, **k: text,
+    )
+    monkey.setattr(steps_mod, "_apply_en_structural_repair", lambda *_a, **_k: None)
     try:
         cfg = load_config(
             env={
@@ -288,10 +287,12 @@ def test_translate_step_differential_calls_llm_only_for_pending() -> None:
             base_source_text=base,
         )
         FileHarness(TRANSLATE_PROFILE).run(state, ctx)
-        assert state.differential_meta.get("mode") == "differential"
-        assert set(translated_ids) == pending_ids
-        assert set(seeded).issubset(state.translations)
+        assert state.differential_meta.get("mode") == "full"
+        assert state.differential_meta.get("seeded") == 0
+        assert state.differential_meta.get("low_magnitude_patch") is False
+        assert set(translated_ids) == all_ids
         assert state.translated_text
+        assert "Stable EN" not in state.translated_text
     finally:
         monkey.undo()
 

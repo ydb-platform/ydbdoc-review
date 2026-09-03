@@ -208,3 +208,86 @@ def test_cli_translate_file_missing_credentials(mock_load_config):
         result = runner.invoke(app, ["translate-file", "missing.md"])
     assert result.exit_code == 1
     assert "Error" in result.stdout or "missing" in result.stdout.lower()
+
+
+def test_cli_run_exits_nonzero_when_publish_skipped(git_repo: Path):
+    job = _fake_doc_job("doc_translate")
+    job.dry_run = False
+    job.translation_pr_number = None
+    job.pr_result.completeness_gaps = ["ydb/docs/en/a.md"]
+
+    with patch("ydbdoc_review.cli.run_doc_translate", return_value=job):
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--repo",
+                "o/r",
+                "--pr",
+                "7",
+                "--repo-path",
+                str(git_repo),
+            ],
+        )
+    assert result.exit_code == 1
+    assert "translation PR" in result.stdout.lower() or "Error" in result.stdout
+
+
+def test_cli_run_exits_zero_for_bilingual_noop(git_repo: Path):
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+        en_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="skip",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    job = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        dry_run=False,
+        pr_result=PRTranslationResult(
+            pair_results=[PairRunResult(plan=plan, target_text=None, skipped=True)]
+        ),
+    )
+
+    with patch("ydbdoc_review.cli.run_doc_translate", return_value=job):
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--repo",
+                "o/r",
+                "--pr",
+                "7",
+                "--repo-path",
+                str(git_repo),
+            ],
+        )
+    assert result.exit_code == 0, result.stdout
+
+
+def test_cli_continue_exits_nonzero_when_blocked(git_repo: Path):
+    job = DocJobResult(mode="doc_continue", pr_number=42, dry_run=False, blocked=True)
+    with patch("ydbdoc_review.cli.run_doc_continue", return_value=job):
+        result = runner.invoke(
+            app,
+            [
+                "continue",
+                "--repo",
+                "o/r",
+                "--pr",
+                "42",
+                "--repo-path",
+                str(git_repo),
+                "--instruction",
+                "fix it",
+            ],
+        )
+    assert result.exit_code == 1

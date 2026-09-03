@@ -267,6 +267,164 @@ def test_pr_51761_href_parity_accepts_ru_translit_via_fragment_remap():
     ) == []
 
 
+def test_href_parity_accepts_fragment_remap_when_target_missing():
+    """#40385 / P3: same-path Cyrillic→EN fragment remap must not block on dead path."""
+    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    ru_frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    en_frag = "enabling-the-node-authentication-and-authorization-mode"
+    href_ru = f"../../devops/concepts/node-authorization.md#{ru_frag}"
+    href_en = f"../../devops/concepts/node-authorization.md#{en_frag}"
+    ru = f"See [nodes]({href_ru}).\n"
+    en = f"See [nodes]({href_en}).\n"
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            docs_text_reader=lambda _p: None,
+        )
+        == []
+    )
+
+
+def test_href_parity_accepts_job_dictionary_fragment_remap():
+    from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
+
+    page = "ydb/docs/en/core/a.md"
+    dictionary = JobAnchorDictionary()
+    dictionary.lookup_or_insert("поля", "Fields")
+    ru = "See [x](./other.md#поля).\n"
+    en = "See [x](./other.md#fields).\n"
+    files = {"ydb/docs/en/core/other.md": "## Fields {#fields}\n"}
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            docs_text_reader=files.get,
+            dictionary=dictionary,
+        )
+        == []
+    )
+
+
+def test_href_parity_tip_baseline_pairs_path_divergence():
+    """#40385: tip-preserved auth_config→security_config / #tls→#activated-profile."""
+    page = "ydb/docs/en/core/security/authentication.md"
+    ru = (
+        "A [auth](../reference/configuration/auth_config.md#security-auth) and "
+        "[tls](../reference/ydb-cli/connect.md#tls).\n"
+    )
+    en = (
+        "A [auth](../reference/configuration/security_config.md#security-auth) and "
+        "[tls](../reference/ydb-cli/connect.md#activated-profile).\n"
+    )
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            docs_text_reader=lambda _p: "# ok\n",
+            en_baseline_text=en,
+        )
+        == []
+    )
+
+
+def test_href_parity_tip_baseline_pairs_duplicate_tls_fragments():
+    """#40385: two× RU connect.md#tls vs tip EN #activated-profile must not block."""
+    page = "ydb/docs/en/core/security/authentication.md"
+    ru = (
+        "See [TLS](../reference/ydb-cli/connect.md#tls).\n"
+        "Also [TLS](../reference/ydb-cli/connect.md#tls).\n"
+    )
+    en = (
+        "See [TLS](../reference/ydb-cli/connect.md#activated-profile).\n"
+        "Also [TLS](../reference/ydb-cli/connect.md#activated-profile).\n"
+    )
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            docs_text_reader=lambda _p: "# activated-profile\n",
+            en_baseline_text=en,
+        )
+        == []
+    )
+
+
+def test_href_parity_grandfathers_tip_only_extras():
+    page = "ydb/docs/en/core/security/index.md"
+    ru = "See [auth](./authentication.md).\n"
+    en = (
+        "See [auth](./authentication.md) and "
+        "[level](../concepts/glossary.md#access-level).\n"
+    )
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            en_baseline_text=en,
+        )
+        == []
+    )
+
+
+def test_restore_non_unique_baseline_slot_is_nonblocking():
+    """P9c: ambiguous tip baseline LinkSlot owner must not hard-block."""
+    from ydbdoc_review.validation.href_parity import _restore_link_in_aligned_segment
+
+    # Two paragraphs each own the same baseline label+href → non-unique ordinal.
+    baseline = (
+        "See the UI overview.\n\n"
+        "Also see the UI overview.\n"
+    )
+    # Force the protected-href scan path: baseline must contain real md links.
+    baseline = (
+        "See [UI](../../reference/ydb-ui/index.md).\n\n"
+        "Also [UI](../../reference/ydb-ui/index.md).\n"
+    )
+    translated = "See UI.\n\nAlso UI.\n"
+    result = _restore_link_in_aligned_segment(
+        translated,
+        baseline,
+        baseline_label="UI",
+        baseline_href="../../reference/ydb-ui/index.md",
+        current_href="../../reference/embedded-ui/index.md",
+    )
+    assert result.ok
+    assert result.issues == ()
+
+
+def test_href_parity_tip_preserved_without_source_baseline():
+    """P9c: candidate/verify gate (en baseline only) grandfathers tip-preserved EN."""
+    page = "ydb/docs/en/core/devops/configuration-management/compare-configs.md"
+    ru = (
+        "See [v2](../../contributor/configuration-v2.md) and "
+        "[ui](../../reference/ydb-ui/index.md).\n"
+    )
+    en = "See [ui](../../reference/embedded-ui/index.md).\n"
+    assert (
+        check_href_parity(
+            ru,
+            en,
+            en_page_path=page,
+            en_baseline_text=en,
+        )
+        == []
+    )
+    # Dual-baseline translate still flags newly added RU when EN stays at tip.
+    assert check_href_parity(
+        ru,
+        en,
+        en_page_path=page,
+        source_baseline_text="See [ui](../../reference/ydb-ui/index.md).\n",
+        en_baseline_text=en,
+    )
+
+
 def test_pr_51761_href_parity_survives_tip_en_baseline_grandfather():
     """§6.237: tip EN baseline must not eat the EN extra before fragment remap (#51761)."""
     from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
@@ -821,4 +979,44 @@ def test_inverted_mirror_delta_then_prefer_resolvable_keeps_tip_en():
             localized, en, en_page_path=page, read_text=files.get
         )
         == en
+    )
+
+
+def test_prefer_resolvable_keeps_tip_devops_ydb_ui_over_stale_maintenance():
+    """#52055 / P9d: merge-commit checkout must not keep tombstone tip-mirror hrefs.
+
+    When tip EN already uses devops/ydb-ui targets but an inverted RU mirror
+    delta proposes legacy maintenance/embedded-ui paths (missing on tip), keep
+    the tip-resolvable hrefs.
+    """
+    from ydbdoc_review.validation.href_parity import (
+        apply_localized_mirror_delta,
+        prefer_resolvable_en_hrefs,
+    )
+
+    page = "ydb/docs/en/core/reference/observability/tracing/setup.md"
+    tip_en = (
+        "See [dynamic configuration](../../../devops/configuration-management/"
+        "configuration-v1/dynamic-config.md).\n"
+        "As with [logs](../../../reference/ydb-ui/logs.md), ok.\n"
+    )
+    # Historical merge RU still carries pre-rename paths (tombstones on tip).
+    ru_tip = tip_en  # tip RU already renamed with EN
+    ru_merge = (
+        "See [dynamic configuration](../../../maintenance/manual/"
+        "dynamic-config.md).\n"
+        "As with [logs](../../../reference/embedded-ui/logs.md), ok.\n"
+    )
+    localized = apply_localized_mirror_delta(ru_tip, ru_merge, tip_en)
+    assert localized == ru_merge  # pure href mirror would pollute tip EN
+    files = {
+        "ydb/docs/en/core/devops/configuration-management/configuration-v1/"
+        "dynamic-config.md": "# Dynamic\n",
+        "ydb/docs/en/core/reference/ydb-ui/logs.md": "# Logs\n",
+    }
+    assert (
+        prefer_resolvable_en_hrefs(
+            localized, tip_en, en_page_path=page, read_text=files.get
+        )
+        == tip_en
     )

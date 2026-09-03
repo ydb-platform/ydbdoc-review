@@ -44,9 +44,7 @@ class FileHarness:
             )
         return self._to_result(state, ctx)
 
-    def _to_result(
-        self, state: FileRunState, ctx: HarnessContext
-    ) -> FileTranslationResult:
+    def _to_result(self, state: FileRunState, ctx: HarnessContext) -> FileTranslationResult:
         heuristics = state.heuristics
         return FileTranslationResult.from_usage(
             tracker=ctx.client.usage_tracker,
@@ -54,7 +52,11 @@ class FileHarness:
             file_path=state.file_path,
             final_text=state.translated_text,
             segments_count=len(state.segments),
-            verdict=state.verdict if not state.stopped_early else "ok",
+            verdict=(
+                "blocked"
+                if state.link_contract_issues
+                else (state.verdict if not state.stopped_early else "ok")
+            ),
             prompt_version=ctx.prompt_version,
             critic_initial=state.critic_initial,
             critic_applied=state.critic_applied,
@@ -70,4 +72,5 @@ class FileHarness:
             segment_source_excerpts=state.segment_source_excerpts,
             segment_alignment_error=state.segment_alignment_error,
             differential_meta=state.differential_meta,
+            link_contract_issues=tuple(state.link_contract_issues),
         )

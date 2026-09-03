@@ -1,8 +1,8 @@
-"""Deterministic RU↔EN link / heading-anchor parity (§6.174).
+"""Deterministic RU↔EN link / heading-anchor parity (§6.174 / REQUIREMENTS §8).
 
-Policy: for a translated docs page, internal hrefs and explicit ``{#id}``
-anchors must match the source twin one-to-one. No EN-only fragment remaps
-(``#ldap`` must stay ``#ldap``, not become ``#ldap-auth-provider``).
+Policy: for a translated docs page, internal hrefs must match the source twin
+one-to-one. Explicit ASCII ``{#id}`` anchors stay byte-identical; Cyrillic RU
+anchors map to a single English id (job dictionary / ``english_yfm_anchor``).
 """
 
 from __future__ import annotations
@@ -13,7 +13,16 @@ from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
+from ydbdoc_review.validation.link_contract import LinkContractIssue, LinkContractResult
+
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
+from ydbdoc_review.validation.yfm_anchor import (
+    JobAnchorDictionary,
+    _heading_plain_text,
+    _iter_headings,
+    english_yfm_anchor,
+    is_ascii_yfm_anchor,
+)
 
 DocsTextReader = Callable[[str], str | None]
 
@@ -192,9 +201,7 @@ def prefer_resolvable_en_hrefs(
         prop_ok = read_text(prop_path) is not None
         prev_ok = prev_path is not None and read_text(prev_path) is not None
         if prev_ok and not prop_ok:
-            replacements.append(
-                (prop.start(), prop.end(), f"[{prop.group(1)}]({prev_href})")
-            )
+            replacements.append((prop.start(), prop.end(), f"[{prop.group(1)}]({prev_href})"))
     out = proposed
     for start, end, replacement in reversed(replacements):
         out = out[:start] + replacement + out[end:]
@@ -271,6 +278,8 @@ def _is_internal_href(href: str) -> bool:
 
 def collect_internal_hrefs(text: str) -> list[str]:
     """Internal docs hrefs in document order (autotitle + ``[]()``)."""
+    if isinstance(text, LinkContractResult):
+        text = text.text
     found: list[str] = []
     for href in _AUTO_LINK.findall(_mask_link_protected_ranges(text or "")):
         if _is_internal_href(href):
@@ -325,6 +334,22 @@ def collect_explicit_anchors(text: str) -> list[str]:
     return out
 
 
+def _fragment_mapped_by_dictionary(
+    source_fragment: str,
+    target_fragment: str,
+    dictionary: JobAnchorDictionary | None,
+) -> bool:
+    """True when job dictionary maps RU ``source_fragment`` → EN ``target_fragment``."""
+    if not dictionary or not source_fragment or not target_fragment:
+        return False
+    if dictionary.get(source_fragment) == target_fragment:
+        return True
+    for ru_key, en_val in dictionary.as_map().items():
+        if en_val == target_fragment and ru_key == source_fragment:
+            return True
+    return False
+
+
 def check_href_parity(
     source_text: str,
     target_text: str,
@@ -337,7 +362,10 @@ def check_href_parity(
     docs_text_reader: DocsTextReader | None = None,
     en_baseline_text: str | None = None,
     source_baseline_text: str | None = None,
+    dictionary: JobAnchorDictionary | None = None,
 ) -> list[str]:
+    if isinstance(target_text, LinkContractResult):
+        target_text = target_text.text
     """Blocking when EN internal href multiset ≠ RU (§6.174)."""
     if source_lang.lower() not in {"ru", "russian"}:
         return []
@@ -350,6 +378,16 @@ def check_href_parity(
     tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
     src = Counter(src_ordered)
     tgt = Counter(tgt_ordered)
+    # Tip-preserved candidate (§6.228 / P9c): when EN hrefs still match tip and
+    # no source baseline is in play (verify/candidate gate), RU tip debt and
+    # path renames are ambient. Dual-baseline translate (#50904) still sees
+    # newly added RU hrefs when ``source_baseline_text`` is set.
+    if en_baseline_text is not None and source_baseline_text is None:
+        tip_hrefs = Counter(
+            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
+        )
+        if tgt == tip_hrefs:
+            return []
     if ignore_basenames:
 
         def _kept(counter: Counter[str]) -> Counter[str]:
@@ -430,12 +468,8 @@ def check_href_parity(
     # newly added RU href is not grandfathered because it is absent from the
     # source baseline (#45949/#50904).
     if source_baseline_text is not None and en_baseline_text is not None:
-        src_base = Counter(
-            unquote(href) for href in collect_internal_hrefs(source_baseline_text)
-        )
-        en_base = Counter(
-            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
-        )
+        src_base = Counter(unquote(href) for href in collect_internal_hrefs(source_baseline_text))
+        en_base = Counter(unquote(href) for href in collect_internal_hrefs(en_baseline_text))
         old_missing = src_base - en_base
         old_extra = en_base - src_base
         current_missing = Counter(missing)
@@ -447,32 +481,30 @@ def check_href_parity(
     # §6.237: grandfather can drop the EN ``extra`` when ``en_baseline_text`` is the
     # live tip EN (verify used ``existing_target_text``) while RU path overlay from
     # tip leaves a new ``missing``. Rebuild position-aligned extras for remap.
+    # Pair every occurrence (duplicate hrefs like two× ``connect.md#tls``, #40385).
     if missing and not extra and en_page_path:
         rebuilt_extra: list[str] = []
         for source_href in missing:
-            source_positions = [
+            for position in (
                 pos for pos, value in enumerate(src_ordered) if value == source_href
-            ]
-            if len(source_positions) != 1:
-                continue
-            position = source_positions[0]
-            if position >= len(tgt_ordered):
-                continue
-            target_href = tgt_ordered[position]
-            source_path, _, source_fragment = source_href.partition("#")
-            target_path, _, target_fragment = target_href.partition("#")
-            if (
-                source_path == target_path
-                and source_fragment
-                and target_fragment
-                and source_fragment != target_fragment
             ):
-                rebuilt_extra.append(target_href)
+                if position >= len(tgt_ordered):
+                    continue
+                target_href = tgt_ordered[position]
+                source_path, _, source_fragment = source_href.partition("#")
+                target_path, _, target_fragment = target_href.partition("#")
+                if source_fragment and target_fragment and source_fragment != target_fragment:
+                    # Same path (P3 fragment remap) or tip slot with different path.
+                    rebuilt_extra.append(target_href)
+                elif (
+                    source_path != target_path
+                    and PurePosixPath(source_path).name == PurePosixPath(target_path).name
+                ):
+                    rebuilt_extra.append(target_href)
         extra = rebuilt_extra
-    # #50976: accept a same-page EN-localized fragment only when the source
-    # fragment is absent and the target fragment is physically declared.
-    if missing and extra and en_page_path and docs_text_reader is not None:
-        from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+    # Position-aligned tip preserve + P3 fragment remap (§8 / §6.228 / #40385).
+    # Use nth occurrence → nth slot so duplicate RU hrefs still pair (#40385).
+    if missing and extra and en_page_path:
         from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
 
         used_extra: set[int] = set()
@@ -480,53 +512,69 @@ def check_href_parity(
         baseline_ordered = [
             unquote(href) for href in collect_internal_hrefs(en_baseline_text or "")
         ]
+        occurrence_seen: Counter[str] = Counter()
         for source_href in missing:
             source_path, _, source_fragment = source_href.partition("#")
+            source_positions = [
+                pos for pos, value in enumerate(src_ordered) if value == source_href
+            ]
+            occ = occurrence_seen[source_href]
+            occurrence_seen[source_href] += 1
             matched = False
-            for idx, target_href in enumerate(extra):
-                if idx in used_extra:
-                    continue
-                target_path, _, target_fragment = target_href.partition("#")
-                if source_path != target_path or not source_fragment or not target_fragment:
-                    continue
-                source_positions = [
-                    pos for pos, value in enumerate(src_ordered) if value == source_href
-                ]
-                target_positions = [
-                    pos for pos, value in enumerate(tgt_ordered) if value == target_href
-                ]
-                if len(source_positions) != 1 or len(target_positions) != 1:
-                    continue
-                position = source_positions[0]
-                if target_positions[0] != position:
-                    continue
-                target_abs = resolve_internal_md_href(en_page_path, target_href)
-                target_md = docs_text_reader(target_abs) if target_abs else None
-                if not target_md:
-                    continue
-                baseline_ok = (
-                    position < len(baseline_ordered)
-                    and baseline_ordered[position] == target_href
-                )
-                remap_ok = _localized_en_fragment_pairs_ru_remap(
-                    source_fragment,
-                    target_fragment,
-                    target_abs=target_abs,
-                    target_md=target_md,
-                    docs_text_reader=docs_text_reader,
-                )
-                if baseline_ok:
-                    if fragment_declared_in_markdown(target_md, source_fragment):
-                        continue
-                    if not fragment_declared_in_markdown(target_md, target_fragment):
-                        continue
-                elif remap_ok:
-                    pass
-                else:
-                    continue
-                used_extra.add(idx)
-                matched = True
-                break
+            if occ < len(source_positions):
+                position = source_positions[occ]
+                if position < len(tgt_ordered):
+                    target_href = tgt_ordered[position]
+                    target_path, _, target_fragment = target_href.partition("#")
+                    for idx, cand in enumerate(extra):
+                        if idx in used_extra or cand != target_href:
+                            continue
+                        baseline_ok = (
+                            position < len(baseline_ordered)
+                            and baseline_ordered[position] == target_href
+                        )
+                        # Tip already had this EN href at this slot (path and/or fragment).
+                        if baseline_ok:
+                            used_extra.add(idx)
+                            matched = True
+                            break
+                        same_path = source_path == target_path
+                        dict_ok = _fragment_mapped_by_dictionary(
+                            source_fragment, target_fragment, dictionary
+                        )
+                        if (
+                            same_path
+                            and source_fragment
+                            and target_fragment
+                            and source_fragment != target_fragment
+                        ):
+                            if docs_text_reader is None:
+                                # Without a docs reader we cannot prove remap or missing
+                                # target; keep the pair as a blocker (heuristics smoke).
+                                continue
+                            target_abs = resolve_internal_md_href(en_page_path, target_href)
+                            target_md = docs_text_reader(target_abs) if target_abs else None
+                            if not target_md:
+                                # Same missing destination: fragment localization is not a
+                                # publish blocker (RU twin debt / P3 remap on dead path).
+                                used_extra.add(idx)
+                                matched = True
+                                break
+                            remap_ok = _localized_en_fragment_pairs_ru_remap(
+                                source_fragment,
+                                target_fragment,
+                                target_abs=target_abs,
+                                target_md=target_md,
+                                docs_text_reader=docs_text_reader,
+                            )
+                            if dict_ok or remap_ok:
+                                used_extra.add(idx)
+                                matched = True
+                                break
+                        elif dict_ok and source_fragment and target_fragment:
+                            used_extra.add(idx)
+                            matched = True
+                            break
             if not matched:
                 kept_missing.append(source_href)
         missing = kept_missing
@@ -574,6 +622,10 @@ def check_href_parity(
                 continue
             kept_extra.append(href)
         extra = kept_extra
+    # After pairing missings, drop leftover tip-ambient EN extras (§6.228).
+    if extra and en_baseline_text is not None and source_baseline_text is None:
+        en_base = Counter(unquote(href) for href in collect_internal_hrefs(en_baseline_text))
+        extra = sorted((Counter(extra) - en_base).elements())
     if not missing and not extra:
         return []
     parts: list[str] = []
@@ -594,14 +646,55 @@ def check_heading_anchor_parity(
     *,
     source_lang: str = "ru",
     target_lang: str = "en",
+    dictionary: JobAnchorDictionary | None = None,
 ) -> list[str]:
-    """Blocking when explicit ``{#id}`` multisets differ (RU vs EN)."""
+    """Blocking when expected EN explicit ``{#id}`` multisets differ.
+
+    ASCII RU anchors must appear unchanged on EN. Cyrillic RU anchors must map
+    to their job-dictionary (or ``english_yfm_anchor``) English counterparts.
+    """
     if source_lang.lower() not in {"ru", "russian"}:
         return []
     if target_lang.lower() not in {"en", "english"}:
         return []
 
-    src = Counter(collect_explicit_anchors(source_text))
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+
+    ru_doc = parse_markdown(source_text)
+    en_doc = parse_markdown(target_text)
+    ru_heads = list(_iter_headings(ru_doc.children))
+    en_heads = list(_iter_headings(en_doc.children))
+    dict_ = dictionary if dictionary is not None else JobAnchorDictionary()
+
+    expected: list[str] = []
+    outlines_aligned = len(ru_heads) == len(en_heads) and all(
+        src.level == tgt.level for src, tgt in zip(ru_heads, en_heads, strict=True)
+    )
+    if outlines_aligned:
+        for src_h, tgt_h in zip(ru_heads, en_heads, strict=True):
+            if not src_h.anchor:
+                continue
+            if is_ascii_yfm_anchor(src_h.anchor):
+                expected.append(src_h.anchor)
+            else:
+                en_text = _heading_plain_text(tgt_h)
+                expected.append(dict_.lookup_or_insert(src_h.anchor, en_text))
+    else:
+        # Drifted outlines: compare ASCII multiset only; Cyrillic RU must not
+        # appear verbatim on EN (REQUIREMENTS §8).
+        for anchor in collect_explicit_anchors(source_text):
+            if is_ascii_yfm_anchor(anchor):
+                expected.append(anchor)
+            elif dictionary is not None and dictionary.get(anchor):
+                expected.append(dictionary.get(anchor) or anchor)
+            else:
+                minted = english_yfm_anchor(anchor, "") or anchor
+                if is_ascii_yfm_anchor(minted):
+                    expected.append(minted)
+                else:
+                    expected.append(dict_.lookup_or_insert(anchor, ""))
+
+    src = Counter(expected)
     tgt = Counter(collect_explicit_anchors(target_text))
     if src == tgt:
         return []
@@ -854,7 +947,7 @@ def restore_md_link_hrefs(
     *,
     source_ru_base: str | None = None,
     target_baseline: str | None = None,
-) -> str:
+) -> LinkContractResult:
     """Force EN ``[label](href)`` targets to match RU (§6.174 / #49451).
 
     1. When non-autotitle internal link **counts** match, rewrite each EN href
@@ -865,11 +958,11 @@ def restore_md_link_hrefs(
        dropped the ``architecture/metadata-services.md`` links).
     """
     if not translated or not source_ru:
-        return translated
+        return LinkContractResult(translated)
 
     ru_links = _iter_md_links(source_ru)
     if not ru_links:
-        return translated
+        return LinkContractResult(translated)
 
     out = translated
     en_links = _iter_md_links(out)
@@ -899,8 +992,8 @@ def restore_md_link_hrefs(
                     pieces.append(f"[{label}]({replacements.get(idx, href)})")
                     cursor = start
                 pieces.append(out[:cursor])
-                return "".join(reversed(pieces))
-            return out
+                return LinkContractResult("".join(reversed(pieces)))
+            return LinkContractResult(out)
 
     ru_href_counts = Counter(href for _label, href, _s, _e in ru_links)
     en_href_counts = Counter(href for _label, href, _s, _e in en_links)
@@ -926,7 +1019,8 @@ def restore_md_link_hrefs(
         for _ in range(max(0, n - present.get(href, 0))):
             missing_hrefs.append(href)
 
-    for href in missing_hrefs:
+    contract_issues: list[LinkContractIssue] = []
+    for slot_index, href in enumerate(missing_hrefs):
 
         def _wrap(match: re.Match[str], *, _href: str = href) -> str:
             return f"{match.group(1)}[{match.group(2).strip()}]({_href}){match.group(3)}"
@@ -935,8 +1029,130 @@ def restore_md_link_hrefs(
         if n:
             out = new_out
             continue
-        # Fallback: no plain "see the section" — leave for critic / continue.
-    return out
+        # Source-owned LinkSlot recovery (#51797). The bounded span is exactly
+        # the translated segment with the same ordinal and kind as the EN
+        # baseline segment that contained this link slot (SPEC-007).
+        if target_baseline is not None:
+            baseline_links = _iter_md_links(target_baseline)
+            slot = next((i for i, item in enumerate(ru_links) if item[1] == href), None)
+            if slot is not None and slot < len(baseline_links):
+                label = baseline_links[slot][0]
+                restored = _restore_link_in_aligned_segment(
+                    out,
+                    target_baseline,
+                    baseline_label=label,
+                    baseline_href=baseline_links[slot][1],
+                    current_href=href,
+                )
+                if restored.ok:
+                    out = restored.text
+                    continue
+                contract_issues.extend(restored.issues)
+        # No deterministic label evidence. Final link-contract gate blocks it.
+        if not any(issue.href == href for issue in contract_issues):
+            contract_issues.append(
+                LinkContractIssue(
+                    code="missing_link_wrapper",
+                    message="no unique translated label in aligned LinkSlot span",
+                    slot=slot_index,
+                    href=href,
+                )
+            )
+    return LinkContractResult(out, tuple(contract_issues))
+
+
+def _restore_link_in_aligned_segment(
+    translated: str,
+    target_baseline: str,
+    *,
+    baseline_label: str,
+    baseline_href: str,
+    current_href: str,
+) -> LinkContractResult:
+    """Restore one LinkSlot only inside its aligned segment ordinal.
+
+    Parse/extract both documents, locate the unique EN-baseline segment that
+    owns the baseline link, then use the translated segment with the same list
+    ordinal and ``SegmentKind``. Exactly one case-sensitive plain-label match
+    inside that span is required. Zero/two matches or alignment drift return
+    ``None`` so the final contract emits ``missing_link_wrapper``.
+    """
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.rendering.markdown_renderer import render_markdown
+    from ydbdoc_review.segmentation.extractor import extract_segments
+    from ydbdoc_review.segmentation.reinsert import reinsert_segments
+
+    baseline_doc = parse_markdown(target_baseline)
+    translated_doc = parse_markdown(translated)
+    baseline_segments = extract_segments(baseline_doc)
+    translated_segments = extract_segments(translated_doc)
+    needle = f"[{baseline_label}]("
+    baseline_ordinals = [
+        index
+        for index, segment in enumerate(baseline_segments)
+        if needle in segment.text
+        and any(
+            getattr(protected.node, "href", None) == baseline_href
+            for protected in segment.placeholders
+        )
+    ]
+    if len(baseline_ordinals) != 1:
+        # Non-unique tip baseline slot is ambient (§6.228 / P9c): cannot
+        # deterministically restore, but must not hard-block publish.
+        return LinkContractResult(translated)
+    ordinal = baseline_ordinals[0]
+    if ordinal >= len(translated_segments):
+        return LinkContractResult(
+            translated,
+            (
+                LinkContractIssue(
+                    "ambiguous_link_slot", "aligned segment ordinal is missing", href=current_href
+                ),
+            ),
+        )
+    baseline_segment = baseline_segments[ordinal]
+    translated_segment = translated_segments[ordinal]
+    if translated_segment.kind != baseline_segment.kind:
+        return LinkContractResult(
+            translated,
+            (
+                LinkContractIssue(
+                    "ambiguous_link_slot", "aligned segment kind differs", href=current_href
+                ),
+            ),
+        )
+    occurrences = list(re.finditer(re.escape(baseline_label), translated_segment.text))
+    visible = [
+        match
+        for match in occurrences
+        if not any(
+            start <= match.start() < end
+            for _label, _href, start, end in _iter_md_links(translated_segment.text)
+        )
+    ]
+    if len(visible) != 1:
+        code = "missing_link_wrapper" if not visible else "ambiguous_link_slot"
+        return LinkContractResult(
+            translated,
+            (
+                LinkContractIssue(
+                    code, f"expected one exact label match, found {len(visible)}", href=current_href
+                ),
+            ),
+        )
+    match = visible[0]
+    actual = translated_segment.text[match.start() : match.end()]
+    replacement = (
+        translated_segment.text[: match.start()]
+        + f"[{actual}]({current_href})"
+        + translated_segment.text[match.end() :]
+    )
+    reinsert_segments(
+        translated_doc,
+        translated_segments,
+        {translated_segment.id: replacement},
+    )
+    return LinkContractResult(render_markdown(translated_doc, target_lang="en"))
 
 
 def insert_missing_autotitle_list_items(

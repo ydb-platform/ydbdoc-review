@@ -311,6 +311,9 @@ def _try_remap_missing_fragment_via_ru_en(
     redirect_ru_paths: dict[str, str],
 ) -> tuple[str, str] | None:
     """Map a missing EN fragment via the paired RU/EN target pages."""
+    # TASK-51797 policy: ASCII/transliterated RU fragments are source-owned
+    # and must remain byte-identical. The final-tree repair declares that
+    # exact id on the paired EN heading. Only Cyrillic ids are localized.
     if not _CYRILLIC.search(unquote(frag)):
         return None
     ru_abs = _resolve_href_path(en_page_path.replace("/docs/en/", "/docs/ru/", 1), path_part)
@@ -337,13 +340,8 @@ def _try_remap_missing_fragment_via_ru_en(
     candidates: list[str] = []
     if ru_frag:
         candidates.append(ru_frag)
-    # Cyrillic auto-slugs, LLM ASCII inventions (via ru_frag), and RU legacy
-    # transliterations preserved on EN (#45949 client_certificate → node-authorization).
-    if frag not in candidates and (
-        ru_frag is not None
-        or _CYRILLIC.search(unquote(frag))
-        or _frag_matches_ru_heading_slug(frag, ru_target)
-    ):
+    # Only Cyrillic fragments are remapped to a deterministic EN heading id.
+    if frag not in candidates and (_CYRILLIC.search(unquote(frag))):
         candidates.append(frag)
     if not candidates:
         return None

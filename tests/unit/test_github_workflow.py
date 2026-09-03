@@ -57,6 +57,20 @@ def git_repo(tmp_path: Path) -> str:
     return str(repo)
 
 
+def _wire_en_toc_for_a(repo_path: str) -> None:
+    """Commit EN toc so ``ydb/docs/en/a.md`` is reachable (not an orphan gap)."""
+    root = Path(repo_path)
+    en_core = root / "ydb" / "docs" / "en" / "core"
+    en_core.mkdir(parents=True, exist_ok=True)
+    (en_core / "toc_p.yaml").write_text(
+        "items:\n- name: A\n  href: ../a.md\n",
+        encoding="utf-8",
+    )
+    (root / "ydb" / "docs" / "en" / "a.md").write_text("Hello.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
+    subprocess.run(["git", "commit", "-m", "en toc for a.md"], cwd=repo_path, check=True)
+
+
 def _fake_pr_result() -> PRTranslationResult:
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -113,6 +127,16 @@ def test_run_doc_continue_retranslates_translation_pr_scope(git_repo: str):
     }
     translated = DocJobResult(mode="doc_continue", pr_number=40385)
 
+    from ydbdoc_review.ops.job_state import mark_continuable
+
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": "abc", "head": "abc"},
+        translation_pr=50840,
+    )
+
     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
         mock_gh.return_value.get_pull.return_value = pull
         with patch(
@@ -151,6 +175,16 @@ def test_run_doc_continue_verifies_non_translation_pr(git_repo: str):
     }
     verified = DocJobResult(mode="doc_continue", pr_number=50840)
 
+    from ydbdoc_review.ops.job_state import mark_continuable
+
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": "abc", "head": "abc"},
+        translation_pr=50840,
+    )
+
     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
         mock_gh.return_value.get_pull.return_value = pull
         with patch("ydbdoc_review.github.workflow.run_doc_translate") as translate:
@@ -174,6 +208,165 @@ def test_run_doc_continue_verifies_non_translation_pr(git_repo: str):
     assert verify.call_args.kwargs["continue_feedback"] == "Исправь замечания критика"
     translate.assert_not_called()
 
+
+def test_run_doc_continue_refuses_without_continuability_flag(git_repo: str):
+    pull = {
+        "title": "Auto-translate docs from PR #40385",
+        "head": {
+            "ref": "ydbdoc-review/pr-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with patch("ydbdoc_review.github.workflow.run_doc_translate") as translate:
+            with patch("ydbdoc_review.github.workflow.run_doc_verify") as verify:
+                result = run_doc_continue(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=50840,
+                    merge_base_with="HEAD",
+                    dry_run=True,
+                    config=load_config(env=_env()),
+                    instruction="fix anchors",
+                )
+
+    assert result.mode == "doc_continue"
+    assert result.blocked is True
+    translate.assert_not_called()
+    verify.assert_not_called()
+
+
+def test_job_requires_nonzero_exit_when_publish_skipped():
+    from ydbdoc_review.github.workflow import job_requires_nonzero_exit
+
+    blocked_publish = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        pr_result=_fake_pr_result(),
+        translation_pr_number=None,
+        dry_run=False,
+    )
+    blocked_publish.pr_result.completeness_gaps = ["ydb/docs/en/a.md"]
+    assert job_requires_nonzero_exit(blocked_publish) is True
+
+    # Translated pairs, no gaps, but no PR (e.g. push/create skipped) → fail.
+    no_pr = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        pr_result=_fake_pr_result(),
+        translation_pr_number=None,
+        dry_run=False,
+    )
+    assert job_requires_nonzero_exit(no_pr) is True
+
+    bilingual = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        dry_run=False,
+    )
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+        en_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="skip",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    bilingual.pr_result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, target_text=None, skipped=True)]
+    )
+    assert job_requires_nonzero_exit(bilingual) is False
+
+    with_pr = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        pr_result=_fake_pr_result(),
+        translation_pr_number=99,
+        dry_run=False,
+    )
+    assert job_requires_nonzero_exit(with_pr) is False
+
+    dry = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        pr_result=_fake_pr_result(),
+        dry_run=True,
+    )
+    assert job_requires_nonzero_exit(dry) is False
+
+    no_commit_ok = DocJobResult(
+        mode="doc_translate",
+        pr_number=7,
+        pr_result=_fake_pr_result(),
+        dry_run=False,
+    )
+    assert job_requires_nonzero_exit(no_commit_ok, no_commit=True) is False
+
+    continue_blocked = DocJobResult(
+        mode="doc_continue",
+        pr_number=7,
+        dry_run=False,
+        blocked=True,
+    )
+    assert job_requires_nonzero_exit(continue_blocked) is True
+
+
+def test_job_requires_zero_exit_verify_when_stale_blocked_verdict():
+    """#52055: verify publish + all-green files must exit 0 despite stale verdict."""
+    from ydbdoc_review.github.workflow import job_requires_nonzero_exit
+    from ydbdoc_review.pipeline.types import NavigationRunResult
+
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="critic_only",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    fr = FileTranslationResult(
+        file_path=pair.en_path,
+        final_text="Hello.\n",
+        segments_count=1,
+        verdict="blocked",
+        prompt_version="v1",
+    )
+    job = DocJobResult(
+        mode="doc_verify",
+        pr_number=52055,
+        translation_pr_number=52055,
+        pr_result=PRTranslationResult(
+            pair_results=[
+                PairRunResult(plan=plan, target_text="Hello.\n", file_result=fr)
+            ],
+            navigation_results=[
+                NavigationRunResult(
+                    ru_path="ydb/docs/ru/a/toc_i.yaml",
+                    en_path="ydb/docs/en/a/toc_i.yaml",
+                    kind="toc",
+                    target_text="items:\n",
+                    verdict="blocked",
+                )
+            ],
+        ),
+        dry_run=False,
+    )
+    assert job_requires_nonzero_exit(job) is False
 
 def test_run_doc_translate_dry_run(git_repo: str):
     pull = {
@@ -425,6 +618,7 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
 
 
 def test_run_doc_translate_posts_comments(git_repo: str):
+    _wire_en_toc_for_a(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -482,6 +676,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
 
 def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str):
     """Source PR comment failure must not abort after inline verify succeeded."""
+    _wire_en_toc_for_a(git_repo)
     pull = {
         "title": "docs",
         "head": {
@@ -532,6 +727,7 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
 
 def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
     """Fork PR: branch from upstream main, push translation branch, PR targets main."""
+    _wire_en_toc_for_a(git_repo)
     pull = {
         "title": "docs",
         "head": {

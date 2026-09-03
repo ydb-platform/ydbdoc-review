@@ -8,10 +8,11 @@ from typing import Protocol
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
 from ydbdoc_review.harness.render import (
-    finalize_en_target,
+    finalize_en_target_result as finalize_en_target,
     remap_translations_by_position,
     render_with_translations,
 )
+from ydbdoc_review.validation.link_contract import coerce_link_contract
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import (
@@ -37,21 +38,11 @@ from ydbdoc_review.translation.critic_retranslate import (
     issues_by_segment_id,
     retranslate_segments_with_critic_feedback,
 )
-from ydbdoc_review.translation.differential import (
-    DifferentialTranslationConfig,
-    low_magnitude_patch_has_anchors,
-    patch_en_with_added_translations,
-    patch_en_with_source_added_autotitle_lines,
-    prepare_differential_seed,
-    slim_pending_for_low_magnitude_patch,
-)
 from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
-    check_fence_parity,
-    check_list_tab_parity,
     run_file_heuristics_classified,
 )
 from ydbdoc_review.validation.href_parity import check_href_parity, collect_internal_hrefs
@@ -65,80 +56,6 @@ from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_tran
 from ydbdoc_review.validation.structural_repair import repair_en_structure_from_ru
 
 logger = logging.getLogger(__name__)
-
-
-def _en_structure_safe_for_low_magnitude_patch(ru_text: str, en_text: str) -> bool:
-    """Refuse EN splice when fence/tab-container counts already diverge (§6.193).
-
-    Low-magnitude patch keeps the existing EN tree. If EN is missing SDK language
-    panes (RU 6 fences vs EN 2), splicing paragraphs cannot restore them — force
-    full reconstruct from RU instead (#37673 / #50684).
-    """
-    if check_fence_parity(ru_text, en_text):
-        return False
-    if check_list_tab_parity(ru_text, en_text):
-        return False
-    # Pane count: same number of ``{% list tabs %}`` can still hide missing
-    # ``- Go`` / ``- Rust`` children.
-    import re
-
-    from ydbdoc_review.parsing.ast_types import YfmIf, YfmTab
-    from ydbdoc_review.segmentation.extractor import (
-        DEFAULT_TAB_TITLE_WHITELIST,
-        extract_segments,
-    )
-    from ydbdoc_review.validation.homoglyphs import normalize_confusable_cyrillic
-
-    def pane_titles(text: str) -> list[str]:
-        doc = parse_markdown(text)
-        titles: list[str] = []
-
-        def walk(blocks: list) -> None:
-            for block in blocks:
-                if isinstance(block, YfmTab):
-                    titles.append("".join(getattr(node, "content", "") for node in block.title))
-                if isinstance(block, YfmIf):
-                    for branch in block.branches:
-                        walk(branch.children)
-                    continue
-                children = getattr(block, "children", None)
-                if children:
-                    walk(children)
-
-        walk(doc.children)
-        return titles
-
-    def language_key(title: str) -> str | None:
-        raw = title.strip()
-        normalized = normalize_confusable_cyrillic(raw).lower()
-        if normalized in DEFAULT_TAB_TITLE_WHITELIST:
-            return normalized
-        match = re.match(
-            r"^(.+?)\s*\((?:alternative|альтернативный)\)$",
-            raw,
-            flags=re.IGNORECASE,
-        )
-        if match:
-            base = normalize_confusable_cyrillic(match.group(1).strip()).lower()
-            if base in DEFAULT_TAB_TITLE_WHITELIST:
-                return f"{base} (alternative)"
-        return None
-
-    ru_titles = pane_titles(ru_text)
-    en_titles = pane_titles(en_text)
-    if len(ru_titles) != len(en_titles):
-        return False
-    if len(extract_segments(parse_markdown(ru_text))) != len(
-        extract_segments(parse_markdown(en_text))
-    ):
-        return False
-    # Technical language pane names are structure, not prose. A legacy EN
-    # ``With#`` opposite RU ``С#`` means the old target is unsafe to splice.
-    for ru_title, en_title in zip(ru_titles, en_titles, strict=True):
-        ru_key = language_key(ru_title)
-        if ru_key is not None and language_key(en_title) != ru_key:
-            return False
-    return True
 
 
 class HarnessStep(Protocol):
@@ -160,22 +77,31 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
         state.segments,
         state.translations,
         target_lang=ctx.target_lang,
+        job_anchor_dictionary=ctx.job_anchor_dictionary,
     )
     if ctx.target_lang.lower() in {"en", "english"}:
-        state.translated_text = finalize_en_target(
-            state.translated_text,
-            state.source_text,
-            client=ctx.client,
-            glossary=ctx.glossary,
-            file_path=state.file_path,
-            source_lang=ctx.source_lang,
-            target_lang=ctx.target_lang,
-            prompt_version=ctx.prompt_version,
-            out_warnings=state.finalize_warnings,
-            en_toc_reachable=ctx.en_toc_reachable,
-            # Verify uses EN as the fence-body authority, but layout repair must
-            # still restore the raw RU marker/container structure (#50741).
-            layout_source_text=state.source_text,
+        contract = coerce_link_contract(
+            finalize_en_target(
+                state.translated_text,
+                state.source_text,
+                client=ctx.client,
+                glossary=ctx.glossary,
+                file_path=state.file_path,
+                source_lang=ctx.source_lang,
+                target_lang=ctx.target_lang,
+                prompt_version=ctx.prompt_version,
+                out_warnings=state.finalize_warnings,
+                en_toc_reachable=ctx.en_toc_reachable,
+                # Verify uses EN as the fence-body authority, but layout repair must
+                # still restore the raw RU marker/container structure (#50741).
+                layout_source_text=state.source_text,
+                source_base_text=state.base_source_text,
+                target_baseline_text=state.base_target_text or state.existing_target_text,
+            )
+        )
+        state.translated_text = contract.text
+        state.link_contract_issues = list(
+            dict.fromkeys([*state.link_contract_issues, *contract.issues])
         )
         state.translated_text = repair_missing_includes(
             state.source_text,
@@ -252,21 +178,30 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         state.render_base_segments,
         render_translations,
         target_lang=ctx.target_lang,
+        job_anchor_dictionary=ctx.job_anchor_dictionary,
     )
     if ctx.target_lang.lower() in {"en", "english"}:
-        state.translated_text = finalize_en_target(
-            state.translated_text,
-            state.fence_reference_text,
-            client=ctx.client,
-            glossary=ctx.glossary,
-            file_path=state.file_path,
-            source_lang=ctx.source_lang,
-            target_lang=ctx.target_lang,
-            prompt_version=ctx.prompt_version,
-            out_warnings=state.finalize_warnings,
-            en_toc_reachable=ctx.en_toc_reachable,
-            layout_source_text=state.source_text,
-            protected_source_text=state.source_text,
+        contract = coerce_link_contract(
+            finalize_en_target(
+                state.translated_text,
+                state.fence_reference_text,
+                client=ctx.client,
+                glossary=ctx.glossary,
+                file_path=state.file_path,
+                source_lang=ctx.source_lang,
+                target_lang=ctx.target_lang,
+                prompt_version=ctx.prompt_version,
+                out_warnings=state.finalize_warnings,
+                en_toc_reachable=ctx.en_toc_reachable,
+                layout_source_text=state.source_text,
+                protected_source_text=state.source_text,
+                source_base_text=state.base_source_text,
+                target_baseline_text=state.base_target_text or state.existing_target_text,
+            )
+        )
+        state.translated_text = contract.text
+        state.link_contract_issues = list(
+            dict.fromkeys([*state.link_contract_issues, *contract.issues])
         )
     state.translations, state.segment_alignment_error = gate_round_trip(
         state.segments, state.translated_text
@@ -325,180 +260,31 @@ class TranslateStep:
         if state.mode != "translate":
             return
         assert state.source_doc is not None
-        cfg = ctx.config.translation
-        if state.existing_target_text and state.base_source_text:
-            deterministic_index_patch = patch_en_with_source_added_autotitle_lines(
-                state.base_source_text,
-                state.source_text,
-                state.base_target_text or state.existing_target_text,
-            )
-            if deterministic_index_patch is not None:
-                state.translations = {}
-                state.translated_text = deterministic_index_patch
-                state.stopped_early = True
-                state.differential_meta = {
-                    "mode": "differential",
-                    "reason": "source_added_autotitle_lines",
-                    "deterministic_autotitle_patch": True,
-                }
-                logger.info("Deterministic autotitle-list insertion: preserve existing EN bytes")
-                return
-        diff_cfg = DifferentialTranslationConfig.from_env_and_defaults(
-            enabled=cfg.differential_enabled,
-            stale_days_threshold=cfg.differential_stale_days,
-            change_magnitude_threshold=cfg.differential_change_magnitude,
-            min_en_file_ratio=cfg.differential_min_en_ratio,
-        )
-        strategy, seeded, pending = prepare_differential_seed(
-            pr_segments=state.segments,
-            ru_pr_text=state.source_text,
-            en_current_text=state.existing_target_text,
-            ru_base_text=state.base_source_text,
-            config=diff_cfg,
-        )
-        patch_analysis = None
-        semantic_noop = False
-        if (
-            strategy.mode == "differential"
-            and state.existing_target_text
-            and state.base_source_text
-        ):
-            if not _en_structure_safe_for_low_magnitude_patch(
-                state.source_text, state.existing_target_text
-            ):
-                logger.info(
-                    "Skip low-magnitude EN patch: fence/tab structure diverges "
-                    "from RU — full reconstruct (§6.193)"
-                )
-            else:
-                slim = slim_pending_for_low_magnitude_patch(
-                    pending,
-                    ru_base_text=state.base_source_text,
-                    ru_pr_text=state.source_text,
-                )
-                if slim is not None:
-                    slim_pending, slim_analysis = slim
-                    change_ids = (
-                        slim_analysis.added_segment_ids | slim_analysis.modified_segment_ids
-                    )
-                    if not change_ids and not slim_analysis.removed_blocks:
-                        semantic_noop = True
-                        pending = []
-                        logger.info("Semantic no-op RU diff: preserve existing EN exactly (§6.217)")
-                    patch_has_anchors = low_magnitude_patch_has_anchors(
-                        state.segments, slim_analysis
-                    )
-                    if patch_has_anchors and not semantic_noop:
-                        pending, patch_analysis = slim_pending, slim_analysis
-                        logger.info(
-                            "Low-magnitude patch: LLM %d added/modified segment(s) "
-                            "(magnitude=%.2f); splice into existing EN (no reconstruct)",
-                            len(pending),
-                            patch_analysis.change_magnitude,
-                        )
-                    elif change_ids:
-                        logger.info(
-                            "Skip low-magnitude EN patch: changed segment has no "
-                            "explicit heading anchor — full reconstruct (§6.213)"
-                        )
+        # REQUIREMENTS_RU.md §5 / §13: one full RU→EN pass. Never seed, splice,
+        # or partially reconstruct published EN from the previous English file.
+        # Verify-only paths may still read EN for comparison outside this step.
         state.differential_meta = {
-            "mode": strategy.mode,
-            "reason": strategy.reason,
-            "seeded": len(seeded),
-            "pending": len(pending),
-            "low_magnitude_patch": patch_analysis is not None,
-            "semantic_noop": semantic_noop,
-            **strategy.config,
+            "mode": "full",
+            "reason": "REQUIREMENTS §5/§13: differential seed/splice disabled on translate",
+            "seeded": 0,
+            "pending": len(state.segments),
+            "low_magnitude_patch": False,
+            "semantic_noop": False,
+            "enabled": False,
         }
-        if patch_analysis is not None:
-            state.differential_meta["change_magnitude"] = patch_analysis.change_magnitude
-        if strategy.mode == "skip":
-            state.translations = {}
-            state.translated_text = state.existing_target_text or state.source_text
-            state.stopped_early = True
-            return
-        if semantic_noop and state.existing_target_text:
-            state.translations = {}
-            state.translated_text = state.existing_target_text
-            state.stopped_early = True
-            return
-
-        # Low-magnitude: never reconstruct from RU. Keep EN and splice only
-        # added/modified translations (pending may be empty → unchanged EN).
-        if patch_analysis is not None and state.existing_target_text:
-            state.translations = {}
-            to_llm = list(pending)
-            if not to_llm:
-                change_ids = patch_analysis.added_segment_ids | patch_analysis.modified_segment_ids
-                to_llm = [s for s in state.segments if s.id in change_ids]
-            if to_llm:
-                state.translations = translate_segments(
-                    to_llm,
-                    ctx.client,
-                    ctx.glossary,
-                    file_path=state.file_path,
-                    source_lang=ctx.source_lang,
-                    target_lang=ctx.target_lang,
-                    max_chars=ctx.batch_chars,
-                    prompt_version=ctx.prompt_version,
-                    cache=ctx.cache,
-                    max_parallel_batches=ctx.parallel,
-                    manual_actions=state.manual_actions,
-                )
-            state.translated_text = patch_en_with_added_translations(
-                state.existing_target_text,
-                pr_segments=state.segments,
-                translations=state.translations,
-                added_segment_ids=patch_analysis.added_segment_ids,
-                modified_segment_ids=patch_analysis.modified_segment_ids,
-            )
-            if ctx.target_lang.lower() in {"en", "english"}:
-                _apply_en_structural_repair(state, ctx)
-                state.translated_text = finalize_en_target(
-                    state.translated_text,
-                    state.source_text,
-                    client=ctx.client,
-                    glossary=ctx.glossary,
-                    file_path=state.file_path,
-                    source_lang=ctx.source_lang,
-                    target_lang=ctx.target_lang,
-                    prompt_version=ctx.prompt_version,
-                    out_warnings=state.finalize_warnings,
-                    en_toc_reachable=ctx.en_toc_reachable,
-                )
-            return
-
-        state.translations = dict(seeded)
-        if pending:
-            new_trans = translate_segments(
-                pending,
-                ctx.client,
-                ctx.glossary,
-                file_path=state.file_path,
-                source_lang=ctx.source_lang,
-                target_lang=ctx.target_lang,
-                max_chars=ctx.batch_chars,
-                prompt_version=ctx.prompt_version,
-                cache=ctx.cache,
-                max_parallel_batches=ctx.parallel,
-                manual_actions=state.manual_actions,
-            )
-            state.translations.update(new_trans)
-        elif not state.translations:
-            # Full path with empty pending should not happen; safety net.
-            state.translations = translate_segments(
-                state.segments,
-                ctx.client,
-                ctx.glossary,
-                file_path=state.file_path,
-                source_lang=ctx.source_lang,
-                target_lang=ctx.target_lang,
-                max_chars=ctx.batch_chars,
-                prompt_version=ctx.prompt_version,
-                cache=ctx.cache,
-                max_parallel_batches=ctx.parallel,
-                manual_actions=state.manual_actions,
-            )
+        state.translations = translate_segments(
+            state.segments,
+            ctx.client,
+            ctx.glossary,
+            file_path=state.file_path,
+            source_lang=ctx.source_lang,
+            target_lang=ctx.target_lang,
+            max_chars=ctx.batch_chars,
+            prompt_version=ctx.prompt_version,
+            cache=ctx.cache,
+            max_parallel_batches=ctx.parallel,
+            manual_actions=state.manual_actions,
+        )
         _render_translated_from_source(state, ctx)
         if ctx.target_lang.lower() in {"en", "english"}:
             _apply_en_structural_repair(state, ctx)
@@ -538,7 +324,11 @@ def _apply_en_structural_repair(state: FileRunState, ctx: HarnessContext) -> Non
         return
     if not state.source_text or not state.translated_text:
         return
-    repaired = repair_en_structure_from_ru(state.translated_text, state.source_text)
+    repaired = repair_en_structure_from_ru(
+        state.translated_text,
+        state.source_text,
+        dictionary=ctx.job_anchor_dictionary,
+    )
     if repaired != state.translated_text:
         state.translated_text = repaired
         state.finalize_warnings.append(
@@ -723,19 +513,27 @@ class FinalizeEnStep:
         # fence bodies over the target (LoadTargetStep sets fence_reference_text).
         fence_ref = state.fence_reference_text or state.translated_text
         before = state.translated_text
-        state.translated_text = finalize_en_target(
-            state.translated_text,
-            fence_ref,
-            client=ctx.client,
-            glossary=ctx.glossary,
-            file_path=state.file_path,
-            source_lang=ctx.source_lang,
-            target_lang=ctx.target_lang,
-            prompt_version=ctx.prompt_version,
-            out_warnings=state.finalize_warnings,
-            en_toc_reachable=ctx.en_toc_reachable,
-            layout_source_text=state.source_text,
-            protected_source_text=state.source_text,
+        contract = coerce_link_contract(
+            finalize_en_target(
+                state.translated_text,
+                fence_ref,
+                client=ctx.client,
+                glossary=ctx.glossary,
+                file_path=state.file_path,
+                source_lang=ctx.source_lang,
+                target_lang=ctx.target_lang,
+                prompt_version=ctx.prompt_version,
+                out_warnings=state.finalize_warnings,
+                en_toc_reachable=ctx.en_toc_reachable,
+                layout_source_text=state.source_text,
+                protected_source_text=state.source_text,
+                source_base_text=state.base_source_text,
+                target_baseline_text=state.base_target_text or state.existing_target_text,
+            )
+        )
+        state.translated_text = contract.text
+        state.link_contract_issues = list(
+            dict.fromkeys([*state.link_contract_issues, *contract.issues])
         )
         # RU→EN include parity repair (§6.148): must use RU source, not fence_ref.
         state.translated_text = repair_missing_includes(
@@ -825,6 +623,7 @@ class HeuristicsStep:
             docs_repo_path=ctx.docs_repo_path,
             en_baseline_text=state.base_target_text or state.existing_target_text,
             source_baseline_text=state.base_source_text,
+            glossary=ctx.glossary,
         )
         for message in state.finalize_warnings:
             bucket = _classify_heuristic(message)

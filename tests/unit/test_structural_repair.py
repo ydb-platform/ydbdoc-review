@@ -57,12 +57,13 @@ def test_repair_en_structure_from_ru_combined():
 
 
 def test_restore_explicit_heading_anchors_overwrites_mismatched_en_id():
-    """§6.192: EN-only ids must be replaced with the RU twin (#37673)."""
+    """REQUIREMENTS §8: Cyrillic RU id maps to English, not copied verbatim."""
     ru = "### Описание полей в ответе {#fields-Описание}\n\nBody.\n"
-    en = "### Response field descriptions {#fields-Response}\n\nBody.\n"
+    en = "### Response field descriptions {#fields-Wrong}\n\nBody.\n"
     fixed = restore_explicit_heading_anchors(en, ru)
-    assert "{#fields-Описание}" in fixed
-    assert "{#fields-Response}" not in fixed
+    assert "{#fields-Response}" in fixed
+    assert "{#fields-Описание}" not in fixed
+    assert "{#fields-Wrong}" not in fixed
 
 
 def test_restore_explicit_heading_anchors_empty_or_already_present():

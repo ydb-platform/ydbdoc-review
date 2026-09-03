@@ -1,24 +1,23 @@
 __pycache__/
-*.pyc
-*.pyo
-.venv/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
+*.py[cod]
+*$py.class
 *.egg-info/
-build/
+.eggs/
 dist/
+build/
+.venv/
+venv/
+.env
 .coverage
 htmlcov/
-
-# Environment
-.env
-.env.local
-
-# IDE
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
 .vscode/
 .idea/
 
 # Local debug
 debug/
 *.log
+.ydbdoc-state/

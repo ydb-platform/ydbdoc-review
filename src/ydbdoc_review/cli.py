@@ -17,7 +17,12 @@ from rich.table import Table
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubConfigError, GitHubError
-from ydbdoc_review.github.workflow import run_doc_continue, run_doc_translate, run_doc_verify
+from ydbdoc_review.github.workflow import (
+    job_requires_nonzero_exit,
+    run_doc_continue,
+    run_doc_translate,
+    run_doc_verify,
+)
 from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -123,6 +128,12 @@ def run(
             f"[yellow]Warning:[/yellow] {result.pr_result.failed_count} pair(s) failed — "
             "see logs and translation PR report."
         )
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print(
+            "[red]Error:[/red] translate did not publish a translation PR "
+            "(blocking error skipped commit/push/PR)."
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -164,6 +175,9 @@ def verify(
         raise typer.Exit(code=1) from exc
 
     _print_job_summary(result.mode, result)
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print("[red]Error:[/red] verify finished with blocking findings.")
+        raise typer.Exit(code=1)
 
 
 @app.command("continue")
@@ -208,6 +222,12 @@ def continue_(
         raise typer.Exit(code=1) from exc
 
     _print_job_summary(result.mode, result)
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print(
+            "[red]Error:[/red] continue refused or did not publish "
+            "(need continuable job state, or blocking publish skip)."
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -276,6 +296,12 @@ def job(
         raise typer.Exit(code=1) from exc
 
     _print_job_summary(getattr(result, "mode", m), result)
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print(
+            "[red]Error:[/red] job finished without success "
+            "(blocked continue or skipped translation PR publish)."
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command("list-models")

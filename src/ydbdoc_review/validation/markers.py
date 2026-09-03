@@ -3,15 +3,30 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import unquote
 
 PLACEHOLDER_RE = re.compile(r"⟦[CLIHVTUS]\d+⟧")
 # Capturing split keeps marker tokens in the parts list.
 PLACEHOLDER_SPLIT_RE = re.compile(r"(⟦[CLIHVTUS]\d+⟧)")
+ENCODED_PLACEHOLDER_RE = re.compile(
+    r"%e2%9f%a6(?:C|L|I|H|V|T|U|S)\d+%e2%9f%a7",
+    re.IGNORECASE,
+)
+
+
+def canonicalize_placeholders(text: str) -> str:
+    """Decode URL-encoded protect markers before validation or repair.
+
+    Markdown parsers legitimately percent-encode ``⟦U1⟧`` when it appears in
+    a destination. Treating that spelling as prose hid the atom from parity
+    checks and allowed it to reach published EN (#51797).
+    """
+    return ENCODED_PLACEHOLDER_RE.sub(lambda match: unquote(match.group(0)), text)
 
 
 def extract_placeholders(text: str) -> list[str]:
     """Return placeholder markers in left-to-right order."""
-    return PLACEHOLDER_RE.findall(text)
+    return PLACEHOLDER_RE.findall(canonicalize_placeholders(text))
 
 
 def is_placeholder_only_text(text: str) -> bool:
@@ -75,11 +90,12 @@ def variable_placeholder_drift_only(
     """True when RU/EN differ only in ``⟦V⟧`` count (human ``{{ var }}`` placement)."""
     if placeholders_match(source, translated):
         return False
-    if sorted(non_variable_placeholders(source)) != sorted(
-        non_variable_placeholders(translated)
-    ):
+    if sorted(non_variable_placeholders(source)) != sorted(non_variable_placeholders(translated)):
         return False
-    return abs(variable_placeholder_count(source) - variable_placeholder_count(translated)) <= max_v_delta
+    return (
+        abs(variable_placeholder_count(source) - variable_placeholder_count(translated))
+        <= max_v_delta
+    )
 
 
 def cross_lang_placeholder_drift_only(source: str, translated: str) -> bool:

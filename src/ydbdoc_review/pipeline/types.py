@@ -9,6 +9,7 @@ from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
+from ydbdoc_review.validation.link_contract import LinkContractIssue
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
 
@@ -20,6 +21,7 @@ __all__ = [
     "PairRunResult",
     "PRTranslationResult",
 ]
+
 
 @dataclass
 class FileTranslationResult:
@@ -48,6 +50,7 @@ class FileTranslationResult:
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    link_contract_issues: tuple[LinkContractIssue, ...] = ()
 
     @classmethod
     def from_usage(
@@ -91,6 +94,7 @@ class PairRunResult:
     error: str | None = None
     # RU/EN source body actually used for this run (verify pick / merge ref).
     source_text: str | None = None
+    validation_issues: tuple[LinkContractIssue, ...] = ()
 
 
 @dataclass
@@ -100,6 +104,8 @@ class PRTranslationResult:
     pair_results: list[PairRunResult] = field(default_factory=list)
     navigation_results: list[NavigationRunResult] = field(default_factory=list)
     completeness_gaps: list[str] = field(default_factory=list)
+    # REQUIREMENTS §10/§12 tip-newer overwrite notices (yellow; never blockers).
+    yellow_warnings: list[str] = field(default_factory=list)
 
     @property
     def translated_count(self) -> int:
@@ -108,11 +114,7 @@ class PRTranslationResult:
             for r in self.pair_results
             if r.file_result is not None and not r.skipped and not r.deleted
         )
-        nav = sum(
-            1
-            for n in self.navigation_results
-            if n.target_text is not None and not n.error
-        )
+        nav = sum(1 for n in self.navigation_results if n.target_text is not None and not n.error)
         return md + nav
 
     @property

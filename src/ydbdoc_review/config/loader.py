@@ -95,8 +95,10 @@ class TranslationConfig(BaseModel):
     target_lang: str = "en"
     segments_per_batch_chars: int = 4000
     critic_feedback_retries: int = 2
-    # §6.132 differential translation (override via YDBDOC_TRANSLATION_*)
-    differential_enabled: bool = True
+    # REQUIREMENTS_RU.md §5 / §13: differential seed/splice off by default.
+    # Override via YDBDOC_TRANSLATION_* only for experiments; TranslateStep
+    # force-disables splice on the product doc_translate path.
+    differential_enabled: bool = False
     differential_stale_days: int = 90
     differential_change_magnitude: float = 0.5
     differential_min_en_ratio: float = 0.3

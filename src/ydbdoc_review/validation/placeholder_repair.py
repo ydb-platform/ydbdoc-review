@@ -13,6 +13,7 @@ from ydbdoc_review.parsing.ast_types import (
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 from ydbdoc_review.validation.homoglyphs import decode_percent_encoded_protect_markers
 from ydbdoc_review.validation.markers import (
+    canonicalize_placeholders,
     extract_placeholders,
     placeholders_match,
     realign_placeholders,
@@ -130,9 +131,7 @@ def _normalize_all_link_anchors(segment: Segment, text: str) -> str:
     return text
 
 
-def _repair_missing_url_markers(
-    text: str, url_placeholders: list[ProtectedInline]
-) -> str:
+def _repair_missing_url_markers(text: str, url_placeholders: list[ProtectedInline]) -> str:
     """Replace bare ``](url)`` destinations with ⟦U⟧ markers in source order."""
     for protected in url_placeholders:
         marker = protected.placeholder
@@ -168,9 +167,7 @@ def _repair_atoms_in_order(segment: Segment, text: str) -> str:
                 continue
 
         if isinstance(node, InlineVariable):
-            pattern = re.compile(
-                r"\{\{\s*" + re.escape(node.name) + r"\s*\}\}"
-            )
+            pattern = re.compile(r"\{\{\s*" + re.escape(node.name) + r"\s*\}\}")
             match = pattern.search(text, cursor)
             if match:
                 start, end = match.span()
@@ -326,9 +323,7 @@ def _strip_placeholders_preserving_atoms(segment: Segment, text: str) -> str:
 
 
 def _translation_placeholders_ok(segment: Segment, text: str) -> bool:
-    return placeholders_match(segment.text, text) and placeholder_roles_valid(
-        segment, text
-    )
+    return placeholders_match(segment.text, text) and placeholder_roles_valid(segment, text)
 
 
 def repair_translation_placeholders(segment: Segment, translated: str) -> str:
@@ -338,6 +333,7 @@ def repair_translation_placeholders(segment: Segment, translated: str) -> str:
     to inline atoms and rebuilds markers from segment metadata (last resort).
     """
     translated = decode_percent_encoded_protect_markers(translated)
+    translated = canonicalize_placeholders(translated)
     text = _repair_core(segment, translated)
     if _translation_placeholders_ok(segment, text):
         return text

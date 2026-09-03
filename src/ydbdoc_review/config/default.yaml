@@ -57,8 +57,8 @@ translation:
   target_lang: en
   segments_per_batch_chars: 2500
   critic_feedback_retries: 2
-  # §6.132 — translate only changed RU segments when EN exists
-  differential_enabled: true
+  # REQUIREMENTS_RU.md §5 / §13 — no differential EN seed/splice on translate
+  differential_enabled: false
   differential_stale_days: 90
   differential_change_magnitude: 0.5
   differential_min_en_ratio: 0.3

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 DocsTextReader = Callable[[str], str | None]
 
@@ -30,6 +31,7 @@ class HarnessContext:
     en_toc_reachable: frozenset[str] | None = None
     docs_text_reader: DocsTextReader | None = None
     docs_repo_path: str | None = None
+    job_anchor_dictionary: JobAnchorDictionary | None = None
 
     @classmethod
     def from_options(
@@ -51,6 +53,7 @@ class HarnessContext:
         en_toc_reachable: frozenset[str] | None = None,
         docs_text_reader: DocsTextReader | None = None,
         docs_repo_path: str | None = None,
+        job_anchor_dictionary: JobAnchorDictionary | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -78,4 +81,5 @@ class HarnessContext:
             en_toc_reachable=en_toc_reachable,
             docs_text_reader=docs_text_reader,
             docs_repo_path=docs_repo_path,
+            job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
         )
