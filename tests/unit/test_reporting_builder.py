@@ -566,7 +566,7 @@ def test_merge_recommendation_red_when_scope_file_missing_despite_green_files():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "не мержить — не все файлы source PR переведены" in body
+    assert "не мержить — в переводном PR нет 1 ожидаемых EN-путей" in body
     assert "monitoring_config.md" in body
     assert "🟢" not in body.split("Рекомендация:")[1].split("\n", 1)[0]
 

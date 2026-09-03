@@ -3,9 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.242 — merged PR tip redirects vs merge-era tombstone paths (#40385 / R-GL-2).
+**Current focus:** §6.243 — tip-satisfied inbound fragments + readable completeness QA (#52077 / R-GL-3).
 
-Prior focus: §6.241 — exact-ASCII declare owns legacy RU translit headings (#40385 / R-GL-1).
+Prior focus: §6.242 — merged PR tip redirects vs merge-era tombstone paths (#40385 / R-GL-2).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.243** — tip EN covering inbound exact-ASCII frags satisfies scope gap; clearer completeness QA (#52077 / R-GL-3) |
 | 2026-09-03 | **§6.242** — tip ``redirects.yaml`` for tombstone skip; fragment owners follow tip ``from``→``to`` (#40385 / R-GL-2) |
 | 2026-09-03 | **§6.241** — `_page_declares_fragment` treats `_legacy_transliterated_slug` as ownership so exact-ASCII declare runs (#40385 / R-GL-1) |
 | 2026-09-03 | **§6.240** — translation-PR `doc_verify` only criticizes source-PR EN; restores tip-ambient EN to merge-base (#40385 / #52055) |

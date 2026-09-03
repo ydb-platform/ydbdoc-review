@@ -192,3 +192,91 @@ def gap_label(en_path: str, *, docs_root: str = "ydb/docs") -> str:
     if is_navigation_yaml(en_path):
         return f"{en_path} — navigation merge не выполнен"
     return f"{en_path} — не переведён"
+
+
+def format_completeness_gap_item(
+    en_path: str,
+    *,
+    docs_root: str = "ydb/docs",
+    tip_en_exists: bool | None = None,
+) -> str:
+    """Reviewer-facing completeness gap block (path + RU twin + what to do)."""
+    path = _norm(en_path)
+    if is_misresolved_shared_include_mirror(path, docs_root=docs_root):
+        return (
+            f"**`{path}`** — ложное EN-зеркало общего snippet "
+            f"`{docs_root}/_includes/…` (не переводится)."
+        )
+    if is_navigation_yaml(path):
+        return f"**`{path}`** — navigation merge не выполнен."
+
+    ru = counterpart(path, docs_root)
+    lines = [f"**EN (ожидался в diff переводного PR):** `{path}`"]
+    if ru:
+        lines.append(f"**RU-близнец:** `{ru}`")
+    if tip_en_exists is True:
+        lines.append(
+            "**Факт:** файл уже есть на tip/`main`, но **не входит в diff** "
+            "этого переводного PR (перевод noop относительно tip или не попал "
+            "в commit)."
+        )
+        lines.append(
+            "**Что сделать:** не править руками «с нуля». Нужен повторный "
+            "`doc_translate` после фикса пайплайна, либо явный commit EN в "
+            "ветку `ydbdoc-review/pr-*`, если tip EN реально устарел относительно RU."
+        )
+    elif tip_en_exists is False:
+        lines.append("**Факт:** EN-файла нет на tip.")
+        lines.append(
+            "**Что сделать:** добавить EN-зеркало (повторный `doc_translate` "
+            "или ручной перевод RU→EN в ту же ветку)."
+        )
+    else:
+        lines.append(
+            "**Факт:** путь отсутствует в diff переводного PR "
+            "(файл мог существовать на main)."
+        )
+        lines.append(
+            "**Что сделать:** проверить tip EN и diff PR; при необходимости "
+            "повторный `doc_translate`."
+        )
+    return "\n".join(lines)
+
+
+def tip_en_covers_inbound_fragments_from_changed(
+    en_path: str,
+    en_text: str,
+    *,
+    changed_en_pages: dict[str, str],
+) -> bool:
+    """True when tip ``en_text`` declares every ``#frag`` linked from PR-diff EN.
+
+    Used so a scope dependency that already satisfies inbound exact-ASCII
+    fragments on tip does not stay a false completeness gap when translate
+    produced no git diff (#52077 ``auth_config``).
+    """
+    from ydbdoc_review.validation.fragment_repair import (
+        _page_declares_fragment,
+        _resolve_href_path,
+    )
+    from ydbdoc_review.validation.href_parity import _MD_LINK
+
+    target = _norm(en_path)
+    saw_link = False
+    for page_path, page_text in changed_en_pages.items():
+        if not page_text:
+            continue
+        for match in _MD_LINK.finditer(page_text):
+            href = match.group(2).strip().split(maxsplit=1)[0]
+            if "#" not in href:
+                continue
+            path_part, frag = href.rsplit("#", 1)
+            if not frag or not frag.isascii() or not path_part.endswith(".md"):
+                continue
+            resolved = _resolve_href_path(_norm(page_path), path_part)
+            if resolved != target:
+                continue
+            saw_link = True
+            if not _page_declares_fragment(en_text, frag):
+                return False
+    return saw_link

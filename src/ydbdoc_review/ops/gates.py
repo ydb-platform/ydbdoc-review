@@ -69,11 +69,28 @@ def quota_deny_comment(*, spent_rub: float, budget_rub: float) -> str:
     )
 
 
-def retention_notice() -> str:
-    return (
+def retention_notice(*, completeness_only: bool = False) -> str:
+    """Footer under QA comments.
+
+    When the only blocker is completeness (path missing from PR diff),
+    ``doc_continue`` cannot invent a commit — prefer re-translate.
+    """
+    base = (
         "_Контекст LLM (промпты/ответы) хранится **14 дней**, затем удаляется — "
         "после этого continue недоступен._\n\n"
-        "**Доработать перевод** (не более **3** раз на PR): в **translation PR** "
+    )
+    if completeness_only:
+        return (
+            base
+            + "**Если блокер — путь отсутствует в diff PR:** `doc_continue` "
+            "обычно не поможет. Закройте/удалите ветку перевода и снова "
+            "повесьте **`doc_translate`** на исходный PR после фикса пайплайна, "
+            "либо вручную добавьте EN в ветку `ydbdoc-review/pr-*` и "
+            "**`doc_verify`**."
+        )
+    return (
+        base
+        + "**Доработать перевод** (не более **3** раз на PR): в **translation PR** "
         "оставьте комментарий вида\n"
         "```\n"
         "/ydbdoc continue <что исправить>\n"

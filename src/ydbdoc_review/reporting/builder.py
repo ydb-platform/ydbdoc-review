@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
-from ydbdoc_review.pipeline.completeness import gap_label
+from ydbdoc_review.pipeline.completeness import format_completeness_gap_item, gap_label
 from ydbdoc_review.pipeline.types import (
     NavigationRunResult,
     PairRunResult,
@@ -105,7 +105,12 @@ def result_has_blocking_findings(result: PRTranslationResult) -> bool:
 def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
     """Return (emoji, short Russian label) for merge readiness."""
     if result.completeness_gaps:
-        return "🔴", "не мержить — не все файлы source PR переведены"
+        n = len(result.completeness_gaps)
+        return (
+            "🔴",
+            f"не мержить — в переводном PR нет {n} ожидаемых EN-путей "
+            "(см. блок ниже)",
+        )
     ok, warn, blocked = _count_verdicts(result)
     nav_blocked = any(
         _nav_has_blocking_findings(n) for n in result.navigation_results
@@ -902,7 +907,11 @@ def build_source_pr_comment(
     qa_line = ""
     if translation_pr_number:
         if result.completeness_gaps:
-            qa_line = "| Статус QA | 🔴 не мержить — не все файлы source PR переведены |\n"
+            n = len(result.completeness_gaps)
+            qa_line = (
+                f"| Статус QA | 🔴 не мержить — в переводном PR нет {n} "
+                "ожидаемых EN-путей |\n"
+            )
         elif verify_result is not None:
             qa_emoji, qa_label = _merge_recommendation(verify_result)
             qa_line = f"| Статус QA | {qa_emoji} {qa_label} |\n"
@@ -971,9 +980,16 @@ def build_full_report(
 
     completeness_section = ""
     if result.completeness_gaps:
-        completeness_section = "## Что исправить: отсутствующие EN-зеркала\n\n"
+        completeness_section = (
+            "## Что исправить: ожидаемые EN-пути отсутствуют в diff PR\n\n"
+            "Это **не** обязательно «файла нет на main». Часто путь — "
+            "зависимость scope: EN уже есть на tip, но **не попал в commit** "
+            "переводной ветки.\n\n"
+        )
         for i, path in enumerate(result.completeness_gaps, start=1):
-            completeness_section += f"{i}. **{gap_label(path)}**\n\n"
+            completeness_section += (
+                f"{i}. {format_completeness_gap_item(path)}\n\n"
+            )
 
     yellow_section = ""
     if result.yellow_warnings:
@@ -1010,9 +1026,13 @@ def build_full_report(
     body = header + completeness_section + yellow_section
     if not problem_runs and not nav_problems:
         if completeness_section:
-            body += "В обработанных файлах открытых замечаний нет.\n\n"
+            body += (
+                "В уже обработанных файлах открытых замечаний критика нет — "
+                "блокер только в completeness выше.\n\n"
+            )
         else:
             body += "По всем файлам открытых замечаний нет.\n\n"
+        green_lines: list[str] = []
         item_index = 1
         for run in ok_runs:
             fr = run.file_result
@@ -1026,10 +1046,18 @@ def build_full_report(
                 )
                 body += section
             else:
-                body += f"- 🟢 `{run.plan.target_path}`\n"
+                green_lines.append(f"- 🟢 `{run.plan.target_path}`")
         for nav in nav_ok:
-            body += f"- 🟢 `{nav.en_path}` (навигация)\n"
-        body += "\n"
+            green_lines.append(f"- 🟢 `{nav.en_path}` (навигация)")
+        if green_lines and completeness_section:
+            body += (
+                "<details>\n<summary>Прочие проверенные файлы без замечаний "
+                f"({len(green_lines)})</summary>\n\n"
+                + "\n".join(green_lines)
+                + "\n\n</details>\n\n"
+            )
+        elif green_lines:
+            body += "\n".join(green_lines) + "\n\n"
         info_lines = []
         for run in file_runs:
             fr = run.file_result

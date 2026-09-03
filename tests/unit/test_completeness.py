@@ -230,3 +230,43 @@ def test_gap_label_shared_include_mirror():
     label = gap_label("ydb/docs/en/_includes/go/auth-static-with-native.md")
     assert "ложное EN-зеркало" in label
     assert "docs/_includes" in label
+
+
+def test_tip_en_covers_inbound_fragments_from_changed():
+    from ydbdoc_review.pipeline.completeness import (
+        tip_en_covers_inbound_fragments_from_changed,
+    )
+
+    auth = "ydb/docs/en/core/reference/configuration/auth_config.md"
+    en_auth = "## Node registration token {#node-registration-token}\n\nBody.\n"
+    linker = (
+        "See [token](../../reference/configuration/auth_config.md"
+        "#node-registration-token).\n"
+    )
+    changed = {
+        "ydb/docs/en/core/devops/concepts/node-authorization.md": linker,
+    }
+    assert tip_en_covers_inbound_fragments_from_changed(
+        auth, en_auth, changed_en_pages=changed
+    )
+    assert not tip_en_covers_inbound_fragments_from_changed(
+        auth,
+        "## Other {#other}\n",
+        changed_en_pages=changed,
+    )
+    assert not tip_en_covers_inbound_fragments_from_changed(
+        auth, en_auth, changed_en_pages={}
+    )
+
+
+def test_format_completeness_gap_item_mentions_ru_twin():
+    from ydbdoc_review.pipeline.completeness import format_completeness_gap_item
+
+    text = format_completeness_gap_item(
+        "ydb/docs/en/core/reference/configuration/auth_config.md",
+        tip_en_exists=True,
+    )
+    assert "auth_config.md" in text
+    assert "ydb/docs/ru/core/reference/configuration/auth_config.md" in text
+    assert "не входит в diff" in text
+    assert "doc_translate" in text

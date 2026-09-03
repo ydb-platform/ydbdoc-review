@@ -415,7 +415,11 @@ def finish_ops_job(
 
 
 def append_retention_footer(body: str) -> str:
-    notice = retention_notice()
+    completeness_only = (
+        "ожидаемые EN-пути отсутствуют в diff PR" in body
+        or "в переводном PR нет" in body
+    )
+    notice = retention_notice(completeness_only=completeness_only)
     if notice in body:
         return body
     return body.rstrip() + "\n\n" + notice + "\n"

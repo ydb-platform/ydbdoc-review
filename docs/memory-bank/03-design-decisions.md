@@ -5621,5 +5621,29 @@ yet) over tip.
 ``test_follow_redirect_repo_md_path_maps_manual_to_concepts``.
 
 
+### §6.243 Tip-satisfied inbound fragments + readable completeness QA (#52077 / R-GL-3, 2026-09-03)
+
+**Problem:** Translation PR #52077 went 🔴 for
+``auth_config.md`` «не переведён» although tip EN already declared
+``{#node-registration-token}``, the job translated the file, and git had no
+diff vs tip. The report headline said «файлы source PR» (misleading for a
+scope dependency) and suggested ``doc_continue``, which cannot invent a
+commit.
+
+**Decision:**
+
+1. When an expected EN path is absent from the translation PR diff, treat it
+   as satisfied if tip EN declares every exact-ASCII ``#fragment`` that EN
+   pages **in the PR diff** use when linking to that path
+   (``tip_en_covers_inbound_fragments_from_changed``).
+2. Completeness QA copy names EN + RU twin, explains «есть на tip / нет в
+   diff PR», puts 🟢 files under ``<details>`` when gaps exist, and steers
+   operators to re-``doc_translate`` instead of ``doc_continue`` for
+   diff-only gaps.
+
+**Tests:** ``test_tip_en_covers_inbound_fragments_from_changed``,
+``test_merge_recommendation_red_when_scope_file_missing_despite_green_files``,
+``test_format_completeness_gap_item_mentions_ru_twin``.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

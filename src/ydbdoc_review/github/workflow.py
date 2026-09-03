@@ -1459,6 +1459,30 @@ def run_doc_verify(
                 continue
             if not check_href_parity(ru_tip, en_tip):
                 noop_satisfied.add(pair.en_path)
+        # §6.243 / #52077: tip EN already covers inbound exact-ASCII fragments
+        # from EN pages that *are* in this translation PR diff → no false gap
+        # when translate was a tip noop (nothing to commit).
+        from ydbdoc_review.pipeline.completeness import (
+            tip_en_covers_inbound_fragments_from_changed,
+        )
+
+        changed_en_texts = {
+            path: (read_text(repo_path, path) or "")
+            for path in changed_en_paths
+            if path.endswith(".md")
+        }
+        for pair in expected_scope_pairs:
+            if pair.en_path in changed_en_paths or pair.en_path in noop_satisfied:
+                continue
+            en_tip = read_text(repo_path, pair.en_path)
+            if not en_tip:
+                continue
+            if tip_en_covers_inbound_fragments_from_changed(
+                pair.en_path,
+                en_tip,
+                changed_en_pages=changed_en_texts,
+            ):
+                noop_satisfied.add(pair.en_path)
         translation_scope_missing = translation_pr_scope_gaps(
             expected_scope_pairs,
             nav_pairs,
