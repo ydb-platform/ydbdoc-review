@@ -918,11 +918,11 @@ def run_doc_translate(
             len(pending_en_tocs),
         )
 
+        # Tombstone skip + orphan exemption must use tip redirects
+        # (``merge_base_with``), not the merge-commit tree. Merged source PRs
+        # checkout an old SHA where the page still lived; tip may already have
+        # ``from`` → ``to`` while merge-era redirects.yaml does not (§6.242).
         redirects_yaml = (
-            read_text_at_ref(repo_path, ru_ref, f"{docs_root}/redirects.yaml")
-            if ru_ref
-            else None
-        ) or (
             read_text_at_ref(repo_path, merge_base_with, f"{docs_root}/redirects.yaml")
             or read_text(repo_path, f"{docs_root}/redirects.yaml")
             or ""

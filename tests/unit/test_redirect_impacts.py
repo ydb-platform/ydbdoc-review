@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from ydbdoc_review.navigation.redirects import (
+    follow_redirect_repo_md_path,
     redirect_public_path_to_repo_md,
     redirect_source_repo_md_paths,
     should_skip_redirect_tombstone_en,

@@ -114,8 +114,14 @@ def _exact_ascii_fragment_owner_dependency(
     read_ru: ReadFn,
     read_en_base: ReadFn,
     docs_root: str,
+    redirects_yaml: str | None = None,
 ) -> str | None:
-    """Return the unique direct RU declaration owner missing in EN."""
+    """Return the unique direct RU declaration owner missing in EN.
+
+    When tip ``redirects.yaml`` marks the owner as a ``from`` tombstone, follow
+    the ``to`` twin so merged-PR scope does not enqueue historical paths (§6.242).
+    """
+    from ydbdoc_review.navigation.redirects import follow_redirect_repo_md_path
     from ydbdoc_review.validation.fragment_repair import _page_declares_fragment
 
     if "#" not in href:
@@ -126,6 +132,10 @@ def _exact_ascii_fragment_owner_dependency(
     ru_wrapper = resolve_locale_md_path(ru_page_path, target_ref, docs_root=docs_root)
     if ru_wrapper is None or not ru_wrapper.startswith(f"{docs_root.strip('/')}/ru/"):
         return None
+    if redirects_yaml:
+        ru_wrapper = follow_redirect_repo_md_path(
+            ru_wrapper, redirects_yaml, docs_root=docs_root
+        )
     ru_text = read_ru(ru_wrapper)
     en_wrapper = counterpart(ru_wrapper, docs_root)
     en_text = read_en_base(en_wrapper) if en_wrapper else None
@@ -138,6 +148,8 @@ def _exact_ascii_fragment_owner_dependency(
     en_includes = collect_yfm_includes(en_text)
     for index, inc in enumerate(ru_includes):
         owner = resolve_locale_md_path(ru_wrapper, inc.path, docs_root=docs_root)
+        if owner and redirects_yaml:
+            owner = follow_redirect_repo_md_path(owner, redirects_yaml, docs_root=docs_root)
         owner_text = read_ru(owner) if owner else None
         if owner and owner_text and _page_declares_fragment(owner_text, frag):
             ru_owners.append((index, owner))
@@ -150,6 +162,10 @@ def _exact_ascii_fragment_owner_dependency(
         if index >= len(en_includes):
             return None
         en_owner = resolve_locale_md_path(en_wrapper, en_includes[index].path, docs_root=docs_root)
+        if en_owner and redirects_yaml:
+            en_owner = follow_redirect_repo_md_path(
+                en_owner, redirects_yaml, docs_root=docs_root
+            )
         en_owner_text = read_en_base(en_owner) if en_owner else None
     if en_owner is None or en_owner_text is None or counterpart(ru_owner, docs_root) != en_owner:
         return None
@@ -564,9 +580,15 @@ def plan_translation_scope(
 
     # §6 Markdown-link dependencies: missing EN → queue RU; redirect/existing EN
     # → skip; dedup; budget 20 extras (source-PR files do not consume budget).
+    # Prefer tip redirects (``read_en_base`` / merge_base_with) over merge-era RU
+    # tree so tombstones match the translation-branch tip (§6.242).
     from ydbdoc_review.navigation.link_deps import collect_md_link_dependencies
+    from ydbdoc_review.navigation.redirects import (
+        follow_redirect_repo_md_path,
+        redirect_source_repo_md_paths,
+    )
 
-    redirects_yaml = read_ru(f"{root}/redirects.yaml") or read_en_base(f"{root}/redirects.yaml")
+    redirects_yaml = read_en_base(f"{root}/redirects.yaml") or read_ru(f"{root}/redirects.yaml")
     link_deps = collect_md_link_dependencies(
         diff_ru_md,
         read_ru=read_ru,
@@ -585,7 +607,12 @@ def plan_translation_scope(
             continue
         for href in sorted(_internal_ascii_fragment_hrefs(ru_text)):
             owner = _exact_ascii_fragment_owner_dependency(
-                ru_md, href, read_ru=read_ru, read_en_base=read_en_base, docs_root=docs_root
+                ru_md,
+                href,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+                redirects_yaml=redirects_yaml,
             )
             if owner:
                 fragment_owners.add(owner)
@@ -602,6 +629,28 @@ def plan_translation_scope(
             if target not in doc_ru and en_md and read_en_base(en_md) is None and read_ru(target) is not None:
                 doc_ru.add(target)
                 queue.append(target)
+
+    # Tip redirect tombstones must not stay as *synthetic* translation targets.
+    # Source-diff / deleted tombstones remain so PlanTranslatePairsStep can skip
+    # (completeness) or delete_en; extras retarget to the live ``to`` twin (§6.242).
+    if redirects_yaml:
+        tip_tombstone_ru = redirect_source_repo_md_paths(
+            redirects_yaml, locale="ru", docs_root=docs_root
+        )
+        retargeted: set[str] = set()
+        for path in sorted(doc_ru):
+            if path not in tip_tombstone_ru:
+                retargeted.add(path)
+                continue
+            live = follow_redirect_repo_md_path(path, redirects_yaml, docs_root=docs_root)
+            if path in diff_ru_md or path in deleted_ru_md:
+                retargeted.add(path)
+                if live != path and read_ru(live) is not None:
+                    retargeted.add(live)
+                continue
+            if live != path and read_ru(live) is not None:
+                retargeted.add(live)
+        doc_ru = retargeted
 
     doc_from_diff = frozenset(diff_ru_md | deleted_ru_md)
     doc_from_main = frozenset(doc_ru - diff_ru_md - deleted_ru_md)
@@ -669,7 +718,11 @@ def make_repo_scope_readers(
         text = read_text(repo_path, path)
         if text is not None:
             return text
-        return read_text_at_ref(repo_path, "HEAD", path)
+        text = read_text_at_ref(repo_path, "HEAD", path)
+        if text is not None:
+            return text
+        # Tip-only paths after a post-merge rename/redirect (§6.242).
+        return read_text_at_upstream_tip(repo_path, merge_base_with, path)
 
     def read_en_base(path: str) -> str | None:
         text = read_text_at_upstream_tip(repo_path, merge_base_with, path)

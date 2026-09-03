@@ -5592,5 +5592,34 @@ forbidden (§6.239 п.4). Ambiguous owners still fail closed.
 ``test_pr_40385_legacy_translit_declare_writes_exact_ascii_and_clears_gate``.
 
 
+### §6.242 Merged PR tip paths vs redirect tombstones (#40385 / R-GL-2, 2026-09-03)
+
+**Problem:** GitHub ``doc_translate`` for a merged source PR checks out the
+**merge commit**. Scope queued
+``deployment-options/manual/node-authorization.md`` (live at merge). The
+translation branch is built from current ``main``, where that path is only a
+``redirects.yaml`` ``from`` → ``concepts/…``. Orphan gate uses tip TOC and
+blocked publish. §6.224 tombstone skip did not fire because
+``redirect_source_en`` preferred merge-commit ``redirects.yaml`` (no tombstone
+yet) over tip.
+
+**Decision:**
+
+1. Tombstone skip / orphan exemption load ``redirects.yaml`` from
+   ``merge_base_with`` (upstream tip), never from ``ru_content_ref`` merge SHA.
+2. ``plan_translation_scope`` prefers tip redirects via ``read_en_base``;
+   exact-ASCII fragment owners follow tip ``from`` → ``to``; synthetic
+   tombstone deps retarget to the live twin (source-diff tombstones stay for
+   skip/completeness).
+3. ``make_repo_scope_readers`` ``read_ru`` falls back to tip when the merge
+   tree lacks a tip-live path.
+4. §6.241 legacy declare and §6.224 skip semantics unchanged for live paths.
+
+**Tests:** ``test_r_gl_2_merge_era_manual_in_scope_tip_tombstone_skips_en_write``,
+``test_r_gl_2_tip_redirect_retargets_fragment_owner_to_concepts``,
+``test_tip_tombstone_skip_uses_tip_redirects_not_merge_era``,
+``test_follow_redirect_repo_md_path_maps_manual_to_concepts``.
+
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

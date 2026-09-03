@@ -131,6 +131,48 @@ def redirect_source_repo_md_paths(
     )
 
 
+def repo_md_to_public_path(repo_md: str, *, docs_root: str = "ydb/docs") -> str | None:
+    """``ydb/docs/{ru|en}/core/foo.md`` → ``/foo.md`` (Diplodoc public path)."""
+    p = repo_md.replace("\\", "/")
+    root = docs_root.strip("/")
+    for locale in ("ru", "en"):
+        prefix = f"{root}/{locale}/core"
+        if p.startswith(prefix + "/") or p == prefix:
+            rest = p[len(prefix) :]
+            if not rest.startswith("/"):
+                rest = "/" + rest
+            return rest
+    return None
+
+
+def follow_redirect_repo_md_path(
+    repo_md: str,
+    redirects_yaml: str,
+    *,
+    docs_root: str = "ydb/docs",
+) -> str:
+    """If ``repo_md`` is a redirect ``from``, return the same-locale ``to`` twin.
+
+    Otherwise return ``repo_md`` unchanged. Used so merged-PR scope/fragment
+    owners follow tip live paths instead of historical tombstones (§6.242).
+    """
+    p = repo_md.replace("\\", "/")
+    public = repo_md_to_public_path(p, docs_root=docs_root)
+    if public is None:
+        return p
+    to_public = iter_redirect_mappings(redirects_yaml).get(public)
+    if not to_public:
+        return p
+    root = docs_root.strip("/")
+    if p.startswith(f"{root}/en/"):
+        locale = "en"
+    elif p.startswith(f"{root}/ru/"):
+        locale = "ru"
+    else:
+        return p
+    return redirect_public_path_to_repo_md(to_public, locale=locale, docs_root=docs_root)
+
+
 REDIRECT_TOMBSTONE_SKIP_SUMMARY = (
     "redirect tombstone — skip EN at redirects.yaml from path (live page is to)"
 )

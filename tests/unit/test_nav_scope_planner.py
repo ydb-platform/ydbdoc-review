@@ -152,6 +152,41 @@ def test_pr_40385_new_tls_href_queues_effective_ru_include_owner():
     assert wrapper not in plan.doc_ru_paths
 
 
+def test_r_gl_2_tip_redirect_retargets_fragment_owner_to_concepts():
+    """#40385 / §6.242: merge-era manual owner → tip concepts via redirects."""
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    manual = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
+    concepts = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
+    frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    tip_redirects = (
+        "common:\n"
+        "  - from: /devops/deployment-options/manual/node-authorization.md\n"
+        "    to: /devops/concepts/node-authorization.md\n"
+    )
+    # Merge-era trees still expose the manual page; tip has concepts + redirect.
+    merge_ru = {
+        auth: f"[nodes](../devops/deployment-options/manual/node-authorization.md#{frag})\n",
+        manual: "## Включение режима аутентификации и авторизации узлов\n",
+        concepts: "## Включение режима аутентификации и авторизации узлов\n",
+        "ydb/docs/redirects.yaml": "common: []\n",  # merge-era: no tombstone yet
+    }
+    tip_en = {
+        concepts.replace("/ru/", "/en/"): (
+            "## Enabling node authentication and authorization\n"
+        ),
+        "ydb/docs/redirects.yaml": tip_redirects,
+    }
+    plan = plan_translation_scope(
+        [(auth, "modified")],
+        read_ru=merge_ru.get,
+        read_en_base=tip_en.get,
+        read_ru_base=lambda p: "" if p == auth else merge_ru.get(p),
+    )
+    assert concepts in plan.doc_ru_paths
+    assert concepts in plan.doc_from_main
+    assert manual not in plan.doc_ru_paths
+
+
 def test_existing_ascii_fragment_href_on_unchanged_page_does_not_expand_scope():
     auth = "ydb/docs/ru/core/security/authentication.md"
     changed = "ydb/docs/ru/core/security/index.md"
