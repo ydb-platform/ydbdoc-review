@@ -303,21 +303,43 @@ def filter_translation_pr_verify_scope(
     changes: list[tuple[str, ChangeKind]],
     *,
     docs_root: str = "ydb/docs",
+    allowed_en_paths: frozenset[str] | set[str] | None = None,
+    allowed_nav_en_paths: frozenset[str] | set[str] | None = None,
 ) -> tuple[list[DocPair], list[NavigationPair]]:
-    """Narrow ``doc_verify`` on a translation PR to this run's EN commit scope (§6.77).
+    """Narrow ``doc_verify`` on a translation PR to this run's EN commit scope (§6.77 / §6.240).
 
     Markdown: only pairs whose EN mirror is in the PR diff vs base.
     Navigation: only EN toc/redirect files present in the PR diff (merged nav),
     excluding ``supplement_only`` ancestor tocs that were not committed.
+
+    When ``allowed_en_paths`` / ``allowed_nav_en_paths`` are set (source-PR
+    translation scope), drop tip-ambient EN that drifted into the translation
+    branch vs ``main`` but are outside the source RU/EN set. Otherwise verify
+    critic-fixes and red-reports unrelated pages (#40385 / #52055).
     """
     root = docs_root.strip("/")
     changed = {_norm(path) for path, _ in changes}
     en_in_diff = {path for path in changed if path.startswith(f"{root}/en/")}
+    allowed_en = (
+        None if allowed_en_paths is None else {_norm(path) for path in allowed_en_paths}
+    )
+    allowed_nav = (
+        None
+        if allowed_nav_en_paths is None
+        else {_norm(path) for path in allowed_nav_en_paths}
+    )
 
-    scoped_pairs = [pair for pair in pairs if pair.en_path in en_in_diff]
+    scoped_pairs = [
+        pair
+        for pair in pairs
+        if pair.en_path in en_in_diff
+        and (allowed_en is None or pair.en_path in allowed_en)
+    ]
     scoped_nav = [
         nav
         for nav in nav_pairs
-        if nav.en_path in changed and not nav.supplement_only
+        if nav.en_path in changed
+        and not nav.supplement_only
+        and (allowed_nav is None or nav.en_path in allowed_nav)
     ]
     return scoped_pairs, scoped_nav

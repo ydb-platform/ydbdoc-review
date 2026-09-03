@@ -334,6 +334,49 @@ def _apply_results_to_disk(
     return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
 
 
+def _restore_out_of_scope_en_from_base(
+    repo_path: str,
+    *,
+    changes: list[tuple[str, str]],
+    allowed_en_paths: frozenset[str],
+    merge_base_with: str,
+    docs_root: str,
+    dry_run: bool,
+) -> list[str]:
+    """Reset tip-ambient EN outside source-PR scope to ``merge_base_with`` (§6.240).
+
+    Translation branches sometimes accumulate EN pages that differ from main but
+    are not twins of the source PR. Leaving them in the tip makes every verify
+    expand into unrelated RU/EN drift; restoring them keeps the PR scoped.
+    """
+    if not allowed_en_paths:
+        return []
+    root = docs_root.strip("/")
+    restored: list[str] = []
+    for raw_path, _kind in changes:
+        path = raw_path.replace("\\", "/")
+        if not path.startswith(f"{root}/en/") or not path.endswith(".md"):
+            continue
+        if path in allowed_en_paths:
+            continue
+        base_text = read_text_at_ref(repo_path, merge_base_with, path)
+        work_text = read_text(repo_path, path)
+        if base_text is None:
+            continue
+        if work_text == base_text:
+            continue
+        if not dry_run:
+            write_text(repo_path, path, base_text)
+        restored.append(path)
+    if restored:
+        logger.info(
+            "Restored %s tip-ambient EN path(s) to %s (outside source PR scope)",
+            len(restored),
+            merge_base_with,
+        )
+    return restored
+
+
 def _docs_text_reader(repo_path: str, merge_base_with: str):
     """Read docs paths from worktree, else upstream tip (§6.142 fragment repair)."""
 
@@ -1247,6 +1290,7 @@ def run_doc_verify(
         )
 
     translation_scope_missing: list[str] = []
+    source_scope_en: frozenset[str] = frozenset()
     if translation_pr:
         noop_satisfied: set[str] = set()
         changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
@@ -1286,12 +1330,31 @@ def run_doc_verify(
                 source_bilingual_skip | redirect_tombstone_en | frozenset(noop_satisfied)
             ),
         )
+        # §6.240: source-PR scope wins over tip-ambient EN in the translation
+        # branch diff (stale compare-configs / auth_config / tracing / …).
+        source_scope_en = frozenset(p.en_path for p in expected_scope_pairs)
+        source_scope_nav_en: frozenset[str] | None = None
+        if scope_plan is not None:
+            source_scope_nav_en = frozenset(
+                en
+                for ru_nav in scope_plan.nav_ru_paths
+                if (en := counterpart(ru_nav, cfg.paths.docs_root)) is not None
+            )
         pairs, nav_pairs = filter_translation_pr_verify_scope(
             pairs,
             nav_pairs,
             changes,
             docs_root=cfg.paths.docs_root,
+            allowed_en_paths=source_scope_en or None,
+            allowed_nav_en_paths=source_scope_nav_en,
         )
+        if source_scope_en:
+            logger.info(
+                "Translation PR #%s verify scoped to %s source EN md path(s) "
+                "(dropped tip-ambient outside source PR)",
+                pr_number,
+                len(source_scope_en),
+            )
         if not pairs and not nav_pairs and not translation_scope_missing:
             logger.info(
                 "No scoped doc/navigation pairs for translation PR verify on #%s",
@@ -1429,6 +1492,7 @@ def run_doc_verify(
         for path, _kind in changes
         if path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
         and path.endswith(".md")
+        and (not source_scope_en or path.replace("\\", "/") in source_scope_en)
     }
     apply_en_link_target_checks(
         pr_result,
@@ -1481,6 +1545,20 @@ def run_doc_verify(
             dry_run=dry_run,
             docs_root=cfg.paths.docs_root,
         )
+        if translation_pr and source_scope_en:
+            ambient_restored = _restore_out_of_scope_en_from_base(
+                repo_path,
+                changes=changes,
+                allowed_en_paths=source_scope_en,
+                merge_base_with=merge_base_with,
+                docs_root=cfg.paths.docs_root,
+                dry_run=dry_run,
+            )
+            if ambient_restored:
+                touched = TouchedPaths(
+                    list(dict.fromkeys([*touched.written, *ambient_restored])),
+                    touched.deleted,
+                )
 
     committed = pushed = False
     inline_head_changed = False

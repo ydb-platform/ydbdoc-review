@@ -5496,4 +5496,24 @@ used raw English exception text in ``builder._format_critic_item``.
 ``test_format_critic_model_refusal``, ``test_humanize_critic_model_refusal_finalize_warning``.
 
 
+### §6.240 Translation-PR verify stays inside source-PR EN scope (#40385 / #52055, 2026-09-03)
+
+**Problem:** On translation PR ``ydbdoc-review/pr-*``, ``doc_verify`` built pairs
+from the tip diff vs ``main``. Tip-ambient EN pages that drifted into the branch
+were verified against current RU, produced unrelated 🔴 findings, and critic
+pushed further ambient rewrites.
+
+**Decision:**
+
+1. ``filter_translation_pr_verify_scope`` intersects the tip EN diff with the
+   source-PR expected EN set.
+2. ``verify_en_paths`` for late link gates excludes the same ambient set.
+3. After critic apply, tip-ambient EN outside source scope is restored from
+   ``merge_base_with`` and included in the inline fixup commit.
+
+**Tests:** ``test_filter_drops_tip_ambient_outside_source_pr_scope``,
+``test_restore_out_of_scope_en_from_base``.
+
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

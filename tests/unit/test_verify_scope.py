@@ -51,6 +51,47 @@ def test_filter_translation_pr_verify_scope_keeps_en_diff_only():
     assert [n.en_path for n in scoped_nav] == ["ydb/docs/en/x/toc_i.yaml"]
 
 
+def test_filter_drops_tip_ambient_outside_source_pr_scope():
+    """§6.240 / #40385→#52055: ambient EN in tip must not enter verify critic."""
+    pairs = [
+        DocPair(
+            ru_path="ydb/docs/ru/core/reference/configuration/tls.md",
+            en_path="ydb/docs/en/core/reference/configuration/tls.md",
+            ru_changed=True,
+            en_changed=True,
+        ),
+        DocPair(
+            ru_path="ydb/docs/ru/core/devops/configuration-management/compare-configs.md",
+            en_path="ydb/docs/en/core/devops/configuration-management/compare-configs.md",
+            en_changed=True,
+        ),
+        DocPair(
+            ru_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+            en_path="ydb/docs/en/core/reference/configuration/auth_config.md",
+            en_changed=True,
+        ),
+    ]
+    changes = [
+        ("ydb/docs/en/core/reference/configuration/tls.md", "modified"),
+        ("ydb/docs/en/core/devops/configuration-management/compare-configs.md", "modified"),
+        ("ydb/docs/en/core/reference/configuration/auth_config.md", "modified"),
+    ]
+    allowed = frozenset(
+        {"ydb/docs/en/core/reference/configuration/tls.md"}
+    )
+    scoped_pairs, scoped_nav = filter_translation_pr_verify_scope(
+        pairs,
+        [],
+        changes,
+        allowed_en_paths=allowed,
+        allowed_nav_en_paths=frozenset(),
+    )
+    assert [p.en_path for p in scoped_pairs] == [
+        "ydb/docs/en/core/reference/configuration/tls.md"
+    ]
+    assert scoped_nav == []
+
+
 def test_translation_pr_scope_gaps_block_false_green_for_missing_source_files():
     """Regression for #40385 -> #50838: critic saw one file and missed two."""
     expected_pairs = [
