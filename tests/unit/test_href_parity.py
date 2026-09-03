@@ -237,8 +237,8 @@ def test_href_parity_rejects_pr_50976_ascii_fragment_retargeting():
     ]
 
 
-def test_pr_51761_ascii_translit_fragment_cannot_be_remapped():
-    """§8: even transliterated ASCII ids are locale-independent."""
+def test_pr_51761_legacy_translit_may_map_to_proven_en_auto_slug():
+    """Legacy RU heading slugs may localize to the aligned EN auto-slug."""
     page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     target_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
     target_ru = target_en.replace("/docs/en/", "/docs/ru/", 1)
@@ -252,17 +252,59 @@ def test_pr_51761_ascii_translit_fragment_cannot_be_remapped():
         target_en: "## Enabling the node authentication and authorization mode\n",
         target_ru: "## Включение режима аутентификации и авторизации узлов\n",
     }
-    issue = f"href_parity: exact ASCII fragment changed: `{href_ru}` -> `{href_en}`"
     assert check_href_parity(
         ru, en, en_page_path=page, docs_text_reader=files.get
-    ) == [issue]
+    ) == []
     assert check_href_parity(
         ru,
         en,
         en_page_path=page,
         docs_text_reader=files.get,
         en_baseline_text=f"See [nodes]({href_ru}).\n",
-    ) == [issue]
+    ) == []
+
+
+def test_explicit_ascii_anchor_cannot_use_heading_slug_remap_exception():
+    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    target_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    target_ru = target_en.replace("/docs/en/", "/docs/ru/", 1)
+    ru_frag = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
+    en_frag = "enabling-the-node-authentication-and-authorization-mode"
+    href_ru = f"../../devops/concepts/node-authorization.md#{ru_frag}"
+    href_en = f"../../devops/concepts/node-authorization.md#{en_frag}"
+    files = {
+        target_en: "## Enabling the node authentication and authorization mode\n",
+        target_ru: (
+            "## Включение режима аутентификации и авторизации узлов "
+            f"{{#{ru_frag}}}\n"
+        ),
+    }
+    assert check_href_parity(
+        f"See [nodes]({href_ru}).\n",
+        f"See [nodes]({href_en}).\n",
+        en_page_path=page,
+        docs_text_reader=files.get,
+    ) == [f"href_parity: exact ASCII fragment changed: `{href_ru}` -> `{href_en}`"]
+
+
+def test_ambiguous_heading_auto_slug_remap_stays_blocking():
+    page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
+    target_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    target_ru = target_en.replace("/docs/en/", "/docs/ru/", 1)
+    ru_frag = "rezhim-autentifikacii"
+    en_frag = "authentication-mode"
+    href_ru = f"../../devops/concepts/node-authorization.md#{ru_frag}"
+    href_en = f"../../devops/concepts/node-authorization.md#{en_frag}"
+    files = {
+        target_en: "## Authentication mode\n## Authentication mode\n",
+        target_ru: "## Режим аутентификации\n## Режим аутентификации\n",
+    }
+    assert check_href_parity(
+        f"See [nodes]({href_ru}).\n",
+        f"See [nodes]({href_en}).\n",
+        en_page_path=page,
+        docs_text_reader=files.get,
+    ) == [f"href_parity: exact ASCII fragment changed: `{href_ru}` -> `{href_en}`"]
 
 
 def test_href_parity_ascii_fragment_change_blocks_when_target_missing():
@@ -354,12 +396,19 @@ def test_href_parity_reports_duplicate_ascii_fragment_changes_by_occurrence():
 
 def test_pr_52077_reports_both_ascii_fragment_changes():
     """Regression fixture for both blocking link defects in PR #52077."""
+    page = "ydb/docs/en/core/security/authentication.md"
+    node_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    node_ru = node_en.replace("/docs/en/", "/docs/ru/", 1)
     ru = (
+        "See [nodes](../devops/concepts/node-authorization.md"
+        "#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov).\n"
         "See [certificate](../reference/configuration/auth_config.md"
         "#certificate-auth-config).\n"
         "Connect with [TLS](../reference/ydb-cli/connect.md#tls).\n"
     )
     en = (
+        "See [nodes](../devops/concepts/node-authorization.md"
+        "#enabling-the-node-authentication-and-authorization-mode).\n"
         "See [certificate](../reference/configuration/auth_config.md"
         "#iam-auth-config).\n"
         "Connect with [TLS](../reference/ydb-cli/connect.md#activated-profile).\n"
@@ -372,7 +421,17 @@ def test_pr_52077_reports_both_ascii_fragment_changes():
         "`../reference/ydb-cli/connect.md#tls` -> "
         "`../reference/ydb-cli/connect.md#activated-profile`",
     ]
-    assert check_href_parity(ru, en, en_baseline_text=en) == expected
+    files = {
+        node_en: "## Enabling the node authentication and authorization mode\n",
+        node_ru: "## Включение режима аутентификации и авторизации узлов\n",
+    }
+    assert check_href_parity(
+        ru,
+        en,
+        en_page_path=page,
+        docs_text_reader=files.get,
+        en_baseline_text=en,
+    ) == expected
 
     classified = run_file_heuristics_classified(
         ru,
@@ -380,6 +439,8 @@ def test_pr_52077_reports_both_ascii_fragment_changes():
         normalized_source_text=ru,
         source_lang="ru",
         target_lang="en",
+        source_file=page.replace("/docs/en/", "/docs/ru/", 1),
+        docs_text_reader=files.get,
         en_baseline_text=en,
     )
     assert classified.blocking == expected
@@ -480,8 +541,8 @@ def test_href_parity_tip_preserved_without_source_baseline():
     )
 
 
-def test_pr_51761_ascii_fragment_blocks_before_tip_baseline_grandfather():
-    """§8 exact ASCII parity has precedence over baseline grandfathering."""
+def test_pr_51761_proven_auto_slug_remap_precedes_tip_baseline_grandfather():
+    """A proven implicit heading remap is allowed before grandfathering."""
     from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 
     page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
@@ -507,9 +568,6 @@ def test_pr_51761_ascii_fragment_blocks_before_tip_baseline_grandfather():
     }
     reader = files.get
 
-    issue = (
-        f"href_parity: exact ASCII fragment changed: `{href_tip_ru}` -> `{href_tip_en}`"
-    )
     assert check_href_parity(
         ru_tip,
         en_tip,
@@ -517,7 +575,7 @@ def test_pr_51761_ascii_fragment_blocks_before_tip_baseline_grandfather():
         docs_text_reader=reader,
         en_baseline_text=en_tip,
         source_baseline_text=ru_base,
-    ) == [issue]
+    ) == []
 
     classified = run_file_heuristics_classified(
         ru_tip,
@@ -528,7 +586,7 @@ def test_pr_51761_ascii_fragment_blocks_before_tip_baseline_grandfather():
         en_baseline_text=en_merge_base,
         source_baseline_text=ru_base,
     )
-    assert issue in classified.blocking
+    assert classified.blocking == []
 
 
 def test_href_parity_50976_ignores_localized_external_link_with_same_label():

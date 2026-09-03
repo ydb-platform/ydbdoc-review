@@ -3,9 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.247 — exact-ASCII href parity before baseline grandfather (#52077 / R-GL-7).
+**Current focus:** §6.248 — proven implicit heading auto-slug exception (#52077 / R-GL-8).
 
-Prior focus: §6.246 — include fragment-owner enqueue + declare fallback (#52077 / R-GL-6).
+Prior focus: §6.247 — exact-ASCII href parity before baseline grandfather (#52077 / R-GL-7).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.248** — allow only proven implicit RU heading slug → aligned EN auto-slug; #52077 must retain exactly 2 critic blockers (R-GL-8) |
 | 2026-09-03 | **§6.247 production** — doc_verify run 33752767042 on #52077 emitted 3 blocking ASCII-fragment substitutions, including legacy-translit; false green eliminated |
 | 2026-09-03 | **§6.247** — hard exact-ASCII href parity before baseline grandfather; #52077 false-green regression (R-GL-7) |
 | 2026-09-03 | **§6.246** — include-only fragment-owner enqueue for pre-existing hrefs; include declare fallback (#52077 / R-GL-6) |

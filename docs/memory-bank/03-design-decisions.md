@@ -5731,4 +5731,25 @@ ASCII change ``#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov`` →
 intended fail-closed result, not an infrastructure error.
 
 
+### §6.248 Proven implicit heading auto-slug exception (#52077 / R-GL-8, 2026-09-03)
+
+**Correction:** A legacy-transliterated slug generated from a bare RU heading is not an
+explicit/stable ASCII id. Localizing it to the generated slug of the aligned bare EN
+heading is correct. R-GL-7 therefore over-reported the node-authorization link and hid
+the intended success criterion: exactly the two independently identified substitutions
+in ``auth_config.md`` and ``connect.md`` must remain blocking.
+
+**Decision:** Before emitting an exact-ASCII blocker, ``check_href_parity`` may exempt
+one link slot only when the EN href resolves to a readable EN target with a readable RU
+twin, both outlines have equal heading counts and levels, and exactly one aligned pair
+of headings without explicit anchors proves RU Diplodoc auto-slug/legacy-translit → EN
+Diplodoc auto-slug. Explicit anchors on either side, a missing target/twin, outline drift,
+or multiple matching heading pairs fail closed. Baseline equality alone proves nothing.
+
+**Tests:** ``test_pr_51761_legacy_translit_may_map_to_proven_en_auto_slug``,
+``test_explicit_ascii_anchor_cannot_use_heading_slug_remap_exception``,
+``test_ambiguous_heading_auto_slug_remap_stays_blocking``, and the #52077 combined
+fixture asserting exactly two blockers.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

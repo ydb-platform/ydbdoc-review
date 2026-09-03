@@ -349,8 +349,68 @@ def _fragment_mapped_by_dictionary(
     return False
 
 
+def _proven_heading_auto_slug_remap(
+    source_fragment: str,
+    target_fragment: str,
+    target_href: str,
+    *,
+    en_page_path: str | None,
+    docs_text_reader: DocsTextReader | None,
+) -> bool:
+    """Allow only an aligned implicit RU heading slug -> EN auto-slug remap."""
+    if not en_page_path or docs_text_reader is None:
+        return False
+
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+    from ydbdoc_review.validation.yfm_anchor import (
+        _legacy_transliterated_slug,
+        diplodoc_auto_slug,
+    )
+
+    target_abs = resolve_internal_md_href(en_page_path, target_href)
+    if not target_abs or "/docs/en/" not in target_abs:
+        return False
+    target_md = docs_text_reader(target_abs)
+    ru_md = docs_text_reader(target_abs.replace("/docs/en/", "/docs/ru/", 1))
+    if not target_md or not ru_md:
+        return False
+
+    ru_heads = list(_iter_headings(parse_markdown(ru_md).children))
+    en_heads = list(_iter_headings(parse_markdown(target_md).children))
+    if len(ru_heads) != len(en_heads) or any(
+        ru_h.level != en_h.level
+        for ru_h, en_h in zip(ru_heads, en_heads, strict=True)
+    ):
+        return False
+
+    matches = 0
+    for ru_h, en_h in zip(ru_heads, en_heads, strict=True):
+        # Explicit ids are stable contracts. The exception is only for the
+        # implicit slugs generated from an aligned pair of heading texts.
+        if ru_h.anchor or en_h.anchor:
+            continue
+        ru_title = _heading_plain_text(ru_h)
+        ru_slugs = {
+            slug
+            for slug in (
+                diplodoc_auto_slug(ru_title),
+                _legacy_transliterated_slug(ru_title),
+            )
+            if slug
+        }
+        en_slug = diplodoc_auto_slug(_heading_plain_text(en_h))
+        if source_fragment in ru_slugs and target_fragment == en_slug:
+            matches += 1
+    return matches == 1
+
+
 def _exact_ascii_fragment_issues(
-    source_hrefs: list[str], target_hrefs: list[str]
+    source_hrefs: list[str],
+    target_hrefs: list[str],
+    *,
+    en_page_path: str | None,
+    docs_text_reader: DocsTextReader | None,
 ) -> list[str]:
     """Reject occurrence-paired changes to ASCII fragments in matched link slots.
 
@@ -388,6 +448,14 @@ def _exact_ascii_fragment_issues(
                 continue
             if source_fragment == target_fragment:
                 continue
+            if _proven_heading_auto_slug_remap(
+                source_fragment,
+                target_fragment,
+                target_href,
+                en_page_path=en_page_path,
+                docs_text_reader=docs_text_reader,
+            ):
+                continue
             issues.append(
                 "href_parity: exact ASCII fragment changed: "
                 f"`{source_href}` -> `{target_href}`"
@@ -405,6 +473,14 @@ def _exact_ascii_fragment_issues(
             if not separator or not source_fragment or not source_fragment.isascii():
                 continue
             if source_fragment == target_fragment:
+                continue
+            if _proven_heading_auto_slug_remap(
+                source_fragment,
+                target_fragment,
+                target_href,
+                en_page_path=en_page_path,
+                docs_text_reader=docs_text_reader,
+            ):
                 continue
             issues.append(
                 "href_parity: exact ASCII fragment changed: "
@@ -466,7 +542,12 @@ def check_href_parity(
         ]
 
     exact_ascii_issues = (
-        _exact_ascii_fragment_issues(src_ordered, tgt_ordered)
+        _exact_ascii_fragment_issues(
+            src_ordered,
+            tgt_ordered,
+            en_page_path=en_page_path,
+            docs_text_reader=docs_text_reader,
+        )
         if src != tgt
         else []
     )
