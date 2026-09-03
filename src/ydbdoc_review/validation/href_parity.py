@@ -13,9 +13,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
-from ydbdoc_review.validation.link_contract import LinkContractIssue, LinkContractResult
-
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
+from ydbdoc_review.validation.link_contract import LinkContractIssue, LinkContractResult
 from ydbdoc_review.validation.yfm_anchor import (
     JobAnchorDictionary,
     _heading_plain_text,
@@ -350,6 +349,70 @@ def _fragment_mapped_by_dictionary(
     return False
 
 
+def _exact_ascii_fragment_issues(
+    source_hrefs: list[str], target_hrefs: list[str]
+) -> list[str]:
+    """Reject occurrence-paired changes to ASCII fragments in matched link slots.
+
+    ASCII fragment ids are locale-independent identifiers (§8).  This check is
+    path-local first and cancels exact occurrences before pairing the remainder,
+    so ambient extras do not shift matches. With equal link counts it also checks
+    cross-path slots positionally for localized paths and redirects. It deliberately
+    precedes tip-baseline grandfathering.
+    """
+    source_by_path: dict[str, list[str]] = {}
+    target_by_path: dict[str, list[str]] = {}
+    for href in source_hrefs:
+        source_by_path.setdefault(href.partition("#")[0], []).append(href)
+    for href in target_hrefs:
+        target_by_path.setdefault(href.partition("#")[0], []).append(href)
+    issues: list[str] = []
+    for source_path, path_sources in source_by_path.items():
+        target_remaining = list(target_by_path.get(source_path, []))
+        source_remaining: list[str] = []
+        # Ambient same-path extras must not shift pairing. Cancel exact href
+        # occurrences first, then compare only the unmatched occurrences.
+        for source_href in path_sources:
+            try:
+                exact_idx = target_remaining.index(source_href)
+            except ValueError:
+                source_remaining.append(source_href)
+            else:
+                target_remaining.pop(exact_idx)
+        for source_href, target_href in zip(
+            source_remaining, target_remaining, strict=False
+        ):
+            _, separator, source_fragment = source_href.partition("#")
+            _, _, target_fragment = target_href.partition("#")
+            if not separator or not source_fragment or not source_fragment.isascii():
+                continue
+            if source_fragment == target_fragment:
+                continue
+            issues.append(
+                "href_parity: exact ASCII fragment changed: "
+                f"`{source_href}` -> `{target_href}`"
+            )
+    # A path may legitimately localize or follow a redirect, but that does not
+    # permit changing its ASCII fragment.  Position is a safe cross-path proof
+    # only when both documents expose the same number of link slots; otherwise
+    # ambient extras could shift unrelated links into the same ordinal.
+    if len(source_hrefs) == len(target_hrefs):
+        for source_href, target_href in zip(source_hrefs, target_hrefs, strict=True):
+            source_path, separator, source_fragment = source_href.partition("#")
+            target_path, _, target_fragment = target_href.partition("#")
+            if source_path == target_path:
+                continue  # Already handled by the path-local pass above.
+            if not separator or not source_fragment or not source_fragment.isascii():
+                continue
+            if source_fragment == target_fragment:
+                continue
+            issues.append(
+                "href_parity: exact ASCII fragment changed: "
+                f"`{source_href}` -> `{target_href}`"
+            )
+    return issues
+
+
 def check_href_parity(
     source_text: str,
     target_text: str,
@@ -378,16 +441,6 @@ def check_href_parity(
     tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
     src = Counter(src_ordered)
     tgt = Counter(tgt_ordered)
-    # Tip-preserved candidate (§6.228 / P9c): when EN hrefs still match tip and
-    # no source baseline is in play (verify/candidate gate), RU tip debt and
-    # path renames are ambient. Dual-baseline translate (#50904) still sees
-    # newly added RU hrefs when ``source_baseline_text`` is set.
-    if en_baseline_text is not None and source_baseline_text is None:
-        tip_hrefs = Counter(
-            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
-        )
-        if tgt == tip_hrefs:
-            return []
     if ignore_basenames:
 
         def _kept(counter: Counter[str]) -> Counter[str]:
@@ -411,6 +464,26 @@ def check_href_parity(
             for href in tgt_ordered
             if PurePosixPath(href.split("#", 1)[0]).name not in ignore_basenames
         ]
+
+    exact_ascii_issues = (
+        _exact_ascii_fragment_issues(src_ordered, tgt_ordered)
+        if src != tgt
+        else []
+    )
+    if exact_ascii_issues:
+        return exact_ascii_issues
+
+    # Tip-preserved candidate (§6.228 / P9c): when EN hrefs still match tip and
+    # no source baseline is in play (verify/candidate gate), RU tip debt and
+    # path renames are ambient. Dual-baseline translate (#50904) still sees
+    # newly added RU hrefs when ``source_baseline_text`` is set. Exact ASCII
+    # fragment parity above is never grandfathered.
+    if en_baseline_text is not None and source_baseline_text is None:
+        tip_hrefs = Counter(
+            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
+        )
+        if tgt == tip_hrefs:
+            return []
 
     if src == tgt:
         source_visible = list(_iter_visible_md_link_matches(source_text))

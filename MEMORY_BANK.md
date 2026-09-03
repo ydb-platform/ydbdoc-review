@@ -3,9 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.246 — include fragment-owner enqueue + declare fallback (#52077 / R-GL-6).
+**Current focus:** §6.247 — exact-ASCII href parity before baseline grandfather (#52077 / R-GL-7).
 
-Prior focus: §6.245 — critic safety refusal informational when heuristics clean (#52077 / R-GL-5).
+Prior focus: §6.246 — include fragment-owner enqueue + declare fallback (#52077 / R-GL-6).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.247** — hard exact-ASCII href parity before baseline grandfather; #52077 false-green regression (R-GL-7) |
 | 2026-09-03 | **§6.246** — include-only fragment-owner enqueue for pre-existing hrefs; include declare fallback (#52077 / R-GL-6) |
 | 2026-09-03 | **§6.245** — ``critic_model_refusal`` classified as info; merge 🟢 when heuristics clean (#52077 / R-GL-5) |
 | 2026-09-03 | **§6.244** — fragment-owner href delta vs ``read_ru_base``; output-aware translate batching + length resplit (#52077 / R-GL-4) |

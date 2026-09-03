@@ -5698,4 +5698,30 @@ before gate.
 ``test_pr_51797_regression.py``.
 
 
+### §6.247 Exact-ASCII href parity precedes baseline grandfather (#52077 / R-GL-7, 2026-09-03)
+
+**Problem:** translation PR #52077 kept two old but resolvable tip EN fragments in
+``security/authentication.md``: current RU ``#certificate-auth-config`` became
+``#iam-auth-config`` and current RU ``#tls`` became ``#activated-profile``. Pair-level
+``repair_en_fragments`` preferred the old baseline before the complete candidate overlay
+was applied. Verify then returned early because candidate hrefs equalled the EN baseline,
+so critic/heuristics reported a false green. Target-existence gates could not distinguish a
+valid link to the wrong section from the RU-requested link.
+
+**Decision:** ``check_href_parity`` enforces decoded exact-ASCII fragment identity before
+all baseline/grandfather paths. Same-path matching cancels exact occurrences before pairing
+the remainder, protecting against ambient extras. When paths differ and link-slot counts
+match, position proves the localized/redirect slot; the path may change but its ASCII
+fragment may not. No dictionary, declared-target, dead-target, or baseline exemption applies
+to ASCII fragments. Non-ASCII fragments keep the existing localization flow.
+
+This is the minimal fail-closed guard. A later simplification should replace competing
+restore/baseline/repair authorities with one immutable current-RU ``LinkContract`` and defer
+fragment resolution until the complete candidate overlay exists.
+
+**Tests:** #52077 two-blocker regression, duplicate occurrences, same-path ambient extra,
+path-only redirect, path+fragment change, legacy-translit ASCII, dead target, and non-ASCII
+dictionary/percent-encoded localization in ``tests/unit/test_href_parity.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
