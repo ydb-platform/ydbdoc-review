@@ -159,6 +159,28 @@ def test_override_translation_chars():
     assert cfg.translation.segments_per_batch_chars == 2000
 
 
+def test_r_gl_4_translation_batch_defaults():
+    cfg = load_config(env={})
+    assert cfg.translation.segments_per_batch_chars == 2500
+    assert cfg.translation.batch_max_output_chars == 6000
+    assert cfg.translation.batch_output_expansion_ratio == 1.35
+    assert cfg.translation.batch_json_overhead_chars == 512
+    assert cfg.translation.segment_max_source_chars == 1200
+
+
+def test_r_gl_4_translation_batch_env_overrides():
+    cfg = load_config(env={
+        "YDBDOC_TRANSLATION_BATCH_MAX_OUTPUT_CHARS": "5000",
+        "YDBDOC_TRANSLATION_BATCH_OUTPUT_EXPANSION_RATIO": "1.5",
+        "YDBDOC_TRANSLATION_BATCH_JSON_OVERHEAD_CHARS": "400",
+        "YDBDOC_TRANSLATION_SEGMENT_MAX_SOURCE_CHARS": "900",
+    })
+    assert cfg.translation.batch_max_output_chars == 5000
+    assert cfg.translation.batch_output_expansion_ratio == 1.5
+    assert cfg.translation.batch_json_overhead_chars == 400
+    assert cfg.translation.segment_max_source_chars == 900
+
+
 def test_override_critic_feedback_retries():
     cfg = load_config(env={"YDBDOC_TRANSLATION_CRITIC_FEEDBACK_RETRIES": "2"})
     assert cfg.translation.critic_feedback_retries == 2

@@ -187,6 +187,99 @@ def test_r_gl_2_tip_redirect_retargets_fragment_owner_to_concepts():
     assert manual not in plan.doc_ru_paths
 
 
+def test_r_gl_4_preexisting_auth_config_fragment_href_does_not_queue_owner():
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    auth_config = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    lockout_href = "[lockout](../reference/configuration/auth_config.md#account-lockout)"
+    files = {
+        auth: f"{lockout_href}\n",
+        auth_config: "## Account lockout {#account-lockout}\n",
+    }
+    en = {
+        auth_config.replace("/ru/", "/en/"): "## Account lockout\n",
+    }
+    plan = plan_translation_scope(
+        [(auth, "modified")],
+        read_ru=files.get,
+        read_en_base=en.get,
+        read_ru_base=lambda p: files.get(auth) if p == auth else files.get(p),
+    )
+    assert auth_config not in plan.doc_ru_paths
+    assert auth_config not in plan.doc_from_main
+
+
+def test_r_gl_4_new_auth_config_fragment_href_queues_owner():
+    auth = "ydb/docs/ru/core/security/authentication.md"
+    auth_config = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    cert_href = (
+        "[cert](../reference/configuration/auth_config.md#certificate-auth-config)"
+    )
+    files = {
+        auth: f"{cert_href}\n",
+        auth_config: "## Certificate auth {#certificate-auth-config}\n",
+    }
+    en = {
+        auth_config.replace("/ru/", "/en/"): "## Certificate auth\n",
+    }
+    plan = plan_translation_scope(
+        [(auth, "modified")],
+        read_ru=files.get,
+        read_en_base=en.get,
+        read_ru_base=lambda p: "" if p == auth else files.get(p),
+    )
+    assert auth_config in plan.doc_ru_paths
+    assert auth_config in plan.doc_from_main
+
+
+def test_r_gl_4_new_page_satisfied_fragment_does_not_queue_auth_config():
+    node_auth = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
+    auth_config = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    href = (
+        "[token](../../reference/configuration/auth_config.md"
+        "#node-registration-token)"
+    )
+    files = {
+        node_auth: f"{href}\n",
+        auth_config: "## Node registration {#node-registration-token}\n",
+    }
+    en = {
+        auth_config.replace("/ru/", "/en/"): (
+            "## Node registration {#node-registration-token}\n"
+        ),
+    }
+    plan = plan_translation_scope(
+        [(node_auth, "added")],
+        read_ru=files.get,
+        read_en_base=en.get,
+        read_ru_base=lambda _p: None,
+    )
+    assert auth_config not in plan.doc_ru_paths
+    assert auth_config not in plan.doc_from_main
+
+
+def test_r_gl_4_added_page_all_hrefs_are_new():
+    new_page = "ydb/docs/ru/core/devops/concepts/new-feature.md"
+    owner = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    href = (
+        "[cfg](../../reference/configuration/auth_config.md#missing-fragment)"
+    )
+    files = {
+        new_page: f"{href}\n",
+        owner: "## Missing {#missing-fragment}\n",
+    }
+    en = {
+        owner.replace("/ru/", "/en/"): "## Missing\n",
+    }
+    plan = plan_translation_scope(
+        [(new_page, "added")],
+        read_ru=files.get,
+        read_en_base=en.get,
+        read_ru_base=lambda _p: None,
+    )
+    assert owner in plan.doc_ru_paths
+    assert owner in plan.doc_from_main
+
+
 def test_existing_ascii_fragment_href_on_unchanged_page_does_not_expand_scope():
     auth = "ydb/docs/ru/core/security/authentication.md"
     changed = "ydb/docs/ru/core/security/index.md"

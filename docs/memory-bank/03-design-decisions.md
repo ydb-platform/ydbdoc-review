@@ -5644,10 +5644,30 @@ commit.
    without aborting the PR (§6.80) but must emit ``translate_soft_keep``
    warning + ``status=soft_keep`` / yellow QA — never a silent ``ok``.
 
-**Tests:** ``test_tip_en_covers_inbound_fragments_from_changed``,
-``test_merge_recommendation_red_when_scope_file_missing_despite_green_files``,
-``test_format_completeness_gap_item_mentions_ru_twin``,
-``test_translate_soft_keep_sets_warning_not_error``.
+**Tests:** `test_tip_en_covers_inbound_fragments_from_changed`,
+`test_merge_recommendation_red_when_scope_file_missing_despite_green_files`,
+`test_format_completeness_gap_item_mentions_ru_twin`,
+`test_translate_soft_keep_sets_warning_not_error`.
+
+
+### §6.244 Fragment-owner href delta + output-aware translate batching (#52077 / R-GL-4, 2026-09-03)
+
+**Problem:** Fragment-owner closure scanned all current exact-ASCII ``#fragment`` hrefs on
+modified RU pages, queueing full translate for ambient tip debt
+(``authentication.md`` → ``auth_config#account-lockout``) while inbound links already
+satisfied on tip EN (``#node-registration-token``). Large translate batches hit
+``finish_reason=length`` because ``chunk_segments`` used source-char budget only and
+never split oversized segments.
+
+**Decision:**
+
+1. Fragment-owner uses positive href delta vs ``read_ru_base`` (R-GL-4a).
+2. ``split_segment_for_batching`` + output-char budget
+   (``estimate_translate_batch_output_chars``) + one non-overlapping segment-boundary
+   resplit on length; no overlap merge (R-GL-4b).
+
+**Tests:** ``test_r_gl_4_*`` in ``test_nav_scope_planner.py``, ``test_chunker.py``,
+``test_translator.py``.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)

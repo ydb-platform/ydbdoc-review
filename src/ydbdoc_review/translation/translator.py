@@ -39,6 +39,27 @@ logger = logging.getLogger(__name__)
 
 _MAX_BATCH_ATTEMPTS = 3
 _PLACEHOLDER_MISMATCH_HINT = "placeholder mismatch"
+_MONOLITH_BUDGET_MESSAGE = "segment exceeds safe translate output budget"
+
+
+def _is_length_resplit_failure(
+    exc: LLMParseError,
+    *,
+    content: str,
+) -> bool:
+    """True when empty/truncated JSON likely came from output length limits."""
+    msg = str(exc)
+    if "Segment id mismatch" in msg:
+        return False
+    if "JSON schema validation failed" in msg:
+        return False
+    if not content.strip():
+        return True
+    if "finish_reason=length" in msg:
+        return True
+    if "Invalid JSON in LLM response" in msg and not content.strip():
+        return True
+    return False
 
 
 def _is_timeout_exhausted(exc: BaseException) -> bool:
@@ -167,8 +188,11 @@ def _translate_batch_with_model(
     model: str,
     max_attempts: int,
     last_attempt: dict[str, str] | None = None,
+    allow_resplit: bool = True,
+    last_raw_content: list[str] | None = None,
 ) -> dict[str, str]:
     last_exc: LLMParseError | TranslationValidationError | None = None
+    last_content = ""
     for attempt in range(1, max_attempts + 1):
         try:
             messages = build_translate_messages(
@@ -180,6 +204,9 @@ def _translate_batch_with_model(
                 version=prompt_version,
             )
             result = client.chat(messages, model=model, role="translate")
+            last_content = result.content or ""
+            if last_raw_content is not None:
+                last_raw_content[:] = [last_content]
             expected = {seg.id for seg in batch.segments}
             translations = parse_translate_response(
                 result.content, expected_ids=expected
@@ -194,6 +221,42 @@ def _translate_batch_with_model(
             return translations
         except (LLMParseError, TranslationValidationError) as exc:
             last_exc = exc
+            if (
+                allow_resplit
+                and isinstance(exc, LLMParseError)
+                and len(batch.segments) > 1
+                and _is_length_resplit_failure(exc, content=last_content)
+            ):
+                mid = max(1, len(batch.segments) // 2)
+                split_batches = [
+                    Batch(index=batch.index, segments=batch.segments[:mid]),
+                    Batch(index=batch.index, segments=batch.segments[mid:]),
+                ]
+                logger.warning(
+                    "Translate batch %s length failure; retrying as %s + %s segment halves",
+                    batch.index,
+                    mid,
+                    len(batch.segments) - mid,
+                )
+                merged: dict[str, str] = {}
+                for half in split_batches:
+                    merged.update(
+                        _translate_batch_with_model(
+                            client,
+                            half,
+                            glossary,
+                            file_path=file_path,
+                            source_lang=source_lang,
+                            target_lang=target_lang,
+                            prompt_version=prompt_version,
+                            model=model,
+                            max_attempts=max_attempts,
+                            last_attempt=last_attempt,
+                            allow_resplit=False,
+                            last_raw_content=last_raw_content,
+                        )
+                    )
+                return merged
             if attempt < max_attempts:
                 logger.warning(
                     "Translate batch %s attempt %s/%s failed: %s",
@@ -216,10 +279,13 @@ def _translate_batch_once(
     target_lang: str,
     prompt_version: str,
     last_attempt: dict[str, str] | None = None,
+    allow_resplit: bool = True,
+    last_raw_content: list[str] | None = None,
 ) -> dict[str, str]:
     model_chain = client.model_chain_for_role("translate")
     last_validation_exc: LLMParseError | TranslationValidationError | None = None
     last_infra_exc: LLMRetryExhaustedError | None = None
+    raw_holder = last_raw_content if last_raw_content is not None else []
 
     for model_idx, model in enumerate(model_chain):
         max_attempts = _MAX_BATCH_ATTEMPTS if model_idx == 0 else 1
@@ -235,6 +301,8 @@ def _translate_batch_once(
                 model=model,
                 max_attempts=max_attempts,
                 last_attempt=last_attempt,
+                allow_resplit=allow_resplit,
+                last_raw_content=raw_holder,
             )
         except LLMRetryExhaustedError as exc:
             last_infra_exc = exc
@@ -353,9 +421,11 @@ def translate_batch(
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     manual_actions: list[ManualAction] | None = None,
+    allow_resplit: bool = True,
 ) -> dict[str, str]:
     """Translate one batch; fall back to per-segment calls on batch failure."""
     last_attempt: dict[str, str] = {}
+    last_raw_content: list[str] = []
     try:
         return _translate_batch_once(
             client,
@@ -366,10 +436,25 @@ def translate_batch(
             target_lang=target_lang,
             prompt_version=prompt_version,
             last_attempt=last_attempt,
+            allow_resplit=allow_resplit,
+            last_raw_content=last_raw_content,
         )
     except (LLMParseError, TranslationValidationError) as exc:
         if len(batch.segments) == 1:
             seg = batch.segments[0]
+            raw_content = last_raw_content[0] if last_raw_content else ""
+            if isinstance(exc, LLMParseError) and _is_length_resplit_failure(
+                exc, content=raw_content
+            ):
+                _record_manual_action(
+                    manual_actions,
+                    seg,
+                    message=_MONOLITH_BUDGET_MESSAGE,
+                )
+                raise TranslationValidationError(
+                    _MONOLITH_BUDGET_MESSAGE,
+                    segment_id=seg.id,
+                ) from exc
             if isinstance(exc, TranslationValidationError):
                 return _recover_or_fallback_segment(
                     seg,
@@ -437,6 +522,10 @@ def translate_segments(
     source_lang: str = "ru",
     target_lang: str = "en",
     max_chars: int = 4000,
+    max_output_chars: int = 6000,
+    expansion_ratio: float = 1.35,
+    json_overhead: int = 512,
+    segment_max_chars: int = 1200,
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     cache: dict[str, str] | None = None,
     max_parallel_batches: int = 3,
@@ -468,7 +557,14 @@ def translate_segments(
     if not pending:
         return translations
 
-    batches = chunk_segments(pending, max_chars=max_chars)
+    batches = chunk_segments(
+        pending,
+        max_chars=max_chars,
+        max_output_chars=max_output_chars,
+        expansion_ratio=expansion_ratio,
+        json_overhead=json_overhead,
+        segment_max_chars=segment_max_chars,
+    )
     if max_parallel_batches < 1:
         raise ValueError("max_parallel_batches must be >= 1")
 

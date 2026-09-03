@@ -7,8 +7,14 @@ from pathlib import Path
 import pytest
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
+from ydbdoc_review.segmentation.chunker import (
+    Batch,
+    chunk_segments,
+    estimate_translate_batch_output_chars,
+    expand_segments_for_batching,
+)
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.segmentation.split import split_segment_for_batching
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 
 
@@ -162,4 +168,84 @@ def test_chunker_reasonable_batch_count_on_real_files():
     # No file should explode into 100+ batches with default settings.
     for name, n in stats.items():
         assert n < 100, f"{name}: too many batches ({n})"
+
+
+def test_r_gl_4_expand_splits_long_paragraph_on_blank_line():
+    text = "a" * 700 + "\n\n" + "b" * 700
+    seg = Segment(
+        id="s0001",
+        kind=SegmentKind.PARAGRAPH,
+        path=["Intro"],
+        text=text,
+        placeholders=[],
+        ast_path=[0],
+    )
+    parts = expand_segments_for_batching([seg], segment_max_chars=1200)
+    assert len(parts) == 2
+    assert all(len(part.text) <= 1200 for part in parts)
+    assert parts[0].id == "s0001__p1"
+    assert parts[1].id == "s0001__p2"
+
+
+def test_r_gl_4_chunk_respects_output_char_budget():
+    segs = [make_seg(i, "x" * 200) for i in range(20)]
+    batches = chunk_segments(
+        segs,
+        max_chars=2500,
+        max_output_chars=6000,
+        segment_max_chars=1200,
+    )
+    for batch in batches:
+        assert (
+            estimate_translate_batch_output_chars(batch.segments) <= 6000
+        )
+
+
+def test_r_gl_4_oversized_segment_solo_after_split():
+    text = ("para " * 200) + "\n\n" + ("more " * 200)
+    seg = Segment(
+        id="s0001",
+        kind=SegmentKind.PARAGRAPH,
+        path=[],
+        text=text,
+        placeholders=[],
+        ast_path=[0],
+    )
+    expanded = expand_segments_for_batching([seg], segment_max_chars=1200)
+    assert len(expanded) > 1
+    batches = chunk_segments(
+        expanded,
+        max_chars=1200,
+        max_output_chars=6000,
+        segment_max_chars=1200,
+    )
+    flat = [s for b in batches for s in b.segments]
+    assert flat == expanded
+    assert len(batches) > 1
+
+
+def test_r_gl_4_no_overlap_between_batches():
+    segs = [make_seg(i, "x" * 100) for i in range(12)]
+    batches = chunk_segments(
+        segs,
+        max_chars=2500,
+        max_output_chars=6000,
+        segment_max_chars=1200,
+    )
+    flat_ids = [s.id for b in batches for s in b.segments]
+    assert flat_ids == [s.id for s in segs]
+    assert len(set(flat_ids)) == len(segs)
+
+
+def test_r_gl_4_heading_not_split():
+    seg = Segment(
+        id="h0001",
+        kind=SegmentKind.HEADING,
+        path=["Title"],
+        text="A" * 2000,
+        placeholders=[],
+        ast_path=[0],
+        heading_anchor="title",
+    )
+    assert split_segment_for_batching(seg, max_chars=1200) == [seg]
 

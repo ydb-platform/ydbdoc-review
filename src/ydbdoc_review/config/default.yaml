@@ -56,6 +56,10 @@ translation:
   source_lang: ru
   target_lang: en
   segments_per_batch_chars: 2500
+  batch_max_output_chars: 6000
+  batch_output_expansion_ratio: 1.35
+  batch_json_overhead_chars: 512
+  segment_max_source_chars: 1200
   critic_feedback_retries: 2
   # REQUIREMENTS_RU.md §5 / §13 — no differential EN seed/splice on translate
   differential_enabled: false

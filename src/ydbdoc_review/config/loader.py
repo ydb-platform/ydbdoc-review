@@ -94,6 +94,10 @@ class TranslationConfig(BaseModel):
     source_lang: str = "ru"
     target_lang: str = "en"
     segments_per_batch_chars: int = 4000
+    batch_max_output_chars: int = 6000
+    batch_output_expansion_ratio: float = 1.35
+    batch_json_overhead_chars: int = 512
+    segment_max_source_chars: int = 1200
     critic_feedback_retries: int = 2
     # REQUIREMENTS_RU.md §5 / §13: differential seed/splice off by default.
     # Override via YDBDOC_TRANSLATION_* only for experiments; TranslateStep

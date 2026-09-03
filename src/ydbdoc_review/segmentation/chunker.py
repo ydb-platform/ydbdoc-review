@@ -11,10 +11,15 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from ydbdoc_review.segmentation.split import split_segment_for_batching
 from ydbdoc_review.segmentation.types import Segment
 
 # Dense table cells: translate alone so the model keeps every ⟦C⟧/⟦U⟧ marker.
 _HEAVY_PLACEHOLDER_COUNT = 8
+
+_DEFAULT_OUTPUT_EXPANSION = 1.35
+_DEFAULT_JSON_OVERHEAD = 512
+_PER_SEGMENT_JSON_OVERHEAD = 40
 
 
 class Batch(BaseModel):
@@ -29,10 +34,42 @@ class Batch(BaseModel):
         return sum(len(s.text) for s in self.segments)
 
 
+def estimate_translate_batch_output_chars(
+    segments: list[Segment],
+    *,
+    expansion_ratio: float = _DEFAULT_OUTPUT_EXPANSION,
+    json_overhead: int = _DEFAULT_JSON_OVERHEAD,
+) -> int:
+    source_chars = sum(len(seg.text) for seg in segments)
+    return (
+        int(source_chars * expansion_ratio)
+        + json_overhead
+        + _PER_SEGMENT_JSON_OVERHEAD * len(segments)
+    )
+
+
+def expand_segments_for_batching(
+    segments: list[Segment],
+    *,
+    segment_max_chars: int,
+) -> list[Segment]:
+    """Apply ``split_segment_for_batching`` to each segment."""
+    expanded: list[Segment] = []
+    for seg in segments:
+        expanded.extend(
+            split_segment_for_batching(seg, max_chars=segment_max_chars)
+        )
+    return expanded
+
+
 def chunk_segments(
     segments: list[Segment],
     *,
     max_chars: int = 4000,
+    max_output_chars: int = 6000,
+    expansion_ratio: float = _DEFAULT_OUTPUT_EXPANSION,
+    json_overhead: int = _DEFAULT_JSON_OVERHEAD,
+    segment_max_chars: int = 1200,
 ) -> list[Batch]:
     """Greedy packing of segments into batches.
 
@@ -41,6 +78,10 @@ def chunk_segments(
     """
     if max_chars < 1:
         raise ValueError("max_chars must be >= 1")
+
+    expanded = expand_segments_for_batching(
+        segments, segment_max_chars=segment_max_chars
+    )
 
     batches: list[Batch] = []
     current: list[Segment] = []
@@ -53,27 +94,64 @@ def chunk_segments(
             current = []
             current_size = 0
 
-    for seg in segments:
+    def fits(candidate: list[Segment]) -> bool:
+        source_chars = sum(len(seg.text) for seg in candidate)
+        if source_chars > max_chars:
+            return False
+        return (
+            estimate_translate_batch_output_chars(
+                candidate,
+                expansion_ratio=expansion_ratio,
+                json_overhead=json_overhead,
+            )
+            <= max_output_chars
+        )
+
+    def append_solo_segments(segs: list[Segment]) -> None:
+        for seg in segs:
+            flush()
+            batches.append(Batch(index=len(batches), segments=[seg]))
+
+    for seg in expanded:
         seg_size = len(seg.text)
 
         if len(seg.placeholders) >= _HEAVY_PLACEHOLDER_COUNT:
             flush()
+            if (
+                seg_size > max_chars
+                or estimate_translate_batch_output_chars(
+                    [seg],
+                    expansion_ratio=expansion_ratio,
+                    json_overhead=json_overhead,
+                )
+                > max_output_chars
+            ):
+                subsegments = split_segment_for_batching(
+                    seg, max_chars=segment_max_chars
+                )
+                if len(subsegments) > 1:
+                    append_solo_segments(subsegments)
+                    continue
             batches.append(Batch(index=len(batches), segments=[seg]))
             continue
 
-        # Oversized segment → its own batch.
         if seg_size > max_chars:
             flush()
             batches.append(Batch(index=len(batches), segments=[seg]))
             continue
 
-        # Doesn't fit into current batch → start a new one.
-        if current and current_size + seg_size > max_chars:
+        candidate = current + [seg]
+        if current and not fits(candidate):
             flush()
+            candidate = [seg]
 
-        current.append(seg)
-        current_size += seg_size
+        if not fits(candidate):
+            flush()
+            batches.append(Batch(index=len(batches), segments=[seg]))
+            continue
+
+        current = candidate
+        current_size = sum(len(s.text) for s in current)
 
     flush()
     return batches
-

@@ -25,6 +25,7 @@
 - Русские файлы, исторически удалённые в исходном pull request, не входят в перевод.
 - Историческое удаление русского файла никогда автоматически не удаляет и не перезаписывает актуальный английский файл.
 - Если первоначальный русский файл отсутствует в текущей базе, операция останавливается до вызова модели, изменения файлов, commit и push.
+- **R-GL-4a** — exact-ASCII fragment-owner closure в `plan_translation_scope` перебирает только внутренние href вида `.md#ASCII`, **новые** на diff-странице относительно `read_ru_base` (положительная дельта). Href, уже присутствующие в базовом RU до PR, не ставят owner в очередь, даже если tip EN не объявляет фрагмент (ambient debt). Для added-страницы при `read_ru_base` = `None`/пусто все href считаются новыми. Если tip EN owner уже объявляет exact-ASCII `#fragment`, owner не ставится для этого href.
 
 ## 4. Зафиксированное состояние репозитория
 
@@ -62,6 +63,15 @@
 
 Старый английский текст не используется как источник частей нового перевода, шаблон склейки или основа частичной реконструкции.
 
+**R-GL-4b** — пакеты перевода сегментов: non-overlapping, structure-aware, с учётом лимита JSON-ответа.
+
+1. Запрещены overlapping batches, sliding window, merge пересечений.
+2. Границы пакетов совпадают с границами сегментов AST; сегмент не разрезается между пакетами.
+3. Перед `chunk_segments` сегменты длиннее `segment_max_source_chars` (default 1200) подразделяются `split_segment_for_batching` на внутренние структурные границы (`\n\n` для paragraph/blockquote/list item).
+4. Размер пакета ограничивает оценку JSON-ответа: `estimate_translate_batch_output_chars` = сумма `len(text)` × `batch_output_expansion_ratio` (1.35) + `batch_json_overhead_chars` (512) + 40 × число сегментов; оценка ≤ `batch_max_output_chars` (6000). Дополнительно сумма source chars ≤ `segments_per_batch_chars` (2500).
+5. Dense table cells (`placeholders >= 8`): solo batch; при нарушении бюджета сначала split, затем packing.
+6. При `finish_reason=length` или empty JSON: один deterministic resplit пакета на два non-overlapping подпакета по границе сегментов (не более одного уровня). Irreducible monolith после resplit → `ManualAction` «segment exceeds safe translate output budget» и блокирующая ошибка (не soft-keep).
+
 ## 6. Связанные документы
 
 - Зависимость добавляется в очередь, если внутренняя Markdown-ссылка из текущего русского файла указывает на путь, для которого в зафиксированном английском дереве **нет файла** (после нормализации `/ru/`→`/en/` и разрешения относительного пути). Наличие только в TOC без файла не считается «есть в EN».
@@ -72,6 +82,7 @@
 - Первоначальные файлы исходного pull request не расходуют лимит зависимостей.
 - Общий лимит дополнительных зависимостей равен 20 файлам.
 - После исчерпания лимита конвейер не начинает бесконечную рекурсию. Он оставляет явное предупреждение с путём ссылки и указанием на ручное действие.
+- **R-GL-4a** — fragment-owner closure использует только **новые** exact-ASCII fragment href на diff-страницах. Существующий EN-файл зависимости без нового inbound fragment href не тянет full translate через fragment-owner.
 
 ## 7. Модель и повторные попытки
 
@@ -195,6 +206,7 @@
 - после успешного перевода создан pull request;
 - `build-docs` и `doc_verify` зелёные на одном SHA либо явно зафиксирован статус ожидания CI без ложного success при отсутствии PR;
 - полный набор unit-тестов не имеет падений.
+- **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
 
 ## 15. Работа команды
 

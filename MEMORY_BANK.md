@@ -3,9 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.243 — tip-satisfied inbound fragments + readable completeness QA (#52077 / R-GL-3).
+**Current focus:** §6.244 — fragment-owner href delta + output-aware translate batching (#52077 / R-GL-4).
 
-Prior focus: §6.242 — merged PR tip redirects vs merge-era tombstone paths (#40385 / R-GL-2).
+Prior focus: §6.243 — tip-satisfied inbound fragments + readable completeness QA (#52077 / R-GL-3).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.244** — fragment-owner href delta vs ``read_ru_base``; output-aware translate batching + length resplit (#52077 / R-GL-4) |
 | 2026-09-03 | **§6.243** — tip EN covering inbound exact-ASCII frags satisfies scope gap; clearer completeness QA (#52077 / R-GL-3) |
 | 2026-09-03 | **§6.242** — tip ``redirects.yaml`` for tombstone skip; fragment owners follow tip ``from``→``to`` (#40385 / R-GL-2) |
 | 2026-09-03 | **§6.241** — `_page_declares_fragment` treats `_legacy_transliterated_slug` as ownership so exact-ASCII declare runs (#40385 / R-GL-1) |

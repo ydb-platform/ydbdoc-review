@@ -21,6 +21,10 @@ class HarnessContext:
     source_lang: str
     target_lang: str
     batch_chars: int
+    batch_max_output_chars: int
+    batch_output_expansion_ratio: float
+    batch_json_overhead_chars: int
+    segment_max_source_chars: int
     prompt_version: str
     parallel: int
     cache: dict[str, str] | None
@@ -63,6 +67,10 @@ class HarnessContext:
             source_lang=source_lang or cfg.translation.source_lang,
             target_lang=target_lang or cfg.translation.target_lang,
             batch_chars=max_chars or cfg.translation.segments_per_batch_chars,
+            batch_max_output_chars=cfg.translation.batch_max_output_chars,
+            batch_output_expansion_ratio=cfg.translation.batch_output_expansion_ratio,
+            batch_json_overhead_chars=cfg.translation.batch_json_overhead_chars,
+            segment_max_source_chars=cfg.translation.segment_max_source_chars,
             prompt_version=prompt_version or cfg.prompts.version,
             parallel=max_parallel_batches or cfg.llm.concurrency.batches_per_file,
             cache=cache,

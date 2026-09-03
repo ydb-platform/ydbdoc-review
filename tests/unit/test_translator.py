@@ -15,6 +15,7 @@ from ydbdoc_review.segmentation.chunker import Batch
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.translator import (
     parse_translate_response,
     translate_batch,
@@ -297,3 +298,43 @@ def test_translate_batch_timeout_tries_fallback_model():
     )
     assert out == {"s1": "Hello"}
     assert client.chat.call_count == 2
+
+
+def test_r_gl_4_translate_resplit_on_length():
+    seg1 = _segment("s1", "Alpha text")
+    seg2 = _segment("s2", "Beta text")
+    batch = Batch(index=0, segments=[seg1, seg2])
+    good_s1 = _json_response([{"id": "s1", "text": "Alpha"}])
+    good_s2 = _json_response([{"id": "s2", "text": "Beta"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary"]
+    client.chat.side_effect = [
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=good_s1),
+        SimpleNamespace(content=good_s2),
+    ]
+    out = translate_batch(
+        client, batch, load_glossary(), file_path="docs/ru/x.md"
+    )
+    assert out == {"s1": "Alpha", "s2": "Beta"}
+    assert client.chat.call_count == 3
+
+
+def test_r_gl_4_irreducible_segment_raises_manual_action():
+    seg = _segment("s1", "X" * 5000)
+    batch = Batch(index=0, segments=[seg])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary"]
+    client.chat.return_value = SimpleNamespace(content="")
+    actions: list[ManualAction] = []
+    with pytest.raises(TranslationValidationError, match="safe translate output budget"):
+        translate_batch(
+            client,
+            batch,
+            load_glossary(),
+            file_path="docs/ru/x.md",
+            manual_actions=actions,
+        )
+    assert actions
+    assert actions[0].segment_id == "s1"
+    assert "safe translate output budget" in actions[0].message

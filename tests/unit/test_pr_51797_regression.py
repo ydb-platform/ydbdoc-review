@@ -62,7 +62,7 @@ def _repo(tmp_path: Path, *, commit_merge: bool = False) -> Path:
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test")
-    _put(repo, AUTH_RU, f"# Authentication\n\n[TLS one]({HREF})\n[TLS two]({HREF})\n")
+    _put(repo, AUTH_RU, "# Authentication\n\n")
     _put(repo, AUTH_EN, "# Authentication\n")
     include = "{% include [connect](_includes/connect.md) %}\n"
     for locale in ("ru", "en"):
@@ -187,7 +187,7 @@ def test_pr_40385_merged_five_api_paths_load_six_pairs_before_translation(tmp_pa
         str(repo), upstream_main_ref, ru_content_ref=merge_sha, ru_base_ref=f"{merge_sha}^",
     )
     assert (read_ru(AUTH_RU) or "").count(HREF) == 2
-    assert (read_ru_base(AUTH_RU) or "").count(HREF) == 2
+    assert (read_ru_base(AUTH_RU) or "").count(HREF) == 0
     plan = plan_translation_scope(
         changes, read_ru=read_ru, read_en_base=read_en_base, read_ru_base=read_ru_base,
     )

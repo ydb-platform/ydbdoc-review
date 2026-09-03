@@ -107,6 +107,16 @@ def _internal_ascii_fragment_hrefs(ru_text: str) -> set[str]:
     return hrefs
 
 
+def _new_internal_ascii_fragment_hrefs(
+    ru_text: str,
+    base_text: str | None,
+) -> set[str]:
+    current = _internal_ascii_fragment_hrefs(ru_text)
+    if not base_text:
+        return current
+    return current - _internal_ascii_fragment_hrefs(base_text)
+
+
 def _exact_ascii_fragment_owner_dependency(
     ru_page_path: str,
     href: str,
@@ -605,7 +615,8 @@ def plan_translation_scope(
         ru_text = read_ru(ru_md)
         if ru_text is None:
             continue
-        for href in sorted(_internal_ascii_fragment_hrefs(ru_text)):
+        base_text = read_ru_base(ru_md) if read_ru_base is not None else None
+        for href in sorted(_new_internal_ascii_fragment_hrefs(ru_text, base_text)):
             owner = _exact_ascii_fragment_owner_dependency(
                 ru_md,
                 href,
