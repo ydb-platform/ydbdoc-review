@@ -26,6 +26,7 @@
 - Историческое удаление русского файла никогда автоматически не удаляет и не перезаписывает актуальный английский файл.
 - Если первоначальный русский файл отсутствует в текущей базе, операция останавливается до вызова модели, изменения файлов, commit и push.
 - **R-GL-4a** — exact-ASCII fragment-owner closure в `plan_translation_scope` перебирает только внутренние href вида `.md#ASCII`, **новые** на diff-странице относительно `read_ru_base` (положительная дельта). Href, уже присутствующие в базовом RU до PR, не ставят owner в очередь, даже если tip EN не объявляет фрагмент (ambient debt). Для added-страницы при `read_ru_base` = `None`/пусто все href считаются новыми. Если tip EN owner уже объявляет exact-ASCII `#fragment`, owner не ставится для этого href.
+- **R-GL-6a** — исключение к R-GL-4a для **include-владельцев** (`*/_includes/*.md`): при исходящих exact-ASCII fragment href со страниц `diff_ru_md` (включая pre-existing href, без фильтра `read_ru_base`) `plan_translation_scope` дополнительно ставит в `doc_ru` / `doc_from_main` RU-владельца include, если `_exact_ascii_fragment_owner_dependency` возвращает include-путь и tip EN не объявляет exact-ASCII `#fragment`. Non-include owners (например `auth_config.md`) по-прежнему только через R-GL-4a (новые href). **R-GL-6a.1** — новый href на diff-странице к missing include-фрагменту по-прежнему ставит owner. **R-GL-6a.2** — pre-existing href к missing include-фрагменту (например `connect.md#tls` на modified `authentication.md`) тоже ставит `_includes/connect.md`. **R-GL-6a.3** — pre-existing href к non-include owner не ставит owner (регрессия R-GL-4).
 
 ## 4. Зафиксированное состояние репозитория
 
@@ -132,6 +133,7 @@
 - ASCII-фрагмент внутренней ссылки, включая legacy-транслит Diplodoc от русского заголовка (без явного `{#…}`), после translate сохраняется byte-identical и **не** переписывается в английский auto-slug.
 - Перед финальным gate конвейер обязан найти единственного детерминированного RU-владельца такого фрагмента (страница или aligned include), если фрагмент совпадает с explicit `{#id}`, Diplodoc auto-slug **или** legacy-транслитом заголовка, и объявить тот же id на парном EN-заголовке (`{#exact-id}`), включив EN-цель в candidate overlay. Неоднозначный pairing — fail closed; gate `en_link_target` остаётся блокирующим.
 - Remap фрагмента в EN-only id разрешён только если в исходном фрагменте есть кириллица.
+- **R-GL-6b** — после apply, если `add_explicit_ascii_fragment_anchor` вернул `None` для уникального RU include-владельца с explicit `{#frag}`, вызывается `declare_explicit_fragment_on_include_owner(en_md, ru_md, frag)`: append-only `{#frag}` на единственный EN-заголовок без anchor с `diplodoc_auto_slug(title) == frag`, иначе на единственный EN-заголовок с keyword overlap (токены ≥3) с RU-заголовком-носителем; при неоднозначности — `None` (gate остаётся блокирующим). **R-GL-6b.1** — fallback не подменяет R-GL-6a translate include-владельца при real-tip outline mismatch.
 
 ## 9. Сохранность документа
 
@@ -230,6 +232,7 @@
 - полный набор unit-тестов не имеет падений.
 - **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
 - **R-GL-5:** fixture `critic_model_refusal` finalize warning + пустые `heuristic_blocking` → `compose_file_verdict` = `ok`; `_file_has_open_issues` = `False` для того же fixture; `build_full_report` / `_merge_recommendation`: рекомендация 🟢 «можно мержить»; refusal в info-секции; regression: `critic_execution_failed` по-прежнему 🔴; `test_run_critic_model_refusal_falls_back_to_heuristics_only` зелёный; `test_merge_recommendation_green_when_critic_warnings_but_no_open_issues` зелёный.
+- **R-GL-6:** merged #40385 fixture — 6 пар (5 diff + `_includes/connect.md`); pre-existing `connect.md#tls` на modified `authentication.md` → `doc_from_main` содержит `_includes/connect.md`, `auth_config` — нет; после translate+declare `apply_en_link_target_checks` == `[]` на `authentication.md`; `test_pr_40385_real_tip_without_queued_translation_stays_blocked` остаётся блокирующим при bypass owner pair; declare fallback: synthetic aligned include → append `{#frag}`; real-tip misaligned без translate → fallback `None`.
 
 ## 15. Работа команды
 

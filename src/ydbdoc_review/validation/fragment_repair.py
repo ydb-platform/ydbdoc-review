@@ -42,6 +42,81 @@ _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 _RAW_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)(\r?\n|$)", re.MULTILINE)
 
 
+def _append_explicit_anchor_to_heading_index(
+    en_md: str, en_heads: list[Heading], index: int, frag: str
+) -> str | None:
+    raw = list(_RAW_HEADING.finditer(en_md))
+    if len(raw) != len(en_heads) or [len(m.group(1)) for m in raw] != [
+        h.level for h in en_heads
+    ]:
+        return None
+    match = raw[index]
+    body = match.group(2)
+    if split_heading_anchor_suffix(body.strip())[1] is not None:
+        return None
+    replacement = f"{match.group(1)} {body} {{#{frag}}}{match.group(3)}"
+    return en_md[: match.start()] + replacement + en_md[match.end() :]
+
+
+def declare_explicit_fragment_on_include_owner(
+    en_md: str, ru_md: str, frag: str
+) -> str | None:
+    """Append-only declare for include owners when outline-aligned declare fails."""
+    if not frag or not frag.isascii():
+        return None
+    if _page_declares_fragment(en_md, frag):
+        return en_md
+    from ydbdoc_review.validation.yfm_anchor import (
+        _heading_plain_text,
+        _legacy_transliterated_slug,
+        diplodoc_auto_slug,
+    )
+
+    try:
+        ru_heads = list(_iter_headings(parse_markdown(ru_md).children))
+        en_heads = list(_iter_headings(parse_markdown(en_md).children))
+    except Exception:
+        return None
+
+    ru_matches: list[int] = []
+    for index, heading in enumerate(ru_heads):
+        title = _heading_plain_text(heading)
+        if frag in {heading.anchor, diplodoc_auto_slug(title), _legacy_transliterated_slug(title)}:
+            ru_matches.append(index)
+    if len(ru_matches) != 1:
+        return None
+    ru_title = _heading_plain_text(ru_heads[ru_matches[0]])
+
+    slug_candidates: list[int] = []
+    for index, heading in enumerate(en_heads):
+        if heading.anchor is not None:
+            continue
+        title = _heading_plain_text(heading)
+        if diplodoc_auto_slug(title) == frag:
+            slug_candidates.append(index)
+    if len(slug_candidates) == 1:
+        return _append_explicit_anchor_to_heading_index(en_md, en_heads, slug_candidates[0], frag)
+    if len(slug_candidates) > 1:
+        return None
+
+    def _keywords(text: str) -> set[str]:
+        tokens = re.findall(r"[a-zA-Zа-яА-ЯёЁ]+", text.casefold())
+        return {token for token in tokens if len(token) >= 3}
+
+    ru_keywords = _keywords(ru_title)
+    if not ru_keywords:
+        return None
+    overlap_candidates: list[int] = []
+    for index, heading in enumerate(en_heads):
+        if heading.anchor is not None:
+            continue
+        if ru_keywords & _keywords(_heading_plain_text(heading)):
+            overlap_candidates.append(index)
+    if len(overlap_candidates) != 1:
+        return None
+    return _append_explicit_anchor_to_heading_index(en_md, en_heads, overlap_candidates[0], frag)
+
+
 def add_explicit_ascii_fragment_anchor(en_md: str, ru_md: str, frag: str) -> str | None:
     """Append an exact ASCII id only to a fully outline-aligned heading."""
     if not frag or not frag.isascii():
@@ -67,15 +142,7 @@ def add_explicit_ascii_fragment_anchor(en_md: str, ru_md: str, frag: str) -> str
     index = matches[0]
     if en_heads[index].anchor is not None:
         return None
-    raw = list(_RAW_HEADING.finditer(en_md))
-    if len(raw) != len(en_heads) or [len(m.group(1)) for m in raw] != [h.level for h in en_heads]:
-        return None
-    match = raw[index]
-    body = match.group(2)
-    if split_heading_anchor_suffix(body.strip())[1] is not None:
-        return None
-    replacement = f"{match.group(1)} {body} {{#{frag}}}{match.group(3)}"
-    return en_md[: match.start()] + replacement + en_md[match.end() :]
+    return _append_explicit_anchor_to_heading_index(en_md, en_heads, index, frag)
 
 
 def _resolve_href_path(page_path: str, href_path: str) -> str | None:

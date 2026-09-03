@@ -499,6 +499,7 @@ def _declare_exact_ascii_fragment_targets_after_apply(
         _page_declares_fragment,
         _resolve_href_path,
         add_explicit_ascii_fragment_anchor,
+        declare_explicit_fragment_on_include_owner,
     )
 
     overlay = {p.replace("\\", "/") for p in paths}
@@ -558,6 +559,10 @@ def _declare_exact_ascii_fragment_targets_after_apply(
                 continue
             en_owner, en_owner_text, _, ru_owner_text = owners[0]
             fixed = add_explicit_ascii_fragment_anchor(en_owner_text, ru_owner_text, frag)
+            if fixed is None and "/_includes/" in en_owner.replace("\\", "/"):
+                fixed = declare_explicit_fragment_on_include_owner(
+                    en_owner_text, ru_owner_text, frag
+                )
             if fixed is None or fixed == en_owner_text:
                 continue
             if en_owner not in declared:

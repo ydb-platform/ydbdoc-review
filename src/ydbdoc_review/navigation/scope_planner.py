@@ -117,6 +117,39 @@ def _new_internal_ascii_fragment_hrefs(
     return current - _internal_ascii_fragment_hrefs(base_text)
 
 
+def _is_include_repo_md(path: str) -> bool:
+    norm = path.replace("\\", "/")
+    return "/_includes/" in norm and norm.endswith(".md")
+
+
+def _include_fragment_owners_for_diff_pages(
+    diff_ru_md: set[str],
+    *,
+    read_ru: ReadFn,
+    read_en_base: ReadFn,
+    read_ru_base: ReadFn | None,  # unused; R-GL-6a ignores delta
+    docs_root: str,
+    redirects_yaml: str | None,
+) -> set[str]:
+    owners: set[str] = set()
+    for ru_md in sorted(diff_ru_md):
+        ru_text = read_ru(ru_md)
+        if not ru_text:
+            continue
+        for href in sorted(_internal_ascii_fragment_hrefs(ru_text)):
+            owner = _exact_ascii_fragment_owner_dependency(
+                ru_md,
+                href,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+                redirects_yaml=redirects_yaml,
+            )
+            if owner and _is_include_repo_md(owner):
+                owners.add(owner)
+    return owners
+
+
 def _exact_ascii_fragment_owner_dependency(
     ru_page_path: str,
     href: str,
@@ -628,6 +661,17 @@ def plan_translation_scope(
             if owner:
                 fragment_owners.add(owner)
                 doc_ru.add(owner)
+    include_owners = _include_fragment_owners_for_diff_pages(
+        diff_ru_md,
+        read_ru=read_ru,
+        read_en_base=read_en_base,
+        read_ru_base=read_ru_base,
+        docs_root=docs_root,
+        redirects_yaml=redirects_yaml,
+    )
+    for owner in sorted(include_owners):
+        fragment_owners.add(owner)
+        doc_ru.add(owner)
     # Feed owners only through the existing locale-include closure.
     queue = sorted(fragment_owners)
     while queue:

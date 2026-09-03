@@ -11,6 +11,7 @@ from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 from ydbdoc_review.validation.fragment_repair import (
     _page_declares_fragment,
     add_explicit_ascii_fragment_anchor,
+    declare_explicit_fragment_on_include_owner,
     fragment_declared_in_markdown,
     repair_en_fragments,
 )
@@ -25,6 +26,27 @@ def test_real_tip_connect_without_tls_heading_cannot_receive_anchor():
     assert add_explicit_ascii_fragment_anchor(en, ru, "tls") is None
     assert en == before
     assert "{#tls}" not in en
+
+
+def test_r_gl_6_include_fallback_appends_slug_match():
+    ru = (
+        "### Параметры аутентификации {#authentication}\n"
+        "### Параметры TLS-соединения {#tls}\n"
+    )
+    en = (
+        "### Authentication parameters {#authentication}\n"
+        "### TLS connection parameters\n"
+    )
+    assert declare_explicit_fragment_on_include_owner(en, ru, "tls") == (
+        "### Authentication parameters {#authentication}\n"
+        "### TLS connection parameters {#tls}\n"
+    )
+
+
+def test_r_gl_6_include_fallback_none_on_real_tip_misalign():
+    ru = "# CLI\n\n## Connect\n\n### TLS {#tls}\n\n### Other\n"
+    en = "# CLI\n\n## Connect\n\n### Other\n"
+    assert declare_explicit_fragment_on_include_owner(en, ru, "tls") is None
 
 
 def test_synthetic_aligned_heading_gets_exact_ascii_anchor_append_only():

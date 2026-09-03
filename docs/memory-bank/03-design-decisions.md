@@ -5684,4 +5684,18 @@ merge 🟢 when heuristics have no blockers. ``critic_execution_failed`` unchang
 ``test_reporting_builder.py``.
 
 
+### §6.246 Include fragment-owner enqueue + declare fallback (#52077 / R-GL-6, 2026-09-03)
+
+**Problem:** R-GL-4a prevented include owner translate for pre-existing
+``authentication.md`` → ``connect.md#tls``, but translating auth emitted ``#tls`` in EN;
+declare failed on misaligned tip ``_includes/connect.md``; ``en_link_target`` blocked publish.
+
+**Decision:** (1) R-GL-6a enqueue ``/_includes/`` owners for all outbound missing-fragment
+hrefs on diff pages (pre-existing or new). (2) R-GL-6b optional include declare fallback
+before gate.
+
+**Tests:** ``test_r_gl_6_*`` in ``test_nav_scope_planner.py``, ``test_fragment_repair.py``,
+``test_pr_51797_regression.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
