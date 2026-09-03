@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.247 production** — doc_verify run 33752767042 on #52077 emitted 3 blocking ASCII-fragment substitutions, including legacy-translit; false green eliminated |
 | 2026-09-03 | **§6.247** — hard exact-ASCII href parity before baseline grandfather; #52077 false-green regression (R-GL-7) |
 | 2026-09-03 | **§6.246** — include-only fragment-owner enqueue for pre-existing hrefs; include declare fallback (#52077 / R-GL-6) |
 | 2026-09-03 | **§6.245** — ``critic_model_refusal`` classified as info; merge 🟢 when heuristics clean (#52077 / R-GL-5) |

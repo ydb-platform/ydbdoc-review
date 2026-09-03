@@ -5723,5 +5723,12 @@ fragment resolution until the complete candidate overlay exists.
 path-only redirect, path+fragment change, legacy-translit ASCII, dead target, and non-ASCII
 dictionary/percent-encoded localization in ``tests/unit/test_href_parity.py``.
 
+**Production validation:** ``doc_verify`` run ``33752767042`` on #52077 at translation
+SHA ``e4d4486`` produced a red report with three blockers. Besides the two independently
+identified substitutions, it correctly exposed the previously grandfathered legacy-translit
+ASCII change ``#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov`` →
+``#enabling-the-node-authentication-and-authorization-mode``. The workflow failure is the
+intended fail-closed result, not an infrastructure error.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
