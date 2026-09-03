@@ -5812,4 +5812,31 @@ only when both decoded fragments are identical; it never authorizes fragment sub
 ``test_prefer_resolvable_en_hrefs_keeps_same_fragment_on_valid_tip_path``.
 
 
+### §6.251 Source-RU authority through post-translate link validation (#40385 / R-GL-11, 2026-09-03)
+
+**Production failure:** Retry run ``33765458147`` translated all nine queued pairs, including
+``auth_config.md``, but final validation repeated both missing fragments. The R-GL-10 tests
+covered scope and path preference as separate helpers, not their actual lifecycle. Two wiring
+gaps remained: normal LLM translation never called ``prefer_resolvable_en_hrefs``, and the
+post-apply declaration reader resolved RU files from ``merge_base_with`` (current upstream
+main) instead of the immutable source-PR ``ru_content_ref``. Therefore the valid tip
+``security_config.md#security-auth`` path was lost, and the declaration stage could not see
+the source RU ``{#certificate-auth-config}`` even though its EN owner had been translated.
+
+**Decision:** Apply same-fragment tip-path preservation after fragment repair for every normal
+EN LLM result that has an existing EN target. Keep exact fragment ownership unchanged. Pass
+``ru_content_ref`` into post-apply exact-fragment declaration. Its candidate reader uses the
+EN overlay over ``merge_base_with`` for EN paths, but reads RU paths from ``ru_content_ref``.
+This makes temporal authority explicit instead of depending on the checkout state.
+
+**Acceptance test:**
+``test_pr_40385_full_post_translate_link_contract_clears_auth_failures`` constructs distinct
+source and tip refs and executes ``load_pair_contents → run_pr_translation → apply → declare
+→ apply_en_link_target_checks``. It asserts the valid tip ``security_config.md#security-auth``
+survives, ``auth_config.md#certificate-auth-config`` remains exact, the EN owner gains the
+explicit certificate anchor, and final link validation returns no blockers. The test failed
+before the runtime change and passes afterward, so these defects are now caught locally rather
+than inferred from a remote translation run.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

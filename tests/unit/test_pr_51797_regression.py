@@ -21,6 +21,7 @@ from ydbdoc_review.navigation.scope_planner import (
     plan_translation_scope,
 )
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
+from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import FileTranslationResult
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
@@ -238,3 +239,85 @@ def test_pr_40385_real_tip_without_queued_translation_stays_blocked(tmp_path: Pa
     if broken:
         touched = TouchedPaths([], [])
     assert not touched  # production lifecycle cannot prepare, commit, or push
+
+
+def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_path: Path):
+    """R-GL-11: exercise the production post-translate lifecycle, not helpers alone."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+
+    auth_ru = (
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
+    )
+    auth_en_tip = (
+        "[Security](../reference/configuration/security_config.md#security-auth)\n"
+        "[Certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
+    )
+    auth_config_ru = (
+        "# auth_config\n\n"
+        "## Настройка аутентификации по сертификату {#certificate-auth-config}\n"
+    )
+    auth_config_en = "# auth_config\n\n## Certificate authentication configuration\n"
+    security_config_en = "# security_config\n\n## Authentication {#security-auth}\n"
+    for rel, text in (
+        (AUTH_RU, auth_ru),
+        (AUTH_EN, auth_en_tip),
+        ("ydb/docs/ru/core/reference/configuration/auth_config.md", auth_config_ru),
+        ("ydb/docs/en/core/reference/configuration/auth_config.md", auth_config_en),
+        ("ydb/docs/en/core/reference/configuration/security_config.md", security_config_en),
+    ):
+        _put(repo, rel, text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "source snapshot")
+    source_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "commit", "--allow-empty", "-qm", "upstream tip")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+
+    auth_pair = DocPair(ru_path=AUTH_RU, en_path=AUTH_EN, ru_changed=True)
+    owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    owner_en = owner_ru.replace("/ru/", "/en/")
+    owner_pair = DocPair(ru_path=owner_ru, en_path=owner_en, ru_changed=True)
+    contents = load_pair_contents(
+        str(repo), [auth_pair, owner_pair], merge_base_with=tip_ref,
+        ru_content_ref=source_ref,
+    )
+
+    def fake_result(_harness, state, _ctx):
+        final = auth_ru if state.file_path == AUTH_RU else auth_config_en
+        return FileTranslationResult(
+            file_path=state.file_path, final_text=final, segments_count=1,
+            verdict="ok", prompt_version="test",
+        )
+
+    client = MagicMock()
+    client.usage_tracker.records = []
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    final_tree = {
+        AUTH_EN: auth_en_tip,
+        owner_en: auth_config_en,
+        "ydb/docs/en/core/reference/configuration/security_config.md": security_config_en,
+    }
+    with patch("ydbdoc_review.harness.pair.FileHarness.run", fake_result):
+        result = run_pr_translation(
+            contents, client, load_glossary(), config=cfg,
+            docs_text_reader=final_tree.get,
+        )
+    touched = _apply_results_to_disk(str(repo), result, dry_run=False)
+    declared = _declare_exact_ascii_fragment_targets_after_apply(
+        str(repo), touched.written, dry_run=False,
+        merge_base_with=tip_ref, ru_content_ref=source_ref,
+    )
+    en_written = set(touched.written) | set(declared)
+
+    auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
+    owner_after = (repo / owner_en).read_text(encoding="utf-8")
+    assert "security_config.md#security-auth" in auth_after
+    assert "auth_config.md#certificate-auth-config" in auth_after
+    assert "{#certificate-auth-config}" in owner_after
+    assert apply_en_link_target_checks(
+        result, repo_path=str(repo), en_md_paths=en_written
+    ) == []

@@ -492,6 +492,7 @@ def _declare_exact_ascii_fragment_targets_after_apply(
     *,
     dry_run: bool,
     merge_base_with: str | None = None,
+    ru_content_ref: str | None = None,
 ) -> list[str]:
     """Declare new exact ASCII targets on unique aligned direct owners."""
     from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
@@ -504,7 +505,13 @@ def _declare_exact_ascii_fragment_targets_after_apply(
 
     overlay = {p.replace("\\", "/") for p in paths}
     if merge_base_with:
-        read_candidate = _final_tree_reader(repo_path, merge_base_with, overlay)
+        read_en_candidate = _final_tree_reader(repo_path, merge_base_with, overlay)
+
+        def read_candidate(path: str) -> str | None:
+            normalized = path.replace("\\", "/")
+            if ru_content_ref and "/docs/ru/" in normalized:
+                return read_text_at_ref(repo_path, ru_content_ref, normalized)
+            return read_en_candidate(normalized)
     else:
 
         def read_candidate(path: str) -> str | None:
@@ -1064,6 +1071,7 @@ def run_doc_translate(
             touched.written,
             dry_run=dry_run,
             merge_base_with=merge_base_with,
+            ru_content_ref=ru_ref,
         )
         if exact_declarations:
             touched = TouchedPaths(

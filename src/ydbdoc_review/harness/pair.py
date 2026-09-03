@@ -328,6 +328,21 @@ def run_pair_plan(
                     ru_source=content.ru_text,
                     en_baseline=content.en_text or content.en_base_text,
                 )
+                # A source PR can carry an ambient/broken RU path while tip EN
+                # already points at the valid owner of the same stable fragment.
+                # Apply the tip-preservation rule to normal LLM translations too,
+                # not only to the deterministic mirror-delta fast path.
+                if existing_target is not None:
+                    from ydbdoc_review.validation.href_parity import (
+                        prefer_resolvable_en_hrefs,
+                    )
+
+                    target_text = prefer_resolvable_en_hrefs(
+                        target_text,
+                        existing_target,
+                        en_page_path=plan.target_path,
+                        read_text=ctx.docs_text_reader,
+                    )
             target_text = repair_en_structure_from_ru(
                 target_text,
                 content.ru_text,

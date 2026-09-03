@@ -3,7 +3,7 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.250 — declared stable owners from all diff-page hrefs + same-fragment path fallback (#40385 / R-GL-10).
+**Current focus:** §6.251 — source-RU authority through the complete post-translate link lifecycle (#40385 / R-GL-11).
 
 Prior focus: §6.249 — source-owned stable fragments beat resolvable baseline hrefs (#52077 / R-GL-9).
 
@@ -28,6 +28,8 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.251** — full #40385 lifecycle regression; normal LLM output preserves same-fragment tip EN path, post-apply declaration reads RU owner from `ru_content_ref` rather than `origin/main` |
+| 2026-09-03 | **§6.250 production retry** — run 33765458147 translated all 9 pairs but repeated both missing fragments, proving helper-level scope/path tests did not cover post-translate temporal authority |
 | 2026-09-03 | **§6.250** — queue pre-existing declared stable-fragment owners; preserve resolvable tip EN path only with the identical fragment (#40385 / R-GL-10) |
 | 2026-09-03 | **§6.249 production retry** — translate run 33760371867 preserved stable fragments but blocked publish because `auth_config` owner was out of scope and ambient broken RU `#security-auth` lost its valid EN path |
 | 2026-09-03 | **§6.249** — stable source fragment cannot fall back to a merely resolvable baseline section; exact blockers use proven link-slot pairing (#52077 / R-GL-9) |
