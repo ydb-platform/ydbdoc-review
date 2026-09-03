@@ -505,6 +505,45 @@ def prefer_baseline_href_when_fragment_missing(
     current = list(_MD_LINK.finditer(en_text))
     baseline = list(_MD_LINK.finditer(en_baseline))
     replacements: list[tuple[int, int, str]] = []
+
+    def _proves_implicit_heading_localization(
+        source_fragment: str,
+        baseline_fragment: str,
+        source_abs: str,
+        baseline_abs: str,
+    ) -> bool:
+        if source_abs != baseline_abs or "/docs/en/" not in baseline_abs:
+            return False
+        en_target = read_text(baseline_abs)
+        ru_target = read_text(baseline_abs.replace("/docs/en/", "/docs/ru/", 1))
+        if not en_target or not ru_target:
+            return False
+        from ydbdoc_review.validation.yfm_anchor import (
+            _heading_plain_text,
+            _legacy_transliterated_slug,
+        )
+
+        ru_heads = list(_iter_headings(parse_markdown(ru_target).children))
+        en_heads = list(_iter_headings(parse_markdown(en_target).children))
+        if len(ru_heads) != len(en_heads) or any(
+            ru_h.level != en_h.level
+            for ru_h, en_h in zip(ru_heads, en_heads, strict=True)
+        ):
+            return False
+        matches = 0
+        for ru_h, en_h in zip(ru_heads, en_heads, strict=True):
+            if ru_h.anchor or en_h.anchor:
+                continue
+            ru_title = _heading_plain_text(ru_h)
+            if source_fragment not in {
+                diplodoc_auto_slug(ru_title),
+                _legacy_transliterated_slug(ru_title),
+            }:
+                continue
+            if baseline_fragment == diplodoc_auto_slug(_heading_plain_text(en_h)):
+                matches += 1
+        return matches == 1
+
     for index, match in enumerate(current):
         if index >= len(baseline):
             break
@@ -529,6 +568,12 @@ def prefer_baseline_href_when_fragment_missing(
         abs_path = _resolve_href_path(en_page_path, path_part)
         base_abs = _resolve_href_path(en_page_path, base_path)
         if abs_path is None or base_abs is None:
+            continue
+        if frag.isascii() and not _proves_implicit_heading_localization(
+            frag, base_frag, abs_path, base_abs
+        ):
+            # A resolvable baseline anchor is not evidence that it names the
+            # source-requested section. Stable ASCII fragments stay source-owned.
             continue
         target = read_text(abs_path)
         if target and fragment_declared_in_markdown(

@@ -420,6 +420,36 @@ def _exact_ascii_fragment_issues(
     cross-path slots positionally for localized paths and redirects. It deliberately
     precedes tip-baseline grandfathering.
     """
+    def _issue(source_href: str, target_href: str) -> str | None:
+        _, separator, source_fragment = source_href.partition("#")
+        _, _, target_fragment = target_href.partition("#")
+        if not separator or not source_fragment or not source_fragment.isascii():
+            return None
+        if source_fragment == target_fragment:
+            return None
+        if _proven_heading_auto_slug_remap(
+            source_fragment,
+            target_fragment,
+            target_href,
+            en_page_path=en_page_path,
+            docs_text_reader=docs_text_reader,
+        ):
+            return None
+        return (
+            "href_parity: exact ASCII fragment changed: "
+            f"`{source_href}` -> `{target_href}`"
+        )
+
+    # Equal document-wide link counts prove link-slot identity by position,
+    # including same-path links. This avoids pairing one EN auth_config href
+    # with the wrong one of multiple RU auth_config hrefs (#52077).
+    if len(source_hrefs) == len(target_hrefs):
+        return [
+            issue
+            for source_href, target_href in zip(source_hrefs, target_hrefs, strict=True)
+            if (issue := _issue(source_href, target_href)) is not None
+        ]
+
     source_by_path: dict[str, list[str]] = {}
     target_by_path: dict[str, list[str]] = {}
     for href in source_hrefs:
@@ -430,8 +460,6 @@ def _exact_ascii_fragment_issues(
     for source_path, path_sources in source_by_path.items():
         target_remaining = list(target_by_path.get(source_path, []))
         source_remaining: list[str] = []
-        # Ambient same-path extras must not shift pairing. Cancel exact href
-        # occurrences first, then compare only the unmatched occurrences.
         for source_href in path_sources:
             try:
                 exact_idx = target_remaining.index(source_href)
@@ -439,53 +467,13 @@ def _exact_ascii_fragment_issues(
                 source_remaining.append(source_href)
             else:
                 target_remaining.pop(exact_idx)
-        for source_href, target_href in zip(
-            source_remaining, target_remaining, strict=False
-        ):
-            _, separator, source_fragment = source_href.partition("#")
-            _, _, target_fragment = target_href.partition("#")
-            if not separator or not source_fragment or not source_fragment.isascii():
-                continue
-            if source_fragment == target_fragment:
-                continue
-            if _proven_heading_auto_slug_remap(
-                source_fragment,
-                target_fragment,
-                target_href,
-                en_page_path=en_page_path,
-                docs_text_reader=docs_text_reader,
-            ):
-                continue
-            issues.append(
-                "href_parity: exact ASCII fragment changed: "
-                f"`{source_href}` -> `{target_href}`"
-            )
-    # A path may legitimately localize or follow a redirect, but that does not
-    # permit changing its ASCII fragment.  Position is a safe cross-path proof
-    # only when both documents expose the same number of link slots; otherwise
-    # ambient extras could shift unrelated links into the same ordinal.
-    if len(source_hrefs) == len(target_hrefs):
-        for source_href, target_href in zip(source_hrefs, target_hrefs, strict=True):
-            source_path, separator, source_fragment = source_href.partition("#")
-            target_path, _, target_fragment = target_href.partition("#")
-            if source_path == target_path:
-                continue  # Already handled by the path-local pass above.
-            if not separator or not source_fragment or not source_fragment.isascii():
-                continue
-            if source_fragment == target_fragment:
-                continue
-            if _proven_heading_auto_slug_remap(
-                source_fragment,
-                target_fragment,
-                target_href,
-                en_page_path=en_page_path,
-                docs_text_reader=docs_text_reader,
-            ):
-                continue
-            issues.append(
-                "href_parity: exact ASCII fragment changed: "
-                f"`{source_href}` -> `{target_href}`"
-            )
+        # With unequal global counts, only a unique unmatched pair on the same
+        # path is safe. Multiple leftovers are ambiguous and fall through to
+        # the generic missing/extra contract report instead of being mispaired.
+        if len(source_remaining) == len(target_remaining) == 1:
+            issue = _issue(source_remaining[0], target_remaining[0])
+            if issue is not None:
+                issues.append(issue)
     return issues
 
 

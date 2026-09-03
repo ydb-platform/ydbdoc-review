@@ -400,6 +400,7 @@ def test_pr_52077_reports_both_ascii_fragment_changes():
     node_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
     node_ru = node_en.replace("/docs/en/", "/docs/ru/", 1)
     ru = (
+        "See [anonymous](../reference/configuration/auth_config.md#security-auth).\n"
         "See [nodes](../devops/concepts/node-authorization.md"
         "#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov).\n"
         "See [certificate](../reference/configuration/auth_config.md"
@@ -407,6 +408,7 @@ def test_pr_52077_reports_both_ascii_fragment_changes():
         "Connect with [TLS](../reference/ydb-cli/connect.md#tls).\n"
     )
     en = (
+        "See [anonymous](../reference/configuration/security_config.md#security-auth).\n"
         "See [nodes](../devops/concepts/node-authorization.md"
         "#enabling-the-node-authentication-and-authorization-mode).\n"
         "See [certificate](../reference/configuration/auth_config.md"

@@ -318,8 +318,8 @@ def test_pr_40385_system_views_localizes_to_declared_en_fragment():
     assert "system-views.md#users)" in fixed
 
 
-def test_pr_40385_prefers_valid_en_baseline_href_after_ru_restore():
-    """§6.227: do not keep a restored RU fragment absent from the EN target."""
+def test_pr_52077_does_not_replace_stable_ascii_with_valid_baseline_fragment():
+    """A resolvable baseline section cannot override source-owned semantics."""
     en_page = "ydb/docs/en/core/security/authentication.md"
     restored = (
         "Configure [authentication](../reference/configuration/auth_config.md#security-auth).\n"
@@ -340,7 +340,28 @@ def test_pr_40385_prefers_valid_en_baseline_href_after_ru_restore():
         en_baseline=baseline,
     )
 
-    assert fixed == baseline
+    assert fixed == restored
+
+
+def test_implicit_heading_slug_may_still_use_proven_localized_baseline():
+    en_page = "ydb/docs/en/core/security/authentication.md"
+    restored = "See [nodes](../devops/concepts/node-authorization.md#rezhim-autentifikacii).\n"
+    baseline = "See [nodes](../devops/concepts/node-authorization.md#authentication-mode).\n"
+    target_en = "ydb/docs/en/core/devops/concepts/node-authorization.md"
+    files = {
+        target_en: "## Authentication mode\n",
+        target_en.replace("/docs/en/", "/docs/ru/", 1): "## Режим аутентификации\n",
+    }
+
+    assert (
+        repair_en_fragments(
+            restored,
+            en_page_path=en_page,
+            read_text=files.get,
+            en_baseline=baseline,
+        )
+        == baseline
+    )
 
 
 def test_pr_50976_ascii_explicit_fragment_is_not_localized():

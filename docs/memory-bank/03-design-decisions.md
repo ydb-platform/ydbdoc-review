@@ -5751,5 +5751,42 @@ or multiple matching heading pairs fail closed. Baseline equality alone proves n
 ``test_ambiguous_heading_auto_slug_remap_stays_blocking``, and the #52077 combined
 fixture asserting exactly two blockers.
 
+**Production validation:** ``doc_verify`` run ``33758083415`` on #52077 at translation
+SHA ``e4d4486`` used action ``v0.1.0`` at ``c104fab`` and reported two blockers.
+The proven node-authorization legacy-translit → EN auto-slug mapping is absent from the
+report. The TLS message is the expected ``#tls`` → ``#activated-profile`` substitution.
+The auth-config message is path-locally mispaired as ``#security-auth`` →
+``#iam-auth-config`` because two unmatched RU hrefs share that path while EN has one;
+the underlying changed link slot is ``#certificate-auth-config`` → ``#iam-auth-config``.
+Thus R-GL-8's count/legacy criterion is satisfied, while diagnostic slot pairing remains
+a separate defect.
+
+
+### §6.249 Source fragment semantics before baseline resolvability (#52077 / R-GL-9, 2026-09-03)
+
+**Problem:** The §6.227 fallback treated a valid same-slot EN baseline href as a safe
+replacement whenever the restored RU fragment was absent from the EN target. On #52077
+this deterministically changed source-owned ``#certificate-auth-config`` and ``#tls`` to
+unrelated but resolvable ``#iam-auth-config`` and ``#activated-profile``. The first repair
+ran before translated dependency overlays were written; the late repair then accepted the
+wrong fragments because they resolved. The translator model did not choose these targets.
+
+Separately, exact-ASCII diagnostics grouped unmatched hrefs only by path. Two RU
+``auth_config.md`` hrefs and one EN href caused the EN ``#iam-auth-config`` occurrence to
+pair with the first RU leftover, ``#security-auth``, instead of its actual document slot
+``#certificate-auth-config``.
+
+**Decision:** Narrow §6.227 rather than adding a competing invariant. A stable ASCII
+source fragment is semantic ownership and cannot be replaced by another baseline fragment
+based only on target existence. Baseline localization remains allowed for the unique,
+aligned, anchorless heading mapping already defined by §6.248. Exact-ASCII validation uses
+document-order pairing whenever total link counts match. With unequal counts, path-local
+matching emits a specific substitution only for one unique unmatched pair; ambiguity falls
+through to the generic missing/extra contract report.
+
+**Tests:** ``test_pr_52077_does_not_replace_stable_ascii_with_valid_baseline_fragment``,
+``test_implicit_heading_slug_may_still_use_proven_localized_baseline``, and the expanded
+``test_pr_52077_reports_both_ascii_fragment_changes`` production-shape fixture.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)
