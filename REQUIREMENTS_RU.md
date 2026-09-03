@@ -103,6 +103,22 @@
 - нарушение структуры, ссылок, якорей или front matter по §8–§9;
 - при наличии настроенного glossary — грубое нарушение обязательных терминов glossary помечается красным или блокирует публикацию так же, как прочие RED критика.
 
+**R-GL-5a** — `critic_model_refusal` не блокирует merge при чистых эвристиках.
+
+Когда LLM-критик возвращает safety/content-policy отказ (§6.235, `is_model_refusal_text`), а детерминированные эвристики файла **не** содержат blocking-сообщений:
+
+1. Файловый `verdict` остаётся **`ok`** (не `warnings`).
+2. PR-level рекомендация merge (`_merge_recommendation`) — **🟢**, если нет других `warn`/`blocked` файлов, completeness gaps и nav blockers.
+3. Уведомление об отказе критика остаётся в отчёте как **информационное** (не в списке «Что исправить»).
+
+**R-GL-5a.1** — Классификация finalize-warning `critic_model_refusal:` в `_classify_heuristic` — bucket **`info`**, не `warnings` (аналог `glossary_verify_critic_skipped:`).
+
+**R-GL-5a.2** — Текст для ревьюера сохраняется: `humanize_heuristic("critic_model_refusal: …")` и `format_critic_reviewer_detail(category="critic_model_refusal", …)` без изменения смысла §6.238.
+
+**R-GL-5a.3** — Отчёт выводит refusal в секции **«Справка (не блокирует merge EN)»** (`heuristic_info`), с humanized RU текстом.
+
+**R-GL-5b** — Поведение **`critic_execution_failed`** (пустой JSON после retries, невалидный JSON после repair+fallback, иные технические сбои критика) **не меняется**: `verdict=blocked`, merge 🔴, сообщение §6.238. Safety refusal и execution failure — **разные** категории; R-GL-5 не сливает их.
+
 ## 8. Ссылки и якоря
 
 - Внутренние пути и фрагменты ссылок должны сохраняться без потери.
@@ -171,6 +187,12 @@
 - Внутренние имена классов, плейсхолдеров и служебные маркеры не заменяют пользовательское объяснение.
 - Для изменений после старого pull request показываются старый и текущий идентификаторы содержимого и затронувшие коммиты.
 
+**R-GL-5c** — При единственном замечании `critic_model_refusal` и 🟢 эвристиках:
+
+- Файл в списке **«Без замечаний»** (🟢), не в **«Что исправить»**.
+- Строка рекомендации: **«можно мержить»**, не «требует правок перед merge».
+- Информация об отказе критика видна в **«Справка (не блокирует merge EN)»**.
+
 ## 13. Запрещённая инфраструктура
 
 В конвейере не должно быть:
@@ -207,6 +229,7 @@
 - `build-docs` и `doc_verify` зелёные на одном SHA либо явно зафиксирован статус ожидания CI без ложного success при отсутствии PR;
 - полный набор unit-тестов не имеет падений.
 - **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
+- **R-GL-5:** fixture `critic_model_refusal` finalize warning + пустые `heuristic_blocking` → `compose_file_verdict` = `ok`; `_file_has_open_issues` = `False` для того же fixture; `build_full_report` / `_merge_recommendation`: рекомендация 🟢 «можно мержить»; refusal в info-секции; regression: `critic_execution_failed` по-прежнему 🔴; `test_run_critic_model_refusal_falls_back_to_heuristics_only` зелёный; `test_merge_recommendation_green_when_critic_warnings_but_no_open_issues` зелёный.
 
 ## 15. Работа команды
 

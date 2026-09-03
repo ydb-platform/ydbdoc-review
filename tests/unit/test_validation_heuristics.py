@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from ydbdoc_review.pipeline.qa import compose_file_verdict
 from ydbdoc_review.validation.heuristics import (
+    ClassifiedHeuristics,
+    _classify_heuristic,
     bump_verdict_for_blocking_heuristics,
     bump_verdict_for_heuristics,
     check_broken_inline_code_markup,
@@ -461,4 +464,25 @@ def test_md_link_parity_ignores_stripped_basenames():
             ignore_basenames={"table.md", "create-resource-pool-classifier.md"},
         )
         == []
+    )
+
+
+def test_r_gl_5_critic_model_refusal_classified_as_info():
+    msg = "critic_model_refusal: model declined review; heuristics only on verify"
+    assert _classify_heuristic(msg) == "info"
+
+
+def test_r_gl_5_compose_file_verdict_ok_when_only_refusal_info():
+    refusal_msg = (
+        "critic_model_refusal: model declined review; heuristics only on verify"
+    )
+    heuristics = ClassifiedHeuristics(info=[refusal_msg], warnings=[], blocking=[])
+    assert (
+        compose_file_verdict(
+            critic_verdict="ok",
+            alignment_error=None,
+            heuristics=heuristics,
+            manual_actions=False,
+        )
+        == "ok"
     )

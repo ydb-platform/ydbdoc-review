@@ -5670,4 +5670,18 @@ never split oversized segments.
 ``test_translator.py``.
 
 
+### §6.245 Critic safety refusal must not yellow merge when heuristics clean (#52077 / R-GL-5, 2026-09-03)
+
+**Problem:** §6.235 routed YandexGPT safety refusal to heuristics-only verify, but
+``critic_model_refusal`` finalize warning was classified as ``warnings``, bumping file
+verdict and PR merge recommendation to 🟡 even with zero heuristic blockers
+(``auth_config.md`` on #52077).
+
+**Decision:** Classify ``critic_model_refusal:`` as ``info``; informational report only;
+merge 🟢 when heuristics have no blockers. ``critic_execution_failed`` unchanged.
+
+**Tests:** ``test_r_gl_5_*`` in ``test_validation_heuristics.py``,
+``test_reporting_builder.py``.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -3,9 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-03
-**Current focus:** §6.244 — fragment-owner href delta + output-aware translate batching (#52077 / R-GL-4).
+**Current focus:** §6.245 — critic safety refusal informational when heuristics clean (#52077 / R-GL-5).
 
-Prior focus: §6.243 — tip-satisfied inbound fragments + readable completeness QA (#52077 / R-GL-3).
+Prior focus: §6.244 — fragment-owner href delta + output-aware translate batching (#52077 / R-GL-4).
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-03 | **§6.245** — ``critic_model_refusal`` classified as info; merge 🟢 when heuristics clean (#52077 / R-GL-5) |
 | 2026-09-03 | **§6.244** — fragment-owner href delta vs ``read_ru_base``; output-aware translate batching + length resplit (#52077 / R-GL-4) |
 | 2026-09-03 | **§6.243** — tip EN covering inbound exact-ASCII frags satisfies scope gap; clearer completeness QA (#52077 / R-GL-3) |
 | 2026-09-03 | **§6.242** — tip ``redirects.yaml`` for tombstone skip; fragment owners follow tip ``from``→``to`` (#40385 / R-GL-2) |

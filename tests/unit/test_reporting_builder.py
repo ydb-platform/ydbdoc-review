@@ -18,6 +18,7 @@ from ydbdoc_review.reporting.builder import (
     build_full_report,
     build_source_pr_comment,
 )
+from ydbdoc_review.reporting.heuristic_messages import humanize_heuristic
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
@@ -602,6 +603,106 @@ def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
     )
     assert "можно мержить" in body
     assert "требует правок" not in body
+
+
+def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
+    """R-GL-5: safety refusal in info must not yellow merge when heuristics clean."""
+    cfg = _cfg()
+    en_path = "ydb/docs/en/core/reference/configuration/auth_config.md"
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+        en_path=en_path,
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    refusal_raw = (
+        "critic_model_refusal: model declined review; heuristics only on verify"
+    )
+    refusal_humanized = humanize_heuristic(refusal_raw)
+    fr = FileTranslationResult(
+        file_path=en_path,
+        final_text="Auth config EN",
+        segments_count=1,
+        verdict="ok",
+        critic_initial=CriticResponse(
+            verdict="ok",
+            issues=[
+                CriticIssueOut(
+                    segment_id="s0001",
+                    severity="warning",
+                    category="critic_model_refusal",
+                    comment=(
+                        "Model refused critic review; file verified with heuristics only."
+                    ),
+                    suggested_text=None,
+                )
+            ],
+        ),
+        critic_unresolved=CriticResponse(verdict="ok", issues=[]),
+        heuristic_blocking=[],
+        heuristic_warnings=[],
+        heuristic_info=[refusal_humanized],
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "можно мержить" in body
+    assert "требует правок" not in body
+    assert "Справка (не блокирует merge EN)" in body
+    assert en_path in body
+    assert "отказала" in body
+
+
+def test_r_gl_5_refusal_still_blocks_when_heuristic_blocking_present():
+    """R-GL-5: refusal info does not override real blocking heuristics."""
+    cfg = _cfg()
+    en_path = "ydb/docs/en/core/reference/configuration/auth_config.md"
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+        en_path=en_path,
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    refusal_raw = (
+        "critic_model_refusal: model declined review; heuristics only on verify"
+    )
+    fr = FileTranslationResult(
+        file_path=en_path,
+        final_text="Auth config EN",
+        segments_count=1,
+        verdict="blocked",
+        critic_initial=CriticResponse(verdict="ok", issues=[]),
+        critic_unresolved=CriticResponse(verdict="ok", issues=[]),
+        heuristic_blocking=["href_parity: missing link target"],
+        heuristic_warnings=[],
+        heuristic_info=[humanize_heuristic(refusal_raw)],
+        prompt_version="v1",
+    )
+    body = build_full_report(
+        PRTranslationResult(pair_results=[PairRunResult(plan=plan, file_result=fr)]),
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    assert "не мержить" in body or "требует правок" in body
+    assert "🔴" in body or "🟡" in body
+    assert "можно мержить" not in body
 
 
 def test_merge_recommendation_green_when_stale_blocked_verdict_all_files_ok():

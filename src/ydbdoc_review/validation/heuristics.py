@@ -437,7 +437,7 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
     if message.startswith("glossary_verify_critic_skipped:"):
         return "info"
     if message.startswith("critic_model_refusal:"):
-        return "warnings"
+        return "info"  # was "warnings"; §6.245 / R-GL-5a.1
     if message.startswith("include_parity_repaired:"):
         return "info"
     if message.startswith("strip_unreachable_links:"):
