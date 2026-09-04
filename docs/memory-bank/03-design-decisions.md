@@ -5866,4 +5866,38 @@ its EN owner, never declares ``security-auth`` there, and returns an empty final
 Negative tests prove all ambiguous cases remain blockers.
 
 
+### §6.253 Publication eligibility is separate from merge readiness (#40385 / R-GL-12..13, 2026-09-04)
+
+**Problem:** The final `en_link_target` gate converted a broken-link path into
+`completeness_gaps` and then replaced `touched` with an empty set. This discarded a fully
+assembled paid candidate even though the file existed and only needed manual link repair.
+It also lost blockers for redirect/declaration impact pages with no `PairRunResult`. At the
+same time, publishing every blocked result would expose incomplete or structurally corrupt
+artifacts, and an exit-zero translate job could falsely read as merge success.
+
+**Decision:** `PRTranslationResult` carries a typed `PublicationImpact` with four ordered
+outcomes: `WITHHOLD_INCOMPLETE`, `WITHHOLD_UNSAFE`, `PUBLISH_RED`, and `PUBLISH_NORMAL`.
+Completeness and safety veto publication. Pair errors, missing outputs, source-retaining
+soft keeps/manual actions, alignment failures, link-contract failures, protect-marker
+leakage, and blocked mandatory navigation stay withheld. The only newly publishable RED
+class is a complete, structurally safe candidate whose final-tree blocker is typed
+`en_link_target`. Those findings live in PR-level `final_tree_blockers`, so an impact path
+cannot disappear merely because no pair result owns it.
+
+`PUBLISH_RED` keeps the candidate paths through branch preparation, commit and push. A new
+translation PR is opened with `draft=true`; a matching ready PR is converted to draft via
+the narrow GitHub GraphQL mutation. PR body and full report say `QA RED, do not merge`, the
+source summary and CLI say `published_red`, and the ops ledger stores `published_red`.
+The source workflow may exit zero only after a translation PR exists, so downstream docs CI
+can run. Draft plus RED QA is merge authority, while a missing PR remains a hard failure.
+
+**Tests:** `tests/unit/test_publication_policy.py` calls top-level `run_doc_translate()`
+with external GitHub/LLM operations mocked but a real temporary git repository and production
+final-tree readers. It covers a pair-owned broken link, a declaration impact path without a
+pair, an existing ready PR, the incomplete/unsafe matrix, clean behavior, source/ops status,
+and nonzero-exit semantics. `tests/unit/test_github_client.py` verifies draft creation and
+ready-to-draft GraphQL payloads; `tests/unit/test_cli.py` rejects a green `Done` label for
+published RED.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

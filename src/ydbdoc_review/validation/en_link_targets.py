@@ -183,7 +183,7 @@ def apply_en_link_target_checks(
     §6.229 tip+overlay reader on merged-PR checkouts.
     """
     from ydbdoc_review.github.git_ops import read_text
-    from ydbdoc_review.pipeline.types import FileTranslationResult
+    from ydbdoc_review.pipeline.types import FileTranslationResult, FinalTreeBlocker
     from ydbdoc_review.validation.heuristics import bump_verdict_for_blocking_heuristics
 
     def _read(path: str) -> str | None:
@@ -220,6 +220,14 @@ def apply_en_link_target_checks(
         if not msgs:
             continue
         broken.append(path)
+        for message in msgs:
+            blocker = FinalTreeBlocker(
+                path=path,
+                code="en_link_target",
+                message=message,
+            )
+            if blocker not in result.final_tree_blockers:
+                result.final_tree_blockers.append(blocker)
         runs = runs_by_path.get(path, [])
         if not runs:
             continue

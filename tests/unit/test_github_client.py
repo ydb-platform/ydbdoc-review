@@ -67,6 +67,90 @@ def test_create_pull_idempotent(mock_request):
 
 
 @patch("ydbdoc_review.github.client.requests.request")
+def test_create_pull_can_open_draft(mock_request):
+    mock_request.side_effect = [
+        MagicMock(status_code=200, content=b"[]", json=lambda: []),
+        MagicMock(
+            status_code=201,
+            content=b'{"html_url": "https://github.com/o/r/pull/9", "number": 9}',
+            json=lambda: {"html_url": "https://github.com/o/r/pull/9", "number": 9},
+        ),
+    ]
+    client = GitHubClient("tok")
+
+    opened = client.create_pull(
+        "o", "r", title="t", head="h", base="b", body="body", draft=True
+    )
+
+    assert opened == ("https://github.com/o/r/pull/9", 9, True)
+    assert mock_request.call_args.kwargs["json"]["draft"] is True
+
+
+@patch("ydbdoc_review.github.client.requests.request")
+def test_convert_ready_pull_to_draft(mock_request):
+    mock_request.side_effect = [
+        MagicMock(
+            status_code=200,
+            content=b'{"draft": false, "node_id": "PR_node"}',
+            json=lambda: {"draft": False, "node_id": "PR_node"},
+        ),
+        MagicMock(
+            status_code=200,
+            content=b"{}",
+            json=lambda: {
+                "data": {
+                    "convertPullRequestToDraft": {"pullRequest": {"isDraft": True}}
+                }
+            },
+        ),
+    ]
+    client = GitHubClient("tok")
+
+    assert client.convert_pull_to_draft("o", "r", 9) is True
+    method, url = mock_request.call_args.args[:2]
+    assert method == "POST"
+    assert url == "https://api.github.com/graphql"
+    assert mock_request.call_args.kwargs["json"]["variables"] == {"id": "PR_node"}
+
+
+@patch("ydbdoc_review.github.client.requests.request")
+def test_convert_ready_pull_to_draft_rejects_unconfirmed_conversion(mock_request):
+    mock_request.side_effect = [
+        MagicMock(
+            status_code=200,
+            content=b'{"draft": false, "node_id": "PR_node"}',
+            json=lambda: {"draft": False, "node_id": "PR_node"},
+        ),
+        MagicMock(
+            status_code=200,
+            content=b'{"errors": [{"message": "forbidden"}]}',
+            json=lambda: {"errors": [{"message": "forbidden"}]},
+        ),
+    ]
+    client = GitHubClient("tok")
+
+    with pytest.raises(GitHubAPIError, match="did not convert"):
+        client.convert_pull_to_draft("o", "r", 9)
+
+
+@patch("ydbdoc_review.github.client.requests.request")
+def test_update_pull_body(mock_request):
+    mock_request.return_value = MagicMock(
+        status_code=200,
+        content=b'{"number": 9}',
+        json=lambda: {"number": 9},
+    )
+    client = GitHubClient("tok")
+
+    client.update_pull_body("o", "r", 9, "QA RED")
+
+    method, url = mock_request.call_args.args[:2]
+    assert method == "PATCH"
+    assert url.endswith("/repos/o/r/pulls/9")
+    assert mock_request.call_args.kwargs["json"] == {"body": "QA RED"}
+
+
+@patch("ydbdoc_review.github.client.requests.request")
 def test_add_issue_labels(mock_request):
     mock_request.return_value = MagicMock(status_code=200, content=b"[]", json=lambda: [])
     client = GitHubClient("tok")
@@ -136,4 +220,3 @@ def test_iter_issue_comments(mock_request):
     client = GitHubClient("tok")
     comments = list(client.iter_issue_comments("o", "r", 2))
     assert len(comments) == 1
-

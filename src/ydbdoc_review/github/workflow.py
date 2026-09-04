@@ -101,8 +101,14 @@ from ydbdoc_review.pipeline.pairs import (
     counterpart,
     filter_translation_pr_verify_scope,
 )
+from ydbdoc_review.pipeline.publication import refresh_publication_impact
 from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
-from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
+from ydbdoc_review.pipeline.types import (
+    FinalTreeBlocker,
+    PairRunResult,
+    PRTranslationResult,
+    PublicationImpact,
+)
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_commit_message,
@@ -713,6 +719,13 @@ def _pr_result_has_blockers(result: PRTranslationResult) -> bool:
     return result_has_blocking_findings(result)
 
 
+def _publication_withheld(result: PRTranslationResult) -> bool:
+    return result.publication_impact in {
+        PublicationImpact.WITHHOLD_INCOMPLETE,
+        PublicationImpact.WITHHOLD_UNSAFE,
+    }
+
+
 def _persist_continuability(
     repo_path: str,
     *,
@@ -1086,9 +1099,11 @@ def run_doc_translate(
         )
     job.pr_result = pr_result
 
-    if pr_result.completeness_gaps:
+    refresh_publication_impact(pr_result)
+    if _publication_withheld(pr_result):
         logger.error(
-            "Completeness gaps — skip commit/push for PR #%s: %s",
+            "Publication withheld (%s) — skip commit/push for PR #%s: gaps=%s",
+            pr_result.publication_impact.value,
             pr_number,
             pr_result.completeness_gaps,
         )
@@ -1217,7 +1232,7 @@ def run_doc_translate(
         )
         if broken_links:
             logger.error(
-                "Broken EN link targets after apply — treat as completeness gaps "
+                "Broken EN link targets after apply — publish candidate as draft/RED "
                 "for PR #%s: %s",
                 pr_number,
                 broken_links,
@@ -1232,10 +1247,7 @@ def run_doc_translate(
                     for msg in fr.heuristic_blocking:
                         if msg.startswith("en_link_target:"):
                             logger.error("%s", msg)
-            pr_result.completeness_gaps = list(
-                dict.fromkeys([*pr_result.completeness_gaps, *broken_links])
-            )
-            touched = TouchedPaths([], [])
+        refresh_publication_impact(pr_result)
 
     committed = pushed = False
     if touched and not dry_run and not no_commit:
@@ -1286,7 +1298,12 @@ def run_doc_translate(
     verify_result: PRTranslationResult | None = None
     if pushed:
         title = f"Auto-translate docs from PR #{pr_number}"
-        body = build_translation_pr_body(pr_number, github_repo)
+        publish_red = pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+        body = build_translation_pr_body(
+            pr_number,
+            github_repo,
+            publication_result=pr_result,
+        )
         opened = gh.create_pull(
             owner,
             repo,
@@ -1294,11 +1311,16 @@ def run_doc_translate(
             head=branch,
             base=translation_pr_base(ctx),
             body=body,
+            draft=publish_red,
         )
         if opened:
             tr_pr_url, tr_pr_number, created = opened
             job.translation_pr_url = tr_pr_url
             job.translation_pr_number = tr_pr_number
+            if not created:
+                gh.update_pull_body(owner, repo, tr_pr_number, body)
+            if publish_red and not created:
+                gh.convert_pull_to_draft(owner, repo, tr_pr_number)
             if created:
                 try:
                     gh.add_issue_labels(owner, repo, tr_pr_number, ["documentation"])
@@ -1325,6 +1347,7 @@ def run_doc_translate(
             no_commit=no_commit,
             config=cfg,
             inherited_completeness_gaps=pr_result.completeness_gaps,
+            inherited_final_tree_blockers=pr_result.final_tree_blockers,
             continue_feedback=effective_continue_feedback,
             skip_ops_gates=True,
         )
@@ -1355,9 +1378,15 @@ def run_doc_translate(
 
     if ops_ctx is not None:
         usage = client.usage_tracker
+        if job_requires_nonzero_exit(job, no_commit=no_commit):
+            ops_status = "failed"
+        elif pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
+            ops_status = "published_red"
+        else:
+            ops_status = "ok"
         finish_ops_job(
             ops_ctx,
-            status="ok" if not pr_result.failed_count else "failed",
+            status=ops_status,
             cost_rub=usage.estimate_cost_rub(),
             input_tokens=sum((r.input_tokens or 0) for r in usage.records if r.success),
             output_tokens=sum((r.output_tokens or 0) for r in usage.records if r.success),
@@ -1377,6 +1406,7 @@ def run_doc_verify(
     no_commit: bool = False,
     config: Config | None = None,
     inherited_completeness_gaps: list[str] | None = None,
+    inherited_final_tree_blockers: list[FinalTreeBlocker] | None = None,
     continue_feedback: str | None = None,
     skip_ops_gates: bool = False,
     ops_mode: str = "verify",
@@ -1792,6 +1822,10 @@ def run_doc_verify(
             dict.fromkeys([*inherited_completeness_gaps, *pr_result.completeness_gaps])
         )
         pr_result.completeness_gaps = merged_gaps
+    if inherited_final_tree_blockers:
+        pr_result.final_tree_blockers = list(
+            dict.fromkeys([*inherited_final_tree_blockers, *pr_result.final_tree_blockers])
+        )
     if translation_scope_missing:
         logger.error(
             "Translation PR #%s is missing source-scope EN paths: %s",
@@ -1801,6 +1835,8 @@ def run_doc_verify(
         pr_result.completeness_gaps = list(
             dict.fromkeys([*pr_result.completeness_gaps, *translation_scope_missing])
         )
+
+    refresh_publication_impact(pr_result)
 
     job.pr_result = pr_result
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
@@ -13,6 +13,7 @@ from ydbdoc_review.pipeline.types import (
     NavigationRunResult,
     PairRunResult,
     PRTranslationResult,
+    PublicationImpact,
 )
 from ydbdoc_review.reporting.heuristic_context import (
     format_heuristic_location,
@@ -50,7 +51,7 @@ class ReportMeta:
 
     @property
     def ts_label(self) -> str:
-        ts = self.timestamp or datetime.now(timezone.utc)
+        ts = self.timestamp or datetime.now(UTC)
         return ts.strftime("%Y-%m-%d %H:%M UTC")
 
 
@@ -95,7 +96,7 @@ def result_has_blocking_findings(result: PRTranslationResult) -> bool:
     Ignores stale ``file_result.verdict == "blocked"`` / nav ``verdict == "blocked"``
     when the report would list no open findings (#52055 false-RED).
     """
-    if result.completeness_gaps or result.failed_count:
+    if result.completeness_gaps or result.final_tree_blockers or result.failed_count:
         return True
     if any(_file_has_blocking_findings(run) for run in result.pair_results):
         return True
@@ -111,6 +112,8 @@ def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
             f"не мержить — в переводном PR нет {n} ожидаемых EN-путей "
             "(см. блок ниже)",
         )
+    if result.final_tree_blockers:
+        return "🔴", "не мержить — QA RED, есть блокеры финального дерева"
     ok, warn, blocked = _count_verdicts(result)
     nav_blocked = any(
         _nav_has_blocking_findings(n) for n in result.navigation_results
@@ -649,7 +652,7 @@ def build_commit_message(
             if r.file_result
         )
         critic_model = config.llm.models.critic.primary
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         return (
             f"Apply critic fixes from doc_verify run on {ts}\n\n"
             f"Critic: {critic_model}\n"
@@ -686,13 +689,35 @@ def build_commit_message(
     return "\n".join(lines)
 
 
-def build_translation_pr_body(source_pr: int, source_repo: str) -> str:
+def build_translation_pr_body(
+    source_pr: int,
+    source_repo: str,
+    *,
+    publication_result: PRTranslationResult | None = None,
+) -> str:
+    red = bool(
+        publication_result
+        and publication_result.publication_impact == PublicationImpact.PUBLISH_RED
+    )
+    banner = ""
+    blockers = ""
+    if red and publication_result is not None:
+        banner = (
+            "> [!CAUTION]\n"
+            "> **QA RED, do not merge.** Candidate опубликован для ручного исправления.\n\n"
+        )
+        blockers = "\n\n**Final-tree blockers:**\n\n" + "\n".join(
+            f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}"
+            for blocker in publication_result.final_tree_blockers
+        )
     return (
+        f"{banner}"
         f"Auto-generated translation for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
         f"Branch: `ydbdoc-review/pr-{source_pr}`\n\n"
         "QA (`doc_verify`) runs inline in the same `doc_translate` CI job; "
         "re-run manually via the **`doc_verify`** label (`ydbdoc-verify.yml`)."
+        f"{blockers}"
     )
 
 
@@ -807,6 +832,7 @@ def build_source_pr_comment(
     """Short summary comment for the source PR after ``doc_translate``."""
     total, new_count, updated_count = _file_translation_counts(result)
     bilingual_skip = _bilingual_skip_count(result)
+    published_red = result.publication_impact == PublicationImpact.PUBLISH_RED
 
     if total == 0 and bilingual_skip and translation_pr_number is None:
         pairs_label = (
@@ -822,22 +848,35 @@ def build_source_pr_comment(
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
         )
 
-    if result.completeness_gaps and translation_pr_number is None:
+    if (
+        result.completeness_gaps
+        or result.publication_impact
+        in {PublicationImpact.WITHHOLD_INCOMPLETE, PublicationImpact.WITHHOLD_UNSAFE}
+        or (published_red and translation_pr_number is None)
+        or (translation_pr_number is None and committed is True)
+    ):
+        failure_label = (
+            "completeness gaps"
+            if result.completeness_gaps
+            else "publication failed"
+        )
         body = (
             "🤖 **ydbdoc-review** — translation PR **не создан**\n\n"
-            "Push заблокирован: не все EN-зеркала source PR переведены "
-            "(§6.80 completeness gate).\n\n"
+            "Publication заблокирована: candidate incomplete/unsafe или RED artifact "
+            "не удалось опубликовать (§6.80 completeness gate, R-GL-12).\n\n"
             "Автоперевод **работает** для обычных пар `docs/ru/…` ↔ `docs/en/…`. "
             "Ниже — файлы, которые pipeline не смог довести до EN в этом прогоне.\n\n"
             "| | |\n"
             "|---|---|\n"
             f"| Translation PR | — |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
-            "| Статус | 🔴 не мержить — completeness gaps |\n\n"
+            f"| Статус | 🔴 не мержить — {failure_label} |\n\n"
             "**Не переведены:**\n\n"
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
+        for blocker in result.final_tree_blockers:
+            body += f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}\n"
         errors = [r for r in result.pair_results if r.error]
         if errors:
             body += "\n**Ошибки pipeline:**\n\n"
@@ -906,7 +945,9 @@ def build_source_pr_comment(
 
     qa_line = ""
     if translation_pr_number:
-        if result.completeness_gaps:
+        if published_red:
+            qa_line = "| Статус QA | 🔴 published_red, не мержить |\n"
+        elif result.completeness_gaps:
             n = len(result.completeness_gaps)
             qa_line = (
                 f"| Статус QA | 🔴 не мержить — в переводном PR нет {n} "
@@ -916,8 +957,13 @@ def build_source_pr_comment(
             qa_emoji, qa_label = _merge_recommendation(verify_result)
             qa_line = f"| Статус QA | {qa_emoji} {qa_label} |\n"
 
+    headline = (
+        "🤖 **ydbdoc-review** — published_red, QA RED, не мержить"
+        if published_red
+        else "🤖 **ydbdoc-review** — перевод готов"
+    )
     body = (
-        "🤖 **ydbdoc-review** — перевод готов\n\n"
+        f"{headline}\n\n"
         "| | |\n"
         "|---|---|\n"
         f"| Translation PR | {tr_line} |\n"
@@ -991,6 +1037,17 @@ def build_full_report(
                 f"{i}. {format_completeness_gap_item(path)}\n\n"
             )
 
+    final_tree_section = ""
+    if result.final_tree_blockers:
+        final_tree_section = (
+            "## QA RED, do not merge: блокеры финального дерева\n\n"
+            "Candidate опубликован для ручного исправления, но merge запрещён.\n\n"
+        )
+        for i, blocker in enumerate(result.final_tree_blockers, start=1):
+            final_tree_section += (
+                f"{i}. `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}\n\n"
+            )
+
     yellow_section = ""
     if result.yellow_warnings:
         yellow_section = (
@@ -1006,6 +1063,7 @@ def build_full_report(
             body = (
                 header
                 + completeness_section
+                + final_tree_section
                 + yellow_section
                 + "## Ошибки pipeline\n\n"
             )
@@ -1015,20 +1073,25 @@ def build_full_report(
                 body += f"- `{nav.en_path}`: {nav.error}\n"
             body += f"\n---\n\nGenerated by {action_release_label()}\n"
             return body
-        if completeness_section or yellow_section:
+        if completeness_section or final_tree_section or yellow_section:
             usage_block = _usage_section(config, result, usage)
-            body = header + completeness_section + yellow_section
+            body = header + completeness_section + final_tree_section + yellow_section
             if usage_block:
                 body += usage_block
             return body + f"---\n\nGenerated by {action_release_label()}\n"
         return header + "Нет обработанных файлов.\n"
 
-    body = header + completeness_section + yellow_section
+    body = header + completeness_section + final_tree_section + yellow_section
     if not problem_runs and not nav_problems:
         if completeness_section:
             body += (
                 "В уже обработанных файлах открытых замечаний критика нет — "
                 "блокер только в completeness выше.\n\n"
+            )
+        elif final_tree_section:
+            body += (
+                "В файловых результатах открытых замечаний критика нет — "
+                "merge блокируют проверки финального дерева выше.\n\n"
             )
         else:
             body += "По всем файлам открытых замечаний нет.\n\n"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Literal
 
 from ydbdoc_review.llm.usage import UsageTracker
@@ -13,13 +14,33 @@ from ydbdoc_review.validation.link_contract import LinkContractIssue
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
 
+
+class PublicationImpact(StrEnum):
+    """Whether a completed candidate may be published and how it must be signalled."""
+
+    WITHHOLD_INCOMPLETE = "WITHHOLD_INCOMPLETE"
+    WITHHOLD_UNSAFE = "WITHHOLD_UNSAFE"
+    PUBLISH_RED = "PUBLISH_RED"
+    PUBLISH_NORMAL = "PUBLISH_NORMAL"
+
+
+@dataclass(frozen=True)
+class FinalTreeBlocker:
+    """PR-level deterministic blocker found against the assembled final tree."""
+
+    path: str
+    code: Literal["en_link_target"]
+    message: str
+
 __all__ = [
-    "ManualAction",
     "FileTranslationResult",
     "FileVerdict",
+    "FinalTreeBlocker",
+    "ManualAction",
     "NavigationRunResult",
-    "PairRunResult",
     "PRTranslationResult",
+    "PairRunResult",
+    "PublicationImpact",
 ]
 
 
@@ -104,6 +125,8 @@ class PRTranslationResult:
     pair_results: list[PairRunResult] = field(default_factory=list)
     navigation_results: list[NavigationRunResult] = field(default_factory=list)
     completeness_gaps: list[str] = field(default_factory=list)
+    final_tree_blockers: list[FinalTreeBlocker] = field(default_factory=list)
+    publication_impact: PublicationImpact = PublicationImpact.PUBLISH_NORMAL
     # REQUIREMENTS §10/§12 tip-newer overwrite notices (yellow; never blockers).
     yellow_warnings: list[str] = field(default_factory=list)
 

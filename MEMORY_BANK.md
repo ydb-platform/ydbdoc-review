@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-04 | **§6.253** — paid-candidate publication separated from merge readiness: only complete safe final-link blockers publish as draft/RED; incomplete/unsafe results remain withheld; PR/source/CLI/ops signalling is explicit |
 | 2026-09-04 | **§6.252** — unequal-count #40385 false-green fixed with a fail-closed RU base/current, tip EN, final EN matcher; it restores only a proven path while the unchanged final link gate remains authoritative |
 | 2026-09-03 | **§6.251** — full #40385 lifecycle regression; normal LLM output preserves same-fragment tip EN path, post-apply declaration reads RU owner from `ru_content_ref` rather than `origin/main` |
 | 2026-09-03 | **§6.250 production retry** — run 33765458147 translated all 9 pairs but repeated both missing fragments, proving helper-level scope/path tests did not cover post-translate temporal authority |

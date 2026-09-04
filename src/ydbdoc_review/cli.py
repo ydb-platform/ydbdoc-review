@@ -27,9 +27,9 @@ from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.shutdown import install_shutdown_handlers
+from ydbdoc_review.translation.glossary import load_glossary
 
 app = typer.Typer(
     name="ydbdoc-review",
@@ -429,10 +429,19 @@ def extract(
 
 def _print_job_summary(mode: str, result: object) -> None:
     from ydbdoc_review.github.workflow import DocJobResult
+    from ydbdoc_review.pipeline.types import PublicationImpact
 
     if not isinstance(result, DocJobResult):
         return
-    console.print(f"[green]Done[/green] ({mode})")
+    if result.pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
+        console.print(f"[red]published_red[/red] ({mode}): QA RED, do not merge")
+    elif result.pr_result.publication_impact in {
+        PublicationImpact.WITHHOLD_INCOMPLETE,
+        PublicationImpact.WITHHOLD_UNSAFE,
+    }:
+        console.print(f"[red]{result.pr_result.publication_impact.value}[/red] ({mode})")
+    else:
+        console.print(f"[green]Done[/green] ({mode})")
     console.print(f"  Pairs processed: {len(result.pr_result.pair_results)}")
     console.print(f"  Translated: {result.pr_result.translated_count}")
     console.print(f"  Failed: {result.pr_result.failed_count}")

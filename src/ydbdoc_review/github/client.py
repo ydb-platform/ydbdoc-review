@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -179,6 +180,7 @@ class GitHubClient:
         head: str,
         base: str,
         body: str,
+        draft: bool = False,
     ) -> tuple[str, int, bool] | None:
         """Open a PR or return an existing one.
 
@@ -196,7 +198,13 @@ class GitHubClient:
             data = self._request(
                 "POST",
                 url,
-                json_body={"title": title, "head": head, "base": base, "body": body},
+                json_body={
+                    "title": title,
+                    "head": head,
+                    "base": base,
+                    "body": body,
+                    "draft": draft,
+                },
             )
         except GitHubAPIError as exc:
             if exc.status_code == 422:
@@ -213,3 +221,39 @@ class GitHubClient:
         html = str(data.get("html_url", ""))
         num = int(data.get("number", 0))
         return (html, num, True) if html and num else None
+
+    def convert_pull_to_draft(self, owner: str, repo: str, pr_number: int) -> bool:
+        """Convert an existing ready-for-review PR to draft via GitHub GraphQL."""
+        pull = self.get_pull(owner, repo, pr_number)
+        if bool(pull.get("draft")):
+            return False
+        node_id = str(pull.get("node_id") or "")
+        if not node_id:
+            raise GitHubAPIError("GitHub pull response has no node_id", status_code=0)
+        query = """mutation($id: ID!) {
+          convertPullRequestToDraft(input: {pullRequestId: $id}) {
+            pullRequest { isDraft }
+          }
+        }"""
+        data = self._request(
+            "POST",
+            "https://api.github.com/graphql",
+            json_body={"query": query, "variables": {"id": node_id}},
+        )
+        is_draft = bool(
+            isinstance(data, dict)
+            and data.get("data", {})
+            .get("convertPullRequestToDraft", {})
+            .get("pullRequest", {})
+            .get("isDraft")
+        )
+        if not is_draft:
+            raise GitHubAPIError(
+                "GitHub did not convert pull request to draft", status_code=0
+            )
+        return True
+
+    def update_pull_body(self, owner: str, repo: str, pr_number: int, body: str) -> None:
+        """Replace the body of an existing pull request."""
+        url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+        self._request("PATCH", url, json_body={"body": body})

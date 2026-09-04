@@ -12,9 +12,14 @@ from typer.testing import CliRunner
 from ydbdoc_review.cli import app
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.workflow import DocJobResult
-from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
 from ydbdoc_review.pipeline.analyze import PairPlan
+from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
+    PairRunResult,
+    PRTranslationResult,
+    PublicationImpact,
+)
 
 runner = CliRunner()
 
@@ -115,6 +120,23 @@ def test_cli_run_dry_run(mock_run, git_repo: Path):
     assert result.exit_code == 0, result.stdout
     mock_run.assert_called_once()
     assert "Pairs processed" in result.stdout
+
+
+@patch("ydbdoc_review.cli.run_doc_translate")
+def test_cli_run_reports_published_red_instead_of_done(mock_run, git_repo: Path):
+    job = _fake_doc_job("doc_translate")
+    job.pr_result.publication_impact = PublicationImpact.PUBLISH_RED
+    job.translation_pr_number = 99
+    mock_run.return_value = job
+
+    result = runner.invoke(
+        app,
+        ["run", "--repo", "o/r", "--pr", "7", "--repo-path", str(git_repo)],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "published_red" in result.stdout
+    assert "Done" not in result.stdout
 
 
 @patch("ydbdoc_review.cli.run_doc_verify", return_value=_fake_doc_job("doc_verify"))
