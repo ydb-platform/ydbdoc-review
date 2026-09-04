@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from requests.exceptions import Timeout
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubAPIError
@@ -139,6 +140,8 @@ def _run_top_level(
     draft_conversion_fails: bool = False,
     draft_conversion_fail_on_call: int | None = None,
     postpush_pr_draft: bool | None = None,
+    postpush_confirmation_error: BaseException | None = None,
+    rollback_error: Exception | None = None,
     prepush_create_returns_none: bool = False,
     real_push_remote: str | None = None,
     remote_branch_sha: str | None = None,
@@ -160,6 +163,8 @@ def _run_top_level(
             return pull
         if event_log is not None:
             event_log.append("refetch")
+        if postpush_confirmation_error is not None:
+            raise postpush_confirmation_error
         draft = postpush_pr_draft
         if draft is None:
             draft = True
@@ -263,9 +268,12 @@ def _run_top_level(
                 patch("ydbdoc_review.github.workflow.rollback_pushed_branch")
             )
             if event_log is not None:
-                rollback.side_effect = lambda *_args, **_kwargs: event_log.append(
-                    "rollback"
-                )
+                def _rollback_mock(*_args, **_kwargs):
+                    event_log.append("rollback")
+                    if rollback_error is not None:
+                        raise rollback_error
+
+                rollback.side_effect = _rollback_mock
             if event_log is not None:
                 def _push_mock(*_args, **_kwargs):
                     event_log.append("push")
@@ -1127,6 +1135,67 @@ def test_existing_red_pr_postpush_reconversion_failure_rolls_back_before_body(
         )
 
     assert events == ["discover", "draft", "push", "refetch", "draft", "rollback"]
+
+
+def test_red_pr_transport_failure_rolls_back_and_preserves_original_exception(
+    publication_repo: str,
+):
+    events: list[str] = []
+    transport_error = Timeout("draft confirmation timed out")
+
+    with pytest.raises(Timeout, match="draft confirmation timed out") as raised:
+        _run_top_level(
+            publication_repo,
+            _pair_result(target_text="See [missing](missing.md).\n"),
+            existing_pr=True,
+            remote_branch_exists=True,
+            remote_branch_sha="previous-sha",
+            postpush_confirmation_error=transport_error,
+            event_log=events,
+        )
+
+    assert raised.value is transport_error
+    assert events == ["discover", "draft", "push", "refetch", "rollback"]
+
+
+def test_red_pr_confirmation_and_rollback_failures_preserve_both_exceptions(
+    publication_repo: str,
+):
+    events: list[str] = []
+    transport_error = Timeout("draft confirmation timed out")
+    rollback_error = RuntimeError("guarded rollback failed")
+
+    with pytest.raises(ExceptionGroup) as raised:
+        _run_top_level(
+            publication_repo,
+            _pair_result(target_text="See [missing](missing.md).\n"),
+            existing_pr=True,
+            remote_branch_exists=True,
+            remote_branch_sha="previous-sha",
+            postpush_confirmation_error=transport_error,
+            rollback_error=rollback_error,
+            event_log=events,
+        )
+
+    assert raised.value.exceptions == (transport_error, rollback_error)
+    assert events == ["discover", "draft", "push", "refetch", "rollback"]
+
+
+def test_red_pr_confirmation_does_not_catch_system_exit(publication_repo: str):
+    events: list[str] = []
+
+    with pytest.raises(SystemExit, match="stop now"):
+        _run_top_level(
+            publication_repo,
+            _pair_result(target_text="See [missing](missing.md).\n"),
+            existing_pr=True,
+            remote_branch_exists=True,
+            remote_branch_sha="previous-sha",
+            postpush_confirmation_error=SystemExit("stop now"),
+            event_log=events,
+        )
+
+    assert events == ["discover", "draft", "push", "refetch"]
 
 
 def test_late_existing_red_pr_is_converted_before_body_mutation(

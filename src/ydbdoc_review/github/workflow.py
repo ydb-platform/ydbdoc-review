@@ -1386,20 +1386,26 @@ def run_doc_translate(
                     postpush_pull = gh.get_pull(owner, repo, tr_pr_number)
                     if postpush_pull.get("draft") is not True:
                         gh.convert_pull_to_draft(owner, repo, tr_pr_number)
-                except GitHubAPIError:
+                except Exception as confirmation_error:
                     if not pushed_candidate_sha:
                         raise RuntimeError(
                             "cannot roll back RED branch without pushed HEAD SHA"
+                        ) from confirmation_error
+                    try:
+                        rollback_pushed_branch(
+                            repo_path,
+                            "ydbdoc-review-push",
+                            branch,
+                            push_token,
+                            upstream_url,
+                            expected_pushed_sha=pushed_candidate_sha,
+                            previous_sha=prepush_remote_sha,
+                        )
+                    except Exception as rollback_error:
+                        raise ExceptionGroup(
+                            "RED PR draft confirmation and branch rollback both failed",
+                            [confirmation_error, rollback_error],
                         ) from None
-                    rollback_pushed_branch(
-                        repo_path,
-                        "ydbdoc-review-push",
-                        branch,
-                        push_token,
-                        upstream_url,
-                        expected_pushed_sha=pushed_candidate_sha,
-                        previous_sha=prepush_remote_sha,
-                    )
                     raise
             if not created:
                 gh.update_pull_body(owner, repo, tr_pr_number, body)
