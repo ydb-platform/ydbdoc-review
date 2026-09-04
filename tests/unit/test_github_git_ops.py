@@ -194,7 +194,7 @@ def test_rollback_pushed_branch_refuses_to_clobber_concurrent_remote_update(
     assert remote_sha == concurrent_sha
 
 
-def test_guarded_force_push_refuses_stale_remote_snapshot(
+def test_guarded_force_push_rejects_update_after_preservation_fetch(
     git_repo: str,
     tmp_path: Path,
     monkeypatch,
@@ -252,17 +252,33 @@ def test_guarded_force_push_refuses_stale_remote_snapshot(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    subprocess.run(
-        ["git", "push", "--force", str(upstream), f"HEAD:{branch_ref}"],
-        cwd=writer,
-        check=True,
-        capture_output=True,
-    )
     write_text(git_repo, "candidate.md", "candidate\n")
     git_commit_paths(git_repo, ["candidate.md"], "candidate", "test", "t@example.com")
     monkeypatch.setattr(git_ops, "remote_push_url", lambda *_args: str(upstream))
+    real_run = git_ops.subprocess.run
+    injected = False
 
-    with pytest.raises(RuntimeError, match="lease"):
+    def _inject_after_fetch(cmd, *args, **kwargs):
+        nonlocal injected
+        if (
+            not injected
+            and isinstance(cmd, list)
+            and len(cmd) >= 5
+            and cmd[:4] == ["git", "-C", git_repo, "push"]
+            and "guarded-push" in cmd
+        ):
+            injected = True
+            real_run(
+                ["git", "push", "--force", str(upstream), f"HEAD:{branch_ref}"],
+                cwd=writer,
+                check=True,
+                capture_output=True,
+            )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(git_ops.subprocess, "run", _inject_after_fetch)
+
+    with pytest.raises(RuntimeError, match="stale info"):
         git_ops.push_branch(
             git_repo,
             "guarded-push",
@@ -274,6 +290,7 @@ def test_guarded_force_push_refuses_stale_remote_snapshot(
             expected_remote_sha=snapshot_sha,
         )
 
+    assert injected is True
     remote_sha = subprocess.run(
         ["git", "--git-dir", str(upstream), "rev-parse", branch_ref],
         check=True,
