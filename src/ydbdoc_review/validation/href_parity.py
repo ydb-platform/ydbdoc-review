@@ -373,7 +373,11 @@ def reconcile_final_en_same_fragment_paths(
         if not separator or not raw_candidate_fragment:
             continue
         raw_href = en_candidate_text[href_start:href_end]
-        raw_path_offset = raw_href.find(candidate_path)
+        raw_path_offset = (
+            raw_href.find(candidate_path)
+            if candidate_path
+            else len(raw_href) - len(raw_href.lstrip())
+        )
         if raw_path_offset < 0:
             continue
         path_start = href_start + raw_path_offset

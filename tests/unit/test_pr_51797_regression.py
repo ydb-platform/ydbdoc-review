@@ -582,3 +582,31 @@ def test_pr_40385_final_reconciliation_changes_only_raw_href_path():
         read_source_ru=source_pages.get,
         read_final_en=final_pages.get,
     ) == expected
+
+
+def test_pr_40385_final_reconciliation_inserts_empty_href_path_after_whitespace():
+    """R-GL-11: an in-page candidate retains its href-group spacing when retargeted."""
+    ru = "[Security](#security-auth)\n"
+    tip = "[Security](../reference/configuration/security_config.md#security-auth)\n"
+    candidate = "[ Security ](  #security-auth  )\n"
+    expected = "[ Security ](  ../reference/configuration/security_config.md#security-auth  )\n"
+    en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
+    source_pages = {AUTH_RU: ru}
+    final_pages = {
+        AUTH_EN: candidate,
+        en_security: "## Security {#security-auth}\n",
+    }
+
+    fixed = reconcile_final_en_same_fragment_paths(
+        ru,
+        ru,
+        tip,
+        candidate,
+        ru_page_path=AUTH_RU,
+        en_page_path=AUTH_EN,
+        read_source_ru=source_pages.get,
+        read_final_en=final_pages.get,
+    )
+
+    assert fixed == expected
+    assert check_en_page_link_targets(AUTH_EN, fixed, read_text=final_pages.get) == []
