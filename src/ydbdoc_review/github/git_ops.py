@@ -296,21 +296,53 @@ def push_branch(
     base_https_url: str,
     *,
     force: bool = False,
+    guard_remote_ref: bool = False,
+    expected_remote_sha: str | None = None,
 ) -> None:
     """Push ``HEAD`` to ``refs/heads/<branch>`` on the remote.
 
-    ``force`` (§6.166): re-``doc_translate`` rebuilds ``ydbdoc-review/pr-*``
-    from upstream main. A plain push is non-fast-forward when a previous
-    translate/verify tip still exists. Use plain ``--force`` (not
-    ``--force-with-lease``): the action checkout never fetches the remote
-    translation tip, so lease checks fail with ``(stale info)``.
+    ``force`` (§6.166) supports legacy unguarded callers. RED publication sets
+    ``guard_remote_ref`` and supplies the exact API snapshot SHA (or ``None``
+    for proven absence). Existing remote objects are fetched into a private ref
+    both to validate the snapshot and to keep rollback objects locally reachable.
     """
     url = remote_push_url(base_https_url, token)
     ensure_remote(repo, remote_name, url)
+    remote_ref = f"refs/heads/{branch}"
+    if guard_remote_ref and expected_remote_sha is not None:
+        preserved_ref = (
+            f"refs/ydbdoc-review/pre-push/{remote_name}/{branch.replace('/', '--')}"
+        )
+        fetched = subprocess.run(
+            [
+                "git",
+                "-C",
+                repo,
+                "fetch",
+                remote_name,
+                f"+{remote_ref}:{preserved_ref}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if fetched.returncode != 0:
+            err = (fetched.stderr or fetched.stdout or "").strip()
+            raise RuntimeError(
+                f"cannot preserve {remote_ref} before guarded push: {err}"
+            ) from None
+        actual_remote_sha = _git(repo, "rev-parse", preserved_ref)
+        if actual_remote_sha != expected_remote_sha:
+            raise RuntimeError(
+                f"guarded push lease snapshot changed for {remote_ref}: "
+                f"expected {expected_remote_sha}, found {actual_remote_sha}"
+            )
     cmd = ["git", "-C", repo, "push"]
-    if force:
+    if guard_remote_ref:
+        lease_sha = expected_remote_sha or ""
+        cmd.append(f"--force-with-lease={remote_ref}:{lease_sha}")
+    elif force:
         cmd.append("--force")
-    cmd.extend([remote_name, f"HEAD:refs/heads/{branch}"])
+    cmd.extend([remote_name, f"HEAD:{remote_ref}"])
     proc = subprocess.run(
         cmd,
         capture_output=True,

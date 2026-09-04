@@ -136,6 +136,8 @@ def _run_top_level(
     draft_conversion_fails: bool = False,
     prepush_create_returns_none: bool = False,
     real_push_remote: str | None = None,
+    remote_branch_sha: str | None = None,
+    push_fails: bool = False,
 ):
     pull = {
         "title": "docs",
@@ -152,7 +154,9 @@ def _run_top_level(
     branch_was_present = (
         late_existing_pr if remote_branch_exists is None else remote_branch_exists
     )
-    gh.get_branch_sha.return_value = "old-remote-sha" if branch_was_present else None
+    gh.get_branch_sha.return_value = (
+        remote_branch_sha or "old-remote-sha" if branch_was_present else None
+    )
     created_pull = (
         (
             "https://github.com/o/r/pull/99",
@@ -239,7 +243,14 @@ def _run_top_level(
                 patch("ydbdoc_review.github.workflow.rollback_pushed_branch")
             )
             if event_log is not None:
-                push.side_effect = lambda *_args, **_kwargs: event_log.append("push")
+                def _push_mock(*_args, **_kwargs):
+                    event_log.append("push")
+                    if push_fails:
+                        raise RuntimeError("guarded push lease failed")
+
+                push.side_effect = _push_mock
+            elif push_fails:
+                push.side_effect = RuntimeError("guarded push lease failed")
         else:
             import ydbdoc_review.github.workflow as workflow
 
@@ -295,6 +306,8 @@ def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
     prepare.assert_called_once()
     commit.assert_called_once()
     push.assert_called_once()
+    assert push.call_args.kwargs["guard_remote_ref"] is True
+    assert push.call_args.kwargs["expected_remote_sha"] is None
     gh.create_pull.assert_called_once()
     assert gh.create_pull.call_args.kwargs["draft"] is True
     pr_body = gh.create_pull.call_args.kwargs["body"]
@@ -929,6 +942,23 @@ def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creat
     assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [True, True]
 
 
+def test_red_push_lease_failure_does_not_mutate_pull_request(
+    publication_repo: str,
+):
+    events: list[str] = []
+
+    with pytest.raises(RuntimeError, match="lease failed"):
+        _run_top_level(
+            publication_repo,
+            _pair_result(target_text="See [missing](missing.md).\n"),
+            remote_branch_exists=False,
+            event_log=events,
+            push_fails=True,
+        )
+
+    assert events == ["discover", "push"]
+
+
 def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
     publication_repo: str,
     tmp_path: Path,
@@ -991,6 +1021,107 @@ def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
     assert remote_ref.returncode != 0
     assert red_sha not in remote_ref.stdout
     assert events == ["discover", "push", "create", "draft"]
+
+
+def test_failed_post_push_conversion_restores_remote_only_previous_sha(
+    publication_repo: str,
+    tmp_path: Path,
+):
+    upstream = tmp_path / "restore-upstream.git"
+    subprocess.run(
+        ["git", "clone", "--bare", publication_repo, str(upstream)],
+        check=True,
+        capture_output=True,
+    )
+    writer = tmp_path / "remote-writer"
+    subprocess.run(
+        ["git", "clone", str(upstream), str(writer)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "writer@example.com"],
+        cwd=writer,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "remote writer"],
+        cwd=writer,
+        check=True,
+    )
+    Path(writer, "remote-only.txt").write_text("old remote tip\n", encoding="utf-8")
+    subprocess.run(["git", "add", "remote-only.txt"], cwd=writer, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "remote-only old tip"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+    )
+    previous_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    branch_ref = "refs/heads/ydbdoc-review/pr-7"
+    subprocess.run(
+        ["git", "push", str(upstream), f"HEAD:{branch_ref}"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+    )
+    assert (
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{previous_sha}^{{commit}}"],
+            cwd=publication_repo,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+    Path(publication_repo, "ydb/docs/en/a.md").write_text(
+        "See [missing](missing.md).\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "ydb/docs/en/a.md"],
+        cwd=publication_repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "red candidate"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    rollback_result = _pair_result(target_text="See [missing](missing.md).\n")
+    rollback_result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing target",
+        )
+    ]
+
+    with pytest.raises(GitHubAPIError, match="cannot convert"):
+        _run_top_level(
+            publication_repo,
+            rollback_result,
+            late_existing_pr=True,
+            remote_branch_exists=True,
+            remote_branch_sha=previous_sha,
+            prepush_create_returns_none=True,
+            draft_conversion_fails=True,
+            real_push_remote=str(upstream),
+        )
+
+    restored_sha = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", branch_ref],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert restored_sha == previous_sha
 
 
 def _withhold_case(case: str) -> PRTranslationResult:

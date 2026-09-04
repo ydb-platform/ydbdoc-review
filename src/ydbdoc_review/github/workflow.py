@@ -1336,6 +1336,10 @@ def run_doc_translate(
                 push_token,
                 upstream_url,
                 force=True,
+                guard_remote_ref=(
+                    pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+                ),
+                expected_remote_sha=prepush_remote_sha,
             )
             pushed = True
     job.committed = committed

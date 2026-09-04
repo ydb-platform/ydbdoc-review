@@ -84,8 +84,8 @@ def test_remote_push_url():
     assert "x-access-token:secret@github.com" in url
 
 
-def test_push_branch_force(monkeypatch):
-    """§6.166: re-translate must --force onto ydbdoc-review/pr-*."""
+def test_push_branch_force_remains_unguarded_for_non_red_callers(monkeypatch):
+    """Legacy non-RED callers retain the explicit unguarded force option."""
     from ydbdoc_review.github import git_ops
 
     calls: list[list[str]] = []
@@ -183,6 +183,171 @@ def test_rollback_pushed_branch_refuses_to_clobber_concurrent_remote_update(
             "https://github.com/o/r.git",
             expected_pushed_sha=candidate_sha,
             previous_sha=previous_sha,
+        )
+
+    remote_sha = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", branch_ref],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_sha == concurrent_sha
+
+
+def test_guarded_force_push_refuses_stale_remote_snapshot(
+    git_repo: str,
+    tmp_path: Path,
+    monkeypatch,
+):
+    from ydbdoc_review.github import git_ops
+
+    upstream = tmp_path / "guarded-upstream.git"
+    subprocess.run(
+        ["git", "clone", "--bare", git_repo, str(upstream)],
+        check=True,
+        capture_output=True,
+    )
+    branch_ref = "refs/heads/ydbdoc-review/pr-7"
+    snapshot_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "push", str(upstream), f"HEAD:{branch_ref}"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    writer = tmp_path / "writer"
+    subprocess.run(
+        ["git", "clone", str(upstream), str(writer)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "writer@example.com"],
+        cwd=writer,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "writer"],
+        cwd=writer,
+        check=True,
+    )
+    write_text(str(writer), "concurrent.md", "concurrent\n")
+    git_commit_paths(
+        str(writer),
+        ["concurrent.md"],
+        "concurrent",
+        "writer",
+        "writer@example.com",
+    )
+    concurrent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "push", "--force", str(upstream), f"HEAD:{branch_ref}"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+    )
+    write_text(git_repo, "candidate.md", "candidate\n")
+    git_commit_paths(git_repo, ["candidate.md"], "candidate", "test", "t@example.com")
+    monkeypatch.setattr(git_ops, "remote_push_url", lambda *_args: str(upstream))
+
+    with pytest.raises(RuntimeError, match="lease"):
+        git_ops.push_branch(
+            git_repo,
+            "guarded-push",
+            "ydbdoc-review/pr-7",
+            "token",
+            "https://github.com/o/r.git",
+            force=True,
+            guard_remote_ref=True,
+            expected_remote_sha=snapshot_sha,
+        )
+
+    remote_sha = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", branch_ref],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_sha == concurrent_sha
+
+
+def test_guarded_force_push_expected_absence_refuses_concurrent_branch_creation(
+    git_repo: str,
+    tmp_path: Path,
+    monkeypatch,
+):
+    from ydbdoc_review.github import git_ops
+
+    upstream = tmp_path / "absent-guard-upstream.git"
+    subprocess.run(
+        ["git", "clone", "--bare", git_repo, str(upstream)],
+        check=True,
+        capture_output=True,
+    )
+    writer = tmp_path / "absence-writer"
+    subprocess.run(
+        ["git", "clone", str(upstream), str(writer)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "writer@example.com"],
+        cwd=writer,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "writer"],
+        cwd=writer,
+        check=True,
+    )
+    write_text(str(writer), "concurrent.md", "concurrent\n")
+    git_commit_paths(
+        str(writer),
+        ["concurrent.md"],
+        "concurrent",
+        "writer",
+        "writer@example.com",
+    )
+    concurrent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    branch_ref = "refs/heads/ydbdoc-review/pr-7"
+    subprocess.run(
+        ["git", "push", str(upstream), f"HEAD:{branch_ref}"],
+        cwd=writer,
+        check=True,
+        capture_output=True,
+    )
+    write_text(git_repo, "candidate.md", "candidate\n")
+    git_commit_paths(git_repo, ["candidate.md"], "candidate", "test", "t@example.com")
+    monkeypatch.setattr(git_ops, "remote_push_url", lambda *_args: str(upstream))
+
+    with pytest.raises(RuntimeError, match="stale info"):
+        git_ops.push_branch(
+            git_repo,
+            "guarded-push",
+            "ydbdoc-review/pr-7",
+            "token",
+            "https://github.com/o/r.git",
+            force=True,
+            guard_remote_ref=True,
+            expected_remote_sha=None,
         )
 
     remote_sha = subprocess.run(
