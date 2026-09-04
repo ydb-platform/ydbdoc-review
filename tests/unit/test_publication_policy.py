@@ -134,6 +134,8 @@ def _run_top_level(
     source_changes: list[tuple[str, str]] | None = None,
     event_log: list[str] | None = None,
     draft_conversion_fails: bool = False,
+    prepush_create_returns_none: bool = False,
+    real_push_remote: str | None = None,
 ):
     pull = {
         "title": "docs",
@@ -147,9 +149,10 @@ def _run_top_level(
     gh = MagicMock()
     gh.get_pull.return_value = pull
     gh.iter_issue_comments.return_value = iter(())
-    gh.branch_exists.return_value = (
+    branch_was_present = (
         late_existing_pr if remote_branch_exists is None else remote_branch_exists
     )
+    gh.get_branch_sha.return_value = "old-remote-sha" if branch_was_present else None
     created_pull = (
         (
             "https://github.com/o/r/pull/99",
@@ -162,9 +165,18 @@ def _run_top_level(
     gh.find_open_pull_by_head.side_effect = lambda *_args, **_kwargs: (
         event_log.append("discover") if event_log is not None else None
     ) or (("https://github.com/o/r/pull/99", 99) if existing_pr else None)
-    gh.create_pull.side_effect = lambda *_args, **_kwargs: (
-        event_log.append("create") if event_log is not None else None
-    ) or created_pull
+    create_calls = 0
+
+    def _create(*_args, **_kwargs):
+        nonlocal create_calls
+        create_calls += 1
+        if event_log is not None:
+            event_log.append("create")
+        if prepush_create_returns_none and create_calls == 1:
+            return None
+        return created_pull
+
+    gh.create_pull.side_effect = _create
     gh.update_pull_body.side_effect = lambda *_args, **_kwargs: (
         event_log.append("body") if event_log is not None else None
     )
@@ -221,9 +233,35 @@ def _run_top_level(
         commit = stack.enter_context(
             patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True)
         )
-        push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
-        if event_log is not None:
-            push.side_effect = lambda *_args, **_kwargs: event_log.append("push")
+        if real_push_remote is None:
+            push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
+            stack.enter_context(
+                patch("ydbdoc_review.github.workflow.rollback_pushed_branch")
+            )
+            if event_log is not None:
+                push.side_effect = lambda *_args, **_kwargs: event_log.append("push")
+        else:
+            import ydbdoc_review.github.workflow as workflow
+
+            real_push = workflow.push_branch
+
+            def _push_real(*args, **kwargs):
+                if event_log is not None:
+                    event_log.append("push")
+                return real_push(*args, **kwargs)
+
+            stack.enter_context(
+                patch(
+                    "ydbdoc_review.github.git_ops.remote_push_url",
+                    return_value=real_push_remote,
+                )
+            )
+            push = stack.enter_context(
+                patch(
+                    "ydbdoc_review.github.workflow.push_branch",
+                    side_effect=_push_real,
+                )
+            )
         stack.enter_context(
             patch(
                 "ydbdoc_review.github.workflow.run_doc_verify",
@@ -359,6 +397,36 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         check=True,
         capture_output=True,
     )
+    upstream_base_sha = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", "refs/heads/main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    Path(publication_repo, "source-checkout-only.txt").write_text(
+        "must not become the translation base\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "source-checkout-only.txt"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "source checkout diverges from upstream"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    source_checkout_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert source_checkout_sha != upstream_base_sha
     Path(publication_repo, impact_path).write_text(
         "See [missing](gone.md).\n",
         encoding="utf-8",
@@ -484,7 +552,24 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         capture_output=True,
         text=True,
     ).stdout
+    checked_out_branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    translation_parent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD^"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     assert committed_impact == "See [missing](gone.md).\n"
+    assert checked_out_branch == "ydbdoc-review/pr-7"
+    assert translation_parent_sha == upstream_base_sha
+    assert translation_parent_sha != source_checkout_sha
     assert job.committed is True
     assert verify_jobs
     assert [(b.path, b.code) for b in verify_jobs[-1].pr_result.final_tree_blockers] == [
@@ -822,6 +907,89 @@ def test_post_push_existing_pr_fallback_conversion_failure_is_fail_closed(
             draft_conversion_fails=True,
         )
 
+    assert events == ["discover", "push", "create", "draft"]
+
+
+def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creation(
+    publication_repo: str,
+):
+    result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
+
+    job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        remote_branch_exists=True,
+        prepush_create_returns_none=True,
+        event_log=events,
+    )
+
+    assert events == ["discover", "create", "push", "create"]
+    assert job.translation_pr_number == 99
+    assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [True, True]
+
+
+def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
+    publication_repo: str,
+    tmp_path: Path,
+):
+    upstream = tmp_path / "rollback-upstream.git"
+    subprocess.run(
+        ["git", "clone", "--bare", publication_repo, str(upstream)],
+        check=True,
+        capture_output=True,
+    )
+    Path(publication_repo, "ydb/docs/en/a.md").write_text(
+        "See [missing](missing.md).\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "ydb/docs/en/a.md"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "red candidate"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    red_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    events: list[str] = []
+    rollback_result = _pair_result(target_text="See [missing](missing.md).\n")
+    rollback_result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing target",
+        )
+    ]
+
+    with pytest.raises(GitHubAPIError, match="cannot convert"):
+        _run_top_level(
+            publication_repo,
+            rollback_result,
+            late_existing_pr=True,
+            remote_branch_exists=False,
+            event_log=events,
+            draft_conversion_fails=True,
+            real_push_remote=str(upstream),
+        )
+
+    remote_ref = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", "refs/heads/ydbdoc-review/pr-7"],
+        capture_output=True,
+        text=True,
+    )
+    assert remote_ref.returncode != 0
+    assert red_sha not in remote_ref.stdout
     assert events == ["discover", "push", "create", "draft"]
 
 

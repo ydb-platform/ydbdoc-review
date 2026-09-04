@@ -21,6 +21,7 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
     read_text_at_upstream_tip,
+    rollback_pushed_branch,
     write_text,
 )
 from ydbdoc_review.github.pr import (
@@ -1252,6 +1253,8 @@ def run_doc_translate(
 
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None
+    prepush_remote_sha: str | None = None
+    pushed_candidate_sha: str | None = None
     committed = pushed = False
     if touched and not dry_run and not no_commit:
         prepare_translation_branch_on_base(
@@ -1276,6 +1279,7 @@ def run_doc_translate(
             if pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
                 # Keep discovery adjacent to the remote mutation. Any known ready
                 # PR must become draft before its head is force-pushed.
+                prepush_remote_sha = gh.get_branch_sha(owner, repo, branch)
                 preexisting_translation_pr = gh.find_open_pull_by_head(
                     owner,
                     repo,
@@ -1290,7 +1294,7 @@ def run_doc_translate(
                         existing_pr_number,
                         False,
                     )
-                elif gh.branch_exists(owner, repo, branch):
+                elif prepush_remote_sha is not None:
                     prepush_opened_pr = gh.create_pull(
                         owner,
                         repo,
@@ -1305,13 +1309,18 @@ def run_doc_translate(
                         draft=True,
                     )
                     if prepush_opened_pr is None:
-                        raise GitHubAPIError(
-                            "could not establish draft protection for existing "
-                            f"translation branch {branch}"
+                        logger.info(
+                            "Existing translation branch %s has no publishable diff; "
+                            "retry draft PR creation after pushing the candidate",
+                            branch,
                         )
-                    _, existing_pr_number, created = prepush_opened_pr
-                    if not created:
-                        gh.convert_pull_to_draft(owner, repo, existing_pr_number)
+                    else:
+                        _, existing_pr_number, created = prepush_opened_pr
+                        if not created:
+                            gh.convert_pull_to_draft(owner, repo, existing_pr_number)
+            pushed_candidate_sha = git_head_sha(repo_path)
+            if not pushed_candidate_sha:
+                raise RuntimeError("cannot publish translation branch without a HEAD SHA")
             logger.info(
                 "Pushing translation branch %s to %s/%s (from upstream %s, source PR head: %s)",
                 branch,
@@ -1368,7 +1377,23 @@ def run_doc_translate(
                     # GitHub may reveal a concurrently-created/existing PR only
                     # through create_pull's conflict fallback. Fail closed: draft
                     # conversion must succeed before changing its merge-facing body.
-                    gh.convert_pull_to_draft(owner, repo, tr_pr_number)
+                    try:
+                        gh.convert_pull_to_draft(owner, repo, tr_pr_number)
+                    except GitHubAPIError:
+                        if not pushed_candidate_sha:
+                            raise RuntimeError(
+                                "cannot roll back RED branch without pushed HEAD SHA"
+                            ) from None
+                        rollback_pushed_branch(
+                            repo_path,
+                            "ydbdoc-review-push",
+                            branch,
+                            push_token,
+                            upstream_url,
+                            expected_pushed_sha=pushed_candidate_sha,
+                            previous_sha=prepush_remote_sha,
+                        )
+                        raise
                 gh.update_pull_body(owner, repo, tr_pr_number, body)
             if created:
                 try:

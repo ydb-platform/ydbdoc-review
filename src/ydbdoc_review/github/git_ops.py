@@ -329,3 +329,38 @@ def push_branch(
         raise RuntimeError(
             f"git push to {base_https_url} refs/heads/{branch} failed: {err}.{hint}"
         ) from None
+
+
+def rollback_pushed_branch(
+    repo: str,
+    remote_name: str,
+    branch: str,
+    token: str,
+    base_https_url: str,
+    *,
+    expected_pushed_sha: str,
+    previous_sha: str | None,
+) -> None:
+    """Restore/delete a just-pushed ref only while it still has our exact SHA."""
+    url = remote_push_url(base_https_url, token)
+    ensure_remote(repo, remote_name, url)
+    ref = f"refs/heads/{branch}"
+    refspec = f"{previous_sha}:{ref}" if previous_sha else f":{ref}"
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo,
+            "push",
+            f"--force-with-lease={ref}:{expected_pushed_sha}",
+            remote_name,
+            refspec,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(
+            f"refusing to roll back {ref}: guarded lease failed: {err}"
+        ) from None

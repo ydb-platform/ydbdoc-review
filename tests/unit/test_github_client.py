@@ -86,25 +86,28 @@ def test_create_pull_can_open_draft(mock_request):
     assert mock_request.call_args.kwargs["json"]["draft"] is True
 
 
-def test_branch_exists_uses_encoded_head_ref():
+def test_get_branch_sha_returns_exact_remote_object_sha():
     client = GitHubClient("tok")
-    with patch.object(client, "_request", return_value={"ref": "refs/heads/a/b"}) as request:
-        assert client.branch_exists("o", "r", "a/b") is True
+    with patch.object(
+        client,
+        "_request",
+        return_value={"object": {"type": "commit", "sha": "abc123"}},
+    ):
+        assert client.get_branch_sha("o", "r", "a/b") == "abc123"
+        client._request.assert_called_once_with(
+            "GET",
+            "https://api.github.com/repos/o/r/git/ref/heads/a%2Fb",
+        )
 
-    request.assert_called_once_with(
-        "GET",
-        "https://api.github.com/repos/o/r/git/ref/heads/a%2Fb",
-    )
 
-
-def test_branch_exists_returns_false_only_for_not_found():
+def test_get_branch_sha_returns_none_for_absent_ref():
     client = GitHubClient("tok")
     with patch.object(
         client,
         "_request",
         side_effect=GitHubAPIError("missing", status_code=404),
     ):
-        assert client.branch_exists("o", "r", "missing") is False
+        assert client.get_branch_sha("o", "r", "missing") is None
 
 
 @patch("ydbdoc_review.github.client.requests.request")

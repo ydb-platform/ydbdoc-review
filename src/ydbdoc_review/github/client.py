@@ -141,17 +141,23 @@ class GitHubClient:
         num = int(item.get("number", 0))
         return (html, num) if html and num else None
 
-    def branch_exists(self, owner: str, repo: str, branch: str) -> bool:
-        """Return whether a remote head exists, without mutating it."""
+    def get_branch_sha(self, owner: str, repo: str, branch: str) -> str | None:
+        """Return the exact remote head SHA, or ``None`` when absent."""
         encoded = quote(branch, safe="")
         url = f"https://api.github.com/repos/{owner}/{repo}/git/ref/heads/{encoded}"
         try:
             data = self._request("GET", url)
         except GitHubAPIError as exc:
             if exc.status_code == 404:
-                return False
+                return None
             raise
-        return isinstance(data, dict)
+        if not isinstance(data, dict):
+            raise GitHubAPIError(f"Malformed branch ref response for {branch}")
+        obj = data.get("object")
+        sha = str(obj.get("sha") or "") if isinstance(obj, dict) else ""
+        if not sha:
+            raise GitHubAPIError(f"Branch ref {branch} is missing its object SHA")
+        return sha
 
     def delete_branch(self, owner: str, repo: str, branch: str) -> bool:
         """Delete ``refs/heads/{branch}``. Return True if removed, False if absent."""

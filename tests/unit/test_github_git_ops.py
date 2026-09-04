@@ -16,6 +16,7 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
     remote_push_url,
+    rollback_pushed_branch,
     write_text,
 )
 
@@ -112,6 +113,85 @@ def test_push_branch_force(monkeypatch):
     assert calls and "--force" in calls[0]
     assert "--force-with-lease" not in calls[0]
     assert "HEAD:refs/heads/ydbdoc-review/pr-46798" in calls[0]
+
+
+def test_rollback_pushed_branch_refuses_to_clobber_concurrent_remote_update(
+    git_repo: str,
+    tmp_path: Path,
+    monkeypatch,
+):
+    from ydbdoc_review.github import git_ops
+
+    upstream = tmp_path / "upstream.git"
+    subprocess.run(
+        ["git", "clone", "--bare", git_repo, str(upstream)],
+        check=True,
+        capture_output=True,
+    )
+    previous_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    write_text(git_repo, "candidate.md", "candidate\n")
+    git_commit_paths(git_repo, ["candidate.md"], "candidate", "test", "t@example.com")
+    candidate_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    branch_ref = "refs/heads/ydbdoc-review/pr-7"
+    subprocess.run(
+        ["git", "push", str(upstream), f"HEAD:{branch_ref}"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    write_text(git_repo, "concurrent.md", "concurrent\n")
+    git_commit_paths(
+        git_repo,
+        ["concurrent.md"],
+        "concurrent",
+        "test",
+        "t@example.com",
+    )
+    concurrent_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "push", "--force", str(upstream), f"HEAD:{branch_ref}"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setattr(git_ops, "remote_push_url", lambda *_args: str(upstream))
+
+    with pytest.raises(RuntimeError, match="guarded lease failed"):
+        rollback_pushed_branch(
+            git_repo,
+            "rollback-test",
+            "ydbdoc-review/pr-7",
+            "token",
+            "https://github.com/o/r.git",
+            expected_pushed_sha=candidate_sha,
+            previous_sha=previous_sha,
+        )
+
+    remote_sha = subprocess.run(
+        ["git", "--git-dir", str(upstream), "rev-parse", branch_ref],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_sha == concurrent_sha
 
 
 def test_git_commit_paths_delete_ignore_unmatch(git_repo: str):
