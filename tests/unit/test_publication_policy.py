@@ -32,8 +32,10 @@ from ydbdoc_review.reporting.builder import (
     ReportMeta,
     build_full_report,
     build_translation_pr_body,
+    result_has_blocking_findings,
 )
 from ydbdoc_review.translation.manual import ManualAction
+from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.validation.href_parity import check_href_parity
 from ydbdoc_review.validation.link_contract import LinkContractIssue
 
@@ -135,6 +137,8 @@ def _run_top_level(
     source_changes: list[tuple[str, str]] | None = None,
     event_log: list[str] | None = None,
     draft_conversion_fails: bool = False,
+    draft_conversion_fail_on_call: int | None = None,
+    postpush_pr_draft: bool | None = None,
     prepush_create_returns_none: bool = False,
     real_push_remote: str | None = None,
     remote_branch_sha: str | None = None,
@@ -150,7 +154,18 @@ def _run_top_level(
         "base": {"ref": "main"},
     }
     gh = MagicMock()
-    gh.get_pull.return_value = pull
+
+    def _get_pull(_owner, _repo, number):
+        if number == 7:
+            return pull
+        if event_log is not None:
+            event_log.append("refetch")
+        draft = postpush_pr_draft
+        if draft is None:
+            draft = True
+        return {"draft": draft}
+
+    gh.get_pull.side_effect = _get_pull
     gh.iter_issue_comments.return_value = iter(())
     branch_was_present = (
         late_existing_pr if remote_branch_exists is None else remote_branch_exists
@@ -186,10 +201,14 @@ def _run_top_level(
         event_log.append("body") if event_log is not None else None
     )
 
+    convert_calls = 0
+
     def _convert(*_args, **_kwargs):
+        nonlocal convert_calls
+        convert_calls += 1
         if event_log is not None:
             event_log.append("draft")
-        if draft_conversion_fails:
+        if draft_conversion_fails or draft_conversion_fail_on_call == convert_calls:
             raise GitHubAPIError("cannot convert", status_code=403)
         return True
 
@@ -240,9 +259,13 @@ def _run_top_level(
         )
         if real_push_remote is None:
             push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
-            stack.enter_context(
+            rollback = stack.enter_context(
                 patch("ydbdoc_review.github.workflow.rollback_pushed_branch")
             )
+            if event_log is not None:
+                rollback.side_effect = lambda *_args, **_kwargs: event_log.append(
+                    "rollback"
+                )
             if event_log is not None:
                 def _push_mock(*_args, **_kwargs):
                     event_log.append("push")
@@ -853,6 +876,91 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
     assert job.pr_result.publication_impact == "PUBLISH_RED"
 
 
+def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
+    publication_repo: str,
+):
+    impact_path = "ydb/docs/en/impact.md"
+    impact_file = Path(publication_repo, impact_path)
+    impact_file.write_text("See [missing](gone.md).\n", encoding="utf-8")
+    subprocess.run(["git", "add", impact_path], cwd=publication_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "durable impact baseline"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    blocker = FinalTreeBlocker(
+        path=impact_path,
+        code="en_link_target",
+        message="en_link_target: impact.md: missing target `gone.md`",
+    )
+    published_result = _pair_result()
+    published_result.final_tree_blockers = [blocker]
+    published_result.publication_impact = PublicationImpact.PUBLISH_RED
+    body = build_translation_pr_body(7, "o/r", publication_result=published_result)
+    impact_file.unlink()
+
+    translation_pull = {
+        "title": "Auto-translate docs from PR #7",
+        "body": body,
+        "head": {
+            "ref": "ydbdoc-review/pr-7",
+            "sha": "translation-sha",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    source_pull = {
+        "title": "docs",
+        "body": "",
+        "head": {
+            "ref": "docs",
+            "sha": "source-head",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": "source-base"},
+    }
+    gh = MagicMock()
+    gh.get_pull.side_effect = lambda _o, _r, number: (
+        translation_pull if number == 99 else source_pull
+    )
+    gh.get_file_text.return_value = "Привет.\n"
+
+    def api_changes(_gh, _owner, _repo, number):
+        if number == 7:
+            return [("ydb/docs/ru/a.md", "modified")]
+        return [("ydb/docs/en/a.md", "modified"), (impact_path, "deleted")]
+
+    with patch(
+        "ydbdoc_review.github.workflow.GitHubClient", return_value=gh
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+        return_value=[("ydb/docs/en/a.md", "modified"), (impact_path, "deleted")],
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+        side_effect=api_changes,
+    ), patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=_pair_result(),
+    ), patch(
+        "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+        return_value=[],
+    ):
+        job = run_doc_verify(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=99,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=load_config(env=_env()),
+            skip_ops_gates=True,
+        )
+
+    assert impact_file.exists() is False
+    assert job.pr_result.final_tree_blockers == [blocker]
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+
+
 def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
     publication_repo: str,
 ):
@@ -960,7 +1068,7 @@ def test_existing_ready_translation_pr_is_converted_to_draft(publication_repo: s
     gh.update_pull_body.assert_called_once()
     assert "QA RED, do not merge" in gh.update_pull_body.call_args.args[3]
     gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
-    assert events == ["discover", "draft", "push", "body"]
+    assert events == ["discover", "draft", "push", "refetch", "body"]
     gh.create_pull.assert_not_called()
 
 
@@ -982,6 +1090,45 @@ def test_existing_ready_pr_conversion_failure_leaves_remote_untouched(
     assert events == ["discover", "draft"]
 
 
+def test_existing_red_pr_ready_transition_after_push_is_converted_again(
+    publication_repo: str,
+):
+    events: list[str] = []
+
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        _pair_result(target_text="See [missing](missing.md).\n"),
+        existing_pr=True,
+        remote_branch_exists=True,
+        remote_branch_sha="previous-sha",
+        postpush_pr_draft=False,
+        event_log=events,
+    )
+
+    assert events == ["discover", "draft", "push", "refetch", "draft", "body"]
+    assert gh.convert_pull_to_draft.call_count == 2
+
+
+def test_existing_red_pr_postpush_reconversion_failure_rolls_back_before_body(
+    publication_repo: str,
+):
+    events: list[str] = []
+
+    with pytest.raises(GitHubAPIError, match="cannot convert"):
+        _run_top_level(
+            publication_repo,
+            _pair_result(target_text="See [missing](missing.md).\n"),
+            existing_pr=True,
+            remote_branch_exists=True,
+            remote_branch_sha="previous-sha",
+            postpush_pr_draft=False,
+            draft_conversion_fail_on_call=2,
+            event_log=events,
+        )
+
+    assert events == ["discover", "draft", "push", "refetch", "draft", "rollback"]
+
+
 def test_late_existing_red_pr_is_converted_before_body_mutation(
     publication_repo: str,
 ):
@@ -995,7 +1142,7 @@ def test_late_existing_red_pr_is_converted_before_body_mutation(
         event_log=events,
     )
 
-    assert events == ["discover", "create", "draft", "push", "body"]
+    assert events == ["discover", "create", "draft", "push", "refetch", "body"]
     gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
 
 
@@ -1028,10 +1175,11 @@ def test_post_push_existing_pr_fallback_converts_before_body_mutation(
         result,
         late_existing_pr=True,
         remote_branch_exists=False,
+        postpush_pr_draft=False,
         event_log=events,
     )
 
-    assert events == ["discover", "push", "create", "draft", "body"]
+    assert events == ["discover", "push", "create", "refetch", "draft", "body"]
 
 
 def test_post_push_existing_pr_fallback_conversion_failure_is_fail_closed(
@@ -1046,11 +1194,19 @@ def test_post_push_existing_pr_fallback_conversion_failure_is_fail_closed(
             result,
             late_existing_pr=True,
             remote_branch_exists=False,
+            postpush_pr_draft=False,
             event_log=events,
             draft_conversion_fails=True,
         )
 
-    assert events == ["discover", "push", "create", "draft"]
+    assert events == [
+        "discover",
+        "push",
+        "create",
+        "refetch",
+        "draft",
+        "rollback",
+    ]
 
 
 def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creation(
@@ -1067,7 +1223,7 @@ def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creat
         event_log=events,
     )
 
-    assert events == ["discover", "create", "push", "create"]
+    assert events == ["discover", "create", "push", "create", "refetch"]
     assert job.translation_pr_number == 99
     assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [True, True]
 
@@ -1138,6 +1294,7 @@ def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
             rollback_result,
             late_existing_pr=True,
             remote_branch_exists=False,
+            postpush_pr_draft=False,
             event_log=events,
             draft_conversion_fails=True,
             real_push_remote=str(upstream),
@@ -1150,7 +1307,7 @@ def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
     )
     assert remote_ref.returncode != 0
     assert red_sha not in remote_ref.stdout
-    assert events == ["discover", "push", "create", "draft"]
+    assert events == ["discover", "push", "create", "refetch", "draft"]
 
 
 def test_failed_post_push_conversion_restores_remote_only_previous_sha(
@@ -1241,6 +1398,7 @@ def test_failed_post_push_conversion_restores_remote_only_previous_sha(
             remote_branch_exists=True,
             remote_branch_sha=previous_sha,
             prepush_create_returns_none=True,
+            postpush_pr_draft=False,
             draft_conversion_fails=True,
             real_push_remote=str(upstream),
         )
@@ -1410,6 +1568,82 @@ def test_withhold_precedence_always_dominates_broken_link_red(
     assert job_requires_nonzero_exit(job) is True
 
 
+@pytest.mark.parametrize(
+    "blocking_message",
+    [
+        "Кириллица в EN-тексте (строка ~1): «остаток»",
+        "include_target: missing include target.md",
+        "glossary_violation: expected YDB term",
+        "inbound_fragment: missing stable fragment",
+        "outbound_fragment: target fragment is absent",
+        "href_parity: source/target href mismatch",
+        "md_link_parity: source/target link mismatch",
+    ],
+)
+def test_non_repairable_blocking_finding_withholds_even_with_final_link_blocker(
+    publication_repo: str,
+    blocking_message: str,
+):
+    result = _pair_result(blocking=[blocking_message])
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing target",
+        )
+    ]
+    assert result_has_blocking_findings(result) is True
+
+    job, gh, prepare, commit, push, _finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
+def test_unresolved_blocked_critic_withholds_even_with_final_link_blocker(
+    publication_repo: str,
+):
+    result = _pair_result()
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    file_result.critic_unresolved = CriticResponse(
+        verdict="blocked",
+        issues=[
+            CriticIssueOut(
+                segment_id="s0001",
+                severity="blocked",
+                category="accuracy",
+                comment="Meaning is not preserved",
+            )
+        ],
+    )
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing target",
+        )
+    ]
+    assert result_has_blocking_findings(result) is True
+
+    job, gh, prepare, commit, push, _finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
 def test_clean_candidate_keeps_normal_publication(publication_repo: str):
     result = _pair_result()
 
@@ -1423,6 +1657,28 @@ def test_clean_candidate_keeps_normal_publication(publication_repo: str):
     assert "QA RED, do not merge" not in gh.create_pull.call_args.kwargs["body"]
     assert finish.call_args.kwargs["status"] == "ok"
     assert job_requires_nonzero_exit(job) is False
+
+
+@pytest.mark.parametrize(
+    ("remote_branch_exists", "remote_sha"),
+    [(True, "manual-concurrent-sha"), (False, None)],
+)
+def test_normal_publication_uses_exact_remote_lease_for_existing_and_new_branch(
+    publication_repo: str,
+    remote_branch_exists: bool,
+    remote_sha: str | None,
+):
+    job, gh, _prepare, _commit, push, _finish = _run_top_level(
+        publication_repo,
+        _pair_result(),
+        remote_branch_exists=remote_branch_exists,
+        remote_branch_sha=remote_sha,
+    )
+
+    assert job.pr_result.publication_impact == "PUBLISH_NORMAL"
+    gh.get_branch_sha.assert_called_once_with("o", "r", "ydbdoc-review/pr-7")
+    assert push.call_args.kwargs["guard_remote_ref"] is True
+    assert push.call_args.kwargs["expected_remote_sha"] == remote_sha
 
 
 def test_clean_empty_scope_keeps_existing_success_without_pr(publication_repo: str):

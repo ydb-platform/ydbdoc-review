@@ -19,7 +19,12 @@ from ydbdoc_review.github.workflow import (
 )
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult, PRTranslationResult, PairRunResult
+from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
+    NavigationRunResult,
+    PairRunResult,
+    PRTranslationResult,
+)
 
 
 def _mock_inline_verify_job() -> DocJobResult:
@@ -552,6 +557,77 @@ def test_run_doc_translate_no_pairs(git_repo: str):
                 config=load_config(env=_env()),
             )
     assert result.pr_result.pair_results == []
+
+
+def test_run_doc_translate_nav_only_reaches_successful_post_apply_lifecycle(
+    git_repo: str,
+):
+    repo = Path(git_repo)
+    ru_toc = repo / "ydb/docs/ru/core/toc_p.yaml"
+    en_toc = repo / "ydb/docs/en/core/toc_p.yaml"
+    ru_toc.parent.mkdir(parents=True, exist_ok=True)
+    en_toc.parent.mkdir(parents=True, exist_ok=True)
+    ru_toc.write_text("items:\n- name: A\n  href: ../a.md\n", encoding="utf-8")
+    en_toc.write_text("items: []\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "navigation baseline"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    ru_toc.write_text(
+        "items:\n- name: A\n  href: ../a.md\n- name: B\n  href: ../b.md\n",
+        encoding="utf-8",
+    )
+    merged_en = "items:\n- name: A\n  href: ../a.md\n- name: B\n  href: ../b.md\n"
+    nav_result = NavigationRunResult(
+        ru_path="ydb/docs/ru/core/toc_p.yaml",
+        en_path="ydb/docs/en/core/toc_p.yaml",
+        kind="toc",
+        target_text=merged_en,
+        verdict="ok",
+    )
+    pull = {
+        "title": "navigation only",
+        "head": {
+            "ref": "feature/docs",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+        return_value=[("ydb/docs/ru/core/toc_p.yaml", "modified")],
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[]
+    ), patch(
+        "ydbdoc_review.github.workflow.run_navigation_merges",
+        return_value=[nav_result],
+    ) as run_nav, patch(
+        "ydbdoc_review.github.workflow.run_pr_translation"
+    ) as run_pairs, patch(
+        "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+        return_value=[],
+    ):
+        gh_cls.return_value.get_pull.return_value = pull
+        result = run_doc_translate(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=47856,
+            merge_base_with="HEAD",
+            no_commit=True,
+            config=load_config(env=_env()),
+        )
+
+    run_pairs.assert_not_called()
+    run_nav.assert_called_once()
+    assert result.pr_result.pair_results == []
+    assert result.pr_result.navigation_results == [nav_result]
+    assert result.pr_result.publication_impact == "PUBLISH_NORMAL"
+    assert en_toc.read_text(encoding="utf-8") == merged_en
 
 
 def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):

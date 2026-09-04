@@ -12,6 +12,7 @@ from ydbdoc_review.config.loader import Config
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import format_completeness_gap_item, gap_label
+from ydbdoc_review.pipeline.publication import classify_publication_blockers
 from ydbdoc_review.pipeline.types import (
     FinalTreeBlocker,
     NavigationRunResult,
@@ -155,11 +156,7 @@ def result_has_blocking_findings(result: PRTranslationResult) -> bool:
     Ignores stale ``file_result.verdict == "blocked"`` / nav ``verdict == "blocked"``
     when the report would list no open findings (#52055 false-RED).
     """
-    if result.completeness_gaps or result.final_tree_blockers or result.failed_count:
-        return True
-    if any(_file_has_blocking_findings(run) for run in result.pair_results):
-        return True
-    return any(_nav_has_blocking_findings(nav) for nav in result.navigation_results)
+    return classify_publication_blockers(result).any
 
 
 def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:

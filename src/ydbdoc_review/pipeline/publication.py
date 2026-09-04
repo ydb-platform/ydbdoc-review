@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ydbdoc_review.pipeline.types import PRTranslationResult, PublicationImpact
 from ydbdoc_review.validation.fence_integrity import check_absolute_paths_in_fences
 from ydbdoc_review.validation.heuristics import (
@@ -17,6 +19,21 @@ from ydbdoc_review.validation.ru_source_bugs import (
     check_required_anchor_lines,
     normalize_ru_source_for_translation,
 )
+
+_REPAIRABLE_FINAL_TREE_CODES = frozenset({"en_link_target"})
+
+
+@dataclass(frozen=True)
+class ClassifiedPublicationBlockers:
+    """Typed publication view of every merge-blocking result signal."""
+
+    incomplete: bool = False
+    unsafe: bool = False
+    repairable_final_tree: bool = False
+
+    @property
+    def any(self) -> bool:
+        return self.incomplete or self.unsafe or self.repairable_final_tree
 
 
 def _has_direct_structural_failure(
@@ -75,6 +92,17 @@ def _is_incomplete(result: PRTranslationResult) -> bool:
 
 
 def _is_unsafe(result: PRTranslationResult) -> bool:
+    repairable_messages_by_path: dict[str, set[str]] = {}
+    unsupported_final_tree_blocker = False
+    for blocker in result.final_tree_blockers:
+        if blocker.code not in _REPAIRABLE_FINAL_TREE_CODES:
+            unsupported_final_tree_blocker = True
+            continue
+        repairable_messages_by_path.setdefault(
+            blocker.path.replace("\\", "/"), set()
+        ).add(blocker.message)
+    if unsupported_final_tree_blocker:
+        return True
     for run in result.pair_results:
         if run.validation_issues:
             return True
@@ -84,6 +112,24 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
         if file_result.segment_alignment_error:
             return True
         if file_result.link_contract_issues:
+            return True
+        critic = (
+            file_result.critic_unresolved
+            if file_result.critic_unresolved is not None
+            else file_result.critic_initial
+        )
+        if critic is not None and (
+            critic.verdict == "blocked"
+            or any(issue.severity == "blocked" for issue in critic.issues)
+        ):
+            return True
+        repairable_messages = repairable_messages_by_path.get(
+            run.plan.target_path.replace("\\", "/"), set()
+        )
+        if any(
+            message not in repairable_messages
+            for message in file_result.heuristic_blocking
+        ):
             return True
         if run.source_text is not None and run.target_text is not None:
             source_lang = run.plan.source_lang.lower()
@@ -112,13 +158,31 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
     )
 
 
+def classify_publication_blockers(
+    result: PRTranslationResult,
+) -> ClassifiedPublicationBlockers:
+    """Classify all blocker evidence with an explicit repairable allowlist."""
+    incomplete = _is_incomplete(result)
+    unsafe = _is_unsafe(result)
+    repairable = bool(result.final_tree_blockers) and all(
+        blocker.code in _REPAIRABLE_FINAL_TREE_CODES
+        for blocker in result.final_tree_blockers
+    )
+    return ClassifiedPublicationBlockers(
+        incomplete=incomplete,
+        unsafe=unsafe,
+        repairable_final_tree=repairable,
+    )
+
+
 def evaluate_publication_impact(result: PRTranslationResult) -> PublicationImpact:
     """Return the typed publication decision; every WITHHOLD outranks publish."""
-    if _is_incomplete(result):
+    blockers = classify_publication_blockers(result)
+    if blockers.incomplete:
         return PublicationImpact.WITHHOLD_INCOMPLETE
-    if _is_unsafe(result):
+    if blockers.unsafe:
         return PublicationImpact.WITHHOLD_UNSAFE
-    if result.final_tree_blockers:
+    if blockers.repairable_final_tree:
         return PublicationImpact.PUBLISH_RED
     return PublicationImpact.PUBLISH_NORMAL
 

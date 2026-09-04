@@ -996,6 +996,7 @@ def run_doc_translate(
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
+    contents: list[PairContent] = []
 
     with continue_feedback_scope(effective_continue_feedback):
         pending_en_md = {p.en_path for p in pairs}
@@ -1276,10 +1277,12 @@ def run_doc_translate(
             deleted_paths=touched.deleted,
         )
         if committed:
+            # Every forced publication is an exact compare-and-swap. A normal
+            # rerun must not overwrite a manual or concurrent branch update.
+            prepush_remote_sha = gh.get_branch_sha(owner, repo, branch)
             if pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
                 # Keep discovery adjacent to the remote mutation. Any known ready
                 # PR must become draft before its head is force-pushed.
-                prepush_remote_sha = gh.get_branch_sha(owner, repo, branch)
                 preexisting_translation_pr = gh.find_open_pull_by_head(
                     owner,
                     repo,
@@ -1336,9 +1339,7 @@ def run_doc_translate(
                 push_token,
                 upstream_url,
                 force=True,
-                guard_remote_ref=(
-                    pr_result.publication_impact == PublicationImpact.PUBLISH_RED
-                ),
+                guard_remote_ref=True,
                 expected_remote_sha=prepush_remote_sha,
             )
             pushed = True
@@ -1376,28 +1377,31 @@ def run_doc_translate(
             tr_pr_url, tr_pr_number, created = opened
             job.translation_pr_url = tr_pr_url
             job.translation_pr_number = tr_pr_number
-            if not created:
-                if publish_red and prepush_opened_pr is None:
-                    # GitHub may reveal a concurrently-created/existing PR only
-                    # through create_pull's conflict fallback. Fail closed: draft
-                    # conversion must succeed before changing its merge-facing body.
-                    try:
+            if publish_red:
+                # Draft state is mutable independently of the branch. Re-check
+                # after the guarded push even when pre-push discovery already
+                # converted the PR; a concurrent ready-for-review transition
+                # must be reversed before any merge-facing body update.
+                try:
+                    postpush_pull = gh.get_pull(owner, repo, tr_pr_number)
+                    if postpush_pull.get("draft") is not True:
                         gh.convert_pull_to_draft(owner, repo, tr_pr_number)
-                    except GitHubAPIError:
-                        if not pushed_candidate_sha:
-                            raise RuntimeError(
-                                "cannot roll back RED branch without pushed HEAD SHA"
-                            ) from None
-                        rollback_pushed_branch(
-                            repo_path,
-                            "ydbdoc-review-push",
-                            branch,
-                            push_token,
-                            upstream_url,
-                            expected_pushed_sha=pushed_candidate_sha,
-                            previous_sha=prepush_remote_sha,
-                        )
-                        raise
+                except GitHubAPIError:
+                    if not pushed_candidate_sha:
+                        raise RuntimeError(
+                            "cannot roll back RED branch without pushed HEAD SHA"
+                        ) from None
+                    rollback_pushed_branch(
+                        repo_path,
+                        "ydbdoc-review-push",
+                        branch,
+                        push_token,
+                        upstream_url,
+                        expected_pushed_sha=pushed_candidate_sha,
+                        previous_sha=prepush_remote_sha,
+                    )
+                    raise
+            if not created:
                 gh.update_pull_body(owner, repo, tr_pr_number, body)
             if created:
                 try:
@@ -1900,18 +1904,33 @@ def run_doc_verify(
         and path.endswith(".md")
         and (not source_scope_en or path.replace("\\", "/") in source_scope_en)
     } | set(durable_impact_paths)
+    verify_deleted_en_paths = {
+        path.replace("\\", "/")
+        for path, kind in changes
+        if kind == "deleted"
+        and path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
+        and path.endswith(".md")
+    }
     rescannable_durable_paths = {
         path
         for path in durable_impact_paths
-        if read_text(repo_path, path) is not None
-        or read_text_at_ref(repo_path, merge_base_with, path) is not None
+        if path not in verify_deleted_en_paths
+        and (
+            read_text(repo_path, path) is not None
+            or read_text_at_ref(repo_path, merge_base_with, path) is not None
+        )
     }
     apply_en_link_target_checks(
         pr_result,
         repo_path=repo_path,
         en_md_paths=verify_en_paths,
         baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
-        docs_read=_final_tree_reader(repo_path, merge_base_with, verify_en_paths),
+        docs_read=_final_tree_reader(
+            repo_path,
+            merge_base_with,
+            verify_en_paths,
+            deleted_paths=verify_deleted_en_paths,
+        ),
     )
     if not translation_pr:
         # Author/fork bilingual PR: flag RU docs/nav without EN mirror in the same diff.
