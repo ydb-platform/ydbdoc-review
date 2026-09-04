@@ -7,6 +7,7 @@ from ydbdoc_review.validation.heuristics import (
     check_unrestored_placeholders,
     check_unrestored_yfmvar_placeholders,
 )
+from ydbdoc_review.validation.include_targets import check_include_parity
 
 
 def _is_incomplete(result: PRTranslationResult) -> bool:
@@ -45,6 +46,18 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
         if file_result.segment_alignment_error:
             return True
         if file_result.link_contract_issues:
+            return True
+        if (
+            run.source_text is not None
+            and run.target_text is not None
+            and run.plan.source_lang.lower() in {"ru", "russian"}
+            and run.plan.target_lang.lower() in {"en", "english"}
+            and check_include_parity(
+                run.source_text,
+                run.target_text,
+                source_file=run.plan.source_path,
+            )
+        ):
             return True
         if run.target_text and run.plan.target_lang.lower() in {"en", "english"}:
             if check_unrestored_placeholders(run.target_text, target_lang="en"):

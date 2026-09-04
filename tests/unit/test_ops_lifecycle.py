@@ -6,7 +6,7 @@ from ydbdoc_review.ops.lifecycle import (
     finish_ops_job,
     load_parent_run_context,
 )
-from ydbdoc_review.ops.runs import InMemoryRunsLedger
+from ydbdoc_review.ops.runs import InMemoryRunsLedger, RunRecord
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 
 
@@ -58,6 +58,72 @@ def test_begin_and_finish_ok():
     assert ledger.sum_cost_for_day(ctx.run_day) == 1.25
     assert store.exists_run(ctx.run_id)
     assert store.get(ctx.run_id, "manifest.json") is not None
+
+
+def test_published_red_is_selected_as_doc_continue_parent():
+    ledger = InMemoryRunsLedger()
+    store = InMemoryTranscriptStore()
+    env = {
+        "YDBDOC_ALLOWED_ACTORS": "",
+        "GITHUB_ACTOR": "sintjuri",
+        "YDBDOC_DAILY_BUDGET_RUB": "5000",
+    }
+    parent, gate, _comment = begin_ops_job(
+        mode="translate",
+        repo="o/r",
+        source_pr=7,
+        env=env,
+        ledger=ledger,
+        store=store,
+    )
+    assert gate.ok and parent is not None
+    finish_ops_job(parent, status="published_red", cost_rub=1.0)
+
+    child, gate, comment = begin_ops_job(
+        mode="continue",
+        repo="o/r",
+        source_pr=7,
+        env=env,
+        ledger=ledger,
+        store=store,
+    )
+
+    assert gate.ok and comment is None and child is not None
+    assert child.parent_run_id == parent.run_id
+
+
+def test_three_published_red_continues_exhaust_limit():
+    ledger = InMemoryRunsLedger()
+    for index in range(1, 4):
+        ledger.upsert_run(
+            RunRecord(
+                run_day="2026-09-04",
+                run_id=f"continue-red-{index}",
+                actor="u",
+                mode="continue",
+                repo="o/r",
+                source_pr=7,
+                status="published_red",
+                continue_index=index,
+            )
+        )
+
+    ctx, gate, comment = begin_ops_job(
+        mode="continue",
+        repo="o/r",
+        source_pr=7,
+        env={
+            "YDBDOC_ALLOWED_ACTORS": "",
+            "GITHUB_ACTOR": "sintjuri",
+            "YDBDOC_DAILY_BUDGET_RUB": "5000",
+        },
+        ledger=ledger,
+        store=InMemoryTranscriptStore(),
+    )
+
+    assert ctx is None
+    assert gate.status == "denied_quota"
+    assert comment and "лимит continue исчерпан" in comment
 
 
 def test_expired_continue():

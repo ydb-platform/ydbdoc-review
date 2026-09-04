@@ -819,6 +819,51 @@ def build_verify_fixup_source_comment(
     )
 
 
+def _withhold_source_details(result: PRTranslationResult) -> list[tuple[str, str]]:
+    """Return concrete affected paths/reasons for a withheld source summary."""
+    details: list[tuple[str, str]] = []
+    for run in result.pair_results:
+        reasons: list[str] = []
+        if run.error:
+            reasons.append(run.error)
+        if (
+            run.plan.action not in {"skip", "delete_en"}
+            and not run.skipped
+            and not run.deleted
+            and run.target_text is None
+        ):
+            reasons.append("expected EN output отсутствует")
+        fr = run.file_result
+        if fr is not None:
+            if fr.segment_alignment_error:
+                reasons.append(fr.segment_alignment_error)
+            reasons.extend(issue.message for issue in run.validation_issues)
+            reasons.extend(issue.message for issue in fr.link_contract_issues)
+            reasons.extend(action.message for action in fr.manual_actions)
+            reasons.extend(fr.heuristic_blocking)
+            reasons.extend(
+                warning
+                for warning in fr.heuristic_warnings
+                if warning.startswith("translate_soft_keep:")
+            )
+        if not reasons and result.publication_impact in {
+            PublicationImpact.WITHHOLD_INCOMPLETE,
+            PublicationImpact.WITHHOLD_UNSAFE,
+        }:
+            reasons.append(result.publication_impact.value)
+        for reason in dict.fromkeys(reasons):
+            details.append((run.plan.target_path, str(reason).replace("\n", " ")))
+    for nav in result.navigation_results:
+        reasons = [*(nav.warnings or ())]
+        if nav.error:
+            reasons.append(nav.error)
+        if nav.verdict == "blocked" and not reasons:
+            reasons.append("mandatory navigation validation blocked")
+        for reason in dict.fromkeys(reasons):
+            details.append((nav.en_path, str(reason).replace("\n", " ")))
+    return list(dict.fromkeys(details))
+
+
 def build_source_pr_comment(
     result: PRTranslationResult,
     *,
@@ -882,6 +927,16 @@ def build_source_pr_comment(
             body += "\n**Ошибки pipeline:**\n\n"
             for run in errors:
                 body += f"- `{run.plan.target_path}`: {run.error}\n"
+        withhold_details = _withhold_source_details(result)
+        if withhold_details:
+            action = (
+                "добавить отсутствующий output и повторить `doc_translate`"
+                if result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
+                else "исправить structural/integrity blocker и повторить `doc_translate`"
+            )
+            body += "\n**Почему публикация удержана:**\n\n"
+            for path, reason in withhold_details:
+                body += f"- `{path}`: {reason}. Действие: {action}.\n"
         if result.yellow_warnings:
             body += "\n**Жёлтые предупреждения (не блокируют):**\n\n"
             for warning in result.yellow_warnings:

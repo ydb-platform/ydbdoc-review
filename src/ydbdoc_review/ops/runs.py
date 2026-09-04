@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
-from ydbdoc_review.ops.msk import msk_today
-
 logger = logging.getLogger(__name__)
+
+SUCCESSFUL_PUBLICATION_STATUSES = ("ok", "published_red")
 
 
 @dataclass
@@ -26,7 +26,7 @@ class RunRecord:
     input_tokens: int = 0
     output_tokens: int = 0
     continue_index: int = 0
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
     translation_pr: int | None = None
     parent_run_id: str | None = None
@@ -43,7 +43,7 @@ class RunsLedger(Protocol):
         source_pr: int,
         *,
         modes: tuple[str, ...] | None = None,
-        statuses: tuple[str, ...] = ("ok",),
+        statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
     ) -> str | None: ...
 
     def upsert_run(self, record: RunRecord) -> None: ...
@@ -64,7 +64,7 @@ class InMemoryRunsLedger:
             for r in self.records
             if r.source_pr == source_pr
             and r.mode == "continue"
-            and r.status == "ok"
+            and r.status in SUCCESSFUL_PUBLICATION_STATUSES
         )
 
     def latest_run_id(
@@ -72,7 +72,7 @@ class InMemoryRunsLedger:
         source_pr: int,
         *,
         modes: tuple[str, ...] | None = None,
-        statuses: tuple[str, ...] = ("ok",),
+        statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
     ) -> str | None:
         candidates = [
             r
@@ -112,7 +112,6 @@ class YdbRunsLedger:
             pass
 
     def sum_cost_for_day(self, run_day: str) -> float:
-        ydb = self._ydb
         query = """
         DECLARE $day AS Utf8;
         SELECT SUM(cost_rub) AS total FROM runs WHERE run_day = $day;
@@ -138,7 +137,8 @@ class YdbRunsLedger:
         return sum(
             1
             for r in rows
-            if r.get("mode") == "continue" and r.get("status") == "ok"
+            if r.get("mode") == "continue"
+            and r.get("status") in SUCCESSFUL_PUBLICATION_STATUSES
         )
 
     def latest_run_id(
@@ -146,7 +146,7 @@ class YdbRunsLedger:
         source_pr: int,
         *,
         modes: tuple[str, ...] | None = None,
-        statuses: tuple[str, ...] = ("ok",),
+        statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
     ) -> str | None:
         rows = self._fetch_by_source_pr(source_pr)
         filtered = []
@@ -163,7 +163,6 @@ class YdbRunsLedger:
         return str(rid) if rid else None
 
     def upsert_run(self, record: RunRecord) -> None:
-        ydb = self._ydb
         query = """
         DECLARE $run_day AS Utf8;
         DECLARE $run_id AS Utf8;
@@ -197,7 +196,7 @@ class YdbRunsLedger:
             if dt is None:
                 return None
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return int(dt.timestamp() * 1_000_000)
 
         params = {

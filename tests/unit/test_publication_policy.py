@@ -11,15 +11,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.github.errors import GitHubAPIError
 from ydbdoc_review.github.workflow import (
     job_requires_nonzero_exit,
     run_doc_translate,
+    run_doc_verify,
 )
 from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
+    FinalTreeBlocker,
     NavigationRunResult,
     PairRunResult,
     PRTranslationResult,
@@ -122,6 +125,8 @@ def _run_top_level(
     impact_path: str | None = None,
     create_succeeds: bool = True,
     source_changes: list[tuple[str, str]] | None = None,
+    event_log: list[str] | None = None,
+    draft_conversion_fails: bool = False,
 ):
     pull = {
         "title": "docs",
@@ -135,11 +140,29 @@ def _run_top_level(
     gh = MagicMock()
     gh.get_pull.return_value = pull
     gh.iter_issue_comments.return_value = iter(())
-    gh.create_pull.return_value = (
+    created_pull = (
         ("https://github.com/o/r/pull/99", 99, not existing_pr)
         if create_succeeds
         else None
     )
+    gh.find_open_pull_by_head.side_effect = lambda *_args, **_kwargs: (
+        event_log.append("discover") if event_log is not None else None
+    ) or (("https://github.com/o/r/pull/99", 99) if existing_pr else None)
+    gh.create_pull.side_effect = lambda *_args, **_kwargs: (
+        event_log.append("create") if event_log is not None else None
+    ) or created_pull
+    gh.update_pull_body.side_effect = lambda *_args, **_kwargs: (
+        event_log.append("body") if event_log is not None else None
+    )
+
+    def _convert(*_args, **_kwargs):
+        if event_log is not None:
+            event_log.append("draft")
+        if draft_conversion_fails:
+            raise GitHubAPIError("cannot convert", status_code=403)
+        return True
+
+    gh.convert_pull_to_draft.side_effect = _convert
     gh.post_issue_comment.return_value = "https://github.com/o/r/pull/7#issuecomment-1"
     ops_ctx = SimpleNamespace(recorder=None, continue_feedback=None)
 
@@ -185,6 +208,8 @@ def _run_top_level(
             patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True)
         )
         push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
+        if event_log is not None:
+            push.side_effect = lambda *_args, **_kwargs: event_log.append("push")
         stack.enter_context(
             patch(
                 "ydbdoc_review.github.workflow.run_doc_verify",
@@ -280,19 +305,332 @@ def test_final_tree_blocker_without_pair_survives_as_draft_red(publication_repo:
     assert job_requires_nonzero_exit(job) is False
 
 
+def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
+    publication_repo: str,
+    tmp_path: Path,
+):
+    import ydbdoc_review.github.workflow as workflow
+
+    upstream = tmp_path / "upstream.git"
+    subprocess.run(
+        ["git", "clone", "--bare", publication_repo, str(upstream)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(upstream)],
+        cwd=publication_repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "fetch", "origin", "main:refs/remotes/origin/feature/docs"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    impact_path = "ydb/docs/en/impact.md"
+    Path(publication_repo, impact_path).write_text(
+        "See [missing](gone.md).\n",
+        encoding="utf-8",
+    )
+    translate_result = _pair_result(target_text="Translated.\n")
+    verify_result = _pair_result(target_text="Translated.\n")
+
+    source_pull = {
+        "title": "docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": "source-head",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": "source-base"},
+    }
+    translation_pull = {
+        "title": "Auto-translate docs from PR #7",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/pr-7",
+            "sha": "translation-head",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    gh = MagicMock()
+    gh.get_pull.side_effect = lambda _o, _r, number: (
+        translation_pull if number == 99 else source_pull
+    )
+    gh.get_file_text.return_value = "Привет.\n"
+    gh.iter_issue_comments.return_value = iter(())
+    gh.find_open_pull_by_head.return_value = None
+    gh.create_pull.return_value = ("https://github.com/o/r/pull/99", 99, True)
+    gh.post_issue_comment.return_value = "comment-url"
+
+    translate_changes = [("ydb/docs/ru/a.md", "modified")]
+    verify_changes = [
+        ("ydb/docs/en/a.md", "modified"),
+        (impact_path, "added"),
+    ]
+    git_change_calls = iter((translate_changes, verify_changes))
+
+    def _api_changes(_gh, _owner, _repo, number):
+        return translate_changes if number == 7 else verify_changes
+
+    real_prepare = workflow.prepare_translation_branch_on_base
+    prepare_calls = 0
+
+    def _prepare_once(*args, **kwargs):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        if prepare_calls == 1:
+            return real_prepare(*args, **kwargs)
+        return None
+
+    real_verify = workflow.run_doc_verify
+    verify_jobs = []
+
+    def _capture_real_verify(**kwargs):
+        verify_job = real_verify(**kwargs)
+        verify_jobs.append(verify_job)
+        return verify_job
+
+    ops_ctx = SimpleNamespace(recorder=None, continue_feedback=None)
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(ops_ctx, GateResult(ok=True), None),
+        ),
+        patch("ydbdoc_review.github.workflow.finish_ops_job"),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            side_effect=lambda *_args, **_kwargs: next(git_change_calls),
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            side_effect=_api_changes,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.run_pr_translation",
+            return_value=translate_result,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow._run_verify_pairs",
+            return_value=verify_result,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+            return_value=[],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow._declare_exact_ascii_fragment_targets_after_apply",
+            return_value=[impact_path],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.translation_branch_base",
+            return_value=(str(upstream), "main"),
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.prepare_translation_branch_on_base",
+            side_effect=_prepare_once,
+        ),
+        patch("ydbdoc_review.github.workflow.push_branch"),
+        patch(
+            "ydbdoc_review.github.workflow.run_doc_verify",
+            side_effect=_capture_real_verify,
+        ),
+    ):
+        job = run_doc_translate(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=7,
+            merge_base_with="HEAD",
+            config=load_config(env=_env()),
+        )
+
+    committed_impact = subprocess.run(
+        ["git", "show", f"HEAD:{impact_path}"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert committed_impact == "See [missing](gone.md).\n"
+    assert job.committed is True
+    assert verify_jobs
+    assert [(b.path, b.code) for b in verify_jobs[-1].pr_result.final_tree_blockers] == [
+        (impact_path, "en_link_target")
+    ]
+    assert verify_jobs[-1].pr_result.publication_impact == "PUBLISH_RED"
+
+
+def test_verify_empty_scoped_result_preserves_inherited_no_pair_blocker(
+    publication_repo: str,
+):
+    blocker = FinalTreeBlocker(
+        path="ydb/docs/en/impact.md",
+        code="en_link_target",
+        message="en_link_target: impact.md: missing target",
+    )
+    pull = {
+        "title": "Auto-translate docs from PR #7",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/pr-7",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    gh = MagicMock()
+    gh.get_pull.return_value = pull
+
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]),
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[]),
+    ):
+        job = run_doc_verify(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=99,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=load_config(env=_env()),
+            inherited_final_tree_blockers=[blocker],
+            skip_ops_gates=True,
+        )
+
+    assert job.pr_result.final_tree_blockers == [blocker]
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+
+
+def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
+    publication_repo: str,
+):
+    blocker = FinalTreeBlocker(
+        path="ydb/docs/en/impact.md",
+        code="en_link_target",
+        message="en_link_target: impact.md: missing target",
+    )
+    translation_pull = {
+        "title": "Auto-translate docs from PR #7",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/pr-7",
+            "sha": "translation-sha",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    source_pull = {
+        "title": "docs",
+        "head": {
+            "ref": "docs",
+            "sha": "source-head",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": "source-base"},
+    }
+    gh = MagicMock()
+    gh.get_pull.side_effect = lambda _o, _r, number: (
+        translation_pull if number == 99 else source_pull
+    )
+    gh.get_file_text.return_value = "Привет.\n"
+    gh.iter_issue_comments.return_value = iter(())
+    gh.post_issue_comment.return_value = "comment-url"
+
+    def _api_changes(_gh, _owner, _repo, number):
+        if number == 7:
+            return [("ydb/docs/ru/a.md", "modified")]
+        return [("ydb/docs/en/a.md", "modified")]
+
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=[("ydb/docs/en/a.md", "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            side_effect=_api_changes,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow._run_verify_pairs",
+            side_effect=[
+                _pair_result(target_text="Critic fix one.\n"),
+                _pair_result(target_text="Critic fix two.\n"),
+            ],
+        ),
+        patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"),
+        patch(
+            "ydbdoc_review.github.workflow.git_commit_paths",
+            side_effect=[True, False],
+        ),
+        patch("ydbdoc_review.github.workflow.push_branch"),
+        patch(
+            "ydbdoc_review.github.workflow.git_head_sha",
+            side_effect=[
+                "checkout-one",
+                "before-one",
+                "after-one",
+                "checkout-two",
+                "before-two",
+            ],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow._enforce_report_checkout_bytes",
+            return_value=[],
+        ),
+    ):
+        job = run_doc_verify(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=99,
+            merge_base_with="HEAD",
+            config=load_config(env=_env()),
+            inherited_final_tree_blockers=[blocker],
+            skip_ops_gates=True,
+        )
+
+    assert job.pr_result.final_tree_blockers == [blocker]
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+
+
 def test_existing_ready_translation_pr_is_converted_to_draft(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
 
     job, gh, _prepare, _commit, _push, _finish = _run_top_level(
         publication_repo,
         result,
         existing_pr=True,
+        event_log=events,
     )
 
     assert getattr(job.pr_result, "publication_impact", None) == "PUBLISH_RED"
     gh.update_pull_body.assert_called_once()
     assert "QA RED, do not merge" in gh.update_pull_body.call_args.args[3]
     gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
+    assert events == ["discover", "draft", "push", "body"]
+    gh.create_pull.assert_not_called()
+
+
+def test_existing_ready_pr_conversion_failure_leaves_remote_untouched(
+    publication_repo: str,
+):
+    result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
+
+    with pytest.raises(GitHubAPIError, match="cannot convert"):
+        _run_top_level(
+            publication_repo,
+            result,
+            existing_pr=True,
+            event_log=events,
+            draft_conversion_fails=True,
+        )
+
+    assert events == ["discover", "draft"]
 
 
 def _withhold_case(case: str) -> PRTranslationResult:
@@ -317,6 +655,16 @@ def _withhold_case(case: str) -> PRTranslationResult:
                 LinkContractIssue("ambiguous_link_slot", "cannot prove source-owned slot"),
             )
         )
+    if case == "include_parity":
+        result = _pair_result(
+            target_text="# Page\n\nTranslated body.\n",
+            blocking=["include_parity: cannot auto-insert EN include"],
+        )
+        result.pair_results[0].source_text = (
+            "# Страница\n\nТекст.\n\n"
+            "{% include [note](./core/_includes/note.md) %}\n"
+        )
+        return result
     if case == "protect_marker_leakage":
         return _pair_result(
             target_text="Leaked ⟦C1⟧ marker.\n",
@@ -353,6 +701,7 @@ def _withhold_case(case: str) -> PRTranslationResult:
         ("source_retaining_manual_action", "WITHHOLD_INCOMPLETE"),
         ("segment_alignment", "WITHHOLD_UNSAFE"),
         ("deterministic_integrity", "WITHHOLD_UNSAFE"),
+        ("include_parity", "WITHHOLD_UNSAFE"),
         ("protect_marker_leakage", "WITHHOLD_UNSAFE"),
         ("link_wrapper_loss", "WITHHOLD_UNSAFE"),
         ("invalid_navigation_yaml", "WITHHOLD_UNSAFE"),
@@ -407,3 +756,17 @@ def test_clean_empty_scope_keeps_existing_success_without_pr(publication_repo: s
     gh.create_pull.assert_not_called()
     assert finish.call_args.kwargs["status"] == "ok"
     assert job_requires_nonzero_exit(job) is False
+
+
+def test_withhold_source_comment_names_file_reason_and_action(publication_repo: str):
+    result = _withhold_case("include_parity")
+
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    source_summary = gh.post_issue_comment.call_args.args[3]
+    assert "`ydb/docs/en/a.md`" in source_summary
+    assert "include_parity:" in source_summary
+    assert "Действие:" in source_summary

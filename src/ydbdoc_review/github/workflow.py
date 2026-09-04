@@ -1249,6 +1249,23 @@ def run_doc_translate(
                             logger.error("%s", msg)
         refresh_publication_impact(pr_result)
 
+    preexisting_translation_pr: tuple[str, int] | None = None
+    if (
+        touched
+        and not dry_run
+        and not no_commit
+        and pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    ):
+        preexisting_translation_pr = gh.find_open_pull_by_head(
+            owner,
+            repo,
+            head_branch=branch,
+            base=translation_pr_base(ctx),
+        )
+        if preexisting_translation_pr is not None:
+            _, existing_pr_number = preexisting_translation_pr
+            gh.convert_pull_to_draft(owner, repo, existing_pr_number)
+
     committed = pushed = False
     if touched and not dry_run and not no_commit:
         prepare_translation_branch_on_base(
@@ -1304,14 +1321,18 @@ def run_doc_translate(
             github_repo,
             publication_result=pr_result,
         )
-        opened = gh.create_pull(
-            owner,
-            repo,
-            title=title,
-            head=branch,
-            base=translation_pr_base(ctx),
-            body=body,
-            draft=publish_red,
+        opened = (
+            (*preexisting_translation_pr, False)
+            if preexisting_translation_pr is not None
+            else gh.create_pull(
+                owner,
+                repo,
+                title=title,
+                head=branch,
+                base=translation_pr_base(ctx),
+                body=body,
+                draft=publish_red,
+            )
         )
         if opened:
             tr_pr_url, tr_pr_number, created = opened
@@ -1319,8 +1340,6 @@ def run_doc_translate(
             job.translation_pr_number = tr_pr_number
             if not created:
                 gh.update_pull_body(owner, repo, tr_pr_number, body)
-            if publish_red and not created:
-                gh.convert_pull_to_draft(owner, repo, tr_pr_number)
             if created:
                 try:
                     gh.add_issue_labels(owner, repo, tr_pr_number, ["documentation"])
@@ -1426,6 +1445,11 @@ def run_doc_verify(
     api_token, push_token = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
+    inherited_result = PRTranslationResult(
+        completeness_gaps=list(inherited_completeness_gaps or ()),
+        final_tree_blockers=list(inherited_final_tree_blockers or ()),
+    )
+    refresh_publication_impact(inherited_result)
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
     translation_pr = is_translation_pr_branch(
@@ -1467,6 +1491,7 @@ def run_doc_verify(
                 pr_number=pr_number,
                 source_pr_number=source_pr,
                 dry_run=dry_run,
+                pr_result=inherited_result,
             )
 
     upstream_url = repo_https_clone_url(owner, repo)
@@ -1559,6 +1584,7 @@ def run_doc_verify(
         translation_branch=ctx.head_ref,
         translation_pr_number=pr_number,
         dry_run=dry_run,
+        pr_result=inherited_result,
     )
     if not pairs and not nav_pairs:
         if translation_pr:
@@ -1957,7 +1983,8 @@ def run_doc_verify(
                 dry_run=False,
                 no_commit=no_commit,
                 config=cfg,
-                inherited_completeness_gaps=inherited_completeness_gaps,
+                inherited_completeness_gaps=pr_result.completeness_gaps,
+                inherited_final_tree_blockers=pr_result.final_tree_blockers,
                 continue_feedback=continue_feedback,
                 skip_ops_gates=True,
                 ops_mode=ops_mode,
@@ -1977,7 +2004,8 @@ def run_doc_verify(
                 dry_run=False,
                 no_commit=no_commit,
                 config=cfg,
-                inherited_completeness_gaps=inherited_completeness_gaps,
+                inherited_completeness_gaps=pr_result.completeness_gaps,
+                inherited_final_tree_blockers=pr_result.final_tree_blockers,
                 continue_feedback=continue_feedback,
                 skip_ops_gates=True,
                 ops_mode=ops_mode,
