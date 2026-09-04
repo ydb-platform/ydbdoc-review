@@ -18,6 +18,7 @@ from ydbdoc_review.github.workflow import (
     _final_tree_reader,
     _reconcile_final_en_same_fragment_paths_after_apply,
     _repair_en_fragments_after_apply,
+    run_doc_translate,
 )
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
@@ -33,7 +34,10 @@ from ydbdoc_review.validation.en_link_targets import (
     apply_en_link_target_checks,
     check_en_page_link_targets,
 )
-from ydbdoc_review.validation.href_parity import reconcile_final_en_same_fragment_paths
+from ydbdoc_review.validation.href_parity import (
+    _iter_visible_md_link_matches,
+    reconcile_final_en_same_fragment_paths,
+)
 
 AUTH_RU = "ydb/docs/ru/core/security/authentication.md"
 AUTH_EN = AUTH_RU.replace("/ru/", "/en/")
@@ -369,6 +373,198 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
         en_md_paths=en_written,
         baseline_read=lambda p: read_text_at_ref(str(repo), tip_ref, p),
         docs_read=_final_tree_reader(str(repo), tip_ref, en_written),
+    ) == []
+
+
+def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
+    tmp_path: Path,
+):
+    """The real post-translation stage must call final EN reconciliation."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+
+    filler_ru = "".join(
+        f"[Справочная ссылка {index}](https://example.test/{index})\n"
+        for index in range(72)
+    )
+    filler_en = "".join(
+        f"[Reference link {index}](https://example.test/{index})\n"
+        for index in range(72)
+    )
+    auth_ru_base = (
+        "[Режим аутентификации]"
+        "(../reference/configuration/auth_config.md#security-auth)\n"
+        "[Сертификат]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        f"{filler_ru}"
+    )
+    auth_ru_current = (
+        auth_ru_base
+        + "[Мониторинг](../reference/configuration/monitoring_config.md#tls)\n"
+    )
+    auth_en_tip = (
+        "[Authentication mode]"
+        "(../reference/configuration/security_config.md#security-auth)\n"
+        "[Certificate]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        f"{filler_en}"
+    )
+    auth_en_candidate = (
+        "[Authentication mode]"
+        "(../reference/configuration/auth_config.md#security-auth)\n"
+        "[Certificate]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        f"{filler_en}"
+        "[Monitoring](../reference/configuration/monitoring_config.md#tls)\n"
+    )
+    assert len(list(_iter_visible_md_link_matches(auth_ru_base))) == 74
+    assert len(list(_iter_visible_md_link_matches(auth_ru_current))) == 75
+    assert len(list(_iter_visible_md_link_matches(auth_en_tip))) == 74
+    assert len(list(_iter_visible_md_link_matches(auth_en_candidate))) == 75
+
+    owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    owner_en = owner_ru.replace("/ru/", "/en/")
+    security_en = "ydb/docs/en/core/reference/configuration/security_config.md"
+    monitoring_en = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
+    for rel, text in (
+        (AUTH_RU, auth_ru_base),
+        (AUTH_EN, auth_en_tip),
+        (owner_ru, "## Сертификат {#certificate-auth-config}\n"),
+        (owner_en, "## Certificate authentication\n"),
+        (security_en, "## Authentication {#security-auth}\n"),
+        (monitoring_en, "## Monitoring {#tls}\n"),
+        (
+            "ydb/docs/en/core/toc_p.yaml",
+            "items:\n"
+            "- name: Authentication\n"
+            "  href: security/authentication.md\n"
+            "- name: Auth config\n"
+            "  href: reference/configuration/auth_config.md\n"
+            "- name: Security config\n"
+            "  href: reference/configuration/security_config.md\n"
+            "- name: Monitoring config\n"
+            "  href: reference/configuration/monitoring_config.md\n",
+        ),
+    ):
+        _put(repo, rel, text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "source base and EN baseline")
+    source_base_ref = _git_output(repo, "rev-parse", "HEAD")
+
+    _put(repo, AUTH_RU, auth_ru_current)
+    _git(repo, "add", AUTH_RU)
+    _git(repo, "commit", "-qm", "merged source adds the 75th link")
+    source_ref = _git_output(repo, "rev-parse", "HEAD")
+
+    _put(repo, security_en, "## Authentication {#security-auth}\n\nTip context.\n")
+    _git(repo, "add", security_en)
+    _git(repo, "commit", "-qm", "distinct upstream EN tip")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", source_ref)
+
+    pull = {
+        "title": "docs",
+        "merged": True,
+        "state": "closed",
+        "merge_commit_sha": source_ref,
+        "head": {
+            "ref": "docs/source",
+            "sha": source_ref,
+            "repo": {
+                "clone_url": "https://github.com/ydb-platform/ydb.git",
+                "full_name": "ydb-platform/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+
+    def translated_result(contents, *_args, **_kwargs):
+        auth_content = next(content for content in contents if content.pair.ru_path == AUTH_RU)
+        assert auth_content.ru_base_text == auth_ru_base
+        assert auth_content.ru_text == auth_ru_current
+        assert auth_content.en_text == auth_en_tip
+        pair_results = []
+        for content in contents:
+            target_text = (
+                auth_en_candidate
+                if content.pair.ru_path == AUTH_RU
+                else content.en_text
+            )
+            assert target_text is not None
+            plan = PairPlan(
+                pair=content.pair,
+                action="translate_to_en",
+                source_path=content.pair.ru_path,
+                target_path=content.pair.en_path,
+                source_lang="ru",
+                target_lang="en",
+            )
+            file_result = FileTranslationResult(
+                file_path=content.pair.en_path,
+                final_text=target_text,
+                segments_count=1,
+                verdict="ok",
+                prompt_version="test",
+            )
+            pair_results.append(
+                PairRunResult(
+                    plan=plan,
+                    target_text=target_text,
+                    file_result=file_result,
+                    source_text=content.ru_text,
+                )
+            )
+        return PRTranslationResult(pair_results=pair_results)
+
+    cfg = load_config(
+        env={
+            "YDBDOC_MODEL_PROVIDER": "yandex_cloud",
+            "YDBDOC_YC_FOLDER_ID": "b1",
+            "YDBDOC_YC_API_KEY": "k",
+            "GITHUB_TOKEN": "gh",
+            "GITHUB_PUSH_TOKEN": "ghp",
+            "YDBDOC_SKIP_OPS_GATES": "1",
+        }
+    )
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+        return_value=[(AUTH_RU, "modified")],
+    ), patch(
+        "ydbdoc_review.github.workflow.run_pr_translation",
+        side_effect=translated_result,
+    ) as translate:
+        gh_cls.return_value.get_pull.return_value = pull
+        result = run_doc_translate(
+            repo_path=str(repo),
+            github_repo="ydb-platform/ydb",
+            pr_number=40385,
+            merge_base_with=tip_ref,
+            no_commit=True,
+            config=cfg,
+        )
+
+    translate.assert_called_once()
+    assert _git_output(repo, "rev-parse", f"{source_ref}^") == source_base_ref
+    assert _git_output(repo, "rev-parse", "HEAD") == source_ref
+    auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
+    owner_after = (repo / owner_en).read_text(encoding="utf-8")
+    assert "security_config.md#security-auth" in auth_after
+    assert "auth_config.md#security-auth" not in auth_after
+    assert "auth_config.md#certificate-auth-config" in auth_after
+    assert "{#certificate-auth-config}" in owner_after
+    assert "{#security-auth}" not in owner_after
+    assert result.pr_result.final_tree_blockers == []
+    assert apply_en_link_target_checks(
+        result.pr_result,
+        repo_path=str(repo),
+        en_md_paths={AUTH_EN, owner_en},
+        baseline_read=lambda path: read_text_at_ref(str(repo), tip_ref, path),
+        docs_read=_final_tree_reader(str(repo), tip_ref, {AUTH_EN, owner_en}),
     ) == []
 
 

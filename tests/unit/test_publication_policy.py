@@ -34,6 +34,7 @@ from ydbdoc_review.reporting.builder import (
     build_translation_pr_body,
 )
 from ydbdoc_review.translation.manual import ManualAction
+from ydbdoc_review.validation.href_parity import check_href_parity
 from ydbdoc_review.validation.link_contract import LinkContractIssue
 
 
@@ -294,6 +295,7 @@ def _run_top_level(
 
 def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
+    result.pair_results[0].source_text = "См. [missing](missing.md).\n"
 
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
@@ -324,6 +326,134 @@ def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
     assert "QA RED, do not merge" in full_report
     assert "missing.md" in full_report
     assert finish.call_args.kwargs["status"] == "published_red"
+    assert job_requires_nonzero_exit(job) is False
+
+
+def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red(
+    publication_repo: str,
+):
+    repo = Path(publication_repo)
+    href = "core/target.md#missing-fragment"
+    source_text = f"См. [цель]({href}).\n"
+    target_text = f"See [target]({href}).\n"
+    assert check_href_parity(source_text, target_text) == []
+    (repo / "ydb/docs/ru/core").mkdir(parents=True, exist_ok=True)
+    (repo / "ydb/docs/ru/core/target.md").write_text(
+        "# Цель\n",
+        encoding="utf-8",
+    )
+    (repo / "ydb/docs/en/core/target.md").write_text(
+        "# Target\n",
+        encoding="utf-8",
+    )
+    (repo / "ydb/docs/en/core/toc_p.yaml").write_text(
+        "items:\n"
+        "- name: A\n"
+        "  href: ../a.md\n"
+        "- name: Target\n"
+        "  href: target.md\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "target fixture"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "ydb/docs/ru/a.md").write_text(source_text, encoding="utf-8")
+
+    pull = {
+        "title": "docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    gh = MagicMock()
+    gh.get_pull.return_value = pull
+    gh.get_branch_sha.return_value = None
+    gh.find_open_pull_by_head.return_value = None
+    gh.create_pull.return_value = ("https://github.com/o/r/pull/99", 99, True)
+    gh.iter_issue_comments.return_value = iter(())
+    gh.post_issue_comment.return_value = "https://github.com/o/r/pull/7#issuecomment-1"
+
+    def fake_file_result(_harness, _state, _ctx):
+        return FileTranslationResult(
+            file_path="ydb/docs/en/a.md",
+            final_text=target_text,
+            segments_count=1,
+            verdict="ok",
+            prompt_version="test",
+        )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh)
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                return_value=[("ydb/docs/ru/a.md", "modified")],
+            )
+        )
+        stack.enter_context(
+            patch("ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[])
+        )
+        stack.enter_context(
+            patch("ydbdoc_review.harness.pair.FileHarness.run", fake_file_result)
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+                return_value=[],
+            )
+        )
+        prepare = stack.enter_context(
+            patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base")
+        )
+        commit = stack.enter_context(
+            patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True)
+        )
+        push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.run_doc_verify",
+                return_value=SimpleNamespace(
+                    translation_comment_url="https://github.com/o/r/pull/99#issuecomment-2",
+                    pr_result=PRTranslationResult(),
+                ),
+            )
+        )
+        job = run_doc_translate(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=7,
+            merge_base_with="HEAD",
+            config=load_config(env=_env()),
+        )
+
+    run = job.pr_result.pair_results[0]
+    assert run.error is None
+    assert run.validation_issues == ()
+    assert run.file_result is not None
+    assert run.file_result.segment_alignment_error is None
+    assert run.file_result.manual_actions == []
+    assert all(
+        blocker.startswith("en_link_target:")
+        for blocker in run.file_result.heuristic_blocking
+    )
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+    assert [(blocker.path, blocker.code) for blocker in job.pr_result.final_tree_blockers] == [
+        ("ydb/docs/en/a.md", "en_link_target")
+    ]
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert "QA RED, do not merge" in gh.create_pull.call_args.kwargs["body"]
     assert job_requires_nonzero_exit(job) is False
 
 
@@ -1227,6 +1357,51 @@ def test_withhold_never_prepares_or_publishes(
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
     assert getattr(job.pr_result, "publication_impact", None) == expected_impact
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+    assert job_requires_nonzero_exit(job) is True
+
+
+@pytest.mark.parametrize(
+    ("case", "soft_keep", "expected_impact"),
+    [
+        ("pair_error", False, "WITHHOLD_INCOMPLETE"),
+        ("missing_expected_output", False, "WITHHOLD_INCOMPLETE"),
+        ("include_parity", False, "WITHHOLD_UNSAFE"),
+        ("link_wrapper_loss", False, "WITHHOLD_UNSAFE"),
+        ("include_parity", True, "WITHHOLD_INCOMPLETE"),
+    ],
+)
+def test_withhold_precedence_always_dominates_broken_link_red(
+    publication_repo: str,
+    case: str,
+    soft_keep: bool,
+    expected_impact: str,
+):
+    result = _withhold_case(case)
+    if soft_keep:
+        file_result = result.pair_results[0].file_result
+        assert file_result is not None
+        file_result.heuristic_warnings.append(
+            "translate_soft_keep: translate failed; kept tip EN unchanged"
+        )
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing target",
+        )
+    ]
+
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == expected_impact
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()
