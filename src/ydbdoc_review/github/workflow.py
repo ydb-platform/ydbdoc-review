@@ -405,6 +405,8 @@ def _final_tree_reader(
     repo_path: str,
     merge_base_with: str,
     overlay_paths: set[str] | frozenset[str],
+    *,
+    deleted_paths: set[str] | frozenset[str] = frozenset(),
 ):
     """Read the intended post-translate docs tree (§6.229).
 
@@ -412,16 +414,18 @@ def _final_tree_reader(
     checkouts are often the historical merge commit, so worktree siblings can
     be stale or missing tip-only moves (e.g. ``node-authorization.md``). For
     paths we did **not** write this run, prefer tip; for overlays, prefer the
-    worktree bytes we just applied.
+    worktree bytes we just applied. Explicit same-job deletions are tombstones
+    and never fall back to tip.
     """
     overlays = {p.replace("\\", "/") for p in overlay_paths}
+    tombstones = {p.replace("\\", "/") for p in deleted_paths}
 
     def _read(path: str) -> str | None:
         norm = path.replace("\\", "/")
+        if norm in tombstones:
+            return None
         if norm in overlays:
-            text = read_text(repo_path, norm)
-            if text is not None:
-                return text
+            return read_text(repo_path, norm)
         tip = read_text_at_ref(repo_path, merge_base_with, norm)
         if tip is not None:
             return tip
@@ -495,6 +499,7 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
     dry_run: bool,
     merge_base_with: str | None = None,
     ru_content_ref: str | None = None,
+    deleted_paths: list[str] | None = None,
 ) -> list[str]:
     """Apply fail-closed four-snapshot same-fragment path preservation.
 
@@ -509,7 +514,12 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
     if not merge_base_with or not ru_content_ref:
         return []
     normalized_paths = {path.replace("\\", "/") for path in paths}
-    final_reader = _final_tree_reader(repo_path, merge_base_with, normalized_paths)
+    final_reader = _final_tree_reader(
+        repo_path,
+        merge_base_with,
+        normalized_paths,
+        deleted_paths=set(deleted_paths or ()),
+    )
 
     def source_reader(path: str) -> str | None:
         return read_text_at_ref(repo_path, ru_content_ref, path)
@@ -529,10 +539,15 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
         candidate = read_text(repo_path, en_path)
         if candidate is None:
             continue
+        # E0 is strictly the tip EN snapshot. A historical checkout body is
+        # not lineage evidence when this path is absent from ``merge_base``.
+        tip_en = read_text_at_ref(repo_path, merge_base_with, en_path)
+        if tip_en is None:
+            continue
         fixed = reconcile_final_en_same_fragment_paths(
             content.ru_base_text,
             content.ru_text,
-            content.en_text or content.en_base_text,
+            tip_en,
             candidate,
             ru_page_path=content.pair.ru_path,
             en_page_path=en_path,
@@ -1162,6 +1177,7 @@ def run_doc_translate(
             dry_run=dry_run,
             merge_base_with=merge_base_with,
             ru_content_ref=ru_ref,
+            deleted_paths=touched.deleted,
         )
         if reconciled_paths:
             logger.info(
@@ -1180,12 +1196,22 @@ def run_doc_translate(
             for p in touched.written
             if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
         }
+        en_deleted = {
+            p
+            for p in touched.deleted
+            if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
+        }
         broken_links = apply_en_link_target_checks(
             pr_result,
             repo_path=repo_path,
             en_md_paths=en_written,
             baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
-            docs_read=_final_tree_reader(repo_path, merge_base_with, en_written),
+            docs_read=_final_tree_reader(
+                repo_path,
+                merge_base_with,
+                en_written,
+                deleted_paths=en_deleted,
+            ),
         )
         if broken_links:
             logger.error(

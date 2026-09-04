@@ -313,6 +313,11 @@ def reconcile_final_en_same_fragment_paths(
 
     base_keys = [_key(label, href) for label, href, _start, _end in ru_base_links]
     current_keys = [_key(label, href) for label, href, _start, _end in ru_current_links]
+    base_key_counts = Counter(base_keys)
+    current_key_counts = Counter(current_keys)
+    base_slot_by_key = {
+        key: slot for slot, key in enumerate(base_keys) if base_key_counts[key] == 1
+    }
     base_fragment_counts = Counter(
         fragment
         for _label, href, _start, _end in ru_base_links
@@ -335,9 +340,9 @@ def reconcile_final_en_same_fragment_paths(
         if fragment is None:
             continue
         key = current_keys[slot]
-        if current_keys.count(key) != 1 or base_keys.count(key) != 1:
+        if current_key_counts[key] != 1 or base_key_counts[key] != 1:
             continue
-        historical_slot = base_keys.index(key)
+        historical_slot = base_slot_by_key[key]
         baseline_href = en_tip_links[historical_slot][1]
         if (
             _decoded_fragment(current_href) != fragment
@@ -356,12 +361,22 @@ def reconcile_final_en_same_fragment_paths(
         if not _resolves(en_page_path, baseline_href, read_final_en):
             continue
         baseline_path, separator, _baseline_fragment = baseline_href.partition("#")
-        _candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
+        candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
         if not separator or not raw_candidate_fragment:
             continue
-        replacements.append(
-            (start, end, f"[{candidate_links[slot][0]}]({baseline_path}#{raw_candidate_fragment})")
+        raw_link = en_candidate_text[start:end]
+        open_paren = raw_link.find("(")
+        raw_href = raw_link[open_paren + 1 : -1] if open_paren >= 0 else ""
+        raw_path_offset = raw_href.find(candidate_path)
+        if raw_path_offset < 0:
+            continue
+        path_start = open_paren + 1 + raw_path_offset
+        replacement = (
+            raw_link[:path_start]
+            + baseline_path
+            + raw_link[path_start + len(candidate_path) :]
         )
+        replacements.append((start, end, replacement))
 
     out = en_candidate_text
     for start, end, replacement in reversed(replacements):

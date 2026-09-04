@@ -24,9 +24,10 @@ from ydbdoc_review.navigation.scope_planner import (
     make_repo_scope_readers,
     plan_translation_scope,
 )
+from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import FileTranslationResult
+from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult, PRTranslationResult
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.validation.en_link_targets import (
     apply_en_link_target_checks,
@@ -296,19 +297,22 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     _git(repo, "add", "ydb/docs/en/core/reference/configuration/security_config.md")
     _git(repo, "commit", "-qm", "EN tip context")
     tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", source_ref)
 
     auth_pair = DocPair(ru_path=AUTH_RU, en_path=AUTH_EN, ru_changed=True)
     owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
     owner_en = owner_ru.replace("/ru/", "/en/")
     owner_pair = DocPair(ru_path=owner_ru, en_path=owner_en, ru_changed=True)
     contents = load_pair_contents(
-        str(repo), [auth_pair, owner_pair], merge_base_with=tip_ref,
+        str(repo), [owner_pair, auth_pair], merge_base_with=tip_ref,
         ru_content_ref=source_ref, ru_base_ref=source_base_ref,
     )
     assert source_base_ref != source_ref != tip_ref
-    assert len(contents[0].ru_base_text and contents[0].ru_base_text.splitlines()) == 2
-    assert len(contents[0].ru_text and contents[0].ru_text.splitlines()) == 3
-    assert len(contents[0].en_text and contents[0].en_text.splitlines()) == 2
+    assert _git_output(repo, "rev-parse", "HEAD") == source_ref
+    auth_content = next(content for content in contents if content.pair == auth_pair)
+    assert len(auth_content.ru_base_text and auth_content.ru_base_text.splitlines()) == 2
+    assert len(auth_content.ru_text and auth_content.ru_text.splitlines()) == 3
+    assert len(auth_content.en_text and auth_content.en_text.splitlines()) == 2
 
     def fake_result(_harness, state, _ctx):
         final = auth_ru_current if state.file_path == AUTH_RU else auth_config_en
@@ -325,6 +329,11 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
             contents, client, load_glossary(), config=cfg,
             docs_text_reader=_final_tree_reader(str(repo), tip_ref, set()),
         )
+    assert [run.plan.target_path for run in result.pair_results] == [owner_en, AUTH_EN]
+    auth_run = next(run for run in result.pair_results if run.plan.target_path == AUTH_EN)
+    assert auth_run.target_text is not None
+    assert "auth_config.md#security-auth" in auth_run.target_text
+    assert "security_config.md#security-auth" in (repo / AUTH_EN).read_text(encoding="utf-8")
     touched = _apply_results_to_disk(str(repo), result, dry_run=False)
     declared = _declare_exact_ascii_fragment_targets_after_apply(
         str(repo), touched.written, dry_run=False,
@@ -361,6 +370,87 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
         baseline_read=lambda p: read_text_at_ref(str(repo), tip_ref, p),
         docs_read=_final_tree_reader(str(repo), tip_ref, en_written),
     ) == []
+
+
+def test_pr_40385_final_tree_reader_keeps_touched_deletion_as_tombstone(tmp_path: Path):
+    """R-GL-11: final target checks must see same-job EN deletions."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    target = "ydb/docs/en/core/reference/configuration/security_config.md"
+    _put(repo, target, "## Security {#security-auth}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "tip target")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    (repo / target).unlink()
+    touched = TouchedPaths(written=[], deleted=[target])
+
+    read = _final_tree_reader(
+        str(repo),
+        tip_ref,
+        set(touched.written),
+        deleted_paths=set(touched.deleted),
+    )
+
+    assert read(target) is None
+
+
+def test_pr_40385_final_reconciliation_fails_closed_without_tip_en_snapshot(tmp_path: Path):
+    """R-GL-11: a historical checkout body cannot stand in for missing tip EN."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    owner_en = owner_ru.replace("/ru/", "/en/")
+    security_en = "ydb/docs/en/core/reference/configuration/security_config.md"
+    tip_href = "../reference/configuration/security_config.md#security-auth"
+    broken_href = "../reference/configuration/auth_config.md#security-auth"
+    _put(repo, AUTH_RU, f"[Security]({broken_href})\n")
+    _put(repo, AUTH_EN, f"[Security]({tip_href})\n")
+    _put(repo, owner_ru, "## Certificate {#certificate-auth-config}\n")
+    _put(repo, owner_en, "## Certificate\n")
+    _put(repo, security_en, "## Security {#security-auth}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "RU base with historical EN")
+    base_ref = _git_output(repo, "rev-parse", "HEAD")
+    _put(repo, AUTH_RU, f"Updated.\n\n[Security]({broken_href})\n")
+    _git(repo, "add", AUTH_RU)
+    _git(repo, "commit", "-qm", "RU current")
+    source_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "rm", "-q", AUTH_EN)
+    _git(repo, "commit", "-qm", "tip deletes EN referrer")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", source_ref)
+
+    pair = DocPair(ru_path=AUTH_RU, en_path=AUTH_EN, ru_changed=True)
+    content = PairContent(
+        pair=pair,
+        ru_text=read_text_at_ref(str(repo), source_ref, AUTH_RU),
+        ru_base_text=read_text_at_ref(str(repo), base_ref, AUTH_RU),
+        # Simulates a caller retaining checkout EN when tip has no snapshot.
+        en_text=f"[Security]({tip_href})\n",
+    )
+    candidate = f"[Security]({broken_href})\n"
+    _put(repo, AUTH_EN, candidate)
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=AUTH_RU,
+        target_path=AUTH_EN,
+        source_lang="ru",
+        target_lang="en",
+    )
+    result = PRTranslationResult(pair_results=[PairRunResult(plan=plan, target_text=candidate)])
+
+    assert _reconcile_final_en_same_fragment_paths_after_apply(
+        str(repo), [content], result, [AUTH_EN], dry_run=False,
+        merge_base_with=tip_ref, ru_content_ref=source_ref,
+    ) == []
+    assert (repo / AUTH_EN).read_text(encoding="utf-8") == candidate
 
 
 def test_pr_40385_final_reconciliation_rejects_ambiguous_or_source_valid_lineage():
@@ -432,3 +522,31 @@ def test_pr_40385_final_reconciliation_rejects_ambiguous_or_source_valid_lineage
         "[Security](../reference/configuration/auth_config.md#security-auth)\n",
         security_text="# security {#different-auth}\n",
     )
+
+
+def test_pr_40385_final_reconciliation_changes_only_raw_href_path():
+    """R-GL-11: retain link label, surrounding whitespace, and encoded fragment bytes."""
+    ru = "[Security](../reference/configuration/auth_config.md#security-auth)\n"
+    tip = "[Security](../reference/configuration/security_config.md#security-auth)\n"
+    candidate = "[ Security ](  ../reference/configuration/auth_config.md#security%2Dauth  )\n"
+    expected = "[ Security ](  ../reference/configuration/security_config.md#security%2Dauth  )\n"
+    ru_owner = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    en_owner = ru_owner.replace("/ru/", "/en/")
+    en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
+    source_pages = {AUTH_RU: ru, ru_owner: "## Certificate {#certificate-auth-config}\n"}
+    final_pages = {
+        AUTH_EN: candidate,
+        en_owner: "## Certificate\n",
+        en_security: "## Security {#security-auth}\n",
+    }
+
+    assert reconcile_final_en_same_fragment_paths(
+        ru,
+        ru,
+        tip,
+        candidate,
+        ru_page_path=AUTH_RU,
+        en_page_path=AUTH_EN,
+        read_source_ru=source_pages.get,
+        read_final_en=final_pages.get,
+    ) == expected
