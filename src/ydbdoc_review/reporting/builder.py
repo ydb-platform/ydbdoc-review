@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -10,6 +13,7 @@ from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import format_completeness_gap_item, gap_label
 from ydbdoc_review.pipeline.types import (
+    FinalTreeBlocker,
     NavigationRunResult,
     PairRunResult,
     PRTranslationResult,
@@ -37,6 +41,61 @@ from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
 from ydbdoc_review.validation.placeholder_drift import exclude_skipped_issues
 from ydbdoc_review.version import action_release_label
+
+_FINAL_TREE_BLOCKERS_MARKER = "ydbdoc-final-tree-blockers:v1"
+
+
+def render_final_tree_blocker_manifest(blockers: list[FinalTreeBlocker]) -> str:
+    """Serialize typed RED evidence into a durable, hidden PR-body marker."""
+    payload = json.dumps(
+        [
+            {"path": item.path, "code": item.code, "message": item.message}
+            for item in blockers
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    return f"<!-- {_FINAL_TREE_BLOCKERS_MARKER}:{encoded} -->"
+
+
+def parse_final_tree_blocker_manifest(body: str) -> list[FinalTreeBlocker]:
+    """Read durable RED evidence, failing closed on a malformed marker."""
+    prefix = f"<!-- {_FINAL_TREE_BLOCKERS_MARKER}:"
+    start = body.find(prefix)
+    if start < 0:
+        return []
+    end = body.find(" -->", start + len(prefix))
+    if end < 0:
+        raise ValueError("malformed final-tree blocker manifest")
+    encoded = body[start + len(prefix) : end].strip()
+    try:
+        padded = encoded + "=" * (-len(encoded) % 4)
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+        data = json.loads(raw)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("malformed final-tree blocker manifest") from exc
+    if not isinstance(data, list):
+        raise ValueError("malformed final-tree blocker manifest")
+    blockers: list[FinalTreeBlocker] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError("malformed final-tree blocker manifest")
+        path = item.get("path")
+        code = item.get("code")
+        message = item.get("message")
+        if (
+            not isinstance(path, str)
+            or not path.startswith("ydb/docs/en/")
+            or not path.endswith(".md")
+            or code != "en_link_target"
+            or not isinstance(message, str)
+            or not message
+        ):
+            raise ValueError("malformed final-tree blocker manifest")
+        blockers.append(FinalTreeBlocker(path=path, code=code, message=message))
+    return blockers
 
 
 @dataclass(frozen=True)
@@ -709,6 +768,9 @@ def build_translation_pr_body(
         blockers = "\n\n**Final-tree blockers:**\n\n" + "\n".join(
             f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}"
             for blocker in publication_result.final_tree_blockers
+        )
+        blockers += "\n\n" + render_final_tree_blocker_manifest(
+            publication_result.final_tree_blockers
         )
     return (
         f"{banner}"

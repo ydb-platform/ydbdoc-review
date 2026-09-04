@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.git_ops import (
@@ -12,8 +12,8 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
 )
+from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
 from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.pairs import (
     ChangeKind,
@@ -22,8 +22,8 @@ from ydbdoc_review.pipeline.pairs import (
     build_doc_pairs,
 )
 from ydbdoc_review.pipeline.tip_newer import apply_tip_newer_policy
-from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 _STATUS_TO_KIND: dict[str, ChangeKind] = {
@@ -57,6 +57,7 @@ class PullRequestContext:
     head_repo_full_name: str
     head_repo_https_url: str
     base_ref: str
+    body: str = ""
     merged: bool = False
     state: str = "open"
     merge_commit_sha: str | None = None
@@ -83,6 +84,7 @@ def pull_request_context(
         head_repo_full_name=str(head_repo.get("full_name") or f"{owner}/{repo}"),
         head_repo_https_url=clone_url,
         base_ref=str(base.get("ref") or ""),
+        body=str(data.get("body") or ""),
         merged=bool(data.get("merged")),
         state=str(data.get("state") or "open"),
         merge_commit_sha=merge_sha,

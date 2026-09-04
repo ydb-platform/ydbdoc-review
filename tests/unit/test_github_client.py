@@ -86,6 +86,27 @@ def test_create_pull_can_open_draft(mock_request):
     assert mock_request.call_args.kwargs["json"]["draft"] is True
 
 
+def test_branch_exists_uses_encoded_head_ref():
+    client = GitHubClient("tok")
+    with patch.object(client, "_request", return_value={"ref": "refs/heads/a/b"}) as request:
+        assert client.branch_exists("o", "r", "a/b") is True
+
+    request.assert_called_once_with(
+        "GET",
+        "https://api.github.com/repos/o/r/git/ref/heads/a%2Fb",
+    )
+
+
+def test_branch_exists_returns_false_only_for_not_found():
+    client = GitHubClient("tok")
+    with patch.object(
+        client,
+        "_request",
+        side_effect=GitHubAPIError("missing", status_code=404),
+    ):
+        assert client.branch_exists("o", "r", "missing") is False
+
+
 @patch("ydbdoc_review.github.client.requests.request")
 def test_convert_ready_pull_to_draft(mock_request):
     mock_request.side_effect = [

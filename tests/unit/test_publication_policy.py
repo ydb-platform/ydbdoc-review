@@ -26,8 +26,13 @@ from ydbdoc_review.pipeline.types import (
     NavigationRunResult,
     PairRunResult,
     PRTranslationResult,
+    PublicationImpact,
 )
-from ydbdoc_review.reporting.builder import ReportMeta, build_full_report
+from ydbdoc_review.reporting.builder import (
+    ReportMeta,
+    build_full_report,
+    build_translation_pr_body,
+)
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.validation.link_contract import LinkContractIssue
 
@@ -122,6 +127,8 @@ def _run_top_level(
     pr_result: PRTranslationResult,
     *,
     existing_pr: bool = False,
+    late_existing_pr: bool = False,
+    remote_branch_exists: bool | None = None,
     impact_path: str | None = None,
     create_succeeds: bool = True,
     source_changes: list[tuple[str, str]] | None = None,
@@ -140,8 +147,15 @@ def _run_top_level(
     gh = MagicMock()
     gh.get_pull.return_value = pull
     gh.iter_issue_comments.return_value = iter(())
+    gh.branch_exists.return_value = (
+        late_existing_pr if remote_branch_exists is None else remote_branch_exists
+    )
     created_pull = (
-        ("https://github.com/o/r/pull/99", 99, not existing_pr)
+        (
+            "https://github.com/o/r/pull/99",
+            99,
+            not existing_pr and not late_existing_pr,
+        )
         if create_succeeds
         else None
     )
@@ -311,6 +325,23 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
 ):
     import ydbdoc_review.github.workflow as workflow
 
+    impact_path = "ydb/docs/en/impact.md"
+    Path(publication_repo, impact_path).write_text(
+        "Existing impact page.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", impact_path],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "add existing impact page"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
     upstream = tmp_path / "upstream.git"
     subprocess.run(
         ["git", "clone", "--bare", publication_repo, str(upstream)],
@@ -328,7 +359,6 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         check=True,
         capture_output=True,
     )
-    impact_path = "ydb/docs/en/impact.md"
     Path(publication_repo, impact_path).write_text(
         "See [missing](gone.md).\n",
         encoding="utf-8",
@@ -368,9 +398,9 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
     translate_changes = [("ydb/docs/ru/a.md", "modified")]
     verify_changes = [
         ("ydb/docs/en/a.md", "modified"),
-        (impact_path, "added"),
+        (impact_path, "modified"),
     ]
-    git_change_calls = iter((translate_changes, verify_changes))
+    git_change_calls = iter((translate_changes, verify_changes, verify_changes))
 
     def _api_changes(_gh, _owner, _repo, number):
         return translate_changes if number == 7 else verify_changes
@@ -504,6 +534,97 @@ def test_verify_empty_scoped_result_preserves_inherited_no_pair_blocker(
     assert job.pr_result.publication_impact == "PUBLISH_RED"
 
 
+def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
+    publication_repo: str,
+):
+    impact_path = "ydb/docs/en/impact.md"
+    Path(publication_repo, impact_path).write_text(
+        "See [missing](gone.md).\n",
+        encoding="utf-8",
+    )
+    blocker = FinalTreeBlocker(
+        path=impact_path,
+        code="en_link_target",
+        message="en_link_target: impact.md: missing target `gone.md`",
+    )
+    published_result = _pair_result()
+    published_result.final_tree_blockers = [blocker]
+    published_result.publication_impact = PublicationImpact.PUBLISH_RED
+    body = build_translation_pr_body(
+        7,
+        "o/r",
+        publication_result=published_result,
+    )
+    assert "ydbdoc-final-tree-blockers:v1" in body
+
+    translation_pull = {
+        "title": "Auto-translate docs from PR #7",
+        "body": body,
+        "head": {
+            "ref": "ydbdoc-review/pr-7",
+            "sha": "translation-sha",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    source_pull = {
+        "title": "docs",
+        "body": "",
+        "head": {
+            "ref": "docs",
+            "sha": "source-head",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": "source-base"},
+    }
+    gh = MagicMock()
+    gh.get_pull.side_effect = lambda _o, _r, number: (
+        translation_pull if number == 99 else source_pull
+    )
+    gh.get_file_text.return_value = "Привет.\n"
+
+    def _api_changes(_gh, _owner, _repo, number):
+        if number == 7:
+            return [("ydb/docs/ru/a.md", "modified")]
+        return [("ydb/docs/en/a.md", "modified"), (impact_path, "modified")]
+
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=[("ydb/docs/en/a.md", "modified"), (impact_path, "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            side_effect=_api_changes,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow._run_verify_pairs",
+            return_value=_pair_result(),
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+            return_value=[],
+        ),
+    ):
+        job = run_doc_verify(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=99,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=load_config(env=_env()),
+            skip_ops_gates=True,
+        )
+
+    assert [(item.path, item.code) for item in job.pr_result.final_tree_blockers] == [
+        (impact_path, "en_link_target")
+    ]
+    assert job.pr_result.final_tree_blockers != [blocker]
+    assert "missing file" in job.pr_result.final_tree_blockers[0].message
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+
+
 def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
     publication_repo: str,
 ):
@@ -633,6 +754,77 @@ def test_existing_ready_pr_conversion_failure_leaves_remote_untouched(
     assert events == ["discover", "draft"]
 
 
+def test_late_existing_red_pr_is_converted_before_body_mutation(
+    publication_repo: str,
+):
+    result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
+
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        late_existing_pr=True,
+        event_log=events,
+    )
+
+    assert events == ["discover", "create", "draft", "push", "body"]
+    gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
+
+
+def test_late_existing_red_pr_conversion_failure_does_not_mutate_body(
+    publication_repo: str,
+):
+    result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
+
+    with pytest.raises(GitHubAPIError, match="cannot convert"):
+        _run_top_level(
+            publication_repo,
+            result,
+            late_existing_pr=True,
+            event_log=events,
+            draft_conversion_fails=True,
+        )
+
+    assert events == ["discover", "create", "draft"]
+
+
+def test_post_push_existing_pr_fallback_converts_before_body_mutation(
+    publication_repo: str,
+):
+    result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
+
+    _run_top_level(
+        publication_repo,
+        result,
+        late_existing_pr=True,
+        remote_branch_exists=False,
+        event_log=events,
+    )
+
+    assert events == ["discover", "push", "create", "draft", "body"]
+
+
+def test_post_push_existing_pr_fallback_conversion_failure_is_fail_closed(
+    publication_repo: str,
+):
+    result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
+
+    with pytest.raises(GitHubAPIError, match="cannot convert"):
+        _run_top_level(
+            publication_repo,
+            result,
+            late_existing_pr=True,
+            remote_branch_exists=False,
+            event_log=events,
+            draft_conversion_fails=True,
+        )
+
+    assert events == ["discover", "push", "create", "draft"]
+
+
 def _withhold_case(case: str) -> PRTranslationResult:
     if case == "pair_error":
         return _pair_result(target_text=None, error="translation failed")
@@ -663,6 +855,23 @@ def _withhold_case(case: str) -> PRTranslationResult:
         result.pair_results[0].source_text = (
             "# Страница\n\nТекст.\n\n"
             "{% include [note](./core/_includes/note.md) %}\n"
+        )
+        return result
+    if case == "heading_parity":
+        result = _pair_result(
+            target_text="# Page\n\nTranslated body.\n",
+            blocking=["heading_parity: source 2 headings vs target 1"],
+        )
+        result.pair_results[0].source_text = "# Страница\n\n## Раздел\n\nТекст.\n"
+        return result
+    if case == "list_tab_parity":
+        result = _pair_result(
+            target_text="# Page\n\nTranslated body.\n",
+            blocking=["list_tab_parity: source 1 tab blocks vs target 0"],
+        )
+        result.pair_results[0].source_text = (
+            "# Страница\n\n{% list tabs %}\n\n- Вкладка\n\n  Текст.\n\n"
+            "{% endlist %}\n"
         )
         return result
     if case == "protect_marker_leakage":
@@ -702,6 +911,8 @@ def _withhold_case(case: str) -> PRTranslationResult:
         ("segment_alignment", "WITHHOLD_UNSAFE"),
         ("deterministic_integrity", "WITHHOLD_UNSAFE"),
         ("include_parity", "WITHHOLD_UNSAFE"),
+        ("heading_parity", "WITHHOLD_UNSAFE"),
+        ("list_tab_parity", "WITHHOLD_UNSAFE"),
         ("protect_marker_leakage", "WITHHOLD_UNSAFE"),
         ("link_wrapper_loss", "WITHHOLD_UNSAFE"),
         ("invalid_navigation_yaml", "WITHHOLD_UNSAFE"),

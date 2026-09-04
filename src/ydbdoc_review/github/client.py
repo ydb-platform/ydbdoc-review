@@ -141,6 +141,18 @@ class GitHubClient:
         num = int(item.get("number", 0))
         return (html, num) if html and num else None
 
+    def branch_exists(self, owner: str, repo: str, branch: str) -> bool:
+        """Return whether a remote head exists, without mutating it."""
+        encoded = quote(branch, safe="")
+        url = f"https://api.github.com/repos/{owner}/{repo}/git/ref/heads/{encoded}"
+        try:
+            data = self._request("GET", url)
+        except GitHubAPIError as exc:
+            if exc.status_code == 404:
+                return False
+            raise
+        return isinstance(data, dict)
+
     def delete_branch(self, owner: str, repo: str, branch: str) -> bool:
         """Delete ``refs/heads/{branch}``. Return True if removed, False if absent."""
         enc_branch = quote(branch, safe="")

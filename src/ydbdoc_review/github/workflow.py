@@ -117,6 +117,7 @@ from ydbdoc_review.reporting.builder import (
     build_translation_pr_body,
     build_verify_fixup_pr_body,
     build_verify_fixup_source_comment,
+    parse_final_tree_blocker_manifest,
     result_has_blocking_findings,
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
@@ -1250,22 +1251,7 @@ def run_doc_translate(
         refresh_publication_impact(pr_result)
 
     preexisting_translation_pr: tuple[str, int] | None = None
-    if (
-        touched
-        and not dry_run
-        and not no_commit
-        and pr_result.publication_impact == PublicationImpact.PUBLISH_RED
-    ):
-        preexisting_translation_pr = gh.find_open_pull_by_head(
-            owner,
-            repo,
-            head_branch=branch,
-            base=translation_pr_base(ctx),
-        )
-        if preexisting_translation_pr is not None:
-            _, existing_pr_number = preexisting_translation_pr
-            gh.convert_pull_to_draft(owner, repo, existing_pr_number)
-
+    prepush_opened_pr: tuple[str, int, bool] | None = None
     committed = pushed = False
     if touched and not dry_run and not no_commit:
         prepare_translation_branch_on_base(
@@ -1287,6 +1273,45 @@ def run_doc_translate(
             deleted_paths=touched.deleted,
         )
         if committed:
+            if pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
+                # Keep discovery adjacent to the remote mutation. Any known ready
+                # PR must become draft before its head is force-pushed.
+                preexisting_translation_pr = gh.find_open_pull_by_head(
+                    owner,
+                    repo,
+                    head_branch=branch,
+                    base=translation_pr_base(ctx),
+                )
+                if preexisting_translation_pr is not None:
+                    existing_pr_url, existing_pr_number = preexisting_translation_pr
+                    gh.convert_pull_to_draft(owner, repo, existing_pr_number)
+                    prepush_opened_pr = (
+                        existing_pr_url,
+                        existing_pr_number,
+                        False,
+                    )
+                elif gh.branch_exists(owner, repo, branch):
+                    prepush_opened_pr = gh.create_pull(
+                        owner,
+                        repo,
+                        title=f"Auto-translate docs from PR #{pr_number}",
+                        head=branch,
+                        base=translation_pr_base(ctx),
+                        body=build_translation_pr_body(
+                            pr_number,
+                            github_repo,
+                            publication_result=pr_result,
+                        ),
+                        draft=True,
+                    )
+                    if prepush_opened_pr is None:
+                        raise GitHubAPIError(
+                            "could not establish draft protection for existing "
+                            f"translation branch {branch}"
+                        )
+                    _, existing_pr_number, created = prepush_opened_pr
+                    if not created:
+                        gh.convert_pull_to_draft(owner, repo, existing_pr_number)
             logger.info(
                 "Pushing translation branch %s to %s/%s (from upstream %s, source PR head: %s)",
                 branch,
@@ -1322,8 +1347,8 @@ def run_doc_translate(
             publication_result=pr_result,
         )
         opened = (
-            (*preexisting_translation_pr, False)
-            if preexisting_translation_pr is not None
+            prepush_opened_pr
+            if prepush_opened_pr is not None
             else gh.create_pull(
                 owner,
                 repo,
@@ -1339,6 +1364,11 @@ def run_doc_translate(
             job.translation_pr_url = tr_pr_url
             job.translation_pr_number = tr_pr_number
             if not created:
+                if publish_red and prepush_opened_pr is None:
+                    # GitHub may reveal a concurrently-created/existing PR only
+                    # through create_pull's conflict fallback. Fail closed: draft
+                    # conversion must succeed before changing its merge-facing body.
+                    gh.convert_pull_to_draft(owner, repo, tr_pr_number)
                 gh.update_pull_body(owner, repo, tr_pr_number, body)
             if created:
                 try:
@@ -1445,12 +1475,6 @@ def run_doc_verify(
     api_token, push_token = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
-    inherited_result = PRTranslationResult(
-        completeness_gaps=list(inherited_completeness_gaps or ()),
-        final_tree_blockers=list(inherited_final_tree_blockers or ()),
-    )
-    refresh_publication_impact(inherited_result)
-
     ctx = pull_request_context(gh, owner, repo, pr_number)
     translation_pr = is_translation_pr_branch(
         ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
@@ -1458,6 +1482,22 @@ def run_doc_verify(
     verify_fixup_pr = is_verify_fixup_branch(
         ctx.head_ref, verify_fixup_branch_prefix=cfg.paths.verify_fixup_branch_prefix
     )
+    durable_final_tree_blockers = list(inherited_final_tree_blockers or ())
+    if translation_pr:
+        durable_final_tree_blockers = list(
+            dict.fromkeys(
+                [
+                    *durable_final_tree_blockers,
+                    *parse_final_tree_blocker_manifest(ctx.body),
+                ]
+            )
+        )
+    inherited_final_tree_blockers = durable_final_tree_blockers
+    inherited_result = PRTranslationResult(
+        completeness_gaps=list(inherited_completeness_gaps or ()),
+        final_tree_blockers=list(durable_final_tree_blockers),
+    )
+    refresh_publication_impact(inherited_result)
     # Inline push (no separate fixup PR): translation heads and existing verify-* heads.
     inline_fixup_push = translation_pr or verify_fixup_pr
     source_pr = source_pr_number_from_branch(
@@ -1466,8 +1506,7 @@ def run_doc_verify(
     # Only parse "PR #N" from title/body on translation PRs. Bilingual author
     # PRs are self-contained; a title like "fix for PR #999" must not redirect RU.
     if source_pr is None and translation_pr:
-        pull_body = str(gh.get_pull(owner, repo, pr_number).get("body") or "")
-        source_pr = parse_source_pr_from_text(f"{ctx.title}\n{pull_body}")
+        source_pr = parse_source_pr_from_text(f"{ctx.title}\n{ctx.body}")
     if source_pr is None and verify_fixup_pr:
         source_pr = source_pr_number_from_branch(
             ctx.head_ref, prefix=cfg.paths.verify_fixup_branch_prefix
@@ -1586,8 +1625,11 @@ def run_doc_verify(
         dry_run=dry_run,
         pr_result=inherited_result,
     )
+    durable_impact_paths = frozenset(
+        blocker.path.replace("\\", "/") for blocker in durable_final_tree_blockers
+    )
     if not pairs and not nav_pairs:
-        if translation_pr:
+        if translation_pr and not durable_impact_paths:
             logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
             return job
         logger.info(
@@ -1685,7 +1727,12 @@ def run_doc_verify(
                 pr_number,
                 len(source_scope_en),
             )
-        if not pairs and not nav_pairs and not translation_scope_missing:
+        if (
+            not pairs
+            and not nav_pairs
+            and not translation_scope_missing
+            and not durable_impact_paths
+        ):
             logger.info(
                 "No scoped doc/navigation pairs for translation PR verify on #%s",
                 pr_number,
@@ -1823,6 +1870,12 @@ def run_doc_verify(
         if path.replace("\\", "/").startswith(f"{cfg.paths.docs_root}/en/")
         and path.endswith(".md")
         and (not source_scope_en or path.replace("\\", "/") in source_scope_en)
+    } | set(durable_impact_paths)
+    rescannable_durable_paths = {
+        path
+        for path in durable_impact_paths
+        if read_text(repo_path, path) is not None
+        or read_text_at_ref(repo_path, merge_base_with, path) is not None
     }
     apply_en_link_target_checks(
         pr_result,
@@ -1848,9 +1901,15 @@ def run_doc_verify(
             dict.fromkeys([*inherited_completeness_gaps, *pr_result.completeness_gaps])
         )
         pr_result.completeness_gaps = merged_gaps
-    if inherited_final_tree_blockers:
+    if durable_final_tree_blockers:
+        carried_blockers = [
+            blocker
+            for blocker in durable_final_tree_blockers
+            if blocker.path.replace("\\", "/") not in verify_en_paths
+            or blocker.path.replace("\\", "/") not in rescannable_durable_paths
+        ]
         pr_result.final_tree_blockers = list(
-            dict.fromkeys([*inherited_final_tree_blockers, *pr_result.final_tree_blockers])
+            dict.fromkeys([*carried_blockers, *pr_result.final_tree_blockers])
         )
     if translation_scope_missing:
         logger.error(
@@ -1882,10 +1941,14 @@ def run_doc_verify(
             docs_root=cfg.paths.docs_root,
         )
         if translation_pr and source_scope_en:
+            protected_impact_paths = frozenset(
+                blocker.path.replace("\\", "/")
+                for blocker in inherited_final_tree_blockers or ()
+            )
             ambient_restored = _restore_out_of_scope_en_from_base(
                 repo_path,
                 changes=changes,
-                allowed_en_paths=source_scope_en,
+                allowed_en_paths=source_scope_en | protected_impact_paths,
                 merge_base_with=merge_base_with,
                 docs_root=cfg.paths.docs_root,
                 dry_run=dry_run,
