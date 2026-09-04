@@ -2,8 +2,8 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-09-03
-**Current focus:** §6.251 — source-RU authority through the complete post-translate link lifecycle (#40385 / R-GL-11).
+**Last updated:** 2026-09-04
+**Current focus:** §6.252 — final-tree four-snapshot same-fragment reconciliation (#40385 / R-GL-9..11).
 
 Prior focus: §6.249 — source-owned stable fragments beat resolvable baseline hrefs (#52077 / R-GL-9).
 
@@ -28,6 +28,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-04 | **§6.252** — unequal-count #40385 false-green fixed with a fail-closed RU base/current, tip EN, final EN matcher; it restores only a proven path while the unchanged final link gate remains authoritative |
 | 2026-09-03 | **§6.251** — full #40385 lifecycle regression; normal LLM output preserves same-fragment tip EN path, post-apply declaration reads RU owner from `ru_content_ref` rather than `origin/main` |
 | 2026-09-03 | **§6.250 production retry** — run 33765458147 translated all 9 pairs but repeated both missing fragments, proving helper-level scope/path tests did not cover post-translate temporal authority |
 | 2026-09-03 | **§6.250** — queue pre-existing declared stable-fragment owners; preserve resolvable tip EN path only with the identical fragment (#40385 / R-GL-10) |

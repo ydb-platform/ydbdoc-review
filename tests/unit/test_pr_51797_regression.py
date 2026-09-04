@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.github.git_ops import read_text_at_ref
 from ydbdoc_review.github.pr import (
     PullRequestContext,
     load_pair_contents,
@@ -14,6 +15,9 @@ from ydbdoc_review.github.workflow import (
     TouchedPaths,
     _apply_results_to_disk,
     _declare_exact_ascii_fragment_targets_after_apply,
+    _final_tree_reader,
+    _reconcile_final_en_same_fragment_paths_after_apply,
+    _repair_en_fragments_after_apply,
 )
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
@@ -24,7 +28,11 @@ from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import FileTranslationResult
 from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
+from ydbdoc_review.validation.en_link_targets import (
+    apply_en_link_target_checks,
+    check_en_page_link_targets,
+)
+from ydbdoc_review.validation.href_parity import reconcile_final_en_same_fragment_paths
 
 AUTH_RU = "ydb/docs/ru/core/security/authentication.md"
 AUTH_EN = AUTH_RU.replace("/ru/", "/en/")
@@ -249,10 +257,11 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test")
 
-    auth_ru = (
+    auth_ru_base = (
         "[Security](../reference/configuration/auth_config.md#security-auth)\n"
         "[Certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
     )
+    auth_ru_current = auth_ru_base + "[Monitoring](../reference/configuration/monitoring_config.md#tls)\n"
     auth_en_tip = (
         "[Security](../reference/configuration/security_config.md#security-auth)\n"
         "[Certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
@@ -264,17 +273,28 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     auth_config_en = "# auth_config\n\n## Certificate authentication configuration\n"
     security_config_en = "# security_config\n\n## Authentication {#security-auth}\n"
     for rel, text in (
-        (AUTH_RU, auth_ru),
+        (AUTH_RU, auth_ru_base),
         (AUTH_EN, auth_en_tip),
         ("ydb/docs/ru/core/reference/configuration/auth_config.md", auth_config_ru),
         ("ydb/docs/en/core/reference/configuration/auth_config.md", auth_config_en),
         ("ydb/docs/en/core/reference/configuration/security_config.md", security_config_en),
+        ("ydb/docs/en/core/reference/configuration/monitoring_config.md", "# Monitoring {#tls}\n"),
     ):
         _put(repo, rel, text)
     _git(repo, "add", ".")
-    _git(repo, "commit", "-qm", "source snapshot")
+    _git(repo, "commit", "-qm", "RU baseline")
+    source_base_ref = _git_output(repo, "rev-parse", "HEAD")
+    _put(repo, AUTH_RU, auth_ru_current)
+    _git(repo, "add", AUTH_RU)
+    _git(repo, "commit", "-qm", "RU source current adds monitoring link")
     source_ref = _git_output(repo, "rev-parse", "HEAD")
-    _git(repo, "commit", "--allow-empty", "-qm", "upstream tip")
+    _put(
+        repo,
+        "ydb/docs/en/core/reference/configuration/security_config.md",
+        security_config_en + "\nTip EN context.\n",
+    )
+    _git(repo, "add", "ydb/docs/en/core/reference/configuration/security_config.md")
+    _git(repo, "commit", "-qm", "EN tip context")
     tip_ref = _git_output(repo, "rev-parse", "HEAD")
 
     auth_pair = DocPair(ru_path=AUTH_RU, en_path=AUTH_EN, ru_changed=True)
@@ -283,11 +303,15 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     owner_pair = DocPair(ru_path=owner_ru, en_path=owner_en, ru_changed=True)
     contents = load_pair_contents(
         str(repo), [auth_pair, owner_pair], merge_base_with=tip_ref,
-        ru_content_ref=source_ref,
+        ru_content_ref=source_ref, ru_base_ref=source_base_ref,
     )
+    assert source_base_ref != source_ref != tip_ref
+    assert len(contents[0].ru_base_text and contents[0].ru_base_text.splitlines()) == 2
+    assert len(contents[0].ru_text and contents[0].ru_text.splitlines()) == 3
+    assert len(contents[0].en_text and contents[0].en_text.splitlines()) == 2
 
     def fake_result(_harness, state, _ctx):
-        final = auth_ru if state.file_path == AUTH_RU else auth_config_en
+        final = auth_ru_current if state.file_path == AUTH_RU else auth_config_en
         return FileTranslationResult(
             file_path=state.file_path, final_text=final, segments_count=1,
             verdict="ok", prompt_version="test",
@@ -296,15 +320,10 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     client = MagicMock()
     client.usage_tracker.records = []
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
-    final_tree = {
-        AUTH_EN: auth_en_tip,
-        owner_en: auth_config_en,
-        "ydb/docs/en/core/reference/configuration/security_config.md": security_config_en,
-    }
     with patch("ydbdoc_review.harness.pair.FileHarness.run", fake_result):
         result = run_pr_translation(
             contents, client, load_glossary(), config=cfg,
-            docs_text_reader=final_tree.get,
+            docs_text_reader=_final_tree_reader(str(repo), tip_ref, set()),
         )
     touched = _apply_results_to_disk(str(repo), result, dry_run=False)
     declared = _declare_exact_ascii_fragment_targets_after_apply(
@@ -312,12 +331,104 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
         merge_base_with=tip_ref, ru_content_ref=source_ref,
     )
     en_written = set(touched.written) | set(declared)
+    _repair_en_fragments_after_apply(
+        str(repo), list(en_written), dry_run=False, merge_base_with=tip_ref,
+    )
+    # With the final reconciliation disabled, the existing final-tree gate is
+    # intentionally still blocking. It must not be weakened to hide the bug.
+    assert apply_en_link_target_checks(
+        result,
+        repo_path=str(repo),
+        en_md_paths=en_written,
+        baseline_read=lambda p: read_text_at_ref(str(repo), tip_ref, p),
+        docs_read=_final_tree_reader(str(repo), tip_ref, en_written),
+    ) == [AUTH_EN]
+    assert _reconcile_final_en_same_fragment_paths_after_apply(
+        str(repo), contents, result, list(en_written), dry_run=False,
+        merge_base_with=tip_ref, ru_content_ref=source_ref,
+    ) == [AUTH_EN]
 
     auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
     owner_after = (repo / owner_en).read_text(encoding="utf-8")
     assert "security_config.md#security-auth" in auth_after
     assert "auth_config.md#certificate-auth-config" in auth_after
     assert "{#certificate-auth-config}" in owner_after
+    assert "{#security-auth}" not in owner_after
     assert apply_en_link_target_checks(
-        result, repo_path=str(repo), en_md_paths=en_written
+        result,
+        repo_path=str(repo),
+        en_md_paths=en_written,
+        baseline_read=lambda p: read_text_at_ref(str(repo), tip_ref, p),
+        docs_read=_final_tree_reader(str(repo), tip_ref, en_written),
     ) == []
+
+
+def test_pr_40385_final_reconciliation_rejects_ambiguous_or_source_valid_lineage():
+    """R-GL-9/10: fail closed when four-snapshot path lineage is not proven."""
+    ru_owner = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    en_owner = ru_owner.replace("/ru/", "/en/")
+    en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
+
+    def assert_blocking_noop(
+        ru_base: str,
+        ru_current: str,
+        en_tip: str,
+        candidate: str,
+        *,
+        ru_owner_text: str = "## auth config\n",
+        security_text: str = "# security {#security-auth}\n",
+    ) -> None:
+        source_pages = {AUTH_RU: ru_current, ru_owner: ru_owner_text}
+        final_pages = {AUTH_EN: candidate, en_owner: "## auth config\n", en_security: security_text}
+        fixed = reconcile_final_en_same_fragment_paths(
+            ru_base,
+            ru_current,
+            en_tip,
+            candidate,
+            ru_page_path=AUTH_RU,
+            en_page_path=AUTH_EN,
+            read_source_ru=source_pages.get,
+            read_final_en=final_pages.get,
+        )
+        assert fixed == candidate
+        assert check_en_page_link_targets(AUTH_EN, fixed, read_text=final_pages.get)
+
+    # A source delete+add with the same short label/fragment is a different
+    # occurrence, not historical evidence for restoring the old EN owner.
+    assert_blocking_noop(
+        "[TLS](../reference/configuration/old_owner.md#tls)\n",
+        "[TLS](../reference/configuration/auth_config.md#tls)\n",
+        "[TLS](../reference/configuration/security_config.md#tls)\n",
+        "[TLS](../reference/configuration/auth_config.md#tls)\n",
+        security_text="# security {#tls}\n",
+    )
+
+    # Repeated historical fragments make the slot identity ambiguous.
+    assert_blocking_noop(
+        "[First](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Second](../reference/configuration/other.md#security-auth)\n",
+        "[First](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Second](../reference/configuration/other.md#security-auth)\n",
+        "[First](../reference/configuration/security_config.md#security-auth)\n"
+        "[Second](../reference/configuration/security_config.md#security-auth)\n",
+        "[First](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Second](../reference/configuration/other.md#security-auth)\n",
+    )
+
+    # A current RU target that declares the fragment is source authority.
+    assert_blocking_noop(
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/security_config.md#security-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        ru_owner_text="## auth config {#security-auth}\n",
+    )
+
+    # The historical fragment must be identical, not merely resolvable.
+    assert_blocking_noop(
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/security_config.md#different-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        security_text="# security {#different-auth}\n",
+    )

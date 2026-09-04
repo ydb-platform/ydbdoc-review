@@ -46,19 +46,10 @@ from ydbdoc_review.github.pr import (
     verify_fixup_pr_base,
 )
 from ydbdoc_review.harness.pr_context import PRHarnessContext
-from ydbdoc_review.ops.job_state import (
-    CONTINUABILITY_STORE_KEY,
-    clear_continuability,
-    dump_continuability_json,
-    load_continuability,
-    load_continuability_from_bytes,
-    mark_continuable,
-    relative_state_path,
-)
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.llm.client import create_llm_client
+from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
 from ydbdoc_review.navigation.redirects import redirect_source_repo_md_paths
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
@@ -70,6 +61,15 @@ from ydbdoc_review.navigation.scope_planner import (
 )
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
+from ydbdoc_review.ops.job_state import (
+    CONTINUABILITY_STORE_KEY,
+    clear_continuability,
+    dump_continuability_json,
+    load_continuability,
+    load_continuability_from_bytes,
+    mark_continuable,
+    relative_state_path,
+)
 from ydbdoc_review.ops.lifecycle import (
     append_retention_footer,
     begin_ops_job,
@@ -115,6 +115,7 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
@@ -129,7 +130,6 @@ from ydbdoc_review.validation.toc_targets import (
     apply_orphan_toc_page_checks,
     apply_toc_target_checks,
 )
-from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
 
 logger = logging.getLogger(__name__)
 
@@ -484,6 +484,68 @@ def _repair_en_fragments_after_apply(
         if not dry_run:
             write_text(repo_path, rel, fixed)
     return repaired
+
+
+def _reconcile_final_en_same_fragment_paths_after_apply(
+    repo_path: str,
+    contents: list[PairContent],
+    result: PRTranslationResult,
+    paths: list[str],
+    *,
+    dry_run: bool,
+    merge_base_with: str | None = None,
+    ru_content_ref: str | None = None,
+) -> list[str]:
+    """Apply fail-closed four-snapshot same-fragment path preservation.
+
+    This runs after declaration and generic late repair, when target checks can
+    see the complete tip-plus-overlay EN tree.  It never invents anchors or
+    weakens the final link gate.
+    """
+    from ydbdoc_review.validation.href_parity import (
+        reconcile_final_en_same_fragment_paths,
+    )
+
+    if not merge_base_with or not ru_content_ref:
+        return []
+    normalized_paths = {path.replace("\\", "/") for path in paths}
+    final_reader = _final_tree_reader(repo_path, merge_base_with, normalized_paths)
+
+    def source_reader(path: str) -> str | None:
+        return read_text_at_ref(repo_path, ru_content_ref, path)
+
+    issues_by_path: dict[str, tuple] = {}
+    for run in result.pair_results:
+        path = run.plan.target_path.replace("\\", "/")
+        if path not in normalized_paths:
+            continue
+        issues_by_path[path] = run.validation_issues
+
+    reconciled: list[str] = []
+    for content in contents:
+        en_path = content.pair.en_path.replace("\\", "/")
+        if en_path not in normalized_paths or not en_path.endswith(".md"):
+            continue
+        candidate = read_text(repo_path, en_path)
+        if candidate is None:
+            continue
+        fixed = reconcile_final_en_same_fragment_paths(
+            content.ru_base_text,
+            content.ru_text,
+            content.en_text or content.en_base_text,
+            candidate,
+            ru_page_path=content.pair.ru_path,
+            en_page_path=en_path,
+            read_source_ru=source_reader,
+            read_final_en=final_reader,
+            link_contract_issues=issues_by_path.get(en_path, ()),
+        )
+        if fixed == candidate:
+            continue
+        reconciled.append(en_path)
+        if not dry_run:
+            write_text(repo_path, en_path, fixed)
+    return reconciled
 
 
 def _declare_exact_ascii_fragment_targets_after_apply(
@@ -971,12 +1033,6 @@ def run_doc_translate(
         else:
             pr_result = PRTranslationResult()
 
-        md_en_paths = {
-            r.plan.target_path
-            for r in pr_result.pair_results
-            if r.target_text is not None and not r.error
-        }
-
         if nav_pairs:
             pr_result.navigation_results = run_navigation_merges(
                 nav_pairs,
@@ -1096,6 +1152,22 @@ def run_doc_translate(
             touched = TouchedPaths(
                 list(dict.fromkeys([*touched.written, *late_repair])),
                 touched.deleted,
+            )
+
+        reconciled_paths = _reconcile_final_en_same_fragment_paths_after_apply(
+            repo_path,
+            contents,
+            pr_result,
+            touched.written,
+            dry_run=dry_run,
+            merge_base_with=merge_base_with,
+            ru_content_ref=ru_ref,
+        )
+        if reconciled_paths:
+            logger.info(
+                "Final EN same-fragment path reconciliation on %d path(s): %s",
+                len(reconciled_paths),
+                reconciled_paths,
             )
 
         # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).

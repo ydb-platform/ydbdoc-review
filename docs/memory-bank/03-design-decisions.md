@@ -5838,5 +5838,32 @@ explicit certificate anchor, and final link validation returns no blockers. The 
 before the runtime change and passes afterward, so these defects are now caught locally rather
 than inferred from a remote translation run.
 
+### §6.252 Final-tree four-snapshot same-fragment reconciliation (#40385 / R-GL-9..11, 2026-09-04)
+
+**Cause:** Run ``33775567317`` carried a source PR with 75 current RU links while tip EN had
+74. ``restore_md_link_hrefs`` correctly retained the source-owned candidate slot, but the
+equal-cardinality guard in ``prefer_resolvable_en_hrefs`` skipped every target check. The
+candidate therefore kept ``auth_config.md#security-auth``. Declaration correctly refused to
+fabricate that absent RU anchor and late repair correctly refused to substitute a different
+fragment, so the unchanged final gate reported the broken target.
+
+**Decision:** After declaration and late repair, immediately before the final EN link gate,
+compare RU base, RU current, tip EN, and the on-disk final EN candidate. A path-only restore
+requires candidate/current slot alignment, a unique normalized-label plus decoded-full-href
+RU occurrence in base and current, matching historical RU/EN slot, a unique identical decoded
+ASCII fragment on both historical sides, no link-contract issues, an unresolved immutable RU
+target and candidate target, and a resolvable baseline EN target in the final overlay. The
+write uses the baseline path and preserves the candidate's raw fragment. Any absent proof,
+delete+add, duplicate fragment, source-valid target, or fragment mismatch is a no-op and the
+existing final gate stays blocking.
+
+**RED/GREEN evidence:** The former R-GL-11 fixture was replaced with distinct non-empty RU
+base/current and EN-tip commits and a 3-current versus 2-baseline link count. On ``5c5f3d2``
+it failed because ``security-auth`` remained on ``auth_config.md``. After the final
+reconciliation, the complete production-shaped lifecycle preserves tip
+``security_config.md#security-auth``, keeps ``certificate-auth-config`` exact and declared on
+its EN owner, never declares ``security-auth`` there, and returns an empty final link gate.
+Negative tests prove all ambiguous cases remain blockers.
+
 
 [← Memory Bank index](../../MEMORY_BANK.md)

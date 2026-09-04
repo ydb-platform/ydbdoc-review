@@ -230,6 +230,145 @@ def prefer_resolvable_en_hrefs(
     return out
 
 
+def reconcile_final_en_same_fragment_paths(
+    ru_base_text: str | None,
+    ru_current_text: str | None,
+    en_tip_text: str | None,
+    en_candidate_text: str | None,
+    *,
+    ru_page_path: str,
+    en_page_path: str,
+    read_source_ru: DocsTextReader,
+    read_final_en: DocsTextReader,
+    link_contract_issues: Iterable[LinkContractIssue] = (),
+) -> str:
+    """Restore a proven tip-EN path without changing an ASCII fragment.
+
+    This final-tree, four-snapshot reconciliation is deliberately narrower
+    than pair-level tip preservation.  It only handles an old, uniquely
+    traceable RU occurrence whose current source target is broken while the
+    corresponding historical EN target remains resolvable in the final tree.
+    Any missing evidence is a no-op so the final EN link gate can block.
+    """
+    from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+    if (
+        not ru_base_text
+        or not ru_current_text
+        or not en_tip_text
+        or not en_candidate_text
+        or any(link_contract_issues)
+    ):
+        return en_candidate_text or ""
+
+    def _links(text: str) -> list[tuple[str, str, int, int]]:
+        return [
+            (match.group(1), match.group(2).strip(), match.start(), match.end())
+            for match in _iter_visible_md_link_matches(text)
+            if _is_internal_href(match.group(2).strip())
+        ]
+
+    def _decoded_fragment(href: str) -> str | None:
+        _path, marker, fragment = href.partition("#")
+        decoded = unquote(fragment)
+        if not marker or not decoded or not decoded.isascii():
+            return None
+        return decoded
+
+    def _key(label: str, href: str) -> tuple[str, str]:
+        return (" ".join(label.split()).casefold(), unquote(href))
+
+    def _resolves(page_path: str, href: str, reader: DocsTextReader) -> bool:
+        path_part, marker, raw_fragment = href.partition("#")
+        fragment = unquote(raw_fragment)
+        if not marker or not fragment:
+            return False
+        target = page_path if not path_part else resolve_internal_md_href(page_path, href)
+        if target is None:
+            return False
+        if "/docs/ru/" in page_path:
+            # ``resolve_internal_md_href`` intentionally resolves an EN
+            # counterpart for the ordinary translation contract. Here the
+            # source-authority proof must instead inspect the immutable RU
+            # projection at the equivalent locale path.
+            target = target.replace("/docs/en/", "/docs/ru/", 1)
+        target_text = reader(target)
+        return target_text is not None and fragment_declared_in_markdown(
+            target_text,
+            fragment,
+            page_path=target,
+            read_text=reader,
+        )
+
+    ru_base_links = _links(ru_base_text)
+    ru_current_links = _links(ru_current_text)
+    en_tip_links = _links(en_tip_text)
+    candidate_links = _links(en_candidate_text)
+    if (
+        len(candidate_links) != len(ru_current_links)
+        or len(ru_base_links) != len(en_tip_links)
+    ):
+        return en_candidate_text
+
+    base_keys = [_key(label, href) for label, href, _start, _end in ru_base_links]
+    current_keys = [_key(label, href) for label, href, _start, _end in ru_current_links]
+    base_fragment_counts = Counter(
+        fragment
+        for _label, href, _start, _end in ru_base_links
+        if (fragment := _decoded_fragment(href)) is not None
+    )
+    tip_fragment_counts = Counter(
+        fragment
+        for _label, href, _start, _end in en_tip_links
+        if (fragment := _decoded_fragment(href)) is not None
+    )
+
+    replacements: list[tuple[int, int, str]] = []
+    for slot, ((_candidate_label, candidate_href, start, end), (_current_label, current_href, _, _)) in enumerate(
+        zip(candidate_links, ru_current_links, strict=True)
+    ):
+        # The final candidate must still be source-owned at this exact slot.
+        if unquote(candidate_href) != unquote(current_href):
+            continue
+        fragment = _decoded_fragment(candidate_href)
+        if fragment is None:
+            continue
+        key = current_keys[slot]
+        if current_keys.count(key) != 1 or base_keys.count(key) != 1:
+            continue
+        historical_slot = base_keys.index(key)
+        baseline_href = en_tip_links[historical_slot][1]
+        if (
+            _decoded_fragment(current_href) != fragment
+            or _decoded_fragment(ru_base_links[historical_slot][1]) != fragment
+            or _decoded_fragment(baseline_href) != fragment
+            or base_fragment_counts[fragment] != 1
+            or tip_fragment_counts[fragment] != 1
+        ):
+            continue
+        # A source-owned target is authority. Only ambient broken RU paths may
+        # retain their historical EN owner.
+        if _resolves(ru_page_path, current_href, read_source_ru):
+            continue
+        if _resolves(en_page_path, candidate_href, read_final_en):
+            continue
+        if not _resolves(en_page_path, baseline_href, read_final_en):
+            continue
+        baseline_path, separator, _baseline_fragment = baseline_href.partition("#")
+        _candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
+        if not separator or not raw_candidate_fragment:
+            continue
+        replacements.append(
+            (start, end, f"[{candidate_links[slot][0]}]({baseline_path}#{raw_candidate_fragment})")
+        )
+
+    out = en_candidate_text
+    for start, end, replacement in reversed(replacements):
+        out = out[:start] + replacement + out[end:]
+    return out
+
+
 def overlay_internal_md_hrefs(target: str, preferred: str) -> str:
     """Rewrite internal ``[](…md)`` hrefs in ``target`` from ``preferred`` by label.
 
@@ -646,7 +785,7 @@ def check_href_parity(
     # §6.237: grandfather can drop the EN ``extra`` when ``en_baseline_text`` is the
     # live tip EN (verify used ``existing_target_text``) while RU path overlay from
     # tip leaves a new ``missing``. Rebuild position-aligned extras for remap.
-    # Pair every occurrence (duplicate hrefs like two× ``connect.md#tls``, #40385).
+    # Pair every occurrence (duplicate hrefs like two ``connect.md#tls``, #40385).
     if missing and not extra and en_page_path:
         rebuilt_extra: list[str] = []
         for source_href in missing:
