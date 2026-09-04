@@ -262,9 +262,16 @@ def reconcile_final_en_same_fragment_paths(
     ):
         return en_candidate_text or ""
 
-    def _links(text: str) -> list[tuple[str, str, int, int]]:
+    def _links(text: str) -> list[tuple[str, str, int, int, int, int]]:
         return [
-            (match.group(1), match.group(2).strip(), match.start(), match.end())
+            (
+                match.group(1),
+                match.group(2).strip(),
+                match.start(),
+                match.end(),
+                match.start(2),
+                match.end(2),
+            )
             for match in _iter_visible_md_link_matches(text)
             if _is_internal_href(match.group(2).strip())
         ]
@@ -311,8 +318,8 @@ def reconcile_final_en_same_fragment_paths(
     ):
         return en_candidate_text
 
-    base_keys = [_key(label, href) for label, href, _start, _end in ru_base_links]
-    current_keys = [_key(label, href) for label, href, _start, _end in ru_current_links]
+    base_keys = [_key(label, href) for label, href, *_offsets in ru_base_links]
+    current_keys = [_key(label, href) for label, href, *_offsets in ru_current_links]
     base_key_counts = Counter(base_keys)
     current_key_counts = Counter(current_keys)
     base_slot_by_key = {
@@ -320,19 +327,20 @@ def reconcile_final_en_same_fragment_paths(
     }
     base_fragment_counts = Counter(
         fragment
-        for _label, href, _start, _end in ru_base_links
+        for _label, href, *_offsets in ru_base_links
         if (fragment := _decoded_fragment(href)) is not None
     )
     tip_fragment_counts = Counter(
         fragment
-        for _label, href, _start, _end in en_tip_links
+        for _label, href, *_offsets in en_tip_links
         if (fragment := _decoded_fragment(href)) is not None
     )
 
     replacements: list[tuple[int, int, str]] = []
-    for slot, ((_candidate_label, candidate_href, start, end), (_current_label, current_href, _, _)) in enumerate(
-        zip(candidate_links, ru_current_links, strict=True)
-    ):
+    for slot, (
+        (_candidate_label, candidate_href, start, end, href_start, href_end),
+        (_current_label, current_href, *_current_offsets),
+    ) in enumerate(zip(candidate_links, ru_current_links, strict=True)):
         # The final candidate must still be source-owned at this exact slot.
         if unquote(candidate_href) != unquote(current_href):
             continue
@@ -364,17 +372,15 @@ def reconcile_final_en_same_fragment_paths(
         candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
         if not separator or not raw_candidate_fragment:
             continue
-        raw_link = en_candidate_text[start:end]
-        open_paren = raw_link.find("(")
-        raw_href = raw_link[open_paren + 1 : -1] if open_paren >= 0 else ""
+        raw_href = en_candidate_text[href_start:href_end]
         raw_path_offset = raw_href.find(candidate_path)
         if raw_path_offset < 0:
             continue
-        path_start = open_paren + 1 + raw_path_offset
+        path_start = href_start + raw_path_offset
         replacement = (
-            raw_link[:path_start]
+            en_candidate_text[start:path_start]
             + baseline_path
-            + raw_link[path_start + len(candidate_path) :]
+            + en_candidate_text[path_start + len(candidate_path) :end]
         )
         replacements.append((start, end, replacement))
 

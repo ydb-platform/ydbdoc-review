@@ -425,7 +425,9 @@ def _final_tree_reader(
         if norm in tombstones:
             return None
         if norm in overlays:
-            return read_text(repo_path, norm)
+            text = read_text(repo_path, norm)
+            if text is not None:
+                return text
         tip = read_text_at_ref(repo_path, merge_base_with, norm)
         if tip is not None:
             return tip

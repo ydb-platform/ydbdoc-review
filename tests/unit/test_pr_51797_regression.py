@@ -397,6 +397,32 @@ def test_pr_40385_final_tree_reader_keeps_touched_deletion_as_tombstone(tmp_path
     assert read(target) is None
 
 
+def test_pr_40385_final_tree_reader_uses_tip_for_missing_dry_run_overlay(tmp_path: Path):
+    """R-GL-11: a dry run names writes but does not create their worktree bytes."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    target = "ydb/docs/en/core/reference/configuration/security_config.md"
+    tip_text = "## Security {#security-auth}\n"
+    _put(repo, target, tip_text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "tip target")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    (repo / target).unlink()
+    dry_run_touched = TouchedPaths(written=[target], deleted=[])
+
+    read = _final_tree_reader(
+        str(repo),
+        tip_ref,
+        set(dry_run_touched.written),
+        deleted_paths=set(dry_run_touched.deleted),
+    )
+
+    assert read(target) == tip_text
+
+
 def test_pr_40385_final_reconciliation_fails_closed_without_tip_en_snapshot(tmp_path: Path):
     """R-GL-11: a historical checkout body cannot stand in for missing tip EN."""
     repo = tmp_path / "repo"
@@ -528,8 +554,14 @@ def test_pr_40385_final_reconciliation_changes_only_raw_href_path():
     """R-GL-11: retain link label, surrounding whitespace, and encoded fragment bytes."""
     ru = "[Security](../reference/configuration/auth_config.md#security-auth)\n"
     tip = "[Security](../reference/configuration/security_config.md#security-auth)\n"
-    candidate = "[ Security ](  ../reference/configuration/auth_config.md#security%2Dauth  )\n"
-    expected = "[ Security ](  ../reference/configuration/security_config.md#security%2Dauth  )\n"
+    candidate = (
+        "[ Security (../reference/configuration/auth_config.md#security%2Dauth)]"
+        "(  ../reference/configuration/auth_config.md#security%2Dauth  )\n"
+    )
+    expected = (
+        "[ Security (../reference/configuration/auth_config.md#security%2Dauth)]"
+        "(  ../reference/configuration/security_config.md#security%2Dauth  )\n"
+    )
     ru_owner = "ydb/docs/ru/core/reference/configuration/auth_config.md"
     en_owner = ru_owner.replace("/ru/", "/en/")
     en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
