@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from unittest.mock import MagicMock, patch
 
+from ydbdoc_review.harness import PRHarness, PRHarnessProfile, PRRunState
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
@@ -43,9 +45,22 @@ def test_translate_soft_keep_sets_warning_not_error():
         result = run_pair_plan(content, plan, ctx, cache={})
     assert result.error is None
     assert result.target_text == "# EN tip\n"
+    assert result.soft_keep_reason == "Invalid JSON in LLM response"
     assert result.file_result is not None
     assert result.file_result.verdict == "warnings"
     assert any(
         str(w).startswith("translate_soft_keep:")
         for w in result.file_result.heuristic_warnings
     )
+
+    harness_result = PRHarness(PRHarnessProfile(name="aggregate", steps=())).run(
+        PRRunState(contents=[content], pair_results=[result]),
+        PRHarnessContext.from_options(MagicMock()),
+    )
+    assert harness_result.yellow_warnings == []
+    assert len(harness_result.final_tree_blockers) == 1
+    blocker = harness_result.final_tree_blockers[0]
+    assert blocker.code == "translation_soft_keep"
+    assert blocker.path == pair.en_path
+    assert "Invalid JSON in LLM response" in blocker.message
+    assert blocker.artifact_sha256 == hashlib.sha256(b"# EN tip\n").hexdigest()

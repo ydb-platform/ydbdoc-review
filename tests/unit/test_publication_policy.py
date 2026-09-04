@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import subprocess
 from contextlib import ExitStack
 from pathlib import Path
@@ -19,6 +22,7 @@ from ydbdoc_review.github.workflow import (
     run_doc_verify,
 )
 from ydbdoc_review.ops.gates import GateResult
+from ydbdoc_review.ops.lifecycle import append_retention_footer
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
@@ -31,8 +35,11 @@ from ydbdoc_review.pipeline.types import (
 )
 from ydbdoc_review.reporting.builder import (
     ReportMeta,
+    build_commit_message,
     build_full_report,
+    build_source_pr_comment,
     build_translation_pr_body,
+    parse_final_tree_blocker_manifest,
     result_has_blocking_findings,
 )
 from ydbdoc_review.translation.manual import ManualAction
@@ -126,6 +133,49 @@ def _pair_result(
     )
 
 
+def _soft_keep_blocker(path: str, text: str) -> FinalTreeBlocker:
+    return FinalTreeBlocker(
+        path=path,
+        code="translation_soft_keep",
+        message=(
+            "translation_soft_keep: Invalid JSON in LLM response. Действие: "
+            "вручную обновить EN в этой ветке, затем запустить doc_verify"
+        ),
+        artifact_sha256=hashlib.sha256(text.encode()).hexdigest(),
+    )
+
+
+def _verify_pair_result(path: str, target_text: str, *, unsafe: bool = False):
+    ru_path = path.replace("/en/", "/ru/")
+    pair = DocPair(ru_path=ru_path, en_path=path, ru_changed=True, en_changed=True)
+    return PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=PairPlan(
+                    pair=pair,
+                    action="critic_only",
+                    source_path=ru_path,
+                    target_path=path,
+                    source_lang="ru",
+                    target_lang="en",
+                ),
+                target_text=target_text,
+                source_text="# Аутентификация\n\nОбновлённый русский текст.\n",
+                file_result=FileTranslationResult(
+                    file_path=path,
+                    final_text=target_text,
+                    segments_count=1,
+                    verdict="blocked" if unsafe else "ok",
+                    prompt_version="verify",
+                    heuristic_blocking=(
+                        ["heading_parity: required heading is missing"] if unsafe else []
+                    ),
+                ),
+            )
+        ]
+    )
+
+
 def _run_top_level(
     repo_path: str,
     pr_result: PRTranslationResult,
@@ -146,6 +196,7 @@ def _run_top_level(
     real_push_remote: str | None = None,
     remote_branch_sha: str | None = None,
     push_fails: bool = False,
+    commit_succeeds: bool = True,
 ):
     pull = {
         "title": "docs",
@@ -260,7 +311,10 @@ def _run_top_level(
             patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base")
         )
         commit = stack.enter_context(
-            patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True)
+            patch(
+                "ydbdoc_review.github.workflow.git_commit_paths",
+                return_value=commit_succeeds,
+            )
         )
         if real_push_remote is None:
             push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
@@ -358,6 +412,406 @@ def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
     assert "missing.md" in full_report
     assert finish.call_args.kwargs["status"] == "published_red"
     assert job_requires_nonzero_exit(job) is False
+
+
+def test_safe_soft_keep_with_eight_git_artifacts_publishes_draft_red(
+    publication_repo: str,
+):
+    repo = Path(publication_repo)
+    pair_results: list[PairRunResult] = []
+    source_changes: list[tuple[str, str]] = []
+    for index in range(1, 9):
+        ru_path = f"ydb/docs/ru/page-{index}.md"
+        en_path = f"ydb/docs/en/page-{index}.md"
+        Path(repo, ru_path).write_text(f"# Страница {index}\n", encoding="utf-8")
+        Path(repo, en_path).write_text(f"# Old page {index}\n", encoding="utf-8")
+        pair = DocPair(ru_path=ru_path, en_path=en_path, ru_changed=True)
+        pair_results.append(
+            PairRunResult(
+                plan=PairPlan(
+                    pair=pair,
+                    action="translate_to_en",
+                    source_path=ru_path,
+                    target_path=en_path,
+                    source_lang="ru",
+                    target_lang="en",
+                ),
+                target_text=f"# Translated page {index}\n",
+                source_text=f"# Страница {index}\n",
+                file_result=FileTranslationResult(
+                    file_path=en_path,
+                    final_text=f"# Translated page {index}\n",
+                    segments_count=1,
+                    verdict="ok",
+                    prompt_version="v1",
+                ),
+            )
+        )
+        source_changes.append((ru_path, "modified"))
+
+    auth_ru = "ydb/docs/ru/core/security/authentication.md"
+    auth_en = "ydb/docs/en/core/security/authentication.md"
+    retained = "# Authentication\n\nExisting reviewed English.\n"
+    Path(repo, auth_ru).parent.mkdir(parents=True, exist_ok=True)
+    Path(repo, auth_en).parent.mkdir(parents=True, exist_ok=True)
+    Path(repo, auth_ru).write_text(
+        "# Аутентификация\n\nОбновлённый русский текст.\n",
+        encoding="utf-8",
+    )
+    Path(repo, auth_en).write_text(retained, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "nine-pair baseline"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    auth_pair = DocPair(ru_path=auth_ru, en_path=auth_en, ru_changed=True)
+    soft_run = PairRunResult(
+        plan=PairPlan(
+            pair=auth_pair,
+            action="translate_to_en",
+            source_path=auth_ru,
+            target_path=auth_en,
+            source_lang="ru",
+            target_lang="en",
+        ),
+        target_text=retained,
+        source_text=Path(repo, auth_ru).read_text(encoding="utf-8"),
+        file_result=FileTranslationResult(
+            file_path=auth_en,
+            final_text=retained,
+            segments_count=0,
+            verdict="warnings",
+            prompt_version="soft-keep",
+            heuristic_warnings=[
+                "translate_soft_keep: translate failed; kept tip EN unchanged"
+            ],
+        ),
+    )
+    soft_run.soft_keep_reason = "Invalid JSON in LLM response"
+    pair_results.append(soft_run)
+    source_changes.append((auth_ru, "modified"))
+    result = PRTranslationResult(pair_results=pair_results)
+
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+        source_changes=source_changes,
+    )
+
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+    assert job.pr_result.translated_count == 8
+    assert job.pr_result.retained_count == 1
+    assert job.pr_result.failed_count == 0
+    assert job.pr_result.completeness_gaps == []
+    assert prepare.call_count == commit.call_count == push.call_count == 1
+    assert push.call_args.kwargs["guard_remote_ref"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is True
+    body = gh.create_pull.call_args.kwargs["body"]
+    assert auth_en in body
+    assert "Invalid JSON in LLM response" in body
+    assert "вручную обновить EN" in body
+    blocker = next(b for b in job.pr_result.final_tree_blockers if b.path == auth_en)
+    assert blocker.code == "translation_soft_keep"
+    assert blocker.artifact_sha256 == hashlib.sha256(retained.encode()).hexdigest()
+    assert finish.call_args.kwargs["status"] == "published_red"
+    assert job_requires_nonzero_exit(job) is False
+
+
+def test_soft_keep_without_target_withholds_incomplete(publication_repo: str):
+    result = _pair_result(target_text=None)
+    result.pair_results[0].soft_keep_reason = "translation timed out"
+
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert job.pr_result.final_tree_blockers == []
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_soft_keep_for_new_missing_target_withholds_incomplete(publication_repo: str):
+    ru_path = "ydb/docs/ru/new-page.md"
+    en_path = "ydb/docs/en/new-page.md"
+    Path(publication_repo, ru_path).write_text("# Новая страница\n", encoding="utf-8")
+    Path(publication_repo, en_path).write_text(
+        "# Fabricated retained target\n",
+        encoding="utf-8",
+    )
+    pair = DocPair(ru_path=ru_path, en_path=en_path, ru_changed=True)
+    result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=PairPlan(
+                    pair=pair,
+                    action="translate_to_en",
+                    source_path=ru_path,
+                    target_path=en_path,
+                    source_lang="ru",
+                    target_lang="en",
+                ),
+                target_text="# Fabricated retained target\n",
+                source_text="# Новая страница\n",
+                soft_keep_reason="translation timed out",
+                file_result=FileTranslationResult(
+                    file_path=en_path,
+                    final_text="# Fabricated retained target\n",
+                    segments_count=0,
+                    verdict="warnings",
+                    prompt_version="soft-keep",
+                ),
+            )
+        ]
+    )
+
+    job, gh, prepare, commit, push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        source_changes=[(ru_path, "added")],
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert "materialized existing EN" in (job.pr_result.pair_results[0].error or "")
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
+def test_soft_keep_with_structural_drift_withholds_unsafe(publication_repo: str):
+    retained = "# Existing English\n"
+    Path(publication_repo, "ydb/docs/en/a.md").write_text(retained, encoding="utf-8")
+    subprocess.run(["git", "add", "ydb/docs/en/a.md"], cwd=publication_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "retained EN"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    result = _pair_result(target_text=retained)
+    result.pair_results[0].source_text = "# Источник\n\n## Обязательный раздел\n"
+    result.pair_results[0].soft_keep_reason = "translation timed out"
+
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_soft_keep_without_publishable_git_diff_is_hard_no_artifact_failure(
+    publication_repo: str,
+):
+    retained = "Hello.\n"
+    result = _pair_result(target_text=retained)
+    result.pair_results[0].soft_keep_reason = "translation timed out"
+
+    job, gh, _prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+        commit_succeeds=False,
+    )
+
+    assert commit.call_count == 1
+    assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    source_summary = gh.post_issue_comment.call_args.args[3]
+    assert "no_publishable_artifact" in source_summary
+    assert finish.call_args.kwargs["status"] == "failed"
+    assert job_requires_nonzero_exit(job) is True
+
+
+def test_soft_keep_and_safe_en_link_target_publish_one_draft_red(
+    publication_repo: str,
+):
+    retained = "Existing reviewed English.\n"
+    Path(publication_repo, "ydb/docs/en/a.md").write_text(retained, encoding="utf-8")
+    subprocess.run(["git", "add", "ydb/docs/en/a.md"], cwd=publication_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "retained link EN"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    result = _pair_result(target_text=retained)
+    result.pair_results[0].source_text = "Обновлённый русский текст.\n"
+    result.pair_results[0].soft_keep_reason = "translation timed out"
+    impact_path = "ydb/docs/en/impact-soft-keep.md"
+    Path(publication_repo, impact_path).write_text(
+        "See [missing](missing.md).\n",
+        encoding="utf-8",
+    )
+
+    job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        impact_path=impact_path,
+    )
+
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+    body = gh.create_pull.call_args.kwargs["body"]
+    parsed = parse_final_tree_blocker_manifest(body)
+    assert {blocker.code for blocker in parsed} == {
+        "translation_soft_keep",
+        "en_link_target",
+    }
+    assert gh.create_pull.call_args.kwargs["draft"] is True
+
+
+def test_soft_keep_never_overrides_unrelated_unsafe_blocker(publication_repo: str):
+    result = _pair_result(
+        target_text="Hello.\n",
+        blocking=["include_target: missing required include"],
+    )
+    result.pair_results[0].soft_keep_reason = "translation timed out"
+
+    job, gh, prepare, commit, push, _finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
+def test_soft_keep_with_blocked_critic_withholds_unsafe(publication_repo: str):
+    result = _pair_result(target_text="Hello.\n")
+    run = result.pair_results[0]
+    run.soft_keep_reason = "translation timed out"
+    assert run.file_result is not None
+    run.file_result.critic_unresolved = CriticResponse(
+        verdict="blocked",
+        issues=[
+            CriticIssueOut(
+                category="accuracy",
+                severity="blocked",
+                description="Retained prose does not reflect current RU",
+                comment="Manual rewrite required",
+            )
+        ],
+    )
+
+    job, gh, prepare, commit, push, _finish = _run_top_level(
+        publication_repo,
+        result,
+    )
+
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [
+            {
+                "path": "ydb/docs/en/a.md",
+                "code": "translation_soft_keep",
+                "message": "manual repair required",
+            }
+        ],
+        [
+            {
+                "path": "ydb/docs/en/a.md",
+                "code": "unknown_repairable_code",
+                "message": "manual repair required",
+                "artifact_sha256": "0" * 64,
+            }
+        ],
+    ],
+)
+def test_soft_keep_manifest_missing_hash_or_unknown_code_fails_closed(payload):
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    body = f"<!-- ydbdoc-final-tree-blockers:v2:{encoded} -->"
+
+    with pytest.raises(ValueError, match="malformed final-tree blocker manifest"):
+        parse_final_tree_blocker_manifest(body)
+
+
+def test_soft_keep_reports_only_failed_path_and_manual_doc_verify_action():
+    result = _pair_result(target_text="Translated clean page.\n")
+    auth_path = "ydb/docs/en/core/security/authentication.md"
+    auth_pair = DocPair(
+        ru_path=auth_path.replace("/en/", "/ru/"),
+        en_path=auth_path,
+        ru_changed=True,
+    )
+    retained = "# Authentication\n\nExisting reviewed English.\n"
+    result.pair_results.append(
+        PairRunResult(
+            plan=PairPlan(
+                pair=auth_pair,
+                action="translate_to_en",
+                source_path=auth_pair.ru_path,
+                target_path=auth_path,
+                source_lang="ru",
+                target_lang="en",
+            ),
+            target_text=retained,
+            source_text="# Аутентификация\n\nНовый текст.\n",
+            soft_keep_reason="Invalid JSON in LLM response",
+            file_result=FileTranslationResult(
+                file_path=auth_path,
+                final_text=retained,
+                segments_count=0,
+                verdict="warnings",
+                prompt_version="soft-keep",
+            ),
+        )
+    )
+    result.final_tree_blockers = [_soft_keep_blocker(auth_path, retained)]
+    result.publication_impact = PublicationImpact.PUBLISH_RED
+    cfg = load_config(env=_env())
+
+    source = append_retention_footer(
+        build_source_pr_comment(
+            result,
+            translation_pr_number=99,
+            meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
+            config=cfg,
+            committed=True,
+        )
+    )
+    report = build_full_report(
+        result,
+        meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
+        config=cfg,
+    )
+    commit_message = build_commit_message(7, result, config=cfg)
+
+    for body in (source, report):
+        assert auth_path in body
+        assert "Invalid JSON in LLM response" in body
+        assert "вручную обновить EN" in body
+        assert "doc_verify" in body
+        assert "doc_continue" not in body
+    assert "- 🟢 `ydb/docs/en/core/security/authentication.md`" not in report
+    assert "Translated 1 files" in commit_message
+    assert auth_path not in commit_message
 
 
 def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red(
@@ -814,7 +1268,7 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
         "o/r",
         publication_result=published_result,
     )
-    assert "ydbdoc-final-tree-blockers:v1" in body
+    assert "ydbdoc-final-tree-blockers:v2" in body
 
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
@@ -967,6 +1421,154 @@ def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
     assert impact_file.exists() is False
     assert job.pr_result.final_tree_blockers == [blocker]
     assert job.pr_result.publication_impact == "PUBLISH_RED"
+
+
+def _run_standalone_soft_keep_verify(
+    publication_repo: str,
+    *,
+    current_text: str,
+    verify_result: PRTranslationResult,
+):
+    path = "ydb/docs/en/core/security/authentication.md"
+    ru_path = path.replace("/en/", "/ru/")
+    original = "# Authentication\n\nExisting reviewed English.\n"
+    Path(publication_repo, path).parent.mkdir(parents=True, exist_ok=True)
+    Path(publication_repo, ru_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(publication_repo, path).write_text(original, encoding="utf-8")
+    Path(publication_repo, ru_path).write_text(
+        "# Аутентификация\n\nОбновлённый русский текст.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=publication_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "soft-keep published artifact"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    Path(publication_repo, path).write_text(current_text, encoding="utf-8")
+    blocker = _soft_keep_blocker(path, original)
+    published = PRTranslationResult(
+        final_tree_blockers=[blocker],
+        publication_impact=PublicationImpact.PUBLISH_RED,
+    )
+    translation_pull = {
+        "title": "Auto-translate docs from PR #7",
+        "body": build_translation_pr_body(7, "o/r", publication_result=published),
+        "draft": True,
+        "head": {
+            "ref": "ydbdoc-review/pr-7",
+            "sha": "translation-sha",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    source_pull = {
+        "title": "docs",
+        "body": "",
+        "head": {
+            "ref": "docs",
+            "sha": "source-head",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": "source-base"},
+    }
+    gh = MagicMock()
+    gh.get_pull.side_effect = lambda _o, _r, number: (
+        translation_pull if number == 99 else source_pull
+    )
+    gh.get_file_text.return_value = Path(publication_repo, ru_path).read_text(
+        encoding="utf-8"
+    )
+    gh.post_issue_comment.return_value = "https://github.com/o/r/pull/99#issuecomment-1"
+
+    def api_changes(_gh, _owner, _repo, number):
+        return [(ru_path, "modified")] if number == 7 else [(path, "modified")]
+
+    with patch(
+        "ydbdoc_review.github.workflow.GitHubClient", return_value=gh
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+        return_value=[(path, "modified")],
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+        side_effect=api_changes,
+    ), patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs",
+        return_value=verify_result,
+    ), patch(
+        "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+        return_value=[],
+    ):
+        job = run_doc_verify(
+            repo_path=publication_repo,
+            github_repo="o/r",
+            pr_number=99,
+            merge_base_with="HEAD",
+            no_commit=True,
+            config=load_config(env=_env()),
+            skip_ops_gates=True,
+        )
+    return job, gh, blocker
+
+
+def test_soft_keep_manifest_survives_inline_verify_when_bytes_unchanged(
+    publication_repo: str,
+):
+    path = "ydb/docs/en/core/security/authentication.md"
+    retained = "# Authentication\n\nExisting reviewed English.\n"
+    job, _gh, blocker = _run_standalone_soft_keep_verify(
+        publication_repo,
+        current_text=retained,
+        verify_result=_verify_pair_result(path, retained),
+    )
+
+    assert job.pr_result.final_tree_blockers == [blocker]
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+
+
+def test_standalone_verify_clears_soft_keep_after_changed_green_pair(
+    publication_repo: str,
+):
+    path = "ydb/docs/en/core/security/authentication.md"
+    repaired = "# Authentication\n\nManually repaired English text.\n"
+    job, gh, _blocker = _run_standalone_soft_keep_verify(
+        publication_repo,
+        current_text=repaired,
+        verify_result=_verify_pair_result(path, repaired),
+    )
+
+    assert job.pr_result.final_tree_blockers == []
+    assert job.pr_result.publication_impact == "PUBLISH_NORMAL"
+    gh.update_pull_body.assert_called_once()
+    updated_body = gh.update_pull_body.call_args.args[3]
+    assert "translation_soft_keep" not in updated_body
+    gh.convert_pull_to_draft.assert_not_called()
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_standalone_verify_keeps_changed_soft_keep_if_unverified_or_unsafe(
+    publication_repo: str,
+    verified: bool,
+):
+    path = "ydb/docs/en/core/security/authentication.md"
+    repaired = "# Authentication\n\nChanged but not proven safe.\n"
+    verify_result = (
+        _verify_pair_result(path, repaired, unsafe=True)
+        if verified
+        else PRTranslationResult()
+    )
+    job, _gh, blocker = _run_standalone_soft_keep_verify(
+        publication_repo,
+        current_text=repaired,
+        verify_result=verify_result,
+    )
+
+    assert blocker in job.pr_result.final_tree_blockers
+    assert job.pr_result.publication_impact in {
+        PublicationImpact.PUBLISH_RED,
+        PublicationImpact.WITHHOLD_UNSAFE,
+    }
 
 
 def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
@@ -1562,7 +2164,6 @@ def _withhold_case(case: str) -> PRTranslationResult:
     [
         ("pair_error", "WITHHOLD_INCOMPLETE"),
         ("missing_expected_output", "WITHHOLD_INCOMPLETE"),
-        ("translate_soft_keep", "WITHHOLD_INCOMPLETE"),
         ("source_retaining_manual_action", "WITHHOLD_INCOMPLETE"),
         ("segment_alignment", "WITHHOLD_UNSAFE"),
         ("deterministic_integrity", "WITHHOLD_UNSAFE"),
@@ -1599,7 +2200,7 @@ def test_withhold_never_prepares_or_publishes(
         ("missing_expected_output", False, "WITHHOLD_INCOMPLETE"),
         ("include_parity", False, "WITHHOLD_UNSAFE"),
         ("link_wrapper_loss", False, "WITHHOLD_UNSAFE"),
-        ("include_parity", True, "WITHHOLD_INCOMPLETE"),
+        ("include_parity", True, "WITHHOLD_UNSAFE"),
     ],
 )
 def test_withhold_precedence_always_dominates_broken_link_red(
@@ -1610,6 +2211,22 @@ def test_withhold_precedence_always_dominates_broken_link_red(
 ):
     result = _withhold_case(case)
     if soft_keep:
+        Path(publication_repo, "ydb/docs/en/a.md").write_text(
+            result.pair_results[0].target_text or "",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "ydb/docs/en/a.md"],
+            cwd=publication_repo,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "soft-keep retained target"],
+            cwd=publication_repo,
+            check=True,
+            capture_output=True,
+        )
+        result.pair_results[0].soft_keep_reason = "translation failed"
         file_result = result.pair_results[0].file_result
         assert file_result is not None
         file_result.heuristic_warnings.append(

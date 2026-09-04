@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from ydbdoc_review.ops.continue_cmd import MAX_CONTINUES_PER_PR
 from ydbdoc_review.ops.gates import (
@@ -407,7 +406,7 @@ def finish_ops_job(
                 parent_run_id=ctx.parent_run_id,
                 continue_index=ctx.continue_index,
                 s3_prefix=prefix,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         )
     except Exception as exc:
@@ -419,7 +418,11 @@ def append_retention_footer(body: str) -> str:
         "ожидаемые EN-пути отсутствуют в diff PR" in body
         or "в переводном PR нет" in body
     )
-    notice = retention_notice(completeness_only=completeness_only)
+    soft_keep_manual_repair = "translation_soft_keep" in body
+    notice = retention_notice(
+        completeness_only=completeness_only,
+        soft_keep_manual_repair=soft_keep_manual_repair,
+    )
     if notice in body:
         return body
     return body.rstrip() + "\n\n" + notice + "\n"

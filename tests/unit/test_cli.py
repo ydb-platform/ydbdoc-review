@@ -125,6 +125,7 @@ def test_cli_run_dry_run(mock_run, git_repo: Path):
 @patch("ydbdoc_review.cli.run_doc_translate")
 def test_cli_run_reports_published_red_instead_of_done(mock_run, git_repo: Path):
     job = _fake_doc_job("doc_translate")
+    job.pr_result.pair_results[0].soft_keep_reason = "translation timed out"
     job.pr_result.publication_impact = PublicationImpact.PUBLISH_RED
     job.translation_pr_number = 99
     mock_run.return_value = job
@@ -137,6 +138,9 @@ def test_cli_run_reports_published_red_instead_of_done(mock_run, git_repo: Path)
     assert result.exit_code == 0, result.stdout
     assert "published_red" in result.stdout
     assert "Done" not in result.stdout
+    assert "Translated: 0" in result.stdout
+    assert "Retained for manual repair: 1" in result.stdout
+    assert "Failed without target: 0" in result.stdout
 
 
 @patch("ydbdoc_review.cli.run_doc_verify", return_value=_fake_doc_job("doc_verify"))

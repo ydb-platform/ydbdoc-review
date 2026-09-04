@@ -69,7 +69,11 @@ def quota_deny_comment(*, spent_rub: float, budget_rub: float) -> str:
     )
 
 
-def retention_notice(*, completeness_only: bool = False) -> str:
+def retention_notice(
+    *,
+    completeness_only: bool = False,
+    soft_keep_manual_repair: bool = False,
+) -> str:
     """Footer under QA comments.
 
     When the only blocker is completeness (path missing from PR diff),
@@ -87,6 +91,12 @@ def retention_notice(*, completeness_only: bool = False) -> str:
             "повесьте **`doc_translate`** на исходный PR после фикса пайплайна, "
             "либо вручную добавьте EN в ветку `ydbdoc-review/pr-*` и "
             "**`doc_verify`**."
+        )
+    if soft_keep_manual_repair:
+        return (
+            base
+            + "**Retained EN требует ручной правки:** обновите указанный EN-файл "
+            "прямо в translation branch, затем запустите **`doc_verify`**."
         )
     return (
         base

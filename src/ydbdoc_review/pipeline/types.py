@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
@@ -29,8 +30,19 @@ class FinalTreeBlocker:
     """PR-level deterministic blocker found against the assembled final tree."""
 
     path: str
-    code: Literal["en_link_target"]
+    code: Literal["en_link_target", "translation_soft_keep"]
     message: str
+    artifact_sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.code == "translation_soft_keep":
+            if not self.artifact_sha256 or not re.fullmatch(
+                r"[0-9a-f]{64}", self.artifact_sha256
+            ):
+                raise ValueError("translation_soft_keep requires a lowercase SHA-256")
+        elif self.artifact_sha256 is not None:
+            raise ValueError("en_link_target must not carry an artifact SHA-256")
+
 
 __all__ = [
     "FileTranslationResult",
@@ -113,6 +125,8 @@ class PairRunResult:
     skipped: bool = False
     file_result: FileTranslationResult | None = None
     error: str | None = None
+    # Typed provenance: translation failed and exact pre-existing target was retained.
+    soft_keep_reason: str | None = None
     # RU/EN source body actually used for this run (verify pick / merge ref).
     source_text: str | None = None
     validation_issues: tuple[LinkContractIssue, ...] = ()
@@ -129,20 +143,42 @@ class PRTranslationResult:
     publication_impact: PublicationImpact = PublicationImpact.PUBLISH_NORMAL
     # REQUIREMENTS §10/§12 tip-newer overwrite notices (yellow; never blockers).
     yellow_warnings: list[str] = field(default_factory=list)
+    # Set only after a publication attempt proves there is no real git artifact.
+    publication_failure: str | None = None
 
     @property
     def translated_count(self) -> int:
         md = sum(
             1
             for r in self.pair_results
-            if r.file_result is not None and not r.skipped and not r.deleted
+            if r.file_result is not None
+            and not r.skipped
+            and not r.deleted
+            and r.soft_keep_reason is None
         )
         nav = sum(1 for n in self.navigation_results if n.target_text is not None and not n.error)
         return md + nav
 
     @property
     def failed_count(self) -> int:
-        return sum(1 for r in self.pair_results if r.error is not None)
+        return sum(
+            1
+            for r in self.pair_results
+            if r.error is not None
+            or (r.soft_keep_reason is not None and not (r.target_text or "").strip())
+        )
+
+    @property
+    def retained_count(self) -> int:
+        return sum(
+            1
+            for r in self.pair_results
+            if r.soft_keep_reason is not None and bool((r.target_text or "").strip())
+        )
+
+    @property
+    def has_soft_keep(self) -> bool:
+        return any(r.soft_keep_reason is not None for r in self.pair_results)
 
     def usage_summary(self, tracker: UsageTracker) -> dict[str, float | int | list[str]]:
         return {

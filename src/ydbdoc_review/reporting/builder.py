@@ -43,14 +43,24 @@ from ydbdoc_review.translation.schemas import CriticIssueOut
 from ydbdoc_review.validation.placeholder_drift import exclude_skipped_issues
 from ydbdoc_review.version import action_release_label
 
-_FINAL_TREE_BLOCKERS_MARKER = "ydbdoc-final-tree-blockers:v1"
+_FINAL_TREE_BLOCKERS_MARKER_V1 = "ydbdoc-final-tree-blockers:v1"
+_FINAL_TREE_BLOCKERS_MARKER = "ydbdoc-final-tree-blockers:v2"
 
 
 def render_final_tree_blocker_manifest(blockers: list[FinalTreeBlocker]) -> str:
     """Serialize typed RED evidence into a durable, hidden PR-body marker."""
     payload = json.dumps(
         [
-            {"path": item.path, "code": item.code, "message": item.message}
+            {
+                "path": item.path,
+                "code": item.code,
+                "message": item.message,
+                **(
+                    {"artifact_sha256": item.artifact_sha256}
+                    if item.artifact_sha256 is not None
+                    else {}
+                ),
+            }
             for item in blockers
         ],
         ensure_ascii=False,
@@ -63,10 +73,15 @@ def render_final_tree_blocker_manifest(blockers: list[FinalTreeBlocker]) -> str:
 
 def parse_final_tree_blocker_manifest(body: str) -> list[FinalTreeBlocker]:
     """Read durable RED evidence, failing closed on a malformed marker."""
-    prefix = f"<!-- {_FINAL_TREE_BLOCKERS_MARKER}:"
+    marker = _FINAL_TREE_BLOCKERS_MARKER
+    prefix = f"<!-- {marker}:"
     start = body.find(prefix)
     if start < 0:
-        return []
+        marker = _FINAL_TREE_BLOCKERS_MARKER_V1
+        prefix = f"<!-- {marker}:"
+        start = body.find(prefix)
+        if start < 0:
+            return []
     end = body.find(" -->", start + len(prefix))
     if end < 0:
         raise ValueError("malformed final-tree blocker manifest")
@@ -86,16 +101,36 @@ def parse_final_tree_blocker_manifest(body: str) -> list[FinalTreeBlocker]:
         path = item.get("path")
         code = item.get("code")
         message = item.get("message")
+        artifact_sha256 = item.get("artifact_sha256")
         if (
             not isinstance(path, str)
             or not path.startswith("ydb/docs/en/")
             or not path.endswith(".md")
-            or code != "en_link_target"
+            or code not in {"en_link_target", "translation_soft_keep"}
             or not isinstance(message, str)
             or not message
+            or (marker == _FINAL_TREE_BLOCKERS_MARKER_V1 and code != "en_link_target")
+            or (
+                code == "translation_soft_keep"
+                and (
+                    not isinstance(artifact_sha256, str)
+                    or len(artifact_sha256) != 64
+                )
+            )
+            or (code == "en_link_target" and artifact_sha256 is not None)
         ):
             raise ValueError("malformed final-tree blocker manifest")
-        blockers.append(FinalTreeBlocker(path=path, code=code, message=message))
+        try:
+            blockers.append(
+                FinalTreeBlocker(
+                    path=path,
+                    code=code,
+                    message=message,
+                    artifact_sha256=artifact_sha256,
+                )
+            )
+        except ValueError as exc:
+            raise ValueError("malformed final-tree blocker manifest") from exc
     return blockers
 
 
@@ -212,7 +247,13 @@ def _file_translation_counts(result: PRTranslationResult) -> tuple[int, int, int
     """Return (total translated, new, updated) including navigation YAML."""
     new = updated = 0
     for run in result.pair_results:
-        if run.skipped or run.deleted or run.error or run.file_result is None:
+        if (
+            run.skipped
+            or run.deleted
+            or run.error
+            or run.file_result is None
+            or run.soft_keep_reason is not None
+        ):
             continue
         if _is_new_file(run):
             new += 1
@@ -717,8 +758,12 @@ def build_commit_message(
         )
 
     translated = [
-        r for r in result.pair_results
-        if r.file_result and not r.skipped and not r.deleted
+        r
+        for r in result.pair_results
+        if r.file_result
+        and not r.skipped
+        and not r.deleted
+        and r.soft_keep_reason is None
     ]
     paths = [r.plan.target_path for r in translated if r.target_text is not None]
     paths.extend(
@@ -751,10 +796,7 @@ def build_translation_pr_body(
     *,
     publication_result: PRTranslationResult | None = None,
 ) -> str:
-    red = bool(
-        publication_result
-        and publication_result.publication_impact == PublicationImpact.PUBLISH_RED
-    )
+    red = bool(publication_result and publication_result.final_tree_blockers)
     banner = ""
     blockers = ""
     if red and publication_result is not None:
@@ -762,7 +804,7 @@ def build_translation_pr_body(
             "> [!CAUTION]\n"
             "> **QA RED, do not merge.** Candidate опубликован для ручного исправления.\n\n"
         )
-        blockers = "\n\n**Final-tree blockers:**\n\n" + "\n".join(
+        blockers = "\n\n**Final-tree/manual-repair blockers:**\n\n" + "\n".join(
             f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}"
             for blocker in publication_result.final_tree_blockers
         )
@@ -905,11 +947,6 @@ def _withhold_source_details(result: PRTranslationResult) -> list[tuple[str, str
                 for warning in fr.heuristic_warnings
                 if warning.startswith("translate_soft_keep:")
             )
-        if not reasons and result.publication_impact in {
-            PublicationImpact.WITHHOLD_INCOMPLETE,
-            PublicationImpact.WITHHOLD_UNSAFE,
-        }:
-            reasons.append(result.publication_impact.value)
         for reason in dict.fromkeys(reasons):
             details.append((run.plan.target_path, str(reason).replace("\n", " ")))
     for nav in result.navigation_results:
@@ -962,7 +999,7 @@ def build_source_pr_comment(
         failure_label = (
             "completeness gaps"
             if result.completeness_gaps
-            else "publication failed"
+            else result.publication_failure or "publication failed"
         )
         body = (
             "🤖 **ydbdoc-review** — translation PR **не создан**\n\n"
@@ -1082,6 +1119,7 @@ def build_source_pr_comment(
         "|---|---|\n"
         f"| Translation PR | {tr_line} |\n"
         f"| Файлов | {files_label} |\n"
+        f"| Retained for manual repair | {result.retained_count} |\n"
         f"| Время | {_format_duration(meta.elapsed_s)} |\n"
         f"{cost_line}"
         f"{qa_line}\n"
@@ -1091,6 +1129,18 @@ def build_source_pr_comment(
             f"Полный QA-отчёт — в комментарии к translation PR #{translation_pr_number}. "
             "Повторная проверка — лейбл **`doc_verify`** (`ydbdoc-verify.yml`).\n"
         )
+        soft_keep_blockers = [
+            blocker
+            for blocker in result.final_tree_blockers
+            if blocker.code == "translation_soft_keep"
+        ]
+        if soft_keep_blockers:
+            body += "\n**Retained for manual repair:**\n\n"
+            for blocker in soft_keep_blockers:
+                body += (
+                    f"- `{blocker.path}`: "
+                    f"{blocker.message.replace(chr(10), ' ')}.\n"
+                )
     elif bilingual_skip:
         body += (
             f"\n{bilingual_skip} пар(ы) пропущены — bilingual update в source PR "
@@ -1125,7 +1175,11 @@ def build_full_report(
 
     file_runs = [
         r for r in result.pair_results
-        if r.file_result and not r.skipped and not r.deleted and not r.error
+        if r.file_result
+        and not r.skipped
+        and not r.deleted
+        and not r.error
+        and r.soft_keep_reason is None
     ]
     problem_runs = [r for r in file_runs if _file_has_open_issues(r)]
     ok_runs = [r for r in file_runs if not _file_has_open_issues(r)]

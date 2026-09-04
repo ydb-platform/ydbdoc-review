@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -102,7 +103,10 @@ from ydbdoc_review.pipeline.pairs import (
     counterpart,
     filter_translation_pr_verify_scope,
 )
-from ydbdoc_review.pipeline.publication import refresh_publication_impact
+from ydbdoc_review.pipeline.publication import (
+    classify_publication_blockers,
+    refresh_publication_impact,
+)
 from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
 from ydbdoc_review.pipeline.types import (
     FinalTreeBlocker,
@@ -352,6 +356,120 @@ def _apply_results_to_disk(
         )
     )
     return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
+
+
+def _soft_keep_message(reason: str) -> str:
+    normalized = " ".join(reason.split()) or "translation failed"
+    return (
+        f"translation_soft_keep: {normalized}. Действие: вручную обновить EN "
+        "в этой ветке, затем запустить doc_verify"
+    )
+
+
+def _materialize_soft_keep_blockers(
+    result: PRTranslationResult,
+    *,
+    repo_path: str,
+    baseline_ref: str,
+) -> None:
+    """Accept only typed soft-keeps retaining exact non-empty existing EN bytes."""
+    blockers = [
+        blocker
+        for blocker in result.final_tree_blockers
+        if blocker.code != "translation_soft_keep"
+    ]
+    for run in result.pair_results:
+        if run.soft_keep_reason is None:
+            continue
+        target = run.target_text or ""
+        existing = read_text_at_ref(repo_path, baseline_ref, run.plan.target_path)
+        if (
+            run.plan.action != "translate_to_en"
+            or not target.strip()
+            or not existing
+            or target != existing
+        ):
+            run.error = (
+                "translation_soft_keep: retained target is not a non-empty "
+                "materialized existing EN file"
+            )
+            continue
+        blockers.append(
+            FinalTreeBlocker(
+                path=run.plan.target_path,
+                code="translation_soft_keep",
+                message=_soft_keep_message(run.soft_keep_reason),
+                artifact_sha256=hashlib.sha256(target.encode()).hexdigest(),
+            )
+        )
+    result.final_tree_blockers = list(dict.fromkeys(blockers))
+
+
+def _freeze_soft_keep_artifact_hashes(
+    result: PRTranslationResult,
+    *,
+    repo_path: str,
+) -> None:
+    """Bind soft-keep blockers to exact bytes after every final-tree repair."""
+    frozen: list[FinalTreeBlocker] = []
+    for blocker in result.final_tree_blockers:
+        if blocker.code != "translation_soft_keep":
+            frozen.append(blocker)
+            continue
+        path = Path(repo_path) / blocker.path.replace("/", os.sep)
+        if not path.is_file():
+            for run in result.pair_results:
+                if run.plan.target_path == blocker.path:
+                    run.error = "translation_soft_keep: published target is missing"
+                    break
+            continue
+        artifact = path.read_bytes()
+        if not artifact.strip():
+            for run in result.pair_results:
+                if run.plan.target_path == blocker.path:
+                    run.error = "translation_soft_keep: published target is empty"
+                    break
+            continue
+        frozen.append(
+            FinalTreeBlocker(
+                path=blocker.path,
+                code=blocker.code,
+                message=blocker.message,
+                artifact_sha256=hashlib.sha256(artifact).hexdigest(),
+            )
+        )
+    result.final_tree_blockers = frozen
+
+
+def _soft_keep_is_manually_resolved(
+    blocker: FinalTreeBlocker,
+    result: PRTranslationResult,
+    *,
+    repo_path: str,
+) -> bool:
+    """Clear only after changed bytes were verified by a current safe pair run."""
+    path = Path(repo_path) / blocker.path.replace("/", os.sep)
+    if not path.is_file():
+        return False
+    artifact = path.read_bytes()
+    if not artifact.strip() or hashlib.sha256(artifact).hexdigest() == blocker.artifact_sha256:
+        return False
+    matching = [
+        run
+        for run in result.pair_results
+        if run.plan.target_path.replace("\\", "/") == blocker.path.replace("\\", "/")
+        and run.target_text is not None
+        and run.file_result is not None
+        and not run.error
+        and not run.skipped
+        and not run.deleted
+    ]
+    if len(matching) != 1 or matching[0].target_text.encode() != artifact:
+        return False
+    classified = classify_publication_blockers(
+        PRTranslationResult(pair_results=matching)
+    )
+    return not classified.incomplete and not classified.unsafe
 
 
 def _restore_out_of_scope_en_from_base(
@@ -1080,6 +1198,12 @@ def run_doc_translate(
                 active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
 
+    _materialize_soft_keep_blockers(
+        pr_result,
+        repo_path=repo_path,
+        baseline_ref=merge_base_with,
+    )
+
     # Orphan gate vs translation-branch tip (not stale merged-PR HEAD), §6.140.
     orphan_paths = apply_orphan_toc_page_checks(
         pr_result,
@@ -1205,6 +1329,8 @@ def run_doc_translate(
                 len(reconciled_paths),
                 reconciled_paths,
             )
+
+        _freeze_soft_keep_artifact_hashes(pr_result, repo_path=repo_path)
 
         # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
         # Baseline = upstream tip EN so ambient tip link debt does not block
@@ -1343,6 +1469,10 @@ def run_doc_translate(
                 expected_remote_sha=prepush_remote_sha,
             )
             pushed = True
+        elif pr_result.has_soft_keep:
+            pr_result.publication_failure = "no_publishable_artifact"
+            refresh_publication_impact(pr_result)
+            job.blocked = True
     job.committed = committed
     job.pushed = pushed
 
@@ -1532,6 +1662,10 @@ def run_doc_verify(
             )
         )
     inherited_final_tree_blockers = durable_final_tree_blockers
+    had_soft_keep_blocker = any(
+        blocker.code == "translation_soft_keep"
+        for blocker in durable_final_tree_blockers
+    )
     inherited_result = PRTranslationResult(
         completeness_gaps=list(inherited_completeness_gaps or ()),
         final_tree_blockers=list(durable_final_tree_blockers),
@@ -1956,14 +2090,33 @@ def run_doc_verify(
         )
         pr_result.completeness_gaps = merged_gaps
     if durable_final_tree_blockers:
-        carried_blockers = [
+        carried_link_blockers = [
             blocker
             for blocker in durable_final_tree_blockers
-            if blocker.path.replace("\\", "/") not in verify_en_paths
-            or blocker.path.replace("\\", "/") not in rescannable_durable_paths
+            if blocker.code == "en_link_target"
+            and (
+                blocker.path.replace("\\", "/") not in verify_en_paths
+                or blocker.path.replace("\\", "/") not in rescannable_durable_paths
+            )
+        ]
+        carried_soft_keep_blockers = [
+            blocker
+            for blocker in durable_final_tree_blockers
+            if blocker.code == "translation_soft_keep"
+            and not _soft_keep_is_manually_resolved(
+                blocker,
+                pr_result,
+                repo_path=repo_path,
+            )
         ]
         pr_result.final_tree_blockers = list(
-            dict.fromkeys([*carried_blockers, *pr_result.final_tree_blockers])
+            dict.fromkeys(
+                [
+                    *carried_link_blockers,
+                    *carried_soft_keep_blockers,
+                    *pr_result.final_tree_blockers,
+                ]
+            )
         )
     if translation_scope_missing:
         logger.error(
@@ -2161,6 +2314,17 @@ def run_doc_verify(
     # Full QA report: on newly opened fixup PR when one exists; otherwise on
     # the verified PR (translation / verify-* / bilingual with no fixes).
     report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
+    if translation_pr and had_soft_keep_blocker and source_pr is not None:
+        gh.update_pull_body(
+            owner,
+            repo,
+            pr_number,
+            build_translation_pr_body(
+                source_pr,
+                github_repo,
+                publication_result=pr_result,
+            ),
+        )
     if final_read_only_verify:
         mismatches = _enforce_report_checkout_bytes(repo_path, verify_content_sha, pr_result)
         if mismatches:

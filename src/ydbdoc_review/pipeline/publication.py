@@ -8,19 +8,24 @@ from ydbdoc_review.pipeline.types import PRTranslationResult, PublicationImpact
 from ydbdoc_review.validation.fence_integrity import check_absolute_paths_in_fences
 from ydbdoc_review.validation.heuristics import (
     check_broken_inline_code_markup,
+    check_cyrillic_in_en,
+    check_cyrillic_in_en_all_fences,
     check_fence_parity,
     check_heading_parity,
     check_list_tab_parity,
     check_unrestored_placeholders,
     check_unrestored_yfmvar_placeholders,
 )
+from ydbdoc_review.validation.href_parity import check_href_parity
 from ydbdoc_review.validation.include_targets import check_include_parity
 from ydbdoc_review.validation.ru_source_bugs import (
     check_required_anchor_lines,
     normalize_ru_source_for_translation,
 )
 
-_REPAIRABLE_FINAL_TREE_CODES = frozenset({"en_link_target"})
+_REPAIRABLE_FINAL_TREE_CODES = frozenset(
+    {"en_link_target", "translation_soft_keep"}
+)
 
 
 @dataclass(frozen=True)
@@ -42,10 +47,11 @@ def _has_direct_structural_failure(
     *,
     source_lang: str,
     source_file: str,
+    retained_soft_keep: bool = False,
 ) -> bool:
     """Re-run typed structural validators instead of parsing heuristic messages."""
     normalized_source = normalize_ru_source_for_translation(source_text)
-    return any(
+    structural_failure = any(
         (
             check_fence_parity(
                 normalized_source,
@@ -63,10 +69,20 @@ def _has_direct_structural_failure(
             ),
         )
     )
+    if structural_failure or not retained_soft_keep:
+        return structural_failure
+    # A retained old EN target did not pass the current translation harness, so
+    # close the two remaining typed integrity gaps here. Normal translated runs
+    # keep relying on their ordinary file-result evidence.
+    return bool(
+        check_href_parity(normalized_source, target_text)
+        or check_cyrillic_in_en(target_text, target_lang="en")
+        or check_cyrillic_in_en_all_fences(target_text, target_lang="en")
+    )
 
 
 def _is_incomplete(result: PRTranslationResult) -> bool:
-    if result.completeness_gaps:
+    if result.completeness_gaps or result.publication_failure:
         return True
     for run in result.pair_results:
         if run.error:
@@ -82,11 +98,6 @@ def _is_incomplete(result: PRTranslationResult) -> bool:
         if file_result is None:
             continue
         if file_result.manual_actions:
-            return True
-        if any(
-            str(warning).startswith("translate_soft_keep:")
-            for warning in file_result.heuristic_warnings
-        ):
             return True
     return any(nav.error for nav in result.navigation_results)
 
@@ -142,6 +153,7 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
                     run.target_text,
                     source_lang=source_lang,
                     source_file=run.plan.source_path,
+                    retained_soft_keep=run.soft_keep_reason is not None,
                 )
             ):
                 return True

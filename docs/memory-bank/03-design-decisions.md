@@ -5641,8 +5641,9 @@ commit.
    operators to re-``doc_translate`` instead of ``doc_continue`` for
    diff-only gaps.
 3. Soft-keep after translate failure (``Invalid JSON`` / timeout) keeps tip EN
-   without aborting the PR (§6.80) but must emit ``translate_soft_keep``
-   warning + ``status=soft_keep`` / yellow QA — never a silent ``ok``.
+   without pretending that the file was translated (§6.80). It must emit typed
+   ``translation_soft_keep`` provenance. Publication and durable manual-repair
+   lifecycle are governed by §6.253; this is never a silent ``ok`` or yellow-only QA.
 
 **Tests:** `test_tip_en_covers_inbound_fragments_from_changed`,
 `test_merge_recommendation_red_when_scope_file_missing_despite_green_files`,
@@ -5877,12 +5878,23 @@ artifacts, and an exit-zero translate job could falsely read as merge success.
 
 **Decision:** `PRTranslationResult` carries a typed `PublicationImpact` with four ordered
 outcomes: `WITHHOLD_INCOMPLETE`, `WITHHOLD_UNSAFE`, `PUBLISH_RED`, and `PUBLISH_NORMAL`.
-Completeness and safety veto publication. Pair errors, missing outputs, source-retaining
-soft keeps/manual actions, alignment failures, link-contract failures, protect-marker
-leakage, and blocked mandatory navigation stay withheld. The only newly publishable RED
-class is a complete, structurally safe candidate whose final-tree blocker is typed
-`en_link_target`. Those findings live in PR-level `final_tree_blockers`, so an impact path
-cannot disappear merely because no pair result owns it.
+Completeness and safety veto publication. Pair errors, missing/new outputs, non-materialized
+soft keeps, manual actions, alignment failures, link-contract failures, protect-marker
+leakage, blocked critics, and blocked mandatory navigation stay withheld. The explicit
+repairable RED allowlist contains `en_link_target` and `translation_soft_keep`. A soft keep
+qualifies only when every failed translation retains exact non-empty bytes from an existing
+tip EN target, the assembled candidate has no structural/integrity/critic veto, and a real
+git commit/diff exists. Its PR-level blocker stores path, normalized reason, manual action,
+and SHA-256 of the exact post-reconciliation published bytes. No artifact means hard
+`no_publishable_artifact`; no empty PR is created. These findings live in PR-level
+`final_tree_blockers`, so an impact path cannot disappear merely because no pair result owns it.
+
+The translation PR remains native draft with a RED banner. Reports count soft-kept files as
+`Retained for manual repair`, not translated, and direct an editor to change the EN file in
+the translation branch and run `doc_verify`, not `doc_continue`. The versioned manifest
+survives standalone verify while bytes match its hash. A changed file clears the blocker only
+after exactly one matching current pair passes completeness, structural/integrity, and critic
+validation; unsafe or unverified changes remain RED. Automation never marks the PR ready.
 
 `PUBLISH_RED` keeps the candidate paths through branch preparation, commit and push. A new
 translation PR is opened with `draft=true`; a matching ready PR is converted to draft via

@@ -56,3 +56,10 @@ def test_retention_and_expired_messages():
     assert "ydbdoc-review/pr-41271" in text
     assert "doc_translate" in text
     assert "doc_verify" in text
+
+
+def test_soft_keep_retention_notice_prefers_manual_doc_verify():
+    notice = retention_notice(soft_keep_manual_repair=True)
+    assert "translation branch" in notice
+    assert "doc_verify" in notice
+    assert "doc_continue" not in notice

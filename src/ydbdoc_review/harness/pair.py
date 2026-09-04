@@ -242,11 +242,13 @@ def run_pair_plan(
                 f"translate_soft_keep: translate failed; kept tip EN unchanged "
                 f"({exc})"
             )
+            soft_reason = " ".join(str(exc).split()) or type(exc).__name__
             return PairRunResult(
                 plan=plan,
                 target_text=existing_target,
                 source_text=source_text,
                 error=None,
+                soft_keep_reason=soft_reason,
                 file_result=FileTranslationResult(
                     file_path=plan.target_path,
                     final_text=existing_target,

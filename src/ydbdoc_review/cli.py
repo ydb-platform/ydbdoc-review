@@ -444,7 +444,10 @@ def _print_job_summary(mode: str, result: object) -> None:
         console.print(f"[green]Done[/green] ({mode})")
     console.print(f"  Pairs processed: {len(result.pr_result.pair_results)}")
     console.print(f"  Translated: {result.pr_result.translated_count}")
-    console.print(f"  Failed: {result.pr_result.failed_count}")
+    console.print(
+        f"  Retained for manual repair: {result.pr_result.retained_count}"
+    )
+    console.print(f"  Failed without target: {result.pr_result.failed_count}")
     if result.translation_pr_number:
         console.print(f"  Translation PR: #{result.translation_pr_number}")
     if result.translation_branch:
