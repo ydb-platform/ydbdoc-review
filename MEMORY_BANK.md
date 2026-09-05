@@ -3,8 +3,9 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-05
-**Current focus:** §6.254 — empty/length-classified translate JSON fallback for exact
-``s0052`` from run ``33960710187``.
+**Current focus:** §6.255 — phase-correct outbound fragment validation for run
+``33967884593``; defer only separately proven eligible occurrences, then enforce the final
+publication gate.
 
 Prior focus: §6.249 — source-owned stable fragments beat resolvable baseline hrefs (#52077 / R-GL-9).
 
@@ -29,6 +30,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-05 | **§6.255** — phase-correct outbound fragment validation defers only occurrences separately proven eligible for the final EN checker, preserves fail-closed include/identity/snapshot behavior, and enforces a second publication gate; locally accepted, production pending |
 | 2026-09-05 | **§6.254** — empty/length-classified translate JSON now advances after three primary attempts to one attempt per configured fallback; validators are unchanged, local RED/GREEN/mutation evidence is complete, and production acceptance is still pending |
 | 2026-09-04 | **§6.253** — paid-candidate publication separated from merge readiness: only complete safe final-link blockers publish as draft/RED; incomplete/unsafe results remain withheld; PR/source/CLI/ops signalling is explicit |
 | 2026-09-04 | **§6.252** — unequal-count #40385 false-green fixed with a fail-closed RU base/current, tip EN, final EN matcher; it restores only a proven path while the unchanged final link gate remains authoritative |

@@ -5949,4 +5949,77 @@ not run yet. Moving ``v0.1.0`` and observing a new production workflow are subse
 operations; run ``33960710187`` is failure evidence on ``da526b6``, not acceptance of this fix.
 
 
+### §6.255 Phase-correct outbound fragment validation (#40385, 2026-09-05)
+
+**Production failure:** [Run ``33967884593``](https://github.com/ydb-platform/ydb/actions/runs/33967884593)
+used action revision ``947af11`` and reported 9 translated, 0 retained, and 0 targetless
+files. The ``authentication.md`` / ``auth_config`` case was translated rather than
+soft-kept. Nevertheless, the run stopped at ``WITHHOLD_UNSAFE`` with
+``completeness_gaps=[]``: no branch preparation, commit, push, or translation PR happened,
+and ``trigger-translation-ci`` was skipped. The four early ``outbound_fragment`` findings
+were ``../reference/configuration/auth_config.md#security-auth``,
+``../reference/configuration/auth_config.md#certificate-auth-config``, the public
+``../reference/ydb-cli/connect.md#tls``, and
+``../reference/configuration/monitoring_config.md#tls``. The
+[source summary](https://github.com/ydb-platform/ydb/pull/40385#issuecomment-5552286637)
+records that stopped outcome. Because execution ended before candidate application, the
+actual remote final-candidate bytes were never reached or validated; this is not evidence of
+a remote final-tree GREEN result.
+
+Run ``33967884593`` continued after 38 prior matching ``doc_translate`` workflow runs for
+source PR #40385; this history was not reset. It was the 39th run in that accounting. Moving
+the release tag is not itself another translation attempt. The fallback log in run
+``33967884593`` concerned the existing placeholder-mismatch path for
+``authentication.md:s0041``; it did not demonstrate execution of §6.254's new
+empty/length-classified fallback branch.
+
+**Cause:** Pair-level ``check_outbound_fragments`` read target pages through the pre-apply
+reader. Anchors that declaration, reconciliation, or another translated owner would add to
+the assembled candidate therefore looked missing before those phases ran. The generic early
+``outbound_fragment`` finding was classified as unsafe, and the first publication decision
+returned before apply, declaration, reconciliation, and final link validation could turn an
+eligible repairable failure into a typed ``en_link_target`` blocker. The early checker also
+sees YFM include directives, while the visible final EN checker masks them, so the two
+checkers are not globally equivalent.
+
+**Decision:** Defer only an active EN Markdown occurrence independently reproduced by both
+the early checker and the visible final checker. The occurrence ledger records its exact
+href, normalized full target path, raw fragment, decoded fragment, and expected final-gate
+message, preserving multiplicity. Eligibility is therefore proven occurrence by occurrence,
+not inferred from a short basename or message prefix. YFM includes remain early blocking;
+so do skipped, deleted, errored, and targetless pairs, ambiguous same-basename collisions,
+missing or empty final referrers, and every path or fragment identity mismatch.
+
+Before the first publication decision, save the exact original blocker lists. If another
+incomplete or unsafe veto already withholds publication, restore those snapshots and refresh
+the decision before returning, without applying candidate bytes. Otherwise continue through
+apply, declaration, and reconciliation, build the final-tree reader once, and run the final
+EN link gate. Recheck each ledger occurrence against that reader. Remove its early blocker
+only when the exact occurrence is resolved or has an exact typed ``en_link_target``
+replacement; otherwise reattach it. Repeated rechecks remove only helper-owned occurrences,
+preserve foreign identical messages, and do not multiply duplicates. Refresh publication a
+second time after final-tree validation. A final ``WITHHOLD_INCOMPLETE`` or
+``WITHHOLD_UNSAFE`` decision prevents prepare, commit, push, and PR creation; this does not
+claim that every precedence defect in unchanged ``publication.py`` is fixed.
+
+**RED/GREEN, mutation, and idempotency evidence:** On the old ordering, the
+production-shaped literal 75-versus-74 lifecycle stopped on the pre-apply findings. With the
+accepted implementation it reaches apply, declaration, reconciliation, and the real final
+reader and link gate; locally it restores the ``security-auth`` path, declares the required
+certificate, connect, and monitoring anchors, and finishes without outbound or final-tree
+blockers. A visible final broken href becomes draft ``PUBLISH_RED``. Include, ambiguous
+basename, skipped-pair, unrelated early-veto, and final structural-veto cases remain
+withheld with no publication mutation. Bypassing the deferral invocation makes the two
+positive regressions RED; restoring it makes them GREEN. The second gate is covered by the
+final structural-veto regression. Idempotency tests prove that a repeated missing occurrence
+stays N rather than 2N and that a resolved recheck removes only ledger-owned occurrences.
+
+The focused accepted snapshot reported 101 passed plus six genuine unresolved
+publication-policy safety/precedence failures. Adjacent validator suites reported 93 passed
+and three known pre-existing failures. The unchanged translator, chunker, translate-file,
+and pipeline-orchestrator suites reported 60 passed. These results do not claim a green full
+repository suite. The local implementation is accepted, but production acceptance remains
+pending a new workflow run after release.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

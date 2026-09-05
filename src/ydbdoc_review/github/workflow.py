@@ -9,6 +9,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import unquote
 
 from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.github.client import GitHubClient
@@ -109,6 +110,7 @@ from ydbdoc_review.pipeline.publication import (
 )
 from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
 from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
     FinalTreeBlocker,
     PairRunResult,
     PRTranslationResult,
@@ -127,8 +129,20 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
-from ydbdoc_review.validation.en_link_targets import apply_en_link_target_checks
-from ydbdoc_review.validation.glossary_toc_links import build_en_toc_reachable_from_repo
+from ydbdoc_review.validation.en_link_targets import (
+    _mask_yfm_include_directives,
+    apply_en_link_target_checks,
+    check_en_page_link_targets,
+)
+from ydbdoc_review.validation.glossary_toc_links import (
+    build_en_toc_reachable_from_repo,
+    resolve_internal_md_href,
+)
+from ydbdoc_review.validation.href_parity import (
+    _MD_LINK,
+    _is_internal_href,
+    check_outbound_fragments,
+)
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
     apply_include_target_checks,
@@ -608,6 +622,267 @@ def _final_tree_reader(
         return read_text(repo_path, norm)
 
     return _read
+
+
+@dataclass(frozen=True)
+class _OutboundFragmentOccurrence:
+    message: str
+    href: str
+    target_path: str
+    raw_fragment: str
+    decoded_fragment: str
+    expected_link_message: str
+
+
+@dataclass
+class _DeferredOutboundFragments:
+    file_result: FileTranslationResult
+    page_path: str
+    baseline_text: str | None
+    original_blocking: list[str]
+    occurrences: list[_OutboundFragmentOccurrence]
+    reattached_messages: list[str] = field(default_factory=list)
+
+
+def _outbound_fragment_identity(
+    page_path: str,
+    href: str,
+) -> tuple[str, str, str] | None:
+    """Return the full target identity shared by both outbound link gates."""
+    if not _is_internal_href(href):
+        return None
+    path_part, marker, raw_fragment = href.partition("#")
+    if not marker or not raw_fragment or (path_part and not path_part.endswith(".md")):
+        return None
+    target_path = (
+        page_path
+        if not path_part
+        else resolve_internal_md_href(page_path, href)
+    )
+    if target_path is None:
+        return None
+    return target_path.replace("\\", "/"), raw_fragment, unquote(raw_fragment)
+
+
+def _isolated_markdown_link(text: str, start: int, end: int) -> str:
+    """Keep one link and line offsets while masking every other character."""
+    chars = ["\n" if char == "\n" else "x" for char in text]
+    chars[start:end] = text[start:end]
+    return "".join(chars)
+
+
+def _proven_outbound_fragment_occurrences(
+    page_path: str,
+    text: str,
+    *,
+    read_docs,
+    baseline_text: str | None,
+) -> list[_OutboundFragmentOccurrence]:
+    """Find outbound findings covered by the final visible-Markdown gate."""
+    canonical_remaining = check_outbound_fragments(
+        page_path,
+        text,
+        read_text=read_docs,
+        en_baseline_text=baseline_text,
+    )
+    final_gate_remaining = check_en_page_link_targets(
+        page_path,
+        text,
+        read_text=read_docs,
+        baseline_text=baseline_text,
+    )
+    if not canonical_remaining or not final_gate_remaining:
+        return []
+
+    proven: list[_OutboundFragmentOccurrence] = []
+    masked = _mask_yfm_include_directives(text)
+    for match in _MD_LINK.finditer(masked):
+        href = match.group(2).strip()
+        identity = _outbound_fragment_identity(page_path, href)
+        if identity is None:
+            continue
+        isolated = _isolated_markdown_link(text, match.start(), match.end())
+        outbound = check_outbound_fragments(
+            page_path,
+            isolated,
+            read_text=read_docs,
+            en_baseline_text=baseline_text,
+        )
+        link_target = check_en_page_link_targets(
+            page_path,
+            isolated,
+            read_text=read_docs,
+        )
+        if len(outbound) != 1 or len(link_target) != 1:
+            continue
+        message = outbound[0]
+        expected_link_message = link_target[0]
+        if message not in canonical_remaining:
+            continue
+        if expected_link_message not in final_gate_remaining:
+            continue
+        canonical_remaining.remove(message)
+        final_gate_remaining.remove(expected_link_message)
+        target_path, raw_fragment, decoded_fragment = identity
+        proven.append(
+            _OutboundFragmentOccurrence(
+                message=message,
+                href=href,
+                target_path=target_path,
+                raw_fragment=raw_fragment,
+                decoded_fragment=decoded_fragment,
+                expected_link_message=expected_link_message,
+            )
+        )
+    return proven
+
+
+def _defer_proven_outbound_fragments(
+    result: PRTranslationResult,
+    *,
+    repo_path: str,
+    baseline_ref: str,
+) -> list[_DeferredOutboundFragments]:
+    """Detach only active EN Markdown findings covered by the final gate."""
+    read_docs = _docs_text_reader(repo_path, baseline_ref)
+    deferred: list[_DeferredOutboundFragments] = []
+    for run in result.pair_results:
+        file_result = run.file_result
+        if (
+            run.skipped
+            or run.deleted
+            or run.error
+            or run.plan.target_lang != "en"
+            or not run.plan.target_path.endswith(".md")
+            or run.target_text is None
+            or file_result is None
+        ):
+            continue
+        page_path = run.plan.target_path.replace("\\", "/")
+        baseline_text = read_text_at_ref(repo_path, baseline_ref, page_path)
+        proven = _proven_outbound_fragment_occurrences(
+            page_path,
+            run.target_text,
+            read_docs=read_docs,
+            baseline_text=baseline_text,
+        )
+        available = list(file_result.heuristic_blocking)
+        selected: list[_OutboundFragmentOccurrence] = []
+        for occurrence in proven:
+            if occurrence.message not in available:
+                continue
+            available.remove(occurrence.message)
+            selected.append(occurrence)
+        if not selected:
+            continue
+
+        original = list(file_result.heuristic_blocking)
+        to_remove = [occurrence.message for occurrence in selected]
+        retained: list[str] = []
+        for message in original:
+            if message in to_remove:
+                to_remove.remove(message)
+            else:
+                retained.append(message)
+        file_result.heuristic_blocking[:] = retained
+        deferred.append(
+            _DeferredOutboundFragments(
+                file_result=file_result,
+                page_path=page_path,
+                baseline_text=baseline_text,
+                original_blocking=original,
+                occurrences=selected,
+            )
+        )
+    return deferred
+
+
+def _restore_deferred_outbound_fragments(
+    deferred: list[_DeferredOutboundFragments],
+) -> None:
+    """Restore the exact early blocker lists after an unrelated early veto."""
+    for bundle in deferred:
+        bundle.file_result.heuristic_blocking[:] = bundle.original_blocking
+        bundle.reattached_messages.clear()
+
+
+def _recheck_deferred_outbound_fragments(
+    result: PRTranslationResult,
+    deferred: list[_DeferredOutboundFragments],
+    *,
+    read_final_docs,
+) -> None:
+    """Replace provisional findings only with exact final-tree evidence."""
+    for bundle in deferred:
+        for message in reversed(bundle.reattached_messages):
+            for index in range(
+                len(bundle.file_result.heuristic_blocking) - 1,
+                -1,
+                -1,
+            ):
+                if bundle.file_result.heuristic_blocking[index] == message:
+                    bundle.file_result.heuristic_blocking.pop(index)
+                    break
+        bundle.reattached_messages.clear()
+
+        final_text = read_final_docs(bundle.page_path)
+        if not final_text:
+            bundle.reattached_messages.extend(
+                occurrence.message for occurrence in bundle.occurrences
+            )
+            bundle.file_result.heuristic_blocking.extend(bundle.reattached_messages)
+            continue
+
+        canonical_remaining = check_outbound_fragments(
+            bundle.page_path,
+            final_text,
+            read_text=read_final_docs,
+            en_baseline_text=bundle.baseline_text,
+        )
+        proven_remaining = _proven_outbound_fragment_occurrences(
+            bundle.page_path,
+            final_text,
+            read_docs=read_final_docs,
+            baseline_text=bundle.baseline_text,
+        )
+        for original in bundle.occurrences:
+            current_message: str | None = None
+            for message in canonical_remaining:
+                probe = check_outbound_fragments(
+                    bundle.page_path,
+                    f"[deferred]({original.href})",
+                    read_text=read_final_docs,
+                    en_baseline_text=bundle.baseline_text,
+                )
+                if len(probe) != 1 or message != probe[0]:
+                    continue
+                current_message = message
+                canonical_remaining.remove(message)
+                break
+            if current_message is None:
+                continue
+
+            exact_final: _OutboundFragmentOccurrence | None = None
+            for candidate in proven_remaining:
+                if (
+                    candidate.message == current_message
+                    and candidate.href == original.href
+                    and candidate.target_path == original.target_path
+                    and candidate.raw_fragment == original.raw_fragment
+                    and candidate.decoded_fragment == original.decoded_fragment
+                ):
+                    exact_final = candidate
+                    proven_remaining.remove(candidate)
+                    break
+            typed_replacement = exact_final is not None and any(
+                blocker.code == "en_link_target"
+                and blocker.path.replace("\\", "/") == bundle.page_path
+                and blocker.message == exact_final.expected_link_message
+                for blocker in result.final_tree_blockers
+            )
+            if not typed_replacement:
+                bundle.reattached_messages.append(current_message)
+        bundle.file_result.heuristic_blocking.extend(bundle.reattached_messages)
 
 
 def _repair_en_fragments_after_apply(
@@ -1274,8 +1549,15 @@ def run_doc_translate(
         )
     job.pr_result = pr_result
 
+    deferred_outbound = _defer_proven_outbound_fragments(
+        pr_result,
+        repo_path=repo_path,
+        baseline_ref=merge_base_with,
+    )
     refresh_publication_impact(pr_result)
     if _publication_withheld(pr_result):
+        _restore_deferred_outbound_fragments(deferred_outbound)
+        refresh_publication_impact(pr_result)
         logger.error(
             "Publication withheld (%s) — skip commit/push for PR #%s: gaps=%s",
             pr_result.publication_impact.value,
@@ -1395,17 +1677,18 @@ def run_doc_translate(
             for p in touched.deleted
             if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
         }
+        final_tree_read = _final_tree_reader(
+            repo_path,
+            merge_base_with,
+            en_written,
+            deleted_paths=en_deleted,
+        )
         broken_links = apply_en_link_target_checks(
             pr_result,
             repo_path=repo_path,
             en_md_paths=en_written,
             baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
-            docs_read=_final_tree_reader(
-                repo_path,
-                merge_base_with,
-                en_written,
-                deleted_paths=en_deleted,
-            ),
+            docs_read=final_tree_read,
         )
         if broken_links:
             logger.error(
@@ -1424,7 +1707,20 @@ def run_doc_translate(
                     for msg in fr.heuristic_blocking:
                         if msg.startswith("en_link_target:"):
                             logger.error("%s", msg)
+        _recheck_deferred_outbound_fragments(
+            pr_result,
+            deferred_outbound,
+            read_final_docs=final_tree_read,
+        )
         refresh_publication_impact(pr_result)
+        if _publication_withheld(pr_result):
+            logger.error(
+                "Publication withheld after final-tree validation (%s) — "
+                "skip commit/push for PR #%s",
+                pr_result.publication_impact.value,
+                pr_number,
+            )
+            touched = TouchedPaths([], [])
 
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None

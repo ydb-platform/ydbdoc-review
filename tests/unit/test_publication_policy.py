@@ -17,6 +17,9 @@ from requests.exceptions import Timeout
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.errors import GitHubAPIError
 from ydbdoc_review.github.workflow import (
+    _DeferredOutboundFragments,
+    _OutboundFragmentOccurrence,
+    _recheck_deferred_outbound_fragments,
     job_requires_nonzero_exit,
     run_doc_translate,
     run_doc_verify,
@@ -45,7 +48,8 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
-from ydbdoc_review.validation.href_parity import check_href_parity
+from ydbdoc_review.validation.en_link_targets import check_en_page_link_targets
+from ydbdoc_review.validation.href_parity import check_href_parity, check_outbound_fragments
 from ydbdoc_review.validation.link_contract import LinkContractIssue
 
 
@@ -131,6 +135,41 @@ def _pair_result(
                 validation_issues=link_issues,
             )
         ]
+    )
+
+
+def _deferred_outbound_bundle(
+    message: str,
+    *,
+    deferred_count: int,
+    preexisting: int = 0,
+):
+    file_result = FileTranslationResult(
+        file_path="ydb/docs/en/a.md",
+        final_text="See [target](target.md#missing-anchor).\n",
+        segments_count=1,
+        verdict="ok",
+        prompt_version="test",
+        heuristic_blocking=[message] * preexisting,
+    )
+    occurrence = _OutboundFragmentOccurrence(
+        message=message,
+        href="target.md#missing-anchor",
+        target_path="ydb/docs/en/target.md",
+        raw_fragment="missing-anchor",
+        decoded_fragment="missing-anchor",
+        expected_link_message=(
+            "en_link_target: a.md:1\n"
+            "  target: target.md\n"
+            "  missing fragment: missing-anchor"
+        ),
+    )
+    return file_result, _DeferredOutboundFragments(
+        file_result=file_result,
+        page_path="ydb/docs/en/a.md",
+        baseline_text=None,
+        original_blocking=[message] * (preexisting + deferred_count),
+        occurrences=[occurrence] * deferred_count,
     )
 
 
@@ -458,6 +497,327 @@ def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
     assert "missing.md" in full_report
     assert finish.call_args.kwargs["status"] == "published_red"
     assert job_requires_nonzero_exit(job) is False
+
+
+def test_early_outbound_finding_reaches_final_link_gate_and_publishes_red(
+    publication_repo: str,
+):
+    """A missing final anchor is RED, not an unsafe pre-apply veto."""
+    candidate = "See [target](target.md#missing-anchor).\n"
+    result = _pair_result(target_text=candidate)
+    result.pair_results[0].source_text = "См. [target](target.md#missing-anchor).\n"
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    early = check_outbound_fragments(
+        "ydb/docs/en/a.md",
+        candidate,
+        read_text=lambda _path: None,
+    )
+    assert early == [
+        "outbound_fragment: `target.md#missing-anchor` points to missing EN "
+        "target `target.md`"
+    ]
+    file_result.heuristic_blocking.extend(early)
+
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert all(
+        not message.startswith("outbound_fragment:")
+        for message in file_result.heuristic_blocking
+    )
+    assert [(blocker.path, blocker.code) for blocker in job.pr_result.final_tree_blockers] == [
+        ("ydb/docs/en/a.md", "en_link_target")
+    ]
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert finish.call_args.kwargs["status"] == "published_red"
+
+
+def test_yfm_include_anchor_finding_stays_early_unsafe_veto(
+    publication_repo: str,
+):
+    """Final link checks intentionally mask YFM includes, so this must not defer."""
+    candidate = "{% include [part](part.md#missing-anchor) %}\n"
+    result = _pair_result(target_text=candidate)
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    parts_path = Path(publication_repo, "ydb/docs/en/part.md")
+    parts_path.write_text("# Part\n", encoding="utf-8")
+
+    def reader(path: str) -> str | None:
+        candidate_path = Path(publication_repo, path)
+        return candidate_path.read_text(encoding="utf-8") if candidate_path.is_file() else None
+
+    early = check_outbound_fragments(
+        "ydb/docs/en/a.md", candidate, read_text=reader
+    )
+    tick = chr(96)
+    assert early == [
+        f"outbound_fragment: {tick}part.md#missing-anchor{tick} points to missing "
+        f"EN anchor {tick}part.md#missing-anchor{tick}"
+    ]
+    assert check_en_page_link_targets(
+        "ydb/docs/en/a.md", candidate, read_text=reader
+    ) == []
+    file_result.heuristic_blocking.extend(early)
+
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert file_result.heuristic_blocking == early
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_masked_include_outbound_does_not_collide_with_visible_same_basename_target(
+    publication_repo: str,
+):
+    """A final short part.md finding cannot discharge another full target path."""
+    candidate = (
+        "[left](left/part.md#missing-anchor)\n"
+        "{% include [right](right/part.md#missing-anchor) %}\n"
+    )
+    result = _pair_result(target_text=candidate)
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    for side in ("left", "right"):
+        Path(publication_repo, f"ydb/docs/en/{side}/part.md").parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        Path(publication_repo, f"ydb/docs/en/{side}/part.md").write_text(
+            "# Part\n",
+            encoding="utf-8",
+        )
+
+    def reader(path: str) -> str | None:
+        candidate_path = Path(publication_repo, path)
+        return candidate_path.read_text(encoding="utf-8") if candidate_path.is_file() else None
+
+    early = check_outbound_fragments(
+        "ydb/docs/en/a.md", candidate, read_text=reader
+    )
+    tick = chr(96)
+    assert early == [
+        f"outbound_fragment: {tick}left/part.md#missing-anchor{tick} points to "
+        f"missing EN anchor {tick}part.md#missing-anchor{tick}",
+        f"outbound_fragment: {tick}right/part.md#missing-anchor{tick} points to "
+        f"missing EN anchor {tick}part.md#missing-anchor{tick}",
+    ]
+    final = check_en_page_link_targets(
+        "ydb/docs/en/a.md", candidate, read_text=reader
+    )
+    assert len(final) == 1
+    assert "target: part.md" in final[0]
+    assert "missing fragment: missing-anchor" in final[0]
+    file_result.heuristic_blocking.extend(early)
+
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert file_result.heuristic_blocking == early
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_recheck_deferred_outbound_missing_twice_keeps_duplicate_occurrences(
+    publication_repo: str,
+):
+    """A repeated missing final page keeps N genuine deferred occurrences, not 2N."""
+    tick = chr(96)
+    message = (
+        f"outbound_fragment: {tick}target.md#missing-anchor{tick} points to missing "
+        f"EN target {tick}target.md{tick}"
+    )
+    file_result, bundle = _deferred_outbound_bundle(message, deferred_count=2)
+    result = PRTranslationResult()
+
+    _recheck_deferred_outbound_fragments(
+        result,
+        [bundle],
+        read_final_docs=lambda _path: None,
+    )
+    assert file_result.heuristic_blocking == [message, message]
+
+    _recheck_deferred_outbound_fragments(
+        result,
+        [bundle],
+        read_final_docs=lambda _path: None,
+    )
+    assert file_result.heuristic_blocking == [message, message]
+
+
+def test_recheck_deferred_outbound_resolved_removes_only_owned_occurrences(
+    publication_repo: str,
+):
+    """A later green final page removes only helper-owned entries, not a foreign twin."""
+    tick = chr(96)
+    message = (
+        f"outbound_fragment: {tick}target.md#missing-anchor{tick} points to missing "
+        f"EN target {tick}target.md{tick}"
+    )
+    file_result, bundle = _deferred_outbound_bundle(
+        message,
+        deferred_count=2,
+        preexisting=1,
+    )
+    result = PRTranslationResult()
+
+    _recheck_deferred_outbound_fragments(
+        result,
+        [bundle],
+        read_final_docs=lambda _path: None,
+    )
+    assert file_result.heuristic_blocking == [message, message, message]
+
+    final_docs = {
+        "ydb/docs/en/a.md": "See [target](target.md#missing-anchor).\n",
+        "ydb/docs/en/target.md": "# Target {#missing-anchor}\n",
+    }
+    _recheck_deferred_outbound_fragments(
+        result,
+        [bundle],
+        read_final_docs=final_docs.get,
+    )
+    assert file_result.heuristic_blocking == [message]
+
+
+@pytest.mark.parametrize("final_page", [None, ""])
+def test_recheck_deferred_outbound_missing_or_empty_final_page_fails_closed(
+    final_page: str | None,
+):
+    """An absent or empty referrer is not evidence that a deferred href was fixed."""
+    tick = chr(96)
+    message = (
+        f"outbound_fragment: {tick}target.md#missing-anchor{tick} points to missing "
+        f"EN target {tick}target.md{tick}"
+    )
+    file_result, bundle = _deferred_outbound_bundle(message, deferred_count=1)
+
+    _recheck_deferred_outbound_fragments(
+        PRTranslationResult(),
+        [bundle],
+        read_final_docs=lambda _path: final_page,
+    )
+
+    assert file_result.heuristic_blocking == [message]
+
+
+@pytest.mark.parametrize("veto", ["unknown_unsafe", "incomplete"])
+def test_early_outbound_snapshot_restores_before_unrelated_veto(
+    publication_repo: str,
+    veto: str,
+):
+    """Deferral cannot erase original evidence when another gate already withholds."""
+    candidate = "See [target](target.md#missing-anchor).\n"
+    result = _pair_result(target_text=candidate)
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    early = check_outbound_fragments(
+        "ydb/docs/en/a.md", candidate, read_text=lambda _path: None
+    )
+    tick = chr(96)
+    assert early == [
+        f"outbound_fragment: {tick}target.md#missing-anchor{tick} points to missing "
+        f"EN target {tick}target.md{tick}"
+    ]
+    if veto == "unknown_unsafe":
+        file_result.heuristic_blocking.extend([*early, "unknown_policy_veto: retain"])
+        expected_impact = PublicationImpact.WITHHOLD_UNSAFE
+    else:
+        file_result.heuristic_blocking.extend(early)
+        file_result.manual_actions.append(
+            ManualAction("s0001", "paragraph 1", "manual completion required")
+        )
+        expected_impact = PublicationImpact.WITHHOLD_INCOMPLETE
+    before_blocking = list(file_result.heuristic_blocking)
+    before_bytes = Path(publication_repo, "ydb/docs/en/a.md").read_bytes()
+
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == expected_impact
+    assert file_result.heuristic_blocking == before_blocking
+    assert Path(publication_repo, "ydb/docs/en/a.md").read_bytes() == before_bytes
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_final_unsafe_after_deferred_outbound_blocks_all_publication(
+    publication_repo: str,
+):
+    """A structural finding introduced at final reconciliation still vetoes publish."""
+    candidate = "See [target](target.md#missing-anchor).\n"
+    result = _pair_result(target_text=candidate)
+    file_result = result.pair_results[0].file_result
+    assert file_result is not None
+    early = check_outbound_fragments(
+        "ydb/docs/en/a.md", candidate, read_text=lambda _path: None
+    )
+    assert len(early) == 1
+    file_result.heuristic_blocking.extend(early)
+
+    def add_final_structural_veto(*_args, **_kwargs):
+        file_result.heuristic_blocking.append(
+            "heading_parity: final reconciliation removed required heading"
+        )
+        return []
+
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+        reconcile_side_effect=add_final_structural_veto,
+    )
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert "heading_parity: final reconciliation removed required heading" in (
+        file_result.heuristic_blocking
+    )
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_skipped_pair_keeps_outbound_fragment_as_unsafe_veto(publication_repo: str):
+    """Deferral is only legal for an active EN Markdown candidate."""
+    candidate = "See [target](target.md#missing-anchor).\n"
+    result = _pair_result(target_text=candidate)
+    run = result.pair_results[0]
+    assert run.file_result is not None
+    early = check_outbound_fragments(
+        "ydb/docs/en/a.md", candidate, read_text=lambda _path: None
+    )
+    tick = chr(96)
+    assert early == [
+        f"outbound_fragment: {tick}target.md#missing-anchor{tick} points to missing "
+        f"EN target {tick}target.md{tick}"
+    ]
+    run.file_result.heuristic_blocking.extend(early)
+    run.skipped = True
+
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.completeness_gaps == []
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert run.file_result.heuristic_blocking == early
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
 
 
 def test_safe_soft_keep_with_eight_git_artifacts_publishes_draft_red(

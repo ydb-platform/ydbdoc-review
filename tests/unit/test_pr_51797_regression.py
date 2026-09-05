@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
@@ -20,6 +21,7 @@ from ydbdoc_review.github.workflow import (
     _repair_en_fragments_after_apply,
     run_doc_translate,
 )
+from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
     make_repo_scope_readers,
@@ -36,6 +38,7 @@ from ydbdoc_review.validation.en_link_targets import (
 )
 from ydbdoc_review.validation.href_parity import (
     _iter_visible_md_link_matches,
+    check_outbound_fragments,
     reconcile_final_en_same_fragment_paths,
 )
 
@@ -388,17 +391,23 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
 
     filler_ru = "".join(
         f"[Справочная ссылка {index}](https://example.test/{index})\n"
-        for index in range(72)
+        for index in range(71)
     )
     filler_en = "".join(
         f"[Reference link {index}](https://example.test/{index})\n"
-        for index in range(72)
+        for index in range(71)
+    )
+    tip_filler_en = "".join(
+        f"[Tip reference {index}](https://example.test/tip-{index})\n"
+        for index in range(71)
     )
     auth_ru_base = (
         "[Режим аутентификации]"
         "(../reference/configuration/auth_config.md#security-auth)\n"
         "[Сертификат]"
         "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/connect.md#tls)\n"
         f"{filler_ru}"
     )
     auth_ru_current = (
@@ -409,14 +418,18 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
         "[Authentication mode]"
         "(../reference/configuration/security_config.md#security-auth)\n"
         "[Certificate]"
-        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
-        f"{filler_en}"
+        "(../reference/configuration/certificate_legacy.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/_includes/connect_legacy.md#tls)\n"
+        f"{tip_filler_en}"
     )
     auth_en_candidate = (
         "[Authentication mode]"
         "(../reference/configuration/auth_config.md#security-auth)\n"
         "[Certificate]"
         "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/connect.md#tls)\n"
         f"{filler_en}"
         "[Monitoring](../reference/configuration/monitoring_config.md#tls)\n"
     )
@@ -428,6 +441,15 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
     owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
     owner_en = owner_ru.replace("/ru/", "/en/")
     security_en = "ydb/docs/en/core/reference/configuration/security_config.md"
+    certificate_legacy_en = (
+        "ydb/docs/en/core/reference/configuration/certificate_legacy.md"
+    )
+    connect_ru = "ydb/docs/ru/core/reference/ydb-cli/connect.md"
+    connect_en = connect_ru.replace("/ru/", "/en/")
+    connect_include_ru = connect_ru.replace("connect.md", "_includes/connect.md")
+    connect_include_en = connect_include_ru.replace("/ru/", "/en/")
+    connect_legacy_en = "ydb/docs/en/core/reference/ydb-cli/_includes/connect_legacy.md"
+    monitoring_ru = "ydb/docs/ru/core/reference/configuration/monitoring_config.md"
     monitoring_en = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
     for rel, text in (
         (AUTH_RU, auth_ru_base),
@@ -435,7 +457,14 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
         (owner_ru, "## Сертификат {#certificate-auth-config}\n"),
         (owner_en, "## Certificate authentication\n"),
         (security_en, "## Authentication {#security-auth}\n"),
-        (monitoring_en, "## Monitoring {#tls}\n"),
+        (certificate_legacy_en, "## Certificate {#certificate-auth-config}\n"),
+        (connect_ru, "{% include [connect](_includes/connect.md) %}\n"),
+        (connect_en, "{% include [connect](_includes/connect.md) %}\n"),
+        (connect_include_ru, "## TLS {#tls}\n"),
+        (connect_include_en, "## TLS connection\n"),
+        (connect_legacy_en, "## TLS {#tls}\n"),
+        (monitoring_ru, "## Мониторинг {#tls}\n"),
+        (monitoring_en, "## Monitoring\n"),
         (
             "ydb/docs/en/core/toc_p.yaml",
             "items:\n"
@@ -509,6 +538,37 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
                 verdict="ok",
                 prompt_version="test",
             )
+            if content.pair.ru_path == AUTH_RU:
+                # This is the real early pair-level validator.  Before the
+                # owner overlay is applied, its stale checkout target lacks
+                # `security-auth`; the final four-snapshot reconciliation
+                # later restores the tip-proven `security_config.md` owner.
+                early = check_outbound_fragments(
+                    AUTH_EN,
+                    auth_en_candidate,
+                    read_text=lambda path: (
+                        (repo / path).read_text(encoding="utf-8")
+                        if (repo / path).is_file()
+                        else None
+                    ),
+                    en_baseline_text=auth_en_tip,
+                )
+                assert early == [
+                    "outbound_fragment: "
+                    "`../reference/configuration/auth_config.md#security-auth` "
+                    "points to missing EN anchor `auth_config.md#security-auth`",
+                    "outbound_fragment: "
+                    "`../reference/configuration/auth_config.md#certificate-auth-config` "
+                    "points to missing EN anchor "
+                    "`auth_config.md#certificate-auth-config`",
+                    "outbound_fragment: "
+                    "`../reference/ydb-cli/connect.md#tls` "
+                    "points to missing EN anchor `connect.md#tls`",
+                    "outbound_fragment: "
+                    "`../reference/configuration/monitoring_config.md#tls` "
+                    "points to missing EN anchor `monitoring_config.md#tls`"
+                ]
+                file_result.heuristic_blocking.extend(early)
             pair_results.append(
                 PairRunResult(
                     plan=plan,
@@ -529,7 +589,26 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
             "YDBDOC_SKIP_OPS_GATES": "1",
         }
     )
+    import ydbdoc_review.github.workflow as workflow
+
+    # This is a workflow integration regression, but its outcome must not
+    # depend on live ops/LLM clients.  The small namespace deliberately has
+    # only the tracker contract which this no-commit path may consume.
+    client = SimpleNamespace(
+        usage_tracker=SimpleNamespace(
+            records=[],
+            estimate_cost_rub=lambda: 0.0,
+        )
+    )
     with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
+        "ydbdoc_review.github.workflow.begin_ops_job",
+        return_value=(None, GateResult(ok=True), None),
+    ) as begin_ops, patch(
+        "ydbdoc_review.github.workflow.finish_ops_job",
+    ) as finish_ops, patch(
+        "ydbdoc_review.github.workflow.create_llm_client",
+        return_value=client,
+    ) as create_client, patch(
         "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]
     ), patch(
         "ydbdoc_review.github.workflow.list_pr_file_changes_api",
@@ -538,33 +617,68 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
         "ydbdoc_review.github.workflow.run_pr_translation",
         side_effect=translated_result,
     ) as translate:
-        gh_cls.return_value.get_pull.return_value = pull
-        result = run_doc_translate(
-            repo_path=str(repo),
-            github_repo="ydb-platform/ydb",
-            pr_number=40385,
-            merge_base_with=tip_ref,
-            no_commit=True,
-            config=cfg,
-        )
+        with patch(
+            "ydbdoc_review.github.workflow._apply_results_to_disk",
+            wraps=workflow._apply_results_to_disk,
+        ) as apply, patch(
+            "ydbdoc_review.github.workflow._declare_exact_ascii_fragment_targets_after_apply",
+            wraps=workflow._declare_exact_ascii_fragment_targets_after_apply,
+        ) as declare, patch(
+            "ydbdoc_review.github.workflow._reconcile_final_en_same_fragment_paths_after_apply",
+            wraps=workflow._reconcile_final_en_same_fragment_paths_after_apply,
+        ) as reconcile, patch(
+            "ydbdoc_review.github.workflow.apply_en_link_target_checks",
+            wraps=workflow.apply_en_link_target_checks,
+        ) as final_links:
+            gh_cls.return_value.get_pull.return_value = pull
+            result = run_doc_translate(
+                repo_path=str(repo),
+                github_repo="ydb-platform/ydb",
+                pr_number=40385,
+                merge_base_with=tip_ref,
+                no_commit=True,
+                config=cfg,
+            )
 
+    # A stale early pair finding must not skip the full candidate lifecycle.
+    apply.assert_called_once()
+    declare.assert_called_once()
+    reconcile.assert_called_once()
+    final_links.assert_called_once()
+
+    begin_ops.assert_called_once()
+    create_client.assert_called_once_with(cfg)
+    finish_ops.assert_not_called()
     translate.assert_called_once()
     assert _git_output(repo, "rev-parse", f"{source_ref}^") == source_base_ref
     assert _git_output(repo, "rev-parse", "HEAD") == source_ref
     auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
     owner_after = (repo / owner_en).read_text(encoding="utf-8")
+    connect_include_after = (repo / connect_include_en).read_text(encoding="utf-8")
+    monitoring_after = (repo / monitoring_en).read_text(encoding="utf-8")
     assert "security_config.md#security-auth" in auth_after
     assert "auth_config.md#security-auth" not in auth_after
     assert "auth_config.md#certificate-auth-config" in auth_after
     assert "{#certificate-auth-config}" in owner_after
     assert "{#security-auth}" not in owner_after
+    assert "{#tls}" in connect_include_after
+    assert "{#tls}" in monitoring_after
     assert result.pr_result.final_tree_blockers == []
+    assert not any(
+        message.startswith("outbound_fragment:")
+        for run in result.pr_result.pair_results
+        for message in (run.file_result.heuristic_blocking if run.file_result else [])
+    )
     assert apply_en_link_target_checks(
         result.pr_result,
         repo_path=str(repo),
-        en_md_paths={AUTH_EN, owner_en},
+        en_md_paths={AUTH_EN, owner_en, connect_en, connect_include_en, monitoring_en},
         baseline_read=lambda path: read_text_at_ref(str(repo), tip_ref, path),
-        docs_read=_final_tree_reader(str(repo), tip_ref, {AUTH_EN, owner_en}),
+        docs_read=_final_tree_reader(
+            str(repo),
+            tip_ref,
+            {AUTH_EN, owner_en, connect_en, connect_include_en, monitoring_en},
+        ),
     ) == []
 
 
