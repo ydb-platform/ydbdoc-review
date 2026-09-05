@@ -200,10 +200,16 @@ def evaluate_publication_impact(result: PRTranslationResult) -> PublicationImpac
     blockers = classify_publication_blockers(result)
     if blockers.incomplete:
         return PublicationImpact.WITHHOLD_INCOMPLETE
+    has_materialized_soft_keep = any(
+        blocker.code == "translation_soft_keep"
+        for blocker in result.final_tree_blockers
+    )
+    if blockers.repairable_final_tree and (
+        not blockers.unsafe or has_materialized_soft_keep
+    ):
+        return PublicationImpact.PUBLISH_RED
     if blockers.unsafe:
         return PublicationImpact.WITHHOLD_UNSAFE
-    if blockers.repairable_final_tree:
-        return PublicationImpact.PUBLISH_RED
     return PublicationImpact.PUBLISH_NORMAL
 
 

@@ -1111,7 +1111,9 @@ def test_final_link_blocker_keeps_related_link_heuristic_repairable(blocking: st
     assert evaluate_publication_impact(result) == PublicationImpact.PUBLISH_RED
 
 
-def test_soft_keep_never_overrides_unrelated_unsafe_blocker(publication_repo: str):
+def test_materialized_soft_keep_with_unsafe_blocker_still_publishes_draft_red(
+    publication_repo: str,
+):
     result = _pair_result(
         target_text="Hello.\n",
         blocking=["include_target: missing required include"],
@@ -1123,11 +1125,9 @@ def test_soft_keep_never_overrides_unrelated_unsafe_blocker(publication_repo: st
         result,
     )
 
-    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
+    assert prepare.call_count == commit.call_count == push.call_count == 1
+    assert gh.create_pull.call_args.kwargs["draft"] is True
 
 
 def test_soft_keep_with_blocked_critic_withholds_unsafe(publication_repo: str):
