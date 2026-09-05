@@ -8,15 +8,13 @@ from ydbdoc_review.pipeline.types import PRTranslationResult, PublicationImpact
 from ydbdoc_review.validation.fence_integrity import check_absolute_paths_in_fences
 from ydbdoc_review.validation.heuristics import (
     check_broken_inline_code_markup,
-    check_cyrillic_in_en,
-    check_cyrillic_in_en_all_fences,
     check_fence_parity,
     check_heading_parity,
     check_list_tab_parity,
     check_unrestored_placeholders,
     check_unrestored_yfmvar_placeholders,
+    run_file_heuristics_classified,
 )
-from ydbdoc_review.validation.href_parity import check_href_parity
 from ydbdoc_review.validation.include_targets import check_include_parity
 from ydbdoc_review.validation.ru_source_bugs import (
     check_required_anchor_lines,
@@ -47,11 +45,22 @@ def _has_direct_structural_failure(
     *,
     source_lang: str,
     source_file: str,
-    retained_soft_keep: bool = False,
+    full_classified_set: bool = False,
 ) -> bool:
-    """Re-run typed structural validators instead of parsing heuristic messages."""
+    """Re-run canonical heuristics; soft-keeps require the complete set."""
     normalized_source = normalize_ru_source_for_translation(source_text)
-    structural_failure = any(
+    if full_classified_set:
+        return bool(
+            run_file_heuristics_classified(
+                source_text,
+                target_text,
+                normalized_source_text=normalized_source,
+                source_lang=source_lang,
+                target_lang="en",
+                source_file=source_file,
+            ).blocking
+        )
+    return any(
         (
             check_fence_parity(
                 normalized_source,
@@ -68,16 +77,6 @@ def _has_direct_structural_failure(
                 source_file=source_file,
             ),
         )
-    )
-    if structural_failure or not retained_soft_keep:
-        return structural_failure
-    # A retained old EN target did not pass the current translation harness, so
-    # close the two remaining typed integrity gaps here. Normal translated runs
-    # keep relying on their ordinary file-result evidence.
-    return bool(
-        check_href_parity(normalized_source, target_text)
-        or check_cyrillic_in_en(target_text, target_lang="en")
-        or check_cyrillic_in_en_all_fences(target_text, target_lang="en")
     )
 
 
@@ -153,7 +152,7 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
                     run.target_text,
                     source_lang=source_lang,
                     source_file=run.plan.source_path,
-                    retained_soft_keep=run.soft_keep_reason is not None,
+                    full_classified_set=run.soft_keep_reason is not None,
                 )
             ):
                 return True

@@ -472,6 +472,54 @@ def _soft_keep_is_manually_resolved(
     return not classified.incomplete and not classified.unsafe
 
 
+def _matching_existing_soft_keep_artifact_pr(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    *,
+    branch: str,
+    base: str,
+    result: PRTranslationResult,
+) -> tuple[str, int, bool] | None:
+    """Return an open PR only when its current head carries the same RED evidence."""
+    remote_sha = gh.get_branch_sha(owner, repo, branch)
+    if not remote_sha:
+        return None
+    found = gh.find_open_pull_by_head(
+        owner,
+        repo,
+        head_branch=branch,
+        base=base,
+    )
+    if found is None:
+        return None
+    url, number = found
+    pull = gh.get_pull(owner, repo, number)
+    head = pull.get("head") or {}
+    if not isinstance(head, dict) or str(head.get("sha") or "") != remote_sha:
+        return None
+    try:
+        published_blockers = parse_final_tree_blocker_manifest(
+            str(pull.get("body") or "")
+        )
+    except ValueError:
+        return None
+
+    def artifact_key(blocker: FinalTreeBlocker) -> tuple[str, str, str | None]:
+        detail = (
+            blocker.artifact_sha256
+            if blocker.code == "translation_soft_keep"
+            else blocker.message
+        )
+        return blocker.code, blocker.path.replace("\\", "/"), detail
+
+    expected = {artifact_key(blocker) for blocker in result.final_tree_blockers}
+    actual = {artifact_key(blocker) for blocker in published_blockers}
+    if not expected or expected != actual:
+        return None
+    return url, number, False
+
+
 def _restore_out_of_scope_en_from_base(
     repo_path: str,
     *,
@@ -1382,6 +1430,7 @@ def run_doc_translate(
     prepush_opened_pr: tuple[str, int, bool] | None = None
     prepush_remote_sha: str | None = None
     pushed_candidate_sha: str | None = None
+    reused_existing_artifact_pr: tuple[str, int, bool] | None = None
     committed = pushed = False
     if touched and not dry_run and not no_commit:
         prepare_translation_branch_on_base(
@@ -1470,9 +1519,18 @@ def run_doc_translate(
             )
             pushed = True
         elif pr_result.has_soft_keep:
-            pr_result.publication_failure = "no_publishable_artifact"
-            refresh_publication_impact(pr_result)
-            job.blocked = True
+            reused_existing_artifact_pr = _matching_existing_soft_keep_artifact_pr(
+                gh,
+                owner,
+                repo,
+                branch=branch,
+                base=translation_pr_base(ctx),
+                result=pr_result,
+            )
+            if reused_existing_artifact_pr is None:
+                pr_result.publication_failure = "no_publishable_artifact"
+                refresh_publication_impact(pr_result)
+                job.blocked = True
     job.committed = committed
     job.pushed = pushed
 
@@ -1482,7 +1540,7 @@ def run_doc_translate(
     tr_pr_number: int | None = None
     tr_pr_url: str | None = None
     verify_result: PRTranslationResult | None = None
-    if pushed:
+    if pushed or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
         publish_red = pr_result.publication_impact == PublicationImpact.PUBLISH_RED
         body = build_translation_pr_body(
@@ -1491,7 +1549,9 @@ def run_doc_translate(
             publication_result=pr_result,
         )
         opened = (
-            prepush_opened_pr
+            reused_existing_artifact_pr
+            if reused_existing_artifact_pr is not None
+            else prepush_opened_pr
             if prepush_opened_pr is not None
             else gh.create_pull(
                 owner,
@@ -2130,6 +2190,13 @@ def run_doc_verify(
 
     refresh_publication_impact(pr_result)
 
+    verify_requires_red = result_has_blocking_findings(pr_result)
+    if translation_pr and verify_requires_red:
+        # Convert through the API method immediately before any local/remote
+        # mutation. The client method re-fetches current state and confirms the
+        # GraphQL draft transition instead of trusting the initial PR snapshot.
+        gh.convert_pull_to_draft(owner, repo, pr_number)
+
     job.pr_result = pr_result
 
     final_read_only_verify = _fixup_rerun_depth >= 3 and inline_fixup_push
@@ -2168,6 +2235,8 @@ def run_doc_verify(
 
     committed = pushed = False
     inline_head_changed = False
+    verify_previous_remote_sha: str | None = None
+    verify_pushed_sha: str | None = None
     fixup_pr_number: int | None = None
     fixup_pr_url: str | None = None
     if touched and not dry_run and not no_commit:
@@ -2201,7 +2270,8 @@ def run_doc_verify(
             _GITHUB_ACTOR_EMAIL,
             deleted_paths=touched.deleted,
         )
-        inline_head_changed = committed and git_head_sha(repo_path) != head_before_fixup
+        head_after_fixup = git_head_sha(repo_path) if committed else None
+        inline_head_changed = committed and head_after_fixup != head_before_fixup
         if committed:
             if not inline_fixup_push:
                 _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
@@ -2224,12 +2294,29 @@ def run_doc_verify(
                     pr_number,
                     ctx.head_repo_full_name,
                 )
+            push_kwargs: dict[str, object] = {}
+            if translation_pr and verify_requires_red:
+                verify_previous_remote_sha = gh.get_branch_sha(
+                    owner,
+                    repo,
+                    push_branch_name,
+                )
+                if not verify_previous_remote_sha or not head_after_fixup:
+                    raise RuntimeError(
+                        "cannot safely publish RED verify result without exact branch SHAs"
+                    )
+                verify_pushed_sha = head_after_fixup
+                push_kwargs = {
+                    "guard_remote_ref": True,
+                    "expected_remote_sha": verify_previous_remote_sha,
+                }
             push_branch(
                 repo_path,
                 "ydbdoc-review-push",
                 push_branch_name,
                 push_token,
                 upstream_url,
+                **push_kwargs,
             )
             pushed = True
     job.committed = committed
@@ -2314,7 +2401,35 @@ def run_doc_verify(
     # Full QA report: on newly opened fixup PR when one exists; otherwise on
     # the verified PR (translation / verify-* / bilingual with no fixes).
     report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
-    if translation_pr and had_soft_keep_blocker and source_pr is not None:
+    if translation_pr and source_pr is not None:
+        if result_has_blocking_findings(pr_result):
+            # Re-check after possible branch mutation and directly before the
+            # merge-facing body update. A concurrent ready transition is
+            # converted again by the client's current-state check.
+            try:
+                gh.convert_pull_to_draft(owner, repo, pr_number)
+            except Exception as confirmation_error:
+                if pushed and verify_requires_red:
+                    if not verify_pushed_sha or not verify_previous_remote_sha:
+                        raise RuntimeError(
+                            "cannot roll back RED verify branch without exact SHAs"
+                        ) from confirmation_error
+                    try:
+                        rollback_pushed_branch(
+                            repo_path,
+                            "ydbdoc-review-push",
+                            ctx.head_ref,
+                            push_token,
+                            upstream_url,
+                            expected_pushed_sha=verify_pushed_sha,
+                            previous_sha=verify_previous_remote_sha,
+                        )
+                    except Exception as rollback_error:
+                        raise ExceptionGroup(
+                            "RED verify draft confirmation and branch rollback both failed",
+                            [confirmation_error, rollback_error],
+                        ) from None
+                raise
         gh.update_pull_body(
             owner,
             repo,

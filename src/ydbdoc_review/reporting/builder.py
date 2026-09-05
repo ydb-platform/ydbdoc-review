@@ -796,7 +796,9 @@ def build_translation_pr_body(
     *,
     publication_result: PRTranslationResult | None = None,
 ) -> str:
-    red = bool(publication_result and publication_result.final_tree_blockers)
+    red = bool(
+        publication_result and result_has_blocking_findings(publication_result)
+    )
     banner = ""
     blockers = ""
     if red and publication_result is not None:
@@ -804,6 +806,7 @@ def build_translation_pr_body(
             "> [!CAUTION]\n"
             "> **QA RED, do not merge.** Candidate опубликован для ручного исправления.\n\n"
         )
+    if publication_result is not None and publication_result.final_tree_blockers:
         blockers = "\n\n**Final-tree/manual-repair blockers:**\n\n" + "\n".join(
             f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}"
             for blocker in publication_result.final_tree_blockers

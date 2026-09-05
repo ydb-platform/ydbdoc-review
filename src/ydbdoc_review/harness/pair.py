@@ -243,6 +243,21 @@ def run_pair_plan(
                 f"({exc})"
             )
             soft_reason = " ".join(str(exc).split()) or type(exc).__name__
+            normalized_source = normalize_ru_source_for_translation(source_text)
+            classified = run_file_heuristics_classified(
+                source_text,
+                existing_target,
+                normalized_source_text=normalized_source,
+                source_lang=plan.source_lang,
+                target_lang=plan.target_lang,
+                source_file=plan.source_path,
+                en_toc_reachable=ctx.en_toc_reachable,
+                docs_text_reader=ctx.docs_text_reader,
+                docs_repo_path=ctx.docs_repo_path,
+                en_baseline_text=content.en_base_text,
+                source_baseline_text=content.ru_base_text,
+                glossary=ctx.glossary,
+            )
             return PairRunResult(
                 plan=plan,
                 target_text=existing_target,
@@ -253,9 +268,11 @@ def run_pair_plan(
                     file_path=plan.target_path,
                     final_text=existing_target,
                     segments_count=0,
-                    verdict="warnings",
+                    verdict="blocked" if classified.blocking else "warnings",
                     prompt_version="soft-keep",
-                    heuristic_warnings=[soft_msg],
+                    heuristic_blocking=classified.blocking,
+                    heuristic_warnings=[*classified.warnings, soft_msg],
+                    heuristic_info=classified.info,
                 ),
             )
         logger.exception("Failed to process %s", plan.target_path)
