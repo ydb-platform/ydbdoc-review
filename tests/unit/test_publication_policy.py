@@ -1102,9 +1102,9 @@ def test_final_link_blocker_keeps_related_link_heuristic_repairable(blocking: st
     result = _pair_result(target_text="Translated.\n", blocking=[blocking])
     result.final_tree_blockers = [
         FinalTreeBlocker(
-            path="ydb/docs/en/a.md",
+            path="ydb/docs/en/security/authentication.md",
             code="en_link_target",
-            message="en_link_target: a.md: missing fragment",
+            message="en_link_target: authentication.md: missing fragment",
         )
     ]
 

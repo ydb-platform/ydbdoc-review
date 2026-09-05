@@ -139,8 +139,6 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
         )
         has_repairable_link_blocker = any(
             blocker.code == "en_link_target"
-            and blocker.path.replace("\\", "/")
-            == run.plan.target_path.replace("\\", "/")
             for blocker in result.final_tree_blockers
         )
         if any(
