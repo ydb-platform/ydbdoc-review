@@ -5912,4 +5912,41 @@ ready-to-draft GraphQL payloads; `tests/unit/test_cli.py` rejects a green `Done`
 published RED.
 
 
+### §6.254 Empty/length-classified translate JSON advances to configured fallback (#40385, 2026-09-05)
+
+**Production failure:** Run ``33960710187`` used production SHA ``da526b6``. The exact
+``auth_config.md`` content from YDB merge commit ``d9fc9f993eb7`` produced an empty response
+with ``finish_reason=length`` for the singleton ``s0052`` batch on all three normal primary
+attempts. A fallback model was configured, but model advancement was gated only by placeholder
+mismatch. The translator therefore missed the fallback and emitted a blocking manual action.
+The segment has 1213 source characters and an estimated output size of 2189, below the
+production ``max_output_chars=6000`` with ``max_chars=2500`` and
+``segment_max_chars=1200``.
+
+**Decision:** Preserve the three normal attempts on the primary model. After the third
+attempt, advance through each remaining configured model exactly once only when the resulting
+``LLMParseError`` is accepted by the existing ``_is_length_resplit_failure`` predicate using
+the last raw response content. The production two-model chain therefore has a 3+1 invariant:
+primary three times, then fallback once. Wrong segment ids and unrelated parse or schema
+failures do not enter the new path. Translation validators are unchanged, so a structurally
+unsafe fallback result remains blocking.
+
+**Local RED/GREEN and mutation evidence:** The byte-exact fixture exercises the real parser,
+extractor, and chunker. Under the production parameters it yields 110 segments and 11 batches;
+``s0052`` is singleton batch 3. A production-shaped local run observed primary ×3 then
+fallback ×1, returned a complete result, and left ``manual_actions=[]``. The focused regression
+configuration uses ``max_output_chars=2200`` and ``segment_max_chars=2500``: seven new
+scenarios were RED on unchanged production, and nine were GREEN after the narrow OR guard.
+Translator plus chunker tests reported 44 passed; translate-file plus pipeline-orchestrator
+tests reported 16 passed. Removing only the new OR guard made the two exact
+``auth_config.md`` regressions RED; restoring it made them GREEN.
+
+This evidence proves the local fix only. The full repository suite is not claimed green:
+existing unrelated state includes two collection ``ImportError`` failures, six existing
+publication-policy assertion failures reproducible on the baseline source, one pre-existing
+gRPC Python segfault, and two baseline Ruff ``RUF001`` findings. Production acceptance has
+not run yet. Moving ``v0.1.0`` and observing a new production workflow are subsequent
+operations; run ``33960710187`` is failure evidence on ``da526b6``, not acceptance of this fix.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

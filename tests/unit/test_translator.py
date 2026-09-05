@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
+from hashlib import sha256
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -11,7 +14,13 @@ import pytest
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
-from ydbdoc_review.segmentation.chunker import Batch
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.segmentation.chunker import (
+    Batch,
+    chunk_segments,
+    estimate_translate_batch_output_chars,
+)
+from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import load_glossary
@@ -338,3 +347,260 @@ def test_r_gl_4_irreducible_segment_raises_manual_action():
     assert actions
     assert actions[0].segment_id == "s1"
     assert "safe translate output budget" in actions[0].message
+
+
+# Regression fixture: exact bytes of
+# d9fc9f993eb7:ydb/docs/ru/core/reference/configuration/auth_config.md.
+_AUTH_CONFIG_D9FC = (
+    Path(__file__).parent.parent
+    / "fixtures"
+    / "markdown_files"
+    / "auth_config_d9fc9f993eb7.md"
+)
+_AUTH_CONFIG_D9FC_SHA256 = (
+    "dfacc38cec25371da34a1f456f26c1e4f9cdcfebce3a3b8b8fa28c84def01abc"
+)
+
+
+def _auth_config_segments() -> list[Segment]:
+    # ``apply_patch`` materializes a terminal newline; the merge-commit blob
+    # deliberately has none, so remove only that transport artifact.
+    source = _AUTH_CONFIG_D9FC.read_text(encoding="utf-8").removesuffix("\n")
+    assert sha256(source.encode()).hexdigest() == _AUTH_CONFIG_D9FC_SHA256
+    return extract_segments(parse_markdown(source))
+
+
+def _ascii_candidate(source: str) -> str:
+    """A model double's structurally valid EN-shaped response, not production logic."""
+    return re.sub(r"[\u0410-\u042f\u0430-\u044f\u0401\u0451]", "x", source)
+
+
+def _auth_config_s0052_batch() -> tuple[Segment, Batch]:
+    seg = next(seg for seg in _auth_config_segments() if seg.id == "s0052")
+    batches = chunk_segments(
+        [seg],
+        max_chars=2500,
+        max_output_chars=2200,
+        segment_max_chars=2500,
+    )
+    assert len(batches) == 1
+    assert batches[0].segments == [seg]
+    assert estimate_translate_batch_output_chars([seg]) == 2189
+    return seg, batches[0]
+
+
+def test_auth_config_s0052_empty_primary_retries_then_uses_fallback():
+    """Catches removal of the length/empty parse-error fallback branch."""
+    seg, batch = _auth_config_s0052_batch()
+    good = _json_response([{"id": "s0052", "text": _ascii_candidate(seg.text)}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=good),
+    ]
+    actions: list[ManualAction] = []
+
+    out = translate_batch(
+        client,
+        batch,
+        load_glossary(),
+        file_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+        manual_actions=actions,
+    )
+
+    assert out == {"s0052": _ascii_candidate(seg.text)}
+    assert actions == []
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "primary",
+        "primary",
+        "fallback",
+    ]
+
+
+def test_translate_segments_auth_config_preserves_all_ids_after_s0052_fallback():
+    """Catches a fallback that succeeds locally but loses file-level coverage."""
+    segments = _auth_config_segments()
+    expected = {seg.id: _ascii_candidate(seg.text) for seg in segments}
+    calls: list[tuple[str, tuple[str, ...]]] = []
+    primary_s0052_attempts = 0
+
+    def chat(messages, *, model, role):
+        nonlocal primary_s0052_attempts
+        assert role == "translate"
+        user = messages[-1]["content"]
+        payload = user.split("```json\n", 1)[1].split("\n```", 1)[0]
+        requested = json.loads(payload)["segments"]
+        ids = tuple(item["id"] for item in requested)
+        calls.append((model, ids))
+        if ids == ("s0052",) and model == "primary":
+            primary_s0052_attempts += 1
+            if primary_s0052_attempts <= 3:
+                return SimpleNamespace(content="")
+        return SimpleNamespace(
+            content=_json_response(
+                [{"id": item["id"], "text": expected[item["id"]]} for item in requested]
+            )
+        )
+
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = chat
+    actions: list[ManualAction] = []
+
+    out = translate_segments(
+        segments,
+        client,
+        load_glossary(),
+        file_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+        max_chars=2500,
+        max_output_chars=2200,
+        segment_max_chars=2500,
+        max_parallel_batches=1,
+        manual_actions=actions,
+    )
+
+    assert out == expected
+    assert list(out) == [seg.id for seg in segments]
+    assert actions == []
+    assert [model for model, ids in calls if ids == ("s0052",)] == [
+        "primary",
+        "primary",
+        "primary",
+        "fallback",
+    ]
+
+
+def test_empty_length_failure_advances_through_three_model_chain():
+    """Catches advancing only one fallback, or retrying a fallback three times."""
+    seg = _segment("s1", "Привет")
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback1", "fallback2"]
+    client.chat.side_effect = [
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=_json_response([{"id": "s1", "text": "Hello"}])),
+    ]
+
+    out = translate_batch(
+        client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
+    )
+
+    assert out == {"s1": "Hello"}
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "primary",
+        "primary",
+        "fallback1",
+        "fallback2",
+    ]
+
+
+def test_empty_length_failure_exhaustion_is_blocking_after_fallback_chain():
+    """Catches false success or unbounded retries after every model is empty."""
+    seg = _segment("s1", "Привет")
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.return_value = SimpleNamespace(content="")
+    actions: list[ManualAction] = []
+
+    with pytest.raises(TranslationValidationError, match="safe translate output budget"):
+        translate_batch(
+            client,
+            Batch(index=0, segments=[seg]),
+            load_glossary(),
+            file_path="docs/ru/x.md",
+            manual_actions=actions,
+        )
+
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "primary",
+        "primary",
+        "fallback",
+    ]
+    assert [action.segment_id for action in actions] == ["s1"]
+
+
+def test_empty_length_failure_without_fallback_keeps_irreducible_monolith_blocked():
+    """Catches weakening the established no-fallback manual-action behavior."""
+    seg = _segment("s1", "X" * 5000)
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary"]
+    client.chat.return_value = SimpleNamespace(content="")
+    actions: list[ManualAction] = []
+
+    with pytest.raises(TranslationValidationError, match="safe translate output budget"):
+        translate_batch(
+            client,
+            Batch(index=0, segments=[seg]),
+            load_glossary(),
+            file_path="docs/ru/x.md",
+            manual_actions=actions,
+        )
+
+    assert client.chat.call_count == 3
+    assert [action.segment_id for action in actions] == ["s1"]
+
+
+def test_non_length_wrong_ids_does_not_advance_to_fallback():
+    """Catches broadening the new branch to ordinary schema/id failures."""
+    seg = _segment("s1", "Привет")
+    wrong_ids = _json_response([{"id": "not-s1", "text": "Hello"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [SimpleNamespace(content=wrong_ids)] * 3
+
+    with pytest.raises(LLMParseError, match="Segment id mismatch"):
+        translate_batch(
+            client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
+        )
+
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "primary",
+        "primary",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "unsafe", "error"),
+    [
+        ("Привет", "Hello мир", "Cyrillic remains"),
+        ("Use ⟦C1⟧", "Use marker", "placeholder mismatch"),
+        ("Run --safe", "Run safely", "CLI/shell token missing"),
+    ],
+)
+def test_empty_length_fallback_rejects_unsafe_translation(source, unsafe, error):
+    """Catches accepting a fallback that violates a structural safety gate."""
+    seg = _segment("s1", source)
+    unsafe_response = _json_response([{"id": "s1", "text": unsafe}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=unsafe_response),
+        SimpleNamespace(content=unsafe_response),
+        SimpleNamespace(content=unsafe_response),
+        SimpleNamespace(content=unsafe_response),
+        SimpleNamespace(content=unsafe_response),
+    ]
+
+    with pytest.raises(TranslationValidationError, match=error):
+        translate_batch(
+            client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
+        )
+
+    assert [call.kwargs["model"] for call in client.chat.call_args_list][:4] == [
+        "primary",
+        "primary",
+        "primary",
+        "fallback",
+    ]

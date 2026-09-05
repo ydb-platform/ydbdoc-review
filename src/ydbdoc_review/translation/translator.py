@@ -324,7 +324,16 @@ def _translate_batch_once(
             last_validation_exc = exc
             if (
                 model_idx + 1 < len(model_chain)
-                and _PLACEHOLDER_MISMATCH_HINT in str(exc)
+                and (
+                    _PLACEHOLDER_MISMATCH_HINT in str(exc)
+                    or (
+                        isinstance(exc, LLMParseError)
+                        and _is_length_resplit_failure(
+                            exc,
+                            content=raw_holder[0] if raw_holder else "",
+                        )
+                    )
+                )
             ):
                 logger.warning(
                     "Translate batch %s retry with fallback model %s: %s",
