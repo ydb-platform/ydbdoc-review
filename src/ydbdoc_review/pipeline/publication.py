@@ -24,6 +24,7 @@ from ydbdoc_review.validation.ru_source_bugs import (
 _REPAIRABLE_FINAL_TREE_CODES = frozenset(
     {"en_link_target", "translation_soft_keep"}
 )
+_REPAIRABLE_LINK_HEURISTIC_PREFIXES = ("en_link_target:", "href_parity:", "anchor_parity:")
 
 
 @dataclass(frozen=True)
@@ -136,8 +137,18 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
         repairable_messages = repairable_messages_by_path.get(
             run.plan.target_path.replace("\\", "/"), set()
         )
+        has_repairable_link_blocker = any(
+            blocker.code == "en_link_target"
+            and blocker.path.replace("\\", "/")
+            == run.plan.target_path.replace("\\", "/")
+            for blocker in result.final_tree_blockers
+        )
         if any(
             message not in repairable_messages
+            and not (
+                has_repairable_link_blocker
+                and message.startswith(_REPAIRABLE_LINK_HEURISTIC_PREFIXES)
+            )
             for message in file_result.heuristic_blocking
         ):
             return True

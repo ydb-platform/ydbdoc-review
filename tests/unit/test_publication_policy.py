@@ -25,6 +25,7 @@ from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.ops.lifecycle import append_retention_footer
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.publication import evaluate_publication_impact
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     FinalTreeBlocker,
@@ -1088,6 +1089,26 @@ def test_soft_keep_and_safe_en_link_target_publish_one_draft_red(
         "en_link_target",
     }
     assert gh.create_pull.call_args.kwargs["draft"] is True
+
+
+@pytest.mark.parametrize(
+    "blocking",
+    [
+        "href_parity: missing auth_config.md#security-auth",
+        "anchor_parity: RU/EN explicit {#id} differ",
+    ],
+)
+def test_final_link_blocker_keeps_related_link_heuristic_repairable(blocking: str):
+    result = _pair_result(target_text="Translated.\n", blocking=[blocking])
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing fragment",
+        )
+    ]
+
+    assert evaluate_publication_impact(result) == PublicationImpact.PUBLISH_RED
 
 
 def test_soft_keep_never_overrides_unrelated_unsafe_blocker(publication_repo: str):
