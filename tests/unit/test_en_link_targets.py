@@ -68,8 +68,11 @@ def test_en_link_target_suppresses_ambient_baseline_debt():
     page = "ydb/docs/en/core/security/authentication.md"
     auth = "ydb/docs/en/core/reference/configuration/auth_config.md"
     mon = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
-    files = {
+    baseline_files = {
         auth: "## Local auth {#local-auth-config}\n",
+    }
+    final_files = {
+        **baseline_files,
         mon: "## Authentication {#authentication}\n",
     }
     baseline = (
@@ -81,7 +84,11 @@ def test_en_link_target_suppresses_ambient_baseline_debt():
         + "See [tls](../reference/configuration/monitoring_config.md#tls).\n"
     )
     msgs = check_en_page_link_targets(
-        page, current, read_text=files.get, baseline_text=baseline
+        page,
+        current,
+        read_text=final_files.get,
+        baseline_text=baseline,
+        baseline_read_text=baseline_files.get,
     )
     assert len(msgs) == 1
     assert "missing fragment: tls" in msgs[0]

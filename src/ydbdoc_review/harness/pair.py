@@ -326,6 +326,17 @@ def run_pair_plan(
             )
             target_text = link_contract.text
             validation_issues = tuple(file_result.link_contract_issues) + link_contract.issues
+            if ctx.docs_text_reader is not None:
+                from ydbdoc_review.validation.href_parity import (
+                    retarget_source_owned_redirect_hrefs,
+                )
+
+                target_text = retarget_source_owned_redirect_hrefs(
+                    target_text,
+                    content.ru_text,
+                    en_page_path=plan.target_path,
+                    read_text=ctx.docs_text_reader,
+                )
             # Critic may reintroduce RU-only hrefs; strip again after restore.
             if ctx.en_toc_reachable is not None:
                 from ydbdoc_review.validation.glossary_toc_links import (

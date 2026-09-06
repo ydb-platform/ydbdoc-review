@@ -10,14 +10,20 @@ from ydbdoc_review.config.loader import Config
 from ydbdoc_review.github.git_ops import (
     merge_base,
     read_text,
+    read_text_at_commit,
     read_text_at_ref,
     read_text_at_upstream_tip,
 )
+from ydbdoc_review.github.provenance import RuAuthority, TranslationArtifactProvenance
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.redirects import (
     merge_en_redirects_yaml,
     redirect_translate_scope,
+)
+from ydbdoc_review.navigation.scope_planner import (
+    TranslationScopePlan,
+    planned_toc_extras_for_pair,
 )
 from ydbdoc_review.navigation.toc import (
     TocTranslateScope,
@@ -29,10 +35,6 @@ from ydbdoc_review.navigation.toc import (
     toc_entry_paths,
     toc_reordered_shared_hrefs,
     toc_translate_scope,
-)
-from ydbdoc_review.navigation.scope_planner import (
-    TranslationScopePlan,
-    planned_toc_extras_for_pair,
 )
 from ydbdoc_review.pipeline.pairs import NavigationPair
 from ydbdoc_review.pipeline.skip_paths import matches_translate_skip, toc_entry_is_skipped
@@ -89,6 +91,7 @@ def _read_navigation_baselines(
     ru_path: str,
     en_path: str,
     ru_base_ref: str | None = None,
+    authority: RuAuthority | None = None,
 ) -> tuple[str, str]:
     """RU at PR merge-base; EN from current upstream main (§6.44, §6.111).
 
@@ -99,6 +102,12 @@ def _read_navigation_baselines(
     EN baseline drops those entries (YFM003 / #46845). Fall back to merge-base
     EN only when the file is still absent on upstream main (new sidebar).
     """
+    if authority is not None:
+        return (
+            read_text_at_commit(repo_path, authority.ru_base_sha, ru_path) or "",
+            read_text_at_commit(repo_path, authority.baseline_sha, en_path) or "",
+        )
+
     mb = ru_base_ref or merge_base(repo_path, merge_base_with, "HEAD")
     ru_text = read_text_at_ref(repo_path, mb, ru_path)
     ru_base = ru_text if ru_text is not None else ""
@@ -289,6 +298,7 @@ def merge_navigation_pair(
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
     ru_base_ref: str | None = None,
+    authority: RuAuthority | None = None,
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> NavigationRunResult:
     """Produce merged EN navigation YAML for one RU/EN pair."""
@@ -312,11 +322,13 @@ def merge_navigation_pair(
         )
 
     ru_pr: str | None = None
-    if ru_content_ref:
+    if authority is not None:
+        ru_pr = read_text_at_commit(repo_path, authority.ru_sha, pair.ru_path)
+    elif ru_content_ref:
         ru_pr = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
-    if ru_pr is None:
+    if ru_pr is None and authority is None:
         ru_pr = read_text(repo_path, pair.ru_path)
-    if ru_pr is None:
+    if ru_pr is None and authority is None:
         ru_pr = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
     if ru_pr is None:
         return NavigationRunResult(
@@ -333,6 +345,7 @@ def merge_navigation_pair(
         ru_path=pair.ru_path,
         en_path=pair.en_path,
         ru_base_ref=ru_base_ref,
+        authority=authority,
     )
 
     if kind == "toc":
@@ -579,6 +592,8 @@ def run_navigation_verifies(
     docs_root: str = "ydb/docs",
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
     skip_globs: list[str] | tuple[str, ...] | None = None,
+    provenance: TranslationArtifactProvenance | None = None,
+    target_ref: str | None = None,
 ) -> list[NavigationRunResult]:
     """Validate navigation YAML pairs for ``doc_verify``.
 
@@ -616,8 +631,12 @@ def run_navigation_verifies(
 
         # Prefer HEAD of the translation branch tip (§6.133): working tree may
         # briefly mirror main / merge-base EN and false-🔴 scope_not_applied.
-        en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
-        if en_text is None:
+        en_text = (
+            read_text_at_commit(repo_path, target_ref, pair.en_path)
+            if provenance is not None and target_ref is not None
+            else read_text_at_ref(repo_path, "HEAD", pair.en_path)
+        )
+        if en_text is None and provenance is None:
             en_text = read_text(repo_path, pair.en_path)
         if en_text is None:
             results.append(
@@ -636,6 +655,7 @@ def run_navigation_verifies(
             merge_base_with,
             ru_path=pair.ru_path,
             en_path=pair.en_path,
+            authority=provenance.authority if provenance is not None else None,
         )
         results.append(
             verify_navigation_pair(
@@ -666,6 +686,7 @@ def run_navigation_merges(
     extra_toc_hrefs: set[str] | None = None,
     ru_content_ref: str | None = None,
     ru_base_ref: str | None = None,
+    authority: RuAuthority | None = None,
     active_doc_ru_paths: frozenset[str] | set[str] | None = None,
 ) -> list[NavigationRunResult]:
     """Merge all navigation YAML pairs with a RU change in the source PR.
@@ -696,6 +717,7 @@ def run_navigation_merges(
                 extra_toc_hrefs=extra_toc_hrefs,
                 ru_content_ref=ru_content_ref,
                 ru_base_ref=ru_base_ref,
+                authority=authority,
                 active_doc_ru_paths=active_doc_ru_paths,
             )
         )

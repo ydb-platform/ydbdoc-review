@@ -6022,4 +6022,153 @@ repository suite. The local implementation is accepted, but production acceptanc
 pending a new workflow run after release.
 
 
+### §6.256 Source-preserving dependency closure and evidence-time ownership (#40385, 2026-09-06)
+
+**Problem:** Sequential include, Markdown-link, fragment-owner, and TOC passes did not
+return newly admitted documents through every discoverer. Late dependencies could therefore
+miss their own owners, links, or navigation parents. A shared counter alone still gave the
+earlier discovery families priority. Separately, the normal label workflow selected the
+configured `current` RU authority, so a locally source-preserving test did not prove that
+production would preserve the historical source PR.
+
+**Decision:** `plan_translation_scope` computes one breadth-level fixed point. Each round
+collects the canonical candidate union from every document in its frontier and every
+eligible dependency family, completes scoped TOC and parent-include closure for cumulative
+accepted live documents, then admits candidates in globally sorted path order. Every newly
+admitted document re-enters include, Markdown-link, exact ASCII fragment-owner, and related
+navigation discovery. Multi-hop redirects resolve to a live canonical identity before
+deduplication; cycles and tombstones cannot cause unbounded traversal. Existing navigation
+eligibility remains scoped, with no ambient repository or unrelated-section expansion.
+
+One `MarkdownDependencyBudget` permits at most twenty synthetic Markdown admissions across
+all families and rounds. Source roots and YAML navigation are free; canonical duplicates
+cost no additional slot. Denied documents are not traversed, and each denied identity warns
+once. Late repair uses the same remaining budget, not a fresh counter or the number of
+written EN files. Independent verify reconstructs late admissions from the immutable
+artifact delta before attempting further repair.
+
+**Frozen redirects and source-owned hrefs:** Exact redirect-key presence takes precedence
+over a supported literal-prefix `/(.*)$` to `/$1` mapping. Exact self/invalid entries do not
+fall through to a prefix rule. Prefix selection uses the unique longest literal match from
+common plus the selected locale, refusing conflicting destinations, unsafe paths and cycles.
+This is a bounded grammar, not a general regex evaluator. Dynamic tombstones test only supplied
+concrete candidate paths; a regex expression never becomes a filename or seeds extra scope.
+
+Proven old source-owned Markdown hrefs are retargeted before unreachable-link stripping in
+producer rendering, standalone `FinalizeEnStep`, and pair postprocessing. Literal `.` and
+`..` are legal only while traversal does not cross the EN-core floor; leave-and-return,
+cross-locale and encoded-path traversal cannot establish a proof. Query and fragment bytes
+remain exact. Code, comments, images, includes, labels, titles and unrelated hrefs are not
+rewritten. Fragment-bearing destinations still require an exact include-aware declaration.
+
+Already-canonical visible target occurrences consume source-owned rewrite capacity. For each
+proven complete canonical href, the target must first cover the source's already-canonical
+baseline. Its excess canonical count reduces both the shared class capacity and every
+possible raw alias's own capacity. This conservative ambiguity rule prevents distinct old
+aliases from borrowing ownership or a second finalize pass from absorbing extra old links.
+Missing baseline occurrences and foreign canonical links cannot manufacture capacity; source
+and target use the same protected-range masks. Raw source/model input remains unchanged.
+
+**Trusted selection and immutable evidence:** The exact case-sensitive repository-managed
+source PR label `doc_translate_source_preserving` selects source-preserving mode immediately
+before authority freezing and before model work. `PullRequestContext` retains exact valid
+label names from the existing fresh REST response. Near matches, title/body text, and branch
+names do not select this mode; absent the selector, configured behavior remains unchanged.
+`doc_translate` remains the sole translation trigger. No external workflow input or global
+configuration-default change is needed.
+
+Keep the existing merged-source authority: landed H is
+`d9fc9f993eb7fbade94da40c7c666178abb93170`, H0 is its first parent
+`581502d6bd98da551b5529d98553f88d599ac94c`, and source-preserving R equals H.
+API PR head H_pr, `99845ebe3ab4ebbfd7521cfd8acec4c905433adb`, is distinct from H.
+All five source-API RU paths have matching blobs at H_pr and H, but H_pr's parent delta
+contains only four paths, so it cannot replace the landed H0..H source scope. Before paid
+CI, a read-only plan at a pinned publication baseline B must additionally prove H_pr/H blob
+equivalence for every selected RU document and navigation file; differences fail closed.
+
+B is frozen once before readers and model work. For this merged source, the root translation
+artifact C has direct parent B. Exactly one `ydbdoc-ru-authority:v1` envelope binds the
+repository, source PR, mode, H/H0/R/B, and C. Fresh and recursive verify retain that artifact
+authority instead of reinterpreting live refs or metadata. In particular, an EN TOC lookup
+that is absent at B remains absent: `_read_en_toc_graph` must not fall through to historical
+EN bytes at R. RU readers use R, while EN baseline readers use B.
+
+Authority-bearing docs readers keep RU text at R and redirect policy at B. EN content comes
+from B during production pair preparation and from verified candidate K during independent
+verify, preserving the existing final-tree/generated-byte overlays. Late fragment repair
+receives R separately from its final EN reader. No miss falls back to checkout, a later ref,
+another locale, or B RU text; candidate redirects cannot replace B's frozen policy.
+
+The final EN link gate independently accepts redirect-equivalent paths only when the rule and
+destination file are proven at B and that exact destination still exists in final K with the
+requested fragment. A B-valid fragment does not cover a removed K anchor. Recursive baseline
+comparison uses the same B policy, so old alias debt cannot grandfather a different final
+missing-target/fragment regression. Comparison-only source href normalization does not replace
+this final gate or bypass the original exact-ASCII fragment check.
+
+**Ordinary versus late owner:** The boundary is when exact ownership can be proven, not
+the carrier's ancestry, dependency family, filename, or admission count. A qualifying link
+on any admitted RU document whose exact owner is already provable from R and B belongs in
+ordinary recursive scope, even if the EN owner exists and only its anchor is missing.
+Do not subtract old hrefs or restrict owner discovery to original source-diff pages.
+Conversely, a required EN include wrapper absent at B but first produced in candidate C
+cannot establish that proof during planning. Its owner remains eligible for the existing
+post-apply declaration path, subject to the same shared budget and artifact-replayed verify.
+
+The A18 late-owner fixtures were corrected to express this genuinely candidate-only wrapper
+boundary, without changing their existing assertions or runtime mock boundaries. Five new
+prerequisite cases prove that ordinary ownership is unavailable before C, and a positive
+real-Git direct-link control proves that ordinary synthetic carriers still admit both their
+dependency and exact owner. No production ancestry exception or late-owner bypass was added.
+
+**Source scope and acceptance:** Draft #52287 is not the replacement acceptance candidate.
+Its green build did not resolve RED QA, and its content imported later RU from #50704,
+merge `0aa50f3ab4688eb53d04888eba9fb3c36968ff14`, into authentication, authorization,
+and auth_config. Recompute the replacement scope from R/B. The later EN paths
+`security/_assets/user-token-lifecycle.md`, `security/_assets/user-token.md`, and
+`security/caching-authentication-results.md` under `ydb/docs/en/core/` are exclusion
+controls, not dependencies to add from the contaminated report. Report later RU separately;
+do not import its translations or inherit the old blocker manifest.
+
+The repeated unpatched real-Git proof at B `c7f267731bdc243b2c274f0d226c656d1695b899`
+returns exactly eight RU documents and eight EN counterparts: the five source roots plus
+`reference/configuration/auth_config.md`, `reference/ydb-cli/_includes/connect.md`, and
+`security/authorization.md` under their locale's `core/`. Navigation is empty; the shared
+twenty-slot ledger contains exactly three admissions, with no denial, uncertainty or warning.
+Frozen H_pr/H blob-equivalence evidence covers every selected RU path. The checked-in snapshot
+fixture comes only from pinned H0/H/H_pr/B objects, with explicit misses and blob hashes;
+unknown reader lookups fail closed instead of silently returning an invented miss.
+
+The historical `/reference/embedded-ui/(.*)$` redirect now resolves to B-live `ydb-ui`.
+Neither obsolete UI documents/navigation nor successor RU pages enter translation scope.
+The five source-owned monitoring, TLS and authorization href occurrences retain wrappers
+and become the live UI paths; repeated retargeting is byte-identical. No asset-copy feature
+or asset-scope expansion was needed: `security/_assets/security-overview.png` already has
+the same RU/EN blob at H and B. Later #50704 paths remain outside scope.
+
+**Local verification:** V004-v013 gates report 35 passing new redirect/retarget/reader/scope
+cases, 95 passing A05 authority/report plus A18 cases, 16 passing A17 cases (11 existing,
+five additional), and 61 passing source-selector/link-dependency/immutable-reader/base-prepare
+cases. A18 retains all 25 original passing cases plus the six new boundary controls.
+Direct standalone-finalize tests cover translate and verify; call-site inspection retains
+the producer reader and proves the separate standalone forwarding. Production-boundary
+mutations of the shared late budget, artifact replay, prefix resolution, pre-strip retarget,
+B redirect authority and final K validation all fail behavioral controls; restoring each
+boundary passes. `git diff --check` is clean.
+
+These are focused local results, not a green repository-wide suite. The harness command
+reports 44 passed and one untouched placeholder-mock failure, identically reproduced in an
+isolated pre-v007 snapshot before finalization. Adjacent validators retain three reproduced
+baseline failures. Full unit collection still hits the unchanged missing
+`_apply_text_transaction` import; the earlier 240-case command retained 184 passed and 56
+baseline publication-lease fake failures. The final thirteen-file Ruff scope has four
+qualified baseline findings and no new findings. The full Ruff comparison reports 470
+current versus 471 pre-v007 findings; no unrelated cleanup, skip or xfail was used.
+
+Deployment and production acceptance remain pending. Completion requires the new clean-scope
+translation PR and green independent `doc_verify` plus docs build on the same final SHA,
+with the immutable source evidence preserved. No local test result or release-tag move
+substitutes for those production checks.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)

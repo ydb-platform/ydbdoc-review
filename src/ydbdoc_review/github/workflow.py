@@ -5,29 +5,38 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import unquote
 
-from ydbdoc_review.config.loader import Config, load_config
+from ydbdoc_review.config.loader import Config, RuAuthorityMode, load_config
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
 from ydbdoc_review.github.git_ops import (
-    ensure_commit,
+    RefMutationReceipt,
+    RefMutationStatus,
+    RemoteRefLease,
+    commit_changes_between,
+    commit_parent_sha,
+    delete_remote_branch_with_lease,
+    ensure_commit,  # noqa: F401 - compatibility seam for workflow tests
+    first_parent_commit_changes,
     git_commit_paths,
     git_head_sha,
     prepare_translation_branch_on_base,
     push_branch,
     read_text,
-    read_text_at_ref,
-    read_text_at_upstream_tip,
+    read_text_at_commit,
+    resolve_commit_ref,
     rollback_pushed_branch,
     write_text,
 )
 from ydbdoc_review.github.pr import (
     build_pairs_from_changes,
+    is_fork_head,
     is_translation_pr_branch,
     is_verify_fixup_branch,
     list_pr_file_changes_api,
@@ -41,20 +50,31 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
-    source_pr_scope_changes,
-    translate_ru_content_ref,
+    translate_ru_content_ref,  # noqa: F401 - A05 mutation-injection seam
     translation_branch_base,
     translation_pr_base,
     verify_fixup_branch,
     verify_fixup_pr_base,
+)
+from ydbdoc_review.github.provenance import (
+    TranslationArtifactProvenance,
+    bind_translation_artifact,
+    freeze_ru_authority,
+    parse_authority_evidence,
+    validate_authority_evidence,
 )
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
-from ydbdoc_review.navigation.redirects import redirect_source_repo_md_paths
+from ydbdoc_review.navigation.dependency_budget import MarkdownDependencyBudget
+from ydbdoc_review.navigation.redirects import (
+    follow_redirect_repo_md_path,
+    redirect_source_repo_md_paths,
+)
 from ydbdoc_review.navigation.scope_planner import (
+    TranslationScopePlan,
     doc_pairs_from_plan,
     make_repo_scope_readers,
     merge_navigation_pair_lists,
@@ -128,6 +148,7 @@ from ydbdoc_review.reporting.builder import (
     result_has_blocking_findings,
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
+from ydbdoc_review.reporting.provenance_drift import build_later_ru_drift_report
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.en_link_targets import (
     _mask_yfm_include_directives,
@@ -164,6 +185,16 @@ _GITHUB_ACTOR_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 _REPORT_MARKER = "ydbdoc-review — отчёт"
 
 
+def _merge_yellow_warnings(
+    result: PRTranslationResult,
+    warnings: tuple[str, ...] | list[str],
+) -> None:
+    """Carry nonblocking warnings across planner/workflow result boundaries."""
+    result.yellow_warnings = list(
+        dict.fromkeys([*result.yellow_warnings, *warnings])
+    )
+
+
 @dataclass(frozen=True)
 class TouchedPaths:
     """Paths written or removed by ``doc_translate`` / ``doc_verify``."""
@@ -193,6 +224,96 @@ class DocJobResult:
     dry_run: bool = False
     # Ops deny, continue refused, or other hard stop (§2 / §11).
     blocked: bool = False
+
+
+@dataclass(frozen=True)
+class _BoundArtifactPR:
+    """An existing artifact PR bound to one immutable remote branch SHA."""
+
+    url: str
+    number: int
+    bound_sha: str
+    provenance: TranslationArtifactProvenance
+
+
+def _snapshot_destination_lease(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    branch: str,
+) -> RemoteRefLease:
+    return RemoteRefLease(
+        branch=branch,
+        expected_sha=gh.get_branch_sha(owner, repo, branch),
+    )
+
+
+def _freeze_candidate_sha(repo_path: str) -> str:
+    candidate = git_head_sha(repo_path)
+    if not candidate:
+        raise RuntimeError("cannot publish branch without a candidate commit SHA")
+    try:
+        resolved = resolve_commit_ref(repo_path, candidate)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"cannot publish invalid candidate commit SHA {candidate!r}"
+        ) from exc
+    if resolved != candidate:
+        raise RuntimeError(
+            f"candidate commit SHA changed while freezing it: {candidate} -> {resolved}"
+        )
+    return candidate
+
+
+def _require_remote_sha(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    branch: str,
+    expected_sha: str | None,
+    *,
+    context: str,
+) -> None:
+    actual = gh.get_branch_sha(owner, repo, branch)
+    if actual != expected_sha:
+        raise RuntimeError(
+            f"{context}: remote branch {branch} changed: "
+            f"expected {expected_sha or '<absent>'}, found {actual or '<absent>'}"
+        )
+
+
+def _raise_with_owned_rollback(
+    original_error: Exception,
+    receipt: RefMutationReceipt | None,
+    previous_sha: str | None,
+    *,
+    repo_path: str,
+    branch: str,
+    push_token: str,
+    upstream_url: str,
+    message: str,
+) -> NoReturn:
+    if receipt is None or receipt.status is not RefMutationStatus.CHANGED:
+        raise original_error
+    requested_sha = receipt.requested_sha
+    if not requested_sha:
+        raise original_error
+    try:
+        rollback_pushed_branch(
+            repo_path,
+            "ydbdoc-review-push",
+            branch,
+            push_token,
+            upstream_url,
+            expected_pushed_sha=requested_sha,
+            previous_sha=previous_sha,
+        )
+    except Exception as rollback_error:
+        raise ExceptionGroup(
+            message,
+            [original_error, rollback_error],
+        ) from None
+    raise original_error
 
 
 def _github_tokens(config: Config) -> tuple[str, str]:
@@ -226,7 +347,7 @@ def _enforce_report_checkout_bytes(
     for pair in result.pair_results:
         if pair.deleted or pair.target_text is None:
             continue
-        committed = read_text_at_ref(repo_path, checkout_ref, pair.plan.target_path)
+        committed = read_text_at_commit(repo_path, checkout_ref, pair.plan.target_path)
         if committed == pair.target_text:
             continue
         mismatches.append(pair.plan.target_path)
@@ -396,7 +517,7 @@ def _materialize_soft_keep_blockers(
         if run.soft_keep_reason is None:
             continue
         target = run.target_text or ""
-        existing = read_text_at_ref(repo_path, baseline_ref, run.plan.target_path)
+        existing = read_text_at_commit(repo_path, baseline_ref, run.plan.target_path)
         if (
             run.plan.action != "translate_to_en"
             or not target.strip()
@@ -494,10 +615,13 @@ def _matching_existing_soft_keep_artifact_pr(
     branch: str,
     base: str,
     result: PRTranslationResult,
-) -> tuple[str, int, bool] | None:
+    expected_remote_sha: str | None,
+    repo_path: str,
+    source_repo: str,
+    source_pr: int,
+) -> _BoundArtifactPR | None:
     """Return an open PR only when its current head carries the same RED evidence."""
-    remote_sha = gh.get_branch_sha(owner, repo, branch)
-    if not remote_sha:
+    if not expected_remote_sha:
         return None
     found = gh.find_open_pull_by_head(
         owner,
@@ -510,13 +634,23 @@ def _matching_existing_soft_keep_artifact_pr(
     url, number = found
     pull = gh.get_pull(owner, repo, number)
     head = pull.get("head") or {}
-    if not isinstance(head, dict) or str(head.get("sha") or "") != remote_sha:
+    if (
+        not isinstance(head, dict)
+        or str(head.get("sha") or "") != expected_remote_sha
+    ):
         return None
     try:
+        provenance = validate_authority_evidence(
+            repo_path,
+            parse_authority_evidence(str(pull.get("body") or "")),
+            expected_repo=source_repo,
+            expected_source_pr=source_pr,
+            current_candidate_sha=expected_remote_sha,
+        )
         published_blockers = parse_final_tree_blocker_manifest(
             str(pull.get("body") or "")
         )
-    except ValueError:
+    except (RuntimeError, ValueError):
         return None
 
     def artifact_key(blocker: FinalTreeBlocker) -> tuple[str, str, str | None]:
@@ -531,7 +665,12 @@ def _matching_existing_soft_keep_artifact_pr(
     actual = {artifact_key(blocker) for blocker in published_blockers}
     if not expected or expected != actual:
         return None
-    return url, number, False
+    return _BoundArtifactPR(
+        url=url,
+        number=number,
+        bound_sha=expected_remote_sha,
+        provenance=provenance,
+    )
 
 
 def _restore_out_of_scope_en_from_base(
@@ -559,7 +698,7 @@ def _restore_out_of_scope_en_from_base(
             continue
         if path in allowed_en_paths:
             continue
-        base_text = read_text_at_ref(repo_path, merge_base_with, path)
+        base_text = read_text_at_commit(repo_path, merge_base_with, path)
         work_text = read_text(repo_path, path)
         if base_text is None:
             continue
@@ -577,34 +716,50 @@ def _restore_out_of_scope_en_from_base(
     return restored
 
 
-def _docs_text_reader(repo_path: str, merge_base_with: str):
-    """Read docs paths from worktree, else upstream tip (§6.142 fragment repair)."""
+def _docs_text_reader(
+    repo_path: str,
+    content_ref: str,
+    *,
+    authority=None,
+    docs_root: str = "ydb/docs",
+):
+    """Read docs paths from the commit captured when this reader is created."""
+    content_sha = resolve_commit_ref(repo_path, content_ref)
+    ru_sha = resolve_commit_ref(repo_path, authority.ru_sha) if authority is not None else None
+    baseline_sha = (
+        resolve_commit_ref(repo_path, authority.baseline_sha)
+        if authority is not None
+        else None
+    )
+    root = docs_root.strip("/")
 
     def _read(path: str) -> str | None:
-        text = read_text(repo_path, path)
-        if text is not None:
-            return text
-        return read_text_at_upstream_tip(repo_path, merge_base_with, path)
+        normalized = path.replace("\\", "/")
+        selected = content_sha
+        if authority is not None:
+            if normalized == f"{root}/redirects.yaml":
+                selected = baseline_sha
+            elif normalized.startswith(f"{root}/ru/"):
+                selected = ru_sha
+        return read_text_at_commit(repo_path, selected, normalized)
 
     return _read
 
 
 def _final_tree_reader(
     repo_path: str,
-    merge_base_with: str,
+    base_ref: str,
     overlay_paths: set[str] | frozenset[str],
     *,
     deleted_paths: set[str] | frozenset[str] = frozenset(),
 ):
     """Read the intended post-translate docs tree (§6.229).
 
-    Translation branches start from upstream tip. Merged ``doc_translate``
-    checkouts are often the historical merge commit, so worktree siblings can
-    be stale or missing tip-only moves (e.g. ``node-authorization.md``). For
-    paths we did **not** write this run, prefer tip; for overlays, prefer the
-    worktree bytes we just applied. Explicit same-job deletions are tombstones
-    and never fall back to tip.
+    Explicit same-job deletions are tombstones. Declared overlays must exist on
+    disk and supply their exact bytes. Every other path comes only from the
+    immutable base captured when this reader is created.
     """
+    base_sha = resolve_commit_ref(repo_path, base_ref)
     overlays = {p.replace("\\", "/") for p in overlay_paths}
     tombstones = {p.replace("\\", "/") for p in deleted_paths}
 
@@ -613,13 +768,16 @@ def _final_tree_reader(
         if norm in tombstones:
             return None
         if norm in overlays:
-            text = read_text(repo_path, norm)
-            if text is not None:
-                return text
-        tip = read_text_at_ref(repo_path, merge_base_with, norm)
-        if tip is not None:
-            return tip
-        return read_text(repo_path, norm)
+            overlay = Path(repo_path) / norm.replace("/", os.sep)
+            if not overlay.is_file():
+                raise RuntimeError(f"declared overlay is missing from disk: {norm}")
+            try:
+                return overlay.read_bytes().decode("utf-8")
+            except OSError as exc:
+                raise RuntimeError(f"could not read declared overlay: {norm}") from exc
+            except UnicodeDecodeError as exc:
+                raise RuntimeError(f"declared overlay is not valid UTF-8: {norm}") from exc
+        return read_text_at_commit(repo_path, base_sha, norm)
 
     return _read
 
@@ -677,6 +835,7 @@ def _proven_outbound_fragment_occurrences(
     *,
     read_docs,
     baseline_text: str | None,
+    baseline_read_text=None,
 ) -> list[_OutboundFragmentOccurrence]:
     """Find outbound findings covered by the final visible-Markdown gate."""
     canonical_remaining = check_outbound_fragments(
@@ -690,6 +849,7 @@ def _proven_outbound_fragment_occurrences(
         text,
         read_text=read_docs,
         baseline_text=baseline_text,
+        baseline_read_text=baseline_read_text,
     )
     if not canonical_remaining or not final_gate_remaining:
         return []
@@ -759,12 +919,15 @@ def _defer_proven_outbound_fragments(
         ):
             continue
         page_path = run.plan.target_path.replace("\\", "/")
-        baseline_text = read_text_at_ref(repo_path, baseline_ref, page_path)
+        baseline_text = read_text_at_commit(repo_path, baseline_ref, page_path)
         proven = _proven_outbound_fragment_occurrences(
             page_path,
             run.target_text,
             read_docs=read_docs,
             baseline_text=baseline_text,
+            baseline_read_text=lambda path: read_text_at_commit(
+                repo_path, baseline_ref, path
+            ),
         )
         available = list(file_result.heuristic_blocking)
         selected: list[_OutboundFragmentOccurrence] = []
@@ -811,6 +974,7 @@ def _recheck_deferred_outbound_fragments(
     deferred: list[_DeferredOutboundFragments],
     *,
     read_final_docs,
+    baseline_read_text=None,
 ) -> None:
     """Replace provisional findings only with exact final-tree evidence."""
     for bundle in deferred:
@@ -844,6 +1008,7 @@ def _recheck_deferred_outbound_fragments(
             final_text,
             read_docs=read_final_docs,
             baseline_text=bundle.baseline_text,
+            baseline_read_text=baseline_read_text,
         )
         for original in bundle.occurrences:
             current_message: str | None = None
@@ -891,6 +1056,8 @@ def _repair_en_fragments_after_apply(
     *,
     dry_run: bool,
     merge_base_with: str | None = None,
+    ru_content_ref: str | None = None,
+    docs_root: str = "ydb/docs",
 ) -> list[str]:
     """Re-run fragment repair once all EN targets exist on disk (§6.225).
 
@@ -907,11 +1074,24 @@ def _repair_en_fragments_after_apply(
 
     overlay = {p.replace("\\", "/") for p in paths}
     if merge_base_with:
-        _read = _final_tree_reader(repo_path, merge_base_with, overlay)
+        read_final = _final_tree_reader(repo_path, merge_base_with, overlay)
     else:
 
-        def _read(path: str) -> str | None:
+        def read_final(path: str) -> str | None:
             return read_text(repo_path, path)
+
+    ru_sha = (
+        resolve_commit_ref(repo_path, ru_content_ref)
+        if ru_content_ref is not None
+        else None
+    )
+    root = docs_root.strip("/")
+
+    def _read(path: str) -> str | None:
+        normalized = path.replace("\\", "/")
+        if ru_sha is not None and normalized.startswith(f"{root}/ru/"):
+            return read_text_at_commit(repo_path, ru_sha, normalized)
+        return read_final(normalized)
 
     repaired: list[str] = []
     for rel in paths:
@@ -928,7 +1108,7 @@ def _repair_en_fragments_after_apply(
             read_text=_read,
             ru_source=_read(ru_twin),
             en_baseline=(
-                read_text_at_ref(repo_path, merge_base_with, rel)
+                read_text_at_commit(repo_path, merge_base_with, rel)
                 if merge_base_with
                 else None
             ),
@@ -973,7 +1153,7 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
     )
 
     def source_reader(path: str) -> str | None:
-        return read_text_at_ref(repo_path, ru_content_ref, path)
+        return read_text_at_commit(repo_path, ru_content_ref, path)
 
     issues_by_path: dict[str, tuple] = {}
     for run in result.pair_results:
@@ -992,7 +1172,7 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
             continue
         # E0 is strictly the tip EN snapshot. A historical checkout body is
         # not lineage evidence when this path is absent from ``merge_base``.
-        tip_en = read_text_at_ref(repo_path, merge_base_with, en_path)
+        tip_en = read_text_at_commit(repo_path, merge_base_with, en_path)
         if tip_en is None:
             continue
         fixed = reconcile_final_en_same_fragment_paths(
@@ -1014,15 +1194,32 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
     return reconciled
 
 
-def _declare_exact_ascii_fragment_targets_after_apply(
-    repo_path: str,
-    paths: list[str],
+@dataclass(frozen=True)
+class _ExactFragmentDeclarationProposal:
+    ru_owner_path: str
+    en_owner_path: str
+    before_en_text: str
+    after_en_text: str
+    fragments: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _AmbiguousExactFragmentOwner:
+    ru_owner_path: str
+    en_owner_path: str
+    reason: str
+
+
+def _discover_exact_ascii_fragment_declaration_proposals(
+    paths: Iterable[str],
     *,
-    dry_run: bool,
-    merge_base_with: str | None = None,
-    ru_content_ref: str | None = None,
-) -> list[str]:
-    """Declare new exact ASCII targets on unique aligned direct owners."""
+    read_page: Callable[[str], str | None],
+    read_candidate: Callable[[str], str | None],
+    docs_root: str = "ydb/docs",
+    redirects_yaml: str | None = None,
+    ambiguous_out: list[_AmbiguousExactFragmentOwner] | None = None,
+) -> tuple[_ExactFragmentDeclarationProposal, ...]:
+    """Prove exact declaration repairs without performing writes."""
     from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
     from ydbdoc_review.validation.fragment_repair import (
         _page_declares_fragment,
@@ -1030,30 +1227,63 @@ def _declare_exact_ascii_fragment_targets_after_apply(
         add_explicit_ascii_fragment_anchor,
         declare_explicit_fragment_on_include_owner,
     )
+    from ydbdoc_review.validation.href_parity import _iter_visible_md_link_matches
 
-    overlay = {p.replace("\\", "/") for p in paths}
-    if merge_base_with:
-        read_en_candidate = _final_tree_reader(repo_path, merge_base_with, overlay)
+    proposed_text: dict[str, str] = {}
+    before_text: dict[str, str] = {}
+    ru_owner_by_en: dict[str, str] = {}
+    fragments_by_en: dict[str, list[str]] = {}
 
-        def read_candidate(path: str) -> str | None:
-            normalized = path.replace("\\", "/")
-            if ru_content_ref and "/docs/ru/" in normalized:
-                return read_text_at_ref(repo_path, ru_content_ref, normalized)
-            return read_en_candidate(normalized)
-    else:
+    def read_with_proposals(path: str) -> str | None:
+        normalized = path.replace("\\", "/")
+        if normalized in proposed_text:
+            return proposed_text[normalized]
+        return read_candidate(normalized)
 
-        def read_candidate(path: str) -> str | None:
-            return read_text(repo_path, path)
-    href_re = re.compile(r"!?(?:\[[^\]]*\])\(([^)]+)\)")
-    declared: list[str] = []
-    for page in paths:
+    def canonical_ru(path: str) -> str:
+        return follow_redirect_repo_md_path(
+            path.replace("\\", "/"),
+            redirects_yaml or "",
+            docs_root=docs_root,
+        )
+
+    def ru_carrier_has_same_edge(
+        en_page: str,
+        en_target: str,
+        fragment: str,
+    ) -> bool:
+        ru_page = counterpart(en_page, docs_root)
+        expected_ru_target = counterpart(en_target, docs_root)
+        if ru_page is None or expected_ru_target is None:
+            return False
+        ru_page_text = read_candidate(ru_page)
+        if not ru_page_text:
+            return False
+        expected_ru_target = canonical_ru(expected_ru_target)
+        for ru_match in _iter_visible_md_link_matches(ru_page_text):
+            ru_href = ru_match.group(2).strip().split(maxsplit=1)[0]
+            if "#" not in ru_href:
+                continue
+            ru_href_path, ru_fragment = ru_href.rsplit("#", 1)
+            if (
+                not ru_href_path.endswith(".md")
+                or not ru_fragment
+                or unquote(ru_fragment) != unquote(fragment)
+            ):
+                continue
+            ru_target = _resolve_href_path(ru_page, ru_href_path)
+            if ru_target is not None and canonical_ru(ru_target) == expected_ru_target:
+                return True
+        return False
+
+    for page in dict.fromkeys(path.replace("\\", "/") for path in paths):
         if not page.endswith(".md") or "/docs/en/" not in page.replace("\\", "/"):
             continue
-        page_text = read_text(repo_path, page)
+        page_text = read_page(page)
         if not page_text:
             continue
-        for match in href_re.finditer(page_text):
-            href = match.group(1).strip().split(maxsplit=1)[0]
+        for match in _iter_visible_md_link_matches(page_text):
+            href = match.group(2).strip().split(maxsplit=1)[0]
             if "#" not in href:
                 continue
             href_path, frag = href.rsplit("#", 1)
@@ -1062,8 +1292,19 @@ def _declare_exact_ascii_fragment_targets_after_apply(
             en_wrapper = _resolve_href_path(page, href_path)
             if en_wrapper is None:
                 continue
-            ru_wrapper = en_wrapper.replace("/docs/en/", "/docs/ru/", 1)
-            en_text, ru_text = read_candidate(en_wrapper), read_candidate(ru_wrapper)
+            ru_wrapper = counterpart(en_wrapper, docs_root)
+            if ru_wrapper is None:
+                continue
+            ru_wrapper = canonical_ru(ru_wrapper)
+            canonical_en_wrapper = counterpart(ru_wrapper, docs_root)
+            if canonical_en_wrapper is None:
+                continue
+            en_wrapper = canonical_en_wrapper
+            if not ru_carrier_has_same_edge(page, en_wrapper, frag):
+                continue
+            en_text, ru_text = read_with_proposals(en_wrapper), read_with_proposals(
+                ru_wrapper
+            )
             if en_text is None or ru_text is None:
                 continue
             if _page_declares_fragment(en_text, frag):
@@ -1076,35 +1317,262 @@ def _declare_exact_ascii_fragment_targets_after_apply(
             for index, ru_inc in enumerate(ru_includes):
                 if index >= len(en_includes):
                     continue
-                ru_owner = resolve_locale_md_path(ru_wrapper, ru_inc.path)
-                en_owner = resolve_locale_md_path(en_wrapper, en_includes[index].path)
-                ru_owner_text = read_candidate(ru_owner) if ru_owner else None
-                en_owner_text = read_candidate(en_owner) if en_owner else None
+                ru_owner = resolve_locale_md_path(
+                    ru_wrapper, ru_inc.path, docs_root=docs_root
+                )
+                en_owner = resolve_locale_md_path(
+                    en_wrapper, en_includes[index].path, docs_root=docs_root
+                )
+                if ru_owner:
+                    ru_owner = canonical_ru(ru_owner)
+                if en_owner:
+                    canonical_owner_ru = counterpart(en_owner, docs_root)
+                    if canonical_owner_ru:
+                        en_owner = counterpart(
+                            canonical_ru(canonical_owner_ru), docs_root
+                        )
+                ru_owner_text = read_with_proposals(ru_owner) if ru_owner else None
+                en_owner_text = read_with_proposals(en_owner) if en_owner else None
                 if (
                     ru_owner
                     and en_owner
                     and ru_owner_text
                     and en_owner_text is not None
-                    and en_owner == ru_owner.replace("/docs/ru/", "/docs/en/", 1)
+                    and counterpart(ru_owner, docs_root) == en_owner
                     and _page_declares_fragment(ru_owner_text, frag)
                     and not collect_yfm_includes(ru_owner_text)
                 ):
                     owners.append((en_owner, en_owner_text, ru_owner, ru_owner_text))
             if len(owners) != 1:
+                if ambiguous_out is not None:
+                    for en_owner, _en_text, ru_owner, _ru_text in dict.fromkeys(
+                        (owner[0], owner[1], owner[2], owner[3]) for owner in owners
+                    ):
+                        ambiguous_out.append(
+                            _AmbiguousExactFragmentOwner(
+                                ru_owner_path=ru_owner,
+                                en_owner_path=en_owner,
+                                reason=(
+                                    "exact fragment owner is not uniquely aligned "
+                                    f"for {page}#{frag}"
+                                ),
+                            )
+                        )
                 continue
-            en_owner, en_owner_text, _, ru_owner_text = owners[0]
+            en_owner, en_owner_text, ru_owner, ru_owner_text = owners[0]
             fixed = add_explicit_ascii_fragment_anchor(en_owner_text, ru_owner_text, frag)
             if fixed is None and "/_includes/" in en_owner.replace("\\", "/"):
                 fixed = declare_explicit_fragment_on_include_owner(
                     en_owner_text, ru_owner_text, frag
                 )
             if fixed is None or fixed == en_owner_text:
+                if fixed is None and ambiguous_out is not None:
+                    ambiguous_out.append(
+                        _AmbiguousExactFragmentOwner(
+                            ru_owner_path=ru_owner,
+                            en_owner_path=en_owner,
+                            reason=f"exact declaration repair is ambiguous for {page}#{frag}",
+                        )
+                    )
                 continue
-            if en_owner not in declared:
-                declared.append(en_owner)
-            if not dry_run:
-                write_text(repo_path, en_owner, fixed)
+            before_text.setdefault(en_owner, en_owner_text)
+            proposed_text[en_owner] = fixed
+            ru_owner_by_en[en_owner] = ru_owner
+            fragments_by_en.setdefault(en_owner, []).append(frag)
+
+    return tuple(
+        _ExactFragmentDeclarationProposal(
+            ru_owner_path=ru_owner_by_en[en_owner],
+            en_owner_path=en_owner,
+            before_en_text=before_text[en_owner],
+            after_en_text=proposed_text[en_owner],
+            fragments=tuple(dict.fromkeys(fragments_by_en[en_owner])),
+        )
+        for en_owner in proposed_text
+    )
+
+
+def _declare_exact_ascii_fragment_targets_after_apply(
+    repo_path: str,
+    paths: list[str],
+    *,
+    dry_run: bool,
+    merge_base_with: str | None = None,
+    ru_content_ref: str | None = None,
+    budget: MarkdownDependencyBudget | None = None,
+    docs_root: str = "ydb/docs",
+) -> list[str]:
+    """Admit and apply proven declarations on unique aligned RU owners."""
+    overlay = {p.replace("\\", "/") for p in paths}
+    if merge_base_with:
+        read_en_candidate = _final_tree_reader(repo_path, merge_base_with, overlay)
+
+        def read_candidate(path: str) -> str | None:
+            normalized = path.replace("\\", "/")
+            if ru_content_ref and "/docs/ru/" in normalized:
+                return read_text_at_commit(repo_path, ru_content_ref, normalized)
+            return read_en_candidate(normalized)
+    else:
+
+        def read_candidate(path: str) -> str | None:
+            return read_text(repo_path, path)
+
+    proposals = _discover_exact_ascii_fragment_declaration_proposals(
+        paths,
+        read_page=lambda path: read_text(repo_path, path),
+        read_candidate=read_candidate,
+        docs_root=docs_root,
+        redirects_yaml=read_candidate(f"{docs_root.strip('/')}/redirects.yaml"),
+    )
+    admission = budget or MarkdownDependencyBudget()
+    declared: list[str] = []
+    for proposal in proposals:
+        if not admission.admit(
+            proposal.ru_owner_path,
+            warning_path=proposal.en_owner_path,
+        ):
+            continue
+        declared.append(proposal.en_owner_path)
+        if not dry_run:
+            write_text(repo_path, proposal.en_owner_path, proposal.after_en_text)
     return declared
+
+
+def _reconstruct_late_dependency_budget_for_verify(
+    repo_path: str,
+    scope_plan: TranslationScopePlan,
+    provenance: TranslationArtifactProvenance,
+    *,
+    verified_commit_sha: str,
+    docs_root: str,
+) -> frozenset[str]:
+    """Recover producer-late admissions from immutable A05 artifact evidence.
+
+    Planning has already reconstructed the ordinary budget from H0/R against B.
+    P is used only for the exact root-artifact P->C delta.  The current verified
+    commit K is consulted only when discovering still-unresolved proposals.
+    """
+    artifact_sha = provenance.candidate_sha
+    prepared_parent_sha = commit_parent_sha(repo_path, artifact_sha)
+    ru_sha = provenance.authority.ru_sha
+    artifact_changes = first_parent_commit_changes(repo_path, artifact_sha)
+    artifact_changed_en = {
+        path.replace("\\", "/")
+        for path, kind in artifact_changes
+        if kind != "deleted"
+        and path.replace("\\", "/").startswith(f"{docs_root.strip('/')}/en/")
+        and path.endswith(".md")
+    }
+    authorized_en_pages = tuple(
+        sorted(
+            en_path
+            for ru_path in scope_plan.doc_ru_paths
+            if ru_path not in scope_plan.doc_deleted
+            and (en_path := counterpart(ru_path, docs_root)) is not None
+            and en_path.endswith(".md")
+        )
+    )
+    planned_overlay_paths = frozenset(authorized_en_pages)
+
+    def read_prepared_candidate(path: str) -> str | None:
+        normalized = path.replace("\\", "/")
+        if normalized.startswith(f"{docs_root.strip('/')}/ru/"):
+            return read_text_at_commit(repo_path, ru_sha, normalized)
+        if normalized in planned_overlay_paths:
+            return read_text_at_commit(repo_path, artifact_sha, normalized)
+        return read_text_at_commit(repo_path, prepared_parent_sha, normalized)
+
+    ambiguous: list[_AmbiguousExactFragmentOwner] = []
+    artifact_proposals = _discover_exact_ascii_fragment_declaration_proposals(
+        authorized_en_pages,
+        read_page=lambda path: read_text_at_commit(repo_path, artifact_sha, path),
+        read_candidate=read_prepared_candidate,
+        docs_root=docs_root,
+        redirects_yaml=(
+            read_text_at_commit(
+                repo_path,
+                artifact_sha,
+                f"{docs_root.strip('/')}/redirects.yaml",
+            )
+            or read_text_at_commit(
+                repo_path,
+                prepared_parent_sha,
+                f"{docs_root.strip('/')}/redirects.yaml",
+            )
+        ),
+        ambiguous_out=ambiguous,
+    )
+    budget = scope_plan.dependency_budget
+    proven_owner_paths: set[str] = set()
+    recovered_en_paths: set[str] = set()
+    for proposal in artifact_proposals:
+        if proposal.en_owner_path not in artifact_changed_en:
+            continue
+        artifact_owner_text = read_text_at_commit(
+            repo_path, artifact_sha, proposal.en_owner_path
+        )
+        if artifact_owner_text != proposal.after_en_text:
+            budget.mark_uncertain(
+                proposal.ru_owner_path,
+                reason="root artifact owner bytes do not equal the exact expected repair",
+            )
+            recovered_en_paths.add(proposal.en_owner_path)
+            continue
+        if budget.replay_proven(proposal.ru_owner_path):
+            proven_owner_paths.add(proposal.ru_owner_path)
+            recovered_en_paths.add(proposal.en_owner_path)
+        else:
+            budget.mark_uncertain(
+                proposal.ru_owner_path,
+                reason="root artifact proves a late repair but its admission is ambiguous",
+            )
+            recovered_en_paths.add(proposal.en_owner_path)
+
+    for candidate in sorted(
+        ambiguous,
+        key=lambda value: (value.ru_owner_path, value.en_owner_path, value.reason),
+    ):
+        if (
+            candidate.en_owner_path not in artifact_changed_en
+            or candidate.ru_owner_path in proven_owner_paths
+        ):
+            continue
+        parent_text = read_text_at_commit(
+            repo_path, prepared_parent_sha, candidate.en_owner_path
+        )
+        artifact_text = read_text_at_commit(
+            repo_path, artifact_sha, candidate.en_owner_path
+        )
+        if parent_text == artifact_text:
+            continue
+        budget.mark_uncertain(candidate.ru_owner_path, reason=candidate.reason)
+        recovered_en_paths.add(candidate.en_owner_path)
+
+    def read_verified_candidate(path: str) -> str | None:
+        normalized = path.replace("\\", "/")
+        if normalized.startswith(f"{docs_root.strip('/')}/ru/"):
+            return read_text_at_commit(repo_path, ru_sha, normalized)
+        return read_text_at_commit(repo_path, verified_commit_sha, normalized)
+
+    remaining = _discover_exact_ascii_fragment_declaration_proposals(
+        authorized_en_pages,
+        read_page=lambda path: read_text_at_commit(
+            repo_path, verified_commit_sha, path
+        ),
+        read_candidate=read_verified_candidate,
+        docs_root=docs_root,
+        redirects_yaml=read_text_at_commit(
+            repo_path,
+            verified_commit_sha,
+            f"{docs_root.strip('/')}/redirects.yaml",
+        ),
+    )
+    for proposal in remaining:
+        budget.admit(
+            proposal.ru_owner_path,
+            warning_path=proposal.en_owner_path,
+        )
+    return frozenset(recovered_en_paths)
 
 
 def _run_verify_pairs(
@@ -1243,22 +1711,7 @@ def _collect_fixed_shas(
         shas["head"] = head_sha
     if ru_ref:
         shas["ru_ref"] = ru_ref
-    resolved_mb = merge_base_with
-    try:
-        import subprocess
-
-        proc = subprocess.run(
-            ["git", "rev-parse", merge_base_with],
-            cwd=repo_path,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            resolved_mb = proc.stdout.strip()
-    except OSError:
-        pass
-    shas["merge_base"] = resolved_mb
+    shas["merge_base"] = resolve_commit_ref(repo_path, merge_base_with)
     return shas
 
 
@@ -1299,6 +1752,9 @@ def run_doc_translate(
             dry_run=dry_run,
         )
 
+    merge_base_with = resolve_commit_ref(repo_path, merge_base_with)
+    source_checkout_sha = resolve_commit_ref(repo_path, "HEAD")
+
     effective_continue_feedback = continue_feedback or (
         ops_ctx.continue_feedback if ops_ctx else None
     )
@@ -1309,37 +1765,35 @@ def run_doc_translate(
         )
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
+    effective_authority_mode = (
+        RuAuthorityMode.SOURCE_PRESERVING
+        if "doc_translate_source_preserving" in ctx.labels
+        else cfg.translation.ru_authority_mode
+    )
+    authority_selection = freeze_ru_authority(
+        repo_path,
+        source_repo=github_repo,
+        source_pr=pr_number,
+        source_head_sha=ctx.head_sha,
+        source_base_sha=ctx.base_sha,
+        merge_commit_sha=ctx.merge_commit_sha,
+        merged=ctx.merged,
+        fork=is_fork_head(ctx),
+        baseline_sha=merge_base_with,
+        checkout_sha=source_checkout_sha,
+        mode=effective_authority_mode,
+    )
+    authority = authority_selection.authority
     branch = f"{cfg.paths.translation_branch_prefix}{pr_number}"
+    destination_lease = _snapshot_destination_lease(gh, owner, repo, branch)
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
+    translation_prepare_parent_sha = authority_selection.prepare_parent_sha
+    ru_ref = authority.ru_sha
+    ru_base_ref = authority.ru_base_sha
 
-    ru_ref = translate_ru_content_ref(ctx)
-    ru_base_ref: str | None = None
-    if ru_ref is not None:
-        if ensure_commit(repo_path, ru_ref):
-            logger.info(
-                "Merged source PR #%s: reading RU from merge commit %s",
-                pr_number,
-                ru_ref[:12],
-            )
-            # A merged PR's original RU delta is merge_commit^..merge_commit.
-            # Comparing it with current main makes old source changes look like
-            # no-ops and silently preserves stale EN (§6.210 / #40385).
-            ru_base_ref = f"{ru_ref}^"
-        else:
-            logger.warning(
-                "Merged source PR #%s: merge commit %s not fetchable; "
-                "falling back to checkout HEAD for RU",
-                pr_number,
-                ru_ref[:12],
-            )
-            ru_ref = None
-
-    changes = source_pr_scope_changes(
-        ctx,
-        list_pr_file_changes_git(repo_path, merge_base_with),
-        list_pr_file_changes_api(gh, owner, repo, pr_number),
-    )
+    changes = list_pr_file_changes_api(gh, owner, repo, pr_number)
+    source_api_paths = frozenset(path for path, _kind in changes)
     changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
     docs_root = cfg.paths.docs_root
     read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
@@ -1347,6 +1801,7 @@ def run_doc_translate(
         merge_base_with,
         ru_content_ref=ru_ref,
         ru_base_ref=ru_base_ref,
+        authority=authority,
     )
     scope_plan = plan_translation_scope(
         changes,
@@ -1357,9 +1812,8 @@ def run_doc_translate(
     )
     skip_globs = cfg.paths.translate_skip_globs
     if skip_globs:
-        from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
-
-        scope_plan = TranslationScopePlan(
+        scope_plan = replace(
+            scope_plan,
             doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
             doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
             doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
@@ -1409,6 +1863,7 @@ def run_doc_translate(
         # ``skip_en_paths`` before analyze — still post «перевод не требуется»
         # (§6.76 / #48751). Without this early path the comment never appeared.
         pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
+        _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
         job.pr_result = pr_result
         if pr_result.pair_results and not dry_run:
             elapsed = time.monotonic() - started
@@ -1447,10 +1902,8 @@ def run_doc_translate(
             # Prefer upstream main for EN toc/pages so strip_unreachable does not
             # use a stale source-PR checkout (#47108 bare ``{#T}`` after strip).
             if path.replace("\\", "/").startswith(f"{docs_root}/en/"):
-                text = read_text_at_ref(repo_path, merge_base_with, path)
-                if text is not None:
-                    return text
-            return read_text(repo_path, path)
+                return read_text_at_commit(repo_path, merge_base_with, path)
+            return read_ru(path)
 
         en_toc_reachable = build_en_toc_reachable_from_repo(
             repo_path,
@@ -1471,12 +1924,14 @@ def run_doc_translate(
         # checkout an old SHA where the page still lived; tip may already have
         # ``from`` → ``to`` while merge-era redirects.yaml does not (§6.242).
         redirects_yaml = (
-            read_text_at_ref(repo_path, merge_base_with, f"{docs_root}/redirects.yaml")
-            or read_text(repo_path, f"{docs_root}/redirects.yaml")
+            read_text_at_commit(repo_path, merge_base_with, f"{docs_root}/redirects.yaml")
             or ""
         )
         redirect_source_en = redirect_source_repo_md_paths(
-            redirects_yaml, locale="en", docs_root=docs_root
+            redirects_yaml,
+            locale="en",
+            docs_root=docs_root,
+            candidate_repo_paths={pair.en_path for pair in pairs},
         )
 
         if pairs:
@@ -1486,6 +1941,7 @@ def run_doc_translate(
                 merge_base_with=merge_base_with,
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
+                authority=authority,
             )
             # Always run real translation for doc_translate, including merged
             # source PRs. Routing merged PRs through critic-only verify planning
@@ -1501,11 +1957,18 @@ def run_doc_translate(
                 config=cfg,
                 en_toc_reachable=en_toc_reachable,
                 redirect_source_en_paths=redirect_source_en,
-                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_text_reader=_docs_text_reader(
+                    repo_path,
+                    merge_base_with,
+                    authority=authority,
+                    docs_root=docs_root,
+                ),
                 docs_repo_path=repo_path,
             )
         else:
             pr_result = PRTranslationResult()
+
+        _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
 
         if nav_pairs:
             pr_result.navigation_results = run_navigation_merges(
@@ -1518,6 +1981,7 @@ def run_doc_translate(
                 scope_plan=scope_plan,
                 ru_content_ref=ru_ref,
                 ru_base_ref=ru_base_ref,
+                authority=authority,
                 active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
 
@@ -1575,13 +2039,11 @@ def run_doc_translate(
         redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
         if any(path == redirects_path for path, _kind in changes):
             redirects_current = (
-                read_text_at_ref(repo_path, ru_ref, redirects_path)
-                if ru_ref
-                else read_text(repo_path, redirects_path)
+                read_text_at_commit(repo_path, ru_ref, redirects_path)
+                if ru_ref is not None
+                else read_ru(redirects_path)
             ) or ""
-            redirects_base = (
-                read_text_at_ref(repo_path, ru_base_ref or merge_base_with, redirects_path) or ""
-            )
+            redirects_base = read_ru_base(redirects_path) or ""
             redirect_mappings = added_redirects(redirects_base, redirects_current)
             # Never retarget/write EN at redirects.yaml ``from`` paths — those are
             # tombstones. Source-branch leftovers + inbound retarget otherwise
@@ -1597,8 +2059,7 @@ def run_doc_translate(
             # write the historical source-merge copy of this global file:
             # doing so reverted unrelated redirects in #50901.
             redirects_worktree = (
-                read_text_at_ref(repo_path, merge_base_with, redirects_path)
-                or read_text(repo_path, redirects_path)
+                read_text_at_commit(repo_path, merge_base_with, redirects_path)
                 or redirects_current
             )
             mirrored_redirects = mirror_redirects_to_en(redirects_worktree, redirect_mappings)
@@ -1611,13 +2072,19 @@ def run_doc_translate(
                 touched.deleted,
             )
 
+        late_budget = MarkdownDependencyBudget.from_state(
+            scope_plan.dependency_budget.snapshot()
+        )
         exact_declarations = _declare_exact_ascii_fragment_targets_after_apply(
             repo_path,
             touched.written,
             dry_run=dry_run,
             merge_base_with=merge_base_with,
             ru_content_ref=ru_ref,
+            budget=late_budget,
+            docs_root=docs_root,
         )
+        _merge_yellow_warnings(pr_result, late_budget.warnings)
         if exact_declarations:
             touched = TouchedPaths(
                 list(dict.fromkeys([*touched.written, *exact_declarations])),
@@ -1631,6 +2098,8 @@ def run_doc_translate(
             touched.written,
             dry_run=dry_run,
             merge_base_with=merge_base_with,
+            ru_content_ref=ru_ref,
+            docs_root=docs_root,
         )
         if late_repair:
             logger.info(
@@ -1680,14 +2149,14 @@ def run_doc_translate(
         final_tree_read = _final_tree_reader(
             repo_path,
             merge_base_with,
-            en_written,
+            en_written if not dry_run else set(),
             deleted_paths=en_deleted,
         )
         broken_links = apply_en_link_target_checks(
             pr_result,
             repo_path=repo_path,
             en_md_paths=en_written,
-            baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
+            baseline_read=lambda p: read_text_at_commit(repo_path, merge_base_with, p),
             docs_read=final_tree_read,
         )
         if broken_links:
@@ -1711,6 +2180,9 @@ def run_doc_translate(
             pr_result,
             deferred_outbound,
             read_final_docs=final_tree_read,
+            baseline_read_text=lambda path: read_text_at_commit(
+                repo_path, merge_base_with, path
+            ),
         )
         refresh_publication_impact(pr_result)
         if _publication_withheld(pr_result):
@@ -1724,9 +2196,9 @@ def run_doc_translate(
 
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None
-    prepush_remote_sha: str | None = None
     pushed_candidate_sha: str | None = None
-    reused_existing_artifact_pr: tuple[str, int, bool] | None = None
+    push_receipt: RefMutationReceipt | None = None
+    reused_existing_artifact_pr: _BoundArtifactPR | None = None
     committed = pushed = False
     if touched and not dry_run and not no_commit:
         prepare_translation_branch_on_base(
@@ -1736,6 +2208,7 @@ def run_doc_translate(
             base_remote_name="ydbdoc-review-upstream",
             base_branch=branch_start_ref,
             paths=touched.written,
+            base_commit_sha=translation_prepare_parent_sha,
             deleted_paths=touched.deleted,
         )
         msg = build_commit_message(pr_number, pr_result, config=cfg)
@@ -1748,9 +2221,9 @@ def run_doc_translate(
             deleted_paths=touched.deleted,
         )
         if committed:
+            pushed_candidate_sha = _freeze_candidate_sha(repo_path)
             # Every forced publication is an exact compare-and-swap. A normal
             # rerun must not overwrite a manual or concurrent branch update.
-            prepush_remote_sha = gh.get_branch_sha(owner, repo, branch)
             if pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
                 # Keep discovery adjacent to the remote mutation. Any known ready
                 # PR must become draft before its head is force-pushed.
@@ -1768,7 +2241,7 @@ def run_doc_translate(
                         existing_pr_number,
                         False,
                     )
-                elif prepush_remote_sha is not None:
+                elif destination_lease.expected_sha is not None:
                     prepush_opened_pr = gh.create_pull(
                         owner,
                         repo,
@@ -1792,9 +2265,6 @@ def run_doc_translate(
                         _, existing_pr_number, created = prepush_opened_pr
                         if not created:
                             gh.convert_pull_to_draft(owner, repo, existing_pr_number)
-            pushed_candidate_sha = git_head_sha(repo_path)
-            if not pushed_candidate_sha:
-                raise RuntimeError("cannot publish translation branch without a HEAD SHA")
             logger.info(
                 "Pushing translation branch %s to %s/%s (from upstream %s, source PR head: %s)",
                 branch,
@@ -1803,7 +2273,7 @@ def run_doc_translate(
                 branch_start_ref,
                 ctx.head_repo_full_name,
             )
-            push_branch(
+            push_receipt = push_branch(
                 repo_path,
                 "ydbdoc-review-push",
                 branch,
@@ -1811,10 +2281,19 @@ def run_doc_translate(
                 upstream_url,
                 force=True,
                 guard_remote_ref=True,
-                expected_remote_sha=prepush_remote_sha,
+                expected_remote_sha=destination_lease.expected_sha,
+                source_sha=pushed_candidate_sha,
             )
             pushed = True
         elif pr_result.has_soft_keep:
+            _require_remote_sha(
+                gh,
+                owner,
+                repo,
+                branch,
+                destination_lease.expected_sha,
+                context="before soft-keep artifact reuse",
+            )
             reused_existing_artifact_pr = _matching_existing_soft_keep_artifact_pr(
                 gh,
                 owner,
@@ -1822,6 +2301,10 @@ def run_doc_translate(
                 branch=branch,
                 base=translation_pr_base(ctx),
                 result=pr_result,
+                expected_remote_sha=destination_lease.expected_sha,
+                repo_path=repo_path,
+                source_repo=github_repo,
+                source_pr=pr_number,
             )
             if reused_existing_artifact_pr is None:
                 pr_result.publication_failure = "no_publishable_artifact"
@@ -1836,74 +2319,130 @@ def run_doc_translate(
     tr_pr_number: int | None = None
     tr_pr_url: str | None = None
     verify_result: PRTranslationResult | None = None
+    artifact_provenance: TranslationArtifactProvenance | None = None
     if pushed or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
         publish_red = pr_result.publication_impact == PublicationImpact.PUBLISH_RED
-        body = build_translation_pr_body(
+        provisional_body = build_translation_pr_body(
             pr_number,
             github_repo,
             publication_result=pr_result,
         )
-        opened = (
-            reused_existing_artifact_pr
+        expected_artifact_sha = (
+            reused_existing_artifact_pr.bound_sha
             if reused_existing_artifact_pr is not None
-            else prepush_opened_pr
-            if prepush_opened_pr is not None
-            else gh.create_pull(
-                owner,
-                repo,
-                title=title,
-                head=branch,
-                base=translation_pr_base(ctx),
-                body=body,
-                draft=publish_red,
+            else pushed_candidate_sha
+        )
+        if expected_artifact_sha is None:
+            raise RuntimeError("cannot publish PR metadata without an artifact SHA")
+        _require_remote_sha(
+            gh,
+            owner,
+            repo,
+            branch,
+            expected_artifact_sha,
+            context="before translation PR metadata",
+        )
+
+        created = False
+        if reused_existing_artifact_pr is not None:
+            tr_pr_url = reused_existing_artifact_pr.url
+            tr_pr_number = reused_existing_artifact_pr.number
+        elif prepush_opened_pr is not None:
+            tr_pr_url, tr_pr_number, created = prepush_opened_pr
+        else:
+            try:
+                opened = gh.create_pull(
+                    owner,
+                    repo,
+                    title=title,
+                    head=branch,
+                    base=translation_pr_base(ctx),
+                    body=provisional_body,
+                    draft=publish_red,
+                )
+                if opened is None:
+                    raise RuntimeError(
+                        f"pull request creation returned no publication for {branch}"
+                    )
+                tr_pr_url, tr_pr_number, created = opened
+            except Exception as create_error:
+                _raise_with_owned_rollback(
+                    create_error,
+                    push_receipt,
+                    destination_lease.expected_sha,
+                    repo_path=repo_path,
+                    branch=branch,
+                    push_token=push_token,
+                    upstream_url=upstream_url,
+                    message="translation PR creation and branch rollback both failed",
+                )
+
+        try:
+            current_pull = gh.get_pull(owner, repo, tr_pr_number)
+        except Exception as pull_error:
+            _raise_with_owned_rollback(
+                pull_error,
+                push_receipt,
+                destination_lease.expected_sha,
+                repo_path=repo_path,
+                branch=branch,
+                push_token=push_token,
+                upstream_url=upstream_url,
+                message="translation PR lookup and branch rollback both failed",
+            )
+        head = current_pull.get("head") or {}
+        current_head_sha = (
+            str(head.get("sha") or "") if isinstance(head, dict) else ""
+        )
+        if current_head_sha != expected_artifact_sha:
+            raise RuntimeError(
+                f"PR #{tr_pr_number} head SHA changed: expected "
+                f"{expected_artifact_sha}, found {current_head_sha or '<missing>'}"
+            )
+
+        artifact_provenance = (
+            reused_existing_artifact_pr.provenance
+            if reused_existing_artifact_pr is not None
+            else bind_translation_artifact(
+                repo_path,
+                authority_selection,
+                expected_artifact_sha,
             )
         )
-        if opened:
-            tr_pr_url, tr_pr_number, created = opened
-            job.translation_pr_url = tr_pr_url
-            job.translation_pr_number = tr_pr_number
-            if publish_red:
-                # Draft state is mutable independently of the branch. Re-check
-                # after the guarded push even when pre-push discovery already
-                # converted the PR; a concurrent ready-for-review transition
-                # must be reversed before any merge-facing body update.
-                try:
-                    postpush_pull = gh.get_pull(owner, repo, tr_pr_number)
-                    if postpush_pull.get("draft") is not True:
-                        gh.convert_pull_to_draft(owner, repo, tr_pr_number)
-                except Exception as confirmation_error:
-                    if not pushed_candidate_sha:
-                        raise RuntimeError(
-                            "cannot roll back RED branch without pushed HEAD SHA"
-                        ) from confirmation_error
-                    try:
-                        rollback_pushed_branch(
-                            repo_path,
-                            "ydbdoc-review-push",
-                            branch,
-                            push_token,
-                            upstream_url,
-                            expected_pushed_sha=pushed_candidate_sha,
-                            previous_sha=prepush_remote_sha,
-                        )
-                    except Exception as rollback_error:
-                        raise ExceptionGroup(
-                            "RED PR draft confirmation and branch rollback both failed",
-                            [confirmation_error, rollback_error],
-                        ) from None
-                    raise
-            if not created:
-                gh.update_pull_body(owner, repo, tr_pr_number, body)
-            if created:
-                try:
-                    gh.add_issue_labels(owner, repo, tr_pr_number, ["documentation"])
-                except GitHubAPIError as exc:
-                    logger.warning(
-                        "Could not add documentation label to PR #%s: %s",
-                        tr_pr_number,
-                        exc,
-                    )
+        body = build_translation_pr_body(
+            pr_number,
+            github_repo,
+            publication_result=pr_result,
+            provenance=artifact_provenance,
+        )
+
+        job.translation_pr_url = tr_pr_url
+        job.translation_pr_number = tr_pr_number
+        try:
+            if publish_red and current_pull.get("draft") is not True:
+                gh.convert_pull_to_draft(owner, repo, tr_pr_number)
+            gh.update_pull_body(owner, repo, tr_pr_number, body)
+        except Exception as metadata_error:
+            _raise_with_owned_rollback(
+                metadata_error,
+                push_receipt,
+                destination_lease.expected_sha,
+                repo_path=repo_path,
+                branch=branch,
+                push_token=push_token,
+                upstream_url=upstream_url,
+                message="translation PR metadata and branch rollback both failed",
+            )
+        if created:
+            try:
+                gh.add_issue_labels(owner, repo, tr_pr_number, ["documentation"])
+            except GitHubAPIError as exc:
+                logger.warning(
+                    "Could not add documentation label to PR #%s: %s",
+                    tr_pr_number,
+                    exc,
+                )
 
     if tr_pr_number is not None and pushed:
         verify_merge = f"origin/{translation_pr_base(ctx)}"
@@ -1931,22 +2470,34 @@ def run_doc_translate(
     elapsed = time.monotonic() - started
     meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
 
+    source_comment = build_source_pr_comment(
+        pr_result,
+        translation_pr_number=tr_pr_number,
+        meta=meta,
+        config=cfg,
+        usage=client.usage_tracker,
+        verify_result=verify_result,
+        committed=committed,
+    )
+    later_ru_drift = build_later_ru_drift_report(
+        repo_path,
+        gh,
+        owner=owner,
+        repo=repo,
+        source_head_sha=authority.source_head_sha,
+        baseline_sha=authority.baseline_sha,
+        source_paths=source_api_paths,
+        docs_root=cfg.paths.docs_root,
+    )
+    if later_ru_drift:
+        source_comment = f"{source_comment.rstrip()}\n\n{later_ru_drift}"
+
     job.source_comment_url = _safe_post_issue_comment(
         gh,
         owner,
         repo,
         pr_number,
-        append_retention_footer(
-            build_source_pr_comment(
-                pr_result,
-                translation_pr_number=tr_pr_number,
-                meta=meta,
-                config=cfg,
-                usage=client.usage_tracker,
-                verify_result=verify_result,
-                committed=committed,
-            )
-        ),
+        append_retention_footer(source_comment),
         label="source PR summary",
     )
 
@@ -2018,10 +2569,6 @@ def run_doc_verify(
             )
         )
     inherited_final_tree_blockers = durable_final_tree_blockers
-    had_soft_keep_blocker = any(
-        blocker.code == "translation_soft_keep"
-        for blocker in durable_final_tree_blockers
-    )
     inherited_result = PRTranslationResult(
         completeness_gaps=list(inherited_completeness_gaps or ()),
         final_tree_blockers=list(durable_final_tree_blockers),
@@ -2041,6 +2588,22 @@ def run_doc_verify(
             ctx.head_ref, prefix=cfg.paths.verify_fixup_branch_prefix
         )
     source_pr_num = source_pr or pr_number
+    requested_merge_base_sha = resolve_commit_ref(repo_path, merge_base_with)
+    verify_content_sha = resolve_commit_ref(repo_path, "HEAD")
+    artifact_provenance: TranslationArtifactProvenance | None = None
+    if translation_pr:
+        if source_pr is None:
+            raise ValueError("translation PR source identity is missing")
+        artifact_provenance = validate_authority_evidence(
+            repo_path,
+            parse_authority_evidence(ctx.body),
+            expected_repo=github_repo,
+            expected_source_pr=source_pr,
+            current_candidate_sha=verify_content_sha,
+        )
+        merge_base_with = artifact_provenance.authority.baseline_sha
+    else:
+        merge_base_with = requested_merge_base_sha
 
     ops_ctx = None
     if not skip_ops_gates:
@@ -2069,26 +2632,50 @@ def run_doc_verify(
     fixup_pr_base = verify_fixup_pr_base(
         ctx, translation_branch_prefix=cfg.paths.translation_branch_prefix
     )
-
-    # Re-run must not reuse a stale fixup branch/PR (closes open fixup PRs).
-    # Never delete the branch we are currently verifying (verify-* head).
-    if not inline_fixup_push and not dry_run:
-        _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
-
-    # Content under review (PR tip / merge commit). Capture before prepare_*
-    # moves HEAD onto main for the fixup branch (§6.137).
-    verify_content_sha = git_head_sha(repo_path)
+    destination_branch = ctx.head_ref if inline_fixup_push else fixup_branch
+    destination_lease = _snapshot_destination_lease(
+        gh,
+        owner,
+        repo,
+        destination_branch,
+    )
+    if inline_fixup_push and (
+        destination_lease.expected_sha is None
+        or not ctx.head_sha
+        or destination_lease.expected_sha != ctx.head_sha
+        or destination_lease.expected_sha != verify_content_sha
+    ):
+        raise RuntimeError(
+            "inline verify publication expectation changed: require nonempty "
+            f"remote E == PR head == checkout C, got E="
+            f"{destination_lease.expected_sha or '<absent>'}, "
+            f"PR={ctx.head_sha or '<missing>'}, C={verify_content_sha}"
+        )
+    verify_prepare_parent_sha = (
+        verify_content_sha
+        if inline_fixup_push or (not is_fork_head(ctx) and not ctx.merged)
+        else merge_base_with
+    )
 
     changes = merge_pr_file_changes(
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
     changes = filter_translate_changes(changes, cfg.paths.translate_skip_globs)
-    source_changes = (
-        list_pr_file_changes_api(gh, owner, repo, source_pr)
-        if source_pr is not None
-        else (None if translation_pr else changes)
-    )
+    if artifact_provenance is not None:
+        source_changes = list(
+            commit_changes_between(
+                repo_path,
+                artifact_provenance.authority.ru_base_sha,
+                artifact_provenance.authority.ru_sha,
+            )
+        )
+    else:
+        source_changes = (
+            list_pr_file_changes_api(gh, owner, repo, source_pr)
+            if source_pr is not None
+            else (None if translation_pr else changes)
+        )
     if source_changes is not None:
         source_changes = filter_translate_changes(source_changes, cfg.paths.translate_skip_globs)
     # On verify-* continue/re-verify: re-check the original bilingual source scope
@@ -2104,8 +2691,17 @@ def run_doc_verify(
     expected_scope_pairs: list[DocPair] = []
     source_bilingual_skip: frozenset[str] = frozenset()
     redirect_tombstone_en: frozenset[str] = frozenset()
+    recovered_late_en_paths: frozenset[str] = frozenset()
     if source_changes:
-        read_ru, read_en_base, read_ru_base = make_repo_scope_readers(repo_path, merge_base_with)
+        read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
+            repo_path,
+            merge_base_with,
+            authority=(
+                artifact_provenance.authority
+                if artifact_provenance is not None
+                else None
+            ),
+        )
         scope_plan = plan_translation_scope(
             source_changes,
             read_ru=read_ru,
@@ -2115,15 +2711,23 @@ def run_doc_verify(
         )
         skip_globs = cfg.paths.translate_skip_globs
         if skip_globs:
-            from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
-
-            scope_plan = TranslationScopePlan(
+            scope_plan = replace(
+                scope_plan,
                 doc_ru_paths=filter_path_set(scope_plan.doc_ru_paths, skip_globs),
                 doc_from_diff=filter_path_set(scope_plan.doc_from_diff, skip_globs),
                 doc_from_main=filter_path_set(scope_plan.doc_from_main, skip_globs),
                 nav_ru_paths=filter_path_set(scope_plan.nav_ru_paths, skip_globs),
                 nav_from_diff=filter_path_set(scope_plan.nav_from_diff, skip_globs),
                 nav_from_main=filter_path_set(scope_plan.nav_from_main, skip_globs),
+                doc_deleted=filter_path_set(scope_plan.doc_deleted, skip_globs),
+            )
+        if artifact_provenance is not None:
+            recovered_late_en_paths = _reconstruct_late_dependency_budget_for_verify(
+                repo_path,
+                scope_plan,
+                artifact_provenance,
+                verified_commit_sha=verify_content_sha,
+                docs_root=cfg.paths.docs_root,
             )
         nav_pairs = merge_navigation_pair_lists(
             navigation_pairs_from_plan(scope_plan, docs_root=cfg.paths.docs_root),
@@ -2133,18 +2737,29 @@ def run_doc_verify(
             bilingual_en_mirrors(source_changes, docs_root=cfg.paths.docs_root)
         )
         verify_redirects_yaml = (
-            read_text_at_ref(repo_path, merge_base_with, f"{cfg.paths.docs_root}/redirects.yaml")
-            or read_text(repo_path, f"{cfg.paths.docs_root}/redirects.yaml")
+            read_text_at_commit(
+                repo_path,
+                merge_base_with,
+                f"{cfg.paths.docs_root}/redirects.yaml",
+            )
             or ""
         )
         redirect_tombstone_en = redirect_source_repo_md_paths(
-            verify_redirects_yaml, locale="en", docs_root=cfg.paths.docs_root
+            verify_redirects_yaml,
+            locale="en",
+            docs_root=cfg.paths.docs_root,
+            candidate_repo_paths={
+                counterpart(path, cfg.paths.docs_root)
+                for path in scope_plan.doc_ru_paths
+                if counterpart(path, cfg.paths.docs_root) is not None
+            },
         )
         expected_scope_pairs = doc_pairs_from_plan(
             scope_plan,
             docs_root=cfg.paths.docs_root,
             skip_en_paths=source_bilingual_skip | redirect_tombstone_en,
         )
+        _merge_yellow_warnings(inherited_result, scope_plan.link_dep_warnings)
     job = DocJobResult(
         mode="doc_verify",
         pr_number=pr_number,
@@ -2172,19 +2787,36 @@ def run_doc_verify(
         noop_satisfied: set[str] = set()
         changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
         if source_pr is not None:
-            source_pull = gh.get_pull(owner, repo, source_pr)
-            source_base_sha = str(source_pull.get("base", {}).get("sha") or "")
-            source_head_sha = str(source_pull.get("head", {}).get("sha") or "")
-            for pair in expected_scope_pairs:
-                if pair.en_path in changed_en_paths:
-                    continue
-                if href_only_source_noop_satisfied(
-                    gh.get_file_text(owner, repo, pair.ru_path, source_base_sha),
-                    gh.get_file_text(owner, repo, pair.ru_path, source_head_sha),
-                    read_text(repo_path, pair.ru_path),
-                    read_text(repo_path, pair.en_path),
-                ):
-                    noop_satisfied.add(pair.en_path)
+            if artifact_provenance is not None:
+                authority = artifact_provenance.authority
+                for pair in expected_scope_pairs:
+                    if pair.en_path in changed_en_paths:
+                        continue
+                    if href_only_source_noop_satisfied(
+                        read_text_at_commit(
+                            repo_path, authority.source_base_sha, pair.ru_path
+                        ),
+                        read_text_at_commit(
+                            repo_path, authority.source_head_sha, pair.ru_path
+                        ),
+                        read_text_at_commit(repo_path, authority.ru_sha, pair.ru_path),
+                        read_text_at_commit(repo_path, verify_content_sha, pair.en_path),
+                    ):
+                        noop_satisfied.add(pair.en_path)
+            else:
+                source_pull = gh.get_pull(owner, repo, source_pr)
+                source_base_sha = str(source_pull.get("base", {}).get("sha") or "")
+                source_head_sha = str(source_pull.get("head", {}).get("sha") or "")
+                for pair in expected_scope_pairs:
+                    if pair.en_path in changed_en_paths:
+                        continue
+                    if href_only_source_noop_satisfied(
+                        gh.get_file_text(owner, repo, pair.ru_path, source_base_sha),
+                        gh.get_file_text(owner, repo, pair.ru_path, source_head_sha),
+                        read_text(repo_path, pair.ru_path),
+                        read_text(repo_path, pair.en_path),
+                    ):
+                        noop_satisfied.add(pair.en_path)
         # Tip-inherited EN (same as upstream main, not rewritten this run) already
         # covers the source scope when RU/EN hrefs match (§6.231 / #51199
         # feature-not-supported identical noop).
@@ -2193,8 +2825,18 @@ def run_doc_verify(
         for pair in expected_scope_pairs:
             if pair.en_path in changed_en_paths or pair.en_path in noop_satisfied:
                 continue
-            en_tip = read_text(repo_path, pair.en_path)
-            ru_tip = read_text(repo_path, pair.ru_path)
+            en_tip = (
+                read_text_at_commit(repo_path, verify_content_sha, pair.en_path)
+                if artifact_provenance is not None
+                else read_text(repo_path, pair.en_path)
+            )
+            ru_tip = (
+                read_text_at_commit(
+                    repo_path, artifact_provenance.authority.ru_sha, pair.ru_path
+                )
+                if artifact_provenance is not None
+                else read_text(repo_path, pair.ru_path)
+            )
             if en_tip is None or ru_tip is None:
                 continue
             if not check_href_parity(ru_tip, en_tip):
@@ -2207,14 +2849,23 @@ def run_doc_verify(
         )
 
         changed_en_texts = {
-            path: (read_text(repo_path, path) or "")
+            path: (
+                read_text_at_commit(repo_path, verify_content_sha, path)
+                if artifact_provenance is not None
+                else read_text(repo_path, path)
+            )
+            or ""
             for path in changed_en_paths
             if path.endswith(".md")
         }
         for pair in expected_scope_pairs:
             if pair.en_path in changed_en_paths or pair.en_path in noop_satisfied:
                 continue
-            en_tip = read_text(repo_path, pair.en_path)
+            en_tip = (
+                read_text_at_commit(repo_path, verify_content_sha, pair.en_path)
+                if artifact_provenance is not None
+                else read_text(repo_path, pair.en_path)
+            )
             if not en_tip:
                 continue
             if tip_en_covers_inbound_fragments_from_changed(
@@ -2233,7 +2884,9 @@ def run_doc_verify(
         )
         # §6.240: source-PR scope wins over tip-ambient EN in the translation
         # branch diff (stale compare-configs / auth_config / tracing / …).
-        source_scope_en = frozenset(p.en_path for p in expected_scope_pairs)
+        source_scope_en = frozenset(p.en_path for p in expected_scope_pairs) | frozenset(
+            recovered_late_en_paths
+        )
         source_scope_nav_en: frozenset[str] | None = None
         if scope_plan is not None:
             source_scope_nav_en = frozenset(
@@ -2280,6 +2933,16 @@ def run_doc_verify(
         docs_root=cfg.paths.docs_root,
         pending_en_md=pending_en_md,
         pending_en_tocs=pending_en_tocs,
+        read_text=_docs_text_reader(
+            repo_path,
+            verify_content_sha,
+            authority=(
+                artifact_provenance.authority
+                if artifact_provenance is not None
+                else None
+            ),
+            docs_root=cfg.paths.docs_root,
+        ),
     )
     logger.info(
         "EN toc reachability (verify): %s md paths (%s pending md, %s pending toc)",
@@ -2306,6 +2969,7 @@ def run_doc_verify(
                     repo=repo,
                     source_pr=source_pr,
                     target_ref=verify_content_sha,
+                    provenance=artifact_provenance,
                 )
             pr_result = _run_verify_pairs(
                 contents,
@@ -2313,11 +2977,23 @@ def run_doc_verify(
                 glossary,
                 cfg,
                 en_toc_reachable=en_toc_reachable,
-                docs_text_reader=_docs_text_reader(repo_path, merge_base_with),
+                docs_text_reader=_docs_text_reader(
+                    repo_path,
+                    verify_content_sha,
+                    authority=(
+                        artifact_provenance.authority
+                        if artifact_provenance is not None
+                        else None
+                    ),
+                    docs_root=cfg.paths.docs_root,
+                ),
                 docs_repo_path=repo_path,
             )
         else:
             pr_result = PRTranslationResult()
+
+    if scope_plan is not None:
+        _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
 
     md_en_paths = {p.en_path for p in pairs if not p.en_deleted}
 
@@ -2330,15 +3006,14 @@ def run_doc_verify(
                 owner=owner,
                 repo=repo,
                 source_pr=source_pr,
+                provenance=artifact_provenance,
             )
         else:
             ru_nav_texts = {}
             for nav in nav_pairs:
                 if nav.ru_deleted:
                     continue
-                text = read_text(repo_path, nav.ru_path)
-                if text is None:
-                    text = read_text_at_ref(repo_path, "HEAD", nav.ru_path)
+                text = read_text_at_commit(repo_path, verify_content_sha, nav.ru_path)
                 if text is not None:
                     ru_nav_texts[nav.ru_path] = text
 
@@ -2354,6 +3029,8 @@ def run_doc_verify(
             docs_root=cfg.paths.docs_root,
             active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             skip_globs=cfg.paths.translate_skip_globs,
+            provenance=artifact_provenance,
+            target_ref=verify_content_sha,
         )
 
     apply_include_parity_repair(
@@ -2382,11 +3059,15 @@ def run_doc_verify(
         docs_root=cfg.paths.docs_root,
         exempt_en_paths=redirect_tombstone_en
         or redirect_source_repo_md_paths(
-            read_text_at_ref(repo_path, merge_base_with, f"{cfg.paths.docs_root}/redirects.yaml")
-            or read_text(repo_path, f"{cfg.paths.docs_root}/redirects.yaml")
+            read_text_at_commit(
+                repo_path,
+                merge_base_with,
+                f"{cfg.paths.docs_root}/redirects.yaml",
+            )
             or "",
             locale="en",
             docs_root=cfg.paths.docs_root,
+            candidate_repo_paths={pair.en_path for pair in pairs},
         ),
     )
     verify_en_paths = {
@@ -2412,19 +3093,19 @@ def run_doc_verify(
         for path in durable_impact_paths
         if path not in verify_deleted_en_paths
         and (
-            read_text(repo_path, path) is not None
-            or read_text_at_ref(repo_path, merge_base_with, path) is not None
+            read_text_at_commit(repo_path, verify_content_sha, path) is not None
+            or read_text_at_commit(repo_path, merge_base_with, path) is not None
         )
     }
     apply_en_link_target_checks(
         pr_result,
         repo_path=repo_path,
         en_md_paths=verify_en_paths,
-        baseline_read=lambda p: read_text_at_ref(repo_path, merge_base_with, p),
+        baseline_read=lambda p: read_text_at_commit(repo_path, merge_base_with, p),
         docs_read=_final_tree_reader(
             repo_path,
-            merge_base_with,
-            verify_en_paths,
+            verify_content_sha,
+            set(),
             deleted_paths=verify_deleted_en_paths,
         ),
     )
@@ -2531,8 +3212,8 @@ def run_doc_verify(
 
     committed = pushed = False
     inline_head_changed = False
-    verify_previous_remote_sha: str | None = None
-    verify_pushed_sha: str | None = None
+    verify_candidate_sha: str | None = None
+    verify_push_receipt: RefMutationReceipt | None = None
     fixup_pr_number: int | None = None
     fixup_pr_url: str | None = None
     if touched and not dry_run and not no_commit:
@@ -2555,6 +3236,7 @@ def run_doc_verify(
             base_remote_name="ydbdoc-review-upstream",
             base_branch=prep_base_branch,
             paths=touched.written,
+            base_commit_sha=verify_prepare_parent_sha,
             deleted_paths=touched.deleted,
         )
         head_before_fixup = git_head_sha(repo_path)
@@ -2566,11 +3248,12 @@ def run_doc_verify(
             _GITHUB_ACTOR_EMAIL,
             deleted_paths=touched.deleted,
         )
-        head_after_fixup = git_head_sha(repo_path) if committed else None
+        head_after_fixup = _freeze_candidate_sha(repo_path) if committed else None
         inline_head_changed = committed and head_after_fixup != head_before_fixup
         if committed:
-            if not inline_fixup_push:
-                _delete_stale_verify_fixup(gh, owner, repo, fixup_branch)
+            verify_candidate_sha = head_after_fixup
+            if verify_candidate_sha is None:
+                raise RuntimeError("cannot publish verify branch without candidate K")
             if translation_pr:
                 logger.info(
                     "Pushing critic fixes onto translation branch %s (PR #%s)",
@@ -2590,31 +3273,99 @@ def run_doc_verify(
                     pr_number,
                     ctx.head_repo_full_name,
                 )
-            push_kwargs: dict[str, object] = {}
-            if translation_pr and verify_requires_red:
-                verify_previous_remote_sha = gh.get_branch_sha(
-                    owner,
-                    repo,
+            if inline_fixup_push or destination_lease.expected_sha == verify_candidate_sha:
+                verify_push_receipt = push_branch(
+                    repo_path,
+                    "ydbdoc-review-push",
                     push_branch_name,
+                    push_token,
+                    upstream_url,
+                    guard_remote_ref=True,
+                    expected_remote_sha=destination_lease.expected_sha,
+                    source_sha=verify_candidate_sha,
                 )
-                if not verify_previous_remote_sha or not head_after_fixup:
-                    raise RuntimeError(
-                        "cannot safely publish RED verify result without exact branch SHAs"
+            else:
+                deleted_receipt: RefMutationReceipt | None = None
+                if destination_lease.expected_sha is not None:
+                    deleted_receipt = delete_remote_branch_with_lease(
+                        repo_path,
+                        "ydbdoc-review-push",
+                        push_branch_name,
+                        push_token,
+                        upstream_url,
+                        expected_remote_sha=destination_lease.expected_sha,
                     )
-                verify_pushed_sha = head_after_fixup
-                push_kwargs = {
-                    "guard_remote_ref": True,
-                    "expected_remote_sha": verify_previous_remote_sha,
-                }
-            push_branch(
-                repo_path,
-                "ydbdoc-review-push",
-                push_branch_name,
-                push_token,
-                upstream_url,
-                **push_kwargs,
-            )
+                try:
+                    verify_push_receipt = push_branch(
+                        repo_path,
+                        "ydbdoc-review-push",
+                        push_branch_name,
+                        push_token,
+                        upstream_url,
+                        guard_remote_ref=True,
+                        expected_remote_sha=None,
+                        source_sha=verify_candidate_sha,
+                    )
+                except Exception as create_error:
+                    if (
+                        deleted_receipt is not None
+                        and deleted_receipt.status is RefMutationStatus.CHANGED
+                        and destination_lease.expected_sha is not None
+                    ):
+                        try:
+                            remote_after_failure = gh.get_branch_sha(
+                                owner,
+                                repo,
+                                push_branch_name,
+                            )
+                        except Exception as snapshot_error:
+                            raise ExceptionGroup(
+                                "verify candidate creation and remote inspection both failed",
+                                [create_error, snapshot_error],
+                            ) from None
+                        if remote_after_failure is None:
+                            try:
+                                rollback_pushed_branch(
+                                    repo_path,
+                                    "ydbdoc-review-push",
+                                    push_branch_name,
+                                    push_token,
+                                    upstream_url,
+                                    expected_pushed_sha=None,
+                                    previous_sha=destination_lease.expected_sha,
+                                )
+                            except Exception as restore_error:
+                                raise ExceptionGroup(
+                                    "verify candidate creation and branch restoration both failed",
+                                    [create_error, restore_error],
+                                ) from None
+                    raise
             pushed = True
+            _require_remote_sha(
+                gh,
+                owner,
+                repo,
+                push_branch_name,
+                verify_candidate_sha,
+                context="after verify branch publication",
+            )
+            if translation_pr and verify_requires_red:
+                try:
+                    gh.convert_pull_to_draft(owner, repo, pr_number)
+                except Exception as confirmation_error:
+                    _raise_with_owned_rollback(
+                        confirmation_error,
+                        verify_push_receipt,
+                        destination_lease.expected_sha,
+                        repo_path=repo_path,
+                        branch=push_branch_name,
+                        push_token=push_token,
+                        upstream_url=upstream_url,
+                        message=(
+                            "RED verify draft confirmation and branch rollback "
+                            "both failed"
+                        ),
+                    )
     job.committed = committed
     job.pushed = pushed
 
@@ -2672,60 +3423,71 @@ def run_doc_verify(
     if pushed and not inline_fixup_push:
         title = f"Critic fixes for #{pr_number}"
         body = build_verify_fixup_pr_body(pr_number, github_repo, fixup_branch)
-        opened = gh.create_pull(
-            owner,
-            repo,
-            title=title,
-            head=fixup_branch,
-            base=fixup_pr_base,
-            body=body,
-        )
-        if opened:
+        try:
+            opened = gh.create_pull(
+                owner,
+                repo,
+                title=title,
+                head=fixup_branch,
+                base=fixup_pr_base,
+                body=body,
+            )
+            if opened is None:
+                raise RuntimeError(
+                    f"pull request creation returned no publication for {fixup_branch}"
+                )
             fixup_pr_url, fixup_pr_number, created = opened
-            job.translation_pr_url = fixup_pr_url
-            job.translation_pr_number = fixup_pr_number
-            if created:
-                try:
-                    gh.add_issue_labels(owner, repo, fixup_pr_number, ["documentation"])
-                except GitHubAPIError as exc:
-                    logger.warning(
-                        "Could not add documentation label to PR #%s: %s",
-                        fixup_pr_number,
-                        exc,
-                    )
+        except Exception as create_error:
+            _raise_with_owned_rollback(
+                create_error,
+                verify_push_receipt,
+                destination_lease.expected_sha,
+                repo_path=repo_path,
+                branch=fixup_branch,
+                push_token=push_token,
+                upstream_url=upstream_url,
+                message="verify PR creation and branch rollback both failed",
+            )
+        try:
+            fixup_pull = gh.get_pull(owner, repo, fixup_pr_number)
+        except Exception as pull_error:
+            _raise_with_owned_rollback(
+                pull_error,
+                verify_push_receipt,
+                destination_lease.expected_sha,
+                repo_path=repo_path,
+                branch=fixup_branch,
+                push_token=push_token,
+                upstream_url=upstream_url,
+                message="verify PR lookup and branch rollback both failed",
+            )
+        fixup_head = fixup_pull.get("head") or {}
+        fixup_head_sha = (
+            str(fixup_head.get("sha") or "")
+            if isinstance(fixup_head, dict)
+            else ""
+        )
+        if fixup_head_sha != verify_candidate_sha:
+            raise RuntimeError(
+                f"PR #{fixup_pr_number} head SHA changed: expected "
+                f"{verify_candidate_sha}, found {fixup_head_sha or '<missing>'}"
+            )
+        job.translation_pr_url = fixup_pr_url
+        job.translation_pr_number = fixup_pr_number
+        if created:
+            try:
+                gh.add_issue_labels(owner, repo, fixup_pr_number, ["documentation"])
+            except GitHubAPIError as exc:
+                logger.warning(
+                    "Could not add documentation label to PR #%s: %s",
+                    fixup_pr_number,
+                    exc,
+                )
 
     # Full QA report: on newly opened fixup PR when one exists; otherwise on
     # the verified PR (translation / verify-* / bilingual with no fixes).
     report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
     if translation_pr and source_pr is not None:
-        if result_has_blocking_findings(pr_result):
-            # Re-check after possible branch mutation and directly before the
-            # merge-facing body update. A concurrent ready transition is
-            # converted again by the client's current-state check.
-            try:
-                gh.convert_pull_to_draft(owner, repo, pr_number)
-            except Exception as confirmation_error:
-                if pushed and verify_requires_red:
-                    if not verify_pushed_sha or not verify_previous_remote_sha:
-                        raise RuntimeError(
-                            "cannot roll back RED verify branch without exact SHAs"
-                        ) from confirmation_error
-                    try:
-                        rollback_pushed_branch(
-                            repo_path,
-                            "ydbdoc-review-push",
-                            ctx.head_ref,
-                            push_token,
-                            upstream_url,
-                            expected_pushed_sha=verify_pushed_sha,
-                            previous_sha=verify_previous_remote_sha,
-                        )
-                    except Exception as rollback_error:
-                        raise ExceptionGroup(
-                            "RED verify draft confirmation and branch rollback both failed",
-                            [confirmation_error, rollback_error],
-                        ) from None
-                raise
         gh.update_pull_body(
             owner,
             repo,
@@ -2734,6 +3496,7 @@ def run_doc_verify(
                 source_pr,
                 github_repo,
                 publication_result=pr_result,
+                provenance=artifact_provenance,
             ),
         )
     if final_read_only_verify:

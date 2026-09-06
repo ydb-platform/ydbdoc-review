@@ -97,6 +97,7 @@ def _render_translated_from_source(state: FileRunState, ctx: HarnessContext) -> 
                 layout_source_text=state.source_text,
                 source_base_text=state.base_source_text,
                 target_baseline_text=state.base_target_text or state.existing_target_text,
+                docs_text_reader=ctx.docs_text_reader,
             )
         )
         state.translated_text = contract.text
@@ -541,6 +542,7 @@ class FinalizeEnStep:
                 protected_source_text=state.source_text,
                 source_base_text=state.base_source_text,
                 target_baseline_text=state.base_target_text or state.existing_target_text,
+                docs_text_reader=ctx.docs_text_reader,
             )
         )
         state.translated_text = contract.text

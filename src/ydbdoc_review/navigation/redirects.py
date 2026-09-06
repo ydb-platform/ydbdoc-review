@@ -5,10 +5,15 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 _ENTRY_SPLIT = re.compile(r"(?m)^- from: ")
 _FROM_LINE = re.compile(r"^- from: (.+)$", re.MULTILINE)
 _TO_LINE = re.compile(r"^  to: (.+)$", re.MULTILINE)
+_PREFIX_FROM = re.compile(
+    r"^\^?/((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+)/\(\.\*\)\$$"
+)
+_PREFIX_TO = re.compile(r"^/((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+)/\$1$")
 
 
 def parse_redirect_entries(yaml_text: str) -> list[dict[str, str]]:
@@ -113,11 +118,153 @@ def redirect_public_path_to_repo_md(
     return f"{root}/{locale}/core{p}"
 
 
+def _redirect_rows_for_locale(
+    redirects_yaml: str,
+    *,
+    locale: str,
+) -> list[tuple[str, str]]:
+    """Return common plus selected-locale rows without collapsing conflicts."""
+    text = (redirects_yaml or "").strip()
+    if not text:
+        return []
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception:
+        data = None
+    rows: list[tuple[str, str]] = []
+    if isinstance(data, dict):
+        sections = ("common", locale) if locale in {"ru", "en"} else ("common",)
+        for key in sections:
+            for row in data.get(key) or []:
+                if isinstance(row, dict) and row.get("from") is not None:
+                    rows.append(
+                        (
+                            str(row["from"]).strip(),
+                            str(row.get("to") or "").strip(),
+                        )
+                    )
+        return rows
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and row.get("from") is not None:
+                rows.append(
+                    (
+                        str(row["from"]).strip(),
+                        str(row.get("to") or "").strip(),
+                    )
+                )
+        return rows
+    return [
+        (entry["from_path"], entry["to_path"])
+        for entry in parse_redirect_entries(text)
+    ]
+
+
+def _safe_literal_prefix(value: str) -> bool:
+    return bool(value) and all(
+        segment not in {"", ".", ".."}
+        and re.fullmatch(r"[A-Za-z0-9_.-]+", segment) is not None
+        for segment in value.split("/")
+    )
+
+
+def _safe_md_suffix(value: str) -> bool:
+    if (
+        not value
+        or not value.endswith(".md")
+        or "\\" in value
+        or "?" in value
+        or "#" in value
+    ):
+        return False
+    decoded = unquote(value)
+    if "/" in decoded.replace(value, "", 1) or "\\" in decoded:
+        return False
+    return all(segment not in {"", ".", ".."} for segment in decoded.split("/"))
+
+
+def _repo_md_locale_public(
+    repo_md: str,
+    *,
+    docs_root: str,
+) -> tuple[str, str, str] | None:
+    path = repo_md.replace("\\", "/")
+    root = docs_root.strip("/")
+    for locale in ("ru", "en"):
+        prefix = f"{root}/{locale}/core/"
+        if not path.startswith(prefix):
+            continue
+        suffix = path[len(prefix) :]
+        if not _safe_md_suffix(suffix):
+            return None
+        return path, locale, f"/{suffix}"
+    return None
+
+
+def prefix_redirect_repo_md_path(
+    repo_md: str,
+    redirects_yaml: str,
+    *,
+    docs_root: str = "ydb/docs",
+) -> str | None:
+    """Return one proven prefix step, unchanged for no match, None for refusal."""
+    identity = _repo_md_locale_public(repo_md, docs_root=docs_root)
+    if identity is None:
+        return None
+    path, locale, public = identity
+    matches: list[tuple[int, str, str]] = []
+    for source, destination in _redirect_rows_for_locale(
+        redirects_yaml, locale=locale
+    ):
+        source_match = _PREFIX_FROM.fullmatch(source)
+        if source_match is None:
+            continue
+        source_prefix = source_match.group(1)
+        if not _safe_literal_prefix(source_prefix):
+            continue
+        marker = f"/{source_prefix}/"
+        if not public.startswith(marker):
+            continue
+        matches.append((len(source_prefix), source_prefix, destination))
+    if not matches:
+        return path
+
+    longest = max(length for length, _source, _destination in matches)
+    selected = [row for row in matches if row[0] == longest]
+    destinations: set[str] = set()
+    source_prefix = selected[0][1]
+    suffix = public[len(source_prefix) + 2 :]
+    if not _safe_md_suffix(suffix):
+        return None
+    for _length, _source, destination in selected:
+        destination_match = _PREFIX_TO.fullmatch(destination)
+        if destination_match is None:
+            return None
+        destination_prefix = destination_match.group(1)
+        if not _safe_literal_prefix(destination_prefix):
+            return None
+        destinations.add(destination_prefix)
+    if len(destinations) != 1:
+        return None
+    destination_prefix = destinations.pop()
+    result = redirect_public_path_to_repo_md(
+        f"/{destination_prefix}/{suffix}",
+        locale=locale,
+        docs_root=docs_root,
+    )
+    if result == path or _repo_md_locale_public(result, docs_root=docs_root) is None:
+        return None
+    return result
+
+
 def redirect_source_repo_md_paths(
     redirects_yaml: str,
     *,
     locale: str,
     docs_root: str = "ydb/docs",
+    candidate_repo_paths: tuple[str, ...] | list[str] | set[str] | frozenset[str] = (),
 ) -> frozenset[str]:
     """Repo ``.md`` paths that appear as redirect ``from`` keys.
 
@@ -125,10 +272,26 @@ def redirect_source_repo_md_paths(
     RU tombstones often remain on disk for content history while EN never had
     a mirror; translating them creates ``orphan_toc_page`` EN files (#45949).
     """
-    return frozenset(
+    literal_paths = {
         redirect_public_path_to_repo_md(public, locale=locale, docs_root=docs_root)
         for public in iter_redirect_from_paths(redirects_yaml)
-    )
+        if public.startswith("/")
+        and _PREFIX_FROM.fullmatch(public) is None
+        and _safe_md_suffix(public.removeprefix("/"))
+    }
+    for candidate in candidate_repo_paths:
+        normalized = candidate.replace("\\", "/")
+        identity = _repo_md_locale_public(normalized, docs_root=docs_root)
+        if identity is None or identity[1] != locale:
+            continue
+        redirected = prefix_redirect_repo_md_path(
+            normalized,
+            redirects_yaml,
+            docs_root=docs_root,
+        )
+        if redirected is None or redirected != normalized:
+            literal_paths.add(normalized)
+    return frozenset(literal_paths)
 
 
 def repo_md_to_public_path(repo_md: str, *, docs_root: str = "ydb/docs") -> str | None:

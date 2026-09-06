@@ -92,6 +92,7 @@ def check_en_page_link_targets(
     *,
     read_text: DocsTextReader,
     baseline_text: str | None = None,
+    baseline_read_text: DocsTextReader | None = None,
 ) -> list[str]:
     """Blocking messages for broken relative EN ``.md`` links / fragments.
 
@@ -103,6 +104,16 @@ def check_en_page_link_targets(
         return []
     issues: list[str] = []
     page = en_page_path.replace("\\", "/")
+    docs_root = None
+    if page.count("/en/core/") == 1:
+        candidate_root, _suffix = page.split("/en/core/", 1)
+        if candidate_root and not candidate_root.startswith("/"):
+            docs_root = candidate_root
+    redirects_yaml = (
+        baseline_read_text(f"{docs_root}/redirects.yaml")
+        if baseline_read_text is not None and docs_root is not None
+        else None
+    )
     scan_text = _mask_yfm_include_directives(en_text)
     for match in _MD_LINK.finditer(scan_text):
         label, href = match.group(1), match.group(2).strip()
@@ -111,12 +122,28 @@ def check_en_page_link_targets(
             pass
         if not _is_internal_href(href):
             continue
-        path_part, _, fragment = href.partition("#")
+        path_query, _, fragment = href.partition("#")
+        path_part = path_query.partition("?")[0]
         if path_part and not path_part.endswith(".md"):
             continue
-        target_path = page if not path_part else resolve_internal_md_href(page, href)
+        target_path = page if not path_part else resolve_internal_md_href(page, path_part)
         if target_path is None:
             continue
+        if redirects_yaml is not None and path_part:
+            from ydbdoc_review.navigation.link_deps import canonical_md_dependency_path
+
+            canonical = canonical_md_dependency_path(
+                target_path,
+                redirects_yaml=redirects_yaml,
+                docs_root=docs_root or "ydb/docs",
+            )
+            if (
+                canonical is not None
+                and canonical != target_path
+                and baseline_read_text is not None
+                and baseline_read_text(canonical) is not None
+            ):
+                target_path = canonical
         target_md = en_text if target_path == page else read_text(target_path)
         line = _line_number(en_text, match.start())
         page_name = PurePosixPath(page).name
@@ -150,12 +177,15 @@ def check_en_page_link_targets(
             f"  missing fragment: {fragment}\n"
             f"  available: {avail_txt}"
         )
-    if not issues or not baseline_text:
+    if not issues or not baseline_text or baseline_read_text is None:
         return issues
     ambient = {
         key
         for msg in check_en_page_link_targets(
-            en_page_path, baseline_text, read_text=read_text
+            en_page_path,
+            baseline_text,
+            read_text=baseline_read_text,
+            baseline_read_text=baseline_read_text,
         )
         if (key := _link_target_issue_key(msg))
     }
@@ -215,7 +245,11 @@ def apply_en_link_target_checks(
             continue
         baseline = baseline_read(path) if baseline_read is not None else None
         msgs = check_en_page_link_targets(
-            path, text, read_text=_read, baseline_text=baseline
+            path,
+            text,
+            read_text=_read,
+            baseline_text=baseline,
+            baseline_read_text=baseline_read,
         )
         if not msgs:
             continue

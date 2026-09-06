@@ -9,9 +9,8 @@ import pytest
 
 from ydbdoc_review.github.git_ops import read_text_at_ref
 from ydbdoc_review.github.workflow import (
-    CandidateOverlay,
     _final_tree_reader,
-    _repair_en_fragments_in_candidate,
+    _repair_en_fragments_after_apply,
 )
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
@@ -116,14 +115,13 @@ def test_candidate_repair_does_not_rewrite_tip_href_against_stale_merge(git_repo
     rel = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     page.write_text(tip_body, encoding="utf-8")
 
-    base_reader = lambda path: read_text_at_ref(git_repo, tip_sha, path)
-    overlay = CandidateOverlay(base_reader, {rel: tip_body}, frozenset())
-    repaired = _repair_en_fragments_in_candidate(
-        overlay,
-        frozenset({rel}),
-        base_reader,
+    repaired = _repair_en_fragments_after_apply(
+        git_repo,
+        [rel],
+        dry_run=False,
+        merge_base_with=tip_sha,
     )
-    assert repaired.overlay.writes[rel] == tip_body
+    assert repaired == []
     assert page.read_text(encoding="utf-8") == tip_body
 
 

@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ydbdoc_review.config.loader import Config
+from ydbdoc_review.github.provenance import (
+    TranslationArtifactProvenance,
+    render_authority_evidence,
+)
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import BILINGUAL_SKIP_MARKER
 from ydbdoc_review.pipeline.completeness import format_completeness_gap_item, gap_label
@@ -795,6 +799,7 @@ def build_translation_pr_body(
     source_repo: str,
     *,
     publication_result: PRTranslationResult | None = None,
+    provenance: TranslationArtifactProvenance | None = None,
 ) -> str:
     red = bool(
         publication_result and result_has_blocking_findings(publication_result)
@@ -814,7 +819,7 @@ def build_translation_pr_body(
         blockers += "\n\n" + render_final_tree_blocker_manifest(
             publication_result.final_tree_blockers
         )
-    return (
+    body = (
         f"{banner}"
         f"Auto-generated translation for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
@@ -823,6 +828,9 @@ def build_translation_pr_body(
         "re-run manually via the **`doc_verify`** label (`ydbdoc-verify.yml`)."
         f"{blockers}"
     )
+    if provenance is not None:
+        body = f"{body.rstrip()}\n\n{render_authority_evidence(provenance)}\n"
+    return body
 
 
 def build_translate_handoff_comment(
@@ -974,6 +982,14 @@ def build_source_pr_comment(
     committed: bool | None = None,
 ) -> str:
     """Short summary comment for the source PR after ``doc_translate``."""
+
+    def yellow_section() -> str:
+        warnings = tuple(dict.fromkeys(result.yellow_warnings))
+        if not warnings:
+            return ""
+        body = "\n**Жёлтые предупреждения (не блокируют):**\n\n"
+        return body + "".join(f"- {warning}\n" for warning in warnings)
+
     total, new_count, updated_count = _file_translation_counts(result)
     bilingual_skip = _bilingual_skip_count(result)
     published_red = result.publication_impact == PublicationImpact.PUBLISH_RED
@@ -990,6 +1006,7 @@ def build_source_pr_comment(
             f"автоперевод пропущен ({BILINGUAL_SKIP_MARKER}). "
             "Translation PR не создаётся.\n\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            f"{yellow_section()}"
         )
 
     if (
@@ -1036,10 +1053,7 @@ def build_source_pr_comment(
             body += "\n**Почему публикация удержана:**\n\n"
             for path, reason in withhold_details:
                 body += f"- `{path}`: {reason}. Действие: {action}.\n"
-        if result.yellow_warnings:
-            body += "\n**Жёлтые предупреждения (не блокируют):**\n\n"
-            for warning in result.yellow_warnings:
-                body += f"- {warning}\n"
+        body += yellow_section()
         if config.reporting.include_cost:
             cost_label = _format_cost_estimate(
                 usage=usage,
@@ -1073,6 +1087,7 @@ def build_source_pr_comment(
             f"| Файлов | {total} |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             f"{cost_line}"
+            f"{yellow_section()}"
         )
 
     if total:
@@ -1149,6 +1164,7 @@ def build_source_pr_comment(
             f"\n{bilingual_skip} пар(ы) пропущены — bilingual update в source PR "
             f"({BILINGUAL_SKIP_MARKER}).\n"
         )
+    body += yellow_section()
     return body
 
 

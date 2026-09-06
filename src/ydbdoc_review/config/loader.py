@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
+from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 # --- Schema ---
 
@@ -89,6 +89,13 @@ class LLMConfig(BaseModel):
         return v.rstrip("/")
 
 
+class RuAuthorityMode(StrEnum):
+    """RU snapshot policy for the product ``doc_translate`` workflow."""
+
+    CURRENT = "current"
+    SOURCE_PRESERVING = "source-preserving"
+
+
 class TranslationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_lang: str = "ru"
@@ -99,6 +106,7 @@ class TranslationConfig(BaseModel):
     batch_json_overhead_chars: int = 512
     segment_max_source_chars: int = 1200
     critic_feedback_retries: int = 2
+    ru_authority_mode: RuAuthorityMode = RuAuthorityMode.CURRENT
     # REQUIREMENTS_RU.md §5 / §13: differential seed/splice off by default.
     # Override via YDBDOC_TRANSLATION_* only for experiments; TranslateStep
     # force-disables splice on the product doc_translate path.
@@ -451,4 +459,3 @@ def _load_yaml(yaml_path: Path | None) -> dict[str, Any]:
     pkg = resources.files("ydbdoc_review.config")
     text = (pkg / "default.yaml").read_text(encoding="utf-8")
     return yaml.safe_load(text) or {}
-

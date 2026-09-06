@@ -316,3 +316,41 @@ def test_pull_request_context():
     assert ctx.number == 5
     assert ctx.head_ref == "feat"
     assert ctx.merged is False
+    assert ctx.labels == frozenset()
+
+
+def test_pull_request_context_preserves_only_valid_exact_label_names():
+    class FakeClient:
+        def get_pull(self, owner, repo, pr_number):
+            return {
+                "title": "t",
+                "head": {
+                    "ref": "feat",
+                    "sha": "abc",
+                    "repo": {
+                        "clone_url": "https://github.com/o/r.git",
+                        "full_name": "o/r",
+                    },
+                },
+                "base": {"ref": "main"},
+                "labels": [
+                    {"name": "doc_translate_source_preserving"},
+                    {"name": "doc_translate_source_preserving"},
+                    {"name": "Doc_Translate_Source_Preserving"},
+                    {"name": " trailing-space "},
+                    {"name": ""},
+                    {"name": None},
+                    {},
+                    "doc_translate_source_preserving",
+                ],
+            }
+
+    ctx = pull_request_context(FakeClient(), "o", "r", 5)  # type: ignore[arg-type]
+
+    assert ctx.labels == frozenset(
+        {
+            "doc_translate_source_preserving",
+            "Doc_Translate_Source_Preserving",
+            " trailing-space ",
+        }
+    )

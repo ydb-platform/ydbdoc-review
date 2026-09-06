@@ -14,8 +14,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from requests.exceptions import Timeout
 
-from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.config.loader import RuAuthorityMode, load_config
 from ydbdoc_review.github.errors import GitHubAPIError
+from ydbdoc_review.github.git_ops import (
+    RefMutationOperation,
+    RefMutationReceipt,
+    RefMutationStatus,
+    RemoteRefLease,
+)
+from ydbdoc_review.github.provenance import RuAuthority, TranslationArtifactProvenance
 from ydbdoc_review.github.workflow import (
     _DeferredOutboundFragments,
     _OutboundFragmentOccurrence,
@@ -28,7 +35,10 @@ from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.ops.lifecycle import append_retention_footer
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.publication import evaluate_publication_impact
+from ydbdoc_review.pipeline.publication import (
+    classify_publication_blockers,
+    evaluate_publication_impact,
+)
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     FinalTreeBlocker,
@@ -62,6 +72,60 @@ def _env() -> dict[str, str]:
         "GITHUB_PUSH_TOKEN": "ghp",
         "YDBDOC_SKIP_OPS_GATES": "1",
     }
+
+
+def _repo_head_sha(repo_path: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _fixture_provenance(
+    repo_path: str,
+    *,
+    baseline_sha: str | None = None,
+    candidate_sha: str | None = None,
+) -> TranslationArtifactProvenance:
+    """Coherent A05 seam object for publication tests that own other behavior."""
+    head = _repo_head_sha(repo_path)
+    baseline = baseline_sha or head
+    return TranslationArtifactProvenance(
+        RuAuthority(
+            source_repo="o/r",
+            source_pr=7,
+            source_base_sha=baseline,
+            source_head_sha=baseline,
+            baseline_sha=baseline,
+            ru_sha=baseline,
+            mode=RuAuthorityMode.CURRENT,
+        ),
+        candidate_sha or head,
+    )
+
+
+def _update_receipt(
+    branch: str,
+    expected_sha: str | None,
+    requested_sha: str,
+) -> RefMutationReceipt:
+    status = (
+        RefMutationStatus.NOOP
+        if expected_sha == requested_sha
+        else RefMutationStatus.CHANGED
+    )
+    return RefMutationReceipt(
+        lease=RemoteRefLease(branch, expected_sha),
+        operation=RefMutationOperation.UPDATE,
+        requested_sha=requested_sha,
+        status=status,
+        porcelain_flag="=" if status is RefMutationStatus.NOOP else "*",
+        stdout="",
+        stderr="",
+    )
 
 
 @pytest.fixture
@@ -242,16 +306,37 @@ def _run_top_level(
     existing_pr_body: str = "",
     existing_pr_draft: bool = True,
 ):
+    source_sha = _repo_head_sha(repo_path)
     pull = {
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": source_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": source_sha},
     }
+    provenance = TranslationArtifactProvenance(
+        RuAuthority(
+            source_repo="o/r",
+            source_pr=7,
+            source_base_sha=source_sha,
+            source_head_sha=source_sha,
+            baseline_sha=source_sha,
+            ru_sha=source_sha,
+            mode=RuAuthorityMode.CURRENT,
+        ),
+        source_sha,
+    )
     gh = MagicMock()
+    branch_was_present = (
+        late_existing_pr if remote_branch_exists is None else remote_branch_exists
+    )
+    remote_state = {
+        "sha": (
+            remote_branch_sha or "old-remote-sha" if branch_was_present else None
+        )
+    }
 
     def _get_pull(_owner, _repo, number):
         if number == 7:
@@ -268,7 +353,7 @@ def _run_top_level(
             "body": existing_pr_body,
             "head": {
                 "ref": "ydbdoc-review/pr-7",
-                "sha": remote_branch_sha or "old-remote-sha",
+                "sha": remote_state["sha"],
                 "repo": {
                     "clone_url": "https://github.com/o/r.git",
                     "full_name": "o/r",
@@ -279,12 +364,7 @@ def _run_top_level(
 
     gh.get_pull.side_effect = _get_pull
     gh.iter_issue_comments.return_value = iter(())
-    branch_was_present = (
-        late_existing_pr if remote_branch_exists is None else remote_branch_exists
-    )
-    gh.get_branch_sha.return_value = (
-        remote_branch_sha or "old-remote-sha" if branch_was_present else None
-    )
+    gh.get_branch_sha.side_effect = lambda *_args, **_kwargs: remote_state["sha"]
     created_pull = (
         (
             "https://github.com/o/r/pull/99",
@@ -337,18 +417,40 @@ def _run_top_level(
             )
         )
         finish = stack.enter_context(patch("ydbdoc_review.github.workflow.finish_ops_job"))
+        effective_source_changes = (
+            [("ydb/docs/ru/a.md", "modified")]
+            if source_changes is None
+            else source_changes
+        )
         stack.enter_context(
             patch(
                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                return_value=(
-                    [("ydb/docs/ru/a.md", "modified")]
-                    if source_changes is None
-                    else source_changes
-                ),
+                return_value=effective_source_changes,
             )
         )
         stack.enter_context(
-            patch("ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[])
+            patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                return_value=effective_source_changes,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.parse_authority_evidence",
+                return_value=provenance,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.validate_authority_evidence",
+                return_value=provenance,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.bind_translation_artifact",
+                return_value=provenance,
+            )
         )
         stack.enter_context(
             patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=pr_result)
@@ -406,22 +508,27 @@ def _run_top_level(
             rollback = stack.enter_context(
                 patch("ydbdoc_review.github.workflow.rollback_pushed_branch")
             )
-            if event_log is not None:
-                def _rollback_mock(*_args, **_kwargs):
-                    event_log.append("rollback")
-                    if rollback_error is not None:
-                        raise rollback_error
 
-                rollback.side_effect = _rollback_mock
-            if event_log is not None:
-                def _push_mock(*_args, **_kwargs):
+            def _push_mock(*_args, **kwargs):
+                if event_log is not None:
                     event_log.append("push")
-                    if push_fails:
-                        raise RuntimeError("guarded push lease failed")
+                if push_fails:
+                    raise RuntimeError("guarded push lease failed")
+                expected = kwargs["expected_remote_sha"]
+                requested = kwargs["source_sha"]
+                remote_state["sha"] = requested
+                return _update_receipt("ydbdoc-review/pr-7", expected, requested)
 
-                push.side_effect = _push_mock
-            elif push_fails:
-                push.side_effect = RuntimeError("guarded push lease failed")
+            push.side_effect = _push_mock
+
+            def _rollback_mock(*_args, **kwargs):
+                if event_log is not None:
+                    event_log.append("rollback")
+                if rollback_error is not None:
+                    raise rollback_error
+                remote_state["sha"] = kwargs["previous_sha"]
+
+            rollback.side_effect = _rollback_mock
         else:
             import ydbdoc_review.github.workflow as workflow
 
@@ -430,7 +537,9 @@ def _run_top_level(
             def _push_real(*args, **kwargs):
                 if event_log is not None:
                     event_log.append("push")
-                return real_push(*args, **kwargs)
+                receipt = real_push(*args, **kwargs)
+                remote_state["sha"] = kwargs["source_sha"]
+                return receipt
 
             stack.enter_context(
                 patch(
@@ -1451,15 +1560,48 @@ def test_soft_keep_and_safe_en_link_target_publish_one_draft_red(
     assert gh.create_pull.call_args.kwargs["draft"] is True
 
 
+def test_final_link_blocker_does_not_exempt_different_link_message(
+    publication_repo: str,
+):
+    """Removing full-message matching must withhold this href mismatch."""
+    result = _pair_result(
+        target_text="Translated.\n",
+        blocking=["href_parity: missing auth_config.md#security-auth"],
+    )
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/security/authentication.md",
+            code="en_link_target",
+            message="en_link_target: authentication.md: missing auth_config.md#certificate-auth",
+        )
+    ]
+
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
 @pytest.mark.parametrize(
     "blocking",
     [
         "href_parity: missing auth_config.md#security-auth",
-        "anchor_parity: RU/EN explicit {#id} differ",
+        "anchor_parity: RU/EN explicit {#security-auth} differ",
     ],
 )
-def test_final_link_blocker_keeps_related_link_heuristic_repairable(blocking: str):
-    result = _pair_result(target_text="Translated.\n", blocking=[blocking])
+def test_final_link_blocker_does_not_exempt_unrelated_link_heuristic(
+    publication_repo: str,
+    blocking: str,
+):
+    """Removing global link-prefix bypass must withhold unrelated pair findings."""
+    result = _pair_result(
+        target_text="Translated.\n",
+        blocking=[blocking],
+    )
     result.final_tree_blockers = [
         FinalTreeBlocker(
             path="ydb/docs/en/security/authentication.md",
@@ -1468,10 +1610,113 @@ def test_final_link_blocker_keeps_related_link_heuristic_repairable(blocking: st
         )
     ]
 
+    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_final_link_blocker_requires_an_identical_full_message_on_same_path():
+    result = _pair_result(
+        blocking=["en_link_target: a.md: missing target auth_config.md#security-auth"]
+    )
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message="en_link_target: a.md: missing target auth_config.md#certificate-auth",
+        )
+    ]
+
+    blockers = classify_publication_blockers(result)
+
+    assert blockers.unsafe is True
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+
+
+def test_final_link_blocker_requires_an_identical_normalized_target_path():
+    message = "en_link_target: a.md: missing target auth_config.md#security-auth"
+    result = _pair_result(blocking=[message])
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/security/authentication.md",
+            code="en_link_target",
+            message=message,
+        )
+    ]
+
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+
+
+def test_final_link_blocker_does_not_exempt_additional_message_on_same_path():
+    matched = "en_link_target: a.md: missing target auth_config.md#security-auth"
+    result = _pair_result(
+        blocking=[
+            matched,
+            "href_parity: missing auth_config.md#certificate-auth",
+        ]
+    )
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path="ydb/docs/en/a.md",
+            code="en_link_target",
+            message=matched,
+        )
+    ]
+
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+
+
+@pytest.mark.parametrize("blocker_path", ["ydb/docs/en/a.md", "ydb\\docs\\en\\a.md"])
+def test_exact_final_link_blocker_on_normalized_target_path_publishes_red(
+    blocker_path: str,
+):
+    message = "en_link_target: a.md: missing target auth_config.md#security-auth"
+    result = _pair_result(blocking=[message])
+    result.final_tree_blockers = [
+        FinalTreeBlocker(
+            path=blocker_path,
+            code="en_link_target",
+            message=message,
+        )
+    ]
+
     assert evaluate_publication_impact(result) == PublicationImpact.PUBLISH_RED
 
 
-def test_materialized_soft_keep_with_unsafe_blocker_still_publishes_draft_red(
+def test_typed_final_link_blocker_without_a_pair_publishes_red():
+    result = PRTranslationResult(
+        final_tree_blockers=[
+            FinalTreeBlocker(
+                path="ydb/docs/en/impact.md",
+                code="en_link_target",
+                message="en_link_target: impact.md: missing target",
+            )
+        ]
+    )
+
+    assert evaluate_publication_impact(result) == PublicationImpact.PUBLISH_RED
+
+
+def test_unsupported_typed_final_tree_blocker_is_unsafe():
+    result = PRTranslationResult(
+        final_tree_blockers=[
+            FinalTreeBlocker(  # type: ignore[arg-type]
+                path="ydb/docs/en/a.md",
+                code="unexpected_policy_blocker",
+                message="unexpected_policy_blocker: must not publish",
+            )
+        ]
+    )
+
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+
+
+def test_mutation_or_has_materialized_soft_keep_with_unsafe_blocker_withholds(
     publication_repo: str,
 ):
     result = _pair_result(
@@ -1480,14 +1725,91 @@ def test_materialized_soft_keep_with_unsafe_blocker_still_publishes_draft_red(
     )
     result.pair_results[0].soft_keep_reason = "translation timed out"
 
-    job, gh, prepare, commit, push, _finish = _run_top_level(
+    job, gh, prepare, commit, push, finish = _run_top_level(
         publication_repo,
         result,
     )
 
-    assert job.pr_result.publication_impact == "PUBLISH_RED"
-    assert prepare.call_count == commit.call_count == push.call_count == 1
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
+
+
+def test_mutation_or_has_materialized_soft_keep_withholds_unsafe_from_different_file(
+    publication_repo: str,
+):
+    retained = "Existing reviewed English.\n"
+    Path(publication_repo, "ydb/docs/en/a.md").write_text(retained, encoding="utf-8")
+    Path(publication_repo, "ydb/docs/ru/b.md").write_text(
+        "# Другой источник\n\n{% include [note](./core/_includes/note.md) %}\n",
+        encoding="utf-8",
+    )
+    Path(publication_repo, "ydb/docs/en/b.md").write_text(
+        "# Different target\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "ydb/docs/en/a.md", "ydb/docs/ru/b.md", "ydb/docs/en/b.md"],
+        cwd=publication_repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "retained soft-keep and separate unsafe pair"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    result = _pair_result(target_text=retained)
+    result.pair_results[0].soft_keep_reason = "translation timed out"
+    unsafe_pair = DocPair(
+        ru_path="ydb/docs/ru/b.md",
+        en_path="ydb/docs/en/b.md",
+        ru_changed=True,
+    )
+    result.pair_results.append(
+        PairRunResult(
+            plan=PairPlan(
+                pair=unsafe_pair,
+                action="translate_to_en",
+                source_path=unsafe_pair.ru_path,
+                target_path=unsafe_pair.en_path,
+                source_lang="ru",
+                target_lang="en",
+            ),
+            target_text="# Different target\n",
+            source_text=(
+                "# Другой источник\n\n"
+                "{% include [note](./core/_includes/note.md) %}\n"
+            ),
+            file_result=FileTranslationResult(
+                file_path=unsafe_pair.en_path,
+                final_text="# Different target\n",
+                segments_count=1,
+                verdict="blocked",
+                prompt_version="test",
+                heuristic_blocking=["include_parity: cannot auto-insert EN include"],
+            ),
+        )
+    )
+
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+        source_changes=[
+            ("ydb/docs/ru/a.md", "modified"),
+            ("ydb/docs/ru/b.md", "modified"),
+        ],
+    )
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+    assert finish.call_args.kwargs["status"] == "failed"
 
 
 def test_soft_keep_with_blocked_critic_withholds_unsafe(publication_repo: str):
@@ -1686,19 +2008,37 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
         capture_output=True,
     )
     (repo / "ydb/docs/ru/a.md").write_text(source_text, encoding="utf-8")
+    source_sha = _repo_head_sha(publication_repo)
+    provenance = _fixture_provenance(publication_repo)
 
     pull = {
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": source_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": source_sha},
     }
     gh = MagicMock()
-    gh.get_pull.return_value = pull
-    gh.get_branch_sha.return_value = None
+    remote_state: dict[str, str | None] = {"sha": None}
+
+    def _get_pull(_owner, _repo, number):
+        if number == 7:
+            return pull
+        return {
+            "draft": True,
+            "body": "",
+            "head": {
+                "ref": "ydbdoc-review/pr-7",
+                "sha": remote_state["sha"],
+                "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+            },
+            "base": {"ref": "main"},
+        }
+
+    gh.get_pull.side_effect = _get_pull
+    gh.get_branch_sha.side_effect = lambda *_args, **_kwargs: remote_state["sha"]
     gh.find_open_pull_by_head.return_value = None
     gh.create_pull.return_value = ("https://github.com/o/r/pull/99", 99, True)
     gh.iter_issue_comments.return_value = iter(())
@@ -1724,7 +2064,16 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
             )
         )
         stack.enter_context(
-            patch("ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[])
+            patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                return_value=[("ydb/docs/ru/a.md", "modified")],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.bind_translation_artifact",
+                return_value=provenance,
+            )
         )
         stack.enter_context(
             patch("ydbdoc_review.harness.pair.FileHarness.run", fake_file_result)
@@ -1742,6 +2091,17 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
             patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True)
         )
         push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
+
+        def _push(*_args, **kwargs):
+            requested = kwargs["source_sha"]
+            remote_state["sha"] = requested
+            return _update_receipt(
+                "ydbdoc-review/pr-7",
+                kwargs["expected_remote_sha"],
+                requested,
+            )
+
+        push.side_effect = _push
         stack.enter_context(
             patch(
                 "ydbdoc_review.github.workflow.run_doc_verify",
@@ -1783,20 +2143,20 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
 
 def test_missing_red_pr_is_hard_failure_and_not_false_green(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
+    events: list[str] = []
 
-    job, gh, _prepare, _commit, _push, finish = _run_top_level(
-        publication_repo,
-        result,
-        create_succeeds=False,
-    )
+    with pytest.raises(
+        RuntimeError,
+        match="pull request creation returned no publication",
+    ):
+        _run_top_level(
+            publication_repo,
+            result,
+            create_succeeds=False,
+            event_log=events,
+        )
 
-    assert job.translation_pr_number is None
-    assert job_requires_nonzero_exit(job) is True
-    source_summary = gh.post_issue_comment.call_args.args[3]
-    assert "translation PR **не создан**" in source_summary
-    assert "🔴" in source_summary
-    assert "перевод готов" not in source_summary
-    assert finish.call_args.kwargs["status"] == "failed"
+    assert events == ["discover", "push", "create", "rollback"]
 
 
 def test_final_tree_blocker_without_pair_survives_as_draft_red(publication_repo: str):
@@ -1859,7 +2219,7 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         check=True,
     )
     subprocess.run(
-        ["git", "fetch", "origin", "main:refs/remotes/origin/feature/docs"],
+        ["git", "fetch", "origin", "main:refs/remotes/origin/main"],
         cwd=publication_repo,
         check=True,
         capture_output=True,
@@ -1905,17 +2265,20 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "source-head",
-            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+            "sha": source_checkout_sha,
+            "repo": {
+                "clone_url": "https://github.com/contributor/r.git",
+                "full_name": "contributor/r",
+            },
         },
-        "base": {"ref": "main", "sha": "source-base"},
+        "base": {"ref": "main", "sha": upstream_base_sha},
     }
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
         "body": "",
         "head": {
             "ref": "ydbdoc-review/pr-7",
-            "sha": "translation-head",
+            "sha": None,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "main"},
@@ -1925,10 +2288,15 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         translation_pull if number == 99 else source_pull
     )
     gh.get_file_text.return_value = "Привет.\n"
+    remote_state: dict[str, str | None] = {"sha": None}
+    gh.get_branch_sha.side_effect = lambda *_args, **_kwargs: remote_state["sha"]
     gh.iter_issue_comments.return_value = iter(())
     gh.find_open_pull_by_head.return_value = None
     gh.create_pull.return_value = ("https://github.com/o/r/pull/99", 99, True)
     gh.post_issue_comment.return_value = "comment-url"
+    gh.update_pull_body.side_effect = (
+        lambda _owner, _repo, _number, body: translation_pull.__setitem__("body", body)
+    )
 
     translate_changes = [("ydb/docs/ru/a.md", "modified")]
     verify_changes = [
@@ -1957,6 +2325,16 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
         verify_job = real_verify(**kwargs)
         verify_jobs.append(verify_job)
         return verify_job
+
+    def _push(*_args, **kwargs):
+        requested = kwargs["source_sha"]
+        remote_state["sha"] = requested
+        translation_pull["head"]["sha"] = requested
+        return _update_receipt(
+            "ydbdoc-review/pr-7",
+            kwargs["expected_remote_sha"],
+            requested,
+        )
 
     ops_ctx = SimpleNamespace(recorder=None, continue_feedback=None)
     with (
@@ -1998,7 +2376,7 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
             "ydbdoc_review.github.workflow.prepare_translation_branch_on_base",
             side_effect=_prepare_once,
         ),
-        patch("ydbdoc_review.github.workflow.push_branch"),
+        patch("ydbdoc_review.github.workflow.push_branch", side_effect=_push),
         patch(
             "ydbdoc_review.github.workflow.run_doc_verify",
             side_effect=_capture_real_verify,
@@ -2008,7 +2386,7 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
             repo_path=publication_repo,
             github_repo="o/r",
             pr_number=7,
-            merge_base_with="HEAD",
+            merge_base_with=upstream_base_sha,
             config=load_config(env=_env()),
         )
 
@@ -2048,6 +2426,7 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
 def test_verify_empty_scoped_result_preserves_inherited_no_pair_blocker(
     publication_repo: str,
 ):
+    checkout_sha = _repo_head_sha(publication_repo)
     blocker = FinalTreeBlocker(
         path="ydb/docs/en/impact.md",
         code="en_link_target",
@@ -2058,18 +2437,28 @@ def test_verify_empty_scoped_result_preserves_inherited_no_pair_blocker(
         "body": "",
         "head": {
             "ref": "ydbdoc-review/pr-7",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "main"},
     }
     gh = MagicMock()
     gh.get_pull.return_value = pull
+    gh.get_branch_sha.return_value = checkout_sha
+    provenance = _fixture_provenance(publication_repo, candidate_sha=checkout_sha)
 
     with (
         patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
         patch("ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]),
         patch("ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[]),
+        patch(
+            "ydbdoc_review.github.workflow.parse_authority_evidence",
+            return_value=provenance,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.validate_authority_evidence",
+            return_value=provenance,
+        ),
     ):
         job = run_doc_verify(
             repo_path=publication_repo,
@@ -2090,10 +2479,25 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
     publication_repo: str,
 ):
     impact_path = "ydb/docs/en/impact.md"
+    baseline_ref = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     Path(publication_repo, impact_path).write_text(
         "See [missing](gone.md).\n",
         encoding="utf-8",
     )
+    subprocess.run(["git", "add", impact_path], cwd=publication_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "durable impact for verify snapshot"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
+    checkout_sha = _repo_head_sha(publication_repo)
     blocker = FinalTreeBlocker(
         path=impact_path,
         code="en_link_target",
@@ -2114,7 +2518,7 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
         "body": body,
         "head": {
             "ref": "ydbdoc-review/pr-7",
-            "sha": "translation-sha",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "main"},
@@ -2134,6 +2538,12 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
         translation_pull if number == 99 else source_pull
     )
     gh.get_file_text.return_value = "Привет.\n"
+    gh.get_branch_sha.return_value = checkout_sha
+    provenance = _fixture_provenance(
+        publication_repo,
+        baseline_sha=baseline_ref,
+        candidate_sha=checkout_sha,
+    )
 
     def _api_changes(_gh, _owner, _repo, number):
         if number == 7:
@@ -2158,12 +2568,20 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
             "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
             return_value=[],
         ),
+        patch(
+            "ydbdoc_review.github.workflow.parse_authority_evidence",
+            return_value=provenance,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.validate_authority_evidence",
+            return_value=provenance,
+        ),
     ):
         job = run_doc_verify(
             repo_path=publication_repo,
             github_repo="o/r",
             pr_number=99,
-            merge_base_with="HEAD",
+            merge_base_with=baseline_ref,
             dry_run=True,
             config=load_config(env=_env()),
             skip_ops_gates=True,
@@ -2200,13 +2618,14 @@ def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
     published_result.publication_impact = PublicationImpact.PUBLISH_RED
     body = build_translation_pr_body(7, "o/r", publication_result=published_result)
     impact_file.unlink()
+    checkout_sha = _repo_head_sha(publication_repo)
 
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
         "body": body,
         "head": {
             "ref": "ydbdoc-review/pr-7",
-            "sha": "translation-sha",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "main"},
@@ -2226,6 +2645,8 @@ def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
         translation_pull if number == 99 else source_pull
     )
     gh.get_file_text.return_value = "Привет.\n"
+    gh.get_branch_sha.return_value = checkout_sha
+    provenance = _fixture_provenance(publication_repo, candidate_sha=checkout_sha)
 
     def api_changes(_gh, _owner, _repo, number):
         if number == 7:
@@ -2246,6 +2667,12 @@ def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
     ), patch(
         "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
         return_value=[],
+    ), patch(
+        "ydbdoc_review.github.workflow.parse_authority_evidence",
+        return_value=provenance,
+    ), patch(
+        "ydbdoc_review.github.workflow.validate_authority_evidence",
+        return_value=provenance,
     ):
         job = run_doc_verify(
             repo_path=publication_repo,
@@ -2290,7 +2717,33 @@ def _run_standalone_soft_keep_verify(
         check=True,
         capture_output=True,
     )
+    checkout_sha = _repo_head_sha(publication_repo)
     Path(publication_repo, path).write_text(current_text, encoding="utf-8")
+    verify_candidate_sha: str | None = None
+    if not no_commit:
+        subprocess.run(["git", "add", path], cwd=publication_repo, check=True)
+        candidate_tree = subprocess.run(
+            ["git", "write-tree"],
+            cwd=publication_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        verify_candidate_sha = subprocess.run(
+            [
+                "git",
+                "commit-tree",
+                candidate_tree,
+                "-p",
+                checkout_sha,
+                "-m",
+                "fixture verify candidate",
+            ],
+            cwd=publication_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
     blocker = _soft_keep_blocker(path, original)
     published = PRTranslationResult(
         final_tree_blockers=[blocker],
@@ -2302,7 +2755,7 @@ def _run_standalone_soft_keep_verify(
         "draft": translation_draft,
         "head": {
             "ref": "ydbdoc-review/pr-7",
-            "sha": "translation-sha",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "main"},
@@ -2324,7 +2777,8 @@ def _run_standalone_soft_keep_verify(
     gh.get_file_text.return_value = Path(publication_repo, ru_path).read_text(
         encoding="utf-8"
     )
-    gh.get_branch_sha.return_value = "translation-sha"
+    remote_state: dict[str, str | None] = {"sha": checkout_sha}
+    gh.get_branch_sha.side_effect = lambda *_args, **_kwargs: remote_state["sha"]
     gh.post_issue_comment.return_value = "https://github.com/o/r/pull/99#issuecomment-1"
     convert_calls = 0
 
@@ -2346,6 +2800,11 @@ def _run_standalone_soft_keep_verify(
     def api_changes(_gh, _owner, _repo, number):
         return [(ru_path, "modified")] if number == 7 else [(path, "modified")]
 
+    provenance = _fixture_provenance(
+        publication_repo,
+        baseline_sha=checkout_sha,
+        candidate_sha=checkout_sha,
+    )
     with ExitStack() as stack:
         stack.enter_context(
             patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh)
@@ -2374,6 +2833,18 @@ def _run_standalone_soft_keep_verify(
                 return_value=[],
             )
         )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.parse_authority_evidence",
+                return_value=provenance,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.validate_authority_evidence",
+                return_value=provenance,
+            )
+        )
         if not no_commit:
             prepare = stack.enter_context(
                 patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base")
@@ -2391,22 +2862,38 @@ def _run_standalone_soft_keep_verify(
                 patch("ydbdoc_review.github.workflow.push_branch")
             )
 
-            def push_verify(*_args, **_kwargs):
+            def push_verify(*_args, **kwargs):
                 if event_log is not None:
                     event_log.append("push")
                 if ready_transition_after_push:
                     translation_pull["draft"] = False
+                requested = kwargs["source_sha"]
+                remote_state["sha"] = requested
+                translation_pull["head"]["sha"] = requested
+                return _update_receipt(
+                    "ydbdoc-review/pr-7",
+                    kwargs["expected_remote_sha"],
+                    requested,
+                )
 
             push.side_effect = push_verify
+            assert verify_candidate_sha is not None
             stack.enter_context(
-                patch("ydbdoc_review.github.workflow.git_head_sha", return_value="verify-sha")
+                patch(
+                    "ydbdoc_review.github.workflow.git_head_sha",
+                    return_value=verify_candidate_sha,
+                )
             )
             rollback = stack.enter_context(
                 patch("ydbdoc_review.github.workflow.rollback_pushed_branch")
             )
-            rollback.side_effect = lambda *_args, **_kwargs: (
-                event_log.append("rollback") if event_log is not None else None
-            )
+            def rollback_verify(*_args, **kwargs):
+                if event_log is not None:
+                    event_log.append("rollback")
+                remote_state["sha"] = kwargs["previous_sha"]
+                translation_pull["head"]["sha"] = kwargs["previous_sha"]
+
+            rollback.side_effect = rollback_verify
         job = run_doc_verify(
             repo_path=publication_repo,
             github_repo="o/r",
@@ -2452,9 +2939,8 @@ def test_verify_with_unresolved_soft_keep_converts_ready_pr_back_to_draft(
     assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
     assert gh.convert_pull_to_draft.call_args_list == [
         (("o", "r", 99), {}),
-        (("o", "r", 99), {}),
     ]
-    assert events == ["draft", "draft", "body"]
+    assert events == ["draft", "body"]
 
 
 def test_verify_clears_soft_keep_but_keeps_red_body_when_other_pair_is_unsafe(
@@ -2483,12 +2969,11 @@ def test_verify_clears_soft_keep_but_keeps_red_body_when_other_pair_is_unsafe(
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
     assert gh.convert_pull_to_draft.call_args_list == [
         (("o", "r", 99), {}),
-        (("o", "r", 99), {}),
     ]
     body = gh.update_pull_body.call_args.args[3]
     assert "QA RED, do not merge" in body
     assert "translation_soft_keep" not in body
-    assert events == ["draft", "draft", "body"]
+    assert events == ["draft", "body"]
 
 
 def test_verify_redrafts_ready_transition_before_red_body_after_branch_push(
@@ -2603,6 +3088,29 @@ def test_standalone_verify_keeps_changed_soft_keep_if_unverified_or_unsafe(
 def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
     publication_repo: str,
 ):
+    checkout_sha = _repo_head_sha(publication_repo)
+    candidate_tree = subprocess.run(
+        ["git", "show", "-s", "--format=%T", checkout_sha],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate_sha = subprocess.run(
+        [
+            "git",
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            checkout_sha,
+            "-m",
+            "fixture recursive verify candidate",
+        ],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     blocker = FinalTreeBlocker(
         path="ydb/docs/en/impact.md",
         code="en_link_target",
@@ -2613,7 +3121,7 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
         "body": "",
         "head": {
             "ref": "ydbdoc-review/pr-7",
-            "sha": "translation-sha",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "main"},
@@ -2632,6 +3140,8 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
         translation_pull if number == 99 else source_pull
     )
     gh.get_file_text.return_value = "Привет.\n"
+    remote_state: dict[str, str | None] = {"sha": checkout_sha}
+    gh.get_branch_sha.side_effect = lambda *_args, **_kwargs: remote_state["sha"]
     gh.iter_issue_comments.return_value = iter(())
     gh.post_issue_comment.return_value = "comment-url"
 
@@ -2640,6 +3150,31 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
             return [("ydb/docs/ru/a.md", "modified")]
         return [("ydb/docs/en/a.md", "modified")]
 
+    commit_calls = 0
+
+    def _commit(*_args, **_kwargs):
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls == 1:
+            subprocess.run(
+                ["git", "update-ref", "HEAD", candidate_sha],
+                cwd=publication_repo,
+                check=True,
+            )
+            return True
+        return False
+
+    def _push(*_args, **kwargs):
+        requested = kwargs["source_sha"]
+        remote_state["sha"] = requested
+        translation_pull["head"]["sha"] = requested
+        return _update_receipt(
+            "ydbdoc-review/pr-7",
+            kwargs["expected_remote_sha"],
+            requested,
+        )
+
+    provenance = _fixture_provenance(publication_repo, candidate_sha=checkout_sha)
     with (
         patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
         patch(
@@ -2660,22 +3195,20 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
         patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"),
         patch(
             "ydbdoc_review.github.workflow.git_commit_paths",
-            side_effect=[True, False],
+            side_effect=_commit,
         ),
-        patch("ydbdoc_review.github.workflow.push_branch"),
-        patch(
-            "ydbdoc_review.github.workflow.git_head_sha",
-            side_effect=[
-                "checkout-one",
-                "before-one",
-                "after-one",
-                "checkout-two",
-                "before-two",
-            ],
-        ),
+        patch("ydbdoc_review.github.workflow.push_branch", side_effect=_push),
         patch(
             "ydbdoc_review.github.workflow._enforce_report_checkout_bytes",
             return_value=[],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.parse_authority_evidence",
+            return_value=provenance,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.validate_authority_evidence",
+            return_value=provenance,
         ),
     ):
         job = run_doc_verify(
@@ -2923,7 +3456,7 @@ def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creat
         event_log=events,
     )
 
-    assert events == ["discover", "create", "push", "create", "refetch"]
+    assert events == ["discover", "create", "push", "create", "refetch", "body"]
     assert job.translation_pr_number == 99
     assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [True, True]
 
@@ -3391,7 +3924,10 @@ def test_normal_publication_uses_exact_remote_lease_for_existing_and_new_branch(
     )
 
     assert job.pr_result.publication_impact == "PUBLISH_NORMAL"
-    gh.get_branch_sha.assert_called_once_with("o", "r", "ydbdoc-review/pr-7")
+    assert gh.get_branch_sha.call_args_list == [
+        (("o", "r", "ydbdoc-review/pr-7"), {}),
+        (("o", "r", "ydbdoc-review/pr-7"), {}),
+    ]
     assert push.call_args.kwargs["guard_remote_ref"] is True
     assert push.call_args.kwargs["expected_remote_sha"] == remote_sha
 

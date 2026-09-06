@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.navigation.link_deps import (
-    MAX_EXTRA_LINK_DEPS,
-    collect_md_link_dependencies,
-)
+from ydbdoc_review.navigation import link_deps
+from ydbdoc_review.navigation.link_deps import MAX_EXTRA_LINK_DEPS, collect_md_link_dependencies
 from ydbdoc_review.navigation.scope_planner import plan_translation_scope
 
 
@@ -191,3 +189,67 @@ def test_plan_translation_scope_hooks_link_deps() -> None:
     assert dep in plan.doc_ru_paths
     assert dep in plan.doc_from_main
     assert seed in plan.doc_from_diff
+
+
+def test_canonical_md_dependency_path_follows_all_redirects_and_rejects_cycles() -> None:
+    redirects = (
+        "common:\n"
+        "  - from: /old.md\n"
+        "    to: /middle.md\n"
+        "  - from: /middle.md\n"
+        "    to: /live.md\n"
+    )
+    assert link_deps.canonical_md_dependency_path(
+        "ydb\\docs\\ru\\core\\old.md",
+        redirects_yaml=redirects,
+    ) == "ydb/docs/ru/core/live.md"
+
+    cycle = (
+        "common:\n"
+        "  - from: /cycle-a.md\n"
+        "    to: /cycle-b.md\n"
+        "  - from: /cycle-b.md\n"
+        "    to: /cycle-a.md\n"
+    )
+    assert (
+        link_deps.canonical_md_dependency_path(
+            "ydb/docs/ru/core/cycle-a.md",
+            redirects_yaml=cycle,
+        )
+        is None
+    )
+
+
+def test_direct_md_link_dependencies_is_canonical_and_does_not_recurse() -> None:
+    seed = "ydb/docs/ru/core/seed.md"
+    live = "ydb/docs/ru/core/live.md"
+    child = "ydb/docs/ru/core/child.md"
+    empty = "ydb/docs/ru/core/empty.md"
+    existing = "ydb/docs/ru/core/existing.md"
+    redirects = (
+        "common:\n"
+        "  - from: /old.md\n"
+        "    to: /middle.md\n"
+        "  - from: /middle.md\n"
+        "    to: /live.md\n"
+    )
+    ru = {
+        seed: "[old](old.md) [empty](empty.md) [existing](existing.md)\n",
+        live: "[child](child.md)\n",
+        child: "# Child\n",
+        empty: "",
+        existing: "# Existing\n",
+    }
+    en = {"ydb/docs/en/core/existing.md": "# Existing EN\n"}
+    read_ru, read_en = _readers(ru, en, redirects=redirects)
+
+    result = link_deps.direct_md_link_dependencies(
+        seed,
+        ru[seed],
+        read_ru=read_ru,
+        read_en=read_en,
+        redirects_yaml=redirects,
+    )
+
+    assert result == frozenset({live, empty})
+    assert child not in result

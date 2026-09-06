@@ -7,6 +7,7 @@ anchors map to a single English id (job dictionary / ``english_yfm_anchor``).
 
 from __future__ import annotations
 
+import posixpath
 import re
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -86,6 +87,213 @@ def _iter_visible_md_link_matches(text: str) -> Iterable[re.Match[str]]:
         original = _MD_LINK.match(text, match.start())
         if original is not None:
             yield original
+
+
+def _markdown_destination_span(raw: str) -> tuple[int, int, str] | None:
+    """Locate a Markdown destination while leaving wrappers/titles untouched."""
+    start = len(raw) - len(raw.lstrip())
+    if start == len(raw):
+        return None
+    if raw[start] == "<":
+        end_marker = raw.find(">", start + 1)
+        if end_marker < 0:
+            return None
+        return start + 1, end_marker, raw[start + 1 : end_marker]
+    end = start
+    while end < len(raw) and not raw[end].isspace():
+        end += 1
+    return start, end, raw[start:end]
+
+
+def _en_page_docs_root(en_page_path: str) -> str | None:
+    page = en_page_path.replace("\\", "/")
+    boundary = "/en/core/"
+    if (
+        page.count(boundary) != 1
+        or not page.endswith(".md")
+        or page.startswith("/")
+        or posixpath.normpath(page) != page
+        or any(part in {"", ".", ".."} for part in page.split("/"))
+    ):
+        return None
+    docs_root, suffix = page.split(boundary, 1)
+    if not docs_root or not suffix or docs_root.startswith("/"):
+        return None
+    return docs_root
+
+
+def redirected_md_href(
+    href: str,
+    *,
+    en_page_path: str,
+    read_text: DocsTextReader,
+) -> str | None:
+    """Prove a different concrete EN href using the reader's frozen redirects."""
+    from ydbdoc_review.navigation.link_deps import canonical_md_dependency_path
+    from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+    raw = href.strip()
+    docs_root = _en_page_docs_root(en_page_path)
+    if (
+        docs_root is None
+        or not raw
+        or raw.startswith(("/", "#", "//"))
+        or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", raw)
+    ):
+        return None
+    before_fragment, fragment_marker, raw_fragment = raw.partition("#")
+    raw_path, query_marker, raw_query = before_fragment.partition("?")
+    if (
+        not raw_path.endswith(".md")
+        or not raw_path
+        or "\\" in raw_path
+        or "%" in raw_path
+        or unquote(raw_path) != raw_path
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_path)
+    ):
+        return None
+    page = en_page_path.replace("\\", "/")
+    stack = page.split("/")[:-1]
+    floor = len(docs_root.split("/")) + 2
+    for segment in raw_path.split("/"):
+        if segment == ".":
+            continue
+        if segment == "..":
+            if len(stack) <= floor:
+                return None
+            stack.pop()
+            continue
+        if not segment:
+            return None
+        stack.append(segment)
+    guarded_target = "/".join(stack)
+    target = resolve_internal_md_href(page, raw_path)
+    expected_prefix = f"{docs_root}/en/core/"
+    if (
+        target is None
+        or target != guarded_target
+        or not target.startswith(expected_prefix)
+        or not target.endswith(".md")
+    ):
+        return None
+    redirects_yaml = read_text(f"{docs_root}/redirects.yaml")
+    if redirects_yaml is None:
+        return None
+    canonical = canonical_md_dependency_path(
+        target,
+        redirects_yaml=redirects_yaml,
+        docs_root=docs_root,
+    )
+    if canonical is None or canonical == target or not canonical.startswith(expected_prefix):
+        return None
+    target_text = read_text(canonical)
+    if target_text is None:
+        return None
+    if fragment_marker and raw_fragment:
+        fragment = unquote(raw_fragment)
+        if not fragment_declared_in_markdown(
+            target_text,
+            fragment,
+            page_path=canonical,
+            read_text=read_text,
+        ):
+            return None
+    relative = posixpath.relpath(canonical, posixpath.dirname(page))
+    return (
+        relative
+        + (query_marker + raw_query if query_marker else "")
+        + (fragment_marker + raw_fragment if fragment_marker else "")
+    )
+
+
+def retarget_source_owned_redirect_hrefs(
+    target_text: str,
+    source_text: str,
+    *,
+    en_page_path: str,
+    read_text: DocsTextReader,
+) -> str:
+    """Retarget only visible source-owned href occurrences; preserve other bytes."""
+    from ydbdoc_review.validation.en_link_targets import _mask_yfm_include_directives
+
+    def visible(text: str) -> list[re.Match[str]]:
+        return list(_iter_visible_md_link_matches(_mask_yfm_include_directives(text)))
+
+    source_hrefs: Counter[str] = Counter()
+    target_hrefs: Counter[str] = Counter()
+    source_matches = visible(source_text or "")
+    target_matches = visible(target_text or "")
+    for match in source_matches:
+        span = _markdown_destination_span(match.group(2))
+        if span is None:
+            continue
+        _start, _end, raw_href = span
+        source_hrefs[raw_href] += 1
+    for match in target_matches:
+        span = _markdown_destination_span(match.group(2))
+        if span is not None:
+            target_hrefs[span[2]] += 1
+
+    proven_by_raw: dict[str, str] = {}
+    for raw_href in source_hrefs:
+        canonical = redirected_md_href(
+            raw_href,
+            en_page_path=en_page_path,
+            read_text=read_text,
+        )
+        if canonical is not None:
+            proven_by_raw[raw_href] = canonical
+    if not proven_by_raw:
+        return target_text
+
+    group_old_counts: Counter[str] = Counter()
+    for raw_href, canonical in proven_by_raw.items():
+        group_old_counts[canonical] += source_hrefs[raw_href]
+    group_capacity: dict[str, int] = {}
+    raw_capacity: dict[str, int] = {}
+    for canonical, old_count in group_old_counts.items():
+        source_canonical = source_hrefs[canonical]
+        target_canonical = target_hrefs[canonical]
+        if target_canonical < source_canonical:
+            group_capacity[canonical] = 0
+            consumed = old_count
+        else:
+            consumed = target_canonical - source_canonical
+            group_capacity[canonical] = max(0, old_count - consumed)
+        for raw_href, raw_canonical in proven_by_raw.items():
+            if raw_canonical == canonical:
+                raw_capacity[raw_href] = max(0, source_hrefs[raw_href] - consumed)
+
+    replacements: list[tuple[int, int, str]] = []
+    for match in target_matches:
+        span = _markdown_destination_span(match.group(2))
+        if span is None:
+            continue
+        local_start, local_end, raw_href = span
+        canonical = proven_by_raw.get(raw_href)
+        if (
+            canonical is None
+            or raw_capacity.get(raw_href, 0) <= 0
+            or group_capacity.get(canonical, 0) <= 0
+        ):
+            continue
+        replacement = redirected_md_href(
+            raw_href,
+            en_page_path=en_page_path,
+            read_text=read_text,
+        )
+        if replacement is None:
+            continue
+        raw_capacity[raw_href] -= 1
+        group_capacity[canonical] -= 1
+        replacements.append(
+            (match.start(2) + local_start, match.start(2) + local_end, replacement)
+        )
+    out = target_text
+    for start, end, replacement in reversed(replacements):
+        out = out[:start] + replacement + out[end:]
+    return out
 
 
 def _link_skeleton(text: str, links: list[re.Match[str]]) -> str:
@@ -728,6 +936,39 @@ def check_href_parity(
     )
     if exact_ascii_issues:
         return exact_ascii_issues
+
+    if en_page_path is not None and docs_text_reader is not None:
+        canonical_source = retarget_source_owned_redirect_hrefs(
+            source_text,
+            source_text,
+            en_page_path=en_page_path,
+            read_text=docs_text_reader,
+        )
+        canonical_source_baseline = (
+            retarget_source_owned_redirect_hrefs(
+                source_baseline_text,
+                source_baseline_text,
+                en_page_path=en_page_path,
+                read_text=docs_text_reader,
+            )
+            if source_baseline_text is not None
+            else None
+        )
+        if canonical_source != source_text:
+            source_text = canonical_source
+            src_ordered = [
+                unquote(href) for href in collect_internal_hrefs(source_text)
+            ]
+            src = Counter(src_ordered)
+            if ignore_basenames:
+                src = _kept(src)
+                src_ordered = [
+                    href
+                    for href in src_ordered
+                    if PurePosixPath(href.split("#", 1)[0]).name
+                    not in ignore_basenames
+                ]
+        source_baseline_text = canonical_source_baseline
 
     # Tip-preserved candidate (§6.228 / P9c): when EN hrefs still match tip and
     # no source baseline is in play (verify/candidate gate), RU tip debt and

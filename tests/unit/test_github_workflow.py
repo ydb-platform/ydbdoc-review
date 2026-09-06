@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.config.loader import RuAuthorityMode, load_config
 from ydbdoc_review.github.errors import GitHubAPIError, GitHubConfigError
+from ydbdoc_review.github.git_ops import (
+    RefMutationOperation,
+    RefMutationReceipt,
+    RefMutationStatus,
+    RemoteRefLease,
+)
+from ydbdoc_review.github.provenance import (
+    RuAuthority,
+    TranslationArtifactProvenance,
+    render_authority_evidence,
+)
 from ydbdoc_review.github.workflow import (
     DocJobResult,
     _enforce_report_checkout_bytes,
@@ -17,6 +28,7 @@ from ydbdoc_review.github.workflow import (
     run_doc_translate,
     run_doc_verify,
 )
+from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
@@ -47,6 +59,183 @@ def _env() -> dict[str, str]:
     }
 
 
+def _head_sha(repo_path: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", repo_path, "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+
+
+def _fixture_provenance(
+    repo_path: str,
+    *,
+    source_pr: int,
+    candidate_sha: str | None = None,
+) -> TranslationArtifactProvenance:
+    candidate = candidate_sha or _head_sha(repo_path)
+    parent = subprocess.check_output(
+        ["git", "-C", repo_path, "rev-parse", f"{candidate}^"],
+        text=True,
+    ).strip()
+    return TranslationArtifactProvenance(
+        authority=RuAuthority(
+            source_repo="o/r",
+            source_pr=source_pr,
+            source_base_sha=parent,
+            source_head_sha=parent,
+            baseline_sha=parent,
+            ru_sha=parent,
+            mode=RuAuthorityMode.CURRENT,
+        ),
+        candidate_sha=candidate,
+    )
+
+
+def _fixture_provenance_body(repo_path: str, *, source_pr: int) -> str:
+    return render_authority_evidence(
+        _fixture_provenance(repo_path, source_pr=source_pr)
+    )
+
+
+def _bind_fixture_artifact(
+    _repo_path: str,
+    selection,
+    candidate_sha: str,
+) -> TranslationArtifactProvenance:
+    return TranslationArtifactProvenance(selection.authority, candidate_sha)
+
+
+def _commit_empty(repo_path: str, message: str = "artifact fixture") -> str:
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", message],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+    )
+    return _head_sha(repo_path)
+
+
+def _update_receipt(
+    branch: str,
+    expected_sha: str | None,
+    requested_sha: str,
+) -> RefMutationReceipt:
+    status = (
+        RefMutationStatus.NOOP
+        if expected_sha == requested_sha
+        else RefMutationStatus.CHANGED
+    )
+    return RefMutationReceipt(
+        lease=RemoteRefLease(branch, expected_sha),
+        operation=RefMutationOperation.UPDATE,
+        requested_sha=requested_sha,
+        status=status,
+        porcelain_flag="=" if status is RefMutationStatus.NOOP else "*",
+        stdout="",
+        stderr="",
+    )
+
+
+def _delete_receipt(branch: str, expected_sha: str) -> RefMutationReceipt:
+    return RefMutationReceipt(
+        lease=RemoteRefLease(branch, expected_sha),
+        operation=RefMutationOperation.DELETE,
+        requested_sha=None,
+        status=RefMutationStatus.CHANGED,
+        porcelain_flag="-",
+        stdout="",
+        stderr="",
+    )
+
+
+def _wire_publication_state(
+    client: MagicMock,
+    push: MagicMock,
+    *,
+    branch: str,
+    initial_sha: str | None,
+    published_pull: dict | None = None,
+) -> dict[str, str | None]:
+    state: dict[str, str | None] = {"sha": initial_sha}
+    client.get_branch_sha.side_effect = lambda *_args, **_kwargs: state["sha"]
+
+    def _push(*_args, **kwargs):
+        requested = kwargs["source_sha"]
+        state["sha"] = requested
+        if published_pull is not None:
+            published_pull["head"]["sha"] = requested
+        return _update_receipt(branch, kwargs["expected_remote_sha"], requested)
+
+    push.side_effect = _push
+    return state
+
+
+def _wire_translation_publication(
+    client: MagicMock,
+    push: MagicMock,
+    source_pull: dict,
+    *,
+    source_number: int = 7,
+) -> None:
+    published_pull = {
+        "title": f"Auto-translate docs from PR #{source_number}",
+        "body": "",
+        "draft": False,
+        "head": {
+            "ref": f"ydbdoc-review/pr-{source_number}",
+            "sha": None,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": source_pull["base"]["ref"]},
+    }
+    client.get_pull.side_effect = lambda _owner, _repo, number: (
+        source_pull if number == source_number else published_pull
+    )
+    client.update_pull_body.side_effect = (
+        lambda _owner, _repo, _number, body: published_pull.__setitem__("body", body)
+    )
+    _wire_publication_state(
+        client,
+        push,
+        branch=f"ydbdoc-review/pr-{source_number}",
+        initial_sha=None,
+        published_pull=published_pull,
+    )
+
+
+def _wire_verify_publication(
+    client: MagicMock,
+    push: MagicMock,
+    source_pull: dict,
+    *,
+    source_number: int,
+    branch: str,
+    initial_sha: str | None = None,
+) -> tuple[dict, dict[str, str | None]]:
+    published_pull = {
+        "title": f"Critic fixes for #{source_number}",
+        "body": "",
+        "draft": False,
+        "head": {
+            "ref": branch,
+            "sha": initial_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": source_pull["base"]["ref"]},
+    }
+    client.get_pull.side_effect = lambda _owner, _repo, number: (
+        source_pull if number == source_number else published_pull
+    )
+    state = _wire_publication_state(
+        client,
+        push,
+        branch=branch,
+        initial_sha=initial_sha,
+        published_pull=published_pull,
+    )
+    return published_pull, state
+
+
 @pytest.fixture
 def git_repo(tmp_path: Path) -> str:
     repo = tmp_path / "repo"
@@ -60,6 +249,21 @@ def git_repo(tmp_path: Path) -> str:
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True)
     return str(repo)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_workflow_llm_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Workflow unit tests must not start real gRPC backend/client threads."""
+    monkeypatch.setattr(
+        "ydbdoc_review.github.workflow.begin_ops_job",
+        lambda **_kwargs: (None, GateResult(ok=True), None),
+    )
+    client = MagicMock()
+    client.usage_tracker = None
+    monkeypatch.setattr(
+        "ydbdoc_review.github.workflow.create_llm_client",
+        lambda _config: client,
+    )
 
 
 def _wire_en_toc_for_a(repo_path: str) -> None:
@@ -105,7 +309,7 @@ def _fake_pr_result() -> PRTranslationResult:
 def test_report_checkout_guard_blocks_in_memory_drift():
     result = _fake_pr_result()
     with patch(
-        "ydbdoc_review.github.workflow.read_text_at_ref",
+        "ydbdoc_review.github.workflow.read_text_at_commit",
         return_value="Different committed bytes.\n",
     ):
         mismatches = _enforce_report_checkout_bytes("/repo", "abc123", result)
@@ -374,14 +578,15 @@ def test_job_requires_zero_exit_verify_when_stale_blocked_verdict():
     assert job_requires_nonzero_exit(job) is False
 
 def test_run_doc_translate_dry_run(git_repo: str):
+    checkout_sha = _head_sha(git_repo)
     pull = {
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
 
     with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
@@ -389,6 +594,9 @@ def test_run_doc_translate_dry_run(git_repo: str):
             mock_gh.return_value.get_pull.return_value = pull
             with patch(
                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                return_value=[("ydb/docs/ru/a.md", "modified")],
+            ), patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
                 return_value=[("ydb/docs/ru/a.md", "modified")],
             ):
                 result = run_doc_translate(
@@ -405,6 +613,100 @@ def test_run_doc_translate_dry_run(git_repo: str):
     assert result.committed is False
     mock_gh.return_value.post_issue_comment.assert_not_called()
     assert not Path(git_repo, "ydb/docs/en/a.md").exists()
+
+
+def test_run_doc_translate_en_toc_graph_keeps_b_miss_separate_from_r(
+    git_repo: str,
+) -> None:
+    root = Path(git_repo)
+    ru_path = "ydb/docs/ru/a.md"
+    missing_en_toc = "ydb/docs/en/core/missing/toc_p.yaml"
+    present_en_page = "ydb/docs/en/core/present.md"
+    (root / missing_en_toc).parent.mkdir(parents=True, exist_ok=True)
+    (root / missing_en_toc).write_text("R-EN-TOC-SENTINEL\n", encoding="utf-8")
+    (root / present_en_page).write_text("R-EN-PAGE-SENTINEL\n", encoding="utf-8")
+    (root / ru_path).write_text("R-RU-SENTINEL\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "historical R"], cwd=git_repo, check=True)
+    r_sha = _head_sha(git_repo)
+    h0_sha = subprocess.run(
+        ["git", "rev-parse", f"{r_sha}^"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    (root / missing_en_toc).unlink()
+    (root / present_en_page).write_text("B-EN-PAGE-SENTINEL\n", encoding="utf-8")
+    (root / ru_path).write_text("B-RU-SENTINEL\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "frozen B"], cwd=git_repo, check=True)
+    b_sha = _head_sha(git_repo)
+
+    (root / missing_en_toc).write_text("WORKTREE-EN-TOC-SENTINEL\n", encoding="utf-8")
+    (root / present_en_page).write_text("WORKTREE-EN-PAGE-SENTINEL\n", encoding="utf-8")
+    (root / ru_path).write_text("WORKTREE-RU-SENTINEL\n", encoding="utf-8")
+
+    pull = {
+        "title": "historical docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": r_sha,
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
+            },
+        },
+        "base": {"ref": "main", "sha": h0_sha},
+        "merged": True,
+        "state": "closed",
+        "merge_commit_sha": r_sha,
+    }
+    callback_observations: dict[str, str | None] = {}
+
+    def inspect_graph_reader(
+        _repo_path: str,
+        *,
+        read_text,
+        **_kwargs,
+    ) -> set[str]:
+        callback_observations[missing_en_toc] = read_text(missing_en_toc)
+        callback_observations[present_en_page] = read_text(present_en_page)
+        callback_observations[ru_path] = read_text(ru_path)
+        return set()
+
+    config = load_config(
+        env={
+            **_env(),
+            "YDBDOC_TRANSLATION_RU_AUTHORITY_MODE": "source-preserving",
+        }
+    )
+    with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
+        with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+            mock_gh.return_value.get_pull.return_value = pull
+            with patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                return_value=[(ru_path, "modified")],
+            ), patch(
+                "ydbdoc_review.github.workflow.build_en_toc_reachable_from_repo",
+                side_effect=inspect_graph_reader,
+            ):
+                result = run_doc_translate(
+                    repo_path=git_repo,
+                    github_repo="o/r",
+                    pr_number=7,
+                    merge_base_with=b_sha,
+                    dry_run=True,
+                    config=config,
+                )
+
+    assert result.dry_run
+    assert callback_observations == {
+        missing_en_toc: None,
+        present_en_page: "B-EN-PAGE-SENTINEL\n",
+        ru_path: "R-RU-SENTINEL\n",
+    }
 
 
 def test_run_doc_translate_merged_pr_uses_real_translation(git_repo: str):
@@ -481,13 +783,14 @@ def test_run_doc_verify_dry_run(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    checkout_sha = _commit_empty(git_repo)
 
     pull = {
         "title": "Auto-translate docs from PR #3",
-        "body": "source PR #3",
+        "body": _fixture_provenance_body(git_repo, source_pr=3),
         "head": {
             "ref": "ydbdoc-review/pr-3",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "feature/docs"},
@@ -513,11 +816,19 @@ def test_run_doc_verify_dry_run(git_repo: str):
     ):
         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
             mock_gh.return_value.get_pull.side_effect = _get_pull
+            mock_gh.return_value.get_branch_sha.return_value = checkout_sha
             mock_gh.return_value.get_file_text.return_value = "RU.\n"
             mock_gh.return_value.iter_issue_comments.return_value = iter([])
             with patch(
                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                 return_value=[("ydb/docs/en/a.md", "modified")],
+            ), patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                side_effect=lambda _gh, _owner, _repo, number: (
+                    [("ydb/docs/en/a.md", "modified")]
+                    if number == 11
+                    else [("ydb/docs/ru/a.md", "modified")]
+                ),
             ):
                 result = run_doc_verify(
                     repo_path=git_repo,
@@ -534,25 +845,30 @@ def test_run_doc_verify_dry_run(git_repo: str):
 
 
 def test_run_doc_translate_no_pairs(git_repo: str):
+    checkout_sha = _head_sha(git_repo)
     pull = {
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
         mock_gh.return_value.get_pull.return_value = pull
         with patch(
             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
             return_value=[("README.md", "modified")],
+        ), patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            return_value=[("README.md", "modified")],
         ):
             result = run_doc_translate(
                 repo_path=git_repo,
                 github_repo="o/r",
                 pr_number=7,
+                merge_base_with="HEAD",
                 dry_run=True,
                 config=load_config(env=_env()),
             )
@@ -580,6 +896,7 @@ def test_run_doc_translate_nav_only_reaches_successful_post_apply_lifecycle(
         "items:\n- name: A\n  href: ../a.md\n- name: B\n  href: ../b.md\n",
         encoding="utf-8",
     )
+    checkout_sha = _head_sha(git_repo)
     merged_en = "items:\n- name: A\n  href: ../a.md\n- name: B\n  href: ../b.md\n"
     nav_result = NavigationRunResult(
         ru_path="ydb/docs/ru/core/toc_p.yaml",
@@ -592,17 +909,18 @@ def test_run_doc_translate_nav_only_reaches_successful_post_apply_lifecycle(
         "title": "navigation only",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
 
     with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
         "ydbdoc_review.github.workflow.list_pr_file_changes_git",
         return_value=[("ydb/docs/ru/core/toc_p.yaml", "modified")],
     ), patch(
-        "ydbdoc_review.github.workflow.list_pr_file_changes_api", return_value=[]
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+        return_value=[("ydb/docs/ru/core/toc_p.yaml", "modified")],
     ), patch(
         "ydbdoc_review.github.workflow.run_navigation_merges",
         return_value=[nav_result],
@@ -634,16 +952,15 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
     """§6.175 / #48751: bilingual noop must still comment «перевод не требуется»."""
     from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 
+    checkout_sha = _head_sha(git_repo)
     pull = {
         "title": "Fix glossary links",
-        "merged": True,
-        "merge_commit_sha": "deadbeef",
         "head": {
             "ref": "docs-glossary",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
     ru = "ydb/docs/ru/core/concepts/glossary.md"
     en = "ydb/docs/en/core/concepts/glossary.md"
@@ -680,6 +997,7 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
                             repo_path=git_repo,
                             github_repo="o/r",
                             pr_number=48751,
+                            merge_base_with="HEAD",
                             dry_run=False,
                             config=load_config(env=_env()),
                         )
@@ -695,25 +1013,30 @@ def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
 
 def test_run_doc_translate_posts_comments(git_repo: str):
     _wire_en_toc_for_a(git_repo)
+    checkout_sha = _head_sha(git_repo)
     pull = {
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
     with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
-                with patch("ydbdoc_review.github.workflow.push_branch"):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch(
                         "ydbdoc_review.github.workflow.run_doc_verify",
                         return_value=_mock_inline_verify_job(),
                     ) as mock_verify:
                         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                            mock_gh.return_value.get_pull.return_value = pull
+                            _wire_translation_publication(
+                                mock_gh.return_value,
+                                push,
+                                pull,
+                            )
                             mock_gh.return_value.create_pull.return_value = (
                                 "https://github.com/o/r/pull/99",
                                 99,
@@ -724,6 +1047,12 @@ def test_run_doc_translate_posts_comments(git_repo: str):
                             with patch(
                                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                                 return_value=[("ydb/docs/ru/a.md", "modified")],
+                            ), patch(
+                                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                                return_value=[("ydb/docs/ru/a.md", "modified")],
+                            ), patch(
+                                "ydbdoc_review.github.workflow.bind_translation_artifact",
+                                side_effect=_bind_fixture_artifact,
                             ):
                                 result = run_doc_translate(
                                     repo_path=git_repo,
@@ -753,25 +1082,30 @@ def test_run_doc_translate_posts_comments(git_repo: str):
 def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str):
     """Source PR comment failure must not abort after inline verify succeeded."""
     _wire_en_toc_for_a(git_repo)
+    checkout_sha = _head_sha(git_repo)
     pull = {
         "title": "docs",
         "head": {
             "ref": "feature/docs",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
     with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
-                with patch("ydbdoc_review.github.workflow.push_branch"):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch(
                         "ydbdoc_review.github.workflow.run_doc_verify",
                         return_value=_mock_inline_verify_job(),
                     ):
                         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                            mock_gh.return_value.get_pull.return_value = pull
+                            _wire_translation_publication(
+                                mock_gh.return_value,
+                                push,
+                                pull,
+                            )
                             mock_gh.return_value.create_pull.return_value = (
                                 "https://github.com/o/r/pull/99",
                                 99,
@@ -785,6 +1119,12 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
                             with patch(
                                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                                 return_value=[("ydb/docs/ru/a.md", "modified")],
+                            ), patch(
+                                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                                return_value=[("ydb/docs/ru/a.md", "modified")],
+                            ), patch(
+                                "ydbdoc_review.github.workflow.bind_translation_artifact",
+                                side_effect=_bind_fixture_artifact,
                             ):
                                 result = run_doc_translate(
                                     repo_path=git_repo,
@@ -804,17 +1144,18 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
 def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
     """Fork PR: branch from upstream main, push translation branch, PR targets main."""
     _wire_en_toc_for_a(git_repo)
+    checkout_sha = _head_sha(git_repo)
     pull = {
         "title": "docs",
         "head": {
             "ref": "parameterized-query",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {
                 "clone_url": "https://github.com/contrib/ydb.git",
                 "full_name": "contrib/ydb",
             },
         },
-        "base": {"ref": "main"},
+        "base": {"ref": "main", "sha": checkout_sha},
     }
     with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prep:
@@ -825,7 +1166,11 @@ def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
                         return_value=_mock_inline_verify_job(),
                     ):
                         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                            mock_gh.return_value.get_pull.return_value = pull
+                            _wire_translation_publication(
+                                mock_gh.return_value,
+                                push,
+                                pull,
+                            )
                             mock_gh.return_value.create_pull.return_value = (
                                 "https://github.com/o/r/pull/99",
                                 99,
@@ -836,6 +1181,12 @@ def test_run_doc_translate_fork_pushes_upstream(git_repo: str):
                             with patch(
                                 "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                                 return_value=[("ydb/docs/ru/a.md", "modified")],
+                            ), patch(
+                                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                                return_value=[("ydb/docs/ru/a.md", "modified")],
+                            ), patch(
+                                "ydbdoc_review.github.workflow.bind_translation_artifact",
+                                side_effect=_bind_fixture_artifact,
                             ):
                                 run_doc_translate(
                                     repo_path=git_repo,
@@ -884,7 +1235,13 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                        mock_gh.return_value.get_pull.return_value = pull
+                        _wire_verify_publication(
+                            mock_gh.return_value,
+                            push,
+                            pull,
+                            source_number=11,
+                            branch="ydbdoc-review/verify-11",
+                        )
                         mock_gh.return_value.iter_issue_comments.return_value = iter([])
                         mock_gh.return_value.post_issue_comment.return_value = "url"
                         mock_gh.return_value.create_pull.return_value = (
@@ -911,8 +1268,7 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
     prep.assert_called_once()
     assert prep.call_args.kwargs["translation_branch"] == "ydbdoc-review/verify-11"
     assert prep.call_args.kwargs["base_branch"] == "main"
-    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-11")
-    assert mock_gh.return_value.delete_branch.call_count >= 1
+    mock_gh.return_value.delete_branch.assert_not_called()
     mock_gh.return_value.create_pull.assert_called_once()
     create_kwargs = mock_gh.return_value.create_pull.call_args.kwargs
     assert create_kwargs["head"] == "ydbdoc-review/verify-11"
@@ -924,7 +1280,7 @@ def test_run_doc_verify_fork_head_opens_fixup_pr(git_repo: str):
 
 
 def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
-    """Second run on a fork PR: stale remote fixup branch is deleted before push."""
+    """Second run replaces a stale fixup branch with leased delete/create."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
@@ -942,6 +1298,21 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
         },
         "base": {"ref": "main"},
     }
+    candidate_sha = _head_sha(git_repo)
+    stale_sha = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            git_repo,
+            "commit-tree",
+            f"{candidate_sha}^{{tree}}",
+            "-p",
+            candidate_sha,
+            "-m",
+            "stale fixup fixture",
+        ],
+        text=True,
+    ).strip()
 
     with patch(
         "ydbdoc_review.github.workflow._run_verify_pairs",
@@ -950,39 +1321,59 @@ def test_run_doc_verify_fork_head_resets_existing_fixup_branch(git_repo: str):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
-                    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                        mock_gh.return_value.get_pull.return_value = pull
-                        mock_gh.return_value.iter_issue_comments.return_value = iter([])
-                        mock_gh.return_value.post_issue_comment.return_value = "url"
-                        # Existing fixup branch from a previous run.
-                        mock_gh.return_value.delete_branch.return_value = True
-                        mock_gh.return_value.create_pull.return_value = (
-                            "https://github.com/o/r/pull/100",
-                            100,
-                            True,
-                        )
-                        with patch(
-                            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-                            return_value=[("ydb/docs/en/a.md", "modified")],
-                        ):
-                            result = run_doc_verify(
-                                repo_path=git_repo,
-                                github_repo="o/r",
-                                pr_number=11,
-                                merge_base_with="HEAD",
-                                dry_run=False,
-                                config=load_config(env=_env()),
+                    with patch(
+                        "ydbdoc_review.github.workflow.delete_remote_branch_with_lease"
+                    ) as delete:
+                        with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+                            _published, state = _wire_verify_publication(
+                                mock_gh.return_value,
+                                push,
+                                pull,
+                                source_number=11,
+                                branch="ydbdoc-review/verify-11",
+                                initial_sha=stale_sha,
                             )
 
-    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-11")
-    assert mock_gh.return_value.delete_branch.call_count >= 2
+                            def _delete(*_args, **kwargs):
+                                state["sha"] = None
+                                return _delete_receipt(
+                                    "ydbdoc-review/verify-11",
+                                    kwargs["expected_remote_sha"],
+                                )
+
+                            delete.side_effect = _delete
+                            mock_gh.return_value.iter_issue_comments.return_value = iter([])
+                            mock_gh.return_value.post_issue_comment.return_value = "url"
+                            mock_gh.return_value.create_pull.return_value = (
+                                "https://github.com/o/r/pull/100",
+                                100,
+                                True,
+                            )
+                            with patch(
+                                "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                                return_value=[("ydb/docs/en/a.md", "modified")],
+                            ):
+                                result = run_doc_verify(
+                                    repo_path=git_repo,
+                                    github_repo="o/r",
+                                    pr_number=11,
+                                    merge_base_with="HEAD",
+                                    dry_run=False,
+                                    config=load_config(env=_env()),
+                                )
+
+    delete.assert_called_once()
+    assert delete.call_args.kwargs["expected_remote_sha"] == stale_sha
+    mock_gh.return_value.delete_branch.assert_not_called()
     push.assert_called_once()
     assert push.call_args.args[2] == "ydbdoc-review/verify-11"
     assert result.translation_pr_number == 100
 
 
-def test_run_doc_verify_deletes_stale_fixup_branch_at_start(git_repo: str):
-    """Re-run deletes ydbdoc-review/verify-N before LLM work (§6.136)."""
+def test_run_doc_verify_does_not_delete_fixup_branch_without_publication(
+    git_repo: str,
+):
+    """Read-only verify leaves a pre-existing fixup branch untouched."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
@@ -1029,7 +1420,7 @@ def test_run_doc_verify_deletes_stale_fixup_branch_at_start(git_repo: str):
                         config=load_config(env=_env()),
                     )
 
-    mock_gh.return_value.delete_branch.assert_called_with("o", "r", "ydbdoc-review/verify-47233")
+    mock_gh.return_value.delete_branch.assert_not_called()
 
 
 def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
@@ -1037,13 +1428,14 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    checkout_sha = _commit_empty(git_repo)
 
     pull = {
         "title": "Auto-translate docs from PR #3",
-        "body": "",
+        "body": _fixture_provenance_body(git_repo, source_pr=3),
         "head": {
             "ref": "ydbdoc-review/pr-3",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {
                 "clone_url": "https://github.com/o/r.git",
                 "full_name": "o/r",
@@ -1061,11 +1453,25 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                         mock_gh.return_value.get_pull.return_value = pull
+                        _wire_publication_state(
+                            mock_gh.return_value,
+                            push,
+                            branch="ydbdoc-review/pr-3",
+                            initial_sha=checkout_sha,
+                            published_pull=pull,
+                        )
                         mock_gh.return_value.iter_issue_comments.return_value = iter([])
                         mock_gh.return_value.post_issue_comment.return_value = "url"
                         with patch(
                             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                             return_value=[("ydb/docs/en/a.md", "modified")],
+                        ), patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                            side_effect=lambda _gh, _owner, _repo, number: (
+                                [("ydb/docs/en/a.md", "modified")]
+                                if number == 11
+                                else [("ydb/docs/ru/a.md", "modified")]
+                            ),
                         ):
                             result = run_doc_verify(
                                 repo_path=git_repo,
@@ -1118,7 +1524,13 @@ def test_run_doc_verify_same_repo_author_pr_opens_fixup_pr(git_repo: str):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-                        mock_gh.return_value.get_pull.return_value = pull
+                        _wire_verify_publication(
+                            mock_gh.return_value,
+                            push,
+                            pull,
+                            source_number=7,
+                            branch="ydbdoc-review/verify-7",
+                        )
                         mock_gh.return_value.iter_issue_comments.return_value = iter([])
                         mock_gh.return_value.post_issue_comment.return_value = "url"
                         mock_gh.return_value.create_pull.return_value = (
@@ -1151,16 +1563,14 @@ def test_run_doc_verify_posts_comment(git_repo: str):
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
-    content_sha = subprocess.check_output(
-        ["git", "-C", git_repo, "rev-parse", "HEAD"], text=True
-    ).strip()
+    content_sha = _commit_empty(git_repo)
 
     pull = {
         "title": "Auto-translate docs from PR #3",
-        "body": "",
+        "body": _fixture_provenance_body(git_repo, source_pr=3),
         "head": {
             "ref": "ydbdoc-review/pr-3",
-            "sha": "abc",
+            "sha": content_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "feature/docs"},
@@ -1181,9 +1591,16 @@ def test_run_doc_verify_posts_comment(git_repo: str):
             side_effect=_fake_prepare,
         ):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
-                with patch("ydbdoc_review.github.workflow.push_branch"):
+                with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                         mock_gh.return_value.get_pull.return_value = pull
+                        _wire_publication_state(
+                            mock_gh.return_value,
+                            push,
+                            branch="ydbdoc-review/pr-3",
+                            initial_sha=content_sha,
+                            published_pull=pull,
+                        )
                         mock_gh.return_value.iter_issue_comments.return_value = iter(
                             [{"body": "ydbdoc-review — отчёт №1"}]
                         )
@@ -1196,6 +1613,13 @@ def test_run_doc_verify_posts_comment(git_repo: str):
                         with patch(
                             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                             return_value=[("ydb/docs/en/a.md", "modified")],
+                        ), patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                            side_effect=lambda _gh, _owner, _repo, number: (
+                                [("ydb/docs/en/a.md", "modified")]
+                                if number == 11
+                                else [("ydb/docs/ru/a.md", "modified")]
+                            ),
                         ):
                             result = run_doc_verify(
                                 repo_path=git_repo,
@@ -1283,6 +1707,7 @@ def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
     glossary = en / "glossary.md"
     good_en = "Sessions: [{#T}](query_execution/execution_process.md#sessions).\n"
     glossary.write_text(good_en, encoding="utf-8")
+    checkout_sha = _commit_empty(git_repo)
 
     pair = DocPair(
         ru_path="ydb/docs/ru/core/concepts/glossary.md",
@@ -1316,10 +1741,10 @@ def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
 
     pull = {
         "title": "Auto-translate docs from PR #45667",
-        "body": "source PR #45667",
+        "body": _fixture_provenance_body(git_repo, source_pr=45667),
         "head": {
             "ref": "ydbdoc-review/pr-45667",
-            "sha": "abc",
+            "sha": checkout_sha,
             "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
         },
         "base": {"ref": "feature/docs"},
@@ -1350,12 +1775,20 @@ def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                         mock_gh.return_value.get_pull.side_effect = _get_pull
+                        mock_gh.return_value.get_branch_sha.return_value = checkout_sha
                         mock_gh.return_value.get_file_text.return_value = "RU.\n"
                         mock_gh.return_value.iter_issue_comments.return_value = iter([])
                         mock_gh.return_value.post_issue_comment.return_value = "url"
                         with patch(
                             "ydbdoc_review.github.workflow.list_pr_file_changes_git",
                             return_value=[("ydb/docs/en/core/concepts/glossary.md", "modified")],
+                        ), patch(
+                            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                            side_effect=lambda _gh, _owner, _repo, number: (
+                                [("ydb/docs/en/core/concepts/glossary.md", "modified")]
+                                if number == 49578
+                                else [("ydb/docs/ru/core/concepts/glossary.md", "modified")]
+                            ),
                         ):
                             run_doc_verify(
                                 repo_path=git_repo,

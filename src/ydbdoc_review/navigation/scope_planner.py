@@ -8,9 +8,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from ydbdoc_review.github.provenance import RuAuthority
+from ydbdoc_review.navigation.dependency_budget import (
+    MarkdownDependencyBudget,
+)
+from ydbdoc_review.navigation.link_deps import (
+    canonical_md_dependency_path,
+    direct_md_link_dependencies,
+)
 from ydbdoc_review.navigation.paths import is_navigation_yaml
+from ydbdoc_review.navigation.redirects import (
+    redirect_source_repo_md_paths,
+)
 from ydbdoc_review.navigation.toc import (
     collect_toc_link_targets,
     en_toc_is_absent,
@@ -55,8 +66,16 @@ class TranslationScopePlan:
     nav_from_diff: frozenset[str]
     nav_from_main: frozenset[str]
     doc_deleted: frozenset[str] = frozenset()
-    # §6 Markdown-link dependency budget warnings (yellow / manual action).
-    link_dep_warnings: tuple[str, ...] = ()
+    dependency_budget: MarkdownDependencyBudget = field(
+        default_factory=MarkdownDependencyBudget,
+        compare=False,
+        repr=False,
+    )
+
+    @property
+    def link_dep_warnings(self) -> tuple[str, ...]:
+        """Compatibility view of all job-global dependency warnings."""
+        return self.dependency_budget.warnings
 
     @property
     def all_ru_paths(self) -> frozenset[str]:
@@ -107,44 +126,6 @@ def _internal_ascii_fragment_hrefs(ru_text: str) -> set[str]:
     return hrefs
 
 
-def _new_internal_ascii_fragment_hrefs(
-    ru_text: str,
-    base_text: str | None,
-) -> set[str]:
-    current = _internal_ascii_fragment_hrefs(ru_text)
-    if not base_text:
-        return current
-    return current - _internal_ascii_fragment_hrefs(base_text)
-
-
-def _stable_fragment_owners_for_diff_pages(
-    diff_ru_md: set[str],
-    *,
-    read_ru: ReadFn,
-    read_en_base: ReadFn,
-    read_ru_base: ReadFn | None,  # unused; R-GL-6a ignores delta
-    docs_root: str,
-    redirects_yaml: str | None,
-) -> set[str]:
-    owners: set[str] = set()
-    for ru_md in sorted(diff_ru_md):
-        ru_text = read_ru(ru_md)
-        if not ru_text:
-            continue
-        for href in sorted(_internal_ascii_fragment_hrefs(ru_text)):
-            owner = _exact_ascii_fragment_owner_dependency(
-                ru_md,
-                href,
-                read_ru=read_ru,
-                read_en_base=read_en_base,
-                docs_root=docs_root,
-                redirects_yaml=redirects_yaml,
-            )
-            if owner:
-                owners.add(owner)
-    return owners
-
-
 def _exact_ascii_fragment_owner_dependency(
     ru_page_path: str,
     href: str,
@@ -159,7 +140,6 @@ def _exact_ascii_fragment_owner_dependency(
     When tip ``redirects.yaml`` marks the owner as a ``from`` tombstone, follow
     the ``to`` twin so merged-PR scope does not enqueue historical paths (§6.242).
     """
-    from ydbdoc_review.navigation.redirects import follow_redirect_repo_md_path
     from ydbdoc_review.validation.fragment_repair import _page_declares_fragment
 
     if "#" not in href:
@@ -170,10 +150,13 @@ def _exact_ascii_fragment_owner_dependency(
     ru_wrapper = resolve_locale_md_path(ru_page_path, target_ref, docs_root=docs_root)
     if ru_wrapper is None or not ru_wrapper.startswith(f"{docs_root.strip('/')}/ru/"):
         return None
-    if redirects_yaml:
-        ru_wrapper = follow_redirect_repo_md_path(
-            ru_wrapper, redirects_yaml, docs_root=docs_root
-        )
+    ru_wrapper = canonical_md_dependency_path(
+        ru_wrapper,
+        redirects_yaml=redirects_yaml,
+        docs_root=docs_root,
+    )
+    if ru_wrapper is None:
+        return None
     ru_text = read_ru(ru_wrapper)
     en_wrapper = counterpart(ru_wrapper, docs_root)
     en_text = read_en_base(en_wrapper) if en_wrapper else None
@@ -186,8 +169,12 @@ def _exact_ascii_fragment_owner_dependency(
     en_includes = collect_yfm_includes(en_text)
     for index, inc in enumerate(ru_includes):
         owner = resolve_locale_md_path(ru_wrapper, inc.path, docs_root=docs_root)
-        if owner and redirects_yaml:
-            owner = follow_redirect_repo_md_path(owner, redirects_yaml, docs_root=docs_root)
+        if owner:
+            owner = canonical_md_dependency_path(
+                owner,
+                redirects_yaml=redirects_yaml,
+                docs_root=docs_root,
+            )
         owner_text = read_ru(owner) if owner else None
         if owner and owner_text and _page_declares_fragment(owner_text, frag):
             ru_owners.append((index, owner))
@@ -200,9 +187,11 @@ def _exact_ascii_fragment_owner_dependency(
         if index >= len(en_includes):
             return None
         en_owner = resolve_locale_md_path(en_wrapper, en_includes[index].path, docs_root=docs_root)
-        if en_owner and redirects_yaml:
-            en_owner = follow_redirect_repo_md_path(
-                en_owner, redirects_yaml, docs_root=docs_root
+        if en_owner:
+            en_owner = canonical_md_dependency_path(
+                en_owner,
+                redirects_yaml=redirects_yaml,
+                docs_root=docs_root,
             )
         en_owner_text = read_en_base(en_owner) if en_owner else None
     if en_owner is None or en_owner_text is None or counterpart(ru_owner, docs_root) != en_owner:
@@ -218,11 +207,12 @@ def _discover_ru_tocs(
     seed_ru_nav: set[str],
     read_ru: ReadFn,
     diff_paths: set[str],
+    docs_root: str,
 ) -> set[str]:
     """BFS: ancestor sidebars + ``include.path`` child sidebars."""
     todo: set[str] = set(seed_ru_nav)
     for ru_md in seed_ru_md:
-        todo.update(_ancestor_ru_tocs(ru_md, docs_root="ydb/docs"))
+        todo.update(_ancestor_ru_tocs(ru_md, docs_root=docs_root))
     seen: set[str] = set()
     queue = sorted(todo)
     while queue:
@@ -280,20 +270,26 @@ def _new_toc_md_hrefs(
 def _add_doc_if_en_absent(
     ru_md: str,
     *,
-    doc_ru: set[str],
+    candidates: set[str],
     read_ru: ReadFn,
     read_en_base: ReadFn,
     docs_root: str,
-) -> None:
-    if ru_md in doc_ru:
-        return
-    if read_ru(ru_md) is None:
-        return
+    redirects_yaml: str,
+) -> str | None:
+    ru_md = canonical_md_dependency_path(
+        _norm(ru_md),
+        redirects_yaml=redirects_yaml,
+        docs_root=docs_root,
+    )
+    if ru_md is None or read_ru(ru_md) is None:
+        return None
     en_md = counterpart(ru_md, docs_root)
     if en_md is None:
-        return
-    if read_en_base(en_md) is None:
-        doc_ru.add(ru_md)
+        return None
+    if read_en_base(en_md) is not None:
+        return None
+    candidates.add(ru_md)
+    return ru_md
 
 
 def _pages_from_discovered_toc(
@@ -302,34 +298,37 @@ def _pages_from_discovered_toc(
     *,
     diff_ru_md: set[str],
     diff_ru_nav: set[str],
-    doc_ru: set[str],
+    candidates: set[str],
     read_ru: ReadFn,
     read_en_base: ReadFn,
     read_ru_base: ReadFn | None,
     docs_root: str,
+    redirects_yaml: str,
 ) -> None:
     """Derive markdown scope from one sidebar (§22.5 / §6.72)."""
     if ru_toc in diff_ru_nav:
-        for rel in _new_toc_md_hrefs(ru_toc, ru_toc_text, read_ru_base):
+        for rel in sorted(_new_toc_md_hrefs(ru_toc, ru_toc_text, read_ru_base)):
             ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
             _add_doc_if_en_absent(
                 ru_md,
-                doc_ru=doc_ru,
+                candidates=candidates,
                 read_ru=read_ru,
                 read_en_base=read_en_base,
                 docs_root=docs_root,
+                redirects_yaml=redirects_yaml,
             )
         return
 
-    for ru_md in diff_ru_md:
+    for ru_md in sorted(diff_ru_md):
         basename = ru_md.rsplit("/", 1)[-1]
         if _toc_lists_page(ru_toc, ru_toc_text, basename):
             _add_doc_if_en_absent(
                 ru_md,
-                doc_ru=doc_ru,
+                candidates=candidates,
                 read_ru=read_ru,
                 read_en_base=read_en_base,
                 docs_root=docs_root,
+                redirects_yaml=redirects_yaml,
             )
 
 
@@ -448,260 +447,207 @@ def plan_translation_scope(
         elif path.startswith(f"{root}/ru/") and is_navigation_yaml(path):
             diff_ru_nav.add(path)
 
-    discovered_tocs = _discover_ru_tocs(
-        seed_ru_md=diff_ru_md,
-        seed_ru_nav=diff_ru_nav,
-        read_ru=read_ru,
-        diff_paths=diff_ru_md | diff_ru_nav,
-    )
+    redirects_yaml = read_en_base(f"{root}/redirects.yaml") or read_ru(
+        f"{root}/redirects.yaml"
+    ) or ""
+    source_roots = diff_ru_md | deleted_ru_md
+    budget = MarkdownDependencyBudget(source_roots)
 
     # Deleted RU pages are translation actions too: their existing EN mirrors
     # must enter the pair pipeline as ``delete_en`` (#50904).
-    doc_ru: set[str] = set(diff_ru_md | deleted_ru_md)
+    doc_ru: set[str] = set(source_roots)
 
-    for ru_toc in sorted(discovered_tocs):
-        ru_toc_text = read_ru(ru_toc)
-        if not ru_toc_text:
-            continue
-        _pages_from_discovered_toc(
-            ru_toc,
-            ru_toc_text,
-            diff_ru_md=diff_ru_md,
-            diff_ru_nav=diff_ru_nav,
-            doc_ru=doc_ru,
+    tip_tombstone_ru = redirect_source_repo_md_paths(
+        redirects_yaml,
+        locale="ru",
+        docs_root=docs_root,
+        candidate_repo_paths=source_roots,
+    )
+    scanned_live_docs: set[str] = set()
+    discovered_tocs: set[str] = set()
+    nav_ru: set[str] = set()
+    first_round = True
+    while True:
+        live_docs = doc_ru - deleted_ru_md - tip_tombstone_ru
+        frontier = sorted(live_docs - scanned_live_docs)
+        candidates: set[str] = set()
+
+        discovered_tocs |= _discover_ru_tocs(
+            seed_ru_md=live_docs,
+            seed_ru_nav=diff_ru_nav,
+            read_ru=read_ru,
+            diff_paths=live_docs | diff_ru_nav,
+            docs_root=docs_root,
+        )
+        for ru_toc in sorted(discovered_tocs):
+            if _nav_needed(
+                ru_toc,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+                seed_ru_md=live_docs,
+                in_diff=ru_toc in diff_ru_nav,
+            ):
+                nav_ru.add(ru_toc)
+        _queue_parents_of_needed_nav(
+            discovered_tocs=discovered_tocs,
+            nav_ru=nav_ru,
             read_ru=read_ru,
             read_en_base=read_en_base,
-            read_ru_base=read_ru_base,
             docs_root=docs_root,
         )
 
-    queue = sorted(doc_ru)
-    while queue:
-        ru_md = queue.pop(0)
-        ru_text = read_ru(ru_md)
-        if not ru_text:
-            continue
-        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
-            if target in doc_ru:
+        for ru_toc in sorted(discovered_tocs):
+            ru_toc_text = read_ru(ru_toc)
+            if not ru_toc_text:
                 continue
-            en_md = counterpart(target, docs_root)
-            if en_md is None:
-                continue
-            # Empty RU includes (size 0) must still enter scope so EN gets a
-            # mirror file; ``{% include %}`` otherwise fails include_target (§6.154).
-            if read_en_base(en_md) is None and read_ru(target) is not None:
-                doc_ru.add(target)
-                queue.append(target)
-
-    nav_ru: set[str] = set()
-    nav_from_diff: set[str] = set()
-    for ru_toc in discovered_tocs:
-        if _nav_needed(
-            ru_toc,
-            read_ru=read_ru,
-            read_en_base=read_en_base,
-            docs_root=docs_root,
-            seed_ru_md=diff_ru_md,
-            in_diff=ru_toc in diff_ru_nav,
-        ):
-            nav_ru.add(ru_toc)
-            if ru_toc in diff_ru_nav:
-                nav_from_diff.add(ru_toc)
-
-    _queue_parents_of_needed_nav(
-        discovered_tocs=discovered_tocs,
-        nav_ru=nav_ru,
-        read_ru=read_ru,
-        read_en_base=read_en_base,
-        docs_root=docs_root,
-    )
-
-    # §6.192 / §6.194 / #37673: when a sidebar is queued because a diff page is
-    # listed in RU toc, also queue **siblings missing from EN toc** (e.g.
-    # ``debug.md`` overview next to ``debug-logs.md``). EN *file* may already
-    # exist as an orphan on main while the href was dropped from EN toc —
-    # ``_add_doc_if_en_absent`` alone skips those and nav merge never gap-fills
-    # → ``scope_not_applied`` / ``only_ru_hrefs=['debug.md']``.
-    for ru_toc in sorted(nav_ru):
-        ru_text = read_ru(ru_toc)
-        if not ru_text:
-            continue
-        toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
-        if not any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md):
-            continue
-        en_toc = counterpart(ru_toc, docs_root)
-        en_toc_text = (read_en_base(en_toc) or "") if en_toc else ""
-        en_toc_hrefs = _toc_md_hrefs(en_toc_text)
-        for rel in _toc_md_hrefs(ru_text):
-            ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
-            _add_doc_if_en_absent(
-                ru_md,
-                doc_ru=doc_ru,
+            _pages_from_discovered_toc(
+                ru_toc,
+                ru_toc_text,
+                diff_ru_md=live_docs,
+                diff_ru_nav=diff_ru_nav,
+                candidates=candidates,
                 read_ru=read_ru,
                 read_en_base=read_en_base,
-                docs_root=docs_root,
-            )
-            if rel in en_toc_hrefs or ru_md in doc_ru:
-                continue
-            if read_ru(ru_md) is None:
-                continue
-            en_md = counterpart(ru_md, docs_root)
-            if en_md is None:
-                continue
-            # EN markdown exists but EN toc lacks the href — still queue so
-            # ``planned_toc_extras_for_pair`` puts it in translate scope.
-            doc_ru.add(ru_md)
-
-    # Absent EN **sibling** sidebars are full-mirrored (§6.85). Queue every RU
-    # href in that toc that lacks an EN mirror so the new menu does not point at
-    # missing files. Do **not** expand ancestor hubs (``reference/toc_p``) —
-    # that reopens §6.104 / #45181 spill. Also queue parent section ``href``
-    # (e.g. ``streaming-query/index.md``) when its ``include.path`` child is in
-    # nav (§6.155 / #46446).
-    for ru_toc in sorted(nav_ru):
-        ru_text = read_ru(ru_toc)
-        if not ru_text:
-            continue
-        en_toc = counterpart(ru_toc, docs_root)
-        en_text = (read_en_base(en_toc) or "") if en_toc else ""
-        toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
-        sibling_of_diff = any(_norm(p).rsplit("/", 1)[0] == toc_dir for p in diff_ru_md)
-        if en_toc_is_absent(en_text) and sibling_of_diff:
-            for rel in _toc_md_hrefs(ru_text):
-                ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
-                _add_doc_if_en_absent(
-                    ru_md,
-                    doc_ru=doc_ru,
-                    read_ru=read_ru,
-                    read_en_base=read_en_base,
-                    docs_root=docs_root,
-                )
-        for it in parse_toc_items(ru_text):
-            include_path = it.get("include_path")
-            href = it.get("href")
-            if not include_path or not href or not href.endswith(".md"):
-                continue
-            child = _norm(resolve_toc_target_path(ru_toc, include_path))
-            if child not in nav_ru:
-                continue
-            # Only when the included child sidebar sits next to a diff page.
-            child_dir = child.rsplit("/", 1)[0]
-            if not any(_norm(p).rsplit("/", 1)[0] == child_dir for p in diff_ru_md):
-                continue
-            ru_md = _norm(resolve_toc_target_path(ru_toc, href))
-            _add_doc_if_en_absent(
-                ru_md,
-                doc_ru=doc_ru,
-                read_ru=read_ru,
-                read_en_base=read_en_base,
-                docs_root=docs_root,
-            )
-
-    # Close includes for pages added after the first pass (absent-toc hrefs).
-    queue = sorted(doc_ru)
-    seen_close = set(doc_ru)
-    while queue:
-        ru_md = queue.pop(0)
-        ru_text = read_ru(ru_md)
-        if not ru_text:
-            continue
-        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
-            if target in seen_close:
-                continue
-            en_md = counterpart(target, docs_root)
-            if en_md is None:
-                continue
-            if read_en_base(en_md) is None and read_ru(target) is not None:
-                doc_ru.add(target)
-                seen_close.add(target)
-                queue.append(target)
-
-    # §6 Markdown-link dependencies: missing EN → queue RU; redirect/existing EN
-    # → skip; dedup; budget 20 extras (source-PR files do not consume budget).
-    # Prefer tip redirects (``read_en_base`` / merge_base_with) over merge-era RU
-    # tree so tombstones match the translation-branch tip (§6.242).
-    from ydbdoc_review.navigation.link_deps import collect_md_link_dependencies
-    from ydbdoc_review.navigation.redirects import (
-        follow_redirect_repo_md_path,
-        redirect_source_repo_md_paths,
-    )
-
-    redirects_yaml = read_en_base(f"{root}/redirects.yaml") or read_ru(f"{root}/redirects.yaml")
-    link_deps = collect_md_link_dependencies(
-        diff_ru_md,
-        read_ru=read_ru,
-        read_en=read_en_base,
-        redirects_yaml=redirects_yaml,
-        docs_root=docs_root,
-        already_queued=doc_ru,
-    )
-    doc_ru.update(link_deps.queued_ru_paths)
-
-    # Exact, non-recursive closure for fragment hrefs on source-diff pages.
-    fragment_owners: set[str] = set()
-    for ru_md in sorted(diff_ru_md):
-        ru_text = read_ru(ru_md)
-        if ru_text is None:
-            continue
-        base_text = read_ru_base(ru_md) if read_ru_base is not None else None
-        for href in sorted(_new_internal_ascii_fragment_hrefs(ru_text, base_text)):
-            owner = _exact_ascii_fragment_owner_dependency(
-                ru_md,
-                href,
-                read_ru=read_ru,
-                read_en_base=read_en_base,
+                read_ru_base=read_ru_base,
                 docs_root=docs_root,
                 redirects_yaml=redirects_yaml,
             )
-            if owner:
-                fragment_owners.add(owner)
-                doc_ru.add(owner)
-    stable_fragment_owners = _stable_fragment_owners_for_diff_pages(
-        diff_ru_md,
-        read_ru=read_ru,
-        read_en_base=read_en_base,
-        read_ru_base=read_ru_base,
-        docs_root=docs_root,
-        redirects_yaml=redirects_yaml,
-    )
-    for owner in sorted(stable_fragment_owners):
-        fragment_owners.add(owner)
-        doc_ru.add(owner)
-    # Feed owners only through the existing locale-include closure.
-    queue = sorted(fragment_owners)
-    while queue:
-        ru_md = queue.pop(0)
-        ru_text = read_ru(ru_md)
-        if not ru_text:
-            continue
-        for target in sorted(_ru_include_md_targets(ru_md, ru_text, docs_root=docs_root)):
-            en_md = counterpart(target, docs_root)
-            if target not in doc_ru and en_md and read_en_base(en_md) is None and read_ru(target) is not None:
+
+        for ru_toc in sorted(nav_ru):
+            ru_text = read_ru(ru_toc)
+            if not ru_text:
+                continue
+            toc_dir = _norm(ru_toc).rsplit("/", 1)[0]
+            related_directory = any(
+                _norm(path).rsplit("/", 1)[0] == toc_dir for path in live_docs
+            )
+            en_toc = counterpart(ru_toc, docs_root)
+            en_text = (read_en_base(en_toc) or "") if en_toc else ""
+            if related_directory:
+                en_toc_hrefs = _toc_md_hrefs(en_text)
+                for rel in sorted(_toc_md_hrefs(ru_text)):
+                    ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
+                    _add_doc_if_en_absent(
+                        ru_md,
+                        candidates=candidates,
+                        read_ru=read_ru,
+                        read_en_base=read_en_base,
+                        docs_root=docs_root,
+                        redirects_yaml=redirects_yaml,
+                    )
+                    canonical_ru = canonical_md_dependency_path(
+                        ru_md,
+                        redirects_yaml=redirects_yaml,
+                        docs_root=docs_root,
+                    )
+                    if canonical_ru is None or rel in en_toc_hrefs:
+                        continue
+                    if read_ru(canonical_ru) is None:
+                        continue
+                    en_md = counterpart(canonical_ru, docs_root)
+                    if en_md is not None:
+                        candidates.add(canonical_ru)
+
+            for item in parse_toc_items(ru_text):
+                include_path = item.get("include_path")
+                href = item.get("href")
+                if not include_path or not href or not href.endswith(".md"):
+                    continue
+                child = _norm(resolve_toc_target_path(ru_toc, include_path))
+                if child not in nav_ru:
+                    continue
+                child_dir = child.rsplit("/", 1)[0]
+                if not any(
+                    _norm(path).rsplit("/", 1)[0] == child_dir for path in live_docs
+                ):
+                    continue
+                _add_doc_if_en_absent(
+                    _norm(resolve_toc_target_path(ru_toc, href)),
+                    candidates=candidates,
+                    read_ru=read_ru,
+                    read_en_base=read_en_base,
+                    docs_root=docs_root,
+                    redirects_yaml=redirects_yaml,
+                )
+
+        if first_round:
+            for source_root in sorted(source_roots & tip_tombstone_ru):
+                live = canonical_md_dependency_path(
+                    source_root,
+                    redirects_yaml=redirects_yaml,
+                    docs_root=docs_root,
+                )
+                if (
+                    live is not None
+                    and live != source_root
+                    and counterpart(live, docs_root) is not None
+                    and read_ru(live) is not None
+                ):
+                    candidates.add(live)
+
+        for ru_md in frontier:
+            ru_text = read_ru(ru_md)
+            scanned_live_docs.add(ru_md)
+            if ru_text is None:
+                continue
+            for target in _ru_include_md_targets(ru_md, ru_text, docs_root=docs_root):
+                _add_doc_if_en_absent(
+                    target,
+                    candidates=candidates,
+                    read_ru=read_ru,
+                    read_en_base=read_en_base,
+                    docs_root=docs_root,
+                    redirects_yaml=redirects_yaml,
+                )
+            candidates.update(
+                direct_md_link_dependencies(
+                    ru_md,
+                    ru_text,
+                    read_ru=read_ru,
+                    read_en=read_en_base,
+                    redirects_yaml=redirects_yaml,
+                    docs_root=docs_root,
+                )
+            )
+            for href in _internal_ascii_fragment_hrefs(ru_text):
+                owner = _exact_ascii_fragment_owner_dependency(
+                    ru_md,
+                    href,
+                    read_ru=read_ru,
+                    read_en_base=read_en_base,
+                    docs_root=docs_root,
+                    redirects_yaml=redirects_yaml,
+                )
+                if owner is not None:
+                    candidates.add(owner)
+
+        newly_admitted: set[str] = set()
+        for target in sorted(candidates):
+            if target in doc_ru:
+                continue
+            if budget.admit(
+                target,
+                warning_path=counterpart(target, docs_root) or target,
+            ):
                 doc_ru.add(target)
-                queue.append(target)
+                newly_admitted.add(target)
+
+        first_round = False
+        if not newly_admitted:
+            break
 
     # Tip redirect tombstones must not stay as *synthetic* translation targets.
     # Source-diff / deleted tombstones remain so PlanTranslatePairsStep can skip
     # (completeness) or delete_en; extras retarget to the live ``to`` twin (§6.242).
     if redirects_yaml:
-        tip_tombstone_ru = redirect_source_repo_md_paths(
-            redirects_yaml, locale="ru", docs_root=docs_root
-        )
-        retargeted: set[str] = set()
-        for path in sorted(doc_ru):
-            if path not in tip_tombstone_ru:
-                retargeted.add(path)
-                continue
-            live = follow_redirect_repo_md_path(path, redirects_yaml, docs_root=docs_root)
-            if path in diff_ru_md or path in deleted_ru_md:
-                retargeted.add(path)
-                if live != path and read_ru(live) is not None:
-                    retargeted.add(live)
-                continue
-            if live != path and read_ru(live) is not None:
-                retargeted.add(live)
-        doc_ru = retargeted
+        doc_ru = {
+            path
+            for path in doc_ru
+            if path not in tip_tombstone_ru or path in source_roots
+        }
 
+    nav_from_diff = nav_ru & diff_ru_nav
     doc_from_diff = frozenset(diff_ru_md | deleted_ru_md)
     doc_from_main = frozenset(doc_ru - diff_ru_md - deleted_ru_md)
     nav_from_main = frozenset(nav_ru - nav_from_diff)
@@ -714,7 +660,7 @@ def plan_translation_scope(
         nav_ru_paths=frozenset(nav_ru),
         nav_from_diff=frozenset(nav_from_diff),
         nav_from_main=nav_from_main,
-        link_dep_warnings=link_deps.warnings,
+        dependency_budget=budget,
     )
 
 
@@ -732,6 +678,7 @@ def make_repo_scope_readers(
     *,
     ru_content_ref: str | None = None,
     ru_base_ref: str | None = None,
+    authority: RuAuthority | None = None,
 ) -> tuple[ReadFn, ReadFn, ReadFn]:
     """Build scope readers for ``plan_translation_scope`` in CI.
 
@@ -746,49 +693,31 @@ def make_repo_scope_readers(
     """
     from ydbdoc_review.github.git_ops import (
         merge_base,
-        read_text,
-        read_text_at_ref,
-        read_text_at_upstream_tip,
+        read_text_at_commit,
+        resolve_commit_ref,
     )
 
-    mb = "HEAD"
-    try:
-        mb = merge_base(repo_path, merge_base_with, "HEAD")
-    except RuntimeError:
-        logger.debug(
-            "merge-base %s..HEAD unavailable; using HEAD for RU-base reads",
-            merge_base_with,
+    if authority is not None:
+        en_base_sha = authority.baseline_sha
+        ru_content_sha = authority.ru_sha
+        ru_base_sha = authority.ru_base_sha
+    else:
+        en_base_sha = resolve_commit_ref(repo_path, merge_base_with)
+        ru_content_sha = resolve_commit_ref(repo_path, ru_content_ref or "HEAD")
+        ru_base_sha = (
+            resolve_commit_ref(repo_path, ru_base_ref)
+            if ru_base_ref is not None
+            else merge_base(repo_path, en_base_sha, ru_content_sha)
         )
 
     def read_ru(path: str) -> str | None:
-        if ru_content_ref:
-            text = read_text_at_ref(repo_path, ru_content_ref, path)
-            if text is not None:
-                return text
-        text = read_text(repo_path, path)
-        if text is not None:
-            return text
-        text = read_text_at_ref(repo_path, "HEAD", path)
-        if text is not None:
-            return text
-        # Tip-only paths after a post-merge rename/redirect (§6.242).
-        return read_text_at_upstream_tip(repo_path, merge_base_with, path)
+        return read_text_at_commit(repo_path, ru_content_sha, path)
 
     def read_en_base(path: str) -> str | None:
-        text = read_text_at_upstream_tip(repo_path, merge_base_with, path)
-        if text is not None:
-            return text
-        return read_text_at_ref(repo_path, mb, path)
+        return read_text_at_commit(repo_path, en_base_sha, path)
 
     def read_ru_base(path: str) -> str | None:
-        if ru_base_ref:
-            text = read_text_at_ref(repo_path, ru_base_ref, path)
-            if text is not None:
-                return text
-        text = read_text_at_ref(repo_path, mb, path)
-        if text is not None:
-            return text
-        return read_text_at_ref(repo_path, merge_base_with, path)
+        return read_text_at_commit(repo_path, ru_base_sha, path)
 
     return read_ru, read_en_base, read_ru_base
 

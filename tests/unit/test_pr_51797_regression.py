@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.git_ops import read_text_at_ref
 from ydbdoc_review.github.pr import (
@@ -21,12 +23,12 @@ from ydbdoc_review.github.workflow import (
     _repair_en_fragments_after_apply,
     run_doc_translate,
 )
-from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.navigation.scope_planner import (
     doc_pairs_from_plan,
     make_repo_scope_readers,
     plan_translation_scope,
 )
+from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import DocPair
@@ -587,6 +589,9 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
             "GITHUB_TOKEN": "gh",
             "GITHUB_PUSH_TOKEN": "ghp",
             "YDBDOC_SKIP_OPS_GATES": "1",
+            # This historical regression intentionally exercises the
+            # explicit source-preserving exception, not A05's new default.
+            "YDBDOC_TRANSLATION_RU_AUTHORITY_MODE": "source-preserving",
         }
     )
     import ydbdoc_review.github.workflow as workflow
@@ -707,8 +712,8 @@ def test_pr_40385_final_tree_reader_keeps_touched_deletion_as_tombstone(tmp_path
     assert read(target) is None
 
 
-def test_pr_40385_final_tree_reader_uses_tip_for_missing_dry_run_overlay(tmp_path: Path):
-    """R-GL-11: a dry run names writes but does not create their worktree bytes."""
+def test_pr_40385_final_tree_reader_rejects_missing_dry_run_overlay(tmp_path: Path):
+    """A declared overlay without bytes is an integrity error, including dry runs."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -730,7 +735,8 @@ def test_pr_40385_final_tree_reader_uses_tip_for_missing_dry_run_overlay(tmp_pat
         deleted_paths=set(dry_run_touched.deleted),
     )
 
-    assert read(target) == tip_text
+    with pytest.raises(RuntimeError, match="declared overlay is missing"):
+        read(target)
 
 
 def test_pr_40385_final_reconciliation_fails_closed_without_tip_en_snapshot(tmp_path: Path):

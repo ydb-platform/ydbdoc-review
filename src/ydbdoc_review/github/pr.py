@@ -7,11 +7,14 @@ from dataclasses import dataclass
 
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.github.git_ops import (
+    file_diff_between,
     file_diff_range,
     list_local_changes,
     read_text,
+    read_text_at_commit,
     read_text_at_ref,
 )
+from ydbdoc_review.github.provenance import RuAuthority, TranslationArtifactProvenance
 from ydbdoc_review.navigation.toc import parse_toc_items
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.analyze import PairContent
@@ -57,10 +60,12 @@ class PullRequestContext:
     head_repo_full_name: str
     head_repo_https_url: str
     base_ref: str
+    base_sha: str = ""
     body: str = ""
     merged: bool = False
     state: str = "open"
     merge_commit_sha: str | None = None
+    labels: frozenset[str] = frozenset()
 
 
 def pull_request_context(
@@ -74,6 +79,18 @@ def pull_request_context(
     if not clone_url:
         raise ValueError(f"PR #{pr_number} missing head repo clone URL")
     merge_sha = str(data.get("merge_commit_sha") or "") or None
+    raw_labels = data.get("labels")
+    labels = (
+        frozenset(
+            name
+            for item in raw_labels
+            if isinstance(item, dict)
+            and isinstance((name := item.get("name")), str)
+            and name
+        )
+        if isinstance(raw_labels, list)
+        else frozenset()
+    )
     return PullRequestContext(
         owner=owner,
         repo=repo,
@@ -84,10 +101,12 @@ def pull_request_context(
         head_repo_full_name=str(head_repo.get("full_name") or f"{owner}/{repo}"),
         head_repo_https_url=clone_url,
         base_ref=str(base.get("ref") or ""),
+        base_sha=str(base.get("sha") or ""),
         body=str(data.get("body") or ""),
         merged=bool(data.get("merged")),
         state=str(data.get("state") or "open"),
         merge_commit_sha=merge_sha,
+        labels=labels,
     )
 
 
@@ -405,6 +424,7 @@ def load_verify_pair_contents(
     repo: str,
     source_pr: int,
     target_ref: str | None = None,
+    provenance: TranslationArtifactProvenance | None = None,
 ) -> list[PairContent]:
     """Load EN from translation PR checkout; RU from PR head / merge / checkout.
 
@@ -414,6 +434,59 @@ def load_verify_pair_contents(
     an alternate. ``pick_verify_ru_text`` chooses among head / merge / local by
     EN segment parity and fence-body fit (§6.70 / §6.106 / §6.109).
     """
+    if provenance is not None:
+        if target_ref is None:
+            raise ValueError("authority-bound verify requires immutable target_ref K")
+        authority = provenance.authority
+        exact_contents: list[PairContent] = []
+        for pair in pairs:
+            ru_text = (
+                None
+                if pair.ru_deleted
+                else read_text_at_commit(repo_path, authority.ru_sha, pair.ru_path)
+            )
+            en_text = (
+                None
+                if pair.en_deleted
+                else read_text_at_commit(repo_path, target_ref, pair.en_path)
+            )
+            exact_contents.append(
+                PairContent(
+                    pair=pair,
+                    ru_text=ru_text,
+                    en_text=en_text,
+                    ru_diff_vs_base=(
+                        file_diff_between(
+                            repo_path,
+                            authority.ru_base_sha,
+                            authority.ru_sha,
+                            pair.ru_path,
+                        )
+                        or None
+                    )
+                    if pair.ru_changed
+                    else None,
+                    en_diff_vs_base=(
+                        file_diff_between(
+                            repo_path,
+                            authority.baseline_sha,
+                            target_ref,
+                            pair.en_path,
+                        )
+                        or None
+                    )
+                    if pair.en_changed
+                    else None,
+                    ru_base_text=read_text_at_commit(
+                        repo_path, authority.ru_base_sha, pair.ru_path
+                    ),
+                    en_base_text=read_text_at_commit(
+                        repo_path, authority.baseline_sha, pair.en_path
+                    ),
+                )
+            )
+        return exact_contents
+
     pull_data = gh.get_pull(owner, repo, source_pr)
     merged = source_pr_merged(pull_data)
     ru_owner, ru_repo, ru_ref = source_pr_content_ref_from_pull(pull_data, owner, repo, source_pr)
@@ -503,6 +576,7 @@ def load_pair_contents(
     merge_base_with: str,
     ru_content_ref: str | None = None,
     ru_base_ref: str | None = None,
+    authority: RuAuthority | None = None,
 ) -> list[PairContent]:
     """Load RU/EN bodies and diffs for each pair from the local checkout.
 
@@ -517,6 +591,56 @@ def load_pair_contents(
     merge commit, whose EN still carries pre-move hrefs (#40385 /
     ``#vklyuchenie-…``) even after later translation PRs landed on main.
     """
+    if authority is not None:
+        exact_contents: list[PairContent] = []
+        for pair in pairs:
+            exact_contents.append(
+                PairContent(
+                    pair=pair,
+                    ru_text=(
+                        None
+                        if pair.ru_deleted
+                        else read_text_at_commit(repo_path, authority.ru_sha, pair.ru_path)
+                    ),
+                    en_text=(
+                        None
+                        if pair.en_deleted
+                        else read_text_at_commit(
+                            repo_path, authority.baseline_sha, pair.en_path
+                        )
+                    ),
+                    ru_diff_vs_base=(
+                        file_diff_between(
+                            repo_path,
+                            authority.ru_base_sha,
+                            authority.ru_sha,
+                            pair.ru_path,
+                        )
+                        or None
+                    )
+                    if pair.ru_changed
+                    else None,
+                    en_diff_vs_base=(
+                        file_diff_between(
+                            repo_path,
+                            authority.baseline_sha,
+                            authority.baseline_sha,
+                            pair.en_path,
+                        )
+                        or None
+                    )
+                    if pair.en_changed
+                    else None,
+                    ru_base_text=read_text_at_commit(
+                        repo_path, authority.ru_base_sha, pair.ru_path
+                    ),
+                    en_base_text=read_text_at_commit(
+                        repo_path, authority.baseline_sha, pair.en_path
+                    ),
+                )
+            )
+        return exact_contents
+
     contents: list[PairContent] = []
     for pair in pairs:
         ru_text: str | None = None
@@ -586,8 +710,21 @@ def load_verify_navigation_ru_texts(
     owner: str,
     repo: str,
     source_pr: int,
+    provenance: TranslationArtifactProvenance | None = None,
 ) -> dict[str, str]:
     """Load RU navigation YAML for ``doc_verify`` (source PR head or checkout)."""
+    if provenance is not None:
+        return {
+            pair.ru_path: text
+            for pair in pairs
+            if not pair.ru_deleted
+            and (
+                text := read_text_at_commit(
+                    repo_path, provenance.authority.ru_sha, pair.ru_path
+                )
+            )
+            is not None
+        }
     ru_owner, ru_repo, ru_ref = source_pr_content_ref(gh, owner, repo, source_pr)
     texts: dict[str, str] = {}
     for pair in pairs:

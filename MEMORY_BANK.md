@@ -2,10 +2,12 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-09-05
-**Current focus:** §6.255 — phase-correct outbound fragment validation for run
-``33967884593``; defer only separately proven eligible occurrences, then enforce the final
-publication gate.
+**Last updated:** 2026-09-06
+**Current focus:** §6.256: source-preserving #40385 translation with a breadth-level
+dependency/navigation fixed point, shared twenty-document budget, bounded frozen-B redirects,
+source-owned pre-strip href repair, and immutable R/B/K readers. The pinned scope is eight
+Markdown files, no navigation, three admissions. Local gates pass with recorded baseline
+failures; deployment and production acceptance are pending.
 
 Prior focus: §6.249 — source-owned stable fragments beat resolvable baseline hrefs (#52077 / R-GL-9).
 
@@ -30,6 +32,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-06 | **§6.256**: trusted source-preserving label, all-family shared-20 closure, exact-first bounded redirects, idempotent source-owned pre-strip href repair, and R/B/K reader/final-gate separation; pinned #40385 scope is 8 Markdown / 0 nav / 3 admissions, without later #50704 RU or asset expansion; local gates 35/95/16/61 pass with qualified baseline failures; deployment pending |
 | 2026-09-05 | **§6.255** — phase-correct outbound fragment validation defers only occurrences separately proven eligible for the final EN checker, preserves fail-closed include/identity/snapshot behavior, and enforces a second publication gate; locally accepted, production pending |
 | 2026-09-05 | **§6.254** — empty/length-classified translate JSON now advances after three primary attempts to one attempt per configured fallback; validators are unchanged, local RED/GREEN/mutation evidence is complete, and production acceptance is still pending |
 | 2026-09-04 | **§6.253** — paid-candidate publication separated from merge readiness: only complete safe final-link blockers publish as draft/RED; incomplete/unsafe results remain withheld; PR/source/CLI/ops signalling is explicit |

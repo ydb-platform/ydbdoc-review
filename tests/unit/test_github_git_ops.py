@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import subprocess
+from inspect import getsource
 from pathlib import Path
 
 import pytest
 
+import ydbdoc_review.github.git_ops as git_ops
 from ydbdoc_review.github.git_ops import (
+    _parse_name_status_z,
     file_diff_range,
+    first_parent_commit_changes,
     git_commit_paths,
     list_local_changes,
     merge_base,
@@ -16,6 +20,7 @@ from ydbdoc_review.github.git_ops import (
     read_text,
     read_text_at_ref,
     remote_push_url,
+    resolve_commit_ref,
     rollback_pushed_branch,
     write_text,
 )
@@ -60,6 +65,100 @@ def test_list_local_changes_after_commit(git_repo: str):
     )
     changes = list_local_changes(git_repo, "HEAD~1")
     assert ("ydb/docs/en/a.md", "added") in changes
+
+
+def test_first_parent_commit_changes_preserves_control_and_unicode_path(git_repo: str):
+    path = "ydb/docs/ru/control\r\n\t`-\u0451-\u5b89\u5168.md"
+    target = Path(git_repo) / path
+    target.write_text("# Exact path\n", encoding="utf-8")
+    subprocess.run(["git", "-C", git_repo, "add", "--", path], check=True)
+    subprocess.run(["git", "-C", git_repo, "commit", "-m", "hostile path"], check=True)
+    commit_sha = resolve_commit_ref(git_repo, "HEAD")
+
+    assert first_parent_commit_changes(git_repo, commit_sha) == ((path, "added"),)
+
+
+def test_first_parent_commit_changes_uses_new_path_for_scored_rename(git_repo: str):
+    old_path = "ydb/docs/ru/old.md"
+    new_path = "ydb/docs/ru/new.md"
+    old_target = Path(git_repo) / old_path
+    old_target.write_text("# Same bytes\n", encoding="utf-8")
+    subprocess.run(["git", "-C", git_repo, "add", "--", old_path], check=True)
+    subprocess.run(["git", "-C", git_repo, "commit", "-m", "old path"], check=True)
+    subprocess.run(["git", "-C", git_repo, "mv", "--", old_path, new_path], check=True)
+    subprocess.run(["git", "-C", git_repo, "commit", "-m", "rename path"], check=True)
+    commit_sha = resolve_commit_ref(git_repo, "HEAD")
+
+    assert first_parent_commit_changes(git_repo, commit_sha) == ((new_path, "modified"),)
+
+
+@pytest.mark.parametrize("status", [b"R100", b"C100"])
+def test_parse_name_status_z_preserves_scored_destination_bytes(status: bytes):
+    """Scored rename/copy records retain only their exact destination path."""
+    source = b"ydb/docs/ru/source\r\n\t-\xd1\x91-\xe5\xae\x89\xe5\x85\xa8.md"
+    destination = b"ydb/docs/ru/destination\r\n\t-\xd1\x91-\xe5\xae\x89\xe5\x85\xa8.md"
+
+    assert _parse_name_status_z(status + b"\0" + source + b"\0" + destination + b"\0") == (
+        (destination.decode("utf-8"), "modified"),
+    )
+
+
+def test_first_parent_commit_changes_accepts_empty_diff(git_repo: str):
+    subprocess.run(
+        ["git", "-C", git_repo, "commit", "--allow-empty", "-m", "empty"],
+        check=True,
+    )
+    commit_sha = resolve_commit_ref(git_repo, "HEAD")
+
+    assert first_parent_commit_changes(git_repo, commit_sha) == ()
+
+
+def test_parse_name_status_z_rejects_non_utf8_path_without_replacement():
+    with pytest.raises(RuntimeError, match="UTF-8"):
+        _parse_name_status_z(b"A\0ydb/docs/ru/bad-\xff.md\0")
+
+
+def test_name_status_raw_bytes_contract_kills_text_and_splitline_mutants(git_repo: str):
+    """The byte/NUL protocol must not be normalized through text lines."""
+    path = "ydb/docs/ru/control\r\n\t-\u0451-\u5b89\u5168.md"
+    Path(git_repo, path).write_text("# Exact path\n", encoding="utf-8")
+    subprocess.run(["git", "-C", git_repo, "add", "--", path], check=True)
+    subprocess.run(["git", "-C", git_repo, "commit", "-m", "raw bytes"], check=True)
+    commit_sha = resolve_commit_ref(git_repo, "HEAD")
+    assert first_parent_commit_changes(git_repo, commit_sha) == ((path, "added"),)
+
+    first_parent_source = getsource(git_ops.first_parent_commit_changes).replace(
+        "text=False", "text=True"
+    )
+    first_parent_globals = dict(vars(git_ops))
+    exec(first_parent_source, first_parent_globals)
+    with pytest.raises(TypeError):
+        first_parent_globals["first_parent_commit_changes"](git_repo, commit_sha)
+
+    parser_source = getsource(git_ops._parse_name_status_z).replace(
+        'raw[:-1].split(b"\\0")', "raw[:-1].splitlines()"
+    )
+    parser_globals = dict(vars(git_ops))
+    exec(parser_source, parser_globals)
+    with pytest.raises(RuntimeError, match="name-status"):
+        parser_globals["_parse_name_status_z"](
+            b"A\0ydb/docs/ru/control\r\n\t-\xd1\x91-\xe5\xae\x89\xe5\x85\xa8.md\0"
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"M\0path-without-terminal-nul",
+        b"M\0\0",
+        b"R100\0old.md\0",
+        b"Q\0path.md\0",
+        b"M\0path.md\0orphan\0",
+    ],
+)
+def test_parse_name_status_z_rejects_truncated_or_invalid_records(payload: bytes):
+    with pytest.raises(RuntimeError, match="name-status"):
+        _parse_name_status_z(payload)
 
 
 def test_read_text_at_ref(git_repo: str):
@@ -435,6 +534,7 @@ def test_prepare_translation_branch_removes_deleted_on_base(tmp_path: Path):
     subprocess.run(["git", "add", "."], cwd=work, check=True)
     subprocess.run(["git", "commit", "-m", "seed main"], cwd=work, check=True)
     subprocess.run(["git", "push", "origin", "main"], cwd=work, check=True)
+    base_commit_sha = resolve_commit_ref(str(work), "HEAD")
 
     write_text(str(work), "ydb/docs/en/new.md", "# New\n")
     prepare_translation_branch_on_base(
@@ -444,6 +544,7 @@ def test_prepare_translation_branch_removes_deleted_on_base(tmp_path: Path):
         base_remote_name="ydbdoc-review-upstream",
         base_branch="main",
         paths=["ydb/docs/en/new.md"],
+        base_commit_sha=base_commit_sha,
         deleted_paths=["ydb/docs/en/stale.md"],
     )
     assert read_text(str(work), "ydb/docs/en/new.md") == "# New\n"

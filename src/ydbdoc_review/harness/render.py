@@ -27,12 +27,15 @@ from ydbdoc_review.validation.glossary_toc_links import (
     strip_unreachable_internal_links,
 )
 from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
-from ydbdoc_review.validation.href_parity import restore_md_link_hrefs
+from ydbdoc_review.validation.href_parity import (
+    restore_md_link_hrefs,
+    retarget_source_owned_redirect_hrefs,
+)
+from ydbdoc_review.validation.link_contract import LinkContractResult
 from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
 )
-from ydbdoc_review.validation.link_contract import LinkContractResult
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
@@ -112,7 +115,7 @@ def remap_translations_by_position(
 
 
 def finalize_en_target_result(
-    text: str,
+    text: str | LinkContractResult,
     normalized_source_text: str,
     *,
     client: YandexLLMClient | None = None,
@@ -127,8 +130,13 @@ def finalize_en_target_result(
     protected_source_text: str | None = None,
     source_base_text: str | None = None,
     target_baseline_text: str | None = None,
+    docs_text_reader=None,
 ) -> LinkContractResult:
     """Copy fenced bodies from reference, translate residual Cyrillic, postprocess."""
+    incoming_issues = ()
+    if isinstance(text, LinkContractResult):
+        incoming_issues = text.issues
+        text = text.text
     if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
         text = enforce_source_fenced_blocks(text, normalized_source_text)
     if client is not None and glossary is not None:
@@ -174,6 +182,18 @@ def finalize_en_target_result(
     )
     text = link_result.text
     text = _restore_cyrillic_source_code_atoms(text, protected)
+    if (
+        docs_text_reader is not None
+        and source_lang.lower() in {"ru", "russian"}
+        and target_lang.lower() in {"en", "english"}
+        and file_path
+    ):
+        text = retarget_source_owned_redirect_hrefs(
+            text,
+            protected,
+            en_page_path=en_mirror_path(file_path),
+            read_text=docs_text_reader,
+        )
     if en_toc_reachable is not None and target_lang.lower() in {"en", "english"}:
         stripped: list[str] = []
         try:
@@ -202,7 +222,7 @@ def finalize_en_target_result(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
-    return LinkContractResult(text, link_result.issues)
+    return LinkContractResult(text, incoming_issues + link_result.issues)
 
 
 def finalize_en_target(*args, **kwargs) -> str:
