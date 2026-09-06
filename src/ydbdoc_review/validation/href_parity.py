@@ -207,6 +207,352 @@ def redirected_md_href(
     )
 
 
+def _segment_paragraph_links(doc: object, segment: object) -> list[object] | None:
+    """Return ordinary internal links owned by one extracted paragraph."""
+    from ydbdoc_review.parsing.ast_types import (
+        Document,
+        InlineEmphasis,
+        InlineLink,
+        InlineStrong,
+        Paragraph,
+        YfmIf,
+    )
+    from ydbdoc_review.segmentation.types import SegmentKind
+
+    if getattr(segment, "kind", None) != SegmentKind.PARAGRAPH:
+        return None
+    node = doc
+    for step in getattr(segment, "ast_path", ()):
+        if not isinstance(step, int):
+            return None
+        if isinstance(node, Document):
+            node = node.children[step]
+        elif isinstance(node, YfmIf):
+            node = node.branches[step]
+        elif hasattr(node, "children") and isinstance(node.children, list):
+            node = node.children[step]
+        else:
+            return None
+    if not isinstance(node, Paragraph):
+        return None
+
+    links: list[object] = []
+
+    def walk(children: list[object]) -> None:
+        for child in children:
+            if isinstance(child, InlineLink):
+                label = "".join(
+                    item.content
+                    for item in child.children
+                    if hasattr(item, "content")
+                )
+                if label.strip() != "{#T}" and _is_internal_href(child.href):
+                    links.append(child)
+            elif isinstance(child, (InlineEmphasis, InlineStrong)):
+                walk(list(child.children))
+
+    walk(list(node.children))
+    return links
+
+
+def _safe_en_md_target(
+    href: str,
+    *,
+    en_page_path: str,
+    docs_root: str,
+) -> str | None:
+    """Resolve one relative Markdown href without permitting locale/root escape."""
+    from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+
+    raw = href.strip()
+    before_fragment = raw.partition("#")[0]
+    raw_path = before_fragment.partition("?")[0]
+    expected_root = docs_root.strip("/")
+    if (
+        not expected_root
+        or expected_root != docs_root
+        or _en_page_docs_root(en_page_path) != expected_root
+        or not raw_path
+        or not raw_path.endswith(".md")
+        or raw.startswith(("/", "#", "//"))
+        or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", raw)
+        or "\\" in raw_path
+        or "%" in raw_path
+        or unquote(raw_path) != raw_path
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_path)
+    ):
+        return None
+    stack = en_page_path.split("/")[:-1]
+    floor = len(expected_root.split("/")) + 2
+    for segment in raw_path.split("/"):
+        if segment == ".":
+            continue
+        if segment == "..":
+            if len(stack) <= floor:
+                return None
+            stack.pop()
+            continue
+        if not segment:
+            return None
+        stack.append(segment)
+    guarded_target = "/".join(stack)
+    target = resolve_internal_md_href(en_page_path, raw_path)
+    prefix = f"{expected_root}/en/core/"
+    if (
+        target is None
+        or target != guarded_target
+        or not target.startswith(prefix)
+        or not target.endswith(".md")
+        or posixpath.normpath(target) != target
+    ):
+        return None
+    return target
+
+
+def _eligible_plain_label_spans(text: str, label: str) -> list[tuple[int, int]]:
+    """Find exact visible, unlinked label occurrences while preserving offsets."""
+    from unicodedata import category
+
+    from ydbdoc_review.validation.en_link_targets import _mask_yfm_include_directives
+
+    def is_word_character(char: str) -> bool:
+        return char.isalnum() or char == "_" or category(char).startswith("M")
+
+    masked = _mask_link_protected_ranges(_mask_yfm_include_directives(text))
+    chars = list(masked)
+    for match in _MD_LINK.finditer(masked):
+        for index in range(match.start(), match.end()):
+            if chars[index] != "\n":
+                chars[index] = " "
+    visible = "".join(chars)
+    spans: list[tuple[int, int]] = []
+    for match in re.finditer(re.escape(label), visible):
+        start, end = match.span()
+        if start and is_word_character(label[0]) and is_word_character(visible[start - 1]):
+            continue
+        if (
+            end < len(visible)
+            and is_word_character(label[-1])
+            and is_word_character(visible[end])
+        ):
+            continue
+        spans.append((start, end))
+    return spans
+
+
+def propose_frozen_baseline_link_wrapper_repair(
+    target_text: str,
+    source_text: str,
+    *,
+    source_base_text: str,
+    target_baseline_text: str,
+    missing_href: str,
+    en_page_path: str,
+    read_baseline: DocsTextReader,
+    read_final: DocsTextReader,
+    docs_root: str = "ydb/docs",
+) -> str | None:
+    """Propose one byte-bounded wrapper from immutable source/B/K evidence."""
+    try:
+        from ydbdoc_review.navigation.link_deps import canonical_md_dependency_path
+        from ydbdoc_review.parsing.ast_types import InlineLink, InlineText
+        from ydbdoc_review.parsing.markdown_parser import parse_markdown
+        from ydbdoc_review.segmentation.extractor import extract_segments
+        from ydbdoc_review.segmentation.types import SegmentKind
+        from ydbdoc_review.validation.en_link_targets import check_en_page_link_targets
+        from ydbdoc_review.validation.fragment_repair import (
+            fragment_declared_in_markdown,
+        )
+
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                target_text,
+                source_text,
+                source_base_text,
+                target_baseline_text,
+                missing_href,
+                en_page_path,
+            )
+        ):
+            return None
+        if _en_page_docs_root(en_page_path) != docs_root.strip("/"):
+            return None
+
+        texts = (source_base_text, source_text, target_baseline_text, target_text)
+        docs = [parse_markdown(text) for text in texts]
+        segments = [extract_segments(doc) for doc in docs]
+        if not segments[0] or len({len(items) for items in segments}) != 1:
+            return None
+        for aligned in zip(*segments, strict=True):
+            if len({item.kind for item in aligned}) != 1:
+                return None
+
+        link_rows: list[list[list[object]]] = []
+        for doc, extracted in zip(docs, segments, strict=True):
+            owned: list[list[object]] = []
+            for segment in extracted:
+                links = _segment_paragraph_links(doc, segment)
+                owned.append(links if links is not None else [])
+            link_rows.append(owned)
+
+        source_matches = [
+            (ordinal, slot)
+            for ordinal, links in enumerate(link_rows[1])
+            for slot, link in enumerate(links)
+            if getattr(link, "href", None) == missing_href
+        ]
+        base_matches = [
+            (ordinal, slot)
+            for ordinal, links in enumerate(link_rows[0])
+            for slot, link in enumerate(links)
+            if getattr(link, "href", None) == missing_href
+        ]
+        if len(source_matches) != 1 or base_matches != source_matches:
+            return None
+        ordinal, slot = source_matches[0]
+        if segments[1][ordinal].kind != SegmentKind.PARAGRAPH:
+            return None
+        if (
+            segments[0][ordinal].text != segments[1][ordinal].text
+            or segments[0][ordinal].placeholders != segments[1][ordinal].placeholders
+        ):
+            return None
+        source_links = link_rows[1][ordinal]
+        baseline_links = link_rows[2][ordinal]
+        if len(source_links) != len(baseline_links) or slot >= len(baseline_links):
+            return None
+        baseline_link = baseline_links[slot]
+        if (
+            not isinstance(baseline_link, InlineLink)
+            or baseline_link.title is not None
+            or len(baseline_link.children) != 1
+            or not isinstance(baseline_link.children[0], InlineText)
+        ):
+            return None
+        label = baseline_link.children[0].content
+        if not label or not label.strip() or label.strip() == "{#T}":
+            return None
+        baseline_href = baseline_link.href
+
+        source_target = _safe_en_md_target(
+            missing_href,
+            en_page_path=en_page_path,
+            docs_root=docs_root,
+        )
+        baseline_target = _safe_en_md_target(
+            baseline_href,
+            en_page_path=en_page_path,
+            docs_root=docs_root,
+        )
+        redirects = read_baseline(f"{docs_root}/redirects.yaml")
+        if source_target is None or baseline_target is None or redirects is None:
+            return None
+        canonical = canonical_md_dependency_path(
+            source_target,
+            redirects_yaml=redirects,
+            docs_root=docs_root,
+        )
+        baseline_canonical = canonical_md_dependency_path(
+            baseline_target,
+            redirects_yaml=redirects,
+            docs_root=docs_root,
+        )
+        if (
+            canonical is None
+            or canonical == source_target
+            or baseline_canonical != canonical
+        ):
+            return None
+        baseline_target_text = read_baseline(canonical)
+        final_target_text = read_final(canonical)
+        if baseline_target_text is None or final_target_text is None:
+            return None
+        _path, marker, raw_fragment = baseline_href.partition("#")
+        if marker:
+            if not raw_fragment:
+                return None
+            fragment = unquote(raw_fragment)
+            if not fragment or not all(
+                fragment_declared_in_markdown(
+                    content,
+                    fragment,
+                    page_path=canonical,
+                    read_text=reader,
+                )
+                for content, reader in (
+                    (baseline_target_text, read_baseline),
+                    (final_target_text, read_final),
+                )
+            ):
+                return None
+
+        current_links = link_rows[3][ordinal]
+        if any(
+            isinstance(link, InlineLink)
+            and link.href == baseline_href
+            and len(link.children) == 1
+            and isinstance(link.children[0], InlineText)
+            and link.children[0].content == label
+            for link in current_links
+        ):
+            return None
+        spans = _eligible_plain_label_spans(target_text, label)
+        if len(spans) != 1:
+            return None
+        start, end = spans[0]
+        proposal = (
+            target_text[:start]
+            + "["
+            + target_text[start:end]
+            + f"]({baseline_href})"
+            + target_text[end:]
+        )
+
+        proposed_doc = parse_markdown(proposal)
+        proposed_segments = extract_segments(proposed_doc)
+        if len(proposed_segments) != len(segments[3]) or any(
+            before.kind != after.kind
+            for before, after in zip(segments[3], proposed_segments, strict=True)
+        ):
+            return None
+        proposed_links = _segment_paragraph_links(
+            proposed_doc, proposed_segments[ordinal]
+        )
+        if proposed_links is None or len(proposed_links) != len(source_links):
+            return None
+        inserted = proposed_links[slot]
+        if (
+            not isinstance(inserted, InlineLink)
+            or inserted.href != baseline_href
+            or len(inserted.children) != 1
+            or not isinstance(inserted.children[0], InlineText)
+            or inserted.children[0].content != label
+        ):
+            return None
+        expected = target_text[:start] + f"[{label}]({baseline_href})" + target_text[end:]
+        if proposal != expected:
+            return None
+        restored = restore_md_link_hrefs(
+            proposal,
+            source_text,
+            source_ru_base=source_base_text,
+            target_baseline=proposal,
+        )
+        if restored.text != proposal or restored.issues:
+            return None
+        if check_en_page_link_targets(
+            en_page_path,
+            proposal,
+            read_text=read_final,
+            baseline_read_text=read_baseline,
+        ):
+            return None
+        return proposal
+    except Exception:
+        return None
+
+
 def retarget_source_owned_redirect_hrefs(
     target_text: str,
     source_text: str,
@@ -666,7 +1012,7 @@ def _is_internal_href(href: str) -> bool:
     # Autotitle / markdown / in-page fragment.
     if href.startswith("#"):
         return True
-    path = href.split("#", 1)[0]
+    path = href.split("#", 1)[0].split("?", 1)[0]
     return path.endswith(".md") or path.endswith(".yaml") or path.endswith(".yml")
 
 

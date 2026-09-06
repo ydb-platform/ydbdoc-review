@@ -44,6 +44,7 @@ from ydbdoc_review.reporting.locations import (
 )
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
+from ydbdoc_review.validation.link_contract import LinkContractIssue
 from ydbdoc_review.validation.placeholder_drift import exclude_skipped_issues
 from ydbdoc_review.version import action_release_label
 
@@ -171,7 +172,12 @@ def _count_verdicts(result: PRTranslationResult) -> tuple[int, int, int]:
     """Count files by unified verdict (translate and verify use the same rules)."""
     ok = warn = blocked = 0
     for run in result.pair_results:
-        if run.skipped or run.deleted or run.error or run.file_result is None:
+        if (
+            run.skipped
+            or run.deleted
+            or run.error
+            or (run.file_result is None and not _typed_link_issues(run))
+        ):
             continue
         if _file_has_blocking_findings(run):
             blocked += 1
@@ -209,6 +215,8 @@ def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
         )
     if result.final_tree_blockers:
         return "🔴", "не мержить — QA RED, есть блокеры финального дерева"
+    if any(_typed_link_issues(run) for run in result.pair_results):
+        return "🔴", "не мержить — есть блокирующие проблемы"
     ok, warn, blocked = _count_verdicts(result)
     nav_blocked = any(
         _nav_has_blocking_findings(n) for n in result.navigation_results
@@ -522,7 +530,51 @@ def _report_heuristic_messages(fr, *, config: Config) -> list[str]:
     return [*fr.heuristic_blocking, *fr.heuristic_warnings]
 
 
+def _typed_link_issues(run: PairRunResult) -> tuple[LinkContractIssue, ...]:
+    """Project and deduplicate every typed link issue for one target path."""
+    combined = [*run.validation_issues]
+    if run.file_result is not None:
+        combined.extend(run.file_result.link_contract_issues)
+    projected: dict[
+        tuple[str, str, str | None, int | None, str], LinkContractIssue
+    ] = {}
+    for issue in combined:
+        path = issue.file_path or run.plan.target_path
+        normalized = LinkContractIssue(
+            code=issue.code,
+            message=issue.message,
+            file_path=path,
+            slot=issue.slot,
+            href=issue.href,
+        )
+        key = (
+            normalized.code,
+            normalized.message,
+            normalized.href,
+            normalized.slot,
+            normalized.file_path,
+        )
+        projected.setdefault(key, normalized)
+    return tuple(projected.values())
+
+
+def _format_typed_link_issue(issue: LinkContractIssue, *, index: int) -> str:
+    details = f"`{issue.code}`: {issue.message}"
+    if issue.href is not None:
+        details += f"; href `{issue.href}`"
+    if issue.slot is not None:
+        details += f"; slot {issue.slot}"
+    return _format_reviewer_item(
+        index=index,
+        location="структура Markdown-ссылок",
+        problem=details,
+        severity="blocked",
+    )
+
+
 def _file_has_open_issues(run: PairRunResult) -> bool:
+    if _typed_link_issues(run):
+        return True
     fr = run.file_result
     if fr is None:
         return False
@@ -545,6 +597,8 @@ def _file_has_blocking_findings(run: PairRunResult) -> bool:
     """
     if run.skipped or run.deleted or run.error:
         return False
+    if _typed_link_issues(run):
+        return True
     fr = run.file_result
     if fr is None:
         return False
@@ -566,8 +620,18 @@ def _file_reviewer_section(
 ) -> tuple[str, int]:
     """Build markdown for one file's open issues; return (text, next item index)."""
     fr = run.file_result
-    if fr is None or run.skipped or run.deleted or run.error:
+    if run.skipped or run.deleted or run.error:
         return "", item_index
+    typed_issues = _typed_link_issues(run)
+    file_path = run.plan.target_path
+    if fr is None:
+        if not typed_issues:
+            return "", item_index
+        out = f"### 🔴 `{file_path}`\n\n"
+        for issue in typed_issues:
+            out += _format_typed_link_issue(issue, index=item_index) + "\n\n"
+            item_index += 1
+        return out, item_index
 
     manual_actions = fr.manual_actions
     manual_ids = manual_action_segment_ids(manual_actions)
@@ -585,12 +649,14 @@ def _file_reviewer_section(
         manual_line_ranges=manual_ranges,
     )
 
-    file_path = run.plan.target_path
     source_lang = run.plan.source_lang
     target_lang = run.plan.target_lang
 
     if fr.segment_alignment_error:
         out = f"### 🔴 `{file_path}`\n\n"
+        for issue in typed_issues:
+            out += _format_typed_link_issue(issue, index=item_index) + "\n\n"
+            item_index += 1
         out += _format_reviewer_item(
             index=item_index,
             location="сегменты RU/EN",
@@ -604,7 +670,7 @@ def _file_reviewer_section(
         ) + "\n\n"
         return out, item_index + 1
 
-    if not critic_items and not heuristics and not manual_actions:
+    if not typed_issues and not critic_items and not heuristics and not manual_actions:
         skipped = _skipped_critic_issues(fr)
         if skipped and config.reporting.include_skipped_critic:
             out = f"### {_verdict_emoji(fr.verdict)} `{file_path}`\n\n"
@@ -637,7 +703,11 @@ def _file_reviewer_section(
             return out, item_index
         return "", item_index
 
-    out = f"### {_verdict_emoji(fr.verdict)} `{file_path}`\n\n"
+    emoji = "🔴" if typed_issues else _verdict_emoji(fr.verdict)
+    out = f"### {emoji} `{file_path}`\n\n"
+    for issue in typed_issues:
+        out += _format_typed_link_issue(issue, index=item_index) + "\n\n"
+        item_index += 1
     for action in manual_actions:
         line_range = fr.segment_lines.get(action.segment_id)
         location = format_location_label(
@@ -1194,7 +1264,7 @@ def build_full_report(
 
     file_runs = [
         r for r in result.pair_results
-        if r.file_result
+        if (r.file_result or _typed_link_issues(r))
         and not r.skipped
         and not r.deleted
         and not r.error

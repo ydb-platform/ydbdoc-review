@@ -163,6 +163,7 @@ from ydbdoc_review.validation.href_parity import (
     _MD_LINK,
     _is_internal_href,
     check_outbound_fragments,
+    propose_frozen_baseline_link_wrapper_repair,
 )
 from ydbdoc_review.validation.include_targets import (
     apply_include_parity_repair,
@@ -491,6 +492,105 @@ def _apply_results_to_disk(
         )
     )
     return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
+
+
+def _collect_frozen_baseline_wrapper_repairs(
+    repo_path: str,
+    result: PRTranslationResult,
+    *,
+    provenance: TranslationArtifactProvenance,
+    verified_commit_sha: str,
+    source_scope_en: frozenset[str],
+    docs_root: str,
+) -> dict[str, str]:
+    """Return only fully proven wrapper repairs for existing scoped EN pages."""
+    authority = provenance.authority
+    root = docs_root.strip("/")
+
+    def read_baseline(path: str) -> str | None:
+        normalized = path.replace("\\", "/")
+        if normalized != f"{root}/redirects.yaml" and not normalized.startswith(
+            f"{root}/en/"
+        ):
+            raise ValueError(f"wrapper repair B read outside EN namespace: {normalized}")
+        return read_text_at_commit(
+            repo_path, authority.baseline_sha, normalized
+        )
+
+    def read_final(path: str) -> str | None:
+        normalized = path.replace("\\", "/")
+        if not normalized.startswith(f"{root}/en/"):
+            raise ValueError(f"wrapper repair K read outside EN namespace: {normalized}")
+        return read_text_at_commit(repo_path, verified_commit_sha, normalized)
+
+    proposals: dict[str, str] = {}
+    for run in sorted(result.pair_results, key=lambda item: item.plan.target_path):
+        path = run.plan.target_path.replace("\\", "/")
+        fr = run.file_result
+        if (
+            path not in source_scope_en
+            or not path.startswith(f"{root}/en/")
+            or not path.endswith(".md")
+            or run.plan.target_lang != "en"
+            or run.skipped
+            or run.deleted
+            or run.error is not None
+            or run.soft_keep_reason is not None
+            or fr is None
+            or fr.segment_alignment_error is not None
+            or bool(fr.manual_actions)
+            or bool(fr.heuristic_blocking)
+            or (
+                fr.critic_unresolved is not None
+                and fr.critic_unresolved.verdict == "blocked"
+            )
+        ):
+            continue
+        current = read_text_at_commit(repo_path, verified_commit_sha, path)
+        if not current or run.target_text != current:
+            continue
+        ru_path = run.plan.source_path.replace("\\", "/")
+        if not ru_path.startswith(f"{root}/ru/") or not ru_path.endswith(".md"):
+            continue
+        source_base = read_text_at_commit(
+            repo_path, authority.source_base_sha, ru_path
+        )
+        source_head = read_text_at_commit(
+            repo_path, authority.source_head_sha, ru_path
+        )
+        source_selected = read_text_at_commit(repo_path, authority.ru_sha, ru_path)
+        baseline = read_text_at_commit(repo_path, authority.baseline_sha, path)
+        if (
+            not source_base
+            or not source_head
+            or not source_selected
+            or not baseline
+            or run.source_text != source_selected
+        ):
+            continue
+        issues = [*run.validation_issues, *fr.link_contract_issues]
+        if not issues or any(
+            issue.code != "missing_link_wrapper" or not issue.href
+            for issue in issues
+        ):
+            continue
+        hrefs = {issue.href for issue in issues}
+        if len(hrefs) != 1:
+            continue
+        proposed = propose_frozen_baseline_link_wrapper_repair(
+            current,
+            source_head,
+            source_base_text=source_base,
+            target_baseline_text=baseline,
+            missing_href=next(iter(hrefs)),
+            en_page_path=path,
+            read_baseline=read_baseline,
+            read_final=read_final,
+            docs_root=docs_root,
+        )
+        if proposed is not None:
+            proposals[path] = proposed
+    return proposals
 
 
 def _soft_keep_message(reason: str) -> str:
@@ -3185,30 +3285,53 @@ def run_doc_verify(
         )
         touched = None
     else:
-        touched = _apply_results_to_disk(
-            repo_path,
-            pr_result,
-            dry_run=dry_run,
-            docs_root=cfg.paths.docs_root,
-        )
-        if translation_pr and source_scope_en:
-            protected_impact_paths = frozenset(
-                blocker.path.replace("\\", "/")
-                for blocker in inherited_final_tree_blockers or ()
-            )
-            ambient_restored = _restore_out_of_scope_en_from_base(
+        wrapper_repairs = (
+            _collect_frozen_baseline_wrapper_repairs(
                 repo_path,
-                changes=changes,
-                allowed_en_paths=source_scope_en | protected_impact_paths,
-                merge_base_with=merge_base_with,
+                pr_result,
+                provenance=artifact_provenance,
+                verified_commit_sha=verify_content_sha,
+                source_scope_en=source_scope_en,
                 docs_root=cfg.paths.docs_root,
-                dry_run=dry_run,
             )
-            if ambient_restored:
-                touched = TouchedPaths(
-                    list(dict.fromkeys([*touched.written, *ambient_restored])),
-                    touched.deleted,
+            if (
+                translation_pr
+                and artifact_provenance is not None
+                and not dry_run
+                and not no_commit
+                and _fixup_rerun_depth < 3
+            )
+            else {}
+        )
+        if wrapper_repairs:
+            for path in sorted(wrapper_repairs):
+                write_text(repo_path, path, wrapper_repairs[path])
+            touched = TouchedPaths(sorted(wrapper_repairs), [])
+        else:
+            touched = _apply_results_to_disk(
+                repo_path,
+                pr_result,
+                dry_run=dry_run,
+                docs_root=cfg.paths.docs_root,
+            )
+            if translation_pr and source_scope_en:
+                protected_impact_paths = frozenset(
+                    blocker.path.replace("\\", "/")
+                    for blocker in inherited_final_tree_blockers or ()
                 )
+                ambient_restored = _restore_out_of_scope_en_from_base(
+                    repo_path,
+                    changes=changes,
+                    allowed_en_paths=source_scope_en | protected_impact_paths,
+                    merge_base_with=merge_base_with,
+                    docs_root=cfg.paths.docs_root,
+                    dry_run=dry_run,
+                )
+                if ambient_restored:
+                    touched = TouchedPaths(
+                        list(dict.fromkeys([*touched.written, *ambient_restored])),
+                        touched.deleted,
+                    )
 
     committed = pushed = False
     inline_head_changed = False
