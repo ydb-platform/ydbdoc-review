@@ -13,14 +13,14 @@ from pathlib import Path, PurePosixPath
 from ydbdoc_review.github.git_ops import read_text
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.toc import collect_toc_link_targets, resolve_toc_target_path
-from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
+from ydbdoc_review.parsing.include_paths import resolve_locale_md_path
+from ydbdoc_review.parsing.markdown_parser import create_parser
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.validation.glossary_toc_links import (
     collect_en_toc_reachable_md,
     normalize_repo_path,
 )
 from ydbdoc_review.validation.heuristics import bump_verdict_for_blocking_heuristics
-from ydbdoc_review.validation.href_parity import _mask_link_protected_ranges
 
 ReadText = Callable[[str], str | None]
 
@@ -116,6 +116,7 @@ def _collect_reachable_include_dependencies(
 ) -> frozenset[str]:
     """Close real YFM Markdown includes from TOC-reachable pages only."""
     locale_root = f"{docs_root.strip('/')}/{locale}/"
+    parser = create_parser()
     queue = deque(
         sorted(
             normalize_repo_path(path)
@@ -135,18 +136,20 @@ def _collect_reachable_include_dependencies(
         if text is None:
             continue
         reachable.add(path)
-        visible_text = _mask_link_protected_ranges(text)
-        for include in collect_yfm_includes(visible_text):
+        for token in parser.parse(text):
+            if token.type != "yfm_include":
+                continue
+            include_ref = token.meta["path"]
             if not _relative_include_stays_in_locale(
                 path,
-                include.path,
+                include_ref,
                 docs_root=docs_root,
                 locale=locale,
             ):
                 continue
             resolved = resolve_locale_md_path(
                 path,
-                include.path,
+                include_ref,
                 docs_root=docs_root,
             )
             if resolved is None:

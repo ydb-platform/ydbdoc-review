@@ -744,6 +744,61 @@ def test_protected_yfm_include_examples_are_not_include_evidence(tmp_path: Path)
     ) == [commented, fenced]
 
 
+def test_tab_indented_yfm_include_example_is_not_include_evidence(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    landing = "ydb/docs/en/core/section/index.md"
+    target = "ydb/docs/en/core/section/_assets/tab.md"
+    _write(
+        repo,
+        "ydb/docs/en/core/toc_p.yaml",
+        "items:\n- name: Section\n  href: section/index.md\n",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True)
+    result = PRTranslationResult(
+        pair_results=[
+            _translated_run(
+                landing,
+                "# Page\n\n\t{% include [Example](_assets/tab.md) %}\n",
+            ),
+            _translated_run(target, "Tab-indented example target.\n"),
+        ]
+    )
+
+    assert apply_orphan_toc_page_checks(
+        result, repo_path=repo, baseline_ref="HEAD"
+    ) == [target]
+
+
+def test_front_matter_scalar_yfm_include_example_is_not_include_evidence(
+    tmp_path: Path,
+):
+    repo = _init_repo(tmp_path)
+    landing = "ydb/docs/en/core/section/index.md"
+    target = "ydb/docs/en/core/section/_assets/front.md"
+    _write(
+        repo,
+        "ydb/docs/en/core/toc_p.yaml",
+        "items:\n- name: Section\n  href: section/index.md\n",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True)
+    result = PRTranslationResult(
+        pair_results=[
+            _translated_run(
+                landing,
+                "---\nexample: |\n  {% include [Example](_assets/front.md) %}\n"
+                "---\n# Page\n",
+            ),
+            _translated_run(target, "Front-matter example target.\n"),
+        ]
+    )
+
+    assert apply_orphan_toc_page_checks(
+        result, repo_path=repo, baseline_ref="HEAD"
+    ) == [target]
+
+
 def test_frozen_reader_does_not_use_dirty_worktree_include_target(tmp_path: Path):
     repo = _init_repo(tmp_path)
     landing = "ydb/docs/en/core/section/index.md"
