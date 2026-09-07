@@ -8,12 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.harness import (
-    FileHarness,
-    FileRunState,
-    HarnessContext,
     TRANSLATE_PROFILE,
     TRANSLATE_WITH_QA_PROFILE,
     VERIFY_PROFILE,
+    FileHarness,
+    FileRunState,
+    HarnessContext,
 )
 from ydbdoc_review.harness.steps import ParseStep, TranslateStep
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -293,7 +293,7 @@ def test_translate_step_does_not_semantic_noop_preserve_existing_en():
 
     with patch("ydbdoc_review.harness.steps.translate_segments") as mock_tr:
         mock_tr.return_value = {
-            s.id: "Secrets must be [created](../../create-secret.md)."
+            s.id: "Secrets must be ⟦L1⟧created⟦L1⟧."
             for s in state.segments
         }
         with patch(
