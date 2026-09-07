@@ -469,6 +469,8 @@ def merge_navigation_pair(
             translate_scope=scope,
         )
 
+    verdict = _navigation_verdict(warnings)
+
     # Pure RU reorder / RU-only toc entries that §6.82 will not mirror leave EN
     # identical to main — do not write or count as translated (§6.141 / #47856).
     if merged == en_main or merged.strip() == en_main.strip():
@@ -482,10 +484,9 @@ def merge_navigation_pair(
             kind=kind,
             target_text=None,
             warnings=warnings,
-            verdict="ok",
+            verdict=verdict,
         )
 
-    verdict = _navigation_verdict(warnings)
     return NavigationRunResult(
         ru_path=pair.ru_path,
         en_path=pair.en_path,
