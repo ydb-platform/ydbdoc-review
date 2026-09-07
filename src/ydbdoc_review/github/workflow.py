@@ -130,6 +130,7 @@ from ydbdoc_review.pipeline.publication import (
     refresh_publication_impact,
 )
 from ydbdoc_review.pipeline.skip_paths import filter_path_set, filter_translate_changes
+from ydbdoc_review.pipeline.translation_preflight import preflight_translation
 from ydbdoc_review.pipeline.types import (
     FileTranslationResult,
     FinalTreeBlocker,
@@ -2079,6 +2080,55 @@ def run_doc_translate(
         translation_branch=branch,
         dry_run=dry_run,
     )
+    executable_ru_paths = frozenset(pair.ru_path for pair in pairs)
+    preflight_plan = replace(
+        scope_plan,
+        doc_ru_paths=frozenset(scope_plan.doc_ru_paths & executable_ru_paths),
+        doc_from_diff=frozenset(scope_plan.doc_from_diff & executable_ru_paths),
+        doc_from_main=frozenset(scope_plan.doc_from_main & executable_ru_paths),
+        doc_deleted=frozenset(scope_plan.doc_deleted & executable_ru_paths),
+    )
+    preflight = preflight_translation(
+        preflight_plan,
+        read_ru=read_ru,
+        read_ru_base=read_ru_base,
+        read_en_base=read_en_base,
+        docs_root=docs_root,
+    )
+    if preflight.blockers:
+        logger.error(
+            "Translation preflight withheld PR #%s before model work: %s",
+            pr_number,
+            preflight.blockers,
+        )
+        pr_result = PRTranslationResult(
+            completeness_gaps=list(preflight.blockers),
+        )
+        _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
+        refresh_publication_impact(pr_result)
+        job.pr_result = pr_result
+        if not dry_run:
+            elapsed = time.monotonic() - started
+            meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
+            job.source_comment_url = _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                append_retention_footer(
+                    build_source_pr_comment(
+                        pr_result,
+                        translation_pr_number=None,
+                        meta=meta,
+                        config=cfg,
+                        committed=False,
+                    )
+                ),
+                label="source PR summary",
+            )
+        if ops_ctx is not None:
+            finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+        return job
     if not pairs and not nav_pairs:
         logger.info("No doc or navigation pairs in PR #%s", pr_number)
         # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
