@@ -6243,4 +6243,40 @@ reviewer did not treat the notation as a merge blocker. Existing broken anchors 
 `authorization.md` and `tls.md` are inherited from source/base, not introduced by this PR.
 
 
+### §6.258 TOC-rooted YFM include reachability (#51079, 2026-09-07)
+
+**Production failure:** Run `33997579873` used action `6c98f0e`, translated all eight Markdown
+files in 51m 28s at approximately ₽435.2, then returned `WITHHOLD_INCOMPLETE` without a
+translation PR. The reported gaps were `security/caching-authentication-results.md` and its two
+`_assets/user-token*.md` include fragments. #50704 is the direct parent H0 of #51079, so these
+dependencies already belong to the landed source tree; source-preserving mode cannot remove them.
+
+**Cause:** §6.256 fixes recursive navigation discovery and adds `security/toc_p.yaml`, but the
+unchanged orphan checker still required standalone TOC entries for Markdown fragments outside
+`_includes`. Its YAML-only reachability graph did not follow rendered YFM includes.
+
+**Decision:** Commits `2de6398` and `159e937` add a separate include closure used only by the
+orphan gate. Start from ordinary TOC-reachable pages and traverse structural `yfm_include` tokens
+produced by the existing Markdown tokenizer. Read the immutable candidate tree: frozen B plus
+pending output during translate, verified K plus pending output during verify. Exact pending keys,
+including empty text, override baseline content; missing or unavailable paths cannot fall back to
+HEAD, RU, or the worktree.
+
+Only existing same-locale targets receive reachability. A raw component walk rejects paths that
+leave the locale boundary, even when normalization would return them to it. BFS visitation bounds
+cycles. Ordinary links, fenced or indented code, HTML comments and YAML front matter provide no
+include evidence. Tokenization failures never fall back to line scanning. Materialized output
+remains usable independently of QA verdict; other blockers remain intact.
+
+The general href-reachability/stripping logic, scope planner, publication policy and existing typed
+include-target checks are unchanged. There is no blanket `_assets` exemption.
+
+**Local acceptance:** 58 focused tests passed; the broader acceptance command passed 157 tests
+with four reproduced baseline failures deselected. The previously known stale
+`_apply_text_transaction` test import remains outside this command. Independent reviewers and
+tester returned GO. These results do not establish full-suite or production success. Deployment
+and a fresh #51079 translation with independent content review, green verification and green build
+on one SHA remain pending.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
