@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
@@ -101,6 +102,12 @@ from ydbdoc_review.ops.lifecycle import (
     finish_ops_job,
     load_parent_run_context,
 )
+from ydbdoc_review.ops.transcripts import NullTranscriptStore
+from ydbdoc_review.ops.translation_checkpoint import (
+    CheckpointIdentity,
+    CheckpointWriter,
+    TranslationCheckpointError,
+)
 from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
     PairContent,
@@ -152,6 +159,7 @@ from ydbdoc_review.reporting.builder import (
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.reporting.provenance_drift import build_later_ru_drift_report
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.translation.prompts import load_template
 from ydbdoc_review.validation.en_link_targets import (
     _mask_yfm_include_directives,
     apply_en_link_target_checks,
@@ -1860,6 +1868,126 @@ def _publication_withheld(result: PRTranslationResult) -> bool:
     }
 
 
+def _translation_checkpoint_fingerprint(
+    config: Config,
+    glossary: Glossary,
+    client: YandexLLMClient,
+    *,
+    effective_continue_feedback: str | None,
+) -> str:
+    """Hash every nonsecret input that can alter a translated unit."""
+    prompt_names = (
+        "system_common",
+        "system_glossary",
+        "translate",
+        "translate_glossary",
+        "en_style_guide",
+        "repair",
+        "critic_feedback_repair",
+    )
+    payload = {
+        "continue_feedback_sha256": hashlib.sha256(
+            (effective_continue_feedback or "").encode("utf-8")
+        ).hexdigest(),
+        "glossary_sha256": hashlib.sha256(
+            glossary.to_prompt_yaml().encode("utf-8")
+        ).hexdigest(),
+        "llm": config.llm.model_dump(mode="json"),
+        "models": client.model_chain_for_role("translate"),
+        "prompt_templates": {
+            name: hashlib.sha256(
+                load_template(name, version=config.prompts.version).encode("utf-8")
+            ).hexdigest()
+            for name in prompt_names
+        },
+        "prompt_version": config.prompts.version,
+        "schemas": {
+            "checkpoint": "translation/v1",
+            "protection": "inline-ast-v1",
+            "renderer": "markdown-ir-v1",
+            "segmentation": "segment-v1",
+        },
+        "translation": config.translation.model_dump(mode="json"),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _translation_checkpoint_scope(
+    plan: TranslationScopePlan,
+) -> dict[str, tuple[str, ...]]:
+    memberships = (
+        ("doc_from_diff", plan.doc_from_diff),
+        ("doc_from_main", plan.doc_from_main),
+        ("nav_from_diff", plan.nav_from_diff),
+        ("nav_from_main", plan.nav_from_main),
+        ("doc_deleted", plan.doc_deleted),
+    )
+    return {
+        path: tuple(name for name, paths in memberships if path in paths)
+        for path in sorted(plan.all_ru_paths | plan.doc_deleted)
+    }
+
+
+def _translation_checkpoint_blockers(
+    result: PRTranslationResult,
+) -> tuple[str, ...]:
+    blockers: list[str] = list(result.completeness_gaps)
+    blockers.extend(blocker.message for blocker in result.final_tree_blockers)
+    for pair in result.pair_results:
+        if pair.error:
+            blockers.append(pair.error)
+        if pair.soft_keep_reason:
+            blockers.append(f"translation_soft_keep: {pair.soft_keep_reason}")
+        if pair.file_result is not None:
+            blockers.extend(pair.file_result.heuristic_blocking)
+            if pair.file_result.segment_alignment_error:
+                blockers.append(pair.file_result.segment_alignment_error)
+            blockers.extend(
+                action.message for action in pair.file_result.manual_actions
+            )
+        blockers.extend(issue.message for issue in pair.validation_issues)
+    for navigation in result.navigation_results:
+        if navigation.error:
+            blockers.append(navigation.error)
+        if navigation.verdict == "blocked":
+            blockers.extend(navigation.warnings)
+    return tuple(dict.fromkeys(blockers))
+
+
+def _finish_translation_checkpoint(
+    checkpoint: CheckpointWriter,
+    result: PRTranslationResult,
+    scope_plan: TranslationScopePlan,
+) -> None:
+    """Retain navigation and the final pre-publication candidate manifest."""
+    for navigation in result.navigation_results:
+        nav_blockers: list[str] = []
+        if navigation.error:
+            nav_blockers.append(navigation.error)
+        if navigation.verdict == "blocked":
+            nav_blockers.extend(navigation.warnings)
+        checkpoint.save_navigation(
+            navigation.en_path,
+            (
+                navigation.target_text.encode("utf-8")
+                if navigation.target_text is not None
+                else None
+            ),
+            blockers=tuple(dict.fromkeys(nav_blockers)),
+        )
+    checkpoint.finish(
+        status=result.publication_impact.value,
+        blockers=_translation_checkpoint_blockers(result),
+        scope=_translation_checkpoint_scope(scope_plan),
+    )
+
+
 def _persist_continuability(
     repo_path: str,
     *,
@@ -1950,6 +2078,7 @@ def run_doc_translate(
     continue_feedback: str | None = None,
     ops_mode: str = "translate",
     parent_run_id: str | None = None,
+    checkpoint: CheckpointWriter | None = None,
 ) -> DocJobResult:
     """Full ``doc_translate`` workflow for a source PR."""
     started = time.monotonic()
@@ -2164,6 +2293,35 @@ def run_doc_translate(
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
+    active_checkpoint = checkpoint
+    if active_checkpoint is None and ops_ctx is not None:
+        store = getattr(ops_ctx, "store", None)
+        run_id = getattr(ops_ctx, "run_id", None)
+        if (
+            store is not None
+            and run_id
+            and not isinstance(store, NullTranscriptStore)
+        ):
+            active_checkpoint = CheckpointWriter(
+                store,
+                run_id,
+                CheckpointIdentity(
+                    authority,
+                    _translation_checkpoint_fingerprint(
+                        cfg,
+                        glossary,
+                        client,
+                        effective_continue_feedback=effective_continue_feedback,
+                    ),
+                ),
+            )
+    if (
+        active_checkpoint is not None
+        and active_checkpoint.identity.authority != authority
+    ):
+        raise TranslationCheckpointError(
+            "translation checkpoint authority mismatch for current workflow"
+        )
     contents: list[PairContent] = []
 
     with continue_feedback_scope(effective_continue_feedback):
@@ -2236,6 +2394,7 @@ def run_doc_translate(
                     docs_root=docs_root,
                 ),
                 docs_repo_path=repo_path,
+                checkpoint=active_checkpoint,
             )
         else:
             pr_result = PRTranslationResult()
@@ -2465,6 +2624,9 @@ def run_doc_translate(
                 pr_number,
             )
             touched = TouchedPaths([], [])
+
+    if active_checkpoint is not None:
+        _finish_translation_checkpoint(active_checkpoint, pr_result, scope_plan)
 
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None

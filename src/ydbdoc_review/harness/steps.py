@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Protocol
 
@@ -9,11 +10,13 @@ from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
 from ydbdoc_review.harness.render import (
     finalize_en_target_result as finalize_en_target,
+)
+from ydbdoc_review.harness.render import (
     remap_translations_by_position,
     render_with_translations,
 )
-from ydbdoc_review.validation.link_contract import coerce_link_contract
 from ydbdoc_review.harness.state import FileRunState
+from ydbdoc_review.ops.translation_checkpoint import translation_unit_key
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import (
     compose_file_verdict,
@@ -27,6 +30,7 @@ from ydbdoc_review.reporting.locations import (
 )
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.placeholder_align import normalize_target_segments_to_source
+from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.critic import (
     apply_critic_fixes,
     run_verify,
@@ -47,6 +51,7 @@ from ydbdoc_review.validation.heuristics import (
 )
 from ydbdoc_review.validation.href_parity import check_href_parity, collect_internal_hrefs
 from ydbdoc_review.validation.include_targets import repair_missing_includes
+from ydbdoc_review.validation.link_contract import coerce_link_contract
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.placeholder_drift import (
     drop_spurious_placeholder_issues,
@@ -273,6 +278,60 @@ class TranslateStep:
             "semantic_noop": False,
             "enabled": False,
         }
+
+        def _retain_validated_segment(segment: Segment, target: str) -> None:
+            if ctx.checkpoint is None:
+                return
+            atoms: list[tuple[str, str]] = []
+            for protected in segment.placeholders:
+                node = protected.node
+                payload = (
+                    node.model_dump(mode="json")
+                    if hasattr(node, "model_dump")
+                    else str(node)
+                )
+                kind = (
+                    str(payload.get("kind", type(node).__name__))
+                    if isinstance(payload, dict)
+                    else type(node).__name__
+                )
+                atoms.append(
+                    (
+                        kind,
+                        json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
+                )
+            parent_context = json.dumps(
+                {
+                    "ast_path": segment.ast_path,
+                    "heading_anchor": segment.heading_anchor,
+                    "kind": segment.kind.value,
+                    "path": segment.path,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            source = segment.text.encode("utf-8")
+            unit_key = translation_unit_key(
+                source=source,
+                source_path=state.file_path,
+                target_locale=ctx.target_lang,
+                atom_signature=tuple(atoms),
+                parent_context=parent_context,
+            )
+            ctx.checkpoint.save_unit(
+                unit_key,
+                source,
+                target.encode("utf-8"),
+                validated=True,
+            )
+
         state.translations = translate_segments(
             state.segments,
             ctx.client,
@@ -289,6 +348,7 @@ class TranslateStep:
             cache=ctx.cache,
             max_parallel_batches=ctx.parallel,
             manual_actions=state.manual_actions,
+            on_validated_segment=_retain_validated_segment,
         )
         _render_translated_from_source(state, ctx)
         if ctx.target_lang.lower() in {"en", "english"}:

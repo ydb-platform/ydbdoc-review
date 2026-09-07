@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.config.loader import Config, load_config
+from ydbdoc_review.config.loader import Config
 from ydbdoc_review.harness.context import DocsTextReader
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_profiles import TRANSLATE_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.translation_checkpoint import CheckpointWriter
 from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.types import PRTranslationResult
-from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.translation.glossary import Glossary
 
 
 def run_pr_translation(
@@ -26,6 +27,7 @@ def run_pr_translation(
     redirect_source_en_paths: frozenset[str] | None = None,
     docs_text_reader: DocsTextReader | None = None,
     docs_repo_path: str | None = None,
+    checkpoint: CheckpointWriter | None = None,
 ) -> PRTranslationResult:
     """Plan and execute translation for all pairs (sequential, one shared cache)."""
     state = PRRunState(
@@ -41,5 +43,6 @@ def run_pr_translation(
         redirect_source_en_paths=redirect_source_en_paths,
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
+        checkpoint=checkpoint,
     )
     return PRHarness(TRANSLATE_PR_PROFILE).run(state, ctx)

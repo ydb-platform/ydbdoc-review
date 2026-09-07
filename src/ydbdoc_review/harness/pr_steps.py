@@ -6,15 +6,15 @@ import logging
 import time
 from typing import Protocol
 
+from ydbdoc_review.harness.context import HarnessContext, checkpoint_scope
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.harness.pr_context import PRHarnessContext
 from ydbdoc_review.harness.pr_state import PRRunState
-from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.navigation.redirects import (
     REDIRECT_TOMBSTONE_SKIP_SUMMARY,
     should_skip_redirect_tombstone_en,
 )
-from ydbdoc_review.pipeline.analyze import PairContent, PairPlan, plan_pairs
+from ydbdoc_review.pipeline.analyze import PairPlan, plan_pairs
 from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,7 @@ class ExecutePairPlansStep:
             docs_text_reader=ctx.docs_text_reader,
             docs_repo_path=ctx.docs_repo_path,
             job_anchor_dictionary=ctx.job_anchor_dictionary or JobAnchorDictionary(),
+            checkpoint=ctx.checkpoint,
         )
         results = []
         total = len(state.plans)
@@ -148,7 +149,8 @@ class ExecutePairPlansStep:
                 plan.target_path,
             )
             started = time.monotonic()
-            result = run_pair_plan(content, plan, file_ctx, state.cache)
+            with checkpoint_scope(ctx.checkpoint):
+                result = run_pair_plan(content, plan, file_ctx, state.cache)
             elapsed = time.monotonic() - started
             status = "error" if result.error else ("skip" if result.skipped else "ok")
             soft_keep = bool(
@@ -170,4 +172,31 @@ class ExecutePairPlansStep:
                 f" err={result.error}" if result.error else "",
             )
             results.append(result)
+            if (
+                ctx.checkpoint is not None
+                and result.source_text is not None
+                and result.target_text is not None
+                and not result.error
+                and not result.skipped
+                and not result.deleted
+            ):
+                blockers: list[str] = []
+                if result.soft_keep_reason:
+                    blockers.append(
+                        f"translation_soft_keep: {result.soft_keep_reason}"
+                    )
+                if result.file_result is not None:
+                    blockers.extend(result.file_result.heuristic_blocking)
+                    blockers.extend(
+                        action.message for action in result.file_result.manual_actions
+                    )
+                    if result.file_result.verdict == "blocked" and not blockers:
+                        blockers.append("file_verdict: blocked")
+                blockers.extend(issue.message for issue in result.validation_issues)
+                ctx.checkpoint.save_file(
+                    plan.target_path,
+                    result.source_text.encode("utf-8"),
+                    result.target_text.encode("utf-8"),
+                    blockers=tuple(dict.fromkeys(blockers)),
+                )
         state.pair_results = results

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ydbdoc_review.llm.client import YandexLLMClient
@@ -539,6 +540,7 @@ def translate_segments(
     cache: dict[str, str] | None = None,
     max_parallel_batches: int = 3,
     manual_actions: list[ManualAction] | None = None,
+    on_validated_segment: Callable[[Segment, str], None] | None = None,
 ) -> dict[str, str]:
     """Translate all segments (chunked batches, optional cache, parallel I/O)."""
     if not segments:
@@ -560,6 +562,8 @@ def translate_segments(
                     seg, cached, target_lang=target_lang
                 )
                 translations[seg.id] = cached
+                if on_validated_segment is not None:
+                    on_validated_segment(seg, cached)
                 continue
         pending.append(seg)
 
@@ -589,18 +593,41 @@ def translate_segments(
             manual_actions=manual_actions,
         )
 
+    def _accept_completed_batch(
+        batch: Batch,
+        batch_translations: dict[str, str],
+    ) -> None:
+        """Persist/cache only segments that pass the existing validator."""
+        for seg in batch.segments:
+            text = batch_translations[seg.id]
+            try:
+                validate_segment_translation(seg, text, target_lang=target_lang)
+            except TranslationValidationError:
+                # Recovery may deliberately return the source together with a
+                # blocking manual action. It remains diagnostic output only.
+                continue
+            if cache is not None:
+                cache[_cache_key(seg, target_lang=target_lang)] = text
+            if on_validated_segment is not None:
+                on_validated_segment(seg, text)
+
     if max_parallel_batches == 1 or len(batches) == 1:
         batch_results = []
         for b in batches:
             check_shutdown()
-            batch_results.append(_run_batch(b))
+            batch_result = _run_batch(b)
+            _accept_completed_batch(b, batch_result)
+            batch_results.append(batch_result)
     else:
         results_by_index: dict[int, dict[str, str]] = {}
         with ThreadPoolExecutor(max_workers=max_parallel_batches) as pool:
             futures = {pool.submit(_run_batch, b): i for i, b in enumerate(batches)}
             try:
                 for fut in as_completed(futures):
-                    results_by_index[futures[fut]] = fut.result()
+                    batch_index = futures[fut]
+                    batch_result = fut.result()
+                    _accept_completed_batch(batches[batch_index], batch_result)
+                    results_by_index[batch_index] = batch_result
             except KeyboardInterrupt:
                 for fut in futures:
                     fut.cancel()
@@ -612,17 +639,5 @@ def translate_segments(
         for seg in batch.segments:
             text = batch_trans[seg.id]
             translations[seg.id] = text
-            if cache is not None:
-                try:
-                    validate_segment_translation(
-                        seg, text, target_lang=target_lang
-                    )
-                except TranslationValidationError:
-                    # Recovery may deliberately return the RU source together
-                    # with a blocking manual action. It is safe for the current
-                    # diagnostic result, but must never become an accepted
-                    # translation in a later run via the cache.
-                    continue
-                cache[_cache_key(seg, target_lang=target_lang)] = text
 
     return translations

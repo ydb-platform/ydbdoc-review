@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.harness.context import DocsTextReader
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.translation_checkpoint import CheckpointWriter
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
@@ -22,6 +23,7 @@ class PRHarnessContext:
     docs_text_reader: DocsTextReader | None = None
     docs_repo_path: str | None = None
     job_anchor_dictionary: JobAnchorDictionary | None = None
+    checkpoint: CheckpointWriter | None = None
 
     @classmethod
     def from_options(
@@ -36,6 +38,7 @@ class PRHarnessContext:
         docs_text_reader: DocsTextReader | None = None,
         docs_repo_path: str | None = None,
         job_anchor_dictionary: JobAnchorDictionary | None = None,
+        checkpoint: CheckpointWriter | None = None,
     ) -> PRHarnessContext:
         return cls(
             client=client,
@@ -47,4 +50,5 @@ class PRHarnessContext:
             docs_text_reader=docs_text_reader,
             docs_repo_path=docs_repo_path,
             job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
+            checkpoint=checkpoint,
         )

@@ -2,15 +2,33 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from ydbdoc_review.config.loader import Config, load_config
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.translation_checkpoint import CheckpointWriter
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 DocsTextReader = Callable[[str], str | None]
+
+_ACTIVE_CHECKPOINT: ContextVar[CheckpointWriter | None] = ContextVar(
+    "ydbdoc_review_active_translation_checkpoint",
+    default=None,
+)
+
+
+@contextmanager
+def checkpoint_scope(checkpoint: CheckpointWriter | None) -> Iterator[None]:
+    """Make a PR checkpoint available to nested per-file contexts."""
+    token = _ACTIVE_CHECKPOINT.set(checkpoint)
+    try:
+        yield
+    finally:
+        _ACTIVE_CHECKPOINT.reset(token)
 
 
 @dataclass
@@ -36,6 +54,7 @@ class HarnessContext:
     docs_text_reader: DocsTextReader | None = None
     docs_repo_path: str | None = None
     job_anchor_dictionary: JobAnchorDictionary | None = None
+    checkpoint: CheckpointWriter | None = None
 
     @classmethod
     def from_options(
@@ -58,6 +77,7 @@ class HarnessContext:
         docs_text_reader: DocsTextReader | None = None,
         docs_repo_path: str | None = None,
         job_anchor_dictionary: JobAnchorDictionary | None = None,
+        checkpoint: CheckpointWriter | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -90,4 +110,5 @@ class HarnessContext:
             docs_text_reader=docs_text_reader,
             docs_repo_path=docs_repo_path,
             job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
+            checkpoint=checkpoint or _ACTIVE_CHECKPOINT.get(),
         )
