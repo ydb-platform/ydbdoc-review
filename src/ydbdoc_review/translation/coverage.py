@@ -12,6 +12,7 @@ import binascii
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -45,9 +46,11 @@ from ydbdoc_review.parsing.ast_types import (
     YfmTabs,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.pipeline.qa import align_translations_from_target
 from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.errors import TranslationValidationError
 
 CoverageAction = Literal[
     "reuse_verified",
@@ -79,6 +82,11 @@ class CoverageUnit:
     en_span: tuple[int, int] | None
     target: str | None
     reason: str
+
+
+CoverageSemanticValidator = Callable[
+    [str, CoverageUnit, list[Segment], dict[str, str]], bool
+]
 
 
 @dataclass(frozen=True)
@@ -1249,6 +1257,7 @@ def validate_coverage_evidence(
     read_source: Any,
     read_baseline_en: Any,
     read_candidate: Any,
+    semantic_validator: CoverageSemanticValidator | None = None,
 ) -> tuple[tuple[str, CoveragePlan], ...]:
     """Validate authority, source, baseline, and final candidate hashes."""
     _validate_coverage_evidence_shape(evidence)
@@ -1269,13 +1278,38 @@ def validate_coverage_evidence(
         candidate_text = read_candidate(target_path)
         if candidate_text is None or _hash_text(candidate_text) != candidate_hashes[target_path]:
             raise ValueError(f"coverage evidence candidate file hash mismatch: {target_path}")
-        if plan.mode == "units":
-            if baseline_text is None or not candidate_preserves_unaffected_en(
-                plan, existing_en=baseline_text, candidate=candidate_text
+        materialized = [
+            unit for unit in plan.units if unit.action == "materialize_protected"
+        ]
+        if plan.mode == "full" and materialized:
+            if len(materialized) != len(plan.units) or any(
+                unit.target is None for unit in materialized
             ):
+                raise ValueError(
+                    f"coverage evidence full materialization is ambiguous: {target_path}"
+                )
+            expected = "".join(
+                unit.target for unit in materialized if unit.target is not None
+            )
+            if candidate_text != expected:
+                raise ValueError(
+                    f"coverage evidence materialized target mismatch: {target_path}"
+                )
+        if plan.mode == "units":
+            if baseline_text is None:
                 raise ValueError(
                     f"coverage evidence candidate changed unaffected EN: {target_path}"
                 )
+            try:
+                translated_targets = extract_candidate_translated_units(
+                    plan,
+                    existing_en=baseline_text,
+                    candidate=candidate_text,
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"coverage evidence candidate changed unaffected EN: {target_path}"
+                ) from exc
             if plan.required_fragments:
                 from ydbdoc_review.validation.fragment_repair import (
                     _page_declares_fragment,
@@ -1287,6 +1321,39 @@ def validate_coverage_evidence(
                             "coverage evidence candidate is missing required fragment: "
                             f"{target_path}#{fragment}"
                         )
+            for unit in plan.units:
+                if unit.action != "translate_required":
+                    continue
+                if semantic_validator is None:
+                    raise ValueError(
+                        "coverage evidence semantic coverage validator is required"
+                    )
+                try:
+                    source_segments = extract_segments(parse_markdown(unit.source))
+                    if not source_segments:
+                        raise ValueError("required source projection has no prose")
+                    translations = align_translations_from_target(
+                        source_segments,
+                        translated_targets[unit.key],
+                    )
+                except (
+                    AssertionError,
+                    TranslationValidationError,
+                    TypeError,
+                    ValueError,
+                ) as exc:
+                    raise ValueError(
+                        f"coverage evidence semantic coverage structure mismatch: {unit.key}"
+                    ) from exc
+                if not semantic_validator(
+                    target_path,
+                    unit,
+                    source_segments,
+                    translations,
+                ):
+                    raise ValueError(
+                        f"coverage evidence semantic coverage rejected: {unit.key}"
+                    )
     return evidence.plans
 
 
@@ -1297,29 +1364,56 @@ def candidate_preserves_unaffected_en(
     candidate: str,
 ) -> bool:
     """Prove that a units candidate differs only at authorized edit spans."""
+    try:
+        extract_candidate_translated_units(
+            plan,
+            existing_en=existing_en,
+            candidate=candidate,
+        )
+    except ValueError:
+        return False
+    return True
+
+
+def extract_candidate_translated_units(
+    plan: CoveragePlan,
+    *,
+    existing_en: str,
+    candidate: str,
+) -> dict[str, str]:
+    """Extract pending replacements while proving every fixed byte around them."""
     _validate_plan(plan)
     if plan.mode != "units" or _hash_text(existing_en) != plan.en_hash:
-        return False
+        raise ValueError("coverage candidate baseline does not match units plan")
     pattern: list[str] = [r"\A"]
+    pending: list[CoverageUnit] = []
     cursor = 0
     for unit in plan.units:
         if unit.en_span is None:
-            return False
+            raise ValueError("coverage candidate unit span is missing")
         start, end = unit.en_span
         if start < cursor or end > len(existing_en):
-            return False
+            raise ValueError("coverage candidate unit span is invalid")
         pattern.append(re.escape(existing_en[cursor:start]))
         if unit.action == "translate_required":
-            pattern.append(".*?")
+            group = f"unit_{len(pending)}"
+            pattern.append(f"(?P<{group}>.*?)")
+            pending.append(unit)
         elif unit.action == "reuse_verified":
             pattern.append(re.escape(existing_en[start:end]))
         elif unit.action == "materialize_protected" and unit.target is not None:
             pattern.append(re.escape(unit.target))
         else:
-            return False
+            raise ValueError("coverage candidate contains unresolved unit")
         cursor = end
     pattern.extend((re.escape(existing_en[cursor:]), r"\Z"))
-    return re.fullmatch("".join(pattern), candidate, flags=re.DOTALL) is not None
+    match = re.fullmatch("".join(pattern), candidate, flags=re.DOTALL)
+    if match is None:
+        raise ValueError("coverage candidate changed fixed or unaffected bytes")
+    return {
+        unit.key: match.group(f"unit_{index}")
+        for index, unit in enumerate(pending)
+    }
 
 
 def _normalize_evidence_mapping(value: object, *, field: str) -> dict[str, Any]:

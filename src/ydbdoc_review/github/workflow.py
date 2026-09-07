@@ -172,6 +172,7 @@ from ydbdoc_review.translation.coverage import (
     save_coverage_evidence,
     validate_coverage_evidence,
 )
+from ydbdoc_review.translation.critic import run_critic as run_coverage_critic
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.translation.prompts import load_template
 from ydbdoc_review.validation.en_link_targets import (
@@ -3372,19 +3373,6 @@ def run_doc_verify(
             candidate_sha=verify_content_sha,
             expected_digest=artifact_provenance.coverage_digest,
         )
-        validate_coverage_evidence(
-            coverage_evidence,
-            authority=artifact_provenance.authority,
-            read_source=lambda path: read_text_at_commit(
-                repo_path, artifact_provenance.authority.ru_sha, path
-            ),
-            read_baseline_en=lambda path: read_text_at_commit(
-                repo_path, artifact_provenance.authority.baseline_sha, path
-            ),
-            read_candidate=lambda path: read_text_at_commit(
-                repo_path, verify_content_sha, path
-            ),
-        )
 
     upstream_url = repo_https_clone_url(owner, repo)
     fixup_source_pr = source_pr or pr_number
@@ -3675,6 +3663,7 @@ def run_doc_verify(
             and not nav_pairs
             and not translation_scope_missing
             and not durable_impact_paths
+            and coverage_evidence is None
         ):
             logger.info(
                 "No scoped doc/navigation pairs for translation PR verify on #%s",
@@ -3686,6 +3675,45 @@ def run_doc_verify(
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
+
+    if coverage_evidence is not None:
+        if artifact_provenance is None:
+            raise ValueError("coverage evidence authority provenance is missing")
+
+        def _semantic_coverage_is_valid(
+            target_path,
+            unit,
+            segments,
+            translations,
+        ) -> bool:
+            del unit
+            response = run_coverage_critic(
+                client,
+                segments=segments,
+                translations=translations,
+                glossary=glossary,
+                file_path=target_path,
+                source_lang="ru",
+                target_lang="en",
+                prompt_version=cfg.prompts.version,
+                max_chars=cfg.translation.segments_per_batch_chars,
+            )
+            return response.verdict == "ok" and not response.issues
+
+        validate_coverage_evidence(
+            coverage_evidence,
+            authority=artifact_provenance.authority,
+            read_source=lambda path: read_text_at_commit(
+                repo_path, artifact_provenance.authority.ru_sha, path
+            ),
+            read_baseline_en=lambda path: read_text_at_commit(
+                repo_path, artifact_provenance.authority.baseline_sha, path
+            ),
+            read_candidate=lambda path: read_text_at_commit(
+                repo_path, verify_content_sha, path
+            ),
+            semantic_validator=_semantic_coverage_is_valid,
+        )
 
     pending_en_md = {p.en_path for p in pairs}
     pending_en_tocs = {nav.en_path for nav in nav_pairs}

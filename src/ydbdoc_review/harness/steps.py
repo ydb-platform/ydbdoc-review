@@ -254,9 +254,64 @@ class ParseStep:
             seg.id: " › ".join(seg.path) if seg.path else "(начало документа)"
             for seg in state.segments
         }
+        if state.coverage_plan is not None:
+            if state.mode == "translate":
+                if state.coverage_plan.source_path != state.file_path:
+                    raise ValueError("coverage plan source path mismatch")
+                actual_source_hash = hashlib.sha256(
+                    state.raw_source_text.encode("utf-8")
+                ).hexdigest()
+                if actual_source_hash != state.coverage_plan.source_hash:
+                    raise ValueError("coverage plan source hash mismatch")
+                actual_en_hash = (
+                    hashlib.sha256(state.existing_target_text.encode("utf-8")).hexdigest()
+                    if state.existing_target_text is not None
+                    else None
+                )
+                if actual_en_hash != state.coverage_plan.en_hash:
+                    raise ValueError("coverage plan EN hash mismatch")
+            actions = [unit.action for unit in state.coverage_plan.units]
+            fallback_reasons = (
+                tuple(dict.fromkeys(unit.reason for unit in state.coverage_plan.units))
+                if state.coverage_plan.mode == "full"
+                else ()
+            )
+            state.differential_meta = {
+                "mode": state.coverage_plan.mode,
+                "reason": (
+                    "proof-based coverage plan"
+                    if state.coverage_plan.mode == "units"
+                    else (
+                        fallback_reasons[0]
+                        if fallback_reasons
+                        else "full protected-source materialization"
+                    )
+                ),
+                "seeded": actions.count("reuse_verified"),
+                "pending": actions.count("translate_required"),
+                "protected": actions.count("materialize_protected"),
+                "low_magnitude_patch": False,
+                "semantic_noop": False,
+                "enabled": state.coverage_plan.mode == "units",
+                "fallback_reasons": fallback_reasons,
+            }
         if not state.segments:
             state.stopped_early = True
-            state.translated_text = state.existing_target_text or state.source_text
+            protected_targets = (
+                [unit.target for unit in state.coverage_plan.units]
+                if state.mode == "translate"
+                and state.coverage_plan is not None
+                and all(
+                    unit.action == "materialize_protected" and unit.target is not None
+                    for unit in state.coverage_plan.units
+                )
+                else []
+            )
+            state.translated_text = (
+                "".join(target for target in protected_targets if target is not None)
+                if protected_targets
+                else state.existing_target_text or state.source_text
+            )
             return
         state.render_base_doc = state.source_doc
         state.render_base_segments = state.segments
