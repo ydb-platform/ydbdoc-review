@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.structured import parse_json_model
@@ -11,6 +11,9 @@ from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION, build_analyze_messages
 from ydbdoc_review.translation.schemas import AnalyzeBatchResponse, AnalyzePairResult
+
+if TYPE_CHECKING:
+    from ydbdoc_review.translation.coverage import CoveragePlan
 
 PairAction = Literal[
     "translate_to_en",
@@ -44,6 +47,8 @@ class PairContent:
     # REQUIREMENTS §10: tip RU/EN diverged after source PR → full overwrite.
     force_full_overwrite: bool = False
     tip_newer_warnings: tuple[str, ...] = ()
+    # Planning evidence only in Task 6. Execution remains full until Task 7.
+    coverage_plan: CoveragePlan | None = None
 
 
 @dataclass(frozen=True)

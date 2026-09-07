@@ -64,7 +64,9 @@ translation:
   batch_json_overhead_chars: 512
   segment_max_source_chars: 1200
   critic_feedback_retries: 2
-  # REQUIREMENTS_RU.md §5 / §13 — no differential EN seed/splice on translate
+  # REQUIREMENTS_RU.md §5 / §13: heuristic EN seed/splice stays forbidden.
+  # Task 6 only emits fail-closed portable coverage plans from exact receipts or
+  # explicit unique fragment anchors; execution stays full until Task 7.
   differential_enabled: false
   differential_stale_days: 90
   differential_change_magnitude: 0.5
