@@ -6165,10 +6165,82 @@ baseline publication-lease fake failures. The final thirteen-file Ruff scope has
 qualified baseline findings and no new findings. The full Ruff comparison reports 470
 current versus 471 pre-v007 findings; no unrelated cleanup, skip or xfail was used.
 
-Deployment and production acceptance remain pending. Completion requires the new clean-scope
-translation PR and green independent `doc_verify` plus docs build on the same final SHA,
-with the immutable source evidence preserved. No local test result or release-tag move
-substitutes for those production checks.
+Deployment and production acceptance were completed by §6.257. The original §6.256 local
+evidence and its pending status remain historical checkpoints rather than the final outcome.
+
+
+### §6.257 Frozen-B wrapper repair and post-push PR-head convergence (#40385 / #52330, 2026-09-07)
+
+**Production failure:** The source-preserving translation reached PR #52330 with eight expected
+EN Markdown files and no navigation or asset expansion. `doc_verify` reported the content green
+but correctly withheld publication because
+`client_certificate_authorization.md` had lost the Markdown wrapper around the otherwise
+unchanged phrase `registering dynamic nodes`. Using `doc_continue` would have retransmitted all
+eight files through translation and expanded the risk surface for a deterministic one-token
+structural defect.
+
+**Decision, frozen-B wrapper repair:** Verify may propose a repair only when immutable source
+and baseline evidence proves exactly one wrapper loss. The source paragraph must be unchanged
+between H0 and H/R, B must contain one Markdown link whose visible English label occurs exactly
+once as plain complete-word text in K, and the B destination plus fragment must be safe and
+valid in the final K tree. The repair inserts only the original B wrapper around the existing K
+label. It does not translate text, normalize bytes, replace fragments, edit labels, or inspect a
+moving ref for evidence.
+
+Safety is deliberately narrower than ordinary href repair. The candidate must remain inside the
+configured `docs_root/en/core` floor under both a raw component walk and canonical resolution.
+A path that leaves the floor and later re-enters is rejected. Query/fragment classification is
+shared with existing internal-href handling. Complete-word boundaries include alphanumeric
+characters, underscore, and Unicode Mn/Mc/Me combining marks, so a substring inside a token or
+grapheme is never wrapped. Code, comments, existing links, images, includes, titles, ambiguous
+occurrences, missing destinations, and missing final fragments are not repairable by this path.
+
+Typed `validation_issues` and `link_contract_issues` remain visible in the full report and keep
+the result unsafe even if per-file critic rows are green. When there is one unique proposal,
+the first verify pass skips the ordinary result writer, applies only that proposal, and reuses
+the existing destination lease and publication path. It creates exactly one K→K2 commit and
+push. Recursive verify reloads the complete immutable authority envelope and evaluates K2.
+The K2 no-proposal apply phase is a true no-op: no touched paths, no writer call, clean status,
+and no second push.
+
+**Live-only race and bounded convergence:** The first production run, `34066924164`, successfully
+published K2 `30f4c4630805629f348c692ed8bbb98ef5633b49`, but its immediate recursive REST
+`GET /pulls/52330` still returned K `f3fb5abd3d06594c507d79fed40cd9f92c7aaffd`. The remote
+destination ref and checkout already equalled K2. The existing equality guard therefore failed
+closed instead of verifying against mixed identities. This was GitHub REST eventual consistency,
+not a failed push or corrupt lease.
+
+After an owned inline push only, verify performs at most six fresh PR-context reads with bounded
+waits of 1, 2, 4, 8, and 15 seconds, at most 30 intentional seconds total. Only the exact previous
+owned K is retryable as a transient value. K2 succeeds only while the destination ref and local
+checkout also remain K2 before and after the REST read. Any third SHA, repository/ref/state
+change, lease drift, checkout drift, or exhausted stale K fails immediately or at the bounded
+timeout. The fully proven K2 context is passed privately into both recursive call sites, avoiding
+another unguarded REST read. Existing `E == PR head == checkout` protection remains authoritative.
+Authority body/evidence removal or replacement preserves the established `ValueError` contract;
+structural publication/ref drift remains `RuntimeError`.
+
+**Verification evidence:** The final scoped implementation changed only `workflow.py` and its
+existing real-Git workflow test after the initial seven-file repair release. Focused tests passed
+78/78 twice, A05/A18 95/95, A17 16/16, redirect/scope 35/35, and publication regressions 116/116.
+Four isolated mutants were killed: removing bounded refresh, removing post-REST checks, removing
+the recursive equality gate, and changing the A05 body/evidence exception type. Independent
+analyst and tester audits approved the exact two-file hashes before deployment.
+
+**Production acceptance:** `ydbdoc-review/main` and tag `v0.1.0` both moved to
+`1e43737b250882cbdcae5b75a9c792e5e359bd5a`. Final `doc_verify` run `34070546888`, docs build
+`34067311221`, and PR-checks `34067802005` and `34071044387` all completed successfully on the
+same K2. The K→K2 diff is one deletion plus one insertion in one EN file and restores the B link
+to `node-authorization.md#enabling-the-node-authentication-and-authorization-mode`. The complete
+PR diff remains exactly eight EN Markdown files; RU, navigation, assets, and the three later
+#50704 paths are absent. A fresh-context independent reviewer returned `PASS / MERGEABLE` for
+content and CI. PR #52330 remains draft and still needs the repository's normal review approval;
+that administrative state is separate from translation correctness.
+
+**Known nonblocking observation:** The independent review recorded a P3 inline notation
+`Имя=Значение,...@<domain>` in `authentication.md`. The concrete SID example is correct, and the
+reviewer did not treat the notation as a merge blocker. Existing broken anchors identified in
+`authorization.md` and `tls.md` are inherited from source/base, not introduced by this PR.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
