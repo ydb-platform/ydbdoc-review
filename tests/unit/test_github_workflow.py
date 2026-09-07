@@ -29,6 +29,7 @@ from ydbdoc_review.github.workflow import (
     run_doc_translate,
     run_doc_verify,
 )
+from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.ops.job_state import (
     CONTINUABILITY_STORE_KEY,
@@ -37,6 +38,9 @@ from ydbdoc_review.ops.job_state import (
     load_continuability,
     mark_continuable,
 )
+from ydbdoc_review.ops.lifecycle import OpsContext, finish_ops_job
+from ydbdoc_review.ops.recorder import LlmTranscriptRecorder
+from ydbdoc_review.ops.runs import InMemoryRunsLedger
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
@@ -493,6 +497,240 @@ def test_run_doc_continue_updates_admission_after_verify_outcome(
     assert expected_flag in stored
     verify.assert_called_once()
     translate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("inline_commits", "terminal_blocked"),
+    [(1, False), (3, True)],
+    ids=["ordinary-recursion", "depth-limit-read-only-recursion"],
+)
+def test_run_doc_continue_finishes_one_job_after_recursive_inline_verify(
+    git_repo: str,
+    inline_commits: int,
+    terminal_blocked: bool,
+):
+    """A recursive verify must finish the dispatcher-admitted lifecycle once."""
+    _wire_en_toc_for_a(git_repo)
+    initial_sha = _head_sha(git_repo)
+    fixup_pull = {
+        "title": "Critic fixes for #40385",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/verify-40385",
+            "sha": initial_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": initial_sha},
+    }
+    source_pull = {
+        "title": "docs: source",
+        "body": "",
+        "head": {
+            "ref": "feature/docs",
+            "sha": initial_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": initial_sha},
+    }
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": initial_sha, "head": initial_sha},
+        translation_pr=50840,
+    )
+    store = InMemoryTranscriptStore()
+    ledger = InMemoryRunsLedger()
+    ops_ctx = OpsContext(
+        actor="tester",
+        store=store,
+        ledger=ledger,
+        run_id="continue-run",
+        run_day="2026-09-07",
+        parent_run_id="parent-run",
+        mode="continue",
+        repo="o/r",
+        source_pr=40385,
+        translation_pr=50840,
+        continue_index=1,
+        continue_feedback="apply critic repair",
+        recorder=LlmTranscriptRecorder(),
+        budget_rub=5000.0,
+    )
+    client = MagicMock(usage_tracker=UsageTracker())
+    verify_attempt = 0
+
+    def verify_result(*_args, **_kwargs) -> PRTranslationResult:
+        nonlocal verify_attempt
+        verify_attempt += 1
+        result = _fake_pr_result()
+        if verify_attempt == inline_commits + 1 and terminal_blocked:
+            result.completeness_gaps = ["terminal blocker"]
+        return result
+
+    commit_attempt = 0
+
+    def commit_fix(*_args, **_kwargs) -> bool:
+        nonlocal commit_attempt
+        if commit_attempt >= inline_commits:
+            return False
+        commit_attempt += 1
+        _commit_empty(git_repo, f"inline verify {commit_attempt}")
+        return True
+
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(ops_ctx, GateResult(ok=True), None),
+        ) as begin,
+        patch(
+            "ydbdoc_review.github.workflow.finish_ops_job",
+            wraps=finish_ops_job,
+        ) as finish,
+        patch("ydbdoc_review.github.workflow.create_llm_client", return_value=client),
+        patch(
+            "ydbdoc_review.github.workflow._run_verify_pairs",
+            side_effect=verify_result,
+        ) as run_pairs,
+        patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"),
+        patch(
+            "ydbdoc_review.github.workflow.git_commit_paths",
+            side_effect=commit_fix,
+        ),
+        patch("ydbdoc_review.github.workflow.push_branch") as push,
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=[("ydb/docs/en/a.md", "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            side_effect=lambda _gh, _owner, _repo, number: (
+                [("ydb/docs/ru/a.md", "modified")]
+                if number == 40385
+                else [("ydb/docs/en/a.md", "modified")]
+            ),
+        ),
+    ):
+        mock_gh.return_value.get_pull.side_effect = (
+            lambda _owner, _repo, number: source_pull if number == 40385 else fixup_pull
+        )
+        _wire_publication_state(
+            mock_gh.return_value,
+            push,
+            branch="ydbdoc-review/verify-40385",
+            initial_sha=initial_sha,
+            published_pull=fixup_pull,
+        )
+        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+        mock_gh.return_value.post_issue_comment.return_value = "url"
+        job = run_doc_continue(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=50840,
+            merge_base_with="HEAD",
+            dry_run=False,
+            config=load_config(env=_env()),
+            instruction="apply critic repair",
+        )
+
+    assert run_pairs.call_count == inline_commits + 1
+    assert push.call_count == inline_commits
+    begin.assert_called_once()
+    finish.assert_called_once()
+    assert finish.call_args.args[0] is ops_ctx
+    assert len(ledger.records) == 1
+    assert ledger.records[0].run_id == "continue-run"
+    assert ledger.records[0].status == "ok"
+    manifest = store.get("continue-run", "manifest.json")
+    assert manifest is not None
+    assert b'"status": "ok"' in manifest
+    terminal_state = load_continuability(git_repo, 40385)
+    assert terminal_state is not None
+    assert terminal_state.allows_continue() is terminal_blocked
+    assert ("terminal blocker" in job.pr_result.completeness_gaps) is terminal_blocked
+
+
+def test_direct_gate_skipping_verify_cannot_inject_continue_context(git_repo: str):
+    """Only an internal recursive verify may carry a gate-skipping ops context."""
+    initial_sha = _head_sha(git_repo)
+    pull = {
+        "title": "Critic fixes for #40385",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/verify-40385",
+            "sha": initial_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": initial_sha},
+    }
+    ops_ctx = SimpleNamespace(
+        store=InMemoryTranscriptStore(),
+        run_id="continue-run",
+        parent_run_id="parent-run",
+        mode="continue",
+        repo="o/r",
+        source_pr=40385,
+    )
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
+        mock_gh.return_value.get_pull.return_value = pull
+        with pytest.raises(
+            RuntimeError,
+            match="continue ops admission cannot be skipped by an external verify",
+        ):
+            run_doc_verify(
+                repo_path=git_repo,
+                github_repo="o/r",
+                pr_number=50840,
+                merge_base_with="HEAD",
+                config=load_config(env=_env()),
+                skip_ops_gates=True,
+                ops_mode="continue",
+                _ops_ctx=ops_ctx,
+            )
+
+
+def test_direct_continue_verify_cannot_skip_ops_admission(git_repo: str):
+    """Saved state alone cannot turn an external gate-skipping call internal."""
+    initial_sha = _head_sha(git_repo)
+    pull = {
+        "title": "Critic fixes for #40385",
+        "body": "",
+        "head": {
+            "ref": "ydbdoc-review/verify-40385",
+            "sha": initial_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": initial_sha},
+    }
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": initial_sha, "head": initial_sha},
+        translation_pr=50840,
+    )
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow._snapshot_destination_lease",
+            side_effect=AssertionError("gate-skipping call reached verify work"),
+        ),
+    ):
+        mock_gh.return_value.get_pull.return_value = pull
+        with pytest.raises(
+            RuntimeError,
+            match="continue ops admission cannot be skipped by an external verify",
+        ):
+            run_doc_verify(
+                repo_path=git_repo,
+                github_repo="o/r",
+                pr_number=50840,
+                merge_base_with="HEAD",
+                config=load_config(env=_env()),
+                skip_ops_gates=True,
+                ops_mode="continue",
+            )
 
 
 def test_run_doc_continue_refuses_without_continuability_flag(git_repo: str):

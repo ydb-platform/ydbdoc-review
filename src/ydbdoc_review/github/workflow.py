@@ -3415,8 +3415,17 @@ def run_doc_verify(
         merge_base_with = requested_merge_base_sha
 
     ops_ctx = _ops_ctx
-    if ops_ctx is not None and (
+    internal_recursive_verify = (
         skip_ops_gates
+        and _fixup_rerun_depth > 0
+        and _inline_fixup_context is not None
+    )
+    if ops_mode == "continue" and skip_ops_gates and not internal_recursive_verify:
+        raise RuntimeError(
+            "continue ops admission cannot be skipped by an external verify"
+        )
+    if ops_ctx is not None and (
+        (skip_ops_gates and not internal_recursive_verify)
         or getattr(ops_ctx, "mode", None) != ops_mode
         or getattr(ops_ctx, "repo", None) != github_repo
         or getattr(ops_ctx, "source_pr", None) != source_pr_num
@@ -4378,6 +4387,7 @@ def run_doc_verify(
                 _fixup_rerun_depth=_fixup_rerun_depth + 1,
                 _inline_fixup_context=next_inline_context,
                 _coverage_store=trusted_coverage_store,
+                _ops_ctx=ops_ctx,
             )
         else:
             logger.info(
@@ -4401,6 +4411,7 @@ def run_doc_verify(
                 _fixup_rerun_depth=_fixup_rerun_depth + 1,
                 _inline_fixup_context=next_inline_context,
                 _coverage_store=trusted_coverage_store,
+                _ops_ctx=ops_ctx,
             )
 
     elapsed = time.monotonic() - started

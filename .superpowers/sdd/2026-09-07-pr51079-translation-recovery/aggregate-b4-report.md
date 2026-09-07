@@ -84,6 +84,35 @@ git diff --check
 Result: all checks passed. `RUF001` is excluded for the repository's existing
 Cyrillic test and message text.
 
+## Independent-review repair
+
+The first B4 commit, `4d8458e1c86cb53d2f34256f73705ecce7cc2b5c`,
+did not propagate its admitted ops context through the two recursive inline
+`run_doc_verify` returns. The outer call returned before lifecycle completion,
+while the terminal recursive call had `ops_ctx=None`; therefore no terminal
+ledger/transcript record was written.
+
+Focused TDD reproduced both branches. The ordinary recursive branch performed
+one inline publication, and the depth-limit branch performed three publications
+before the final read-only verification. Before the repair both assertions
+failed with `finish_ops_job` called zero times. The implementation now passes
+the same identity-validated context through both recursive calls. An external
+`ops_mode="continue"` call cannot use `skip_ops_gates=True` to impersonate an
+internal recursive verification, with or without an injected context.
+
+Focused final result: 4 passed. The tests assert exactly one dispatcher
+`begin_ops_job`, exactly one real `finish_ops_job`, one terminal in-memory ledger
+record, a terminal transcript manifest, and matching continuability outcomes:
+clean final verification clears admission; a final blocker retains it.
+
+Final review-repair gates, all with `PYTHONPATH=src`, memory persistence
+backends, and `XDG_CACHE_HOME` under `/private/tmp`:
+
+- mandatory workflow/job-state/lifecycle/resume gate: 88 passed in 21.46s;
+- checkpoint/source-preserving/resume gate: 90 passed in 12.30s;
+- recursive frozen-wrapper/fixup contract: 30 passed in 185.43s;
+- Ruff with the documented `RUF001` exception and `git diff --check`: passed.
+
 ## Scope and exclusions
 
 Changed product code only in `src/ydbdoc_review/github/workflow.py`; tests only
