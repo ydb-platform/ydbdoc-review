@@ -35,6 +35,7 @@ from ydbdoc_review.github.git_ops import (
     write_text,
 )
 from ydbdoc_review.github.pr import (
+    PullRequestContext,
     build_pairs_from_changes,
     is_fork_head,
     is_translation_pr_branch,
@@ -247,6 +248,127 @@ def _snapshot_destination_lease(
         branch=branch,
         expected_sha=gh.get_branch_sha(owner, repo, branch),
     )
+
+
+def _await_inline_fixup_pr_context(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    repo_path: str,
+    previous_context: PullRequestContext,
+    expected_sha: str,
+) -> PullRequestContext:
+    if (
+        not expected_sha
+        or len(expected_sha) != 40
+        or any(char not in "0123456789abcdef" for char in expected_sha)
+        or not previous_context.head_sha
+        or expected_sha == previous_context.head_sha
+        or previous_context.owner != owner
+        or previous_context.repo != repo
+        or previous_context.number != pr_number
+        or not previous_context.head_ref
+        or previous_context.state != "open"
+        or previous_context.merged
+    ):
+        raise RuntimeError("invalid inline fixup PR-context preconditions")
+
+    delays = (1.0, 2.0, 4.0, 8.0, 15.0)
+    for attempt in range(6):
+        local_head = resolve_commit_ref(repo_path, "HEAD")
+        if local_head != expected_sha:
+            raise RuntimeError(
+                "inline verify PR-head visibility checkout changed before REST read: "
+                f"expected {expected_sha}, found {local_head}"
+            )
+        _require_remote_sha(
+            gh,
+            owner,
+            repo,
+            previous_context.head_ref,
+            expected_sha,
+            context="inline verify PR-head visibility before REST read",
+        )
+
+        fresh = pull_request_context(gh, owner, repo, pr_number)
+        previous_identity = (
+            previous_context.owner,
+            previous_context.repo,
+            previous_context.number,
+            previous_context.head_ref,
+            previous_context.head_repo_full_name,
+            previous_context.head_repo_https_url,
+            previous_context.base_ref,
+        )
+        fresh_identity = (
+            fresh.owner,
+            fresh.repo,
+            fresh.number,
+            fresh.head_ref,
+            fresh.head_repo_full_name,
+            fresh.head_repo_https_url,
+            fresh.base_ref,
+        )
+        if (
+            fresh_identity != previous_identity
+            or fresh.state != "open"
+            or fresh.merged
+        ):
+            raise RuntimeError(
+                "inline verify PR identity or publication inputs changed while "
+                "waiting for head visibility"
+            )
+        if fresh.body != previous_context.body:
+            raise ValueError(
+                "inline verify PR authority evidence/body changed while "
+                "waiting for head visibility"
+            )
+        if fresh.head_sha not in {previous_context.head_sha, expected_sha}:
+            raise RuntimeError(
+                "inline verify PR head changed to an unexpected SHA while waiting "
+                f"for visibility: expected {previous_context.head_sha} or "
+                f"{expected_sha}, found {fresh.head_sha or '<missing>'}"
+            )
+
+        _require_remote_sha(
+            gh,
+            owner,
+            repo,
+            previous_context.head_ref,
+            expected_sha,
+            context="inline verify PR-head visibility after REST read",
+        )
+        local_head = resolve_commit_ref(repo_path, "HEAD")
+        if local_head != expected_sha:
+            raise RuntimeError(
+                "inline verify PR-head visibility checkout changed during REST read: "
+                f"expected {expected_sha}, found {local_head}"
+            )
+
+        if fresh.head_sha == expected_sha:
+            return fresh
+        if attempt == 5:
+            raise RuntimeError(
+                "inline verify PR head visibility did not converge for "
+                f"PR #{pr_number}: expected {expected_sha}, last observed "
+                f"{fresh.head_sha or '<missing>'} after {attempt + 1} attempts; "
+                "the already published branch is retained"
+            )
+        delay = delays[attempt]
+        logger.info(
+            "Waiting for PR #%s head visibility (%s/6): old=%s expected=%s; "
+            "retrying in %.1fs",
+            pr_number,
+            attempt + 1,
+            previous_context.head_sha,
+            expected_sha,
+            delay,
+        )
+        time.sleep(delay)
+
+    raise AssertionError("unreachable inline fixup PR-context wait")
 
 
 def _freeze_candidate_sha(repo_path: str) -> str:
@@ -2636,6 +2758,7 @@ def run_doc_verify(
     skip_ops_gates: bool = False,
     ops_mode: str = "verify",
     _fixup_rerun_depth: int = 0,
+    _inline_fixup_context: PullRequestContext | None = None,
 ) -> DocJobResult:
     """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
@@ -2651,7 +2774,14 @@ def run_doc_verify(
     api_token, push_token = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
-    ctx = pull_request_context(gh, owner, repo, pr_number)
+    if _inline_fixup_context is not None:
+        if _fixup_rerun_depth <= 0 or not skip_ops_gates:
+            raise RuntimeError(
+                "inline fixup context requires an internal recursive verify"
+            )
+        ctx = _inline_fixup_context
+    else:
+        ctx = pull_request_context(gh, owner, repo, pr_number)
     translation_pr = is_translation_pr_branch(
         ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
     )
@@ -3496,6 +3626,17 @@ def run_doc_verify(
     # change the translation PR head, so the old result must never be posted as
     # current. Re-run verify on the new head and report that result (§6.219).
     if pushed and inline_fixup_push and inline_head_changed and not dry_run:
+        if not verify_candidate_sha:
+            raise RuntimeError("inline verify publication candidate SHA is missing")
+        next_inline_context = _await_inline_fixup_pr_context(
+            gh,
+            owner,
+            repo,
+            pr_number,
+            repo_path=repo_path,
+            previous_context=ctx,
+            expected_sha=verify_candidate_sha,
+        )
         if _fixup_rerun_depth >= 2:
             logger.info(
                 "Inline critic fix changed PR #%s after the automatic rerun limit; "
@@ -3516,6 +3657,7 @@ def run_doc_verify(
                 skip_ops_gates=True,
                 ops_mode=ops_mode,
                 _fixup_rerun_depth=_fixup_rerun_depth + 1,
+                _inline_fixup_context=next_inline_context,
             )
         else:
             logger.info(
@@ -3537,6 +3679,7 @@ def run_doc_verify(
                 skip_ops_gates=True,
                 ops_mode=ops_mode,
                 _fixup_rerun_depth=_fixup_rerun_depth + 1,
+                _inline_fixup_context=next_inline_context,
             )
 
     elapsed = time.monotonic() - started

@@ -350,6 +350,7 @@ class FakeGitHub:
     comments: list[tuple[str, str]] = field(default_factory=list)
     draft_calls: int = 0
     lease_conflict_sha: str | None = None
+    runtime_observations: dict[str, object] | None = None
 
     def get_pull(self, owner: str, repo: str, number: int) -> dict[str, Any]:
         assert f"{owner}/{repo}" == REPO_ID
@@ -432,7 +433,13 @@ def _workflow_runtime(history: History, gh: FakeGitHub) -> Iterator[dict[str, ob
         "pushes": [],
         "apply_calls": 0,
         "apply_events": [],
+        "client_calls": 0,
     }
+    gh.runtime_observations = observations
+
+    def observed_client(_config: object) -> SimpleNamespace:
+        observations["client_calls"] += 1
+        return _mock_client()
 
     def prepare(repo_path: str, **kwargs: object) -> None:
         forwarded = dict(kwargs)
@@ -509,7 +516,7 @@ def _workflow_runtime(history: History, gh: FakeGitHub) -> Iterator[dict[str, ob
     with ExitStack() as stack:
         stack.enter_context(patch.object(workflow, "GitHubClient", return_value=gh))
         stack.enter_context(
-            patch.object(workflow, "create_llm_client", return_value=_mock_client())
+            patch.object(workflow, "create_llm_client", side_effect=observed_client)
         )
         stack.enter_context(
             patch.object(workflow, "load_glossary", return_value=Glossary(entries=[]))
@@ -662,6 +669,448 @@ def test_real_git_verify_publishes_one_wrapper_and_freshly_verifies_k2(
             "writer_calls": 0,
         }
     ]
+
+
+@pytest.mark.parametrize("stale_responses", [1, 2, 5])
+def test_inline_fixup_waits_for_owned_pr_head_visibility(
+    wrapper_history: History,
+    stale_responses: int,
+) -> None:
+    original_get_pull = FakeGitHub.get_pull
+    postpush_reads = 0
+    sleeps: list[float] = []
+    activity: list[tuple[int, int, int, int]] = []
+
+    def lagged_get_pull(
+        fake: FakeGitHub, owner: str, repo: str, number: int
+    ) -> dict[str, Any]:
+        nonlocal postpush_reads
+        data = original_get_pull(fake, owner, repo, number)
+        if fake.remote_head != fake.history.k:
+            postpush_reads += 1
+            observed = fake.runtime_observations
+            assert observed is not None
+            activity.append(
+                (
+                    int(observed["client_calls"]),
+                    int(observed["apply_calls"]),
+                    len(fake.comments),
+                    len(observed["pushes"]),
+                )
+            )
+            if postpush_reads <= stale_responses:
+                data["head"]["sha"] = fake.history.k
+        return data
+
+    with (
+        patch.object(FakeGitHub, "get_pull", new=lagged_get_pull),
+        patch.object(workflow.time, "sleep", side_effect=sleeps.append),
+    ):
+        test_real_git_verify_publishes_one_wrapper_and_freshly_verifies_k2(
+            wrapper_history
+        )
+
+    assert postpush_reads == stale_responses + 1
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 15.0][:stale_responses]
+    assert activity == [(1, 0, 0, 1)] * (stale_responses + 1)
+
+
+def test_inline_fixup_visibility_timeout_keeps_published_candidate(
+    wrapper_history: History,
+) -> None:
+    gh = FakeGitHub(wrapper_history, wrapper_history.k, wrapper_history.body)
+    original_get_pull = gh.get_pull
+    postpush_reads = 0
+    sleeps: list[float] = []
+
+    def stale_get_pull(owner: str, repo: str, number: int) -> dict[str, Any]:
+        nonlocal postpush_reads
+        data = original_get_pull(owner, repo, number)
+        if gh.remote_head != wrapper_history.k:
+            postpush_reads += 1
+            data["head"]["sha"] = wrapper_history.k
+        return data
+
+    with (
+        patch.object(gh, "get_pull", side_effect=stale_get_pull),
+        patch.object(workflow.time, "sleep", side_effect=sleeps.append),
+        _workflow_runtime(wrapper_history, gh) as observed,
+    ):
+        with pytest.raises(RuntimeError) as captured:
+            workflow.run_doc_verify(
+                repo_path=str(wrapper_history.repo),
+                github_repo=REPO_ID,
+                pr_number=TRANSLATION_PR,
+                merge_base_with="origin/main",
+                config=_config(),
+                skip_ops_gates=True,
+            )
+
+    assert postpush_reads == 6
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 15.0]
+    assert len(observed["pushes"]) == 1
+    k2 = observed["pushes"][0]
+    message = str(captured.value)
+    assert "inline verify PR head visibility did not converge" in message
+    assert k2 in message
+    assert wrapper_history.k in message
+    assert "6" in message
+    assert _git(wrapper_history.repo, "rev-parse", "HEAD") == k2
+    assert _git_bare(wrapper_history.upstream, "rev-parse", BRANCH) == k2
+    assert _git(wrapper_history.repo, "diff", "--name-only", wrapper_history.k, k2) == EN_CLIENT
+    assert _git(wrapper_history.repo, "diff", "--numstat", wrapper_history.k, k2) == (
+        f"1\t1\t{EN_CLIENT}"
+    )
+    evidence = parse_authority_evidence(gh.body)
+    assert evidence.candidate_sha == wrapper_history.c
+    assert evidence.authority.source_head_sha == wrapper_history.h
+    assert evidence.authority.source_base_sha == wrapper_history.h0
+    assert evidence.authority.baseline_sha == wrapper_history.b
+    assert observed["client_calls"] == 1
+    assert observed["apply_calls"] == 0
+    assert observed["pushes"] == [k2]
+    assert gh.comments == []
+
+
+def _inline_visibility_state(
+    history: History,
+) -> tuple[FakeGitHub, object, str, str]:
+    gh = FakeGitHub(history, history.k, history.body)
+    previous = workflow.pull_request_context(
+        gh, "ydb-platform", "ydb", TRANSLATION_PR
+    )
+    expected = _git(
+        history.repo,
+        "commit-tree",
+        f"{history.k}^{{tree}}",
+        "-p",
+        history.k,
+        "-m",
+        "expected inline candidate",
+    )
+    competing = _git(
+        history.repo,
+        "commit-tree",
+        f"{history.k}^{{tree}}",
+        "-p",
+        history.k,
+        "-m",
+        "competing inline candidate",
+    )
+    assert expected != history.k and competing not in {history.k, expected}
+    _git(history.repo, "checkout", "--detach", expected)
+    gh.remote_head = expected
+    return gh, previous, expected, competing
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "third_head",
+        "empty_head",
+        "changed_head_ref",
+        "changed_head_repo",
+        "changed_clone_url",
+        "changed_base_ref",
+        "changed_body",
+        "closed_pr",
+        "merged_pr",
+        "remote_absent",
+        "remote_different_before",
+        "local_different_before",
+        "remote_changes_during_rest",
+        "local_changes_during_rest",
+    ],
+)
+def test_inline_visibility_rejects_nontransient_drift(
+    wrapper_history: History,
+    fault: str,
+) -> None:
+    gh, previous, expected, competing = _inline_visibility_state(wrapper_history)
+    original_get_pull = gh.get_pull
+    pull_calls = 0
+    remote_reads = 0
+    local_reads = 0
+    sleeps: list[float] = []
+
+    def faulted_get_pull(owner: str, repo: str, number: int) -> dict[str, Any]:
+        nonlocal pull_calls
+        pull_calls += 1
+        data = original_get_pull(owner, repo, number)
+        data["head"]["sha"] = expected
+        if fault == "third_head":
+            data["head"]["sha"] = competing
+        elif fault == "empty_head":
+            data["head"]["sha"] = ""
+        elif fault == "changed_head_ref":
+            data["head"]["ref"] = "other-branch"
+        elif fault == "changed_head_repo":
+            data["head"]["repo"]["full_name"] = "ydb-platform/other"
+        elif fault == "changed_clone_url":
+            data["head"]["repo"]["clone_url"] = (
+                "https://github.com/ydb-platform/other.git"
+            )
+        elif fault == "changed_base_ref":
+            data["base"]["ref"] = "stable"
+        elif fault == "changed_body":
+            data["body"] = f"{wrapper_history.body}\nmutated evidence"
+        elif fault == "closed_pr":
+            data["state"] = "closed"
+        elif fault == "merged_pr":
+            data["merged"] = True
+        return data
+
+    def branch_sha(owner: str, repo: str, branch: str) -> str | None:
+        nonlocal remote_reads
+        assert f"{owner}/{repo}" == REPO_ID and branch == BRANCH
+        remote_reads += 1
+        if fault == "remote_absent" and remote_reads == 1:
+            return None
+        if fault == "remote_different_before" and remote_reads == 1:
+            return competing
+        if fault == "remote_changes_during_rest" and remote_reads == 2:
+            return competing
+        return expected
+
+    def local_head(_repo_path: str, ref: str) -> str:
+        nonlocal local_reads
+        assert ref == "HEAD"
+        local_reads += 1
+        if fault == "local_different_before" and local_reads == 1:
+            return competing
+        if fault == "local_changes_during_rest" and local_reads == 2:
+            return competing
+        return expected
+
+    with (
+        patch.object(gh, "get_pull", side_effect=faulted_get_pull),
+        patch.object(gh, "get_branch_sha", side_effect=branch_sha),
+        patch.object(workflow, "resolve_commit_ref", side_effect=local_head),
+        patch.object(workflow.time, "sleep", side_effect=sleeps.append),
+    ):
+        with pytest.raises(ValueError if fault == "changed_body" else RuntimeError):
+            workflow._await_inline_fixup_pr_context(
+                gh,
+                "ydb-platform",
+                "ydb",
+                TRANSLATION_PR,
+                repo_path=str(wrapper_history.repo),
+                previous_context=previous,
+                expected_sha=expected,
+            )
+
+    if fault in {
+        "remote_absent",
+        "remote_different_before",
+        "local_different_before",
+    }:
+        assert pull_calls == 0
+    else:
+        assert pull_calls == 1
+    assert sleeps == []
+    assert _git(wrapper_history.repo, "status", "--porcelain") == ""
+
+
+def test_inline_visibility_returns_fresh_metadata_without_fabrication(
+    wrapper_history: History,
+) -> None:
+    gh, previous, expected, competing = _inline_visibility_state(wrapper_history)
+    original_get_pull = gh.get_pull
+    parsed_contexts: list[object] = []
+    sleeps: list[float] = []
+
+    def changed_metadata(owner: str, repo: str, number: int) -> dict[str, Any]:
+        data = original_get_pull(owner, repo, number)
+        data["head"]["sha"] = expected
+        data["title"] = "fresh candidate metadata"
+        data["labels"] = [{"name": "doc_verify"}, {"name": "ready"}]
+        data["base"]["sha"] = competing
+        return data
+
+    original_context = workflow.pull_request_context
+
+    def observed_context(*args: object, **kwargs: object):
+        fresh = original_context(*args, **kwargs)
+        parsed_contexts.append(fresh)
+        return fresh
+
+    with (
+        patch.object(gh, "get_pull", side_effect=changed_metadata),
+        patch.object(
+            workflow, "pull_request_context", side_effect=observed_context
+        ),
+        patch.object(workflow.time, "sleep", side_effect=sleeps.append),
+    ):
+        fresh = workflow._await_inline_fixup_pr_context(
+            gh,
+            "ydb-platform",
+            "ydb",
+            TRANSLATION_PR,
+            repo_path=str(wrapper_history.repo),
+            previous_context=previous,
+            expected_sha=expected,
+        )
+
+    assert parsed_contexts == [fresh]
+    assert fresh is parsed_contexts[0]
+    assert fresh.head_sha == expected
+    assert fresh.title == "fresh candidate metadata"
+    assert fresh.labels == frozenset({"doc_verify", "ready"})
+    assert fresh.base_sha == competing
+    assert fresh.body == wrapper_history.body
+    assert parse_authority_evidence(fresh.body) == parse_authority_evidence(
+        previous.body
+    )
+    assert sleeps == []
+
+
+def test_recursive_inline_guard_still_rejects_post_handshake_ref_drift(
+    wrapper_history: History,
+) -> None:
+    gh = FakeGitHub(wrapper_history, wrapper_history.k, wrapper_history.body)
+    competing = wrapper_history.h
+    original_get_pull = gh.get_pull
+    original_get_branch_sha = gh.get_branch_sha
+    candidate_seen = False
+    after_candidate_reads = 0
+
+    def candidate_get_pull(owner: str, repo: str, number: int) -> dict[str, Any]:
+        nonlocal candidate_seen
+        data = original_get_pull(owner, repo, number)
+        if gh.remote_head != wrapper_history.k:
+            candidate_seen = True
+        return data
+
+    def drifting_branch_sha(owner: str, repo: str, branch: str) -> str | None:
+        nonlocal after_candidate_reads
+        if candidate_seen:
+            after_candidate_reads += 1
+            if after_candidate_reads == 2:
+                _git_bare(
+                    wrapper_history.upstream,
+                    "update-ref",
+                    f"refs/heads/{BRANCH}",
+                    competing,
+                )
+                gh.remote_head = competing
+        return original_get_branch_sha(owner, repo, branch)
+
+    with (
+        patch.object(gh, "get_pull", side_effect=candidate_get_pull),
+        patch.object(
+            gh, "get_branch_sha", side_effect=drifting_branch_sha
+        ),
+        _workflow_runtime(wrapper_history, gh) as observed,
+    ):
+        with pytest.raises(
+            RuntimeError, match="inline verify publication expectation changed"
+        ):
+            workflow.run_doc_verify(
+                repo_path=str(wrapper_history.repo),
+                github_repo=REPO_ID,
+                pr_number=TRANSLATION_PR,
+                merge_base_with="origin/main",
+                config=_config(),
+                skip_ops_gates=True,
+            )
+
+    assert len(observed["pushes"]) == 1
+    assert observed["client_calls"] == 1
+    assert observed["apply_calls"] == 0
+    assert gh.remote_head == competing
+    assert _git_bare(wrapper_history.upstream, "rev-parse", BRANCH) == competing
+    assert gh.comments == []
+
+
+def test_inline_visibility_handshake_covers_final_read_only_transition(
+    wrapper_history: History,
+) -> None:
+    gh = FakeGitHub(wrapper_history, wrapper_history.k, wrapper_history.body)
+    original_get_pull = gh.get_pull
+    postpush_reads = 0
+    sleeps: list[float] = []
+
+    def lagged_get_pull(owner: str, repo: str, number: int) -> dict[str, Any]:
+        nonlocal postpush_reads
+        data = original_get_pull(owner, repo, number)
+        if gh.remote_head != wrapper_history.k:
+            postpush_reads += 1
+            if postpush_reads == 1:
+                data["head"]["sha"] = wrapper_history.k
+        return data
+
+    with (
+        patch.object(gh, "get_pull", side_effect=lagged_get_pull),
+        patch.object(workflow.time, "sleep", side_effect=sleeps.append),
+        patch.object(workflow, "write_text", wraps=workflow.write_text) as writer,
+        _workflow_runtime(wrapper_history, gh) as observed,
+    ):
+        job = workflow.run_doc_verify(
+            repo_path=str(wrapper_history.repo),
+            github_repo=REPO_ID,
+            pr_number=TRANSLATION_PR,
+            merge_base_with="origin/main",
+            config=_config(),
+            skip_ops_gates=True,
+            _fixup_rerun_depth=2,
+        )
+
+    assert postpush_reads == 2
+    assert sleeps == [1.0]
+    assert len(observed["pushes"]) == 1
+    k2 = observed["pushes"][0]
+    assert gh.remote_head == k2
+    assert _git(wrapper_history.repo, "rev-parse", "HEAD") == k2
+    assert observed["client_calls"] == 2
+    assert observed["apply_calls"] == 0
+    assert writer.call_count == 1
+    assert gh.comments and gh.comments[-1][0] == k2
+    assert k2[:12] in gh.comments[-1][1]
+    assert "можно мержить" in gh.comments[-1][1]
+    assert not classify_publication_blockers(job.pr_result).any
+    assert not workflow.job_requires_nonzero_exit(job)
+
+
+@pytest.mark.parametrize(
+    ("depth", "skip_ops_gates"),
+    [(0, True), (1, False)],
+)
+def test_external_entry_cannot_supply_inline_fixup_context(
+    wrapper_history: History,
+    depth: int,
+    skip_ops_gates: bool,
+) -> None:
+    gh = FakeGitHub(wrapper_history, wrapper_history.k, wrapper_history.body)
+    supplied = workflow.pull_request_context(
+        gh, "ydb-platform", "ydb", TRANSLATION_PR
+    )
+    with (
+        patch.object(workflow, "GitHubClient", return_value=gh),
+        patch.object(
+            workflow,
+            "pull_request_context",
+            side_effect=AssertionError("unexpected REST read"),
+        ),
+        patch.object(
+            workflow,
+            "create_llm_client",
+            side_effect=AssertionError("unexpected content/model work"),
+        ),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="inline fixup context requires an internal recursive verify",
+        ):
+            workflow.run_doc_verify(
+                repo_path=str(wrapper_history.repo),
+                github_repo=REPO_ID,
+                pr_number=TRANSLATION_PR,
+                merge_base_with="origin/main",
+                config=_config(),
+                skip_ops_gates=skip_ops_gates,
+                _fixup_rerun_depth=depth,
+                _inline_fixup_context=supplied,
+            )
 
 
 @pytest.mark.parametrize(
