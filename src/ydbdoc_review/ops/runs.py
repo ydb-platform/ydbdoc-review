@@ -46,6 +46,7 @@ class RunsLedger(Protocol):
         statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
         repo: str | None = None,
         exclude_run_ids: tuple[str, ...] = (),
+        run_id: str | None = None,
     ) -> str | None: ...
 
     def upsert_run(self, record: RunRecord) -> None: ...
@@ -77,6 +78,7 @@ class InMemoryRunsLedger:
         statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
         repo: str | None = None,
         exclude_run_ids: tuple[str, ...] = (),
+        run_id: str | None = None,
     ) -> str | None:
         excluded = set(exclude_run_ids)
         candidates = [
@@ -87,6 +89,7 @@ class InMemoryRunsLedger:
             and (modes is None or r.mode in modes)
             and (repo is None or r.repo == repo)
             and r.run_id not in excluded
+            and (run_id is None or r.run_id == run_id)
         ]
         if not candidates:
             return None
@@ -156,6 +159,7 @@ class YdbRunsLedger:
         statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
         repo: str | None = None,
         exclude_run_ids: tuple[str, ...] = (),
+        run_id: str | None = None,
     ) -> str | None:
         rows = self._fetch_by_source_pr(source_pr)
         excluded = set(exclude_run_ids)
@@ -168,6 +172,8 @@ class YdbRunsLedger:
             if repo is not None and r.get("repo") != repo:
                 continue
             if str(r.get("run_id") or "") in excluded:
+                continue
+            if run_id is not None and r.get("run_id") != run_id:
                 continue
             filtered.append(r)
         if not filtered:

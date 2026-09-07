@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ydbdoc_review.config.loader import RuAuthorityMode, load_config
+from ydbdoc_review.github import workflow as workflow_module
+from ydbdoc_review.github.git_ops import (
+    RefMutationOperation,
+    RefMutationReceipt,
+    RefMutationStatus,
+    RemoteRefLease,
+    RemoteRefMutationError,
+)
 from ydbdoc_review.github.provenance import RuAuthority
 from ydbdoc_review.github.workflow import (
     _resolve_translation_resume_parent,
@@ -31,6 +40,7 @@ from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 from ydbdoc_review.ops.translation_checkpoint import (
     CheckpointIdentity,
     CheckpointWriter,
+    TranslationCheckpointError,
     load_verified_unit,
     translation_unit_key_for_segment,
 )
@@ -143,6 +153,32 @@ def _workflow_repo(tmp_path: Path) -> str:
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "source"], cwd=repo, check=True)
     return str(repo)
+
+
+def _workflow_identity(
+    sha: str,
+    config: Any,
+    client: YandexLLMClient,
+    *,
+    effective_continue_feedback: str | None = None,
+) -> CheckpointIdentity:
+    return CheckpointIdentity(
+        RuAuthority(
+            source_repo="o/r",
+            source_pr=51079,
+            source_base_sha=sha,
+            source_head_sha=sha,
+            baseline_sha=sha,
+            ru_sha=sha,
+            mode=RuAuthorityMode.CURRENT,
+        ),
+        _translation_checkpoint_fingerprint(
+            config,
+            load_glossary(),
+            client,
+            effective_continue_feedback=effective_continue_feedback,
+        ),
+    )
 
 
 def test_recreated_loader_reads_exact_completed_bytes(tmp_path: Path) -> None:
@@ -519,6 +555,133 @@ def test_explicit_invalid_parent_never_falls_back() -> None:
     assert selected is None
 
 
+def test_explicit_parent_lookup_does_not_scan_other_candidates() -> None:
+    store = InMemoryTranscriptStore()
+    identity = _identity()
+    CheckpointWriter(store, "explicit", identity).save_unit(
+        "6" * 64,
+        b"source",
+        b"target",
+        validated=True,
+    )
+
+    class ExactLookupLedger(InMemoryRunsLedger):
+        def __init__(self) -> None:
+            super().__init__()
+            self.requested_run_ids: list[str | None] = []
+
+        def latest_run_id(self, source_pr: int, **kwargs: Any) -> str | None:
+            self.requested_run_ids.append(kwargs.get("run_id"))
+            return super().latest_run_id(source_pr, **kwargs)
+
+    ledger = ExactLookupLedger()
+    ledger.records = [
+        _record("older", hour=8),
+        _record("explicit", hour=9),
+        _record("newer", hour=10),
+    ]
+
+    selected = _resolve_translation_resume_parent(
+        ops_ctx=_ops_context(ledger, store),
+        checkpoint=CheckpointWriter(store, "current", identity),
+        explicit_parent_run_id="explicit",
+    )
+
+    assert selected == "explicit"
+    assert ledger.requested_run_ids == ["explicit"]
+
+
+def test_workflow_rejects_external_checkpoint_with_stale_full_identity(
+    tmp_path: Path,
+) -> None:
+    git_repo = _workflow_repo(tmp_path)
+    sha = subprocess.check_output(
+        ["git", "-C", git_repo, "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    config = load_config(
+        env={
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
+    )
+    client = _client([])
+    authority = RuAuthority(
+        source_repo="o/r",
+        source_pr=51079,
+        source_base_sha=sha,
+        source_head_sha=sha,
+        baseline_sha=sha,
+        ru_sha=sha,
+        mode=RuAuthorityMode.CURRENT,
+    )
+    stale_identity = CheckpointIdentity(
+        authority,
+        _translation_checkpoint_fingerprint(
+            config,
+            load_glossary(),
+            client,
+            effective_continue_feedback=None,
+        ),
+    )
+    checkpoint = CheckpointWriter(
+        InMemoryTranscriptStore(),
+        "current",
+        stale_identity,
+    )
+    pull = {
+        "title": "docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": sha,
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
+            },
+        },
+        "base": {"ref": "main", "sha": sha},
+    }
+
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as github,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(None, GateResult(ok=True), None),
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.create_llm_client",
+            return_value=client,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=[("ydb/docs/ru/a.md", "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            return_value=[("ydb/docs/ru/a.md", "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.run_pr_translation",
+            return_value=PRTranslationResult(),
+        ),
+        pytest.raises(TranslationCheckpointError, match="identity mismatch"),
+    ):
+        github.return_value.get_pull.return_value = pull
+        github.return_value.get_branch_sha.return_value = None
+        run_doc_translate(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=51079,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=config,
+            continue_feedback="changed instruction",
+            checkpoint=checkpoint,
+        )
+
+
 def test_workflow_propagates_selected_resume_parent(tmp_path: Path) -> None:
     git_repo = _workflow_repo(tmp_path)
     sha = subprocess.check_output(
@@ -533,18 +696,8 @@ def test_workflow_propagates_selected_resume_parent(tmp_path: Path) -> None:
             "GITHUB_PUSH_TOKEN": "push-token",
         }
     )
-    identity = CheckpointIdentity(
-        RuAuthority(
-            source_repo="o/r",
-            source_pr=51079,
-            source_base_sha=sha,
-            source_head_sha=sha,
-            baseline_sha=sha,
-            ru_sha=sha,
-            mode=RuAuthorityMode.CURRENT,
-        ),
-        "4" * 64,
-    )
+    client = _client([])
+    identity = _workflow_identity(sha, config, client)
     store = InMemoryTranscriptStore()
     CheckpointWriter(store, "parent", identity).save_unit(
         "5" * 64,
@@ -609,7 +762,7 @@ def test_workflow_propagates_selected_resume_parent(tmp_path: Path) -> None:
         patch("ydbdoc_review.github.workflow.finish_ops_job"),
         patch(
             "ydbdoc_review.github.workflow.create_llm_client",
-            return_value=_client([]),
+            return_value=client,
         ),
         patch(
             "ydbdoc_review.github.workflow.run_pr_translation",
@@ -769,18 +922,8 @@ def test_zero_call_resume_runs_final_gates_and_lease_check(tmp_path: Path) -> No
             "GITHUB_PUSH_TOKEN": "push-token",
         }
     )
-    identity = CheckpointIdentity(
-        RuAuthority(
-            source_repo="o/r",
-            source_pr=51079,
-            source_base_sha=sha,
-            source_head_sha=sha,
-            baseline_sha=sha,
-            ru_sha=sha,
-            mode=RuAuthorityMode.CURRENT,
-        ),
-        "4" * 64,
-    )
+    client = _client([])
+    identity = _workflow_identity(sha, config, client)
     source_text = "Привет.\n"
     segment = extract_segments(parse_markdown(source_text))[0]
     store = InMemoryTranscriptStore()
@@ -820,7 +963,6 @@ def test_zero_call_resume_runs_final_gates_and_lease_check(tmp_path: Path) -> No
         },
         "base": {"ref": "main", "sha": sha},
     }
-    client = _client([])
     prepare = MagicMock()
 
     with (
@@ -866,6 +1008,254 @@ def test_zero_call_resume_runs_final_gates_and_lease_check(tmp_path: Path) -> No
     assert "ydb/docs/en/a.md" in job.pr_result.completeness_gaps
     github.return_value.get_branch_sha.assert_called_once()
     prepare.assert_not_called()
+
+
+def _run_all_reuse_gate_workflow(
+    tmp_path: Path,
+    *,
+    source_text: str,
+    resumed_segment_text: str,
+    keep_real_orphan_gate: bool = False,
+    destination_sha: str | None = None,
+    push_error: Exception | None = None,
+    observed: dict[str, Any] | None = None,
+    post_apply_target_text: str | None = None,
+) -> tuple[Any, YandexLLMClient, MagicMock, MagicMock]:
+    git_repo = _workflow_repo(tmp_path)
+    source_path = Path(git_repo, "ydb/docs/ru/a.md")
+    source_path.write_text(source_text, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "gate source"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    sha = subprocess.check_output(
+        ["git", "-C", git_repo, "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    config = load_config(
+        env={
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
+    )
+    client = _client([])
+    identity = _workflow_identity(sha, config, client)
+    segment = extract_segments(parse_markdown(source_text))[0]
+    store = InMemoryTranscriptStore()
+    CheckpointWriter(store, "parent", identity).save_unit(
+        translation_unit_key_for_segment(
+            segment,
+            source_path="ydb/docs/ru/a.md",
+            target_locale="en",
+        ),
+        segment.text.encode("utf-8"),
+        resumed_segment_text.encode("utf-8"),
+        validated=True,
+    )
+    current = CheckpointWriter(store, "current", identity)
+    ledger = InMemoryRunsLedger()
+    ledger.records = [_record("parent", repo="o/r", status="failed", hour=9)]
+    ops_ctx = SimpleNamespace(
+        ledger=ledger,
+        store=store,
+        run_id="current",
+        repo="o/r",
+        source_pr=51079,
+        parent_run_id="parent",
+        continue_feedback=None,
+        recorder=MagicMock(),
+    )
+    pull = {
+        "title": "docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": sha,
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
+            },
+        },
+        "base": {"ref": "main", "sha": sha},
+    }
+    github = MagicMock()
+    github.get_pull.return_value = pull
+    github.get_branch_sha.return_value = destination_sha
+    prepare = MagicMock()
+    push = MagicMock(side_effect=push_error)
+    if observed is not None:
+        observed.update(client=client, github=github, push=push)
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("ydbdoc_review.github.workflow.GitHubClient", return_value=github)
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.begin_ops_job",
+                return_value=(ops_ctx, GateResult(ok=True), None),
+            )
+        )
+        stack.enter_context(patch("ydbdoc_review.github.workflow.finish_ops_job"))
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.create_llm_client",
+                return_value=client,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+                return_value=[("ydb/docs/ru/a.md", "modified")],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+                return_value=[("ydb/docs/ru/a.md", "modified")],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.preflight_translation",
+                return_value=PreflightResult(blockers=(), deferred_checks=()),
+            )
+        )
+        if not keep_real_orphan_gate:
+            stack.enter_context(
+                patch(
+                    "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+                    return_value=[],
+                )
+            )
+        if post_apply_target_text is not None:
+            real_apply = workflow_module._apply_results_to_disk
+
+            def apply_then_mutate(*args: Any, **kwargs: Any) -> Any:
+                touched = real_apply(*args, **kwargs)
+                Path(git_repo, "ydb/docs/en/a.md").write_text(
+                    post_apply_target_text,
+                    encoding="utf-8",
+                )
+                return touched
+
+            stack.enter_context(
+                patch(
+                    "ydbdoc_review.github.workflow._apply_results_to_disk",
+                    side_effect=apply_then_mutate,
+                )
+            )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.prepare_translation_branch_on_base",
+                prepare,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.git_commit_paths",
+                return_value=True,
+            )
+        )
+        stack.enter_context(
+            patch("ydbdoc_review.github.workflow.push_branch", push)
+        )
+        job = run_doc_translate(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=51079,
+            merge_base_with="HEAD",
+            dry_run=False,
+            no_commit=push_error is None,
+            config=config,
+            parent_run_id="parent",
+            checkpoint=current,
+        )
+
+    return job, client, github, push
+
+
+def test_all_reuse_still_runs_real_final_tree_gate(tmp_path: Path) -> None:
+    job, client, _github, push = _run_all_reuse_gate_workflow(
+        tmp_path,
+        source_text="Привет.\n",
+        resumed_segment_text="Hello.",
+        post_apply_target_text="See [missing](missing.md).\n",
+    )
+
+    assert client.usage_tracker.records == []
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert [(item.path, item.code) for item in job.pr_result.final_tree_blockers] == [
+        ("ydb/docs/en/a.md", "en_link_target")
+    ]
+    push.assert_not_called()
+
+
+def test_all_reuse_still_runs_real_orphan_gate(tmp_path: Path) -> None:
+    job, client, _github, push = _run_all_reuse_gate_workflow(
+        tmp_path,
+        source_text="Привет.\n",
+        resumed_segment_text="Hello.",
+        keep_real_orphan_gate=True,
+    )
+
+    assert client.usage_tracker.records == []
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
+    assert "ydb/docs/en/a.md" in job.pr_result.completeness_gaps
+    push.assert_not_called()
+
+
+def test_all_reuse_still_runs_real_unsafe_gate(tmp_path: Path) -> None:
+    job, client, _github, push = _run_all_reuse_gate_workflow(
+        tmp_path,
+        source_text="Привет.\n",
+        resumed_segment_text="Hello.\n\n# Extra heading",
+    )
+
+    assert client.usage_tracker.records == []
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    push.assert_not_called()
+
+
+def test_all_reuse_still_honors_destination_branch_drift(tmp_path: Path) -> None:
+    destination_sha = "a" * 40
+    conflict = RemoteRefMutationError(
+        "destination branch changed",
+        RefMutationReceipt(
+            lease=RemoteRefLease(
+                branch="ydbdoc-review/pr-51079",
+                expected_sha=destination_sha,
+            ),
+            operation=RefMutationOperation.UPDATE,
+            requested_sha="b" * 40,
+            status=RefMutationStatus.CONFLICT,
+            porcelain_flag="!",
+            stdout="",
+            stderr="stale lease",
+        ),
+    )
+    observed: dict[str, Any] = {}
+
+    with pytest.raises(RemoteRefMutationError, match="destination branch changed"):
+        _run_all_reuse_gate_workflow(
+            tmp_path,
+            source_text="Привет.\n",
+            resumed_segment_text="Hello.",
+            destination_sha=destination_sha,
+            push_error=conflict,
+            observed=observed,
+        )
+
+    client = observed["client"]
+    github = observed["github"]
+    push = observed["push"]
+    assert client.usage_tracker.records == []
+    github.get_branch_sha.assert_called_once()
+    assert push.call_args.kwargs["expected_remote_sha"] == destination_sha
 
 
 def test_changed_baseline_refreezes_and_does_not_inherit_approval() -> None:
@@ -966,6 +1356,50 @@ def test_translation_inputs_invalidate_resume() -> None:
     assert all(fingerprint != base for fingerprint in variants)
 
 
+def test_translation_fingerprint_canonicalizes_iterable_model_chain() -> None:
+    config = load_config(
+        env={"YDBDOC_YC_FOLDER_ID": "folder", "YDBDOC_YC_API_KEY": "key"}
+    )
+    client = MagicMock()
+    client.model_chain_for_role.return_value = iter(["model-a", "model-b"])
+
+    fingerprint = _translation_checkpoint_fingerprint(
+        config,
+        load_glossary(),
+        client,
+        effective_continue_feedback=None,
+    )
+
+    assert len(fingerprint) == 64
+
+
+def test_translation_fingerprint_canonicalizes_glossary_prompt_text() -> None:
+    config = load_config(
+        env={"YDBDOC_YC_FOLDER_ID": "folder", "YDBDOC_YC_API_KEY": "key"}
+    )
+    client = _client([])
+    glossary = load_glossary()
+    prompt = glossary.to_prompt_yaml()
+    proxy = MagicMock()
+    proxy.to_prompt_yaml.return_value = prompt
+
+    expected = _translation_checkpoint_fingerprint(
+        config,
+        glossary,
+        client,
+        effective_continue_feedback=None,
+    )
+    actual = _translation_checkpoint_fingerprint(
+        config,
+        proxy,
+        client,
+        effective_continue_feedback=None,
+    )
+
+    assert actual == expected
+    assert str(prompt).encode("utf-8") == prompt.encode("utf-8")
+
+
 def test_checkpoint_scope_resets_resume_parent_between_jobs() -> None:
     checkpoint = CheckpointWriter(InMemoryTranscriptStore(), "current", _identity())
     client = _client([])
@@ -1032,18 +1466,16 @@ def test_navigation_change_reuses_translations_but_recomputes_navigation(
         ["git", "-C", git_repo, "rev-parse", "HEAD"],
         text=True,
     ).strip()
-    identity = CheckpointIdentity(
-        RuAuthority(
-            source_repo="o/r",
-            source_pr=51079,
-            source_base_sha=sha,
-            source_head_sha=sha,
-            baseline_sha=sha,
-            ru_sha=sha,
-            mode=RuAuthorityMode.CURRENT,
-        ),
-        "4" * 64,
+    config = load_config(
+        env={
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
     )
+    client = _client([])
+    identity = _workflow_identity(sha, config, client)
     source_text = "Привет.\n"
     segment = extract_segments(parse_markdown(source_text))[0]
     store = InMemoryTranscriptStore()
@@ -1097,16 +1529,6 @@ def test_navigation_change_reuses_translations_but_recomputes_navigation(
         },
         "base": {"ref": "main", "sha": sha},
     }
-    config = load_config(
-        env={
-            "YDBDOC_YC_FOLDER_ID": "folder",
-            "YDBDOC_YC_API_KEY": "key",
-            "GITHUB_TOKEN": "token",
-            "GITHUB_PUSH_TOKEN": "push-token",
-        }
-    )
-    client = _client([])
-
     with (
         patch("ydbdoc_review.github.workflow.GitHubClient") as github,
         patch(

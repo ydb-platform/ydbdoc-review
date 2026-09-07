@@ -488,6 +488,15 @@ def _run_checkpoint_workflow(
     identity_mismatch: bool = False,
 ):  # type: ignore[no-untyped-def]
     repo, sha = _workflow_repo(tmp_path)
+    config = load_config(
+        env={
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
+    )
+    client = _client([])
     if not identity_mismatch:
         writer.identity = CheckpointIdentity(
             RuAuthority(
@@ -499,7 +508,12 @@ def _run_checkpoint_workflow(
                 ru_sha=sha,
                 mode=RuAuthorityMode.SOURCE_PRESERVING,
             ),
-            writer.identity.translation_fingerprint,
+            _translation_checkpoint_fingerprint(
+                config,
+                load_glossary(),
+                client,
+                effective_continue_feedback=None,
+            ),
         )
     pull = SimpleNamespace(
         owner="ydb-platform",
@@ -543,14 +557,6 @@ def _run_checkpoint_workflow(
         )
         return result
 
-    config = load_config(
-        env={
-            "YDBDOC_YC_FOLDER_ID": "folder",
-            "YDBDOC_YC_API_KEY": "key",
-            "GITHUB_TOKEN": "token",
-            "GITHUB_PUSH_TOKEN": "push-token",
-        }
-    )
     with (
         patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
         patch(
@@ -584,7 +590,7 @@ def _run_checkpoint_workflow(
             "ydbdoc_review.github.workflow.redirect_source_repo_md_paths",
             return_value=frozenset(),
         ),
-        patch("ydbdoc_review.github.workflow.create_llm_client", return_value=_client([])),
+        patch("ydbdoc_review.github.workflow.create_llm_client", return_value=client),
         patch("ydbdoc_review.github.workflow.run_pr_translation", side_effect=retained_result),
         patch(
             "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",

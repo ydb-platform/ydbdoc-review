@@ -1891,10 +1891,10 @@ def _translation_checkpoint_fingerprint(
             (effective_continue_feedback or "").encode("utf-8")
         ).hexdigest(),
         "glossary_sha256": hashlib.sha256(
-            glossary.to_prompt_yaml().encode("utf-8")
+            str(glossary.to_prompt_yaml()).encode("utf-8")
         ).hexdigest(),
         "llm": config.llm.model_dump(mode="json"),
-        "models": client.model_chain_for_role("translate"),
+        "models": list(client.model_chain_for_role("translate")),
         "prompt_templates": {
             name: hashlib.sha256(
                 load_template(name, version=config.prompts.version).encode("utf-8")
@@ -1953,6 +1953,36 @@ def _resolve_translation_resume_parent(
         excluded.append(current_run_id)
     seen: set[str] = set(excluded)
 
+    if explicit_parent_run_id is not None:
+        try:
+            candidate = ledger.latest_run_id(
+                source_pr,
+                modes=("translate", "continue"),
+                statuses=("ok", "published_red", "failed"),
+                repo=repo,
+                exclude_run_ids=tuple(excluded),
+                run_id=explicit_parent_run_id,
+            )
+        except Exception as exc:
+            logger.warning("Translation resume ledger lookup failed: %s", exc)
+            return None
+        if candidate != explicit_parent_run_id:
+            logger.warning(
+                "Translation resume parent=%s rejected: no matching completed "
+                "same-repository run metadata",
+                explicit_parent_run_id,
+            )
+            return None
+        return (
+            candidate
+            if run_has_usable_verified_units(
+                checkpoint.store,
+                candidate,
+                checkpoint.identity,
+            )
+            else None
+        )
+
     while True:
         try:
             candidate = ledger.latest_run_id(
@@ -1966,12 +1996,6 @@ def _resolve_translation_resume_parent(
             logger.warning("Translation resume ledger lookup failed: %s", exc)
             return None
         if candidate is None:
-            if explicit_parent_run_id:
-                logger.warning(
-                    "Translation resume parent=%s rejected: no matching completed "
-                    "same-repository run metadata",
-                    explicit_parent_run_id,
-                )
             return None
         if candidate in seen:
             logger.warning(
@@ -1981,17 +2005,11 @@ def _resolve_translation_resume_parent(
             return None
         seen.add(candidate)
 
-        if explicit_parent_run_id is not None and candidate != explicit_parent_run_id:
-            excluded.append(candidate)
-            continue
-
         usable = run_has_usable_verified_units(
             checkpoint.store,
             candidate,
             checkpoint.identity,
         )
-        if explicit_parent_run_id is not None:
-            return candidate if usable else None
         if usable:
             return candidate
         excluded.append(candidate)
@@ -2372,6 +2390,15 @@ def run_doc_translate(
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
     glossary = load_glossary()
+    current_identity = CheckpointIdentity(
+        authority,
+        _translation_checkpoint_fingerprint(
+            cfg,
+            glossary,
+            client,
+            effective_continue_feedback=effective_continue_feedback,
+        ),
+    )
     active_checkpoint = checkpoint
     if active_checkpoint is None and ops_ctx is not None:
         store = getattr(ops_ctx, "store", None)
@@ -2384,23 +2411,17 @@ def run_doc_translate(
             active_checkpoint = CheckpointWriter(
                 store,
                 run_id,
-                CheckpointIdentity(
-                    authority,
-                    _translation_checkpoint_fingerprint(
-                        cfg,
-                        glossary,
-                        client,
-                        effective_continue_feedback=effective_continue_feedback,
-                    ),
-                ),
+                current_identity,
             )
-    if (
-        active_checkpoint is not None
-        and active_checkpoint.identity.authority != authority
-    ):
-        raise TranslationCheckpointError(
-            "translation checkpoint authority mismatch for current workflow"
-        )
+    if active_checkpoint is not None:
+        if active_checkpoint.identity.authority != current_identity.authority:
+            raise TranslationCheckpointError(
+                "translation checkpoint authority mismatch for current workflow"
+            )
+        if active_checkpoint.identity != current_identity:
+            raise TranslationCheckpointError(
+                "translation checkpoint identity mismatch for current workflow"
+            )
     requested_resume_parent = parent_run_id or (
         getattr(ops_ctx, "parent_run_id", None) if ops_ctx is not None else None
     )

@@ -132,6 +132,15 @@ def test_memory_latest_run_selector_filters_repo_status_and_exclusions():
         ledger.latest_run_id(
             7,
             repo="o/r",
+            statuses=("ok", "published_red", "failed"),
+            run_id="same-failed",
+        )
+        == "same-failed"
+    )
+    assert (
+        ledger.latest_run_id(
+            7,
+            repo="o/r",
             modes=("translate", "continue"),
             statuses=("ok", "published_red", "failed"),
         )
