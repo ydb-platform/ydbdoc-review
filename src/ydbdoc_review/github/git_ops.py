@@ -558,13 +558,21 @@ def git_commit_paths(
             )
         for rel in paths:
             subprocess.run(["git", "-C", repo, "add", "--", rel], check=True)
-    st = subprocess.run(
-        ["git", "-C", repo, "status", "--porcelain"],
+    staged_diff_args = ["git", "-C", repo, "diff", "--cached", "--quiet"]
+    staged_diff = subprocess.run(
+        staged_diff_args,
         capture_output=True,
         text=True,
     )
-    if not (st.stdout or "").strip():
+    if staged_diff.returncode == 0:
         return False
+    if staged_diff.returncode != 1:
+        raise subprocess.CalledProcessError(
+            staged_diff.returncode,
+            staged_diff_args,
+            output=staged_diff.stdout,
+            stderr=staged_diff.stderr,
+        )
     subprocess.run(["git", "-C", repo, "commit", "-m", message], check=True)
     return True
 

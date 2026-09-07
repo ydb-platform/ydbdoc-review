@@ -178,6 +178,133 @@ def test_git_commit_paths(git_repo: str):
     assert ok is True
 
 
+def test_git_commit_paths_ignores_untracked_state_when_selected_path_is_unchanged(
+    git_repo: str,
+):
+    state_path = Path(git_repo) / ".ydbdoc-state" / "pr-7.json"
+    state_path.parent.mkdir()
+    state_bytes = b'{"continuable": false}\n'
+    state_path.write_bytes(state_bytes)
+    previous_head = resolve_commit_ref(git_repo, "HEAD")
+
+    ok = git_commit_paths(
+        git_repo,
+        ["ydb/docs/ru/a.md"],
+        "unchanged docs",
+        "test",
+        "t@example.com",
+    )
+
+    assert ok is False
+    assert resolve_commit_ref(git_repo, "HEAD") == previous_head
+    assert state_path.read_bytes() == state_bytes
+    assert subprocess.run(
+        ["git", "-C", git_repo, "status", "--porcelain", "--", ".ydbdoc-state"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == "?? .ydbdoc-state/\n"
+
+
+def test_git_commit_paths_ignores_unstaged_tracked_change_when_selected_path_is_unchanged(
+    git_repo: str,
+):
+    unrelated_path = Path(git_repo) / "unrelated.txt"
+    unrelated_path.write_text("baseline\n", encoding="utf-8")
+    subprocess.run(["git", "-C", git_repo, "add", "--", "unrelated.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", git_repo, "commit", "-m", "add unrelated"],
+        check=True,
+    )
+    unrelated_path.write_text("local edit\n", encoding="utf-8")
+    previous_head = resolve_commit_ref(git_repo, "HEAD")
+
+    ok = git_commit_paths(
+        git_repo,
+        ["ydb/docs/ru/a.md"],
+        "unchanged docs",
+        "test",
+        "t@example.com",
+    )
+
+    assert ok is False
+    assert resolve_commit_ref(git_repo, "HEAD") == previous_head
+    assert unrelated_path.read_text(encoding="utf-8") == "local edit\n"
+    assert subprocess.run(
+        ["git", "-C", git_repo, "diff", "--cached", "--name-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+    assert subprocess.run(
+        ["git", "-C", git_repo, "status", "--porcelain", "--", "unrelated.txt"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == " M unrelated.txt\n"
+
+
+def test_git_commit_paths_commits_selected_change_without_staging_untracked_state(
+    git_repo: str,
+):
+    selected_path = "ydb/docs/ru/a.md"
+    write_text(git_repo, selected_path, "# Updated\n")
+    state_path = Path(git_repo) / ".ydbdoc-state" / "pr-7.json"
+    state_path.parent.mkdir()
+    state_bytes = b'{"continuable": false}\n'
+    state_path.write_bytes(state_bytes)
+
+    ok = git_commit_paths(
+        git_repo,
+        [selected_path],
+        "update docs",
+        "test",
+        "t@example.com",
+    )
+
+    assert ok is True
+    assert first_parent_commit_changes(git_repo, "HEAD") == (
+        (selected_path, "modified"),
+    )
+    assert state_path.read_bytes() == state_bytes
+    assert subprocess.run(
+        ["git", "-C", git_repo, "status", "--porcelain", "--", ".ydbdoc-state"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == "?? .ydbdoc-state/\n"
+
+
+def test_git_commit_paths_propagates_staged_diff_probe_failure(
+    git_repo: str,
+    monkeypatch,
+):
+    real_run = git_ops.subprocess.run
+
+    def fail_staged_diff_probe(cmd, *args, **kwargs):
+        if cmd == ["git", "-C", git_repo, "diff", "--cached", "--quiet"]:
+            return subprocess.CompletedProcess(
+                cmd,
+                2,
+                stdout="",
+                stderr="fatal: staged diff probe failed",
+            )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(git_ops.subprocess, "run", fail_staged_diff_probe)
+
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        git_commit_paths(
+            git_repo,
+            ["ydb/docs/ru/a.md"],
+            "unchanged docs",
+            "test",
+            "t@example.com",
+        )
+
+    assert exc_info.value.returncode == 2
+
+
 def test_remote_push_url():
     url = remote_push_url("https://github.com/o/r.git", "secret")
     assert "x-access-token:secret@github.com" in url
