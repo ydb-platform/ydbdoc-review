@@ -119,7 +119,12 @@ def _render_yfm_tabs(t: YfmTabs, indent: str) -> str:
     for i, tab in enumerate(t.children):
         if i > 0:
             parts.append("\n")
-        parts.append(_render_yfm_tab(tab, indent))
+        # The parser uses a content-bearing untitled tab as a lossless sentinel
+        # for blocks that occur outside the container's bullet lists.
+        if not tab.title and tab.children:
+            parts.append(_join_blocks(tab.children, indent=indent))
+        else:
+            parts.append(_render_yfm_tab(tab, indent))
     parts.append("\n")
     parts.append(close_line)
     return "".join(parts)

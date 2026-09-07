@@ -429,7 +429,8 @@ def _parse_yfm_tabs(stream: _TokenStream) -> YfmTabs:
                 tabs.append(tab)
         else:
             # Unexpected content inside tabs container. We don't lose it:
-            # wrap as a tab with empty title.
+            # preserve it as an empty-title sentinel that the renderer emits
+            # at container level without inventing a bullet-list marker.
             tabs.append(YfmTab(title=[], children=[block]))
 
     return YfmTabs(variant=variant, children=tabs)

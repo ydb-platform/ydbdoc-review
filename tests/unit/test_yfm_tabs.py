@@ -246,3 +246,19 @@ def test_round_trip_tabs_with_note_inside():
     )
     assert_stable(text)
 
+
+def test_tabs_preserve_content_outside_bullet_list_without_empty_tab_marker():
+    text = (
+        "{% list tabs group=lang %}\n"
+        "\n"
+        "Context shared by every tab.\n"
+        "\n"
+        "- Python\n"
+        "\n"
+        "  Python body.\n"
+        "\n"
+        "{% endlist %}\n"
+    )
+
+    assert round_trip(text) == text
+    assert_stable(text)
