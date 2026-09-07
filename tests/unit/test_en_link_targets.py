@@ -75,14 +75,9 @@ def test_en_link_target_suppresses_ambient_baseline_debt():
         **baseline_files,
         mon: "## Authentication {#authentication}\n",
     }
-    baseline = (
-        "See [lockout](../reference/configuration/auth_config.md#account-lockout).\n"
-    )
+    baseline = "See [lockout](../reference/configuration/auth_config.md#account-lockout).\n"
     # Same ambient debt + new broken #tls from this PR's RU delta.
-    current = (
-        baseline
-        + "See [tls](../reference/configuration/monitoring_config.md#tls).\n"
-    )
+    current = baseline + "See [tls](../reference/configuration/monitoring_config.md#tls).\n"
     msgs = check_en_page_link_targets(
         page,
         current,
@@ -95,36 +90,48 @@ def test_en_link_target_suppresses_ambient_baseline_debt():
     assert "account-lockout" not in msgs[0]
 
 
-def test_en_link_target_suppresses_ru_twin_broken_paths():
-    """#40385: EN mirroring pre-existing broken RU hrefs must not hard-block."""
+def test_en_link_target_suppresses_baseline_broken_paths():
+    """#40385: broken hrefs proven on the frozen EN baseline stay ambient."""
     page = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
-    en = (
-        "See [mon](../ydb-ui/ydb-monitoring.md) and "
-        "[ui](../ydb-ui/index.md).\n"
-    )
-    ru = (
-        "См. [mon](../ydb-ui/ydb-monitoring.md) и "
-        "[ui](../ydb-ui/index.md).\n"
-    )
+    en = "See [mon](../ydb-ui/ydb-monitoring.md) and [ui](../ydb-ui/index.md).\n"
     assert (
-        check_en_page_link_targets(page, en, read_text=lambda _p: None, ru_text=ru) == []
+        check_en_page_link_targets(
+            page,
+            en,
+            read_text=lambda _path: None,
+            baseline_text=en,
+            baseline_read_text=lambda _path: None,
+        )
+        == []
     )
     # Newly invented EN-only broken path still blocks.
     en_new = en + "See [gone](../ydb-ui/missing-only-en.md).\n"
-    msgs = check_en_page_link_targets(page, en_new, read_text=lambda _p: None, ru_text=ru)
+    msgs = check_en_page_link_targets(
+        page,
+        en_new,
+        read_text=lambda _path: None,
+        baseline_text=en,
+        baseline_read_text=lambda _path: None,
+    )
     assert len(msgs) == 1
     assert "missing-only-en.md" in msgs[0]
 
 
-def test_en_link_target_suppresses_ru_twin_missing_fragment():
-    """#40385: RU and EN both link to connect.md#tls on an include stub."""
+def test_en_link_target_suppresses_baseline_missing_fragment():
+    """#40385: an unchanged missing fragment in the frozen EN tree stays ambient."""
     page = "ydb/docs/en/core/security/authentication.md"
     target = "ydb/docs/en/core/reference/ydb-cli/connect.md"
     files = {target: "{% include [connect.md](_includes/connect.md) %}\n"}
     en = "See [TLS](../reference/ydb-cli/connect.md#tls).\n"
-    ru = "См. [TLS](../reference/ydb-cli/connect.md#tls).\n"
     assert (
-        check_en_page_link_targets(page, en, read_text=files.get, ru_text=ru) == []
+        check_en_page_link_targets(
+            page,
+            en,
+            read_text=files.get,
+            baseline_text=en,
+            baseline_read_text=files.get,
+        )
+        == []
     )
 
 
@@ -166,8 +173,8 @@ def test_apply_en_link_target_checks_blocks_href_only_pair(tmp_path):
     assert any(m.startswith("en_link_target:") for m in fr.heuristic_blocking)
 
 
-def test_apply_suppresses_ambient_tip_wrapper_shortfall(tmp_path):
-    """P9c: tip EN with fewer wrappers than RU must not hard-block when unchanged."""
+def test_apply_suppresses_ambient_tip_link_debt(tmp_path):
+    """P9c: unchanged broken tip links stay ambient; a new broken link blocks."""
     repo = tmp_path / "repo"
     page = "ydb/docs/en/core/reference/configuration/auth_config.md"
     page_file = repo / page
@@ -177,13 +184,6 @@ def test_apply_suppresses_ambient_tip_wrapper_shortfall(tmp_path):
         "See [token](../../concepts/glossary.md#auth-token).\n"
     )
     page_file.write_text(en, encoding="utf-8")
-    ru = (
-        "См. [ldap](../../security/authentication.md#ldap).\n"
-        "См. [svc](../../security/authentication.md#ldap-service-account-auth).\n"
-        "См. [cert](../../security/authentication.md#client-certificate).\n"
-        "См. [cca](client_certificate_authorization.md).\n"
-        "См. [token](../../concepts/glossary.md#auth-token).\n"
-    )
     pair = DocPair(
         ru_path=page.replace("/docs/en/", "/docs/ru/", 1),
         en_path=page,
@@ -198,36 +198,31 @@ def test_apply_suppresses_ambient_tip_wrapper_shortfall(tmp_path):
         target_lang="en",
         summary="verify",
     )
-    result = PRTranslationResult(
-        pair_results=[PairRunResult(plan=plan, target_text=en, source_text=ru)]
-    )
+    result = PRTranslationResult(pair_results=[PairRunResult(plan=plan, target_text=en)])
     assert (
         apply_en_link_target_checks(
             result,
             repo_path=str(repo),
             en_md_paths={page},
-            baseline_read=lambda _p: en,
+            baseline_read=lambda path: en if path == page else None,
         )
         == []
     )
-    # Dropping a tip wrapper is still a regression (candidate differs from tip).
-    regressed = "See [ldap](../../security/authentication.md#ldap-auth-provider).\n"
-    result2 = PRTranslationResult(
-        pair_results=[PairRunResult(plan=plan, target_text=regressed, source_text=ru)]
-    )
+    # A new broken candidate link is not ambient even though the old debt is.
+    regressed = en + "See [new](../../security/new-page.md#missing-anchor).\n"
+    result2 = PRTranslationResult(pair_results=[PairRunResult(plan=plan, target_text=regressed)])
     broken = apply_en_link_target_checks(
         result2,
         repo_path=str(repo),
         en_md_paths={page},
-        baseline_read=lambda _p: en,
+        baseline_read=lambda path: en if path == page else None,
         docs_read=lambda p: regressed if p == page else None,
     )
     assert broken == [page]
     fr = result2.pair_results[0].file_result
     assert fr is not None
     assert any(
-        m.startswith(("missing_link_wrapper:", "link_contract:"))
-        for m in fr.heuristic_blocking
+        m.startswith("en_link_target:") and "new-page.md" in m for m in fr.heuristic_blocking
     )
 
 
