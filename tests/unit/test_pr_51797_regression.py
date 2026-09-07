@@ -597,13 +597,18 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
     import ydbdoc_review.github.workflow as workflow
 
     # This is a workflow integration regression, but its outcome must not
-    # depend on live ops/LLM clients.  The small namespace deliberately has
-    # only the tracker contract which this no-commit path may consume.
+    # depend on live ops/LLM clients. The namespace exposes only the usage and
+    # model-chain contracts which this no-commit path may consume.
+    def model_chain_for_role(role: str) -> list[str]:
+        assert role == "translate"
+        return ["pr51797-fixture-translate"]
+
     client = SimpleNamespace(
         usage_tracker=SimpleNamespace(
             records=[],
             estimate_cost_rub=lambda: 0.0,
-        )
+        ),
+        model_chain_for_role=model_chain_for_role,
     )
     with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
         "ydbdoc_review.github.workflow.begin_ops_job",

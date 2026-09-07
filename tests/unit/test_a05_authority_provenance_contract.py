@@ -222,6 +222,27 @@ def authority_history(tmp_path: Path) -> AuthorityHistory:
 
     _write(
         repo,
+        f"{EN_ROOT}/toc_p.yaml",
+        "items:\n"
+        "  - name: Security\n"
+        "    include:\n"
+        "      mode: link\n"
+        "      path: security/toc_p.yaml\n"
+        "  - name: Client certificate authorization\n"
+        "    href: reference/configuration/client_certificate_authorization.md\n"
+        "  - name: Monitoring configuration\n"
+        "    href: reference/configuration/monitoring_config.md\n"
+        "  - name: TLS settings\n"
+        "    href: reference/configuration/tls.md\n"
+        "  - name: Authentication configuration\n"
+        "    href: reference/configuration/auth_config.md\n"
+        "  - name: Glossary\n"
+        "    href: concepts/glossary.md\n"
+        "  - name: Authorization\n"
+        "    href: security/authorization.md\n",
+    )
+    _write(
+        repo,
         H_NAV,
         "items:\n"
         "  - name: Authentication\n"
@@ -701,6 +722,10 @@ def _runtime(
         def __init__(self) -> None:
             self.usage_tracker = UsageTracker()
             self.transcript_recorder = None
+
+        def model_chain_for_role(self, role: str) -> list[str]:
+            assert role == "translate"
+            return ["a05-fixture-translate"]
 
         def chat(self, messages: list[dict[str, str]], *, role: str) -> SimpleNamespace:
             assert role == "translate"

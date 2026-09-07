@@ -759,6 +759,10 @@ class BoundaryClient:
         self.usage_tracker = UsageTracker()
         self.transcript_recorder = None
 
+    def model_chain_for_role(self, role: str) -> list[str]:
+        assert role == "translate"
+        return ["a17-fixture-translate"]
+
     def chat(self, messages: list[dict[str, str]], **_kwargs: object) -> SimpleNamespace:
         request = json.loads(messages[-1]["content"])
         labels = request.get("labels") or []

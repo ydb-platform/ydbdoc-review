@@ -792,6 +792,10 @@ class _BoundaryClient:
         self.usage_tracker = UsageTracker()
         self.transcript_recorder = None
 
+    def model_chain_for_role(self, role: str) -> list[str]:
+        assert role == "translate"
+        return ["a18-fixture-translate"]
+
     def chat(self, *_args: object, **_kwargs: object) -> SimpleNamespace:
         raise AssertionError("A18 fixture crossed the patched model boundary")
 
