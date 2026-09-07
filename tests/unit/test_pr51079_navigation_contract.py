@@ -125,6 +125,117 @@ def test_reordered_href_parents_match_en_identity_and_keep_nested_scope() -> Non
     assert "en-only.md" in merged
 
 
+def test_reordered_include_parents_match_identity_before_merging_children() -> None:
+    en = dedent("""
+        items:
+        - name: Alpha EN
+          include:
+            mode: link
+            path: alpha/toc.yaml
+          items:
+          - name: Alpha child EN
+            href: alpha-child.md
+        - name: Beta EN
+          include:
+            mode: link
+            path: beta/toc.yaml
+          items:
+          - name: Beta child EN
+            href: beta-child.md
+    """).strip()
+    ru = dedent("""
+        items:
+        - name: Бета
+          include:
+            mode: link
+            path: beta/toc.yaml
+          items:
+          - name: Дочерняя Бета
+            href: beta-child.md
+        - name: Альфа
+          include:
+            mode: link
+            path: alpha/toc.yaml
+          items:
+          - name: Дочерняя Альфа
+            href: alpha-child.md
+    """).strip()
+
+    merged = merge_en_toc_yaml(
+        en,
+        ru,
+        translate_hrefs=set(),
+        translate_include_paths=set(),
+        translate_name=lambda name: (_ for _ in ()).throw(
+            AssertionError(f"unexpected translation: {name}")
+        ),
+        ru_base_hrefs={"alpha-child.md", "beta-child.md"},
+        ru_base_include_paths={"alpha/toc.yaml", "beta/toc.yaml"},
+        restrict_gap_fill_to_scope=True,
+    )
+    items = yaml.safe_load(merged)["items"]
+
+    assert [item["include"]["path"] for item in items] == [
+        "beta/toc.yaml",
+        "alpha/toc.yaml",
+    ]
+    assert [child["href"] for child in items[0]["items"]] == ["beta-child.md"]
+    assert [child["href"] for child in items[1]["items"]] == ["alpha-child.md"]
+
+
+def test_nested_en_only_child_stays_with_its_original_parent() -> None:
+    en = dedent("""
+        items:
+        - name: Alpha EN
+          href: alpha.md
+          items:
+          - name: Alpha shared EN
+            href: alpha-shared.md
+          - name: Alpha EN only
+            href: alpha-only.md
+        - name: Beta EN
+          href: beta.md
+          items:
+          - name: Beta shared EN
+            href: beta-shared.md
+    """).strip()
+    ru = dedent("""
+        items:
+        - name: Альфа
+          href: alpha.md
+          items:
+          - name: Альфа общая
+            href: alpha-shared.md
+        - name: Бета
+          href: beta.md
+          items:
+          - name: Бета общая
+            href: beta-shared.md
+    """).strip()
+
+    merged = merge_en_toc_yaml(
+        en,
+        ru,
+        translate_hrefs=set(),
+        translate_name=lambda name: name,
+        ru_base_hrefs={
+            "alpha.md",
+            "alpha-shared.md",
+            "beta.md",
+            "beta-shared.md",
+        },
+        restrict_gap_fill_to_scope=True,
+    )
+    items = yaml.safe_load(merged)["items"]
+
+    assert [item["href"] for item in items] == ["alpha.md", "beta.md"]
+    assert [child["href"] for child in items[0]["items"]] == [
+        "alpha-shared.md",
+        "alpha-only.md",
+    ]
+    assert [child["href"] for child in items[1]["items"]] == ["beta-shared.md"]
+
+
 def test_scoped_mixed_parent_keeps_ru_href_include_and_when_metadata() -> None:
     ru = dedent("""
         items:

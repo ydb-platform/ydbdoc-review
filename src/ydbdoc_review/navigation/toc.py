@@ -52,8 +52,6 @@ class TocNode:
 
 def _attach_include_path(node: TocNode) -> None:
     """Set ``include_path`` from block body when entry is an ``include:`` link."""
-    if node.children:
-        return
     for pattern in (_INCLUDE_PATH, _INCLUDE_PATH_INLINE):
         match = pattern.search(node.block)
         if match:
@@ -322,11 +320,55 @@ def _collect_toc_include_paths(nodes: list[TocNode]) -> set[str]:
     return paths
 
 
-def _walk_toc_nodes(nodes: list[TocNode]):
-    for node in nodes:
-        yield node
-        if node.children:
-            yield from _walk_toc_nodes(node.children)
+def _preserve_en_only_toc_node(
+    node: TocNode,
+    *,
+    ru_hrefs: set[str],
+    ru_include_paths: set[str],
+    ru_base_hrefs: set[str],
+    ru_base_include_paths: set[str],
+    keep_en_hrefs: set[str],
+    seen_hrefs: set[str],
+    seen_include_paths: set[str],
+) -> TocNode | None:
+    """Keep an allowed EN-only subtree at its original hierarchy level."""
+    if node.href or node.include_path:
+        if node.href and node.href in seen_hrefs:
+            return None
+        if node.include_path and node.include_path in seen_include_paths:
+            return None
+
+        preserve_self = False
+        if node.href and node.href not in ru_hrefs:
+            preserve_self = (
+                node.href not in ru_base_hrefs or node.href in keep_en_hrefs
+            )
+        elif node.include_path and node.include_path not in ru_include_paths:
+            preserve_self = node.include_path not in ru_base_include_paths
+        if not preserve_self:
+            return None
+
+        seen_hrefs.update(_collect_toc_hrefs([node]))
+        seen_include_paths.update(_collect_toc_include_paths([node]))
+        return node
+
+    children: list[TocNode] = []
+    for child in node.children:
+        preserved = _preserve_en_only_toc_node(
+            child,
+            ru_hrefs=ru_hrefs,
+            ru_include_paths=ru_include_paths,
+            ru_base_hrefs=ru_base_hrefs,
+            ru_base_include_paths=ru_base_include_paths,
+            keep_en_hrefs=keep_en_hrefs,
+            seen_hrefs=seen_hrefs,
+            seen_include_paths=seen_include_paths,
+        )
+        if preserved is not None:
+            children.append(preserved)
+    if not children:
+        return None
+    return replace(node, children=children)
 
 
 def _merge_toc_tree_nodes(
@@ -341,10 +383,20 @@ def _merge_toc_tree_nodes(
     ru_base_hrefs: set[str] | None = None,
     ru_base_include_paths: set[str] | None = None,
     restrict_gap_fill_to_scope: bool = False,
+    ru_hrefs: set[str] | None = None,
+    ru_include_paths: set[str] | None = None,
+    keep_en_hrefs: set[str] | None = None,
 ) -> list[TocNode]:
     merged: list[TocNode] = []
     base_hrefs = ru_base_hrefs or set()
     base_includes = ru_base_include_paths or set()
+    all_ru_hrefs = ru_hrefs if ru_hrefs is not None else _collect_toc_hrefs(ru_nodes)
+    all_ru_includes = (
+        ru_include_paths
+        if ru_include_paths is not None
+        else _collect_toc_include_paths(ru_nodes)
+    )
+    preserve_hrefs = keep_en_hrefs or set()
     for idx, ru_node in enumerate(ru_nodes):
         positional = en_nodes[idx] if idx < len(en_nodes) else None
         existing: TocNode | None = None
@@ -476,6 +528,9 @@ def _merge_toc_tree_nodes(
                 ru_base_hrefs=base_hrefs,
                 ru_base_include_paths=base_includes,
                 restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
+                ru_hrefs=all_ru_hrefs,
+                ru_include_paths=all_ru_includes,
+                keep_en_hrefs=preserve_hrefs,
             )
             selected = replace(selected, children=merged_children)
 
@@ -489,6 +544,22 @@ def _merge_toc_tree_nodes(
         ):
             continue
         merged.append(selected)
+
+    seen_hrefs = _collect_toc_hrefs(merged)
+    seen_include_paths = _collect_toc_include_paths(merged)
+    for en_node in en_nodes:
+        preserved = _preserve_en_only_toc_node(
+            en_node,
+            ru_hrefs=all_ru_hrefs,
+            ru_include_paths=all_ru_includes,
+            ru_base_hrefs=base_hrefs,
+            ru_base_include_paths=base_includes,
+            keep_en_hrefs=preserve_hrefs,
+            seen_hrefs=seen_hrefs,
+            seen_include_paths=seen_include_paths,
+        )
+        if preserved is not None:
+            merged.append(preserved)
 
     return merged
 
@@ -533,34 +604,10 @@ def _merge_en_toc_yaml_nested(
         ru_base_hrefs=ru_base_hrefs,
         ru_base_include_paths=base_includes,
         restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
+        ru_hrefs=ru_hrefs,
+        ru_include_paths=ru_includes,
+        keep_en_hrefs=preserve_hrefs,
     )
-    seen_hrefs = _collect_toc_hrefs(merged)
-    seen_includes = _collect_toc_include_paths(merged)
-    base_hrefs = ru_base_hrefs or set()
-    for node in _walk_toc_nodes(en_tree):
-        href_seen = bool(node.href and node.href in seen_hrefs)
-        include_seen = bool(node.include_path and node.include_path in seen_includes)
-        if href_seen or include_seen:
-            continue
-        href_en_only = bool(node.href) and node.href not in ru_hrefs
-        include_en_only = bool(node.include_path) and node.include_path not in ru_includes
-        if not href_en_only and not include_en_only:
-            continue
-        if node.href and href_en_only:
-            if node.href in base_hrefs and node.href not in preserve_hrefs:
-                continue
-            merged.append(node)
-            seen_hrefs.add(node.href)
-            if node.include_path:
-                seen_includes.add(node.include_path)
-            continue
-        if node.include_path and include_en_only:
-            if node.include_path in base_includes:
-                continue
-            merged.append(node)
-            seen_includes.add(node.include_path)
-            if node.href:
-                seen_hrefs.add(node.href)
     return _serialize_toc_tree(merged, list_indent=list_indent)
 
 
