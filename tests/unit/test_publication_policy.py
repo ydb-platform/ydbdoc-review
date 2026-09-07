@@ -1339,6 +1339,19 @@ def test_soft_keep_with_substituted_nonempty_target_withholds_incomplete(
 
 
 def test_soft_keep_does_not_override_completeness_gap(publication_repo: str):
+    missing_ru = Path(publication_repo, "ydb/docs/ru/missing-page.md")
+    missing_ru.write_text("# Пропущенная страница\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "ydb/docs/ru/missing-page.md"],
+        cwd=publication_repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "add untranslated source page"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
+    )
     result = _pair_result(target_text="Hello.\n")
     result.pair_results[0].soft_keep_reason = "translation timed out"
 
@@ -1401,6 +1414,13 @@ def test_soft_keep_for_new_missing_target_withholds_incomplete(publication_repo:
     Path(publication_repo, en_path).write_text(
         "# Fabricated retained target\n",
         encoding="utf-8",
+    )
+    subprocess.run(["git", "add", ru_path], cwd=publication_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add source without EN target"],
+        cwd=publication_repo,
+        check=True,
+        capture_output=True,
     )
     pair = DocPair(ru_path=ru_path, en_path=en_path, ru_changed=True)
     result = PRTranslationResult(
@@ -1751,8 +1771,28 @@ def test_mutation_or_has_materialized_soft_keep_withholds_unsafe_from_different_
         "# Different target\n",
         encoding="utf-8",
     )
+    ru_include = Path(
+        publication_repo,
+        "ydb/docs/ru/core/_includes/note.md",
+    )
+    en_include = Path(
+        publication_repo,
+        "ydb/docs/en/core/_includes/note.md",
+    )
+    ru_include.parent.mkdir(parents=True, exist_ok=True)
+    en_include.parent.mkdir(parents=True, exist_ok=True)
+    ru_include.write_text("Обязательное примечание.\n", encoding="utf-8")
+    en_include.write_text("Required note.\n", encoding="utf-8")
     subprocess.run(
-        ["git", "add", "ydb/docs/en/a.md", "ydb/docs/ru/b.md", "ydb/docs/en/b.md"],
+        [
+            "git",
+            "add",
+            "ydb/docs/en/a.md",
+            "ydb/docs/ru/b.md",
+            "ydb/docs/en/b.md",
+            "ydb/docs/ru/core/_includes/note.md",
+            "ydb/docs/en/core/_includes/note.md",
+        ],
         cwd=publication_repo,
         check=True,
     )
