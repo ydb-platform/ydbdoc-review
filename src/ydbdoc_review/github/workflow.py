@@ -89,6 +89,7 @@ from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
 from ydbdoc_review.ops.job_state import (
     CONTINUABILITY_STORE_KEY,
+    ContinuabilityState,
     clear_continuability,
     dump_continuability_json,
     load_continuability,
@@ -97,6 +98,7 @@ from ydbdoc_review.ops.job_state import (
     relative_state_path,
 )
 from ydbdoc_review.ops.lifecycle import (
+    OpsContext,
     append_retention_footer,
     begin_ops_job,
     compose_continue_feedback,
@@ -2274,9 +2276,11 @@ def _load_continuability_for_continue(
     *,
     ops_store: object | None = None,
     parent_run_id: str | None = None,
-) -> object | None:
+) -> ContinuabilityState | None:
     state = load_continuability(repo_path, source_pr)
-    if state is not None and state.allows_continue():
+    # A local artifact is an explicit decision, including a terminal denial.
+    # Only a genuinely fresh checkout may fall back to the trusted parent run.
+    if state is not None:
         return state
     if ops_store is not None and parent_run_id:
         try:
@@ -2320,6 +2324,7 @@ def run_doc_translate(
     ops_mode: str = "translate",
     parent_run_id: str | None = None,
     checkpoint: CheckpointWriter | None = None,
+    _ops_ctx: OpsContext | None = None,
 ) -> DocJobResult:
     """Full ``doc_translate`` workflow for a source PR."""
     started = time.monotonic()
@@ -2328,22 +2333,52 @@ def run_doc_translate(
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
 
-    ops_ctx, gate, deny_body = begin_ops_job(
-        mode=ops_mode,
-        repo=github_repo,
-        source_pr=pr_number,
-        continue_feedback=continue_feedback,
-        parent_run_id=parent_run_id,
-    )
-    if not gate.ok:
-        if deny_body and not dry_run:
-            _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
-        return DocJobResult(
-            mode=f"doc_{ops_mode}",
-            pr_number=pr_number,
-            source_pr_number=pr_number,
-            dry_run=dry_run,
+    ops_ctx = _ops_ctx
+    if ops_ctx is None:
+        ops_ctx, gate, deny_body = begin_ops_job(
+            mode=ops_mode,
+            repo=github_repo,
+            source_pr=pr_number,
+            continue_feedback=continue_feedback,
+            parent_run_id=parent_run_id,
         )
+        if not gate.ok:
+            if deny_body and not dry_run:
+                _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
+            return DocJobResult(
+                mode=f"doc_{ops_mode}",
+                pr_number=pr_number,
+                source_pr_number=pr_number,
+                dry_run=dry_run,
+                blocked=True,
+            )
+    elif (
+        getattr(ops_ctx, "mode", None) != ops_mode
+        or getattr(ops_ctx, "repo", None) != github_repo
+        or getattr(ops_ctx, "source_pr", None) != pr_number
+    ):
+        raise RuntimeError("pre-authorized ops context does not match translation job")
+    if ops_mode == "continue":
+        continuability = _load_continuability_for_continue(
+            repo_path,
+            pr_number,
+            ops_store=getattr(ops_ctx, "store", None),
+            parent_run_id=getattr(ops_ctx, "parent_run_id", None),
+        )
+        if (
+            continuability is None
+            or not continuability.allows_continue()
+            or continuability.source_pr != pr_number
+        ):
+            if ops_ctx is not None and not dry_run:
+                finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+            return DocJobResult(
+                mode="doc_continue",
+                pr_number=pr_number,
+                source_pr_number=pr_number,
+                dry_run=dry_run,
+                blocked=True,
+            )
 
     merge_base_with = resolve_commit_ref(repo_path, merge_base_with)
     source_checkout_sha = resolve_commit_ref(repo_path, "HEAD")
@@ -2384,6 +2419,23 @@ def run_doc_translate(
     translation_prepare_parent_sha = authority_selection.prepare_parent_sha
     ru_ref = authority.ru_sha
     ru_base_ref = authority.ru_base_sha
+    fixed_shas = _collect_fixed_shas(
+        repo_path,
+        merge_base_with=merge_base_with,
+        ru_ref=ru_ref,
+        head_sha=ctx.head_sha,
+    )
+    if not dry_run and not no_commit:
+        # A new attempt starts terminal. Admission is granted only after a
+        # concrete translation PR exists and inline verification is pending.
+        _persist_continuability(
+            repo_path,
+            source_pr=pr_number,
+            fixed_shas=fixed_shas,
+            translation_pr=None,
+            unfinished=False,
+            ops_ctx=ops_ctx,
+        )
 
     changes = list_pr_file_changes_api(gh, owner, repo, pr_number)
     source_api_paths = frozenset(path for path, _kind in changes)
@@ -3164,6 +3216,15 @@ def run_doc_translate(
                 )
 
     if tr_pr_number is not None and pushed:
+        _persist_continuability(
+            repo_path,
+            source_pr=pr_number,
+            fixed_shas=fixed_shas,
+            translation_pr=tr_pr_number,
+            unfinished=True,
+            unfinished_stage="verify",
+            ops_ctx=ops_ctx,
+        )
         verify_merge = f"origin/{translation_pr_base(ctx)}"
         logger.info(
             "Running inline doc_verify on translation PR #%s (merge_base=%s)",
@@ -3188,6 +3249,22 @@ def run_doc_translate(
         )
         job.translation_comment_url = verify_job.translation_comment_url
         verify_result = verify_job.pr_result
+
+    if not dry_run and not no_commit:
+        unfinished_verify = (
+            verify_result is not None
+            and pr_result.publication_impact != PublicationImpact.PUBLISH_RED
+            and _pr_result_has_blockers(verify_result)
+        )
+        _persist_continuability(
+            repo_path,
+            source_pr=pr_number,
+            fixed_shas=fixed_shas,
+            translation_pr=tr_pr_number,
+            unfinished=unfinished_verify,
+            unfinished_stage="verify",
+            ops_ctx=ops_ctx,
+        )
 
     elapsed = time.monotonic() - started
     meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
@@ -3260,6 +3337,7 @@ def run_doc_verify(
     _fixup_rerun_depth: int = 0,
     _inline_fixup_context: PullRequestContext | None = None,
     _coverage_store: TranscriptStore | None = None,
+    _ops_ctx: OpsContext | None = None,
 ) -> DocJobResult:
     """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
@@ -3336,8 +3414,15 @@ def run_doc_verify(
     else:
         merge_base_with = requested_merge_base_sha
 
-    ops_ctx = None
-    if not skip_ops_gates:
+    ops_ctx = _ops_ctx
+    if ops_ctx is not None and (
+        skip_ops_gates
+        or getattr(ops_ctx, "mode", None) != ops_mode
+        or getattr(ops_ctx, "repo", None) != github_repo
+        or getattr(ops_ctx, "source_pr", None) != source_pr_num
+    ):
+        raise RuntimeError("pre-authorized ops context does not match verify job")
+    if not skip_ops_gates and ops_ctx is None:
         ops_ctx, gate, deny_body = begin_ops_job(
             mode=ops_mode,
             repo=github_repo,
@@ -3354,6 +3439,34 @@ def run_doc_verify(
                 source_pr_number=source_pr,
                 dry_run=dry_run,
                 pr_result=inherited_result,
+                blocked=True,
+            )
+    if ops_mode == "continue":
+        continuability = _load_continuability_for_continue(
+            repo_path,
+            source_pr_num,
+            ops_store=getattr(ops_ctx, "store", None),
+            parent_run_id=getattr(ops_ctx, "parent_run_id", None),
+        )
+        if (
+            continuability is None
+            or not continuability.allows_continue()
+            or continuability.source_pr != source_pr_num
+            or (
+                continuability.translation_pr is not None
+                and continuability.translation_pr != pr_number
+            )
+        ):
+            if ops_ctx is not None and not dry_run:
+                finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+            return DocJobResult(
+                mode="doc_continue",
+                pr_number=pr_number,
+                source_pr_number=source_pr,
+                translation_pr_number=pr_number if inline_fixup_push else None,
+                dry_run=dry_run,
+                pr_result=inherited_result,
+                blocked=True,
             )
 
     coverage_evidence: CoverageEvidence | None = None
@@ -4475,7 +4588,84 @@ def run_doc_continue(
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
-    if source_pr is not None:
+    translation_source_pr = source_pr
+    if source_pr is None and is_verify_fixup_branch(
+        ctx.head_ref,
+        verify_fixup_branch_prefix=cfg.paths.verify_fixup_branch_prefix,
+    ):
+        source_pr = source_pr_number_from_branch(
+            ctx.head_ref,
+            prefix=cfg.paths.verify_fixup_branch_prefix,
+        )
+    source_pr_num = source_pr or pr_number
+
+    ops_ctx, gate, deny_body = begin_ops_job(
+        mode="continue",
+        repo=github_repo,
+        source_pr=source_pr_num,
+        translation_pr=pr_number,
+        continue_feedback=feedback,
+    )
+    if not gate.ok:
+        if deny_body and not dry_run:
+            _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                deny_body,
+                label="ops deny",
+            )
+        return DocJobResult(
+            mode="doc_continue",
+            pr_number=pr_number,
+            source_pr_number=source_pr,
+            translation_pr_number=pr_number,
+            dry_run=dry_run,
+            blocked=True,
+        )
+
+    continuability = _load_continuability_for_continue(
+        repo_path,
+        source_pr_num,
+        ops_store=getattr(ops_ctx, "store", None),
+        parent_run_id=getattr(ops_ctx, "parent_run_id", None),
+    )
+    if (
+        continuability is None
+        or not continuability.allows_continue()
+        or continuability.source_pr != source_pr_num
+        or (
+            continuability.translation_pr is not None
+            and continuability.translation_pr != pr_number
+        )
+    ):
+        body = (
+            "⛔ **ydbdoc-review:** `doc_continue` отклонён: для исходного "
+            f"PR #{source_pr_num} нет сохранённого незавершённого этапа после "
+            "фиксации SHA. Запустите новый `doc_translate`."
+        )
+        if not dry_run:
+            _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                body,
+                label="continue denied",
+            )
+            if ops_ctx is not None:
+                finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+        return DocJobResult(
+            mode="doc_continue",
+            pr_number=pr_number,
+            source_pr_number=source_pr,
+            translation_pr_number=pr_number,
+            dry_run=dry_run,
+            blocked=True,
+        )
+
+    if translation_source_pr is not None:
         # A translation PR may be incomplete. Re-running verify can only edit
         # files already present in its diff, so it can never create an omitted
         # source-scope mirror (#50840). Continue must re-run translation from
@@ -4483,13 +4673,15 @@ def run_doc_continue(
         job = run_doc_translate(
             repo_path=repo_path,
             github_repo=github_repo,
-            pr_number=source_pr,
+            pr_number=translation_source_pr,
             merge_base_with=merge_base_with,
             dry_run=dry_run,
             no_commit=no_commit,
             config=cfg,
             continue_feedback=feedback,
             ops_mode="continue",
+            parent_run_id=getattr(ops_ctx, "parent_run_id", None),
+            _ops_ctx=ops_ctx,
         )
     else:
         # Verify-fixup PRs have all source-scope files already; critic feedback
@@ -4504,6 +4696,19 @@ def run_doc_continue(
             config=cfg,
             continue_feedback=feedback,
             ops_mode="continue",
+            _ops_ctx=ops_ctx,
         )
+        if not dry_run and not no_commit:
+            _persist_continuability(
+                repo_path,
+                source_pr=source_pr_num,
+                fixed_shas=dict(continuability.fixed_shas),
+                translation_pr=pr_number,
+                unfinished=(
+                    not job.blocked and _pr_result_has_blockers(job.pr_result)
+                ),
+                unfinished_stage="verify",
+                ops_ctx=ops_ctx,
+            )
     job.mode = "doc_continue"
     return job

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,6 +30,14 @@ from ydbdoc_review.github.workflow import (
     run_doc_verify,
 )
 from ydbdoc_review.ops.gates import GateResult
+from ydbdoc_review.ops.job_state import (
+    CONTINUABILITY_STORE_KEY,
+    ContinuabilityState,
+    dump_continuability_json,
+    load_continuability,
+    mark_continuable,
+)
+from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
@@ -418,6 +427,74 @@ def test_run_doc_continue_verifies_non_translation_pr(git_repo: str):
     translate.assert_not_called()
 
 
+@pytest.mark.parametrize("verify_blocked", [False, True])
+def test_run_doc_continue_updates_admission_after_verify_outcome(
+    git_repo: str,
+    verify_blocked: bool,
+):
+    pull = {
+        "title": "Critic fixup",
+        "head": {
+            "ref": "ydbdoc-review/verify-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": "abc", "head": "abc"},
+        translation_pr=50840,
+    )
+    store = InMemoryTranscriptStore()
+    child_ctx = SimpleNamespace(
+        store=store,
+        run_id="child",
+        parent_run_id=None,
+        mode="continue",
+        repo="o/r",
+        source_pr=40385,
+    )
+    verified = DocJobResult(mode="doc_continue", pr_number=50840)
+    if verify_blocked:
+        verified.pr_result.completeness_gaps = ["still incomplete"]
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(child_ctx, GateResult(ok=True), None),
+        ),
+        patch("ydbdoc_review.github.workflow.run_doc_translate") as translate,
+        patch(
+            "ydbdoc_review.github.workflow.run_doc_verify",
+            return_value=verified,
+        ) as verify,
+    ):
+        mock_gh.return_value.get_pull.return_value = pull
+        result = run_doc_continue(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=50840,
+            merge_base_with="HEAD",
+            dry_run=False,
+            config=load_config(env=_env()),
+            instruction="fix anchors",
+        )
+
+    assert result is verified
+    state = load_continuability(git_repo, 40385)
+    assert state is not None
+    assert state.allows_continue() is verify_blocked
+    stored = store.get("child", CONTINUABILITY_STORE_KEY)
+    assert stored is not None
+    expected_flag = b'"continuable": true' if verify_blocked else b'"continuable": false'
+    assert expected_flag in stored
+    verify.assert_called_once()
+    translate.assert_not_called()
+
+
 def test_run_doc_continue_refuses_without_continuability_flag(git_repo: str):
     pull = {
         "title": "Auto-translate docs from PR #40385",
@@ -444,6 +521,190 @@ def test_run_doc_continue_refuses_without_continuability_flag(git_repo: str):
                 )
 
     assert result.mode == "doc_continue"
+    assert result.blocked is True
+    translate.assert_not_called()
+    verify.assert_not_called()
+
+
+def test_run_doc_continue_uses_parent_store_admission_in_fresh_checkout(
+    git_repo: str,
+    tmp_path: Path,
+):
+    pull = {
+        "title": "Auto-translate docs from PR #40385",
+        "head": {
+            "ref": "ydbdoc-review/pr-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    store = InMemoryTranscriptStore()
+    parent_ctx = SimpleNamespace(store=store, run_id="parent")
+    from ydbdoc_review.github import workflow as workflow_module
+
+    workflow_module._persist_continuability(
+        str(tmp_path / "old-checkout"),
+        source_pr=40385,
+        fixed_shas={"merge_base": "abc", "head": "abc"},
+        translation_pr=50840,
+        unfinished=True,
+        ops_ctx=parent_ctx,
+    )
+    assert load_continuability(git_repo, 40385) is None
+
+    child_ctx = SimpleNamespace(
+        store=store,
+        run_id="child",
+        parent_run_id="parent",
+        mode="continue",
+        repo="o/r",
+        source_pr=40385,
+    )
+    translated = DocJobResult(mode="doc_continue", pr_number=40385)
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(child_ctx, GateResult(ok=True), None),
+        ) as begin,
+        patch(
+            "ydbdoc_review.github.workflow.run_doc_translate",
+            return_value=translated,
+        ) as translate,
+        patch("ydbdoc_review.github.workflow.run_doc_verify") as verify,
+    ):
+        mock_gh.return_value.get_pull.return_value = pull
+        result = run_doc_continue(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=50840,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=load_config(env=_env()),
+            instruction="fix anchors",
+        )
+
+    assert result is translated
+    begin.assert_called_once()
+    assert translate.call_args.kwargs["parent_run_id"] == "parent"
+    assert translate.call_args.kwargs["_ops_ctx"] is child_ctx
+    verify.assert_not_called()
+
+
+@pytest.mark.parametrize("local_state", ["denied", "wrong_translation_pr"])
+def test_run_doc_continue_rejects_explicit_ineligible_local_state(
+    git_repo: str,
+    local_state: str,
+):
+    pull = {
+        "title": "Auto-translate docs from PR #40385",
+        "head": {
+            "ref": "ydbdoc-review/pr-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    store = InMemoryTranscriptStore()
+    store.put(
+        "parent",
+        CONTINUABILITY_STORE_KEY,
+        dump_continuability_json(
+            ContinuabilityState(
+                continuable=True,
+                unfinished_stage="verify",
+                fixed_shas={"merge_base": "abc", "head": "abc"},
+                source_pr=40385,
+                translation_pr=50840,
+            )
+        ),
+    )
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": "abc", "head": "abc"},
+        translation_pr=999 if local_state == "wrong_translation_pr" else 50840,
+    )
+    if local_state == "denied":
+        from ydbdoc_review.ops.job_state import clear_continuability
+
+        clear_continuability(git_repo, 40385)
+    child_ctx = SimpleNamespace(
+        store=store,
+        run_id="child",
+        parent_run_id="parent",
+        mode="continue",
+        repo="o/r",
+        source_pr=40385,
+    )
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(child_ctx, GateResult(ok=True), None),
+        ),
+        patch("ydbdoc_review.github.workflow.run_doc_translate") as translate,
+        patch("ydbdoc_review.github.workflow.run_doc_verify") as verify,
+    ):
+        mock_gh.return_value.get_pull.return_value = pull
+        result = run_doc_continue(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=50840,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=load_config(env=_env()),
+            instruction="fix anchors",
+        )
+
+    assert result.blocked is True
+    translate.assert_not_called()
+    verify.assert_not_called()
+
+
+def test_run_doc_continue_preserves_acl_denial_before_saved_admission(git_repo: str):
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": "abc", "head": "abc"},
+        translation_pr=50840,
+    )
+    pull = {
+        "title": "Auto-translate docs from PR #40385",
+        "head": {
+            "ref": "ydbdoc-review/pr-40385",
+            "sha": "abc",
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main"},
+    }
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(
+                None,
+                GateResult(ok=False, reason="denied", status="denied_acl"),
+                "denied",
+            ),
+        ),
+        patch("ydbdoc_review.github.workflow.run_doc_translate") as translate,
+        patch("ydbdoc_review.github.workflow.run_doc_verify") as verify,
+    ):
+        mock_gh.return_value.get_pull.return_value = pull
+        result = run_doc_continue(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=50840,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=load_config(env=_env()),
+            instruction="fix anchors",
+        )
+
     assert result.blocked is True
     translate.assert_not_called()
     verify.assert_not_called()
@@ -1023,13 +1284,22 @@ def test_run_doc_translate_posts_comments(git_repo: str):
         },
         "base": {"ref": "main", "sha": checkout_sha},
     }
+
+    def verify_after_saved_admission(**_kwargs) -> DocJobResult:
+        state = load_continuability(git_repo, 7)
+        assert state is not None
+        assert state.allows_continue()
+        assert state.unfinished_stage == "verify"
+        assert state.translation_pr == 99
+        return _mock_inline_verify_job()
+
     with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch(
                         "ydbdoc_review.github.workflow.run_doc_verify",
-                        return_value=_mock_inline_verify_job(),
+                        side_effect=verify_after_saved_admission,
                     ) as mock_verify:
                         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                             _wire_translation_publication(
@@ -1067,6 +1337,9 @@ def test_run_doc_translate_posts_comments(git_repo: str):
     assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
     assert result.committed is True
     assert result.pushed is True
+    terminal_state = load_continuability(git_repo, 7)
+    assert terminal_state is not None
+    assert not terminal_state.allows_continue()
     mock_verify.assert_called_once()
     assert mock_verify.call_args.kwargs["pr_number"] == 99
     assert mock_gh.return_value.post_issue_comment.call_count == 1

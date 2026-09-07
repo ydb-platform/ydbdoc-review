@@ -29,6 +29,7 @@ from ydbdoc_review.github.provenance import RuAuthority
 from ydbdoc_review.github.workflow import (
     _resolve_translation_resume_parent,
     _translation_checkpoint_fingerprint,
+    run_doc_continue,
     run_doc_translate,
 )
 from ydbdoc_review.harness.context import HarnessContext, checkpoint_scope
@@ -906,6 +907,131 @@ def test_resume_does_not_admit_denied_continue(tmp_path: Path) -> None:
     assert result.mode == "doc_continue"
     create_client.assert_not_called()
     prepare.assert_not_called()
+
+
+def test_valid_receipt_alone_never_admits_doc_continue(tmp_path: Path) -> None:
+    config = load_config(
+        env={
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
+    )
+    store = InMemoryTranscriptStore()
+    CheckpointWriter(store, "parent", _identity()).save_unit(
+        "5" * 64,
+        b"source",
+        b"target",
+        validated=True,
+    )
+    child_ctx = SimpleNamespace(
+        store=store,
+        run_id="child",
+        parent_run_id="parent",
+        mode="continue",
+        repo="ydb-platform/ydb",
+        source_pr=51079,
+    )
+    pull = {
+        "title": "Auto-translate docs from PR #51079",
+        "head": {
+            "ref": "ydbdoc-review/pr-51079",
+            "sha": "abc",
+            "repo": {
+                "clone_url": "https://github.com/ydb-platform/ydb.git",
+                "full_name": "ydb-platform/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as github,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(child_ctx, GateResult(ok=True), None),
+        ),
+        patch("ydbdoc_review.github.workflow.run_doc_translate") as translate,
+        patch("ydbdoc_review.github.workflow.run_doc_verify") as verify,
+    ):
+        github.return_value.get_pull.return_value = pull
+        result = run_doc_continue(
+            repo_path=str(tmp_path),
+            github_repo="ydb-platform/ydb",
+            pr_number=52000,
+            dry_run=True,
+            config=config,
+            instruction="continue exact units",
+        )
+
+    assert result.blocked is True
+    translate.assert_not_called()
+    verify.assert_not_called()
+
+
+def test_direct_continue_mode_cannot_bypass_saved_admission(tmp_path: Path) -> None:
+    git_repo = _workflow_repo(tmp_path)
+    sha = subprocess.check_output(
+        ["git", "-C", git_repo, "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    config = load_config(
+        env={
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
+    )
+    ops_ctx = SimpleNamespace(
+        store=InMemoryTranscriptStore(),
+        run_id="child",
+        parent_run_id=None,
+        mode="continue",
+        repo="ydb-platform/ydb",
+        source_pr=51079,
+        continue_feedback=None,
+    )
+    create_client = MagicMock()
+    pull = {
+        "title": "source",
+        "head": {
+            "ref": "feature/docs",
+            "sha": sha,
+            "repo": {
+                "clone_url": "https://github.com/ydb-platform/ydb.git",
+                "full_name": "ydb-platform/ydb",
+            },
+        },
+        "base": {"ref": "main", "sha": sha},
+    }
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient") as github,
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(ops_ctx, GateResult(ok=True), None),
+        ),
+        patch("ydbdoc_review.github.workflow.create_llm_client", create_client),
+        patch("ydbdoc_review.github.workflow.load_parent_run_context", return_value=""),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            return_value=[],
+        ),
+    ):
+        github.return_value.get_pull.return_value = pull
+        result = run_doc_translate(
+            repo_path=git_repo,
+            github_repo="ydb-platform/ydb",
+            pr_number=51079,
+            merge_base_with="HEAD",
+            dry_run=True,
+            config=config,
+            ops_mode="continue",
+        )
+
+    assert result.mode == "doc_continue"
+    assert result.blocked is True
+    create_client.assert_not_called()
 
 
 def test_zero_call_resume_runs_final_gates_and_lease_check(tmp_path: Path) -> None:
