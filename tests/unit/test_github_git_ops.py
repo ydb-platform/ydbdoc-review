@@ -198,12 +198,15 @@ def test_git_commit_paths_ignores_untracked_state_when_selected_path_is_unchange
     assert ok is False
     assert resolve_commit_ref(git_repo, "HEAD") == previous_head
     assert state_path.read_bytes() == state_bytes
-    assert subprocess.run(
-        ["git", "-C", git_repo, "status", "--porcelain", "--", ".ydbdoc-state"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout == "?? .ydbdoc-state/\n"
+    assert (
+        subprocess.run(
+            ["git", "-C", git_repo, "status", "--porcelain", "--", ".ydbdoc-state"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == "?? .ydbdoc-state/\n"
+    )
 
 
 def test_git_commit_paths_ignores_unstaged_tracked_change_when_selected_path_is_unchanged(
@@ -230,18 +233,24 @@ def test_git_commit_paths_ignores_unstaged_tracked_change_when_selected_path_is_
     assert ok is False
     assert resolve_commit_ref(git_repo, "HEAD") == previous_head
     assert unrelated_path.read_text(encoding="utf-8") == "local edit\n"
-    assert subprocess.run(
-        ["git", "-C", git_repo, "diff", "--cached", "--name-only"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout == ""
-    assert subprocess.run(
-        ["git", "-C", git_repo, "status", "--porcelain", "--", "unrelated.txt"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout == " M unrelated.txt\n"
+    assert (
+        subprocess.run(
+            ["git", "-C", git_repo, "diff", "--cached", "--name-only"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == ""
+    )
+    assert (
+        subprocess.run(
+            ["git", "-C", git_repo, "status", "--porcelain", "--", "unrelated.txt"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == " M unrelated.txt\n"
+    )
 
 
 def test_git_commit_paths_commits_selected_change_without_staging_untracked_state(
@@ -263,16 +272,17 @@ def test_git_commit_paths_commits_selected_change_without_staging_untracked_stat
     )
 
     assert ok is True
-    assert first_parent_commit_changes(git_repo, "HEAD") == (
-        (selected_path, "modified"),
-    )
+    assert first_parent_commit_changes(git_repo, "HEAD") == ((selected_path, "modified"),)
     assert state_path.read_bytes() == state_bytes
-    assert subprocess.run(
-        ["git", "-C", git_repo, "status", "--porcelain", "--", ".ydbdoc-state"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout == "?? .ydbdoc-state/\n"
+    assert (
+        subprocess.run(
+            ["git", "-C", git_repo, "status", "--porcelain", "--", ".ydbdoc-state"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        == "?? .ydbdoc-state/\n"
+    )
 
 
 def test_git_commit_paths_propagates_staged_diff_probe_failure(
