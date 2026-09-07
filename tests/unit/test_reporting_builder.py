@@ -453,7 +453,7 @@ def test_full_report_does_not_hide_alignment_error_behind_completeness_gap():
         config=cfg,
     )
 
-    assert "отсутствующие EN-зеркала" in body
+    assert "ожидаемые EN-пути отсутствуют в diff PR" in body
     assert "missing.md" in body
     assert "(alignment)" in body
     assert "segment count mismatch" in body
