@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 
 _ITEM_SPLIT = re.compile(r"(?m)^- name: ")
@@ -245,7 +245,33 @@ def _serialize_toc_node(node: TocNode, *, list_indent: int) -> str:
     if node.children:
         pad = " " * list_indent
         child_pad = " " * (list_indent + 2)
-        lines = [f"{pad}- name: {node.name}", f"{child_pad}items:"]
+        block_lines = node.block.rstrip("\n").splitlines()
+        if block_lines:
+            match = _NAME_LINE.match(block_lines[0])
+            source_indent = len(match.group(1)) if match else list_indent
+            lines = []
+            for line in block_lines:
+                nested_items = _NESTED_ITEMS_LINE.match(line)
+                if nested_items and len(nested_items.group(1)) > source_indent:
+                    continue
+                if line.strip():
+                    relative = line[source_indent:]
+                    lines.append(f"{pad}{relative}")
+                else:
+                    lines.append("")
+        else:
+            lines = [f"{pad}- name: {node.name}"]
+            if node.href:
+                lines.append(f"{child_pad}href: {node.href}")
+            if node.include_path:
+                lines.extend(
+                    [
+                        f"{child_pad}include:",
+                        f"{child_pad}  mode: link",
+                        f"{child_pad}  path: {node.include_path}",
+                    ]
+                )
+        lines.append(f"{child_pad}items:")
         for child in node.children:
             lines.append(_serialize_toc_node(child, list_indent=list_indent + 2).rstrip("\n"))
         return "\n".join(lines) + "\n"
@@ -320,7 +346,23 @@ def _merge_toc_tree_nodes(
     base_hrefs = ru_base_hrefs or set()
     base_includes = ru_base_include_paths or set()
     for idx, ru_node in enumerate(ru_nodes):
-        en_node = en_nodes[idx] if idx < len(en_nodes) else None
+        positional = en_nodes[idx] if idx < len(en_nodes) else None
+        existing: TocNode | None = None
+        if ru_node.href:
+            existing = en_by_href.get(ru_node.href)
+        if existing is None and ru_node.include_path:
+            existing = en_by_include.get(ru_node.include_path)
+        if (
+            existing is None
+            and not ru_node.href
+            and not ru_node.include_path
+            and positional is not None
+            and not positional.href
+            and not positional.include_path
+        ):
+            existing = positional
+
+        selected: TocNode | None = None
         if ru_node.href and ru_node.include_path:
             href = ru_node.href
             path = ru_node.include_path
@@ -341,74 +383,61 @@ def _merge_toc_tree_nodes(
                 en_name = translate_name(ru_node.name).strip()
                 if ru_node.block.strip():
                     block = _replace_item_name(ru_node.block, en_name)
-                    merged.append(
-                        TocNode(
-                            name=en_name,
-                            href=href,
-                            include_path=path,
-                            block=block,
-                        )
+                    selected = replace(
+                        ru_node,
+                        name=en_name,
+                        block=block,
+                        children=[],
                     )
                 else:
-                    merged.append(
-                        TocNode(
-                            name=en_name,
-                            href=href,
-                            include_path=path,
-                            block=_leaf_block(en_name, href, list_indent=0),
-                        )
+                    selected = replace(
+                        ru_node,
+                        name=en_name,
+                        block=_leaf_block(en_name, href, list_indent=0),
+                        children=[],
                     )
-            elif href in en_by_href:
-                merged.append(en_by_href[href])
-            elif path in en_by_include:
-                merged.append(en_by_include[path])
-            continue
+            elif existing is not None:
+                selected = existing
 
-        if ru_node.href:
+        elif ru_node.href:
             href = ru_node.href
-            if href in en_by_href and href not in translate_hrefs:
-                merged.append(en_by_href[href])
+            if existing is not None and href not in translate_hrefs:
+                selected = existing
             elif href in translate_hrefs or (
                 not restrict_gap_fill_to_scope
                 and href not in en_by_href
                 and href in base_hrefs
             ):
                 en_name = translate_name(ru_node.name).strip()
-                # Keep include.path on section entries (href + include); do not
-                # collapse to a leaf-only block (#47100 / #46878).
-                if ru_node.include_path and ru_node.block.strip():
+                if ru_node.block.strip():
                     block = _replace_item_name(ru_node.block, en_name)
-                    merged.append(
-                        TocNode(
-                            name=en_name,
-                            href=href,
-                            include_path=ru_node.include_path,
-                            block=block,
-                        )
+                    selected = replace(
+                        ru_node,
+                        name=en_name,
+                        block=block,
+                        children=[],
                     )
                 else:
                     list_indent = 0
-                    if en_node and en_node.block:
-                        m = _NAME_LINE.match(en_node.block.splitlines()[0])
+                    if existing and existing.block:
+                        m = _NAME_LINE.match(existing.block.splitlines()[0])
                         if m:
                             list_indent = len(m.group(1))
                     elif ru_node.block:
                         m = _NAME_LINE.match(ru_node.block.splitlines()[0])
                         if m:
                             list_indent = len(m.group(1))
-                    merged.append(
-                        TocNode(
-                            name=en_name,
-                            href=href,
-                            block=_leaf_block(en_name, href, list_indent=list_indent),
-                        )
+                    selected = replace(
+                        ru_node,
+                        name=en_name,
+                        block=_leaf_block(en_name, href, list_indent=list_indent),
+                        children=[],
                     )
-            continue
 
-        if ru_node.include_path:
+        elif ru_node.include_path:
             path = ru_node.include_path
-            if path in en_by_include and path not in translate_include_paths:
-                merged.append(en_by_include[path])
+            if existing is not None and path not in translate_include_paths:
+                selected = existing
             elif path in translate_include_paths or (
                 not restrict_gap_fill_to_scope
                 and path not in en_by_include
@@ -416,31 +445,50 @@ def _merge_toc_tree_nodes(
             ):
                 en_name = translate_name(ru_node.name).strip()
                 block = _replace_item_name(ru_node.block, en_name)
-                merged.append(
-                    TocNode(name=en_name, include_path=path, block=block)
+                selected = replace(
+                    ru_node,
+                    name=en_name,
+                    block=block,
+                    children=[],
                 )
-            continue
 
-        if not ru_node.children:
-            continue
+        elif ru_node.children:
+            parent_name = (
+                existing.name
+                if existing is not None
+                else translate_name(ru_node.name).strip()
+            )
+            selected = replace(
+                existing if existing is not None else ru_node,
+                name=parent_name,
+                children=[],
+            )
 
-        en_children = en_node.children if en_node and en_node.children else []
-        merged_children = _merge_toc_tree_nodes(
-            en_children,
-            ru_node.children,
-            en_by_href=en_by_href,
-            en_by_include=en_by_include,
-            translate_hrefs=translate_hrefs,
-            translate_include_paths=translate_include_paths,
-            translate_name=translate_name,
-            ru_base_hrefs=base_hrefs,
-            ru_base_include_paths=base_includes,
-            restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
-        )
-        if not merged_children:
+        if selected is not None:
+            merged_children = _merge_toc_tree_nodes(
+                existing.children if existing is not None else [],
+                ru_node.children,
+                en_by_href=en_by_href,
+                en_by_include=en_by_include,
+                translate_hrefs=translate_hrefs,
+                translate_include_paths=translate_include_paths,
+                translate_name=translate_name,
+                ru_base_hrefs=base_hrefs,
+                ru_base_include_paths=base_includes,
+                restrict_gap_fill_to_scope=restrict_gap_fill_to_scope,
+            )
+            selected = replace(selected, children=merged_children)
+
+        if selected is None:
             continue
-        parent_name = en_node.name if en_node else translate_name(ru_node.name).strip()
-        merged.append(TocNode(name=parent_name, children=merged_children))
+        if (
+            ru_node.children
+            and not selected.children
+            and not selected.href
+            and not selected.include_path
+        ):
+            continue
+        merged.append(selected)
 
     return merged
 

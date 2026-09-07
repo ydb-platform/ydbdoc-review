@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+import yaml
+
 from ydbdoc_review.navigation.toc import (
+    _parse_toc_tree_block,
+    _serialize_toc_tree,
     merge_en_toc_yaml,
     parse_toc_items,
     toc_reordered_shared_hrefs,
@@ -692,6 +696,40 @@ def test_parse_toc_items_nested_ydb_sdk_format():
         "debug-logs-otel.md",
         "debug-otel.md",
     ]
+
+
+def test_parse_serialize_mixed_node_preserves_own_metadata_and_children():
+    toc = dedent("""
+        items:
+        - name: Authentication
+          href: authentication.md
+          when: feature_auth
+          include:
+            mode: link
+            path: authentication/toc_p.yaml
+          items:
+          - name: Caching
+            href: caching-authentication-results.md
+    """).strip()
+
+    serialized = _serialize_toc_tree(_parse_toc_tree_block(toc))
+    parent = yaml.safe_load(serialized)["items"][0]
+
+    assert parent == {
+        "name": "Authentication",
+        "href": "authentication.md",
+        "when": "feature_auth",
+        "include": {
+            "mode": "link",
+            "path": "authentication/toc_p.yaml",
+        },
+        "items": [
+            {
+                "name": "Caching",
+                "href": "caching-authentication-results.md",
+            }
+        ],
+    }
 
 
 def test_toc_translate_scope_nested_detects_new_href():
