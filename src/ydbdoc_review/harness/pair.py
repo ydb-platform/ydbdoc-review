@@ -203,6 +203,7 @@ def run_pair_plan(
         existing_target_text=existing_target,
         base_target_text=base_target,
         base_source_text=base_source,
+        coverage_plan=content.coverage_plan,
     )
     harness_ctx = HarnessContext.from_options(
         ctx.client,

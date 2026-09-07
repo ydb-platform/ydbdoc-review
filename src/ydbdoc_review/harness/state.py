@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ydbdoc_review.parsing.ast_types import Document
 from ydbdoc_review.pipeline.types import FileVerdict
@@ -12,6 +12,9 @@ from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.validation.heuristics import ClassifiedHeuristics
 from ydbdoc_review.validation.link_contract import LinkContractIssue
+
+if TYPE_CHECKING:
+    from ydbdoc_review.translation.coverage import CoveragePlan
 
 HarnessMode = Literal["translate", "verify"]
 
@@ -31,6 +34,7 @@ class FileRunState:
     base_target_text: str | None = None
     # Merge-base source (RU) for differential translate (§6.132).
     base_source_text: str | None = None
+    coverage_plan: CoveragePlan | None = None
 
     source_doc: Document | None = None
     segments: list[Segment] = field(default_factory=list)

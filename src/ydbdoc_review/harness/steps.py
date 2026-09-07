@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Protocol
 
@@ -33,6 +34,7 @@ from ydbdoc_review.reporting.locations import (
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.placeholder_align import normalize_target_segments_to_source
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.coverage import assemble_coverage
 from ydbdoc_review.translation.critic import (
     apply_critic_fixes,
     run_verify,
@@ -268,19 +270,6 @@ class TranslateStep:
         if state.mode != "translate":
             return
         assert state.source_doc is not None
-        # REQUIREMENTS_RU.md §5 / §13: one full RU→EN pass. Never seed, splice,
-        # or partially reconstruct published EN from the previous English file.
-        # Verify-only paths may still read EN for comparison outside this step.
-        state.differential_meta = {
-            "mode": "full",
-            "reason": "REQUIREMENTS §5/§13: differential seed/splice disabled on translate",
-            "seeded": 0,
-            "pending": len(state.segments),
-            "low_magnitude_patch": False,
-            "semantic_noop": False,
-            "enabled": False,
-        }
-
         def _retain_validated_segment(segment: Segment, target: str) -> None:
             if ctx.checkpoint is None:
                 return
@@ -324,6 +313,116 @@ class TranslateStep:
                     exc,
                 )
                 return None
+
+        coverage_plan = state.coverage_plan
+        if coverage_plan is not None and coverage_plan.mode == "units":
+            if coverage_plan.source_path != state.file_path:
+                raise ValueError("coverage plan source path mismatch")
+            actual_source_hash = hashlib.sha256(
+                state.raw_source_text.encode("utf-8")
+            ).hexdigest()
+            if actual_source_hash != coverage_plan.source_hash:
+                raise ValueError("coverage plan source hash mismatch")
+
+            translated_units: dict[str, str] = {}
+            translated_segment_values: dict[str, str] = {}
+            for unit in coverage_plan.units:
+                if unit.action != "translate_required":
+                    continue
+                unit_doc = parse_markdown(unit.source)
+                unit_segments = extract_segments(unit_doc)
+                if not unit_segments:
+                    raise ValueError(
+                        f"translate_required coverage unit has no prose: {unit.key}"
+                    )
+                unit_translations = translate_segments(
+                    unit_segments,
+                    ctx.client,
+                    ctx.glossary,
+                    file_path=state.file_path,
+                    source_lang=ctx.source_lang,
+                    target_lang=ctx.target_lang,
+                    max_chars=ctx.batch_chars,
+                    max_output_chars=ctx.batch_max_output_chars,
+                    expansion_ratio=ctx.batch_output_expansion_ratio,
+                    json_overhead=ctx.batch_json_overhead_chars,
+                    segment_max_chars=ctx.segment_max_source_chars,
+                    prompt_version=ctx.prompt_version,
+                    cache=ctx.cache,
+                    max_parallel_batches=ctx.parallel,
+                    manual_actions=state.manual_actions,
+                    on_validated_segment=_retain_validated_segment,
+                    load_validated_segment=(
+                        _load_validated_segment
+                        if ctx.resume_parent_run_id is not None
+                        else None
+                    ),
+                )
+                unit_state = FileRunState(
+                    mode="translate",
+                    file_path=state.file_path,
+                    raw_source_text=unit.source,
+                    source_text=unit.source,
+                    existing_target_text=None,
+                    base_target_text=None,
+                    base_source_text=None,
+                    source_doc=unit_doc,
+                    segments=unit_segments,
+                    translations=unit_translations,
+                    render_base_doc=unit_doc,
+                    render_base_segments=unit_segments,
+                    fence_reference_text=unit.source,
+                )
+                _render_translated_from_source(unit_state, ctx)
+                translated_units[unit.key] = unit_state.translated_text
+                translated_segment_values.update(unit_translations)
+                state.finalize_warnings.extend(unit_state.finalize_warnings)
+                state.link_contract_issues.extend(unit_state.link_contract_issues)
+
+            state.translations = translated_segment_values
+            state.translated_text = assemble_coverage(
+                coverage_plan,
+                existing_en=state.existing_target_text,
+                translated_units=translated_units,
+            )
+            actions = [unit.action for unit in coverage_plan.units]
+            state.differential_meta = {
+                "mode": "units",
+                "reason": "proof-based coverage plan",
+                "seeded": actions.count("reuse_verified"),
+                "pending": actions.count("translate_required"),
+                "protected": actions.count("materialize_protected"),
+                "low_magnitude_patch": False,
+                "semantic_noop": False,
+                "enabled": True,
+                "fallback_reasons": (),
+            }
+            if ctx.target_lang.lower() in {"en", "english"}:
+                _apply_en_structural_repair(state, ctx)
+            return
+
+        # None is the exact legacy full path. A full coverage plan records why
+        # proof-based execution fell back, but does not seed or splice old EN.
+        fallback_reasons = (
+            tuple(dict.fromkeys(unit.reason for unit in coverage_plan.units))
+            if coverage_plan is not None
+            else ()
+        )
+        state.differential_meta = {
+            "mode": "full",
+            "reason": (
+                fallback_reasons[0]
+                if fallback_reasons
+                else "REQUIREMENTS §5/§13: differential seed/splice disabled on translate"
+            ),
+            "seeded": 0,
+            "pending": len(state.segments),
+            "protected": 0,
+            "low_magnitude_patch": False,
+            "semantic_noop": False,
+            "enabled": False,
+            "fallback_reasons": fallback_reasons,
+        }
 
         state.translations = translate_segments(
             state.segments,

@@ -20,6 +20,7 @@ from ydbdoc_review.github.git_ops import (
 
 AUTHORITY_WIRE_MARKER = "ydbdoc-ru-authority:v1"
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _WIRE_RE = re.compile(rf"<!--\s*{re.escape(AUTHORITY_WIRE_MARKER)}:([A-Za-z0-9_-]+)\s*-->")
 
 
@@ -64,6 +65,9 @@ class TranslationArtifactProvenance:
 
     authority: RuAuthority
     candidate_sha: str  # C
+    coverage_version: int | None = None
+    coverage_run_id: str | None = None
+    coverage_digest: str | None = None
 
 
 def _require_sha(value: object, *, field: str) -> str:
@@ -155,7 +159,7 @@ def bind_translation_artifact(
 
 def authority_payload(provenance: TranslationArtifactProvenance) -> dict[str, object]:
     authority = provenance.authority
-    return {
+    payload: dict[str, object] = {
         "version": 1,
         "source": {
             "repo": authority.source_repo,
@@ -170,6 +174,29 @@ def authority_payload(provenance: TranslationArtifactProvenance) -> dict[str, ob
         },
         "candidate_sha": provenance.candidate_sha,
     }
+    coverage_values = (
+        provenance.coverage_version,
+        provenance.coverage_run_id,
+        provenance.coverage_digest,
+    )
+    if any(value is not None for value in coverage_values):
+        if not all(value is not None for value in coverage_values):
+            raise ValueError("authority coverage binding must be complete")
+        if provenance.coverage_version != 1:
+            raise ValueError("unsupported authority coverage version")
+        if not isinstance(provenance.coverage_run_id, str) or not provenance.coverage_run_id:
+            raise ValueError("authority coverage run ID is invalid")
+        if (
+            not isinstance(provenance.coverage_digest, str)
+            or _SHA256_RE.fullmatch(provenance.coverage_digest) is None
+        ):
+            raise ValueError("authority coverage digest is invalid")
+        payload["coverage"] = {
+            "digest": provenance.coverage_digest,
+            "run_id": provenance.coverage_run_id,
+            "version": provenance.coverage_version,
+        }
+    return payload
 
 
 def render_authority_evidence(provenance: TranslationArtifactProvenance) -> str:
@@ -202,11 +229,13 @@ def parse_authority_evidence(body: str) -> TranslationArtifactProvenance:
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("malformed authority evidence payload") from exc
 
-    root = _strict_object(
-        payload,
-        field="root",
-        keys={"version", "source", "selection", "candidate_sha"},
-    )
+    if not isinstance(payload, dict):
+        raise ValueError("malformed authority evidence root object")
+    old_keys = {"version", "source", "selection", "candidate_sha"}
+    new_keys = old_keys | {"coverage"}
+    if frozenset(payload) not in {frozenset(old_keys), frozenset(new_keys)}:
+        raise ValueError("malformed authority evidence root object")
+    root = payload
     if root["version"] != 1:
         raise ValueError(f"unsupported authority evidence version: {root['version']!r}")
     source = _strict_object(
@@ -237,9 +266,33 @@ def parse_authority_evidence(body: str) -> TranslationArtifactProvenance:
         ru_sha=_require_sha(selection["ru_sha"], field="selection.ru_sha"),
         mode=mode,
     )
+    coverage_version: int | None = None
+    coverage_run_id: str | None = None
+    coverage_digest: str | None = None
+    if "coverage" in root:
+        coverage = _strict_object(
+            root["coverage"],
+            field="coverage",
+            keys={"digest", "run_id", "version"},
+        )
+        if coverage["version"] != 1:
+            raise ValueError("unsupported authority coverage version")
+        if not isinstance(coverage["run_id"], str) or not coverage["run_id"]:
+            raise ValueError("malformed authority evidence coverage run ID")
+        if (
+            not isinstance(coverage["digest"], str)
+            or _SHA256_RE.fullmatch(coverage["digest"]) is None
+        ):
+            raise ValueError("malformed authority evidence coverage digest")
+        coverage_version = 1
+        coverage_run_id = coverage["run_id"]
+        coverage_digest = coverage["digest"]
     return TranslationArtifactProvenance(
         authority=authority,
         candidate_sha=_require_sha(root["candidate_sha"], field="candidate_sha"),
+        coverage_version=coverage_version,
+        coverage_run_id=coverage_run_id,
+        coverage_digest=coverage_digest,
     )
 
 

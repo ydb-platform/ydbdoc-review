@@ -7,13 +7,17 @@ fragment obligation with unambiguous structural anchors.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ydbdoc_review.config.loader import RuAuthorityMode
 from ydbdoc_review.github.provenance import RuAuthority
+from ydbdoc_review.ops.transcripts import TranscriptStore
 from ydbdoc_review.ops.translation_checkpoint import (
     CheckpointIdentity,
     VerifiedUnit,
@@ -59,6 +63,7 @@ _ACTIONS = frozenset(
 )
 _MODES = frozenset({"full", "units"})
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_COMMIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
 _ASCII_FRAGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 _HEADING_RE = re.compile(
     r"(?m)^(#{1,6})[ \t]+[^\r\n]*?"
@@ -84,6 +89,19 @@ class CoveragePlan:
     units: tuple[CoverageUnit, ...]
     required_fragments: frozenset[str]
     mode: CoverageMode
+
+
+@dataclass(frozen=True)
+class CoverageEvidence:
+    """Candidate-bound, portable evidence for every planned target file."""
+
+    version: int
+    candidate_sha: str
+    authority: RuAuthority
+    plans: tuple[tuple[str, CoveragePlan], ...]
+    baseline_en_hashes: tuple[tuple[str, str | None], ...]
+    candidate_file_hashes: tuple[tuple[str, str], ...]
+    digest: str
 
 
 @dataclass(frozen=True)
@@ -870,6 +888,75 @@ def decode_coverage_plan(data: bytes) -> CoveragePlan:
     return plan
 
 
+def assemble_coverage(
+    plan: CoveragePlan,
+    *,
+    existing_en: str | None,
+    translated_units: dict[str, str],
+) -> str:
+    """Assemble a complete target from a validated portable coverage plan."""
+    _validate_plan(plan)
+    if plan.mode != "units":
+        raise ValueError("coverage assembly requires units mode")
+    if existing_en is None:
+        raise ValueError("units coverage assembly requires existing EN")
+    if _hash_text(existing_en) != plan.en_hash:
+        raise ValueError("coverage assembly EN hash mismatch")
+    unresolved = next(
+        (unit for unit in plan.units if unit.action == "unresolved"),
+        None,
+    )
+    if unresolved is not None:
+        raise ValueError(f"unresolved coverage unit: {unresolved.key}")
+
+    pending_keys = {
+        unit.key for unit in plan.units if unit.action == "translate_required"
+    }
+    supplied_keys = set(translated_units)
+    missing = pending_keys - supplied_keys
+    if missing:
+        raise ValueError(f"missing translated unit: {sorted(missing)[0]}")
+    unexpected = supplied_keys - pending_keys
+    if unexpected:
+        raise ValueError(f"unexpected translated unit: {sorted(unexpected)[0]}")
+
+    edits: list[tuple[int, int, str]] = []
+    previous_end = -1
+    for unit in plan.units:
+        if unit.en_span is None:
+            raise ValueError(f"coverage unit span is missing: {unit.key}")
+        start, end = unit.en_span
+        if start < previous_end:
+            raise ValueError("coverage unit spans are out of source order or overlap")
+        if start < 0 or end < start or end > len(existing_en):
+            raise ValueError("invalid or out-of-bounds coverage span")
+        previous_end = end
+
+        if unit.action == "translate_required":
+            replacement = translated_units[unit.key]
+        elif unit.action == "reuse_verified":
+            # The planner proved these exact bytes are the materialized form of
+            # the validated receipt. Reusing the baseline slice keeps every
+            # accepted byte, including whitespace, byte-for-byte intact.
+            replacement = existing_en[start:end]
+        elif unit.action == "materialize_protected":
+            assert unit.target is not None
+            replacement = unit.target
+        else:  # pragma: no cover - guarded by _validate_plan above
+            raise ValueError(f"unsupported coverage unit action: {unit.action}")
+        edits.append((start, end, replacement))
+
+    pieces: list[str] = []
+    cursor = 0
+    for start, end, replacement in edits:
+        if start < cursor:
+            raise ValueError("invalid or overlapping coverage span")
+        pieces.extend((existing_en[cursor:start], replacement))
+        cursor = end
+    pieces.append(existing_en[cursor:])
+    return "".join(pieces)
+
+
 def _validate_plan(plan: CoveragePlan) -> None:
     if (
         type(plan.source_path) is not str
@@ -971,3 +1058,436 @@ def _require_hash(value: object, *, field: str) -> str:
 
 def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def coverage_evidence_key(candidate_sha: str) -> str:
+    if type(candidate_sha) is not str or _COMMIT_SHA_RE.fullmatch(candidate_sha) is None:
+        raise ValueError("coverage evidence candidate SHA is invalid")
+    return f"translation/v1/coverage/{candidate_sha}.json"
+
+
+def build_coverage_evidence(
+    *,
+    authority: RuAuthority,
+    candidate_sha: str,
+    plans: dict[str, CoveragePlan],
+    baseline_en: dict[str, str | None],
+    candidate_files: dict[str, str],
+) -> CoverageEvidence:
+    """Build one canonical manifest from exact baseline and candidate bytes."""
+    coverage_evidence_key(candidate_sha)
+    normalized_plans = _normalize_evidence_mapping(plans, field="plans")
+    normalized_baseline = _normalize_evidence_mapping(baseline_en, field="baseline_en")
+    normalized_candidate = _normalize_evidence_mapping(
+        candidate_files, field="candidate_files"
+    )
+    paths = set(normalized_plans)
+    if set(normalized_baseline) != paths or set(normalized_candidate) != paths:
+        raise ValueError("coverage evidence file sets do not match")
+
+    plan_items: list[tuple[str, CoveragePlan]] = []
+    baseline_hashes: list[tuple[str, str | None]] = []
+    candidate_hashes: list[tuple[str, str]] = []
+    for path in sorted(paths):
+        plan = normalized_plans[path]
+        if not isinstance(plan, CoveragePlan):
+            raise ValueError("coverage evidence plan is malformed")
+        _validate_plan(plan)
+        baseline_text = normalized_baseline[path]
+        if baseline_text is not None and type(baseline_text) is not str:
+            raise ValueError("coverage evidence baseline EN is malformed")
+        baseline_hash = None if baseline_text is None else _hash_text(baseline_text)
+        if baseline_hash != plan.en_hash:
+            raise ValueError("coverage evidence baseline EN hash does not match plan")
+        candidate_text = normalized_candidate[path]
+        if type(candidate_text) is not str:
+            raise ValueError("coverage evidence candidate file is malformed")
+        plan_items.append((path, plan))
+        baseline_hashes.append((path, baseline_hash))
+        candidate_hashes.append((path, _hash_text(candidate_text)))
+
+    provisional = CoverageEvidence(
+        version=_SCHEMA_VERSION,
+        candidate_sha=candidate_sha,
+        authority=authority,
+        plans=tuple(plan_items),
+        baseline_en_hashes=tuple(baseline_hashes),
+        candidate_file_hashes=tuple(candidate_hashes),
+        digest="",
+    )
+    digest = hashlib.sha256(_coverage_evidence_core(provisional)).hexdigest()
+    return CoverageEvidence(**{**provisional.__dict__, "digest": digest})
+
+
+def encode_coverage_evidence(evidence: CoverageEvidence) -> bytes:
+    """Encode a self-digesting evidence manifest as canonical JSON."""
+    _validate_coverage_evidence_shape(evidence)
+    expected = hashlib.sha256(_coverage_evidence_core(evidence)).hexdigest()
+    if evidence.digest != expected:
+        raise ValueError("coverage evidence digest mismatch")
+    payload = json.loads(_coverage_evidence_core(evidence))
+    payload["digest"] = evidence.digest
+    return _canonical_json(payload)
+
+
+def decode_coverage_evidence(data: bytes) -> CoverageEvidence:
+    """Strictly decode and authenticate a candidate coverage manifest."""
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("malformed coverage evidence JSON") from exc
+    root = _strict_evidence_object(
+        payload,
+        field="root",
+        keys={
+            "authority",
+            "baseline_en_hashes",
+            "candidate_file_hashes",
+            "candidate_sha",
+            "digest",
+            "plans",
+            "version",
+        },
+    )
+    authority = _decode_evidence_authority(root["authority"])
+    raw_plans = root["plans"]
+    if not isinstance(raw_plans, list):
+        raise ValueError("coverage evidence plans must be a list")
+    plans: list[tuple[str, CoveragePlan]] = []
+    for value in raw_plans:
+        entry = _strict_evidence_object(
+            value, field="plan", keys={"encoded_plan", "target_path"}
+        )
+        encoded = _strict_evidence_string(entry["encoded_plan"], field="encoded_plan")
+        try:
+            raw_plan = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("coverage evidence encoded plan is malformed") from exc
+        plans.append(
+            (
+                _strict_evidence_path(entry["target_path"]),
+                decode_coverage_plan(raw_plan),
+            )
+        )
+    baseline_hashes = _decode_evidence_hashes(
+        root["baseline_en_hashes"], field="baseline_en_hashes", nullable=True
+    )
+    candidate_hashes = _decode_evidence_hashes(
+        root["candidate_file_hashes"], field="candidate_file_hashes", nullable=False
+    )
+    evidence = CoverageEvidence(
+        version=root["version"] if type(root["version"]) is int else -1,
+        candidate_sha=_strict_evidence_string(root["candidate_sha"], field="candidate_sha"),
+        authority=authority,
+        plans=tuple(plans),
+        baseline_en_hashes=baseline_hashes,
+        candidate_file_hashes=tuple((path, value or "") for path, value in candidate_hashes),
+        digest=_strict_evidence_string(root["digest"], field="digest"),
+    )
+    _validate_coverage_evidence_shape(evidence)
+    expected = hashlib.sha256(_coverage_evidence_core(evidence)).hexdigest()
+    if evidence.digest != expected:
+        raise ValueError("coverage evidence digest mismatch")
+    return evidence
+
+
+def save_coverage_evidence(
+    store: TranscriptStore,
+    run_id: str,
+    evidence: CoverageEvidence,
+) -> None:
+    """Persist evidence immutably and verify the exact stored bytes."""
+    if type(run_id) is not str or not run_id:
+        raise ValueError("coverage evidence run ID is invalid")
+    key = coverage_evidence_key(evidence.candidate_sha)
+    data = encode_coverage_evidence(evidence)
+    try:
+        current = store.get(run_id, key)
+        if current is not None and current != data:
+            raise ValueError("coverage evidence immutable conflict")
+        if current is None:
+            store.put(run_id, key, data)
+        if store.get(run_id, key) != data:
+            raise ValueError("coverage evidence storage verification failed")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"coverage evidence storage failed: {exc}") from exc
+
+
+def load_coverage_evidence(
+    store: TranscriptStore,
+    run_id: str,
+    *,
+    candidate_sha: str,
+    expected_digest: str,
+) -> CoverageEvidence:
+    """Load only the exact candidate key and envelope-bound digest."""
+    _require_hash(expected_digest, field="evidence.digest")
+    key = coverage_evidence_key(candidate_sha)
+    try:
+        raw = store.get(run_id, key)
+    except Exception as exc:
+        raise ValueError(f"coverage evidence load failed: {exc}") from exc
+    if raw is None:
+        raise ValueError("coverage evidence missing for candidate")
+    try:
+        evidence = decode_coverage_evidence(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"coverage evidence is corrupt: {exc}") from exc
+    if evidence.candidate_sha != candidate_sha:
+        raise ValueError("coverage evidence candidate mismatch")
+    if evidence.digest != expected_digest:
+        raise ValueError("coverage evidence envelope digest mismatch")
+    return evidence
+
+
+def validate_coverage_evidence(
+    evidence: CoverageEvidence,
+    *,
+    authority: RuAuthority,
+    read_source: Any,
+    read_baseline_en: Any,
+    read_candidate: Any,
+) -> tuple[tuple[str, CoveragePlan], ...]:
+    """Validate authority, source, baseline, and final candidate hashes."""
+    _validate_coverage_evidence_shape(evidence)
+    if evidence.authority != authority:
+        raise ValueError("coverage evidence authority mismatch")
+    baseline_hashes = dict(evidence.baseline_en_hashes)
+    candidate_hashes = dict(evidence.candidate_file_hashes)
+    for target_path, plan in evidence.plans:
+        source_text = read_source(plan.source_path)
+        if source_text is None or _hash_text(source_text) != plan.source_hash:
+            raise ValueError(f"coverage evidence source hash mismatch: {plan.source_path}")
+        baseline_text = read_baseline_en(target_path)
+        actual_baseline_hash = None if baseline_text is None else _hash_text(baseline_text)
+        if actual_baseline_hash != baseline_hashes[target_path]:
+            raise ValueError(f"coverage evidence baseline EN hash mismatch: {target_path}")
+        if actual_baseline_hash != plan.en_hash:
+            raise ValueError(f"coverage evidence plan baseline mismatch: {target_path}")
+        candidate_text = read_candidate(target_path)
+        if candidate_text is None or _hash_text(candidate_text) != candidate_hashes[target_path]:
+            raise ValueError(f"coverage evidence candidate file hash mismatch: {target_path}")
+        if plan.mode == "units":
+            if baseline_text is None or not candidate_preserves_unaffected_en(
+                plan, existing_en=baseline_text, candidate=candidate_text
+            ):
+                raise ValueError(
+                    f"coverage evidence candidate changed unaffected EN: {target_path}"
+                )
+            if plan.required_fragments:
+                from ydbdoc_review.validation.fragment_repair import (
+                    _page_declares_fragment,
+                )
+
+                for fragment in plan.required_fragments:
+                    if not _page_declares_fragment(candidate_text, fragment):
+                        raise ValueError(
+                            "coverage evidence candidate is missing required fragment: "
+                            f"{target_path}#{fragment}"
+                        )
+    return evidence.plans
+
+
+def candidate_preserves_unaffected_en(
+    plan: CoveragePlan,
+    *,
+    existing_en: str,
+    candidate: str,
+) -> bool:
+    """Prove that a units candidate differs only at authorized edit spans."""
+    _validate_plan(plan)
+    if plan.mode != "units" or _hash_text(existing_en) != plan.en_hash:
+        return False
+    pattern: list[str] = [r"\A"]
+    cursor = 0
+    for unit in plan.units:
+        if unit.en_span is None:
+            return False
+        start, end = unit.en_span
+        if start < cursor or end > len(existing_en):
+            return False
+        pattern.append(re.escape(existing_en[cursor:start]))
+        if unit.action == "translate_required":
+            pattern.append(".*?")
+        elif unit.action == "reuse_verified":
+            pattern.append(re.escape(existing_en[start:end]))
+        elif unit.action == "materialize_protected" and unit.target is not None:
+            pattern.append(re.escape(unit.target))
+        else:
+            return False
+        cursor = end
+    pattern.extend((re.escape(existing_en[cursor:]), r"\Z"))
+    return re.fullmatch("".join(pattern), candidate, flags=re.DOTALL) is not None
+
+
+def _normalize_evidence_mapping(value: object, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        raise ValueError(f"coverage evidence {field} must be a non-empty mapping")
+    normalized: dict[str, Any] = {}
+    for raw_path, item in value.items():
+        path = _strict_evidence_path(raw_path)
+        if path in normalized:
+            raise ValueError(f"coverage evidence duplicate {field} path")
+        normalized[path] = item
+    return normalized
+
+
+def _coverage_evidence_core(evidence: CoverageEvidence) -> bytes:
+    return _canonical_json(
+        {
+            "authority": _evidence_authority_payload(evidence.authority),
+            "baseline_en_hashes": [
+                {"hash": digest, "path": path}
+                for path, digest in evidence.baseline_en_hashes
+            ],
+            "candidate_file_hashes": [
+                {"hash": digest, "path": path}
+                for path, digest in evidence.candidate_file_hashes
+            ],
+            "candidate_sha": evidence.candidate_sha,
+            "plans": [
+                {
+                    "encoded_plan": base64.urlsafe_b64encode(
+                        encode_coverage_plan(plan)
+                    ).decode("ascii").rstrip("="),
+                    "target_path": path,
+                }
+                for path, plan in evidence.plans
+            ],
+            "version": evidence.version,
+        }
+    )
+
+
+def _validate_coverage_evidence_shape(evidence: CoverageEvidence) -> None:
+    if evidence.version != _SCHEMA_VERSION:
+        raise ValueError("unsupported coverage evidence version")
+    coverage_evidence_key(evidence.candidate_sha)
+    _require_hash(evidence.digest, field="evidence.digest")
+    plan_paths = [path for path, _ in evidence.plans]
+    baseline_paths = [path for path, _ in evidence.baseline_en_hashes]
+    candidate_paths = [path for path, _ in evidence.candidate_file_hashes]
+    if (
+        not plan_paths
+        or plan_paths != sorted(set(plan_paths))
+        or baseline_paths != plan_paths
+        or candidate_paths != plan_paths
+    ):
+        raise ValueError("coverage evidence paths are not canonical")
+    for path, plan in evidence.plans:
+        _strict_evidence_path(path)
+        _validate_plan(plan)
+    for path, digest in evidence.baseline_en_hashes:
+        _strict_evidence_path(path)
+        if digest is not None:
+            _require_hash(digest, field="baseline_en_hash")
+    for path, digest in evidence.candidate_file_hashes:
+        _strict_evidence_path(path)
+        _require_hash(digest, field="candidate_file_hash")
+
+
+def _evidence_authority_payload(authority: RuAuthority) -> dict[str, object]:
+    return {
+        "baseline_sha": authority.baseline_sha,
+        "mode": authority.mode.value,
+        "ru_sha": authority.ru_sha,
+        "source_base_sha": authority.source_base_sha,
+        "source_head_sha": authority.source_head_sha,
+        "source_pr": authority.source_pr,
+        "source_repo": authority.source_repo,
+    }
+
+
+def _decode_evidence_authority(value: object) -> RuAuthority:
+    payload = _strict_evidence_object(
+        value,
+        field="authority",
+        keys={
+            "baseline_sha",
+            "mode",
+            "ru_sha",
+            "source_base_sha",
+            "source_head_sha",
+            "source_pr",
+            "source_repo",
+        },
+    )
+    source_pr = payload["source_pr"]
+    if type(source_pr) is not int or source_pr <= 0:
+        raise ValueError("coverage evidence source PR is invalid")
+    try:
+        mode = RuAuthorityMode(_strict_evidence_string(payload["mode"], field="mode"))
+    except ValueError as exc:
+        raise ValueError("coverage evidence authority mode is invalid") from exc
+    return RuAuthority(
+        source_repo=_strict_evidence_string(payload["source_repo"], field="source_repo"),
+        source_pr=source_pr,
+        source_base_sha=_strict_evidence_commit(payload["source_base_sha"]),
+        source_head_sha=_strict_evidence_commit(payload["source_head_sha"]),
+        baseline_sha=_strict_evidence_commit(payload["baseline_sha"]),
+        ru_sha=_strict_evidence_commit(payload["ru_sha"]),
+        mode=mode,
+    )
+
+
+def _decode_evidence_hashes(
+    value: object, *, field: str, nullable: bool
+) -> tuple[tuple[str, str | None], ...]:
+    if not isinstance(value, list):
+        raise ValueError(f"coverage evidence {field} must be a list")
+    decoded: list[tuple[str, str | None]] = []
+    for raw in value:
+        item = _strict_evidence_object(raw, field=field, keys={"hash", "path"})
+        digest = item["hash"]
+        if digest is None and nullable:
+            checked = None
+        else:
+            checked = _require_hash(digest, field=field)
+        decoded.append((_strict_evidence_path(item["path"]), checked))
+    paths = [path for path, _ in decoded]
+    if paths != sorted(set(paths)):
+        raise ValueError(f"coverage evidence {field} paths are not canonical")
+    return tuple(decoded)
+
+
+def _strict_evidence_object(
+    value: object, *, field: str, keys: set[str]
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"malformed coverage evidence {field}")
+    return value
+
+
+def _strict_evidence_string(value: object, *, field: str) -> str:
+    if type(value) is not str or not value:
+        raise ValueError(f"coverage evidence {field} must be a non-empty string")
+    return value
+
+
+def _strict_evidence_path(value: object) -> str:
+    path = _strict_evidence_string(value, field="path")
+    if (
+        "\\" in path
+        or path.startswith("/")
+        or any(part in {"", ".", ".."} for part in path.split("/"))
+    ):
+        raise ValueError("coverage evidence path is malformed")
+    return path
+
+
+def _strict_evidence_commit(value: object) -> str:
+    sha = _strict_evidence_string(value, field="commit")
+    if _COMMIT_SHA_RE.fullmatch(sha) is None:
+        raise ValueError("coverage evidence commit SHA is invalid")
+    return sha
+
+
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")

@@ -59,6 +59,7 @@ from ydbdoc_review.github.pr import (
     verify_fixup_pr_base,
 )
 from ydbdoc_review.github.provenance import (
+    RuAuthority,
     TranslationArtifactProvenance,
     bind_translation_artifact,
     freeze_ru_authority,
@@ -102,13 +103,16 @@ from ydbdoc_review.ops.lifecycle import (
     finish_ops_job,
     load_parent_run_context,
 )
-from ydbdoc_review.ops.transcripts import NullTranscriptStore
+from ydbdoc_review.ops.transcripts import NullTranscriptStore, TranscriptStore
 from ydbdoc_review.ops.translation_checkpoint import (
     CheckpointIdentity,
     CheckpointWriter,
     TranslationCheckpointError,
+    load_verified_unit,
     run_has_usable_verified_units,
+    translation_unit_key_for_segment,
 )
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
     PairContent,
@@ -159,6 +163,15 @@ from ydbdoc_review.reporting.builder import (
 )
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.reporting.provenance_drift import build_later_ru_drift_report
+from ydbdoc_review.segmentation.extractor import extract_segments
+from ydbdoc_review.translation.coverage import (
+    CoverageEvidence,
+    build_coverage_evidence,
+    load_coverage_evidence,
+    plan_source_coverage,
+    save_coverage_evidence,
+    validate_coverage_evidence,
+)
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.translation.prompts import load_template
 from ydbdoc_review.validation.en_link_targets import (
@@ -2015,6 +2028,136 @@ def _resolve_translation_resume_parent(
         excluded.append(candidate)
 
 
+def _attach_source_coverage_plans(
+    contents: list[PairContent],
+    *,
+    scope_plan: TranslationScopePlan,
+    authority: RuAuthority,
+    checkpoint: CheckpointWriter | None,
+    resume_parent_run_id: str | None,
+) -> list[PairContent]:
+    """Plan each RU target from frozen bytes and exact Task 5 receipts only."""
+    planned: list[PairContent] = []
+    for content in contents:
+        pair = content.pair
+        source_text = content.ru_text
+        if source_text is None or pair.ru_deleted or pair.en_changed:
+            planned.append(content)
+            continue
+
+        verified_units = []
+        if checkpoint is not None and resume_parent_run_id is not None:
+            try:
+                segments = extract_segments(parse_markdown(source_text))
+            except (AssertionError, TypeError, ValueError):
+                segments = []
+            for segment in segments:
+                key = translation_unit_key_for_segment(
+                    segment,
+                    source_path=pair.ru_path,
+                    target_locale="en",
+                )
+                verified = load_verified_unit(
+                    checkpoint.store,
+                    resume_parent_run_id,
+                    checkpoint.identity,
+                    key,
+                    segment.text.encode("utf-8"),
+                )
+                if verified is not None:
+                    verified_units.append(verified)
+
+        coverage_plan = plan_source_coverage(
+            source_path=pair.ru_path,
+            source_text=source_text,
+            existing_en=content.en_text,
+            authority=authority,
+            required_fragments=scope_plan.required_fragments_for(pair.ru_path),
+            verified_units=tuple(verified_units),
+            checkpoint_identity=(checkpoint.identity if checkpoint is not None else None),
+        )
+        planned.append(replace(content, coverage_plan=coverage_plan))
+    return planned
+
+
+def _persist_candidate_coverage_evidence(
+    *,
+    repo_path: str,
+    candidate_sha: str,
+    authority: RuAuthority,
+    contents: list[PairContent],
+    store: TranscriptStore,
+    run_id: str,
+) -> CoverageEvidence | None:
+    planned = {
+        content.pair.en_path: content.coverage_plan
+        for content in contents
+        if content.coverage_plan is not None
+    }
+    if not any(plan.mode == "units" for plan in planned.values()):
+        return None
+    baseline_en = {
+        content.pair.en_path: content.en_text
+        for content in contents
+        if content.pair.en_path in planned
+    }
+    candidate_files: dict[str, str] = {}
+    for path in planned:
+        text = read_text_at_commit(repo_path, candidate_sha, path)
+        if text is None:
+            raise TranslationCheckpointError(
+                f"coverage evidence candidate file is missing: {path}"
+            )
+        candidate_files[path] = text
+    try:
+        evidence = build_coverage_evidence(
+            authority=authority,
+            candidate_sha=candidate_sha,
+            plans=planned,  # type: ignore[arg-type]
+            baseline_en=baseline_en,
+            candidate_files=candidate_files,
+        )
+        save_coverage_evidence(store, run_id, evidence)
+    except ValueError as exc:
+        raise TranslationCheckpointError(str(exc)) from exc
+    return evidence
+
+
+def _persist_repaired_coverage_evidence(
+    *,
+    repo_path: str,
+    candidate_sha: str,
+    prior: CoverageEvidence,
+    store: TranscriptStore,
+    run_id: str,
+) -> CoverageEvidence:
+    plans = dict(prior.plans)
+    baseline_en = {
+        path: read_text_at_commit(repo_path, prior.authority.baseline_sha, path)
+        for path in plans
+    }
+    candidate_files: dict[str, str] = {}
+    for path in plans:
+        text = read_text_at_commit(repo_path, candidate_sha, path)
+        if text is None:
+            raise TranslationCheckpointError(
+                f"coverage evidence repaired candidate file is missing: {path}"
+            )
+        candidate_files[path] = text
+    try:
+        evidence = build_coverage_evidence(
+            authority=prior.authority,
+            candidate_sha=candidate_sha,
+            plans=plans,
+            baseline_en=baseline_en,
+            candidate_files=candidate_files,
+        )
+        save_coverage_evidence(store, run_id, evidence)
+    except ValueError as exc:
+        raise TranslationCheckpointError(str(exc)) from exc
+    return evidence
+
+
 def _translation_checkpoint_scope(
     plan: TranslationScopePlan,
 ) -> dict[str, tuple[str, ...]]:
@@ -2481,6 +2624,21 @@ def run_doc_translate(
                 ru_base_ref=ru_base_ref,
                 authority=authority,
             )
+            contents = _attach_source_coverage_plans(
+                contents,
+                scope_plan=scope_plan,
+                authority=authority,
+                checkpoint=active_checkpoint,
+                resume_parent_run_id=resume_parent_run_id,
+            )
+            if any(
+                content.coverage_plan is not None
+                and content.coverage_plan.mode == "units"
+                for content in contents
+            ) and active_checkpoint is None:
+                raise TranslationCheckpointError(
+                    "units-mode translation requires a durable coverage evidence store"
+                )
             # Always run real translation for doc_translate, including merged
             # source PRs. Routing merged PRs through critic-only verify planning
             # skipped any pair missing RU or EN text — so new RU pages never got
@@ -2740,6 +2898,7 @@ def run_doc_translate(
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None
     pushed_candidate_sha: str | None = None
+    coverage_evidence: CoverageEvidence | None = None
     push_receipt: RefMutationReceipt | None = None
     reused_existing_artifact_pr: _BoundArtifactPR | None = None
     committed = pushed = False
@@ -2765,6 +2924,15 @@ def run_doc_translate(
         )
         if committed:
             pushed_candidate_sha = _freeze_candidate_sha(repo_path)
+            if active_checkpoint is not None:
+                coverage_evidence = _persist_candidate_coverage_evidence(
+                    repo_path=repo_path,
+                    candidate_sha=pushed_candidate_sha,
+                    authority=authority,
+                    contents=contents,
+                    store=active_checkpoint.store,
+                    run_id=active_checkpoint.run_id,
+                )
             # Every forced publication is an exact compare-and-swap. A normal
             # rerun must not overwrite a manual or concurrent branch update.
             if pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
@@ -2953,6 +3121,13 @@ def run_doc_translate(
                 expected_artifact_sha,
             )
         )
+        if coverage_evidence is not None:
+            artifact_provenance = replace(
+                artifact_provenance,
+                coverage_version=coverage_evidence.version,
+                coverage_run_id=active_checkpoint.run_id if active_checkpoint else None,
+                coverage_digest=coverage_evidence.digest,
+            )
         body = build_translation_pr_body(
             pr_number,
             github_repo,
@@ -3006,6 +3181,9 @@ def run_doc_translate(
             inherited_final_tree_blockers=pr_result.final_tree_blockers,
             continue_feedback=effective_continue_feedback,
             skip_ops_gates=True,
+            _coverage_store=(
+                active_checkpoint.store if active_checkpoint is not None else None
+            ),
         )
         job.translation_comment_url = verify_job.translation_comment_url
         verify_result = verify_job.pr_result
@@ -3080,6 +3258,7 @@ def run_doc_verify(
     ops_mode: str = "verify",
     _fixup_rerun_depth: int = 0,
     _inline_fixup_context: PullRequestContext | None = None,
+    _coverage_store: TranscriptStore | None = None,
 ) -> DocJobResult:
     """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
@@ -3175,6 +3354,37 @@ def run_doc_verify(
                 dry_run=dry_run,
                 pr_result=inherited_result,
             )
+
+    coverage_evidence: CoverageEvidence | None = None
+    trusted_coverage_store = _coverage_store or (
+        getattr(ops_ctx, "store", None) if ops_ctx is not None else None
+    )
+    if artifact_provenance is not None and artifact_provenance.coverage_version is not None:
+        if (
+            trusted_coverage_store is None
+            or artifact_provenance.coverage_run_id is None
+            or artifact_provenance.coverage_digest is None
+        ):
+            raise ValueError("coverage evidence trusted store or binding is missing")
+        coverage_evidence = load_coverage_evidence(
+            trusted_coverage_store,
+            artifact_provenance.coverage_run_id,
+            candidate_sha=verify_content_sha,
+            expected_digest=artifact_provenance.coverage_digest,
+        )
+        validate_coverage_evidence(
+            coverage_evidence,
+            authority=artifact_provenance.authority,
+            read_source=lambda path: read_text_at_commit(
+                repo_path, artifact_provenance.authority.ru_sha, path
+            ),
+            read_baseline_en=lambda path: read_text_at_commit(
+                repo_path, artifact_provenance.authority.baseline_sha, path
+            ),
+            read_candidate=lambda path: read_text_at_commit(
+                repo_path, verify_content_sha, path
+            ),
+        )
 
     upstream_url = repo_https_clone_url(owner, repo)
     fixup_source_pr = source_pr or pr_number
@@ -3522,6 +3732,15 @@ def run_doc_verify(
                     target_ref=verify_content_sha,
                     provenance=artifact_provenance,
                 )
+            if coverage_evidence is not None:
+                plans_by_target = dict(coverage_evidence.plans)
+                contents = [
+                    replace(
+                        content,
+                        coverage_plan=plans_by_target.get(content.pair.en_path),
+                    )
+                    for content in contents
+                ]
             pr_result = _run_verify_pairs(
                 contents,
                 client,
@@ -3829,6 +4048,27 @@ def run_doc_verify(
             verify_candidate_sha = head_after_fixup
             if verify_candidate_sha is None:
                 raise RuntimeError("cannot publish verify branch without candidate K")
+            if translation_pr and coverage_evidence is not None:
+                if (
+                    trusted_coverage_store is None
+                    or artifact_provenance is None
+                    or artifact_provenance.coverage_run_id is None
+                ):
+                    raise TranslationCheckpointError(
+                        "cannot bind repaired units candidate without trusted coverage store"
+                    )
+                coverage_evidence = _persist_repaired_coverage_evidence(
+                    repo_path=repo_path,
+                    candidate_sha=verify_candidate_sha,
+                    prior=coverage_evidence,
+                    store=trusted_coverage_store,
+                    run_id=artifact_provenance.coverage_run_id,
+                )
+                artifact_provenance = replace(
+                    artifact_provenance,
+                    coverage_version=coverage_evidence.version,
+                    coverage_digest=coverage_evidence.digest,
+                )
             if translation_pr:
                 logger.info(
                     "Pushing critic fixes onto translation branch %s (PR #%s)",
@@ -3941,6 +4181,22 @@ def run_doc_verify(
                             "both failed"
                         ),
                     )
+            if translation_pr and coverage_evidence is not None:
+                if artifact_provenance is None:
+                    raise RuntimeError("repaired coverage provenance is missing")
+                rebound_body = build_translation_pr_body(
+                    source_pr_num,
+                    github_repo,
+                    publication_result=pr_result,
+                    provenance=artifact_provenance,
+                )
+                gh.update_pull_body(
+                    owner,
+                    repo,
+                    pr_number,
+                    rebound_body,
+                )
+                ctx = replace(ctx, body=rebound_body)
     job.committed = committed
     job.pushed = pushed
 
@@ -3980,6 +4236,7 @@ def run_doc_verify(
                 ops_mode=ops_mode,
                 _fixup_rerun_depth=_fixup_rerun_depth + 1,
                 _inline_fixup_context=next_inline_context,
+                _coverage_store=trusted_coverage_store,
             )
         else:
             logger.info(
@@ -4002,6 +4259,7 @@ def run_doc_verify(
                 ops_mode=ops_mode,
                 _fixup_rerun_depth=_fixup_rerun_depth + 1,
                 _inline_fixup_context=next_inline_context,
+                _coverage_store=trusted_coverage_store,
             )
 
     elapsed = time.monotonic() - started

@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.harness.context import HarnessContext
-from ydbdoc_review.harness.steps import ParseStep, TranslateStep
 from ydbdoc_review.harness.state import FileRunState
+from ydbdoc_review.harness.steps import ParseStep, TranslateStep
+from ydbdoc_review.parsing import front_matter as front_matter_mod
 from ydbdoc_review.parsing.front_matter import (
     FrontMatterError,
     apply_front_matter_updates,
     parse_front_matter_with_spans,
 )
-from ydbdoc_review.parsing import front_matter as front_matter_mod
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.reinsert import reinsert_segments
 from ydbdoc_review.segmentation.types import SegmentKind
+from ydbdoc_review.translation.coverage import CoveragePlan, CoverageUnit
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.validation.heuristics import (
     check_cyrillic_in_en,
@@ -218,3 +218,150 @@ def test_translate_path_one_pass_without_differential_seed(monkeypatch):
     # Old EN prose must not be the published result of a low-magnitude splice.
     assert "Stable paragraph EN" not in (state.translated_text or "")
     assert state.translated_text
+
+
+def test_units_mode_dispatches_only_translate_required_and_preserves_reused_en(
+    monkeypatch,
+) -> None:
+    source = "Сохранённый источник.\n\nНовый источник.\n"
+    existing = "Accepted existing EN.\n\n"
+    translated_calls: list[list[str]] = []
+
+    def _fake_translate(segments, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        del args, kwargs
+        translated_calls.append([segment.text for segment in segments])
+        return {segment.id: "Translated required prose." for segment in segments}
+
+    import hashlib
+
+    import ydbdoc_review.harness.steps as steps_mod
+
+    monkeypatch.setattr(steps_mod, "translate_segments", _fake_translate)
+    plan = CoveragePlan(
+        source_path="ydb/docs/ru/core/x.md",
+        source_hash=hashlib.sha256(source.encode()).hexdigest(),
+        en_hash=hashlib.sha256(existing.encode()).hexdigest(),
+        units=(
+            CoverageUnit(
+                key="1" * 64,
+                action="reuse_verified",
+                source="Сохранённый источник.",
+                en_span=(0, len("Accepted existing EN.")),
+                target="Accepted existing EN.",
+                reason="matching validated source and EN receipt",
+            ),
+            CoverageUnit(
+                key="2" * 64,
+                action="translate_required",
+                source="Новый источник.\n",
+                en_span=(len(existing), len(existing)),
+                target=None,
+                reason="required missing section",
+            ),
+        ),
+        required_fragments=frozenset(),
+        mode="units",
+    )
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"})
+    ctx = HarnessContext.from_options(MagicMock(), glossary=load_glossary(), config=cfg)
+    state = FileRunState(
+        mode="translate",
+        file_path=plan.source_path,
+        raw_source_text=source,
+        source_text=source,
+        existing_target_text=existing,
+        coverage_plan=plan,
+    )
+    ParseStep().run(state, ctx)
+
+    with (
+        patch(
+            "ydbdoc_review.harness.steps.finalize_en_target",
+            side_effect=lambda text, *args, **kwargs: text,
+        ),
+        patch(
+            "ydbdoc_review.harness.steps._apply_en_structural_repair",
+            lambda *_args, **_kwargs: None,
+        ),
+    ):
+        TranslateStep().run(state, ctx)
+
+    assert translated_calls == [["Новый источник."]]
+    assert state.translated_text.startswith(existing)
+    assert state.translated_text.endswith("Translated required prose.\n")
+    assert state.differential_meta == {
+        "mode": "units",
+        "reason": "proof-based coverage plan",
+        "seeded": 1,
+        "pending": 1,
+        "protected": 0,
+        "low_magnitude_patch": False,
+        "semantic_noop": False,
+        "enabled": True,
+        "fallback_reasons": (),
+    }
+
+
+def test_units_all_reuse_and_protected_assets_make_zero_translation_calls(
+    monkeypatch,
+) -> None:
+    import hashlib
+
+    import ydbdoc_review.harness.steps as steps_mod
+
+    source = "Принятый текст.\n"
+    existing = "Accepted text.\n{% include [asset](../asset.md) %}\n"
+    plan = CoveragePlan(
+        source_path="ydb/docs/ru/core/reused.md",
+        source_hash=hashlib.sha256(source.encode()).hexdigest(),
+        en_hash=hashlib.sha256(existing.encode()).hexdigest(),
+        units=(
+            CoverageUnit(
+                key="a" * 64,
+                action="reuse_verified",
+                source=source,
+                en_span=(0, len("Accepted text.\n")),
+                target="Accepted text.\n",
+                reason="exact verified receipt",
+            ),
+            CoverageUnit(
+                key="b" * 64,
+                action="materialize_protected",
+                source="{% include [asset](../asset.md) %}\n",
+                en_span=(len("Accepted text.\n"), len(existing)),
+                target="{% include [asset](../asset.md) %}\n",
+                reason="protected source structure",
+            ),
+        ),
+        required_fragments=frozenset(),
+        mode="units",
+    )
+    monkeypatch.setattr(
+        steps_mod,
+        "translate_segments",
+        MagicMock(side_effect=AssertionError("zero-call plan dispatched a model")),
+    )
+    ctx = HarnessContext.from_options(
+        MagicMock(), glossary=load_glossary(), config=load_config(
+            env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"}
+        )
+    )
+    state = FileRunState(
+        mode="translate",
+        file_path=plan.source_path,
+        raw_source_text=source,
+        source_text=source,
+        existing_target_text=existing,
+        coverage_plan=plan,
+    )
+    ParseStep().run(state, ctx)
+    with patch(
+        "ydbdoc_review.harness.steps._apply_en_structural_repair",
+        lambda *_args, **_kwargs: None,
+    ):
+        TranslateStep().run(state, ctx)
+
+    assert state.translated_text == existing
+    assert state.differential_meta["seeded"] == 1
+    assert state.differential_meta["pending"] == 0
+    assert state.differential_meta["protected"] == 1

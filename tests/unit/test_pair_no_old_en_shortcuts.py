@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
@@ -9,6 +10,7 @@ from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.translation.coverage import CoveragePlan, CoverageUnit
 from ydbdoc_review.translation.glossary import load_glossary
 
 
@@ -40,7 +42,7 @@ def _ctx() -> HarnessContext:
     )
 
 
-def _fake_harness(final_text: str, *, existing: str, calls: dict[str, int]):
+def _fake_harness(final_text: str, *, existing: str, calls: dict[str, object]):
     class _FakeHarness:
         def __init__(self, _profile):
             pass
@@ -48,6 +50,9 @@ def _fake_harness(final_text: str, *, existing: str, calls: dict[str, int]):
         def run(self, state, ctx):
             del ctx
             calls["n"] += 1
+            calls["coverage_mode"] = (
+                state.coverage_plan.mode if state.coverage_plan is not None else None
+            )
             assert state.existing_target_text == existing
             result = MagicMock()
             result.final_text = final_text
@@ -139,12 +144,31 @@ def test_run_pair_plan_localized_mirror_bait_still_full_translates() -> None:
     old_en = "See [{#T}](../a.md).\nLOCALIZED_MIRROR_OLD_EN\n"
     mirror_bait = "See [{#T}](../b.md).\nLOCALIZED_MIRROR_OLD_EN\n"
     fresh = "See [{#T}](../b.md).\nFULL_ONE_PASS_FROM_RU\n"
+    source = "См. [{#T}](../b.md).\n"
+    full_plan = CoveragePlan(
+        source_path=pair.ru_path,
+        source_hash=hashlib.sha256(source.encode()).hexdigest(),
+        en_hash=hashlib.sha256(old_en.encode()).hexdigest(),
+        units=(
+            CoverageUnit(
+                key="f" * 64,
+                action="translate_required",
+                source=source,
+                en_span=None,
+                target=None,
+                reason="atom drift requires full translation",
+            ),
+        ),
+        required_fragments=frozenset(),
+        mode="full",
+    )
     content = PairContent(
         pair=pair,
         ru_base_text="См. [{#T}](../a.md).\n",
-        ru_text="См. [{#T}](../b.md).\n",
+        ru_text=source,
         en_base_text=old_en,
         en_text=old_en,
+        coverage_plan=full_plan,
     )
     calls = {"n": 0}
     with (
@@ -162,6 +186,7 @@ def test_run_pair_plan_localized_mirror_bait_still_full_translates() -> None:
     # Preserve helper is not invoked on translate, so mirror is never consulted.
     mirror.assert_not_called()
     assert calls["n"] == 1
+    assert calls["coverage_mode"] == "full"
     assert result.target_text is not None
     assert "LOCALIZED_MIRROR_OLD_EN" not in result.target_text
     assert "FULL_ONE_PASS_FROM_RU" in result.target_text

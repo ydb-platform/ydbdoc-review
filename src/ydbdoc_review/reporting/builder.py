@@ -900,7 +900,43 @@ def build_translation_pr_body(
     )
     if provenance is not None:
         body = f"{body.rstrip()}\n\n{render_authority_evidence(provenance)}\n"
+    if publication_result is not None:
+        coverage = build_coverage_summary(publication_result)
+        if coverage:
+            body = f"{body.rstrip()}\n\n{coverage}\n"
     return body
+
+
+def build_coverage_summary(result: PRTranslationResult) -> str:
+    """Report real unit execution counts and conservative fallback reasons."""
+    reused = translated = protected = 0
+    fallback_reasons: list[str] = []
+    found = False
+    for run in result.pair_results:
+        if run.file_result is None:
+            continue
+        meta = run.file_result.differential_meta
+        if not meta or meta.get("mode") not in {"units", "full"}:
+            continue
+        found = True
+        reused += int(meta.get("seeded") or 0)
+        translated += int(meta.get("pending") or 0)
+        protected += int(meta.get("protected") or 0)
+        raw_reasons = meta.get("fallback_reasons") or ()
+        if isinstance(raw_reasons, (list, tuple)):
+            fallback_reasons.extend(str(reason) for reason in raw_reasons if reason)
+    if not found:
+        return ""
+    text = (
+        "**Coverage units:** "
+        f"reused {reused}, translated {translated}, protected {protected}."
+    )
+    reasons = tuple(dict.fromkeys(fallback_reasons))
+    if reasons:
+        text += "\n\n**Full-mode fallback reasons:**\n" + "".join(
+            f"\n- {reason}" for reason in reasons
+        )
+    return text
 
 
 def build_translate_handoff_comment(
@@ -1261,6 +1297,9 @@ def build_full_report(
         f"{checkout_line}"
         f"## Рекомендация: {rec_emoji} {rec_label}\n\n"
     )
+    coverage_summary = build_coverage_summary(result)
+    if coverage_summary:
+        header += coverage_summary + "\n\n"
 
     file_runs = [
         r for r in result.pair_results

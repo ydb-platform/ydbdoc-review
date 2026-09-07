@@ -71,6 +71,9 @@ class TranslationScopePlan:
         compare=False,
         repr=False,
     )
+    # Exact fragment obligations admitted by dependency closure. Ordinary
+    # links/includes deliberately do not authorize partial-page translation.
+    required_fragment_dependencies: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     @property
     def link_dep_warnings(self) -> tuple[str, ...]:
@@ -80,6 +83,13 @@ class TranslationScopePlan:
     @property
     def all_ru_paths(self) -> frozenset[str]:
         return self.doc_ru_paths | self.nav_ru_paths
+
+    def required_fragments_for(self, ru_path: str) -> frozenset[str]:
+        normalized = _norm(ru_path)
+        for path, fragments in self.required_fragment_dependencies:
+            if path == normalized:
+                return frozenset(fragments)
+        return frozenset()
 
 
 def _ancestor_ru_tocs(ru_md_path: str, *, docs_root: str) -> list[str]:
@@ -466,6 +476,7 @@ def plan_translation_scope(
     scanned_live_docs: set[str] = set()
     discovered_tocs: set[str] = set()
     nav_ru: set[str] = set()
+    required_fragment_dependencies: dict[str, set[str]] = {}
     first_round = True
     while True:
         live_docs = doc_ru - deleted_ru_md - tip_tombstone_ru
@@ -586,6 +597,7 @@ def plan_translation_scope(
                 ):
                     candidates.add(live)
 
+        candidate_fragments: dict[str, set[str]] = {}
         for ru_md in frontier:
             ru_text = read_ru(ru_md)
             scanned_live_docs.add(ru_md)
@@ -621,6 +633,8 @@ def plan_translation_scope(
                 )
                 if owner is not None:
                     candidates.add(owner)
+                    fragment = href.rsplit("#", 1)[1]
+                    candidate_fragments.setdefault(owner, set()).add(fragment)
 
         newly_admitted: set[str] = set()
         for target in sorted(candidates):
@@ -632,6 +646,10 @@ def plan_translation_scope(
             ):
                 doc_ru.add(target)
                 newly_admitted.add(target)
+                if target in candidate_fragments:
+                    required_fragment_dependencies.setdefault(target, set()).update(
+                        candidate_fragments[target]
+                    )
 
         first_round = False
         if not newly_admitted:
@@ -645,6 +663,11 @@ def plan_translation_scope(
             path
             for path in doc_ru
             if path not in tip_tombstone_ru or path in source_roots
+        }
+        required_fragment_dependencies = {
+            path: fragments
+            for path, fragments in required_fragment_dependencies.items()
+            if path in doc_ru
         }
 
     nav_from_diff = nav_ru & diff_ru_nav
@@ -661,6 +684,10 @@ def plan_translation_scope(
         nav_from_diff=frozenset(nav_from_diff),
         nav_from_main=nav_from_main,
         dependency_budget=budget,
+        required_fragment_dependencies=tuple(
+            (path, tuple(sorted(fragments)))
+            for path, fragments in sorted(required_fragment_dependencies.items())
+        ),
     )
 
 

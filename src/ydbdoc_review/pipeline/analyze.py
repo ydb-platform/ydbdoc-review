@@ -47,7 +47,7 @@ class PairContent:
     # REQUIREMENTS §10: tip RU/EN diverged after source PR → full overwrite.
     force_full_overwrite: bool = False
     tip_newer_warnings: tuple[str, ...] = ()
-    # Planning evidence only in Task 6. Execution remains full until Task 7.
+    # Proof-based Task 7 execution; None retains the exact legacy full path.
     coverage_plan: CoveragePlan | None = None
 
 
