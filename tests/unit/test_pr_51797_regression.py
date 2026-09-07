@@ -39,8 +39,8 @@ from ydbdoc_review.validation.en_link_targets import (
     check_en_page_link_targets,
 )
 from ydbdoc_review.validation.href_parity import (
-    _iter_visible_md_link_matches,
     check_outbound_fragments,
+    collect_internal_hrefs,
     reconcile_final_en_same_fragment_paths,
 )
 
@@ -381,64 +381,87 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     ) == []
 
 
-def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
+def test_pr_51079_translate_workflow_reconciles_internal_70_75_67_75_topology(
     tmp_path: Path,
 ):
-    """The real post-translation stage must call final EN reconciliation."""
+    """The real post-translation stage must run paragraph-local reconciliation."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test")
 
-    filler_ru = "".join(
-        f"[Справочная ссылка {index}](https://example.test/{index})\n"
-        for index in range(71)
+    filler_href = "../reference/configuration/filler.md"
+    ru_prefix = "".join(
+        f"[RU before {index}]({filler_href})\n" for index in range(12)
     )
-    filler_en = "".join(
-        f"[Reference link {index}](https://example.test/{index})\n"
-        for index in range(71)
+    ru_current_prefix = "".join(
+        f"[RU current before {index}]({filler_href})\n" for index in range(13)
     )
-    tip_filler_en = "".join(
-        f"[Tip reference {index}](https://example.test/tip-{index})\n"
-        for index in range(71)
+    ru_suffix = "".join(
+        f"[RU after {index}]({filler_href})\n" for index in range(55)
+    )
+    ru_current_suffix = "".join(
+        f"[RU current after {index}]({filler_href})\n" for index in range(58)
+    )
+    tip_prefix = "".join(
+        f"[EN tip before {index}]({filler_href})\n" for index in range(12)
+    )
+    tip_suffix = "".join(
+        f"[EN tip after {index}]({filler_href})\n" for index in range(52)
+    )
+    candidate_prefix = "".join(
+        f"[EN candidate before {index}]({filler_href})\n" for index in range(13)
+    )
+    candidate_suffix = "".join(
+        f"[EN candidate after {index}]({filler_href})\n" for index in range(58)
     )
     auth_ru_base = (
+        f"{ru_prefix}\n"
         "[Режим аутентификации]"
-        "(../reference/configuration/auth_config.md#security-auth)\n"
+        "(../reference/configuration/auth_config.md#security-auth)\n\n"
         "[Сертификат]"
         "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
         "[TLS]"
         "(../reference/ydb-cli/connect.md#tls)\n"
-        f"{filler_ru}"
+        f"{ru_suffix}"
     )
     auth_ru_current = (
-        auth_ru_base
+        f"{ru_current_prefix}\n"
+        "[Режим аутентификации]"
+        "(../reference/configuration/auth_config.md#security-auth)\n\n"
+        "[Сертификат]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/connect.md#tls)\n"
         + "[Мониторинг](../reference/configuration/monitoring_config.md#tls)\n"
+        + ru_current_suffix
     )
     auth_en_tip = (
+        f"{tip_prefix}\n"
         "[Authentication mode]"
-        "(../reference/configuration/security_config.md#security-auth)\n"
+        "(../reference/configuration/security_config.md#security-auth)\n\n"
         "[Certificate]"
         "(../reference/configuration/certificate_legacy.md#certificate-auth-config)\n"
         "[TLS]"
         "(../reference/ydb-cli/_includes/connect_legacy.md#tls)\n"
-        f"{tip_filler_en}"
+        f"{tip_suffix}"
     )
     auth_en_candidate = (
+        f"{candidate_prefix}\n"
         "[Authentication mode]"
-        "(../reference/configuration/auth_config.md#security-auth)\n"
+        "(../reference/configuration/auth_config.md#security-auth)\n\n"
         "[Certificate]"
         "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
         "[TLS]"
         "(../reference/ydb-cli/connect.md#tls)\n"
-        f"{filler_en}"
         "[Monitoring](../reference/configuration/monitoring_config.md#tls)\n"
+        f"{candidate_suffix}"
     )
-    assert len(list(_iter_visible_md_link_matches(auth_ru_base))) == 74
-    assert len(list(_iter_visible_md_link_matches(auth_ru_current))) == 75
-    assert len(list(_iter_visible_md_link_matches(auth_en_tip))) == 74
-    assert len(list(_iter_visible_md_link_matches(auth_en_candidate))) == 75
+    assert [
+        len(collect_internal_hrefs(text))
+        for text in (auth_ru_base, auth_ru_current, auth_en_tip, auth_en_candidate)
+    ] == [70, 75, 67, 75]
 
     owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
     owner_en = owner_ru.replace("/ru/", "/en/")
@@ -453,6 +476,8 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
     connect_legacy_en = "ydb/docs/en/core/reference/ydb-cli/_includes/connect_legacy.md"
     monitoring_ru = "ydb/docs/ru/core/reference/configuration/monitoring_config.md"
     monitoring_en = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
+    filler_ru = "ydb/docs/ru/core/reference/configuration/filler.md"
+    filler_en = filler_ru.replace("/ru/", "/en/")
     for rel, text in (
         (AUTH_RU, auth_ru_base),
         (AUTH_EN, auth_en_tip),
@@ -467,6 +492,8 @@ def test_pr_40385_translate_workflow_reconciles_literal_75_vs_74_topology(
         (connect_legacy_en, "## TLS {#tls}\n"),
         (monitoring_ru, "## Мониторинг {#tls}\n"),
         (monitoring_en, "## Monitoring\n"),
+        (filler_ru, "# Filler\n"),
+        (filler_en, "# Filler\n"),
         (
             "ydb/docs/en/core/toc_p.yaml",
             "items:\n"

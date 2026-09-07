@@ -816,19 +816,28 @@ def reconcile_final_en_same_fragment_paths(
     ):
         return en_candidate_text or ""
 
-    def _links(text: str) -> list[tuple[str, str, int, int, int, int]]:
-        return [
-            (
-                match.group(1),
-                match.group(2).strip(),
-                match.start(),
-                match.end(),
-                match.start(2),
-                match.end(2),
+    LinkOccurrence = tuple[str, str, int, int, int, int]
+
+    def _links(text: str) -> list[LinkOccurrence]:
+        links: list[LinkOccurrence] = []
+        for match in _iter_visible_md_link_matches(text):
+            destination = _markdown_destination_span(match.group(2))
+            if destination is None:
+                continue
+            local_start, local_end, href = destination
+            if not _is_internal_href(href):
+                continue
+            links.append(
+                (
+                    match.group(1),
+                    href,
+                    match.start(),
+                    match.end(),
+                    match.start(2) + local_start,
+                    match.start(2) + local_end,
+                )
             )
-            for match in _iter_visible_md_link_matches(text)
-            if _is_internal_href(match.group(2).strip())
-        ]
+        return links
 
     def _decoded_fragment(href: str) -> str | None:
         _path, marker, fragment = href.partition("#")
@@ -848,12 +857,20 @@ def reconcile_final_en_same_fragment_paths(
         target = page_path if not path_part else resolve_internal_md_href(page_path, href)
         if target is None:
             return False
+        docs_root = _en_page_docs_root(page_path.replace("/ru/", "/en/", 1))
+        if docs_root is None:
+            return False
         if "/docs/ru/" in page_path:
             # ``resolve_internal_md_href`` intentionally resolves an EN
             # counterpart for the ordinary translation contract. Here the
             # source-authority proof must instead inspect the immutable RU
             # projection at the equivalent locale path.
             target = target.replace("/docs/en/", "/docs/ru/", 1)
+            allowed_prefix = f"{docs_root}/ru/core/"
+        else:
+            allowed_prefix = f"{docs_root}/en/core/"
+        if not target.startswith(allowed_prefix):
+            return False
         target_text = reader(target)
         return target_text is not None and fragment_declared_in_markdown(
             target_text,
@@ -866,11 +883,6 @@ def reconcile_final_en_same_fragment_paths(
     ru_current_links = _links(ru_current_text)
     en_tip_links = _links(en_tip_text)
     candidate_links = _links(en_candidate_text)
-    if (
-        len(candidate_links) != len(ru_current_links)
-        or len(ru_base_links) != len(en_tip_links)
-    ):
-        return en_candidate_text
 
     base_keys = [_key(label, href) for label, href, *_offsets in ru_base_links]
     current_keys = [_key(label, href) for label, href, *_offsets in ru_current_links]
@@ -889,58 +901,163 @@ def reconcile_final_en_same_fragment_paths(
         for _label, href, *_offsets in en_tip_links
         if (fragment := _decoded_fragment(href)) is not None
     )
+    current_href_counts = Counter(unquote(href) for _label, href, *_ in ru_current_links)
+    candidate_href_counts = Counter(unquote(href) for _label, href, *_ in candidate_links)
+    current_fragment_counts = Counter(
+        fragment
+        for _label, href, *_offsets in ru_current_links
+        if (fragment := _decoded_fragment(href)) is not None
+    )
+    candidate_fragment_counts = Counter(
+        fragment
+        for _label, href, *_offsets in candidate_links
+        if (fragment := _decoded_fragment(href)) is not None
+    )
+
+    def _paragraph_span(text: str, occurrence: LinkOccurrence) -> tuple[int, int]:
+        start = 0
+        end = len(text)
+        for boundary in re.finditer(r"\n[ \t]*\n", text):
+            if boundary.end() <= occurrence[2]:
+                start = boundary.end()
+                continue
+            if boundary.start() >= occurrence[3]:
+                end = boundary.start()
+                break
+        return start, end
+
+    def _paragraph_path_skeleton(text: str, occurrence: LinkOccurrence) -> str:
+        paragraph_start, paragraph_end = _paragraph_span(text, occurrence)
+        path, separator, _fragment = occurrence[1].partition("#")
+        if not separator:
+            return ""
+        path_start = occurrence[4]
+        path_end = path_start + len(path)
+        return (
+            text[paragraph_start:path_start]
+            + "<historical-en-path>"
+            + text[path_end:paragraph_end]
+        )
 
     replacements: list[tuple[int, int, str]] = []
-    for slot, (
-        (_candidate_label, candidate_href, start, end, href_start, href_end),
-        (_current_label, current_href, *_current_offsets),
-    ) in enumerate(zip(candidate_links, ru_current_links, strict=True)):
-        # The final candidate must still be source-owned at this exact slot.
-        if unquote(candidate_href) != unquote(current_href):
-            continue
-        fragment = _decoded_fragment(candidate_href)
-        if fragment is None:
-            continue
-        key = current_keys[slot]
-        if current_key_counts[key] != 1 or base_key_counts[key] != 1:
-            continue
-        historical_slot = base_slot_by_key[key]
-        baseline_href = en_tip_links[historical_slot][1]
+    replaced_spans: set[tuple[int, int]] = set()
+
+    def _schedule_path_restore(
+        candidate: LinkOccurrence,
+        baseline_href: str,
+    ) -> None:
+        _label, candidate_href, start, end, href_start, _href_end = candidate
+        if (start, end) in replaced_spans:
+            return
+        if _resolves(ru_page_path, candidate_href, read_source_ru):
+            return
+        if _resolves(en_page_path, candidate_href, read_final_en):
+            return
+        if not _resolves(en_page_path, baseline_href, read_final_en):
+            return
+        baseline_path, separator, _baseline_fragment = baseline_href.partition("#")
+        candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
+        if not separator or not raw_candidate_fragment:
+            return
+        replacement = (
+            en_candidate_text[start:href_start]
+            + baseline_path
+            + en_candidate_text[href_start + len(candidate_path) : end]
+        )
+        replacements.append((start, end, replacement))
+        replaced_spans.add((start, end))
+
+    # Keep the existing positional proof when all four snapshots have aligned
+    # cardinality. It preserves established behavior for encoded fragments and
+    # other path-only fidelity cases.
+    if len(candidate_links) == len(ru_current_links) and len(ru_base_links) == len(
+        en_tip_links
+    ):
+        for slot, (candidate, current) in enumerate(
+            zip(candidate_links, ru_current_links, strict=True)
+        ):
+            candidate_href = candidate[1]
+            current_href = current[1]
+            if unquote(candidate_href) != unquote(current_href):
+                continue
+            fragment = _decoded_fragment(candidate_href)
+            if fragment is None:
+                continue
+            key = current_keys[slot]
+            if current_key_counts[key] != 1 or base_key_counts[key] != 1:
+                continue
+            historical_slot = base_slot_by_key[key]
+            baseline_href = en_tip_links[historical_slot][1]
+            if (
+                _decoded_fragment(current_href) != fragment
+                or _decoded_fragment(ru_base_links[historical_slot][1]) != fragment
+                or _decoded_fragment(baseline_href) != fragment
+                or base_fragment_counts[fragment] != 1
+                or tip_fragment_counts[fragment] != 1
+            ):
+                continue
+            _schedule_path_restore(candidate, baseline_href)
+
+    # Unequal document-wide counts do not disprove one stable occurrence. This
+    # fallback is deliberately paragraph-local: every source and candidate
+    # occurrence is unique, and the historical/candidate EN paragraphs must be
+    # identical after masking only this link path.
+    candidates_by_href: dict[str, list[LinkOccurrence]] = {}
+    for candidate in candidate_links:
+        candidates_by_href.setdefault(unquote(candidate[1]), []).append(candidate)
+    tip_by_fragment: dict[str, list[LinkOccurrence]] = {}
+    for tip in en_tip_links:
+        fragment = _decoded_fragment(tip[1])
+        if fragment is not None:
+            tip_by_fragment.setdefault(fragment, []).append(tip)
+
+    for current_slot, current in enumerate(ru_current_links):
+        current_href = current[1]
+        current_href_key = unquote(current_href)
+        key = current_keys[current_slot]
+        fragment = _decoded_fragment(current_href)
         if (
-            _decoded_fragment(current_href) != fragment
-            or _decoded_fragment(ru_base_links[historical_slot][1]) != fragment
-            or _decoded_fragment(baseline_href) != fragment
+            fragment is None
+            or current_key_counts[key] != 1
+            or base_key_counts[key] != 1
+            or current_href_counts[current_href_key] != 1
+            or candidate_href_counts[current_href_key] != 1
+            or current_fragment_counts[fragment] != 1
+            or candidate_fragment_counts[fragment] != 1
             or base_fragment_counts[fragment] != 1
             or tip_fragment_counts[fragment] != 1
         ):
             continue
-        # A source-owned target is authority. Only ambient broken RU paths may
-        # retain their historical EN owner.
-        if _resolves(ru_page_path, current_href, read_source_ru):
+        historical_ru = ru_base_links[base_slot_by_key[key]]
+        if _decoded_fragment(historical_ru[1]) != fragment:
             continue
-        if _resolves(en_page_path, candidate_href, read_final_en):
+        candidate = candidates_by_href[current_href_key][0]
+        baseline = tip_by_fragment[fragment][0]
+        if _decoded_fragment(candidate[1]) != fragment:
             continue
-        if not _resolves(en_page_path, baseline_href, read_final_en):
+        if _paragraph_path_skeleton(en_tip_text, baseline) != _paragraph_path_skeleton(
+            en_candidate_text,
+            candidate,
+        ):
             continue
-        baseline_path, separator, _baseline_fragment = baseline_href.partition("#")
-        candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
-        if not separator or not raw_candidate_fragment:
+        baseline_skeleton = _paragraph_path_skeleton(en_tip_text, baseline)
+        if not baseline_skeleton:
             continue
-        raw_href = en_candidate_text[href_start:href_end]
-        raw_path_offset = (
-            raw_href.find(candidate_path)
-            if candidate_path
-            else len(raw_href) - len(raw_href.lstrip())
-        )
-        if raw_path_offset < 0:
+        if (
+            sum(
+                _paragraph_path_skeleton(en_tip_text, occurrence) == baseline_skeleton
+                for occurrence in en_tip_links
+            )
+            != 1
+            or sum(
+                _paragraph_path_skeleton(en_candidate_text, occurrence)
+                == baseline_skeleton
+                for occurrence in candidate_links
+            )
+            != 1
+        ):
             continue
-        path_start = href_start + raw_path_offset
-        replacement = (
-            en_candidate_text[start:path_start]
-            + baseline_path
-            + en_candidate_text[path_start + len(candidate_path) :end]
-        )
-        replacements.append((start, end, replacement))
+        _schedule_path_restore(candidate, baseline[1])
 
     out = en_candidate_text
     for start, end, replacement in reversed(replacements):

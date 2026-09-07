@@ -6279,4 +6279,36 @@ and a fresh #51079 translation with independent content review, green verificati
 on one SHA remain pending.
 
 
+### §6.259 Paragraph-local historical EN path proof (#51079, R-GL-9..11, 2026-09-08)
+
+**Production failure:** Run `34167624121` published candidate `c0c96eb` with one inherited
+broken link in `security/authentication.md`. The unchanged RU occurrence pointed to
+`auth_config.md#security-auth`, while frozen tip EN correctly pointed to
+`security_config.md#security-auth`. The four immutable snapshots contained 70, 75, 67 and
+75 internal links. §6.252 required equal RU-base/tip-EN cardinality before aligning any
+historical occurrence, so the valid frozen EN path could not be reused.
+
+**Decision:** Keep §6.252 positional reconciliation when snapshot cardinalities align, but
+do not treat unrelated document-wide insertions or deletions as evidence against one link.
+The fallback requires one unique unchanged RU normalized-label plus decoded-full-href
+occurrence across R0 and R1, a unique identical decoded ASCII fragment in all relevant
+snapshots, and a candidate href equal to the current source href. The frozen and candidate
+EN paragraphs must become byte-identical after masking only that occurrence's href path.
+The historical destination must resolve inside the same `docs_root/en/core` tree, while
+the immutable current RU and candidate EN destinations must both remain broken.
+
+Ambiguous source lineage, duplicate fragments or paragraphs, changed source labels or
+hrefs, different paragraph content, existing link-contract issues, missing frozen
+evidence, targets outside the locale root, and deleted or fragmentless historical targets
+remain no-ops. Reconciliation changes only the raw path bytes. Candidate fragment spelling,
+link label, destination wrapper, optional title and surrounding bytes remain unchanged.
+The final link gate is not weakened.
+
+**Acceptance:** The production workflow regression now uses internal-link cardinalities
+70/75/67/75 and distinct immutable source-base, source-current and tip-EN refs. Focused tests
+also cover unrelated link edits around the paragraph, wrapper/title fidelity, semantic and
+occurrence ambiguity, source authority, already valid candidates, missing targets,
+contract issues and docs-root escape attempts.
+
+
 [← Memory Bank index](../../MEMORY_BANK.md)
