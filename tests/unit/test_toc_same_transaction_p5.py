@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.github.git_ops import git_commit_paths
 from ydbdoc_review.github.workflow import (
-    _apply_text_transaction,
-    _collect_candidate_changes,
-    _prepare_validated_candidate,
+    DocJobResult,
+    _apply_results_to_disk,
+    _publication_withheld,
+    job_requires_nonzero_exit,
 )
 from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.navigation_merge import merge_navigation_pair
 from ydbdoc_review.pipeline.pairs import DocPair, NavigationPair
-from ydbdoc_review.pipeline.types import NavigationRunResult, PairRunResult, PRTranslationResult
+from ydbdoc_review.pipeline.publication import refresh_publication_impact
+from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
+    NavigationRunResult,
+    PairRunResult,
+    PRTranslationResult,
+    PublicationImpact,
+)
 from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.validation.toc_targets import apply_orphan_toc_page_checks
 
 RU_TOC = "ydb/docs/ru/core/demo/toc_i.yaml"
 EN_TOC = "ydb/docs/en/core/demo/toc_i.yaml"
@@ -67,7 +78,62 @@ def _pair_result(en_path: str, target_text: str) -> PairRunResult:
         target_lang="en",
         summary="P5 §11.1",
     )
-    return PairRunResult(plan=plan, target_text=target_text)
+    file_result = FileTranslationResult(
+        file_path=en_path,
+        final_text=target_text,
+        segments_count=1,
+        verdict="ok",
+        prompt_version="v1",
+    )
+    return PairRunResult(plan=plan, target_text=target_text, file_result=file_result)
+
+
+def _write(repo: Path, relative_path: str, text: str) -> None:
+    target = repo / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+
+
+def _init_repo(tmp_path: Path, files: dict[str, str]) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True)
+    for relative_path, text in files.items():
+        _write(repo, relative_path, text)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=P5 Test",
+            "-c",
+            "user.email=p5@example.com",
+            "commit",
+            "-m",
+            "base",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    return repo
+
+
+def _commit_candidate(repo: Path, result: PRTranslationResult) -> tuple[str, ...]:
+    touched = _apply_results_to_disk(str(repo), result, dry_run=False)
+    assert git_commit_paths(
+        str(repo),
+        touched.written,
+        "P5 candidate",
+        "P5 Test",
+        "p5@example.com",
+        deleted_paths=touched.deleted,
+    )
+    committed_paths = subprocess.check_output(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+        cwd=repo,
+        text=True,
+    ).splitlines()
+    return tuple(committed_paths)
 
 
 def _scope_plan_for_new() -> TranslationScopePlan:
@@ -82,7 +148,14 @@ def _scope_plan_for_new() -> TranslationScopePlan:
 
 
 def test_toc_reachable_new_en_lands_in_en_toc_same_transaction(tmp_path: Path):
-    """§11.1 / §14: TOC-reachable new EN + EN TOC write share one apply transaction."""
+    """§11.1 / §14: validated new EN and EN TOC share one candidate commit."""
+    repo = _init_repo(
+        tmp_path,
+        {
+            EN_TOC: EN_TOC_INDEX_ONLY,
+            "ydb/docs/en/core/demo/index.md": "# Overview\n",
+        },
+    )
     client = MagicMock()
     glossary = load_glossary()
     pair = NavigationPair(ru_path=RU_TOC, en_path=EN_TOC, ru_changed=True, supplement_only=True)
@@ -104,7 +177,7 @@ def test_toc_reachable_new_en_lands_in_en_toc_same_transaction(tmp_path: Path):
     ):
         nav = merge_navigation_pair(
             pair,
-            repo_path=str(tmp_path),
+            repo_path=str(repo),
             merge_base_with="origin/main",
             client=client,
             glossary=glossary,
@@ -122,38 +195,29 @@ def test_toc_reachable_new_en_lands_in_en_toc_same_transaction(tmp_path: Path):
         pair_results=[_pair_result(EN_NEW, EN_NEW_BODY)],
         navigation_results=[nav],
     )
-    base = {
-        EN_TOC: EN_TOC_INDEX_ONLY,
-        "ydb/docs/en/core/demo/index.md": "# Overview\n",
-    }
-    overlay = _collect_candidate_changes(result, base.get)
-    assert EN_NEW in overlay.writes
-    assert EN_TOC in overlay.writes
-    assert "new.md" in overlay.writes[EN_TOC]
+    assert apply_orphan_toc_page_checks(result, repo_path=str(repo)) == []
+    assert refresh_publication_impact(result) == PublicationImpact.PUBLISH_NORMAL
 
-    prepared = _prepare_validated_candidate(
-        result,
-        repo_path=str(tmp_path),
-        read_base=base.get,
-        base_paths=frozenset(base),
-    )
-    assert prepared.ok, prepared.issues
-    assert EN_NEW in prepared.overlay.writes
-    assert EN_TOC in prepared.overlay.writes
-    assert "new.md" in prepared.overlay.writes[EN_TOC]
-
-    # Same atomic text transaction writes both the page and the TOC.
-    touched = _apply_text_transaction(str(tmp_path), prepared.overlay)
-    assert EN_NEW in touched.written
-    assert EN_TOC in touched.written
-    assert (tmp_path / EN_NEW).read_text(encoding="utf-8") == EN_NEW_BODY
-    toc_on_disk = (tmp_path / EN_TOC).read_text(encoding="utf-8")
+    committed_paths = _commit_candidate(repo, result)
+    assert set(committed_paths) == {EN_NEW, EN_TOC}
+    assert subprocess.check_output(
+        ["git", "rev-list", "--count", "HEAD"], cwd=repo, text=True
+    ).strip() == "2"
+    assert (repo / EN_NEW).read_text(encoding="utf-8") == EN_NEW_BODY
+    toc_on_disk = (repo / EN_TOC).read_text(encoding="utf-8")
     assert "new.md" in toc_on_disk
     assert "New" in toc_on_disk
 
 
 def test_orphan_en_not_forced_into_en_toc(tmp_path: Path):
-    """§11.1: RU file outside TOC reachability does not require an EN TOC entry."""
+    """§11.1: an orphan candidate is withheld, not partially published as success."""
+    repo = _init_repo(
+        tmp_path,
+        {
+            EN_TOC: EN_TOC_INDEX_ONLY,
+            "ydb/docs/en/core/demo/index.md": "# Overview\n",
+        },
+    )
     client = MagicMock()
     glossary = load_glossary()
     pair = NavigationPair(ru_path=RU_TOC, en_path=EN_TOC, ru_changed=True, supplement_only=True)
@@ -182,7 +246,7 @@ def test_orphan_en_not_forced_into_en_toc(tmp_path: Path):
     ):
         nav = merge_navigation_pair(
             pair,
-            repo_path=str(tmp_path),
+            repo_path=str(repo),
             merge_base_with="origin/main",
             client=client,
             glossary=glossary,
@@ -199,13 +263,24 @@ def test_orphan_en_not_forced_into_en_toc(tmp_path: Path):
         pair_results=[_pair_result(EN_ORPHAN, EN_ORPHAN_BODY)],
         navigation_results=[nav] if nav.target_text is not None else [],
     )
-    overlay = _collect_candidate_changes(result, {EN_TOC: EN_TOC_INDEX_ONLY}.get)
-    assert EN_ORPHAN in overlay.writes
-    assert EN_TOC not in overlay.writes
+    orphan_paths = apply_orphan_toc_page_checks(result, repo_path=str(repo))
+    result.completeness_gaps = orphan_paths
+
+    assert orphan_paths == [EN_ORPHAN]
+    assert refresh_publication_impact(result) == PublicationImpact.WITHHOLD_INCOMPLETE
+    assert _publication_withheld(result)
+    assert job_requires_nonzero_exit(
+        DocJobResult(mode="doc_translate", pr_number=5, pr_result=result)
+    )
+    assert not (repo / EN_ORPHAN).exists()
+    assert (repo / EN_TOC).read_text(encoding="utf-8") == EN_TOC_INDEX_ONLY
+    assert subprocess.check_output(
+        ["git", "rev-list", "--count", "HEAD"], cwd=repo, text=True
+    ).strip() == "1"
 
 
 def test_redirect_update_shares_transaction_with_new_en(tmp_path: Path):
-    """§11.1: when redirects must change, they join the same overlay as new EN."""
+    """§11.1: page, TOC, and redirects join one validated candidate commit."""
     ru_base = dedent("""
         - from: /docs/old
           to: /docs/index
@@ -221,6 +296,14 @@ def test_redirect_update_shares_transaction_with_new_en(tmp_path: Path):
           to: /docs/index
     """).strip()
 
+    repo = _init_repo(
+        tmp_path,
+        {
+            EN_TOC: EN_TOC_INDEX_ONLY,
+            EN_REDIRECTS: en_main,
+            "ydb/docs/en/core/demo/index.md": "# Overview\n",
+        },
+    )
     client = MagicMock()
     glossary = load_glossary()
     pair = NavigationPair(ru_path=RU_REDIRECTS, en_path=EN_REDIRECTS, ru_changed=True)
@@ -237,7 +320,7 @@ def test_redirect_update_shares_transaction_with_new_en(tmp_path: Path):
     ):
         nav = merge_navigation_pair(
             pair,
-            repo_path=str(tmp_path),
+            repo_path=str(repo),
             merge_base_with="origin/main",
             client=client,
             glossary=glossary,
@@ -260,14 +343,13 @@ def test_redirect_update_shares_transaction_with_new_en(tmp_path: Path):
         pair_results=[_pair_result(EN_NEW, EN_NEW_BODY)],
         navigation_results=[toc_nav, nav],
     )
-    overlay = _collect_candidate_changes(result, {EN_TOC: EN_TOC_INDEX_ONLY, EN_REDIRECTS: en_main}.get)
-    assert EN_NEW in overlay.writes
-    assert EN_TOC in overlay.writes
-    assert EN_REDIRECTS in overlay.writes
-    assert "new.md" in overlay.writes[EN_TOC]
-    assert "/docs/legacy-new" in overlay.writes[EN_REDIRECTS]
+    assert apply_orphan_toc_page_checks(result, repo_path=str(repo)) == []
+    assert refresh_publication_impact(result) == PublicationImpact.PUBLISH_NORMAL
 
-    touched = _apply_text_transaction(str(tmp_path), overlay)
-    assert {EN_NEW, EN_TOC, EN_REDIRECTS} <= set(touched.written)
-    assert "new.md" in (tmp_path / EN_TOC).read_text(encoding="utf-8")
-    assert "/docs/legacy-new" in (tmp_path / EN_REDIRECTS).read_text(encoding="utf-8")
+    committed_paths = _commit_candidate(repo, result)
+    assert set(committed_paths) == {EN_NEW, EN_TOC, EN_REDIRECTS}
+    assert subprocess.check_output(
+        ["git", "rev-list", "--count", "HEAD"], cwd=repo, text=True
+    ).strip() == "2"
+    assert "new.md" in (repo / EN_TOC).read_text(encoding="utf-8")
+    assert "/docs/legacy-new" in (repo / EN_REDIRECTS).read_text(encoding="utf-8")
