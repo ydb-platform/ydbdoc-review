@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -183,6 +183,99 @@ def test_current_en_drift_rejects_matching_receipt(
         source_path=path,
         source_text="Источник.\n",
         existing_en="Newer accepted EN repair.\n",
+        authority=current_authority,
+        verified_units=(verified,),
+        checkpoint_identity=identity,
+    )
+
+    assert result.mode == "full"
+    assert not any(unit.action == "reuse_verified" for unit in result.units)
+
+
+@pytest.mark.parametrize(
+    ("source", "existing_en"),
+    [
+        pytest.param(
+            "Source.\n",
+            "Target.\n\n```yaml\nx: y\n```\n",
+            id="additional-en-atom",
+        ),
+        pytest.param(
+            "Source.\n",
+            "Target.\n\n[Additional](extra.md)\n",
+            id="additional-en-inline-atom",
+        ),
+        pytest.param(
+            "Source.\n\n```yaml\nx: y\n```\n",
+            "Target.\n",
+            id="missing-en-atom",
+        ),
+        pytest.param(
+            "Source.\n\n```yaml\nx: y\n```\n\n{% include [x](required.md) %}\n",
+            "Target.\n\n{% include [x](required.md) %}\n\n```yaml\nx: y\n```\n",
+            id="reordered-en-atoms",
+        ),
+        pytest.param(
+            "Source.\n\n```yaml\nx: y\n```\n",
+            "Target.\n\n```yaml\nx: changed\n```\n",
+            id="changed-en-atom-value",
+        ),
+        pytest.param(
+            "Source.\n\n```yaml\nx: y\n```\n",
+            "Target.\n\n<div>x: y</div>\n",
+            id="changed-en-atom-type",
+        ),
+        pytest.param(
+            "Source.\n\n```yaml\nx: y\n```\n\n```yaml\nx: y\n```\n",
+            "Target.\n\n```yaml\nx: y\n```\n\n```yaml\nx: y\n```\n",
+            id="ambiguous-duplicate-atoms",
+        ),
+    ],
+)
+def test_document_protected_atom_drift_rejects_reuse(
+    current_authority: RuAuthority,
+    source: str,
+    existing_en: str,
+) -> None:
+    path = "ydb/docs/ru/a.md"
+    identity = _identity(current_authority)
+    verified = _verified_unit(
+        source_text=source,
+        target="Target.",
+        source_path=path,
+        identity=identity,
+    )
+
+    result = plan_source_coverage(
+        source_path=path,
+        source_text=source,
+        existing_en=existing_en,
+        authority=current_authority,
+        verified_units=(verified,),
+        checkpoint_identity=identity,
+    )
+
+    assert result.mode == "full"
+    assert not any(unit.action == "reuse_verified" for unit in result.units)
+
+
+def test_cross_type_protected_atom_reorder_rejects_reuse(
+    current_authority: RuAuthority,
+) -> None:
+    path = "ydb/docs/ru/a.md"
+    identity = _identity(current_authority)
+    source = "Source [link](required.md).\n\n```yaml\nx: y\n```\n"
+    verified = _verified_unit(
+        source_text=source,
+        target="Target ⟦L1⟧link⟦L1⟧.",
+        source_path=path,
+        identity=identity,
+    )
+
+    result = plan_source_coverage(
+        source_path=path,
+        source_text=source,
+        existing_en="```yaml\nx: y\n```\n\nTarget [link](required.md).\n",
         authority=current_authority,
         verified_units=(verified,),
         checkpoint_identity=identity,
@@ -390,7 +483,7 @@ def test_protected_only_asset_materializes_deterministically(
     assert result.units[0].target == source
 
 
-def test_required_50704_fragment_preserves_later_52355_en_repair(
+def test_required_50704_fragment_preserves_unrelated_accepted_en_section(
     current_authority: RuAuthority,
 ) -> None:
     source = (
@@ -403,7 +496,7 @@ def test_required_50704_fragment_preserves_later_52355_en_repair(
     existing = (
         "# Glossary {#glossary}\n\nIntroduction.\n\n"
         "## Previous {#previous}\n\nExisting accepted prose.\n\n"
-        "## Next {#next}\n\nNewer accepted EN repair from #52355.\n"
+        "## Next {#next}\n\nUnrelated accepted EN repair.\n"
     )
 
     result = plan_source_coverage(
@@ -425,10 +518,48 @@ def test_required_50704_fragment_preserves_later_52355_en_repair(
     )
     insertion = existing.index("## Next {#next}")
     assert unit.en_span == (insertion, insertion)
-    assert existing[unit.en_span[1] :] == (
-        "## Next {#next}\n\nNewer accepted EN repair from #52355.\n"
-    )
+    assert existing[unit.en_span[1] :] == ("## Next {#next}\n\nUnrelated accepted EN repair.\n")
     assert unit.target is None
+
+
+def test_explicit_later_ru_only_auth_config_drift_stays_outside_coverage_scope(
+    current_authority: RuAuthority,
+) -> None:
+    source_authority = replace(
+        current_authority,
+        ru_sha=current_authority.source_head_sha,
+        mode=RuAuthorityMode.SOURCE_PRESERVING,
+    )
+    source_at_h = "Use parameter auth-mode.\n"
+    later_ru_only_at_b = "Use parameter `auth-mode`.\n"
+    plan = plan_source_coverage(
+        source_path="ydb/docs/ru/core/security/auth_config.md",
+        source_text=source_at_h,
+        existing_en="Use the auth-mode parameter.\n",
+        authority=source_authority,
+    )
+    warning = "fixture attribution: later RU-only PR #52355 H-to-B drift in auth_config"
+    content = PairContent(
+        pair=DocPair(
+            ru_path=plan.source_path,
+            en_path="ydb/docs/en/core/security/auth_config.md",
+            ru_changed=True,
+        ),
+        ru_text=source_at_h,
+        tip_newer_warnings=(warning,),
+        coverage_plan=plan,
+    )
+
+    assert content.tip_newer_warnings == (warning,)
+    assert content.coverage_plan is not None
+    assert content.coverage_plan.source_path.endswith("/auth_config.md")
+    assert content.coverage_plan.source_hash == hashlib.sha256(source_at_h.encode()).hexdigest()
+    assert content.coverage_plan.required_fragments == frozenset()
+    assert tuple(unit.source for unit in content.coverage_plan.units) == (
+        "Use parameter auth-mode.",
+    )
+    assert all(unit.action != "reuse_verified" for unit in content.coverage_plan.units)
+    assert all(later_ru_only_at_b not in unit.source for unit in content.coverage_plan.units)
 
 
 @pytest.mark.parametrize(
@@ -571,6 +702,55 @@ def test_decoder_rejects_overlapping_en_spans() -> None:
         decode_coverage_plan(json.dumps(payload).encode())
 
 
+@pytest.mark.parametrize("offset", [0, len("Existing target.")])
+def test_decoder_rejects_insertion_at_replacement_boundary(offset: int) -> None:
+    payload = json.loads(encode_coverage_plan(_portable_plan()))
+    insertion = dict(payload["units"][0])
+    insertion.update(
+        action="translate_required",
+        en_span=[offset, offset],
+        key="3" * 64,
+        source="Вставка.",
+        target=None,
+    )
+    payload["units"].append(insertion)
+
+    with pytest.raises(ValueError, match="overlap"):
+        decode_coverage_plan(json.dumps(payload).encode())
+
+
+def test_decoder_rejects_multiple_insertions_at_same_offset() -> None:
+    payload = json.loads(encode_coverage_plan(_portable_plan()))
+    payload["units"][0].update(
+        action="translate_required",
+        en_span=[len("Existing target.\n"), len("Existing target.\n")],
+        target=None,
+    )
+    duplicate = dict(payload["units"][0])
+    duplicate["key"] = "3" * 64
+    payload["units"].append(duplicate)
+
+    with pytest.raises(ValueError, match="overlap"):
+        decode_coverage_plan(json.dumps(payload).encode())
+
+
+def test_decoder_accepts_nonoverlapping_replacement_and_insertion() -> None:
+    payload = json.loads(encode_coverage_plan(_portable_plan()))
+    insertion = dict(payload["units"][0])
+    insertion.update(
+        action="translate_required",
+        en_span=[len("Existing target.\n"), len("Existing target.\n")],
+        key="3" * 64,
+        source="Вставка.",
+        target=None,
+    )
+    payload["units"].append(insertion)
+
+    decoded = decode_coverage_plan(json.dumps(payload).encode())
+
+    assert decoded.units[1].en_span == (17, 17)
+
+
 def test_decoder_requires_en_hash_and_spans_for_units_mode() -> None:
     payload = json.loads(encode_coverage_plan(_portable_plan()))
     payload["en_hash"] = None
@@ -586,6 +766,39 @@ def test_decoder_rejects_edit_spans_in_full_mode() -> None:
 
     with pytest.raises(ValueError, match=r"full.*span"):
         decode_coverage_plan(json.dumps(payload).encode())
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        "",
+        "/absolute.md",
+        "../outside.md",
+        "a/../outside.md",
+        "a/./b.md",
+        "a//b.md",
+        "a/b.md/",
+        r"a\b.md",
+        "C:/outside.md",
+        ".",
+    ],
+)
+def test_decoder_rejects_noncanonical_or_non_repo_relative_source_path(
+    source_path: str,
+) -> None:
+    payload = json.loads(encode_coverage_plan(_portable_plan()))
+    payload["source_path"] = source_path
+
+    with pytest.raises(ValueError, match="source_path"):
+        decode_coverage_plan(json.dumps(payload).encode())
+
+
+def test_decoder_accepts_canonical_repo_relative_source_path() -> None:
+    plan = _portable_plan()
+
+    decoded = decode_coverage_plan(encode_coverage_plan(plan))
+
+    assert decoded.source_path == "ydb/docs/ru/a.md"
 
 
 def test_pair_content_carries_plan_without_changing_pair_planning() -> None:

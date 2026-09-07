@@ -30,7 +30,9 @@ from ydbdoc_review.parsing.ast_types import (
     HTMLBlock,
     IndentedCode,
     OrderedList,
+    Paragraph,
     Table,
+    TermDefinition,
     ThematicBreak,
     YfmCut,
     YfmIf,
@@ -407,15 +409,14 @@ def _materialize_protected_text(segment: Segment) -> str:
 
 def _protected_structure_is_proven(source: Document, target: Document) -> bool:
     source_atoms = _document_atoms(source)
-    target_atoms = _document_atoms(target)
-    for atom in set(source_atoms):
-        if source_atoms.count(atom) != 1 or target_atoms.count(atom) != 1:
-            return False
-    return True
+    return len(source_atoms) == len(set(source_atoms)) and source_atoms == _document_atoms(target)
 
 
 def _document_atoms(document: Document) -> tuple[tuple[str, str], ...]:
     atoms: list[tuple[str, str]] = []
+    inline_atoms = {
+        tuple(segment.ast_path): _atom_signature(segment) for segment in extract_segments(document)
+    }
 
     def add(kind: str, payload: object) -> None:
         atoms.append(
@@ -425,10 +426,18 @@ def _document_atoms(document: Document) -> tuple[tuple[str, str], ...]:
             )
         )
 
-    def walk(blocks: list[BlockNode]) -> None:
-        for block in blocks:
-            if isinstance(block, Heading) and block.anchor is not None:
-                add("heading_anchor", [block.level, block.anchor])
+    def add_inline(path: tuple[int | str, ...]) -> None:
+        atoms.extend(inline_atoms.pop(path, ()))
+
+    def walk(blocks: list[BlockNode], path: tuple[int | str, ...] = ()) -> None:
+        for index, block in enumerate(blocks):
+            block_path = (*path, index)
+            if isinstance(block, Heading):
+                if block.anchor is not None:
+                    add("heading_anchor", [block.level, block.anchor])
+                add_inline(block_path)
+            elif isinstance(block, (Paragraph, TermDefinition)):
+                add_inline(block_path)
             elif isinstance(block, FencedCode):
                 add("fenced_code", block.model_dump(mode="json"))
             elif isinstance(block, IndentedCode):
@@ -442,22 +451,31 @@ def _document_atoms(document: Document) -> tuple[tuple[str, str], ...]:
             elif isinstance(block, (BlockQuote, YfmCut, YfmNote)):
                 if isinstance(block, YfmNote):
                     add("yfm_note", block.note_type)
-                walk(block.children)
+                    add_inline((*block_path, "title"))
+                walk(block.children, block_path)
             elif isinstance(block, YfmIf):
-                for branch in block.branches:
+                for branch_index, branch in enumerate(block.branches):
                     add("yfm_if", branch.condition)
-                    walk(branch.children)
+                    walk(branch.children, (*block_path, branch_index))
             elif isinstance(block, YfmTabs):
                 add("yfm_tabs", block.variant)
-                for tab in block.children:
-                    walk(tab.children)
+                for tab_index, tab in enumerate(block.children):
+                    add_inline((*block_path, tab_index, "title"))
+                    walk(tab.children, (*block_path, tab_index))
             elif isinstance(block, (BulletList, OrderedList)):
-                for item in block.children:
-                    walk(item.children)
+                for item_index, item in enumerate(block.children):
+                    walk(item.children, (*block_path, item_index))
             elif isinstance(block, Table):
                 add("table_shape", [len(block.header.cells), block.aligns])
+                for column_index in range(len(block.header.cells)):
+                    add_inline((*block_path, "header", column_index))
+                for row_index, row in enumerate(block.rows):
+                    for column_index in range(len(row.cells)):
+                        add_inline((*block_path, "row", row_index, column_index))
 
     walk(document.children)
+    if any(inline_atoms.values()):
+        add("unmapped_inline_atoms", sorted(inline_atoms.items(), key=lambda item: str(item[0])))
     return tuple(atoms)
 
 
@@ -853,7 +871,14 @@ def decode_coverage_plan(data: bytes) -> CoveragePlan:
 
 
 def _validate_plan(plan: CoveragePlan) -> None:
-    if type(plan.source_path) is not str or not plan.source_path or "\\" in plan.source_path:
+    if (
+        type(plan.source_path) is not str
+        or not plan.source_path
+        or "\\" in plan.source_path
+        or plan.source_path.startswith("/")
+        or any(part in {"", ".", ".."} for part in plan.source_path.split("/"))
+        or re.fullmatch(r"[A-Za-z]:", plan.source_path.split("/", 1)[0]) is not None
+    ):
         raise ValueError("coverage plan source_path is malformed")
     _require_hash(plan.source_hash, field="source_hash")
     if plan.en_hash is not None:
@@ -916,6 +941,13 @@ def _validate_plan(plan: CoveragePlan) -> None:
         if start < previous_end:
             raise ValueError("coverage unit spans overlap")
         previous_end = max(previous_end, end)
+    replacements = [(start, end) for start, end in spans if start < end]
+    if any(
+        replacement_start <= insertion <= replacement_end
+        for insertion in zero_offsets
+        for replacement_start, replacement_end in replacements
+    ):
+        raise ValueError("coverage unit spans overlap at replacement boundary")
 
 
 def _strict_object(value: object, *, field: str, keys: set[str]) -> dict[str, Any]:
