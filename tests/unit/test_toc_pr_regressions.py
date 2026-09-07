@@ -958,11 +958,17 @@ def test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base():
     """).strip()
     ru_toc = en_at_head  # RU still has WITH
 
+    def fake_resolve(_repo: str, ref: str) -> str:
+        return {
+            "origin/main": "main-tip-sha",
+            "HEAD": "head-sha",
+        }[ref]
+
     def fake_read(_repo: str, ref: str, path: str) -> str | None:
         if "en/" in path and path.endswith("toc_i.yaml"):
-            if ref in {"origin/main", "main", "refs/remotes/origin/main"}:
+            if ref == "main-tip-sha":
                 return en_at_main
-            if ref in {"HEAD", "merge-base-sha"}:
+            if ref in {"head-sha", "merge-base-sha"}:
                 return en_at_head
         if "ru/" in path and path.endswith("toc_i.yaml"):
             return ru_toc
@@ -976,12 +982,12 @@ def test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base():
             return_value="merge-base-sha",
         ),
         patch(
-            "ydbdoc_review.github.git_ops.read_text_at_ref",
-            side_effect=fake_read,
+            "ydbdoc_review.github.git_ops.resolve_commit_ref",
+            side_effect=fake_resolve,
         ),
         patch(
-            "ydbdoc_review.github.git_ops.read_text",
-            return_value=None,
+            "ydbdoc_review.github.git_ops.read_text_at_commit",
+            side_effect=fake_read,
         ),
     ):
         _read_ru, read_en_base, _read_ru_base = make_repo_scope_readers(
