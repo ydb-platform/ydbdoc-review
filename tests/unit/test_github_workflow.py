@@ -17,6 +17,7 @@ from ydbdoc_review.github.git_ops import (
     RefMutationStatus,
     RemoteRefLease,
 )
+from ydbdoc_review.github.pr import PullRequestContext
 from ydbdoc_review.github.provenance import (
     RuAuthority,
     TranslationArtifactProvenance,
@@ -686,6 +687,65 @@ def test_direct_gate_skipping_verify_cannot_inject_continue_context(git_repo: st
                 config=load_config(env=_env()),
                 skip_ops_gates=True,
                 ops_mode="continue",
+                _ops_ctx=ops_ctx,
+            )
+
+
+def test_external_verify_cannot_forge_recursive_continue_admission(git_repo: str):
+    """Public recursion-shaped arguments cannot authorize gate skipping."""
+    initial_sha = _head_sha(git_repo)
+    supplied_context = PullRequestContext(
+        owner="o",
+        repo="r",
+        number=50840,
+        title="Critic fixes for #40385",
+        head_ref="ydbdoc-review/verify-40385",
+        head_sha=initial_sha,
+        head_repo_full_name="o/r",
+        head_repo_https_url="https://github.com/o/r.git",
+        base_ref="main",
+        base_sha=initial_sha,
+    )
+    mark_continuable(
+        git_repo,
+        source_pr=40385,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": initial_sha, "head": initial_sha},
+        translation_pr=50840,
+    )
+    ops_ctx = SimpleNamespace(
+        store=InMemoryTranscriptStore(),
+        run_id="continue-run",
+        parent_run_id="parent-run",
+        mode="continue",
+        repo="o/r",
+        source_pr=40385,
+    )
+    with (
+        patch("ydbdoc_review.github.workflow.GitHubClient"),
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            side_effect=AssertionError("external call opened a second job"),
+        ),
+        patch(
+            "ydbdoc_review.github.workflow._snapshot_destination_lease",
+            side_effect=AssertionError("forged call reached verify work"),
+        ),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="continue ops admission cannot be skipped by an external verify",
+        ):
+            run_doc_verify(
+                repo_path=git_repo,
+                github_repo="o/r",
+                pr_number=50840,
+                merge_base_with="HEAD",
+                config=load_config(env=_env()),
+                skip_ops_gates=True,
+                ops_mode="continue",
+                _fixup_rerun_depth=1,
+                _inline_fixup_context=supplied_context,
                 _ops_ctx=ops_ctx,
             )
 

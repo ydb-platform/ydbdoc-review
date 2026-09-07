@@ -113,6 +113,36 @@ backends, and `XDG_CACHE_HOME` under `/private/tmp`:
 - recursive frozen-wrapper/fixup contract: 30 passed in 185.43s;
 - Ruff with the documented `RUF001` exception and `git diff --check`: passed.
 
+## Second independent-review repair
+
+The first lifecycle follow-up still derived recursive trust exclusively from
+three public call arguments: `skip_ops_gates=True`, a positive
+`_fixup_rerun_depth`, and `_inline_fixup_context`. An external caller could
+forge that complete tuple together with a matching `_ops_ctx` and valid saved
+continuability, bypass `begin_ops_job`, and reach verify work.
+
+The regression test supplies that exact tuple and first failed at
+`_snapshot_destination_lease`, proving the bypass reached content work. The
+recursive path now carries a unique capability that must match the capability
+active only for the dynamic extent of the parent call's recursive dispatch.
+Public recursion-shaped arguments alone cannot activate that scope. The
+capability is reset in `finally` on both the ordinary rerun and final read-only
+rerun paths.
+
+Fresh final evidence, with `PYTHONPATH=src`, memory persistence backends, and a
+separate `XDG_CACHE_HOME` under `/private/tmp` for every command:
+
+- exact forged tuple and adjacent internal-entry controls: 7 passed;
+- mandatory workflow/job-state/lifecycle/resume gate: 89 passed in 21.45s;
+- checkpoint/source-preserving/resume gate: 90 passed in 12.73s;
+- recursive frozen-wrapper/fixup contract: 30 passed in 202.31s;
+- Ruff with the documented `RUF001` exception and `git diff --check`: passed.
+
+The positive recursive lifecycle test still covers both terminal shapes. Each
+opens exactly one job, finishes exactly once, writes one real in-memory ledger
+record and terminal transcript manifest, clears continuability on a clean
+result, and retains it for a terminal blocker.
+
 ## Scope and exclusions
 
 Changed product code only in `src/ydbdoc_review/github/workflow.py`; tests only

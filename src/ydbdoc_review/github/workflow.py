@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import NoReturn
@@ -211,6 +212,10 @@ logger = logging.getLogger(__name__)
 _GITHUB_ACTOR_NAME = "github-actions[bot]"
 _GITHUB_ACTOR_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 _REPORT_MARKER = "ydbdoc-review — отчёт"
+_ACTIVE_VERIFY_RERUN_CAPABILITY: ContextVar[object | None] = ContextVar(
+    "ydbdoc_review_active_verify_rerun_capability",
+    default=None,
+)
 
 
 def _merge_yellow_warnings(
@@ -3338,6 +3343,7 @@ def run_doc_verify(
     _inline_fixup_context: PullRequestContext | None = None,
     _coverage_store: TranscriptStore | None = None,
     _ops_ctx: OpsContext | None = None,
+    _verify_rerun_capability: object | None = None,
 ) -> DocJobResult:
     """``doc_verify`` on a translation PR, bilingual source PR, or verify fixup.
 
@@ -3353,8 +3359,20 @@ def run_doc_verify(
     api_token, push_token = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
     gh = GitHubClient(api_token)
+    active_rerun_capability = _ACTIVE_VERIFY_RERUN_CAPABILITY.get()
+    internal_recursive_verify = (
+        active_rerun_capability is not None
+        and _verify_rerun_capability is active_rerun_capability
+        and skip_ops_gates
+        and _fixup_rerun_depth > 0
+        and _inline_fixup_context is not None
+    )
     if _inline_fixup_context is not None:
-        if _fixup_rerun_depth <= 0 or not skip_ops_gates:
+        if not internal_recursive_verify:
+            if ops_mode == "continue" and skip_ops_gates:
+                raise RuntimeError(
+                    "continue ops admission cannot be skipped by an external verify"
+                )
             raise RuntimeError(
                 "inline fixup context requires an internal recursive verify"
             )
@@ -3415,11 +3433,6 @@ def run_doc_verify(
         merge_base_with = requested_merge_base_sha
 
     ops_ctx = _ops_ctx
-    internal_recursive_verify = (
-        skip_ops_gates
-        and _fixup_rerun_depth > 0
-        and _inline_fixup_context is not None
-    )
     if ops_mode == "continue" and skip_ops_gates and not internal_recursive_verify:
         raise RuntimeError(
             "continue ops admission cannot be skipped by an external verify"
@@ -4371,30 +4384,15 @@ def run_doc_verify(
                 "running one final read-only doc_verify on the new head",
                 pr_number,
             )
-            return run_doc_verify(
-                repo_path=repo_path,
-                github_repo=github_repo,
-                pr_number=pr_number,
-                merge_base_with=merge_base_with,
-                dry_run=False,
-                no_commit=no_commit,
-                config=cfg,
-                inherited_completeness_gaps=pr_result.completeness_gaps,
-                inherited_final_tree_blockers=pr_result.final_tree_blockers,
-                continue_feedback=continue_feedback,
-                skip_ops_gates=True,
-                ops_mode=ops_mode,
-                _fixup_rerun_depth=_fixup_rerun_depth + 1,
-                _inline_fixup_context=next_inline_context,
-                _coverage_store=trusted_coverage_store,
-                _ops_ctx=ops_ctx,
-            )
         else:
             logger.info(
                 "Inline critic fix changed PR #%s head; re-running doc_verify (%s/2)",
                 pr_number,
                 _fixup_rerun_depth + 1,
             )
+        rerun_capability = object()
+        capability_token = _ACTIVE_VERIFY_RERUN_CAPABILITY.set(rerun_capability)
+        try:
             return run_doc_verify(
                 repo_path=repo_path,
                 github_repo=github_repo,
@@ -4412,7 +4410,10 @@ def run_doc_verify(
                 _inline_fixup_context=next_inline_context,
                 _coverage_store=trusted_coverage_store,
                 _ops_ctx=ops_ctx,
+                _verify_rerun_capability=rerun_capability,
             )
+        finally:
+            _ACTIVE_VERIFY_RERUN_CAPABILITY.reset(capability_token)
 
     elapsed = time.monotonic() - started
     if dry_run:
