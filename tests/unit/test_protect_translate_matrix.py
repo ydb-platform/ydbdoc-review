@@ -199,7 +199,10 @@ def test_translate_path_one_pass_without_differential_seed(monkeypatch):
         base_target_text=en,
     )
     ParseStep().run(state, ctx)
-    with patch("ydbdoc_review.harness.steps.finalize_en_target", side_effect=lambda text, *a, **k: text):
+    with patch(
+        "ydbdoc_review.harness.steps.finalize_en_target",
+        side_effect=lambda text, *a, **k: text,
+    ):
         with patch(
             "ydbdoc_review.harness.steps._apply_en_structural_repair",
             lambda *_a, **_k: None,
