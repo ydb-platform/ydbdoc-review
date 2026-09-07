@@ -107,6 +107,7 @@ from ydbdoc_review.ops.translation_checkpoint import (
     CheckpointIdentity,
     CheckpointWriter,
     TranslationCheckpointError,
+    run_has_usable_verified_units,
 )
 from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
@@ -1918,6 +1919,84 @@ def _translation_checkpoint_fingerprint(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _resolve_translation_resume_parent(
+    *,
+    ops_ctx: object | None,
+    checkpoint: CheckpointWriter | None,
+    explicit_parent_run_id: str | None,
+) -> str | None:
+    """Resolve one eligible parent without inheriting any candidate verdict."""
+    if checkpoint is None:
+        if explicit_parent_run_id:
+            logger.warning(
+                "Translation resume parent=%s rejected: no trusted checkpoint store",
+                explicit_parent_run_id,
+            )
+        return None
+    if ops_ctx is None:
+        if explicit_parent_run_id:
+            logger.warning(
+                "Translation resume parent=%s rejected: run metadata unavailable",
+                explicit_parent_run_id,
+            )
+        return None
+    ledger = getattr(ops_ctx, "ledger", None)
+    repo = getattr(ops_ctx, "repo", None)
+    source_pr = getattr(ops_ctx, "source_pr", None)
+    current_run_id = getattr(ops_ctx, "run_id", None)
+    if ledger is None or not isinstance(repo, str) or type(source_pr) is not int:
+        logger.warning("Translation resume disabled: incomplete current run metadata")
+        return None
+
+    excluded: list[str] = []
+    if isinstance(current_run_id, str) and current_run_id:
+        excluded.append(current_run_id)
+    seen: set[str] = set(excluded)
+
+    while True:
+        try:
+            candidate = ledger.latest_run_id(
+                source_pr,
+                modes=("translate", "continue"),
+                statuses=("ok", "published_red", "failed"),
+                repo=repo,
+                exclude_run_ids=tuple(excluded),
+            )
+        except Exception as exc:
+            logger.warning("Translation resume ledger lookup failed: %s", exc)
+            return None
+        if candidate is None:
+            if explicit_parent_run_id:
+                logger.warning(
+                    "Translation resume parent=%s rejected: no matching completed "
+                    "same-repository run metadata",
+                    explicit_parent_run_id,
+                )
+            return None
+        if candidate in seen:
+            logger.warning(
+                "Translation resume ledger made no exclusion progress at run=%s",
+                candidate,
+            )
+            return None
+        seen.add(candidate)
+
+        if explicit_parent_run_id is not None and candidate != explicit_parent_run_id:
+            excluded.append(candidate)
+            continue
+
+        usable = run_has_usable_verified_units(
+            checkpoint.store,
+            candidate,
+            checkpoint.identity,
+        )
+        if explicit_parent_run_id is not None:
+            return candidate if usable else None
+        if usable:
+            return candidate
+        excluded.append(candidate)
+
+
 def _translation_checkpoint_scope(
     plan: TranslationScopePlan,
 ) -> dict[str, tuple[str, ...]]:
@@ -2322,6 +2401,14 @@ def run_doc_translate(
         raise TranslationCheckpointError(
             "translation checkpoint authority mismatch for current workflow"
         )
+    requested_resume_parent = parent_run_id or (
+        getattr(ops_ctx, "parent_run_id", None) if ops_ctx is not None else None
+    )
+    resume_parent_run_id = _resolve_translation_resume_parent(
+        ops_ctx=ops_ctx,
+        checkpoint=active_checkpoint,
+        explicit_parent_run_id=requested_resume_parent,
+    )
     contents: list[PairContent] = []
 
     with continue_feedback_scope(effective_continue_feedback):
@@ -2395,6 +2482,7 @@ def run_doc_translate(
                 ),
                 docs_repo_path=repo_path,
                 checkpoint=active_checkpoint,
+                resume_parent_run_id=resume_parent_run_id,
             )
         else:
             pr_result = PRTranslationResult()

@@ -134,6 +134,7 @@ class ExecutePairPlansStep:
             docs_repo_path=ctx.docs_repo_path,
             job_anchor_dictionary=ctx.job_anchor_dictionary or JobAnchorDictionary(),
             checkpoint=ctx.checkpoint,
+            resume_parent_run_id=ctx.resume_parent_run_id,
         )
         results = []
         total = len(state.plans)
@@ -149,7 +150,7 @@ class ExecutePairPlansStep:
                 plan.target_path,
             )
             started = time.monotonic()
-            with checkpoint_scope(ctx.checkpoint):
+            with checkpoint_scope(ctx.checkpoint, ctx.resume_parent_run_id):
                 result = run_pair_plan(content, plan, file_ctx, state.cache)
             elapsed = time.monotonic() - started
             status = "error" if result.error else ("skip" if result.skipped else "ok")

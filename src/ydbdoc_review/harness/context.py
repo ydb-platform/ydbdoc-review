@@ -19,16 +19,25 @@ _ACTIVE_CHECKPOINT: ContextVar[CheckpointWriter | None] = ContextVar(
     "ydbdoc_review_active_translation_checkpoint",
     default=None,
 )
+_ACTIVE_RESUME_PARENT: ContextVar[str | None] = ContextVar(
+    "ydbdoc_review_active_translation_resume_parent",
+    default=None,
+)
 
 
 @contextmanager
-def checkpoint_scope(checkpoint: CheckpointWriter | None) -> Iterator[None]:
+def checkpoint_scope(
+    checkpoint: CheckpointWriter | None,
+    resume_parent_run_id: str | None = None,
+) -> Iterator[None]:
     """Make a PR checkpoint available to nested per-file contexts."""
-    token = _ACTIVE_CHECKPOINT.set(checkpoint)
+    checkpoint_token = _ACTIVE_CHECKPOINT.set(checkpoint)
+    resume_token = _ACTIVE_RESUME_PARENT.set(resume_parent_run_id)
     try:
         yield
     finally:
-        _ACTIVE_CHECKPOINT.reset(token)
+        _ACTIVE_RESUME_PARENT.reset(resume_token)
+        _ACTIVE_CHECKPOINT.reset(checkpoint_token)
 
 
 @dataclass
@@ -55,6 +64,7 @@ class HarnessContext:
     docs_repo_path: str | None = None
     job_anchor_dictionary: JobAnchorDictionary | None = None
     checkpoint: CheckpointWriter | None = None
+    resume_parent_run_id: str | None = None
 
     @classmethod
     def from_options(
@@ -78,6 +88,7 @@ class HarnessContext:
         docs_repo_path: str | None = None,
         job_anchor_dictionary: JobAnchorDictionary | None = None,
         checkpoint: CheckpointWriter | None = None,
+        resume_parent_run_id: str | None = None,
     ) -> HarnessContext:
         cfg = config or load_config()
         return cls(
@@ -111,4 +122,9 @@ class HarnessContext:
             docs_repo_path=docs_repo_path,
             job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
             checkpoint=checkpoint or _ACTIVE_CHECKPOINT.get(),
+            resume_parent_run_id=(
+                resume_parent_run_id
+                if resume_parent_run_id is not None
+                else _ACTIVE_RESUME_PARENT.get()
+            ),
         )

@@ -28,6 +28,7 @@ def run_pr_translation(
     docs_text_reader: DocsTextReader | None = None,
     docs_repo_path: str | None = None,
     checkpoint: CheckpointWriter | None = None,
+    resume_parent_run_id: str | None = None,
 ) -> PRTranslationResult:
     """Plan and execute translation for all pairs (sequential, one shared cache)."""
     state = PRRunState(
@@ -44,5 +45,6 @@ def run_pr_translation(
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
         checkpoint=checkpoint,
+        resume_parent_run_id=resume_parent_run_id,
     )
     return PRHarness(TRANSLATE_PR_PROFILE).run(state, ctx)

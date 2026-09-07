@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
+from ydbdoc_review.config.loader import RuAuthorityMode
 from ydbdoc_review.github.provenance import RuAuthority
 from ydbdoc_review.ops.transcripts import TranscriptStore
+from ydbdoc_review.segmentation.types import Segment
 
 _SCHEMA_VERSION = 1
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_COMMIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
+logger = logging.getLogger(__name__)
 
 
 class TranslationCheckpointError(RuntimeError):
@@ -37,6 +44,262 @@ class UnitReceipt:
     validated: bool
 
 
+@dataclass(frozen=True)
+class VerifiedUnit:
+    """A completed unit whose receipt and content were verified durably."""
+
+    receipt: UnitReceipt
+    source: bytes
+    target: bytes
+
+
+def load_verified_unit(
+    store: TranscriptStore,
+    parent_run_id: str,
+    identity: CheckpointIdentity,
+    unit_key: str,
+    source: bytes,
+) -> VerifiedUnit | None:
+    """Load one exact completed unit conservatively."""
+    receipt = _load_unit_receipt(store, parent_run_id, unit_key)
+    if receipt is None:
+        return None
+    if receipt.identity != identity:
+        _resume_miss(parent_run_id, unit_key, "checkpoint identity mismatch")
+        return None
+    if receipt.validated is not True:
+        _resume_miss(parent_run_id, unit_key, "receipt is not validated")
+        return None
+    if hashlib.sha256(source).hexdigest() != receipt.source_hash:
+        _resume_miss(parent_run_id, unit_key, "source hash mismatch")
+        return None
+    try:
+        target = store.get(parent_run_id, receipt.object_key)
+    except Exception as exc:
+        _resume_miss(parent_run_id, unit_key, f"target load failed: {exc}")
+        return None
+    if target is None:
+        _resume_miss(parent_run_id, unit_key, "target object missing")
+        return None
+    if hashlib.sha256(target).hexdigest() != receipt.target_hash:
+        _resume_miss(parent_run_id, unit_key, "target hash mismatch")
+        return None
+    return VerifiedUnit(receipt=receipt, source=source, target=target)
+
+
+def run_has_usable_verified_units(
+    store: TranscriptStore,
+    parent_run_id: str,
+    identity: CheckpointIdentity,
+) -> bool:
+    """Return whether a completed run has any reusable unit evidence."""
+    try:
+        keys = store.list_keys(parent_run_id)
+    except Exception as exc:
+        logger.warning(
+            "Translation resume parent=%s key listing failed: %s",
+            parent_run_id,
+            exc,
+        )
+        return False
+    prefix = "translation/v1/units/"
+    suffix = ".json"
+    for receipt_key in keys:
+        if not receipt_key.startswith(prefix) or not receipt_key.endswith(suffix):
+            continue
+        unit_key = receipt_key[len(prefix) : -len(suffix)]
+        receipt = _load_unit_receipt(store, parent_run_id, unit_key)
+        if (
+            receipt is None
+            or receipt.identity != identity
+            or receipt.validated is not True
+        ):
+            continue
+        try:
+            target = store.get(parent_run_id, receipt.object_key)
+        except Exception as exc:
+            _resume_miss(parent_run_id, unit_key, f"target load failed: {exc}")
+            continue
+        if target is None:
+            _resume_miss(parent_run_id, unit_key, "target object missing")
+            continue
+        if hashlib.sha256(target).hexdigest() != receipt.target_hash:
+            _resume_miss(parent_run_id, unit_key, "target hash mismatch")
+            continue
+        return True
+    logger.warning(
+        "Translation resume parent=%s has no usable units for current identity",
+        parent_run_id,
+    )
+    return False
+
+
+def _resume_miss(parent_run_id: str, unit_key: str, reason: str) -> None:
+    logger.warning(
+        "Translation resume miss parent=%s unit=%s: %s",
+        parent_run_id,
+        unit_key,
+        reason,
+    )
+
+
+def _strict_object(
+    value: object,
+    *,
+    field: str,
+    keys: set[str],
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"malformed translation checkpoint {field}")
+    return value
+
+
+def _strict_string(value: object, *, field: str) -> str:
+    if type(value) is not str:
+        raise ValueError(f"translation checkpoint {field} must be a string")
+    return value
+
+
+def _strict_hash(value: object, *, field: str, pattern: re.Pattern[str]) -> str:
+    text = _strict_string(value, field=field)
+    if pattern.fullmatch(text) is None:
+        raise ValueError(f"translation checkpoint {field} has invalid hash")
+    return text
+
+
+def _decode_identity(value: object) -> CheckpointIdentity:
+    payload = _strict_object(
+        value,
+        field="identity",
+        keys={"authority", "translation_fingerprint"},
+    )
+    authority_payload = _strict_object(
+        payload["authority"],
+        field="authority",
+        keys={
+            "baseline_sha",
+            "mode",
+            "ru_sha",
+            "source_base_sha",
+            "source_head_sha",
+            "source_pr",
+            "source_repo",
+        },
+    )
+    source_pr = authority_payload["source_pr"]
+    if type(source_pr) is not int or source_pr <= 0:
+        raise ValueError("translation checkpoint source_pr must be a positive integer")
+    try:
+        mode = RuAuthorityMode(
+            _strict_string(authority_payload["mode"], field="authority.mode")
+        )
+    except ValueError as exc:
+        raise ValueError("translation checkpoint authority.mode is invalid") from exc
+    authority = RuAuthority(
+        source_repo=_strict_string(
+            authority_payload["source_repo"], field="authority.source_repo"
+        ),
+        source_pr=source_pr,
+        source_base_sha=_strict_hash(
+            authority_payload["source_base_sha"],
+            field="authority.source_base_sha",
+            pattern=_COMMIT_SHA_RE,
+        ),
+        source_head_sha=_strict_hash(
+            authority_payload["source_head_sha"],
+            field="authority.source_head_sha",
+            pattern=_COMMIT_SHA_RE,
+        ),
+        baseline_sha=_strict_hash(
+            authority_payload["baseline_sha"],
+            field="authority.baseline_sha",
+            pattern=_COMMIT_SHA_RE,
+        ),
+        ru_sha=_strict_hash(
+            authority_payload["ru_sha"],
+            field="authority.ru_sha",
+            pattern=_COMMIT_SHA_RE,
+        ),
+        mode=mode,
+    )
+    return CheckpointIdentity(
+        authority=authority,
+        translation_fingerprint=_strict_hash(
+            payload["translation_fingerprint"],
+            field="translation_fingerprint",
+            pattern=_SHA256_RE,
+        ),
+    )
+
+
+def _decode_unit_receipt(data: bytes, *, requested_unit_key: str) -> UnitReceipt:
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("malformed translation checkpoint receipt JSON") from exc
+    root = _strict_object(
+        payload,
+        field="receipt",
+        keys={
+            "schema",
+            "identity",
+            "object_key",
+            "source_hash",
+            "target_hash",
+            "unit_key",
+            "validated",
+        },
+    )
+    if type(root["schema"]) is not int or root["schema"] != _SCHEMA_VERSION:
+        raise ValueError("unsupported translation checkpoint receipt schema")
+    unit_key = _strict_hash(root["unit_key"], field="unit_key", pattern=_SHA256_RE)
+    if unit_key != requested_unit_key:
+        raise ValueError("translation checkpoint requested unit key mismatch")
+    source_hash = _strict_hash(
+        root["source_hash"], field="source_hash", pattern=_SHA256_RE
+    )
+    target_hash = _strict_hash(
+        root["target_hash"], field="target_hash", pattern=_SHA256_RE
+    )
+    object_key = _strict_string(root["object_key"], field="object_key")
+    if object_key != f"translation/v1/objects/{target_hash}":
+        raise ValueError("translation checkpoint object key is not content-addressed")
+    if type(root["validated"]) is not bool:
+        raise ValueError("translation checkpoint validated must be boolean")
+    return UnitReceipt(
+        identity=_decode_identity(root["identity"]),
+        unit_key=unit_key,
+        source_hash=source_hash,
+        target_hash=target_hash,
+        object_key=object_key,
+        validated=root["validated"],
+    )
+
+
+def _load_unit_receipt(
+    store: TranscriptStore,
+    parent_run_id: str,
+    unit_key: str,
+) -> UnitReceipt | None:
+    if _SHA256_RE.fullmatch(unit_key) is None:
+        _resume_miss(parent_run_id, unit_key, "requested unit key is invalid")
+        return None
+    receipt_key = f"translation/v1/units/{unit_key}.json"
+    try:
+        raw = store.get(parent_run_id, receipt_key)
+    except Exception as exc:
+        _resume_miss(parent_run_id, unit_key, f"receipt load failed: {exc}")
+        return None
+    if raw is None:
+        _resume_miss(parent_run_id, unit_key, "completion receipt missing")
+        return None
+    try:
+        return _decode_unit_receipt(raw, requested_unit_key=unit_key)
+    except (TypeError, ValueError) as exc:
+        _resume_miss(parent_run_id, unit_key, str(exc))
+        return None
+
+
 def translation_unit_key(
     *,
     source: bytes,
@@ -54,6 +317,57 @@ def translation_unit_key(
         "target_locale": target_locale,
     }
     return hashlib.sha256(_canonical_json(payload)).hexdigest()
+
+
+def translation_unit_key_for_segment(
+    segment: Segment,
+    *,
+    source_path: str,
+    target_locale: str,
+) -> str:
+    """Build the one canonical save/load key for a current Segment."""
+    atoms: list[tuple[str, str]] = []
+    for protected in segment.placeholders:
+        node = protected.node
+        payload = (
+            node.model_dump(mode="json")
+            if hasattr(node, "model_dump")
+            else str(node)
+        )
+        kind = (
+            str(payload.get("kind", type(node).__name__))
+            if isinstance(payload, dict)
+            else type(node).__name__
+        )
+        atoms.append(
+            (
+                kind,
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        )
+    parent_context = json.dumps(
+        {
+            "ast_path": segment.ast_path,
+            "heading_anchor": segment.heading_anchor,
+            "kind": segment.kind.value,
+            "path": segment.path,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return translation_unit_key(
+        source=segment.text.encode("utf-8"),
+        source_path=source_path,
+        target_locale=target_locale,
+        atom_signature=tuple(atoms),
+        parent_context=parent_context,
+    )
 
 
 def _canonical_json(value: Any) -> bytes:

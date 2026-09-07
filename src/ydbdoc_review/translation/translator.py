@@ -541,6 +541,7 @@ def translate_segments(
     max_parallel_batches: int = 3,
     manual_actions: list[ManualAction] | None = None,
     on_validated_segment: Callable[[Segment, str], None] | None = None,
+    load_validated_segment: Callable[[Segment], str | None] | None = None,
 ) -> dict[str, str]:
     """Translate all segments (chunked batches, optional cache, parallel I/O)."""
     if not segments:
@@ -554,7 +555,35 @@ def translate_segments(
         if is_placeholder_only_text(seg.text):
             translations[seg.id] = seg.text.strip()
             continue
-        if cache is not None:
+        if load_validated_segment is not None:
+            try:
+                resumed = load_validated_segment(seg)
+            except Exception as exc:
+                logger.warning(
+                    "Translation resume load failed for %s: %s",
+                    seg.id,
+                    exc,
+                )
+                resumed = None
+            if resumed is not None:
+                try:
+                    validate_segment_translation(
+                        seg,
+                        resumed,
+                        target_lang=target_lang,
+                    )
+                except TranslationValidationError as exc:
+                    logger.warning(
+                        "Translation resume for %s rejected by current validation: %s",
+                        seg.id,
+                        exc,
+                    )
+                else:
+                    translations[seg.id] = resumed
+                    if on_validated_segment is not None:
+                        on_validated_segment(seg, resumed)
+                    continue
+        elif cache is not None:
             key = _cache_key(seg, target_lang=target_lang)
             cached = cache.get(key)
             if cached is not None:

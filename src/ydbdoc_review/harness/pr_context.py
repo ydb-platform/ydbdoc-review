@@ -24,6 +24,7 @@ class PRHarnessContext:
     docs_repo_path: str | None = None
     job_anchor_dictionary: JobAnchorDictionary | None = None
     checkpoint: CheckpointWriter | None = None
+    resume_parent_run_id: str | None = None
 
     @classmethod
     def from_options(
@@ -39,6 +40,7 @@ class PRHarnessContext:
         docs_repo_path: str | None = None,
         job_anchor_dictionary: JobAnchorDictionary | None = None,
         checkpoint: CheckpointWriter | None = None,
+        resume_parent_run_id: str | None = None,
     ) -> PRHarnessContext:
         return cls(
             client=client,
@@ -51,4 +53,5 @@ class PRHarnessContext:
             docs_repo_path=docs_repo_path,
             job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
             checkpoint=checkpoint,
+            resume_parent_run_id=resume_parent_run_id,
         )

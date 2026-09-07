@@ -91,6 +91,73 @@ def test_memory_ledger_treats_published_red_as_successful_publication():
     assert ledger.latest_run_id(7) == "continue-red-3"
 
 
+def test_memory_latest_run_selector_filters_repo_status_and_exclusions():
+    ledger = InMemoryRunsLedger()
+    ledger.records = [
+        RunRecord(
+            run_day="2026-09-07",
+            run_id="same-ok",
+            actor="u",
+            mode="translate",
+            repo="o/r",
+            source_pr=7,
+            status="ok",
+            started_at=datetime(2026, 9, 7, 10, 0, tzinfo=UTC),
+        ),
+        RunRecord(
+            run_day="2026-09-07",
+            run_id="same-failed",
+            actor="u",
+            mode="continue",
+            repo="o/r",
+            source_pr=7,
+            status="failed",
+            started_at=datetime(2026, 9, 7, 11, 0, tzinfo=UTC),
+        ),
+        RunRecord(
+            run_day="2026-09-07",
+            run_id="foreign-newest",
+            actor="u",
+            mode="translate",
+            repo="other/r",
+            source_pr=7,
+            status="ok",
+            started_at=datetime(2026, 9, 7, 12, 0, tzinfo=UTC),
+        ),
+    ]
+
+    assert ledger.latest_run_id(7) == "foreign-newest"
+    assert ledger.latest_run_id(7, repo="o/r") == "same-ok"
+    assert (
+        ledger.latest_run_id(
+            7,
+            repo="o/r",
+            modes=("translate", "continue"),
+            statuses=("ok", "published_red", "failed"),
+        )
+        == "same-failed"
+    )
+    assert (
+        ledger.latest_run_id(
+            7,
+            repo="o/r",
+            statuses=("ok", "published_red", "failed"),
+            exclude_run_ids=("same-failed",),
+        )
+        == "same-ok"
+    )
+    assert (
+        ledger.latest_run_id(
+            7,
+            repo="o/r",
+            statuses=("ok", "published_red", "failed"),
+            exclude_run_ids=("same-failed", "same-ok"),
+        )
+        is None
+    )
+    assert ledger.count_successful_continues(7) == 0
+
+
 def test_ydb_ledger_treats_published_red_as_successful_publication():
     ledger = object.__new__(YdbRunsLedger)
     ledger._fetch_by_source_pr = lambda _source_pr: [  # type: ignore[method-assign]

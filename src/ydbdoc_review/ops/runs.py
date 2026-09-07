@@ -44,6 +44,8 @@ class RunsLedger(Protocol):
         *,
         modes: tuple[str, ...] | None = None,
         statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
+        repo: str | None = None,
+        exclude_run_ids: tuple[str, ...] = (),
     ) -> str | None: ...
 
     def upsert_run(self, record: RunRecord) -> None: ...
@@ -73,13 +75,18 @@ class InMemoryRunsLedger:
         *,
         modes: tuple[str, ...] | None = None,
         statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
+        repo: str | None = None,
+        exclude_run_ids: tuple[str, ...] = (),
     ) -> str | None:
+        excluded = set(exclude_run_ids)
         candidates = [
             r
             for r in self.records
             if r.source_pr == source_pr
             and r.status in statuses
             and (modes is None or r.mode in modes)
+            and (repo is None or r.repo == repo)
+            and r.run_id not in excluded
         ]
         if not candidates:
             return None
@@ -147,13 +154,20 @@ class YdbRunsLedger:
         *,
         modes: tuple[str, ...] | None = None,
         statuses: tuple[str, ...] = SUCCESSFUL_PUBLICATION_STATUSES,
+        repo: str | None = None,
+        exclude_run_ids: tuple[str, ...] = (),
     ) -> str | None:
         rows = self._fetch_by_source_pr(source_pr)
+        excluded = set(exclude_run_ids)
         filtered = []
         for r in rows:
             if r.get("status") not in statuses:
                 continue
             if modes is not None and r.get("mode") not in modes:
+                continue
+            if repo is not None and r.get("repo") != repo:
+                continue
+            if str(r.get("run_id") or "") in excluded:
                 continue
             filtered.append(r)
         if not filtered:
@@ -227,7 +241,7 @@ class YdbRunsLedger:
     def _fetch_by_source_pr(self, source_pr: int) -> list[dict]:
         query = """
         DECLARE $pr AS Uint64;
-        SELECT run_id, mode, status, continue_index, started_at
+        SELECT run_id, mode, repo, status, continue_index, started_at
         FROM runs VIEW runs_by_source_pr
         WHERE source_pr = $pr;
         """
@@ -245,6 +259,7 @@ class YdbRunsLedger:
                     {
                         "run_id": row.run_id,
                         "mode": row.mode,
+                        "repo": row.repo,
                         "status": row.status,
                         "continue_index": row.continue_index,
                         "started_at": str(row.started_at),

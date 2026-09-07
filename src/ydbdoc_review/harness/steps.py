@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Protocol
 
@@ -16,7 +15,10 @@ from ydbdoc_review.harness.render import (
     render_with_translations,
 )
 from ydbdoc_review.harness.state import FileRunState
-from ydbdoc_review.ops.translation_checkpoint import translation_unit_key
+from ydbdoc_review.ops.translation_checkpoint import (
+    load_verified_unit,
+    translation_unit_key_for_segment,
+)
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import (
     compose_file_verdict,
@@ -282,48 +284,11 @@ class TranslateStep:
         def _retain_validated_segment(segment: Segment, target: str) -> None:
             if ctx.checkpoint is None:
                 return
-            atoms: list[tuple[str, str]] = []
-            for protected in segment.placeholders:
-                node = protected.node
-                payload = (
-                    node.model_dump(mode="json")
-                    if hasattr(node, "model_dump")
-                    else str(node)
-                )
-                kind = (
-                    str(payload.get("kind", type(node).__name__))
-                    if isinstance(payload, dict)
-                    else type(node).__name__
-                )
-                atoms.append(
-                    (
-                        kind,
-                        json.dumps(
-                            payload,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
-                    )
-                )
-            parent_context = json.dumps(
-                {
-                    "ast_path": segment.ast_path,
-                    "heading_anchor": segment.heading_anchor,
-                    "kind": segment.kind.value,
-                    "path": segment.path,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
             source = segment.text.encode("utf-8")
-            unit_key = translation_unit_key(
-                source=source,
+            unit_key = translation_unit_key_for_segment(
+                segment,
                 source_path=state.file_path,
                 target_locale=ctx.target_lang,
-                atom_signature=tuple(atoms),
-                parent_context=parent_context,
             )
             ctx.checkpoint.save_unit(
                 unit_key,
@@ -331,6 +296,34 @@ class TranslateStep:
                 target.encode("utf-8"),
                 validated=True,
             )
+
+        def _load_validated_segment(segment: Segment) -> str | None:
+            if ctx.checkpoint is None or ctx.resume_parent_run_id is None:
+                return None
+            source = segment.text.encode("utf-8")
+            unit_key = translation_unit_key_for_segment(
+                segment,
+                source_path=state.file_path,
+                target_locale=ctx.target_lang,
+            )
+            loaded = load_verified_unit(
+                ctx.checkpoint.store,
+                ctx.resume_parent_run_id,
+                ctx.checkpoint.identity,
+                unit_key,
+                source,
+            )
+            if loaded is None:
+                return None
+            try:
+                return loaded.target.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                logger.warning(
+                    "Translation resume target is not UTF-8 for %s: %s",
+                    segment.id,
+                    exc,
+                )
+                return None
 
         state.translations = translate_segments(
             state.segments,
@@ -349,6 +342,9 @@ class TranslateStep:
             max_parallel_batches=ctx.parallel,
             manual_actions=state.manual_actions,
             on_validated_segment=_retain_validated_segment,
+            load_validated_segment=(
+                _load_validated_segment if ctx.resume_parent_run_id is not None else None
+            ),
         )
         _render_translated_from_source(state, ctx)
         if ctx.target_lang.lower() in {"en", "english"}:
