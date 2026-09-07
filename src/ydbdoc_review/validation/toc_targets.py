@@ -6,17 +6,23 @@ Also flag translated EN pages that are not reachable from any sidebar toc (§6.1
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from collections import deque
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
 
 from ydbdoc_review.github.git_ops import read_text
 from ydbdoc_review.navigation.paths import navigation_yaml_kind
 from ydbdoc_review.navigation.toc import collect_toc_link_targets, resolve_toc_target_path
+from ydbdoc_review.parsing.include_paths import collect_yfm_includes, resolve_locale_md_path
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.validation.glossary_toc_links import (
     collect_en_toc_reachable_md,
     normalize_repo_path,
 )
 from ydbdoc_review.validation.heuristics import bump_verdict_for_blocking_heuristics
+from ydbdoc_review.validation.href_parity import _mask_link_protected_ranges
+
+ReadText = Callable[[str], str | None]
 
 
 def _target_exists(repo_path: str, rel_path: str) -> bool:
@@ -70,6 +76,88 @@ def _is_toc_orphan_exempt(
     if "/_includes/" in normalized or normalized.endswith("/_includes"):
         return True
     return False
+
+
+def _relative_include_stays_in_locale(
+    referrer_path: str,
+    include_ref: str,
+    *,
+    docs_root: str,
+    locale: str,
+) -> bool:
+    """Reject include proof that escapes its locale before path normalization."""
+    ref = include_ref.strip().split("#", 1)[0].strip()
+    if not ref or ref.startswith("/") or "\\" in ref:
+        return False
+
+    floor = [*PurePosixPath(docs_root.strip("/")).parts, locale]
+    stack = list(PurePosixPath(normalize_repo_path(referrer_path)).parent.parts)
+    if stack[: len(floor)] != floor:
+        return False
+
+    for part in ref.split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if len(stack) == len(floor):
+                return False
+            stack.pop()
+            continue
+        stack.append(part)
+    return True
+
+
+def _collect_reachable_include_dependencies(
+    read_text: ReadText,
+    *,
+    toc_reachable: set[str] | frozenset[str],
+    docs_root: str,
+    locale: str,
+) -> frozenset[str]:
+    """Close real YFM Markdown includes from TOC-reachable pages only."""
+    locale_root = f"{docs_root.strip('/')}/{locale}/"
+    queue = deque(
+        sorted(
+            normalize_repo_path(path)
+            for path in toc_reachable
+            if normalize_repo_path(path).startswith(locale_root)
+        )
+    )
+    seen: set[str] = set()
+    reachable: set[str] = set()
+
+    while queue:
+        path = queue.popleft()
+        if path in seen:
+            continue
+        seen.add(path)
+        text = read_text(path)
+        if text is None:
+            continue
+        reachable.add(path)
+        visible_text = _mask_link_protected_ranges(text)
+        for include in collect_yfm_includes(visible_text):
+            if not _relative_include_stays_in_locale(
+                path,
+                include.path,
+                docs_root=docs_root,
+                locale=locale,
+            ):
+                continue
+            resolved = resolve_locale_md_path(
+                path,
+                include.path,
+                docs_root=docs_root,
+            )
+            if resolved is None:
+                continue
+            resolved = normalize_repo_path(resolved)
+            if not resolved.startswith(locale_root) or resolved in seen:
+                continue
+            if read_text(resolved) is None:
+                continue
+            queue.append(resolved)
+    return frozenset(reachable)
 
 
 def find_locale_pages_missing_from_toc(
@@ -154,17 +242,20 @@ def check_orphan_pages_for_locale(
     locale: str = "en",
     docs_root: str = "ydb/docs",
     pending_toc_texts: dict[str, str] | None = None,
+    pending_md_texts: dict[str, str] | None = None,
+    unavailable_md_paths: set[str] | frozenset[str] | None = None,
     extra_toc_paths: set[str] | frozenset[str] | None = None,
     baseline_ref: str | None = None,
 ) -> dict[str, list[str]]:
     """Map page path → messages when the page is off that locale's toc graph.
 
-    A ``.md`` (except ``_includes/``) must appear as a ``href`` reachable from
-    ``{docs_root}/{locale}/core/toc_p.yaml`` via ``include.path`` child sidebars.
+    A ``.md`` (except ``_includes/``) must be reachable from
+    ``{docs_root}/{locale}/core/toc_p.yaml`` through toc ``href`` entries,
+    ``include.path`` child sidebars, or visible YFM includes from those pages.
 
-    Prefer ``baseline_ref`` (translation-branch tip, e.g. ``origin/main``) over
-    ``HEAD`` when provided (§6.140): merged-PR checkouts are stale ancestors.
-    Otherwise prefer ``HEAD`` over a dirty worktree (§6.133).
+    When supplied, pending texts override the immutable ``baseline_ref``;
+    unavailable pending paths cannot fall back to it. Otherwise prefer ``HEAD``
+    over a dirty worktree (§6.133).
     """
     from ydbdoc_review.github.git_ops import (
         read_text_at_ref,
@@ -179,6 +270,14 @@ def check_orphan_pages_for_locale(
         normalize_repo_path(p): text
         for p, text in (pending_toc_texts or {}).items()
     }
+    pending_texts_supplied = pending_md_texts is not None
+    pending_texts = {
+        normalize_repo_path(p): text
+        for p, text in (pending_md_texts or {}).items()
+    }
+    unavailable = {
+        normalize_repo_path(p) for p in (unavailable_md_paths or ())
+    }
     pending_md = {
         normalize_repo_path(p)
         for p in md_paths
@@ -190,12 +289,14 @@ def check_orphan_pages_for_locale(
 
     def _read(path: str) -> str | None:
         key = normalize_repo_path(path)
+        if key in pending_texts:
+            return pending_texts[key]
         if key in pending_tocs:
             return pending_tocs[key]
+        if key in unavailable:
+            return None
         if baseline_ref:
-            tip = read_text_at_upstream_tip(repo_path, baseline_ref, key)
-            if tip is not None:
-                return tip
+            return read_text_at_upstream_tip(repo_path, baseline_ref, key)
         head = read_text_at_ref(repo_path, "HEAD", key)
         if head is not None:
             return head
@@ -208,13 +309,24 @@ def check_orphan_pages_for_locale(
         if str(p).endswith((".yaml", ".yml"))
     }
     # Name is historical (EN QA); BFS is locale-agnostic given ``root_toc``.
-    reachable = collect_en_toc_reachable_md(
+    toc_reachable = collect_en_toc_reachable_md(
         _read,
         root_toc=root_toc,
-        extra_md_paths=pending_md,
+        extra_md_paths=(
+            frozenset(pending_texts)
+            if pending_texts_supplied
+            else pending_md
+        ),
         extra_toc_paths=extra,
         seed_extra_md=False,
     )
+    include_reachable = _collect_reachable_include_dependencies(
+        _read,
+        toc_reachable=toc_reachable,
+        docs_root=docs_root,
+        locale=loc,
+    )
+    reachable = toc_reachable | include_reachable
 
     out: dict[str, list[str]] = {}
     for path in sorted(pending_md):
@@ -235,6 +347,8 @@ def check_orphan_translated_pages(
     repo_path: str,
     docs_root: str = "ydb/docs",
     pending_toc_texts: dict[str, str] | None = None,
+    pending_md_texts: dict[str, str] | None = None,
+    unavailable_md_paths: set[str] | frozenset[str] | None = None,
     extra_toc_paths: set[str] | frozenset[str] | None = None,
     baseline_ref: str | None = None,
 ) -> dict[str, list[str]]:
@@ -248,6 +362,8 @@ def check_orphan_translated_pages(
         locale="en",
         docs_root=docs_root,
         pending_toc_texts=pending_toc_texts,
+        pending_md_texts=pending_md_texts,
+        unavailable_md_paths=unavailable_md_paths,
         extra_toc_paths=extra_toc_paths,
         baseline_ref=baseline_ref,
     )
@@ -308,22 +424,30 @@ def apply_orphan_toc_page_checks(
     pending_toc_texts: dict[str, str] = {}
     extra_toc_paths: set[str] = set()
     for nav in result.navigation_results:
-        if nav.error or nav.kind != "toc":
+        if nav.error or nav.kind != "toc" or nav.target_text is None:
             continue
         extra_toc_paths.add(normalize_repo_path(nav.en_path))
-        if nav.target_text is not None:
-            pending_toc_texts[nav.en_path] = nav.target_text
+        pending_toc_texts[nav.en_path] = nav.target_text
 
     exempt = {normalize_repo_path(p) for p in (exempt_en_paths or ())}
     en_md_paths: set[str] = set()
+    pending_md_texts: dict[str, str] = {}
+    unavailable_md_paths: set[str] = set()
     runs_by_path: dict[str, list] = {}
     for run in result.pair_results:
-        fr = run.file_result
-        if fr is None or run.skipped or run.deleted or run.error:
-            continue
         if run.plan.target_lang != "en" or not run.plan.target_path.endswith(".md"):
             continue
         path = normalize_repo_path(run.plan.target_path)
+        if run.deleted or run.error:
+            unavailable_md_paths.add(path)
+            continue
+        if run.skipped:
+            continue
+        fr = run.file_result
+        if fr is None:
+            unavailable_md_paths.add(path)
+            continue
+        pending_md_texts[path] = fr.final_text
         if path in exempt:
             continue
         en_md_paths.add(path)
@@ -334,6 +458,8 @@ def apply_orphan_toc_page_checks(
         repo_path=repo_path,
         docs_root=docs_root,
         pending_toc_texts=pending_toc_texts,
+        pending_md_texts=pending_md_texts,
+        unavailable_md_paths=unavailable_md_paths,
         extra_toc_paths=extra_toc_paths,
         baseline_ref=baseline_ref,
     )

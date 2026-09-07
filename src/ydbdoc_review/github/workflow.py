@@ -3287,6 +3287,7 @@ def run_doc_verify(
         pr_result,
         repo_path=repo_path,
         docs_root=cfg.paths.docs_root,
+        baseline_ref=verify_content_sha,
         exempt_en_paths=redirect_tombstone_en
         or redirect_source_repo_md_paths(
             read_text_at_commit(

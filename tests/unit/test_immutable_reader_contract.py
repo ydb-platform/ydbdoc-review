@@ -462,7 +462,7 @@ def test_verify_uses_captured_head_not_dirty_worktree_for_pair_and_final_gate(tm
     _write(repo, en, "EN B\n")
     base = _commit(repo, "B")
     _write(repo, en, "EN C\n")
-    _commit(repo, "C")
+    candidate = _commit(repo, "C")
     captured: dict[str, str | None] = {}
 
     def _dirty_after_head_capture(*_args, **_kwargs):
@@ -475,6 +475,10 @@ def test_verify_uses_captured_head_not_dirty_worktree_for_pair_and_final_gate(tm
 
     def _capture_final_gate(_result, **kwargs):
         captured["final"] = kwargs["docs_read"](en)
+        return []
+
+    def _capture_orphan_gate(_result, **kwargs):
+        captured["orphan_ref"] = kwargs.get("baseline_ref")
         return []
 
     with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
@@ -491,6 +495,9 @@ def test_verify_uses_captured_head_not_dirty_worktree_for_pair_and_final_gate(tm
     ), patch(
         "ydbdoc_review.github.workflow.apply_en_link_target_checks",
         side_effect=_capture_final_gate,
+    ), patch(
+        "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
+        side_effect=_capture_orphan_gate,
     ), patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prepare, patch(
         "ydbdoc_review.github.workflow.push_branch"
     ) as push:
@@ -504,7 +511,11 @@ def test_verify_uses_captured_head_not_dirty_worktree_for_pair_and_final_gate(tm
             config=_config(),
         )
 
-    assert captured == {"pair": "EN C\n", "final": "EN C\n"}
+    assert captured == {
+        "pair": "EN C\n",
+        "final": "EN C\n",
+        "orphan_ref": candidate,
+    }
     prepare.assert_not_called()
     push.assert_not_called()
 
