@@ -89,6 +89,10 @@ CoverageSemanticValidator = Callable[
 ]
 
 
+class CoverageEvidenceBindingMiss(ValueError):
+    """The exact candidate object is absent or has another envelope digest."""
+
+
 @dataclass(frozen=True)
 class CoveragePlan:
     source_path: str
@@ -1238,7 +1242,7 @@ def load_coverage_evidence(
     except Exception as exc:
         raise ValueError(f"coverage evidence load failed: {exc}") from exc
     if raw is None:
-        raise ValueError("coverage evidence missing for candidate")
+        raise CoverageEvidenceBindingMiss("coverage evidence missing for candidate")
     try:
         evidence = decode_coverage_evidence(raw)
     except (TypeError, ValueError) as exc:
@@ -1246,7 +1250,9 @@ def load_coverage_evidence(
     if evidence.candidate_sha != candidate_sha:
         raise ValueError("coverage evidence candidate mismatch")
     if evidence.digest != expected_digest:
-        raise ValueError("coverage evidence envelope digest mismatch")
+        raise CoverageEvidenceBindingMiss(
+            "coverage evidence envelope digest mismatch"
+        )
     return evidence
 
 

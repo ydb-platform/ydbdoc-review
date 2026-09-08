@@ -64,7 +64,7 @@ rewrite. Ordinary exact-envelope verification remains on its prior path.
 
 ## Threat coverage
 
-The 34 focused tests cover the real Git four-snapshot controller path, strict loader
+The 35 focused tests cover the real Git four-snapshot controller path, strict loader
 failure before binding, independent exact loader acceptance after binding, immutable C
 retention, units-plan byte retention and mandatory semantic validation. Negative controls
 cover extra prose, alternate hrefs, changed fragments and labels, deletion/config edits,
@@ -79,10 +79,11 @@ paragraph-movement controls for the reused repair helper.
 
 ## Verification
 
-- Focused evidence-rebind plus receipt-backed/ordinary workflow tests: 36/36 passed.
-- Expanded proof/coverage/source-preserving/href group: 192/192 passed.
+- Focused evidence-rebind plus receipt-backed/ordinary workflow tests: 37/37 passed.
+- Expanded proof/coverage/source-preserving/href group: 193/193 passed.
 - Workflow/checkpoint/resume group, including publication paths: 99/99 passed.
-- Full `tests/unit` collection: 2085 tests collected successfully.
+- Real-Git recursive wrapper/fixup contract: 29/29 passed.
+- Full `tests/unit` collection: 2087 tests collected successfully.
 - Ruff on changed Python files: passed.
 - `compileall` on changed Python files: passed.
 - `git diff --check`: passed.
@@ -100,6 +101,14 @@ of every unit test was not requested for this developer gate; full collection su
 The first independent pass rejected commit `e12fd24` because GitHub does not provide a
 documented compare-and-set precondition for pull-request body PATCH. This follow-up uses
 the analyst's Recommendation D: trusted-store exact attestation with no GitHub body write.
+
+The second independent pass rejected `b23238d` because its root-SHA discriminator routed
+the existing internally managed K-to-K2 recursive repair through the manual attestation
+path. The corrected adapter always tries the ordinary strict exact-K object and marker
+digest first, regardless of the immutable artifact root C. Only a typed exact-object
+missing/digest-binding miss can proceed to the exact manual receipt; corrupt or forged
+objects cannot. A new real-Git end-to-end regression publishes K2, persists its strict
+evidence, recursively verifies it, and proves the attestation loader is never called.
 
 Confirm that the operation cannot accept any edit based on small diff size or matching
 fragment alone. In particular, inspect raw-tree parsing, the exact old-evidence

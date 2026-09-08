@@ -170,6 +170,7 @@ from ydbdoc_review.reporting.provenance_drift import build_later_ru_drift_report
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.coverage import (
     CoverageEvidence,
+    CoverageEvidenceBindingMiss,
     build_coverage_evidence,
     load_coverage_evidence,
     plan_source_coverage,
@@ -3504,14 +3505,16 @@ def run_doc_verify(
             or artifact_provenance.coverage_digest is None
         ):
             raise ValueError("coverage evidence trusted store or binding is missing")
-        if artifact_provenance.candidate_sha == verify_content_sha:
+        try:
             coverage_evidence = load_coverage_evidence(
                 trusted_coverage_store,
                 artifact_provenance.coverage_run_id,
                 candidate_sha=verify_content_sha,
                 expected_digest=artifact_provenance.coverage_digest,
             )
-        else:
+        except CoverageEvidenceBindingMiss:
+            if artifact_provenance.candidate_sha == verify_content_sha:
+                raise
             coverage_evidence = load_attested_coverage_evidence(
                 repo_path=repo_path,
                 store=trusted_coverage_store,

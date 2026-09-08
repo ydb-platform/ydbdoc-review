@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,10 +27,18 @@ from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.pair import run_pair_plan
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.publication import classify_publication_blockers
 from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.translation.coverage import (
+    CoveragePlan,
+    CoverageUnit,
+    build_coverage_evidence,
+    load_coverage_evidence,
+    save_coverage_evidence,
+)
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticResponse
 from ydbdoc_review.validation.en_link_targets import check_en_page_link_targets
@@ -669,6 +678,84 @@ def test_real_git_verify_publishes_one_wrapper_and_freshly_verifies_k2(
             "writer_calls": 0,
         }
     ]
+
+
+def test_recursive_internal_k2_prefers_existing_strict_exact_evidence(
+    wrapper_history: History,
+) -> None:
+    provenance = parse_authority_evidence(wrapper_history.body)
+    store = InMemoryTranscriptStore()
+    source = _text_at(wrapper_history.repo, wrapper_history.h, RU_CLIENT)
+    baseline = _text_at(wrapper_history.repo, wrapper_history.b, EN_CLIENT)
+    candidate = _text_at(wrapper_history.repo, wrapper_history.k, EN_CLIENT)
+    assert source is not None and baseline is not None and candidate is not None
+    plan = CoveragePlan(
+        source_path=RU_CLIENT,
+        source_hash=hashlib.sha256(source.encode()).hexdigest(),
+        en_hash=hashlib.sha256(baseline.encode()).hexdigest(),
+        units=(
+            CoverageUnit(
+                key="1" * 64,
+                action="translate_required",
+                source=source,
+                en_span=None,
+                target=None,
+                reason="internal repair regression",
+            ),
+        ),
+        required_fragments=frozenset(),
+        mode="full",
+    )
+    evidence_k = build_coverage_evidence(
+        authority=provenance.authority,
+        candidate_sha=wrapper_history.k,
+        plans={EN_CLIENT: plan},
+        baseline_en={EN_CLIENT: baseline},
+        candidate_files={EN_CLIENT: candidate},
+    )
+    save_coverage_evidence(store, "internal-repair-run", evidence_k)
+    bound = replace(
+        provenance,
+        coverage_version=evidence_k.version,
+        coverage_run_id="internal-repair-run",
+        coverage_digest=evidence_k.digest,
+    )
+    gh = FakeGitHub(
+        wrapper_history,
+        wrapper_history.k,
+        "Wrapper test\n\n" + render_authority_evidence(bound) + "\n",
+    )
+
+    with _workflow_runtime(wrapper_history, gh) as observed, patch.object(
+        workflow,
+        "load_attested_coverage_evidence",
+        side_effect=AssertionError("strict internal evidence must win"),
+    ) as attested_loader:
+        job = workflow.run_doc_verify(
+            repo_path=str(wrapper_history.repo),
+            github_repo=REPO_ID,
+            pr_number=TRANSLATION_PR,
+            merge_base_with="origin/main",
+            config=_config(),
+            skip_ops_gates=True,
+            _coverage_store=store,
+        )
+
+    attested_loader.assert_not_called()
+    assert len(observed["pushes"]) == 1
+    k2 = observed["pushes"][0]
+    rebound = parse_authority_evidence(gh.body)
+    assert rebound.candidate_sha == wrapper_history.c
+    assert rebound.coverage_run_id == "internal-repair-run"
+    assert rebound.coverage_digest is not None
+    assert load_coverage_evidence(
+        store,
+        "internal-repair-run",
+        candidate_sha=k2,
+        expected_digest=rebound.coverage_digest,
+    ).candidate_sha == k2
+    assert gh.comments and gh.comments[-1][0] == k2
+    assert not workflow.job_requires_nonzero_exit(job)
 
 
 @pytest.mark.parametrize("stale_responses", [1, 2, 5])

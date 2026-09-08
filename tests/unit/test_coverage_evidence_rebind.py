@@ -28,6 +28,7 @@ from ydbdoc_review.ops.coverage_rebind import (
 )
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore, NullTranscriptStore
 from ydbdoc_review.translation.coverage import (
+    CoverageEvidenceBindingMiss,
     CoveragePlan,
     CoverageUnit,
     build_coverage_evidence,
@@ -384,6 +385,34 @@ def test_real_git_rebind_is_exact_and_controller_stores_attestation_last(
     ) == proof.new_evidence
     assert fx.store.get(RUN_ID, coverage_rebind_audit_key(fx.k)) is not None
     assert fx.store.get(RUN_ID, coverage_evidence_key(fx.c)) is not None
+
+
+def test_only_exact_missing_or_digest_mismatch_is_a_binding_miss(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    with pytest.raises(CoverageEvidenceBindingMiss, match="missing"):
+        load_coverage_evidence(
+            fx.store,
+            RUN_ID,
+            candidate_sha=fx.k,
+            expected_digest=fx.evidence.digest,
+        )
+    with pytest.raises(CoverageEvidenceBindingMiss, match="digest mismatch"):
+        load_coverage_evidence(
+            fx.store,
+            RUN_ID,
+            candidate_sha=fx.c,
+            expected_digest="0" * 64,
+        )
+
+    fx.store.put(RUN_ID, coverage_evidence_key(fx.c), b"forged-object")
+    with pytest.raises(ValueError, match="corrupt") as error:
+        load_coverage_evidence(
+            fx.store,
+            RUN_ID,
+            candidate_sha=fx.c,
+            expected_digest=fx.evidence.digest,
+        )
+    assert not isinstance(error.value, CoverageEvidenceBindingMiss)
 
 
 def test_rebound_units_evidence_still_requires_semantic_validation(tmp_path: Path) -> None:
