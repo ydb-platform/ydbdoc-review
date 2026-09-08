@@ -41,6 +41,7 @@ When document-wide cardinalities differ, the new fallback requires:
 - unique identical decoded ASCII fragment lineage across the four snapshots;
 - a unique candidate href equal to the current source href;
 - unique E0/E1 paragraph correspondence after masking only that href path;
+- identical target paragraph ordinals in R0/R1 and E0/E1;
 - broken immutable RU and candidate EN targets;
 - a resolvable frozen EN target inside the same `docs_root/en/core` boundary;
 - no existing deterministic link-contract issue.
@@ -56,14 +57,24 @@ paragraph-context drift, duplicate occurrences/fragments, changed RU lineage,
 source-valid and candidate-valid targets, missing/deleted/fragmentless historical
 targets, contract issues, raw fragment spelling and docs-root escape.
 
+### Independent tester fix loop
+
+The first independent test rejected commit `6c1f6d3` because a unique paragraph could
+move to a different ordinal in RU or EN and still satisfy the content skeleton. Two RED
+regressions reproduced R0/R1 ordinal 0 to 1 and E0/E1 ordinal 0 to 2; both initially
+repaired. The follow-up requires paragraph ordinal equality in both the aligned positional
+route and the unequal-cardinality fallback. The two regressions now remain unchanged,
+while the 70/75/67/75 workflow and link additions/deletions inside stable surrounding
+paragraphs still repair exactly one path.
+
 ## Verification
 
-- Focused href/reuse suite: 103/103 passed.
+- Focused href/reuse suite: 105/105 passed after the tester fix loop.
 - Exact real post-apply workflow regression: 1/1 passed.
 - Task 6 coverage/provenance gate: 164/164 passed.
 - Task 7 differential/source-preserving gate: 278/278 passed.
-- Link/publication/checkpoint aggregate: 341/341 passed.
-- Full `tests/unit` collection: passed, including 6 new PR51079 tests.
+- Link/publication/checkpoint aggregate: 343/343 passed after the tester fix loop.
+- Full `tests/unit` collection: passed, including 8 new PR51079 tests.
 - Ruff on changed Python files: passed.
 - `compileall` on changed Python files: passed.
 - `git diff --check`: passed.

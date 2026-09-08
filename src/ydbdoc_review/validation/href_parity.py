@@ -926,6 +926,12 @@ def reconcile_final_en_same_fragment_paths(
                 break
         return start, end
 
+    def _paragraph_ordinal(text: str, occurrence: LinkOccurrence) -> int:
+        return sum(
+            boundary.end() <= occurrence[2]
+            for boundary in re.finditer(r"\n[ \t]*\n", text)
+        )
+
     def _paragraph_path_skeleton(text: str, occurrence: LinkOccurrence) -> str:
         paragraph_start, paragraph_end = _paragraph_span(text, occurrence)
         path, separator, _fragment = occurrence[1].partition("#")
@@ -987,13 +993,25 @@ def reconcile_final_en_same_fragment_paths(
             if current_key_counts[key] != 1 or base_key_counts[key] != 1:
                 continue
             historical_slot = base_slot_by_key[key]
+            historical_ru = ru_base_links[historical_slot]
+            baseline = en_tip_links[historical_slot]
             baseline_href = en_tip_links[historical_slot][1]
             if (
                 _decoded_fragment(current_href) != fragment
-                or _decoded_fragment(ru_base_links[historical_slot][1]) != fragment
+                or _decoded_fragment(historical_ru[1]) != fragment
                 or _decoded_fragment(baseline_href) != fragment
                 or base_fragment_counts[fragment] != 1
                 or tip_fragment_counts[fragment] != 1
+            ):
+                continue
+            if _paragraph_ordinal(ru_base_text, historical_ru) != _paragraph_ordinal(
+                ru_current_text,
+                current,
+            ):
+                continue
+            if _paragraph_ordinal(en_tip_text, baseline) != _paragraph_ordinal(
+                en_candidate_text,
+                candidate,
             ):
                 continue
             _schedule_path_restore(candidate, baseline_href)
@@ -1034,6 +1052,16 @@ def reconcile_final_en_same_fragment_paths(
         candidate = candidates_by_href[current_href_key][0]
         baseline = tip_by_fragment[fragment][0]
         if _decoded_fragment(candidate[1]) != fragment:
+            continue
+        if _paragraph_ordinal(ru_base_text, historical_ru) != _paragraph_ordinal(
+            ru_current_text,
+            current,
+        ):
+            continue
+        if _paragraph_ordinal(en_tip_text, baseline) != _paragraph_ordinal(
+            en_candidate_text,
+            candidate,
+        ):
             continue
         if _paragraph_path_skeleton(en_tip_text, baseline) != _paragraph_path_skeleton(
             en_candidate_text,

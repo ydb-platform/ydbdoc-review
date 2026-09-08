@@ -254,3 +254,25 @@ def test_pr_51079_paragraph_local_fallback_rejects_target_outside_docs_root():
     )
 
     assert fixed == EN_BROKEN_SENTENCE
+
+
+def test_pr_51079_paragraph_local_fallback_rejects_moved_ru_paragraph():
+    ru_base = RU_SENTENCE + "\n\nStable trailing RU paragraph."
+    ru_current = "Inserted RU paragraph.\n\n" + ru_base
+    en_tip = EN_HISTORICAL_SENTENCE + "\n\nStable trailing EN paragraph."
+    candidate = EN_BROKEN_SENTENCE + "\n\nStable trailing EN paragraph."
+
+    assert _reconcile(ru_base, ru_current, en_tip, candidate) == candidate
+
+
+def test_pr_51079_paragraph_local_fallback_rejects_moved_en_paragraph():
+    ru = RU_SENTENCE + "\n\nStable trailing RU paragraph."
+    en_tip = EN_HISTORICAL_SENTENCE + "\n\nStable trailing EN paragraph."
+    candidate = (
+        "Inserted EN paragraph one.\n\n"
+        "Inserted EN paragraph two.\n\n"
+        + EN_BROKEN_SENTENCE
+        + "\n\nStable trailing EN paragraph."
+    )
+
+    assert _reconcile(ru, ru, en_tip, candidate) == candidate

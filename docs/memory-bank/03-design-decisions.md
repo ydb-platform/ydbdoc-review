@@ -6294,6 +6294,8 @@ The fallback requires one unique unchanged RU normalized-label plus decoded-full
 occurrence across R0 and R1, a unique identical decoded ASCII fragment in all relevant
 snapshots, and a candidate href equal to the current source href. The frozen and candidate
 EN paragraphs must become byte-identical after masking only that occurrence's href path.
+The occurrence must retain the same Markdown paragraph ordinal in R0/R1 and E0/E1;
+paragraph insertion, deletion or movement before it is ambiguous and remains fail-closed.
 The historical destination must resolve inside the same `docs_root/en/core` tree, while
 the immutable current RU and candidate EN destinations must both remain broken.
 
@@ -6308,7 +6310,9 @@ The final link gate is not weakened.
 70/75/67/75 and distinct immutable source-base, source-current and tip-EN refs. Focused tests
 also cover unrelated link edits around the paragraph, wrapper/title fidelity, semantic and
 occurrence ambiguity, source authority, already valid candidates, missing targets,
-contract issues and docs-root escape attempts.
+contract issues, docs-root escape attempts and RU/EN paragraph movement. Link edits inside
+stable paragraphs before or after the occurrence remain eligible because they do not change
+the target paragraph's ordinal.
 
 
 [← Memory Bank index](../../MEMORY_BANK.md)
