@@ -48,35 +48,44 @@ The deterministic derivation path:
 
 The controller loads C only through the existing strict loader and explicit trusted
 run/digest. It validates the authority envelope and current remote head, verifies the
-caller-supplied expected K digest, saves K evidence immutably with read-back, then saves
-a self-digesting immutable repair audit receipt. Immediately before metadata mutation it
-rechecks repository, head, exact PR body and authority binding. It replaces only the
-coverage fields inside the existing marker, keeping artifact root C and all RED prose.
-Identical retries are idempotent; conflicts and read-back failures remain fail-closed.
-A metadata failure after durable evidence can be retried without changing candidate
-history.
+caller-supplied expected K digest, saves K evidence with read-back, then saves the exact
+repair audit. After a final read-only head/authority check it persists a canonical
+attestation last, addressed by repository, source PR, translation PR, C, old run and
+digest, K, and repair rule. It never updates the PR body. Identical retries produce the
+same bytes; conflicts, partial objects and read-back failures remain fail-closed.
+
+The workflow adapter activates only when the ordinary envelope remains rooted at C while
+the exact checkout is K. It derives the one attestation key without scans, strictly loads
+C, repeats the complete deterministic proof, compares the exact audit and digests, and
+finally loads K through the unchanged strict coverage loader. Receipt-backed verification
+is read-only for candidate and PR body: it runs fresh QA and all final gates on K, but a
+critic-proposed K2 becomes an explicit checkout mismatch/RED instead of a push or body
+rewrite. Ordinary exact-envelope verification remains on its prior path.
 
 ## Threat coverage
 
-The 21 focused tests cover the real Git four-snapshot controller path, strict loader
+The 34 focused tests cover the real Git four-snapshot controller path, strict loader
 failure before binding, independent exact loader acceptance after binding, immutable C
 retention, units-plan byte retention and mandatory semantic validation. Negative controls
 cover extra prose, alternate hrefs, changed fragments and labels, deletion/config edits,
 units and protected-only changes, extra paths, mode changes, non-child K, wrong binding
 and expected digests, old source/baseline/candidate/authority corruption, remote head and
-body drift, null store, evidence/audit conflicts, idempotent retry and retry after metadata
-failure. Existing PR51079 anchor tests independently retain ambiguity, source-lineage and
+marker drift, null store, evidence/audit/attestation conflicts, idempotent retry and retry
+after attestation failure. Complete-tuple mismatches, partial/unknown/unsupported receipts
+and valid-self-digest forged proof data reject. The exact old PATCH-window race proves zero
+body-update calls and preservation of the concurrent human prose edit. Existing PR51079
+anchor tests independently retain ambiguity, source-lineage and
 paragraph-movement controls for the reused repair helper.
 
 ## Verification
 
-- Focused evidence-rebind suite: 21/21 passed.
-- Task 7 coverage/source-preserving group, including the new suite: 299/299 passed.
-- Workflow/publication/checkpoint/resume group: 260/260 passed.
-- Full `tests/unit` collection: 2071 tests collected successfully.
+- Focused evidence-rebind plus receipt-backed/ordinary workflow tests: 36/36 passed.
+- Expanded proof/coverage/source-preserving/href group: 192/192 passed.
+- Workflow/checkpoint/resume group, including publication paths: 99/99 passed.
+- Full `tests/unit` collection: 2085 tests collected successfully.
 - Ruff on changed Python files: passed.
 - `compileall` on changed Python files: passed.
-- `git diff --cached --check`: passed.
+- `git diff --check`: passed.
 
 The repository's strict mypy run still reports its existing cross-module baseline debt.
 One new local mismatch from passing legacy string href issues into the typed repair helper
@@ -88,10 +97,15 @@ of every unit test was not requested for this developer gate; full collection su
 
 ## Independent tester focus
 
+The first independent pass rejected commit `e12fd24` because GitHub does not provide a
+documented compare-and-set precondition for pull-request body PATCH. This follow-up uses
+the analyst's Recommendation D: trusted-store exact attestation with no GitHub body write.
+
 Confirm that the operation cannot accept any edit based on small diff size or matching
 fragment alone. In particular, inspect raw-tree parsing, the exact old-evidence
-reconstruction, second PR snapshot ordering, immutable evidence/audit persistence and
-artifact-root preservation. Re-run the focused suite and the two broad groups above from
+reconstruction, second PR snapshot ordering, attestation-last persistence, proof replay,
+strict K loading, body preservation and artifact-root preservation. Re-run the focused
+suite and the two broad groups above from
 the committed SHA. The live PR52432 recovery and expected production digest
 `8a16af708cd613b4a4063720879e0303cbdb78f4dcb1cd00ad548a02ab4f4251` remain controller
 actions after independent approval; this developer performed no external mutation.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -1401,6 +1402,103 @@ def test_run_doc_verify_dry_run(git_repo: str):
     assert result.mode == "doc_verify"
     assert result.source_pr_number == 3
     assert result.pr_result.translated_count == 1
+
+
+def test_attestation_backed_verify_preserves_body_and_never_publishes_k2(
+    git_repo: str,
+) -> None:
+    en = Path(git_repo) / "ydb" / "docs" / "en"
+    en.mkdir(parents=True)
+    (en / "a.md").write_text("Hello.\n", encoding="utf-8")
+    root_c = _commit_empty(git_repo, "root C")
+    candidate_k = _commit_empty(git_repo, "repaired K")
+    provenance = replace(
+        _fixture_provenance(git_repo, source_pr=3, candidate_sha=root_c),
+        coverage_version=1,
+        coverage_run_id="old-run",
+        coverage_digest="1" * 64,
+    )
+    original_body = (
+        "RED: old human-readable caution.\n\n"
+        + render_authority_evidence(provenance)
+    )
+    pull = {
+        "title": "Auto-translate docs from PR #3",
+        "body": original_body,
+        "head": {
+            "ref": "ydbdoc-review/pr-3",
+            "sha": candidate_k,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "feature/docs"},
+    }
+    source_pull = {
+        "head": {
+            "sha": "source-head-sha",
+            "repo": {"owner": {"login": "o"}, "name": "r"},
+        }
+    }
+
+    def _get_pull(_owner: str, _repo: str, number: int) -> dict:
+        if number == 11:
+            return pull
+        if number == 3:
+            return source_pull
+        raise AssertionError(f"unexpected PR {number}")
+
+    proposed = _fake_pr_result()
+    proposed.pair_results[0].target_text = "Critic-proposed K2.\n"
+    assert proposed.pair_results[0].file_result is not None
+    proposed.pair_results[0].file_result.final_text = "Critic-proposed K2.\n"
+    effective_evidence = SimpleNamespace(plans=())
+    store = InMemoryTranscriptStore()
+    with patch(
+        "ydbdoc_review.github.workflow._run_verify_pairs", return_value=proposed
+    ), patch(
+        "ydbdoc_review.github.workflow.load_attested_coverage_evidence",
+        return_value=effective_evidence,
+    ) as load_attested, patch(
+        "ydbdoc_review.github.workflow.validate_coverage_evidence"
+    ), patch(
+        "ydbdoc_review.github.workflow.push_branch"
+    ) as push, patch(
+        "ydbdoc_review.github.workflow.GitHubClient"
+    ) as gh_cls:
+        gh = gh_cls.return_value
+        gh.get_pull.side_effect = _get_pull
+        gh.get_branch_sha.return_value = candidate_k
+        gh.get_file_text.return_value = "RU.\n"
+        gh.iter_issue_comments.return_value = iter([])
+        with patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=[("ydb/docs/en/a.md", "modified")],
+        ), patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            side_effect=lambda _gh, _owner, _repo, number: (
+                [("ydb/docs/en/a.md", "modified")]
+                if number == 11
+                else [("ydb/docs/ru/a.md", "modified")]
+            ),
+        ):
+            result = run_doc_verify(
+                repo_path=git_repo,
+                github_repo="o/r",
+                pr_number=11,
+                merge_base_with="HEAD",
+                config=load_config(env=_env()),
+                _coverage_store=store,
+            )
+
+    load_attested.assert_called_once()
+    gh.update_pull_body.assert_not_called()
+    push.assert_not_called()
+    assert pull["body"] == original_body
+    assert result.pushed is False
+    assert result.committed is False
+    assert result.pr_result.pair_results[0].file_result is not None
+    assert "report_checkout_mismatch" in " ".join(
+        result.pr_result.pair_results[0].file_result.heuristic_blocking
+    )
 
 
 def test_run_doc_translate_no_pairs(git_repo: str):

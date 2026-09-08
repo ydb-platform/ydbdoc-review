@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -17,8 +18,12 @@ from ydbdoc_review.github.provenance import (
 )
 from ydbdoc_review.ops.coverage_rebind import (
     CoverageRebindRequest,
+    coverage_rebind_attestation_key,
     coverage_rebind_audit_key,
+    decode_coverage_rebind_attestation,
     derive_same_fragment_coverage_rebind,
+    encode_coverage_rebind_attestation,
+    load_attested_coverage_evidence,
     rebind_same_fragment_coverage_evidence,
 )
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore, NullTranscriptStore
@@ -257,6 +262,45 @@ class FailingUpdateGitHub(FakeGitHub):
         raise RuntimeError("simulated metadata failure")
 
 
+class RacingUpdateGitHub(FakeGitHub):
+    """Apply an unrelated edit just after returning the final snapshot."""
+
+    concurrent_edit = "\nConcurrent edit after the final snapshot."
+
+    def __init__(self, *, body: str, head_sha: str) -> None:
+        super().__init__(body=body, head_sha=head_sha)
+        self.get_calls = 0
+
+    def get_pull(self, owner: str, repo: str, pr_number: int) -> dict[str, object]:
+        self.get_calls += 1
+        snapshot = super().get_pull(owner, repo, pr_number)
+        if self.get_calls == 2:
+            self.body += self.concurrent_edit
+        return snapshot
+
+
+class MarkerDriftingGitHub(FakeGitHub):
+    def __init__(self, *, body: str, head_sha: str, drifted_body: str) -> None:
+        super().__init__(body=body, head_sha=head_sha)
+        self.drifted_body = drifted_body
+        self.get_calls = 0
+
+    def get_pull(self, owner: str, repo: str, pr_number: int) -> dict[str, object]:
+        self.get_calls += 1
+        if self.get_calls == 2:
+            self.body = self.drifted_body
+        return super().get_pull(owner, repo, pr_number)
+
+
+class FailingAttestationStore(InMemoryTranscriptStore):
+    fail_attestation = True
+
+    def put(self, run_id: str, object_key: str, data: bytes | str) -> None:
+        if self.fail_attestation and "coverage-rebind-bindings" in object_key:
+            raise RuntimeError("simulated attestation failure")
+        super().put(run_id, object_key, data)
+
+
 def _request(fx: Fixture, *, expected_digest: str) -> CoverageRebindRequest:
     return CoverageRebindRequest(
         source_repo=REPO,
@@ -270,7 +314,19 @@ def _request(fx: Fixture, *, expected_digest: str) -> CoverageRebindRequest:
     )
 
 
-def test_real_git_rebind_is_exact_and_controller_updates_only_coverage_marker(
+def _attestation_key(fx: Fixture) -> str:
+    return coverage_rebind_attestation_key(
+        source_repo=REPO,
+        source_pr=SOURCE_PR,
+        translation_pr=TRANSLATION_PR,
+        old_candidate_sha=fx.c,
+        old_run_id=RUN_ID,
+        old_coverage_digest=fx.provenance.coverage_digest or "",
+        new_candidate_sha=fx.k,
+    )
+
+
+def test_real_git_rebind_is_exact_and_controller_stores_attestation_last(
     tmp_path: Path,
 ) -> None:
     fx = _fixture(tmp_path)
@@ -305,17 +361,26 @@ def test_real_git_rebind_is_exact_and_controller_updates_only_coverage_marker(
     )
 
     assert result.proof == proof
-    assert gh.updated_bodies == [gh.body]
-    assert gh.body.startswith("RED: unresolved link remains.\n\n")
+    assert result.attestation_stored is True
+    assert gh.updated_bodies == []
+    assert gh.body == body
     rebound = parse_authority_evidence(gh.body)
-    assert rebound.candidate_sha == fx.c
-    assert rebound.coverage_run_id == RUN_ID
-    assert rebound.coverage_digest == proof.new_evidence.digest
+    assert rebound == fx.provenance
+    assert fx.store.get(RUN_ID, _attestation_key(fx)) is not None
     assert load_coverage_evidence(
         fx.store,
         RUN_ID,
         candidate_sha=fx.k,
         expected_digest=proof.new_evidence.digest,
+    ) == proof.new_evidence
+    assert load_attested_coverage_evidence(
+        repo_path=str(fx.repo),
+        store=fx.store,
+        provenance=fx.provenance,
+        source_repo=REPO,
+        source_pr=SOURCE_PR,
+        translation_pr=TRANSLATION_PR,
+        new_candidate_sha=fx.k,
     ) == proof.new_evidence
     assert fx.store.get(RUN_ID, coverage_rebind_audit_key(fx.k)) is not None
     assert fx.store.get(RUN_ID, coverage_evidence_key(fx.c)) is not None
@@ -459,27 +524,74 @@ def test_old_evidence_snapshot_corruption_is_rejected(
         )
 
 
-@pytest.mark.parametrize("drift", ["body", "head"])
-def test_concurrent_pull_drift_after_persistence_prevents_metadata_update(
-    tmp_path: Path, drift: str
-) -> None:
+def test_concurrent_head_drift_after_persistence_prevents_attestation(tmp_path: Path) -> None:
     fx = _fixture(tmp_path)
     proof = derive_same_fragment_coverage_rebind(
         repo_path=str(fx.repo), provenance=fx.provenance,
         old_evidence=fx.evidence, new_candidate_sha=fx.k,
     )
     gh = DriftingGitHub(
-        body=render_authority_evidence(fx.provenance), head_sha=fx.k, drift=drift
+        body=render_authority_evidence(fx.provenance), head_sha=fx.k, drift="head"
     )
-    expected = "body drifted" if drift == "body" else "head drifted"
-    with pytest.raises(ValueError, match=expected):
+    with pytest.raises(ValueError, match="head drifted"):
         rebind_same_fragment_coverage_evidence(
             repo_path=str(fx.repo), github=gh, store=fx.store,
             request=_request(fx, expected_digest=proof.new_evidence.digest),
         )
     assert gh.updated_bodies == []
+    assert fx.store.get(RUN_ID, _attestation_key(fx)) is None
     assert fx.store.get(RUN_ID, coverage_evidence_key(fx.k)) is not None
     assert fx.store.get(RUN_ID, coverage_rebind_audit_key(fx.k)) is not None
+
+
+def test_concurrent_body_edit_exactly_before_update_is_not_overwritten(
+    tmp_path: Path,
+) -> None:
+    fx = _fixture(tmp_path)
+    proof = derive_same_fragment_coverage_rebind(
+        repo_path=str(fx.repo), provenance=fx.provenance,
+        old_evidence=fx.evidence, new_candidate_sha=fx.k,
+    )
+    initial_body = render_authority_evidence(fx.provenance)
+    gh = RacingUpdateGitHub(body=initial_body, head_sha=fx.k)
+
+    result = rebind_same_fragment_coverage_evidence(
+        repo_path=str(fx.repo), github=gh, store=fx.store,
+        request=_request(fx, expected_digest=proof.new_evidence.digest),
+    )
+
+    assert result.attestation_stored is True
+    assert gh.body == initial_body + gh.concurrent_edit
+    assert gh.updated_bodies == []
+    assert fx.store.get(RUN_ID, _attestation_key(fx)) is not None
+    assert fx.store.get(RUN_ID, coverage_evidence_key(fx.k)) is not None
+    assert fx.store.get(RUN_ID, coverage_rebind_audit_key(fx.k)) is not None
+
+
+def test_concurrent_authority_marker_change_never_stores_attestation(
+    tmp_path: Path,
+) -> None:
+    fx = _fixture(tmp_path)
+    proof = derive_same_fragment_coverage_rebind(
+        repo_path=str(fx.repo), provenance=fx.provenance,
+        old_evidence=fx.evidence, new_candidate_sha=fx.k,
+    )
+    gh = MarkerDriftingGitHub(
+        body=render_authority_evidence(fx.provenance),
+        head_sha=fx.k,
+        drifted_body=render_authority_evidence(
+            replace(fx.provenance, coverage_digest="0" * 64)
+        ),
+    )
+
+    with pytest.raises(ValueError, match="binding drifted"):
+        rebind_same_fragment_coverage_evidence(
+            repo_path=str(fx.repo), github=gh, store=fx.store,
+            request=_request(fx, expected_digest=proof.new_evidence.digest),
+        )
+
+    assert gh.updated_bodies == []
+    assert fx.store.get(RUN_ID, _attestation_key(fx)) is None
 
 
 def test_audit_conflict_and_metadata_failure_are_safe_to_retry(tmp_path: Path) -> None:
@@ -504,21 +616,29 @@ def test_audit_conflict_and_metadata_failure_are_safe_to_retry(tmp_path: Path) -
         old_evidence=retry.evidence, new_candidate_sha=retry.k,
     )
     retry_request = _request(retry, expected_digest=retry_proof.new_evidence.digest)
-    failing = FailingUpdateGitHub(
+    retry_gh = FailingUpdateGitHub(
         body=render_authority_evidence(retry.provenance), head_sha=retry.k
     )
-    with pytest.raises(RuntimeError, match="metadata failure"):
+    retry_store = FailingAttestationStore()
+    for object_key in retry.store.list_keys(RUN_ID):
+        data = retry.store.get(RUN_ID, object_key)
+        assert data is not None
+        retry_store.put(RUN_ID, object_key, data)
+    with pytest.raises(ValueError, match="attestation storage failed"):
         rebind_same_fragment_coverage_evidence(
-            repo_path=str(retry.repo), github=failing, store=retry.store,
+            repo_path=str(retry.repo), github=retry_gh, store=retry_store,
             request=retry_request,
         )
-    assert retry.store.get(RUN_ID, coverage_evidence_key(retry.k)) is not None
-    succeeding = FakeGitHub(body=failing.body, head_sha=retry.k)
+    assert retry_store.get(RUN_ID, coverage_evidence_key(retry.k)) is not None
+    assert retry_store.get(RUN_ID, coverage_rebind_audit_key(retry.k)) is not None
+    assert retry_store.get(RUN_ID, _attestation_key(retry)) is None
+    assert retry_gh.updated_bodies == []
+    retry_store.fail_attestation = False
     result = rebind_same_fragment_coverage_evidence(
-        repo_path=str(retry.repo), github=succeeding, store=retry.store,
+        repo_path=str(retry.repo), github=retry_gh, store=retry_store,
         request=retry_request,
     )
-    assert result.metadata_updated is True
+    assert result.attestation_stored is True
 
     proof = derive_same_fragment_coverage_rebind(
         repo_path=str(fx.repo), provenance=fx.provenance,
@@ -573,6 +693,8 @@ def test_idempotent_retry_and_conflicting_new_object(tmp_path: Path) -> None:
     second = rebind_same_fragment_coverage_evidence(
         repo_path=str(fx.repo), github=gh, store=fx.store, request=request
     )
+    assert first.attestation_stored is True
+    assert second.attestation_stored is False
     assert second.proof == first.proof
 
     conflict = _fixture(tmp_path / "other")
@@ -590,3 +712,142 @@ def test_idempotent_retry_and_conflicting_new_object(tmp_path: Path) -> None:
             request=_request(conflict, expected_digest=conflict_proof.new_evidence.digest),
         )
     assert conflict_gh.updated_bodies == []
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ["repo", "source_pr", "translation_pr", "root", "run", "old_digest", "head"],
+)
+def test_attestation_complete_identity_mismatch_is_rejected(
+    tmp_path: Path, mismatch: str
+) -> None:
+    fx = _fixture(tmp_path)
+    proof = derive_same_fragment_coverage_rebind(
+        repo_path=str(fx.repo), provenance=fx.provenance,
+        old_evidence=fx.evidence, new_candidate_sha=fx.k,
+    )
+    rebind_same_fragment_coverage_evidence(
+        repo_path=str(fx.repo),
+        github=FakeGitHub(
+            body=render_authority_evidence(fx.provenance), head_sha=fx.k
+        ),
+        store=fx.store,
+        request=_request(fx, expected_digest=proof.new_evidence.digest),
+    )
+    provenance = fx.provenance
+    source_repo = REPO
+    source_pr = SOURCE_PR
+    translation_pr = TRANSLATION_PR
+    candidate = fx.k
+    if mismatch == "repo":
+        source_repo = "other/repo"
+    elif mismatch == "source_pr":
+        source_pr += 1
+    elif mismatch == "translation_pr":
+        translation_pr += 1
+    elif mismatch == "root":
+        provenance = replace(provenance, candidate_sha=fx.h)
+    elif mismatch == "run":
+        provenance = replace(provenance, coverage_run_id="other-run")
+    elif mismatch == "old_digest":
+        provenance = replace(provenance, coverage_digest="0" * 64)
+    else:
+        candidate = fx.h
+
+    with pytest.raises(ValueError, match="coverage rebind"):
+        load_attested_coverage_evidence(
+            repo_path=str(fx.repo),
+            store=fx.store,
+            provenance=provenance,
+            source_repo=source_repo,
+            source_pr=source_pr,
+            translation_pr=translation_pr,
+            new_candidate_sha=candidate,
+        )
+
+
+def _rewrite_attestation_field(
+    data: bytes, field: str, value: object
+) -> bytes:
+    payload = json.loads(data)
+    payload[field] = value
+    core = {key: item for key, item in payload.items() if key != "self_digest"}
+    payload["self_digest"] = hashlib.sha256(
+        json.dumps(
+            core, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+    ).hexdigest()
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+
+
+def test_valid_self_digest_never_substitutes_for_replayed_proof(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    proof = derive_same_fragment_coverage_rebind(
+        repo_path=str(fx.repo), provenance=fx.provenance,
+        old_evidence=fx.evidence, new_candidate_sha=fx.k,
+    )
+    rebind_same_fragment_coverage_evidence(
+        repo_path=str(fx.repo),
+        github=FakeGitHub(
+            body=render_authority_evidence(fx.provenance), head_sha=fx.k
+        ),
+        store=fx.store,
+        request=_request(fx, expected_digest=proof.new_evidence.digest),
+    )
+    key = _attestation_key(fx)
+    data = fx.store.get(RUN_ID, key)
+    assert data is not None
+    attestation = decode_coverage_rebind_attestation(data)
+    assert encode_coverage_rebind_attestation(attestation) == data
+    tampered = _rewrite_attestation_field(data, "proof_audit_digest", "0" * 64)
+    decode_coverage_rebind_attestation(tampered)
+    fx.store.put(RUN_ID, key, tampered)
+
+    with pytest.raises(ValueError, match="proof digest mismatch"):
+        load_attested_coverage_evidence(
+            repo_path=str(fx.repo), store=fx.store, provenance=fx.provenance,
+            source_repo=REPO, source_pr=SOURCE_PR,
+            translation_pr=TRANSLATION_PR, new_candidate_sha=fx.k,
+        )
+
+
+@pytest.mark.parametrize("corruption", ["partial", "unknown", "version", "rule"])
+def test_malformed_or_unsupported_attestation_is_rejected(
+    tmp_path: Path, corruption: str
+) -> None:
+    fx = _fixture(tmp_path)
+    proof = derive_same_fragment_coverage_rebind(
+        repo_path=str(fx.repo), provenance=fx.provenance,
+        old_evidence=fx.evidence, new_candidate_sha=fx.k,
+    )
+    rebind_same_fragment_coverage_evidence(
+        repo_path=str(fx.repo),
+        github=FakeGitHub(
+            body=render_authority_evidence(fx.provenance), head_sha=fx.k
+        ),
+        store=fx.store,
+        request=_request(fx, expected_digest=proof.new_evidence.digest),
+    )
+    key = _attestation_key(fx)
+    data = fx.store.get(RUN_ID, key)
+    assert data is not None
+    if corruption == "partial":
+        bad = data[: len(data) // 2]
+    elif corruption == "unknown":
+        payload = json.loads(data)
+        payload["extra"] = True
+        bad = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    elif corruption == "version":
+        bad = _rewrite_attestation_field(data, "version", 2)
+    else:
+        bad = _rewrite_attestation_field(data, "rule", "arbitrary_repair")
+    fx.store.put(RUN_ID, key, bad)
+
+    with pytest.raises(ValueError, match="attestation"):
+        load_attested_coverage_evidence(
+            repo_path=str(fx.repo), store=fx.store, provenance=fx.provenance,
+            source_repo=REPO, source_pr=SOURCE_PR,
+            translation_pr=TRANSLATION_PR, new_candidate_sha=fx.k,
+        )

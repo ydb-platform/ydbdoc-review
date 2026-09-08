@@ -13,7 +13,6 @@ from ydbdoc_review.github.git_ops import read_text_at_commit, resolve_commit_ref
 from ydbdoc_review.github.provenance import (
     TranslationArtifactProvenance,
     parse_authority_evidence,
-    render_authority_evidence,
     validate_authority_evidence,
 )
 from ydbdoc_review.ops.transcripts import TranscriptStore
@@ -33,14 +32,11 @@ _SHA_RE = re.compile(r"[0-9a-f]{40}")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _AUDIT_RULE = "reconcile_final_en_same_fragment_paths"
 _AUDIT_VERSION = 1
+_ATTESTATION_VERSION = 1
 
 
 class CoverageRebindGitHub(Protocol):
     def get_pull(self, owner: str, repo: str, pr_number: int) -> dict[str, Any]: ...
-
-    def update_pull_body(
-        self, owner: str, repo: str, pr_number: int, body: str
-    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -72,7 +68,26 @@ class CoverageRebindProof:
 @dataclass(frozen=True)
 class CoverageRebindResult:
     proof: CoverageRebindProof
-    metadata_updated: bool
+    attestation_stored: bool
+
+
+@dataclass(frozen=True)
+class CoverageRebindAttestation:
+    """Exact trusted-store authorization for one proven C-to-K repair."""
+
+    version: int
+    source_repo: str
+    source_pr: int
+    translation_pr: int
+    old_candidate_sha: str
+    old_run_id: str
+    old_coverage_digest: str
+    new_candidate_sha: str
+    new_coverage_digest: str
+    rule: str
+    rule_version: int
+    proof_audit_digest: str
+    self_digest: str
 
 
 @dataclass(frozen=True)
@@ -230,6 +245,205 @@ def _validate_old_evidence_snapshots(
 def coverage_rebind_audit_key(new_candidate_sha: str) -> str:
     sha = _require_sha(new_candidate_sha, field="new candidate SHA")
     return f"translation/v1/coverage-repairs/{sha}.json"
+
+
+def _attestation_identity(
+    *,
+    source_repo: str,
+    source_pr: int,
+    translation_pr: int,
+    old_candidate_sha: str,
+    old_run_id: str,
+    old_coverage_digest: str,
+    new_candidate_sha: str,
+) -> dict[str, object]:
+    if type(source_repo) is not str:
+        raise ValueError("coverage rebind source repository is invalid")
+    owner, separator, repo = source_repo.partition("/")
+    if not separator or not owner or not repo or "/" in repo:
+        raise ValueError("coverage rebind source repository is invalid")
+    if (
+        type(source_pr) is not int
+        or type(translation_pr) is not int
+        or source_pr <= 0
+        or translation_pr <= 0
+    ):
+        raise ValueError("coverage rebind pull request identity is invalid")
+    if type(old_run_id) is not str or not old_run_id:
+        raise ValueError("coverage rebind old run ID is invalid")
+    return {
+        "source_repo": source_repo.casefold(),
+        "source_pr": source_pr,
+        "translation_pr": translation_pr,
+        "old_candidate_sha": _require_sha(
+            old_candidate_sha, field="old candidate SHA"
+        ),
+        "old_run_id": old_run_id,
+        "old_coverage_digest": _require_digest(
+            old_coverage_digest, field="old digest"
+        ),
+        "new_candidate_sha": _require_sha(
+            new_candidate_sha, field="new candidate SHA"
+        ),
+        "rule": _AUDIT_RULE,
+        "rule_version": _AUDIT_VERSION,
+    }
+
+
+def coverage_rebind_attestation_key(
+    *,
+    source_repo: str,
+    source_pr: int,
+    translation_pr: int,
+    old_candidate_sha: str,
+    old_run_id: str,
+    old_coverage_digest: str,
+    new_candidate_sha: str,
+) -> str:
+    """Address a receipt by its complete immutable authorization tuple."""
+    identity = _attestation_identity(
+        source_repo=source_repo,
+        source_pr=source_pr,
+        translation_pr=translation_pr,
+        old_candidate_sha=old_candidate_sha,
+        old_run_id=old_run_id,
+        old_coverage_digest=old_coverage_digest,
+        new_candidate_sha=new_candidate_sha,
+    )
+    encoded = json.dumps(
+        identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    digest = hashlib.sha256(encoded).hexdigest()
+    return f"translation/v1/coverage-rebind-bindings/{digest}.json"
+
+
+def _attestation_core(attestation: CoverageRebindAttestation) -> dict[str, object]:
+    return {
+        "version": attestation.version,
+        "source_repo": attestation.source_repo,
+        "source_pr": attestation.source_pr,
+        "translation_pr": attestation.translation_pr,
+        "old_candidate_sha": attestation.old_candidate_sha,
+        "old_run_id": attestation.old_run_id,
+        "old_coverage_digest": attestation.old_coverage_digest,
+        "new_candidate_sha": attestation.new_candidate_sha,
+        "new_coverage_digest": attestation.new_coverage_digest,
+        "rule": attestation.rule,
+        "rule_version": attestation.rule_version,
+        "proof_audit_digest": attestation.proof_audit_digest,
+    }
+
+
+def _digest_attestation_core(core: dict[str, object]) -> str:
+    encoded = json.dumps(
+        core, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _build_attestation(
+    *, request: CoverageRebindRequest, proof: CoverageRebindProof
+) -> CoverageRebindAttestation:
+    identity = _attestation_identity(
+        source_repo=request.source_repo,
+        source_pr=request.source_pr,
+        translation_pr=request.translation_pr,
+        old_candidate_sha=request.old_candidate_sha,
+        old_run_id=request.old_run_id,
+        old_coverage_digest=request.old_digest,
+        new_candidate_sha=request.new_candidate_sha,
+    )
+    without_digest = CoverageRebindAttestation(
+        version=_ATTESTATION_VERSION,
+        source_repo=str(identity["source_repo"]),
+        source_pr=request.source_pr,
+        translation_pr=request.translation_pr,
+        old_candidate_sha=request.old_candidate_sha,
+        old_run_id=request.old_run_id,
+        old_coverage_digest=request.old_digest,
+        new_candidate_sha=request.new_candidate_sha,
+        new_coverage_digest=proof.new_evidence.digest,
+        rule=_AUDIT_RULE,
+        rule_version=_AUDIT_VERSION,
+        proof_audit_digest=hashlib.sha256(proof.audit_data).hexdigest(),
+        self_digest="",
+    )
+    return replace(
+        without_digest,
+        self_digest=_digest_attestation_core(_attestation_core(without_digest)),
+    )
+
+
+def encode_coverage_rebind_attestation(
+    attestation: CoverageRebindAttestation,
+) -> bytes:
+    core = _attestation_core(attestation)
+    if attestation.self_digest != _digest_attestation_core(core):
+        raise ValueError("coverage rebind attestation self-digest mismatch")
+    return json.dumps(
+        {**core, "self_digest": attestation.self_digest},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def decode_coverage_rebind_attestation(data: bytes) -> CoverageRebindAttestation:
+    """Decode only canonical, complete v1 attestation bytes."""
+    try:
+        raw = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("coverage rebind attestation is malformed") from exc
+    expected_fields = {
+        "version",
+        "source_repo",
+        "source_pr",
+        "translation_pr",
+        "old_candidate_sha",
+        "old_run_id",
+        "old_coverage_digest",
+        "new_candidate_sha",
+        "new_coverage_digest",
+        "rule",
+        "rule_version",
+        "proof_audit_digest",
+        "self_digest",
+    }
+    if not isinstance(raw, dict) or set(raw) != expected_fields:
+        raise ValueError("coverage rebind attestation fields are invalid")
+    if (
+        type(raw["version"]) is not int
+        or type(raw["source_pr"]) is not int
+        or type(raw["translation_pr"]) is not int
+        or type(raw["rule_version"]) is not int
+        or any(type(raw[field]) is not str for field in expected_fields - {
+            "version", "source_pr", "translation_pr", "rule_version"
+        })
+    ):
+        raise ValueError("coverage rebind attestation field types are invalid")
+    attestation = CoverageRebindAttestation(**raw)
+    _attestation_identity(
+        source_repo=attestation.source_repo,
+        source_pr=attestation.source_pr,
+        translation_pr=attestation.translation_pr,
+        old_candidate_sha=attestation.old_candidate_sha,
+        old_run_id=attestation.old_run_id,
+        old_coverage_digest=attestation.old_coverage_digest,
+        new_candidate_sha=attestation.new_candidate_sha,
+    )
+    _require_digest(attestation.new_coverage_digest, field="new digest")
+    _require_digest(attestation.proof_audit_digest, field="proof audit digest")
+    _require_digest(attestation.self_digest, field="attestation self digest")
+    if attestation.version != _ATTESTATION_VERSION:
+        raise ValueError("coverage rebind attestation version is unsupported")
+    if (
+        attestation.rule != _AUDIT_RULE
+        or attestation.rule_version != _AUDIT_VERSION
+    ):
+        raise ValueError("coverage rebind attestation rule is unsupported")
+    if encode_coverage_rebind_attestation(attestation) != data:
+        raise ValueError("coverage rebind attestation encoding is not canonical")
+    return attestation
 
 
 def _build_audit_data(
@@ -450,6 +664,136 @@ def _save_audit(
         raise ValueError(f"coverage rebind audit storage failed: {exc}") from exc
 
 
+def _save_attestation(
+    store: TranscriptStore,
+    run_id: str,
+    key: str,
+    attestation: CoverageRebindAttestation,
+) -> bool:
+    data = encode_coverage_rebind_attestation(attestation)
+    try:
+        current = store.get(run_id, key)
+        if current is not None and current != data:
+            raise ValueError("coverage rebind attestation immutable conflict")
+        stored = current is None
+        if stored:
+            store.put(run_id, key, data)
+        if store.get(run_id, key) != data:
+            raise ValueError("coverage rebind attestation storage verification failed")
+        return stored
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"coverage rebind attestation storage failed: {exc}") from exc
+
+
+def load_attested_coverage_evidence(
+    *,
+    repo_path: str,
+    store: TranscriptStore,
+    provenance: TranslationArtifactProvenance,
+    source_repo: str,
+    source_pr: int,
+    translation_pr: int,
+    new_candidate_sha: str,
+) -> CoverageEvidence:
+    """Re-prove an exact trusted-store receipt, then strictly load K evidence."""
+    if provenance.coverage_version != 1:
+        raise ValueError("coverage rebind original coverage version is invalid")
+    old_run_id = provenance.coverage_run_id
+    old_digest = provenance.coverage_digest
+    if old_run_id is None or old_digest is None:
+        raise ValueError("coverage rebind original coverage binding is missing")
+    old_candidate_sha = _require_sha(
+        provenance.candidate_sha, field="old candidate SHA"
+    )
+    new_candidate_sha = _require_sha(new_candidate_sha, field="new candidate SHA")
+    if old_candidate_sha == new_candidate_sha:
+        raise ValueError("coverage rebind attestation is not an exact-binding fallback")
+    if provenance.authority.source_repo.casefold() != source_repo.casefold():
+        raise ValueError("coverage rebind attestation source repository mismatch")
+    if provenance.authority.source_pr != source_pr:
+        raise ValueError("coverage rebind attestation source pull request mismatch")
+    key = coverage_rebind_attestation_key(
+        source_repo=source_repo,
+        source_pr=source_pr,
+        translation_pr=translation_pr,
+        old_candidate_sha=old_candidate_sha,
+        old_run_id=old_run_id,
+        old_coverage_digest=old_digest,
+        new_candidate_sha=new_candidate_sha,
+    )
+    try:
+        data = store.get(old_run_id, key)
+    except Exception as exc:
+        raise ValueError(f"coverage rebind attestation load failed: {exc}") from exc
+    if data is None:
+        raise ValueError("coverage rebind attestation is missing for exact candidate")
+    attestation = decode_coverage_rebind_attestation(data)
+    expected_identity = _attestation_identity(
+        source_repo=source_repo,
+        source_pr=source_pr,
+        translation_pr=translation_pr,
+        old_candidate_sha=old_candidate_sha,
+        old_run_id=old_run_id,
+        old_coverage_digest=old_digest,
+        new_candidate_sha=new_candidate_sha,
+    )
+    actual_identity = {
+        "source_repo": attestation.source_repo,
+        "source_pr": attestation.source_pr,
+        "translation_pr": attestation.translation_pr,
+        "old_candidate_sha": attestation.old_candidate_sha,
+        "old_run_id": attestation.old_run_id,
+        "old_coverage_digest": attestation.old_coverage_digest,
+        "new_candidate_sha": attestation.new_candidate_sha,
+        "rule": attestation.rule,
+        "rule_version": attestation.rule_version,
+    }
+    if actual_identity != expected_identity:
+        raise ValueError("coverage rebind attestation identity mismatch")
+    validate_authority_evidence(
+        repo_path,
+        provenance,
+        expected_repo=source_repo,
+        expected_source_pr=source_pr,
+        current_candidate_sha=new_candidate_sha,
+    )
+    old_evidence = load_coverage_evidence(
+        store,
+        old_run_id,
+        candidate_sha=old_candidate_sha,
+        expected_digest=old_digest,
+    )
+    proof = derive_same_fragment_coverage_rebind(
+        repo_path=repo_path,
+        provenance=provenance,
+        old_evidence=old_evidence,
+        new_candidate_sha=new_candidate_sha,
+    )
+    proof_digest = hashlib.sha256(proof.audit_data).hexdigest()
+    if proof_digest != attestation.proof_audit_digest:
+        raise ValueError("coverage rebind attestation proof digest mismatch")
+    if proof.new_evidence.digest != attestation.new_coverage_digest:
+        raise ValueError("coverage rebind attestation new coverage digest mismatch")
+    audit_key = coverage_rebind_audit_key(new_candidate_sha)
+    try:
+        audit_data = store.get(old_run_id, audit_key)
+    except Exception as exc:
+        raise ValueError(f"coverage rebind audit load failed: {exc}") from exc
+    if audit_data != proof.audit_data:
+        raise ValueError("coverage rebind attestation audit proof mismatch")
+    evidence = load_coverage_evidence(
+        store,
+        old_run_id,
+        candidate_sha=new_candidate_sha,
+        expected_digest=proof.new_evidence.digest,
+    )
+    if evidence != proof.new_evidence:
+        raise ValueError("coverage rebind strict K evidence differs from proof")
+    return evidence
+
+
 def rebind_same_fragment_coverage_evidence(
     *,
     repo_path: str,
@@ -457,7 +801,7 @@ def rebind_same_fragment_coverage_evidence(
     store: TranscriptStore,
     request: CoverageRebindRequest,
 ) -> CoverageRebindResult:
-    """Persist proven K evidence, then update only the PR coverage marker."""
+    """Persist proven K evidence and activate it with an exact attestation."""
     old_candidate_sha = _require_sha(
         request.old_candidate_sha, field="old candidate SHA"
     )
@@ -489,9 +833,7 @@ def rebind_same_fragment_coverage_evidence(
         raise ValueError("coverage rebind source pull request identity mismatch")
     if provenance.coverage_run_id != request.old_run_id or provenance.coverage_version != 1:
         raise ValueError("coverage rebind old coverage binding is invalid")
-    binding_is_old = provenance.coverage_digest == old_digest
-    binding_is_rebound = provenance.coverage_digest == expected_new_digest
-    if not binding_is_old and not binding_is_rebound:
+    if provenance.coverage_digest != old_digest:
         raise ValueError("coverage rebind old coverage binding is invalid")
     validate_authority_evidence(
         repo_path,
@@ -527,23 +869,19 @@ def rebind_same_fragment_coverage_evidence(
     )
     if latest_head != new_candidate_sha:
         raise ValueError("coverage rebind remote head drifted before metadata update")
-    if latest_body != initial_body:
-        raise ValueError("coverage rebind PR body drifted before metadata update")
     latest = parse_authority_evidence(latest_body)
     expected_old = replace(provenance, coverage_digest=old_digest)
-    expected_new = replace(provenance, coverage_digest=expected_new_digest)
-    if binding_is_rebound:
-        if latest != expected_new:
-            raise ValueError("coverage rebind authority binding drifted before update")
-        return CoverageRebindResult(proof=proof, metadata_updated=False)
     if latest != expected_old:
-        raise ValueError("coverage rebind authority binding drifted before update")
-    old_marker = render_authority_evidence(expected_old)
-    if latest_body.count(old_marker) != 1:
-        raise ValueError("coverage rebind authority marker cannot be replaced exactly")
-    new_body = latest_body.replace(
-        old_marker, render_authority_evidence(expected_new), 1
+        raise ValueError("coverage rebind authority binding drifted before attestation")
+    attestation = _build_attestation(request=request, proof=proof)
+    key = coverage_rebind_attestation_key(
+        source_repo=request.source_repo,
+        source_pr=request.source_pr,
+        translation_pr=request.translation_pr,
+        old_candidate_sha=old_candidate_sha,
+        old_run_id=request.old_run_id,
+        old_coverage_digest=old_digest,
+        new_candidate_sha=new_candidate_sha,
     )
-    owner, repo = request.source_repo.split("/", 1)
-    github.update_pull_body(owner, repo, request.translation_pr, new_body)
-    return CoverageRebindResult(proof=proof, metadata_updated=True)
+    stored = _save_attestation(store, request.old_run_id, key, attestation)
+    return CoverageRebindResult(proof=proof, attestation_stored=stored)

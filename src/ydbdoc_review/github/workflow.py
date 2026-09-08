@@ -87,6 +87,7 @@ from ydbdoc_review.navigation.scope_planner import (
     synthetic_changes_from_plan,
 )
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
+from ydbdoc_review.ops.coverage_rebind import load_attested_coverage_evidence
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
 from ydbdoc_review.ops.job_state import (
     CONTINUABILITY_STORE_KEY,
@@ -3492,6 +3493,7 @@ def run_doc_verify(
             )
 
     coverage_evidence: CoverageEvidence | None = None
+    attested_coverage_rebind = False
     trusted_coverage_store = _coverage_store or (
         getattr(ops_ctx, "store", None) if ops_ctx is not None else None
     )
@@ -3502,12 +3504,30 @@ def run_doc_verify(
             or artifact_provenance.coverage_digest is None
         ):
             raise ValueError("coverage evidence trusted store or binding is missing")
-        coverage_evidence = load_coverage_evidence(
-            trusted_coverage_store,
-            artifact_provenance.coverage_run_id,
-            candidate_sha=verify_content_sha,
-            expected_digest=artifact_provenance.coverage_digest,
-        )
+        if artifact_provenance.candidate_sha == verify_content_sha:
+            coverage_evidence = load_coverage_evidence(
+                trusted_coverage_store,
+                artifact_provenance.coverage_run_id,
+                candidate_sha=verify_content_sha,
+                expected_digest=artifact_provenance.coverage_digest,
+            )
+        else:
+            coverage_evidence = load_attested_coverage_evidence(
+                repo_path=repo_path,
+                store=trusted_coverage_store,
+                provenance=artifact_provenance,
+                source_repo=github_repo,
+                source_pr=source_pr_num,
+                translation_pr=pr_number,
+                new_candidate_sha=verify_content_sha,
+            )
+            attested_coverage_rebind = True
+            logger.info(
+                "Loaded exact coverage rebind attestation for translation PR #%s "
+                "candidate %s",
+                pr_number,
+                verify_content_sha,
+            )
 
     upstream_url = repo_https_clone_url(owner, repo)
     fixup_source_pr = source_pr or pr_number
@@ -4101,6 +4121,19 @@ def run_doc_verify(
 
     refresh_publication_impact(pr_result)
 
+    if attested_coverage_rebind:
+        mismatches = _enforce_report_checkout_bytes(
+            repo_path, verify_content_sha, pr_result
+        )
+        if mismatches:
+            logger.error(
+                "Attestation-backed doc_verify cannot publish critic changes; "
+                "candidate %s remains unchanged and RED: %s",
+                verify_content_sha,
+                mismatches,
+            )
+            refresh_publication_impact(pr_result)
+
     verify_requires_red = result_has_blocking_findings(pr_result)
     if translation_pr and verify_requires_red:
         # Convert through the API method immediately before any local/remote
@@ -4110,13 +4143,22 @@ def run_doc_verify(
 
     job.pr_result = pr_result
 
-    final_read_only_verify = _fixup_rerun_depth >= 3 and inline_fixup_push
+    final_read_only_verify = attested_coverage_rebind or (
+        _fixup_rerun_depth >= 3 and inline_fixup_push
+    )
     if final_read_only_verify:
-        logger.info(
-            "Final read-only doc_verify for PR #%s: reporting the current head "
-            "without applying further critic suggestions",
-            pr_number,
-        )
+        if attested_coverage_rebind:
+            logger.info(
+                "Attestation-backed doc_verify for PR #%s: preserving exact K and "
+                "the complete PR body",
+                pr_number,
+            )
+        else:
+            logger.info(
+                "Final read-only doc_verify for PR #%s: reporting the current head "
+                "without applying further critic suggestions",
+                pr_number,
+            )
         touched = None
     else:
         wrapper_repairs = (
@@ -4486,7 +4528,20 @@ def run_doc_verify(
     # Full QA report: on newly opened fixup PR when one exists; otherwise on
     # the verified PR (translation / verify-* / bilingual with no fixes).
     report_pr = fixup_pr_number if fixup_pr_number is not None else pr_number
-    if translation_pr and source_pr is not None:
+    if attested_coverage_rebind:
+        _require_remote_sha(
+            gh,
+            owner,
+            repo,
+            ctx.head_ref,
+            verify_content_sha,
+            context="before attestation-backed verify report",
+        )
+    if (
+        translation_pr
+        and source_pr is not None
+        and not attested_coverage_rebind
+    ):
         gh.update_pull_body(
             owner,
             repo,
