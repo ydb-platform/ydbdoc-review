@@ -39,26 +39,7 @@ if command -v ydbdoc-review >/dev/null 2>&1; then
 fi
 
 case "${MODE}" in
-  verify)
-    set -- ${CLI} verify \
-      --repo "${INPUT_REPO}" \
-      --pr "${INPUT_PR}" \
-      --merge-base-with "${MB}" \
-      ${OPTS}
-    ;;
-  continue)
-    set -- ${CLI} continue \
-      --repo "${INPUT_REPO}" \
-      --pr "${INPUT_PR}" \
-      --merge-base-with "${MB}" \
-      ${OPTS}
-    ;;
-  run)
-    set -- ${CLI} run \
-      --repo "${INPUT_REPO}" \
-      --pr "${INPUT_PR}" \
-      --merge-base-with "${MB}" \
-      ${OPTS}
+  run|verify|continue)
     ;;
   *)
     echo "::error::unsupported mode: ${MODE}" >&2
@@ -66,6 +47,12 @@ case "${MODE}" in
     ;;
 esac
 
+set -- ${CLI} job \
+  --mode "${MODE}" \
+  --repo "${INPUT_REPO}" \
+  --pr "${INPUT_PR}" \
+  --merge-base-with "${MB}" \
+  ${OPTS}
 set -- "$@" --repo-path "${REPO}"
 
 exec "$@"

@@ -71,3 +71,12 @@ def test_F004_action_rejects_modes_that_job_does_not_expose():
     assert 'case "${MODE}" in' in entrypoint
     assert '  *)\n    echo "::error::unsupported mode: ${MODE}" >&2\n    exit 2\n    ;;' in entrypoint
     assert 'set -- "$@" --repo-path "${REPO}"' in entrypoint
+
+
+def test_F004_action_routes_all_user_modes_through_unified_job():
+    entrypoint = Path("entrypoint.sh").read_text(encoding="utf-8")
+
+    assert 'set -- ${CLI} job \\\n  --mode "${MODE}"' in entrypoint
+    assert 'set -- ${CLI} run' not in entrypoint
+    assert 'set -- ${CLI} verify' not in entrypoint
+    assert 'set -- ${CLI} continue' not in entrypoint
