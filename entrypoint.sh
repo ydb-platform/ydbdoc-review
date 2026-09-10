@@ -48,12 +48,16 @@ case "${MODE}" in
       --merge-base-with "${MB}" \
       ${OPTS}
     ;;
-  *)
+  run)
     set -- ${CLI} run \
       --repo "${INPUT_REPO}" \
       --pr "${INPUT_PR}" \
       --merge-base-with "${MB}" \
       ${OPTS}
+    ;;
+  *)
+    echo "::error::unsupported mode: ${MODE}" >&2
+    exit 2
     ;;
 esac
 

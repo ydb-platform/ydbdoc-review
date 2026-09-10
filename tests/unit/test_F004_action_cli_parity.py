@@ -60,3 +60,10 @@ def test_F004_job_dispatches_explicitly_to_each_mode(monkeypatch: pytest.MonkeyP
 
 def test_F004_verify_does_not_derive_source_pr_from_arbitrary_title():
     assert "parse_source_pr_from_text" not in inspect.getsource(workflow.run_doc_verify)
+
+
+def test_F004_action_rejects_modes_that_job_does_not_expose():
+    entrypoint = Path("entrypoint.sh").read_text(encoding="utf-8")
+
+    assert 'case "${MODE}" in' in entrypoint
+    assert '  *)\n    echo "::error::unsupported mode: ${MODE}" >&2\n    exit 2\n    ;;' in entrypoint
