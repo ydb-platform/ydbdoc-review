@@ -96,7 +96,32 @@ def run(
     ] = False,
 ) -> None:
     """Translate changed doc pairs for a source PR (``doc_translate``)."""
-    job("run", repo, pr, repo_path, merge_base_with, dry_run, no_commit)
+    path = _resolve_repo_path(repo_path)
+    try:
+        result = run_doc_translate(
+            repo_path=str(path),
+            github_repo=repo,
+            pr_number=pr,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+        )
+    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_job_summary(result.mode, result, no_commit=no_commit)
+    if result.pr_result.failed_count:
+        console.print(
+            f"[yellow]Warning:[/yellow] {result.pr_result.failed_count} pair(s) failed — "
+            "see logs and translation PR report."
+        )
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print(
+            "[red]Error:[/red] translate did not publish a translation PR "
+            "(blocking error skipped commit/push/PR)."
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -123,7 +148,24 @@ def verify(
     ] = False,
 ) -> None:
     """Critic QA + completeness on a translation PR or bilingual source PR (``doc_verify``)."""
-    job("verify", repo, pr, repo_path, merge_base_with, dry_run, no_commit)
+    path = _resolve_repo_path(repo_path)
+    try:
+        result = run_doc_verify(
+            repo_path=str(path),
+            github_repo=repo,
+            pr_number=pr,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+        )
+    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_job_summary(result.mode, result, no_commit=no_commit)
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print("[red]Error:[/red] verify finished with blocking findings.")
+        raise typer.Exit(code=1)
 
 
 @app.command("continue")
@@ -152,7 +194,28 @@ def continue_(
     ] = None,
 ) -> None:
     """Continue translation with operator feedback (``doc_continue``)."""
-    job("continue", repo, pr, repo_path, merge_base_with, dry_run, no_commit, instruction)
+    path = _resolve_repo_path(repo_path)
+    try:
+        result = run_doc_continue(
+            repo_path=str(path),
+            github_repo=repo,
+            pr_number=pr,
+            merge_base_with=merge_base_with,
+            dry_run=dry_run,
+            no_commit=no_commit,
+            instruction=instruction,
+        )
+    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_job_summary(result.mode, result, no_commit=no_commit)
+    if job_requires_nonzero_exit(result, no_commit=no_commit):
+        console.print(
+            "[red]Error:[/red] continue refused or did not publish "
+            "(need continuable job state, or blocking publish skip)."
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -220,7 +283,7 @@ def job(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    _print_job_summary(getattr(result, "mode", m), result)
+    _print_job_summary(getattr(result, "mode", m), result, no_commit=no_commit)
     if job_requires_nonzero_exit(result, no_commit=no_commit):
         console.print(
             "[red]Error:[/red] job finished without success "
@@ -352,7 +415,7 @@ def extract(
     sys.stdout.write("\n")
 
 
-def _print_job_summary(mode: str, result: object) -> None:
+def _print_job_summary(mode: str, result: object, *, no_commit: bool = False) -> None:
     from ydbdoc_review.github.workflow import DocJobResult
     from ydbdoc_review.pipeline.types import PublicationImpact
 
@@ -381,7 +444,7 @@ def _print_job_summary(mode: str, result: object) -> None:
         console.print("  Git: committed")
     if result.pushed:
         console.print("  Git: pushed")
-    if result.dry_run or getattr(result, "translation_pr_number", None) is None:
+    if result.dry_run or no_commit or getattr(result, "translation_pr_number", None) is None:
         console.print("  Published PR: none")
 
 

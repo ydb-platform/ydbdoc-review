@@ -3724,6 +3724,8 @@ def run_doc_verify(
     if not pairs and not nav_pairs:
         if translation_pr and not durable_impact_paths:
             logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
+            if ops_ctx is not None:
+                finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
             return job
         logger.info(
             "No doc/nav pairs on bilingual/source PR #%s — completeness-only verify",
