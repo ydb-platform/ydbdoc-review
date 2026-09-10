@@ -381,6 +381,8 @@ def _print_job_summary(mode: str, result: object) -> None:
         console.print("  Git: committed")
     if result.pushed:
         console.print("  Git: pushed")
+    if result.dry_run or getattr(result, "translation_pr_number", None) is None:
+        console.print("  Published PR: none")
 
 
 if __name__ == "__main__":
