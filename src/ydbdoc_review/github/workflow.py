@@ -2400,6 +2400,26 @@ def run_doc_translate(
         )
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
+    if ctx.state != "open" and not ctx.merged:
+        if ops_ctx is not None and not dry_run:
+            finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+        if not dry_run:
+            _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                "Метка `doc_translate` обрабатывает только открытые и уже слитые PR.",
+                label="doc_translate blocked",
+            )
+        return DocJobResult(
+            mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
+            pr_number=pr_number,
+            source_pr_number=pr_number,
+            dry_run=dry_run,
+            blocked=True,
+        )
+
     effective_authority_mode = (
         RuAuthorityMode.SOURCE_PRESERVING
         if "doc_translate_source_preserving" in ctx.labels
