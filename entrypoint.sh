@@ -4,13 +4,18 @@ set -eu
 # In Docker Actions the repo is mounted at GITHUB_WORKSPACE (e.g. /github/workspace).
 # Workflows often set YDBDOC_REPO_PATH=${{ github.workspace }}, which is a *runner* path
 # (/home/runner/...) and does not exist inside the container — then merge-base fails.
-REPO="${YDBDOC_REPO_PATH:-}"
+REPO="${INPUT_REPO_PATH:-${YDBDOC_REPO_PATH:-}}"
 if [ -z "${REPO}" ]; then
   REPO="${GITHUB_WORKSPACE:-}"
 elif [ ! -e "${REPO}/.git" ] && [ -n "${GITHUB_WORKSPACE:-}" ] && [ -e "${GITHUB_WORKSPACE}/.git" ]; then
   REPO="${GITHUB_WORKSPACE}"
 fi
 export YDBDOC_REPO_PATH="${REPO}"
+
+if [ -z "${REPO}" ]; then
+  echo "::error::repo_path is required" >&2
+  exit 2
+fi
 
 # Legacy: workflow may still pass YDBDOC_PUSH_PAT; app reads GITHUB_PUSH_TOKEN. ydb CI uses GITHUB_TOKEN only.
 if [ -n "${YDBDOC_PUSH_PAT:-}" ] && [ -z "${GITHUB_PUSH_TOKEN:-}" ]; then
@@ -61,8 +66,6 @@ case "${MODE}" in
     ;;
 esac
 
-if [ -n "${YDBDOC_REPO_PATH}" ] && [ -e "${YDBDOC_REPO_PATH}/.git" ]; then
-  set -- "$@" --repo-path "${YDBDOC_REPO_PATH}"
-fi
+set -- "$@" --repo-path "${REPO}"
 
 exec "$@"

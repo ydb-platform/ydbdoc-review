@@ -17,6 +17,9 @@ def test_F004_action_and_cli_expose_the_same_explicit_inputs_for_all_modes():
     assert 'repo:\n    description:' in action
     assert 'pr:\n    description:' in action
     assert 'mode:\n    description:' in action
+    assert 'repo_path:\n    description:' in action
+    assert action[action.index("repo_path:") :].count("required: true") >= 1
+    assert 'INPUT_REPO_PATH: ${{ inputs.repo_path }}' in action
     assert 'required: true' in action
     for mode in ("run", "verify", "continue"):
         assert f'"{mode}"' in action
@@ -67,3 +70,4 @@ def test_F004_action_rejects_modes_that_job_does_not_expose():
 
     assert 'case "${MODE}" in' in entrypoint
     assert '  *)\n    echo "::error::unsupported mode: ${MODE}" >&2\n    exit 2\n    ;;' in entrypoint
+    assert 'set -- "$@" --repo-path "${REPO}"' in entrypoint
