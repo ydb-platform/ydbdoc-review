@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -56,21 +55,10 @@ def _setup_logging(verbose: bool) -> None:
     _setup_logging._configured = True  # type: ignore[attr-defined]
 
 
-def _resolve_repo_path(repo_path: Path | None) -> Path:
-    if repo_path is not None:
-        return repo_path.expanduser().resolve()
-    env_raw = os.environ.get("YDBDOC_REPO_PATH", "")
-    if env_raw:
-        env = Path(env_raw).expanduser()
-        if env.is_dir():
-            return env.resolve()
-    cwd = Path.cwd()
-    if (cwd / ".git").exists():
-        return cwd
-    raise typer.BadParameter(
-        "Repository path required: pass --repo-path or set YDBDOC_REPO_PATH "
-        "to a git checkout of the docs repo."
-    )
+def _resolve_repo_path(repo_path: Path) -> Path:
+    if repo_path is None:
+        raise typer.BadParameter("Repository path required: pass --repo-path.")
+    return repo_path.expanduser().resolve()
 
 
 @app.callback()
@@ -91,9 +79,9 @@ def run(
     repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
     pr: Annotated[int, typer.Option(help="Source PR number (doc_translate).")],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the PR head."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
@@ -146,9 +134,9 @@ def verify(
         ),
     ],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the PR head (or merge commit)."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
@@ -188,9 +176,9 @@ def continue_(
         typer.Option(help="Translation PR number (doc_continue)."),
     ],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the translation PR head."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
@@ -242,9 +230,9 @@ def job(
     repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
     pr: Annotated[int, typer.Option(help="PR number (source for translate; translation for verify/continue).")],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the PR head."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),

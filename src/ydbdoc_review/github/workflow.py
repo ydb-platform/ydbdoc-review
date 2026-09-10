@@ -49,7 +49,6 @@ from ydbdoc_review.github.pr import (
     load_verify_pair_contents,
     merge_pr_file_changes,
     parse_repo,
-    parse_source_pr_from_text,
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
@@ -3428,10 +3427,6 @@ def run_doc_verify(
     source_pr = source_pr_number_from_branch(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
-    # Only parse "PR #N" from title/body on translation PRs. Bilingual author
-    # PRs are self-contained; a title like "fix for PR #999" must not redirect RU.
-    if source_pr is None and translation_pr:
-        source_pr = parse_source_pr_from_text(f"{ctx.title}\n{ctx.body}")
     if source_pr is None and verify_fixup_pr:
         source_pr = source_pr_number_from_branch(
             ctx.head_ref, prefix=cfg.paths.verify_fixup_branch_prefix
