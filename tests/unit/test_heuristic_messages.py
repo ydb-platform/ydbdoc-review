@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ydbdoc_review.reporting.heuristic_messages as heuristic_messages
 from ydbdoc_review.reporting.heuristic_messages import (
     format_critic_reviewer_detail,
     format_heuristic_reviewer_detail,
@@ -62,17 +63,22 @@ def test_humanize_orphan_toc_page():
     assert "orphan_toc_page" not in text
 
 
-def test_format_heuristic_wikipedia_link_locale():
+def test_format_heuristic_wikipedia_link_locale(monkeypatch):
     raw = (
         "link_locale: en.wikipedia.org uses Russian article slug "
         "(use English title): "
         "https://en.wikipedia.org/wiki/%D0%AF%D0%B7%D1%8B%D0%BA_%D0%BC%D0%B0%D0%BD%D0%B8%D0%BF%D1%83%D0%BB%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F_%D0%B4%D0%B0%D0%BD%D0%BD%D1%8B%D0%BC%D0%B8"
     )
+    monkeypatch.setattr(
+        heuristic_messages,
+        "resolve_wikipedia_href",
+        lambda href, *, target_lang: "https://en.wikipedia.org/wiki/Manipulation",
+    )
     detail = format_heuristic_reviewer_detail(raw)
     assert "Wikipedia" in detail.problem
     assert "русский slug" in detail.problem
     assert detail.suggestion is not None
-    assert "en.wikipedia.org" in detail.suggestion
+    assert detail.suggestion == "Замените ссылку на: https://en.wikipedia.org/wiki/Manipulation"
 
 
 def test_format_critic_execution_failed_invalid_json():

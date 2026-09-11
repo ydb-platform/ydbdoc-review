@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import urllib.request
 from pathlib import Path
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.validation.markers import placeholders_match
 from ydbdoc_review.validation.placeholder_repair import (
-    repair_translation_placeholders,
     _is_url_placeholder_template,
+    repair_translation_placeholders,
 )
 
 
@@ -124,14 +123,13 @@ def test_repair_s0010_literals_with_link_variable():
 
 
 def test_repair_swapped_variable_and_url_vscode_s0077():
-    url = (
-        "https://raw.githubusercontent.com/ydb-platform/ydb/main/"
-        "ydb/docs/ru/core/integrations/gui/vscode-plugin.md"
+    source = (
+        "Аутентификация по логину и паролю. Укажите имя пользователя в поле "
+        "**Username** и пароль в поле **Password**. Используется, если на "
+        "сервере {{ ydb-short-name }} включена "
+        "[аутентификация по логину и паролю](../../security/authentication.md#static-credentials)."
     )
-    text = urllib.request.urlopen(url, timeout=30).read().decode()
-    seg = next(
-        s for s in extract_segments(parse_markdown(text)) if s.id == "s0077"
-    )
+    seg = next(s for s in extract_segments(parse_markdown(source)))
     broken = (
         "Authentication by login and password. Specify the username in the "
         "**Username** field and the password in the **Password** field. "
