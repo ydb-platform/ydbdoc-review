@@ -1,5 +1,8 @@
 """Tests for PR helpers."""
 
+# Russian fixture text is intentional in these source-reading tests.
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import subprocess
@@ -11,6 +14,8 @@ from ydbdoc_review.github.pr import (
     PullRequestContext,
     build_pairs_from_changes,
     is_fork_head,
+    is_translation_pr_branch,
+    is_verify_fixup_branch,
     list_pr_file_changes_api,
     load_pair_contents,
     parse_repo,
@@ -18,10 +23,8 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
-    is_translation_pr_branch,
-    is_verify_fixup_branch,
-    translation_pr_base,
     translation_branch_base,
+    translation_pr_base,
     verify_fixup_pr_base,
 )
 

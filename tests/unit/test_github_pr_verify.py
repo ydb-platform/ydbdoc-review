@@ -362,7 +362,7 @@ def test_pick_verify_ru_text_uses_local_when_api_mismatch(tmp_path):
     assert picked == ru_local
 
 
-def test_load_verify_pair_contents_uses_local_when_api_segments_differ(tmp_path):
+def test_load_verify_pair_contents_does_not_fill_source_from_local(tmp_path):
     repo = tmp_path / "repo"
     ru_dir = repo / "ydb" / "docs" / "ru"
     en_dir = repo / "ydb" / "docs" / "en"
@@ -397,7 +397,7 @@ def test_load_verify_pair_contents_uses_local_when_api_segments_differ(tmp_path)
         repo="r",
         source_pr=38700,
     )
-    assert contents[0].ru_text == ru_local
+    assert contents[0].ru_text == "# T\n\nPara.\n"
 
 
 def test_load_verify_navigation_ru_texts():

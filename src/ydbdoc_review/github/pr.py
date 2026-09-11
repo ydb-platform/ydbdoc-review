@@ -24,9 +24,7 @@ from ydbdoc_review.pipeline.pairs import (
     NavigationPair,
     build_doc_pairs,
 )
-from ydbdoc_review.pipeline.tip_newer import apply_tip_newer_policy
 from ydbdoc_review.segmentation.extractor import extract_segments
-from ydbdoc_review.validation.autotitle_hrefs import overlay_autotitle_fragment_hrefs
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 _STATUS_TO_KIND: dict[str, ChangeKind] = {
@@ -438,13 +436,11 @@ def load_verify_pair_contents(
     target_ref: str | None = None,
     provenance: TranslationArtifactProvenance | None = None,
 ) -> list[PairContent]:
-    """Load EN from translation PR checkout; RU from PR head / merge / checkout.
+    """Load EN from the target snapshot; RU from the one source snapshot.
 
-    Translation branches commit EN only; checkout RU is often the branch base
-    (``main``). Always fetch source PR **head** (§6.31 — same tree as
-    ``doc_translate`` checkout). For merged PRs also fetch **merge commit** as
-    an alternate. ``pick_verify_ru_text`` chooses among head / merge / local by
-    EN segment parity and fence-body fit (§6.70 / §6.106 / §6.109).
+    Translation branches commit EN only. The source PR ref is captured once and
+    is the sole RU input; the mutable checkout and later base are never used to
+    fill or overlay missing source prose.
     """
     if provenance is not None:
         if target_ref is None:
@@ -500,9 +496,7 @@ def load_verify_pair_contents(
         return exact_contents
 
     pull_data = gh.get_pull(owner, repo, source_pr)
-    merged = source_pr_merged(pull_data)
     ru_owner, ru_repo, ru_ref = source_pr_content_ref_from_pull(pull_data, owner, repo, source_pr)
-    merge_ref = source_pr_merge_ref_from_pull(pull_data, owner, repo)
     contents: list[PairContent] = []
     for pair in pairs:
         en_text = None
@@ -516,26 +510,13 @@ def load_verify_pair_contents(
             )
 
         ru_api: str | None = None
-        ru_merge: str | None = None
         if not pair.ru_deleted:
             ru_api = gh.get_file_text(ru_owner, ru_repo, pair.ru_path, ru_ref)
-            if merge_ref is not None:
-                m_owner, m_repo, m_sha = merge_ref
-                if (m_owner, m_repo, m_sha) != (ru_owner, ru_repo, ru_ref):
-                    ru_merge = gh.get_file_text(m_owner, m_repo, pair.ru_path, m_sha)
-
-        ru_local: str | None = None
-        if not pair.ru_deleted:
-            ru_local = read_text(repo_path, pair.ru_path)
-            if ru_local is None:
-                ru_local = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
 
         ru_text = pick_verify_ru_text(
             en_text=en_text,
             ru_api=ru_api,
-            ru_merge=ru_merge,
-            ru_local=ru_local,
-            source_pr_merged=merged,
+            source_pr_merged=False,
         )
 
         ru_diff = (
@@ -555,17 +536,6 @@ def load_verify_pair_contents(
         )
         if ru_base_text is None:
             ru_base_text = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
-        # Prefer tip RU path targets when tip moved after the source merge
-        # (same idea as §6.128 autotitle fragment overlay).
-        tip_ru = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
-        if tip_ru and ru_text:
-            from ydbdoc_review.validation.autotitle_hrefs import (
-                overlay_autotitle_fragment_hrefs,
-            )
-            from ydbdoc_review.validation.href_parity import overlay_internal_md_hrefs
-
-            ru_text = overlay_autotitle_fragment_hrefs(ru_text, tip_ru)
-            ru_text = overlay_internal_md_hrefs(ru_text, tip_ru)
         en_base_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
         contents.append(
             PairContent(
@@ -658,25 +628,17 @@ def load_pair_contents(
         ru_text: str | None = None
         if ru_content_ref:
             ru_text = read_text_at_ref(repo_path, ru_content_ref, pair.ru_path)
-        if ru_text is None:
+        else:
             ru_text = read_text(repo_path, pair.ru_path)
-        if ru_text is None and not pair.ru_deleted:
+        if not ru_content_ref and ru_text is None and not pair.ru_deleted:
             ru_text = read_text_at_ref(repo_path, "HEAD", pair.ru_path)
-        if ru_content_ref and ru_text is not None:
-            # Prefer post-merge main fragment targets over stale merge-commit ones
-            # (§6.128). Checkout may still be the source PR head — use merge base.
-            ru_main = read_text_at_ref(repo_path, merge_base_with, pair.ru_path)
-            if ru_main is None:
-                ru_main = read_text(repo_path, pair.ru_path)
-            if ru_main:
-                ru_text = overlay_autotitle_fragment_hrefs(ru_text, ru_main)
         en_text: str | None = None
         if ru_content_ref and not pair.en_deleted:
             # Tip EN is authoritative for existing mirrors on merged source PRs.
             en_text = read_text_at_ref(repo_path, merge_base_with, pair.en_path)
-        if en_text is None:
+        elif not ru_content_ref:
             en_text = read_text(repo_path, pair.en_path)
-        if en_text is None and not pair.en_deleted:
+        if not ru_content_ref and en_text is None and not pair.en_deleted:
             en_text = read_text_at_ref(repo_path, "HEAD", pair.en_path)
 
         ru_diff = (
@@ -698,13 +660,6 @@ def load_pair_contents(
                 en_base_text=en_base_text,
             )
         )
-    # REQUIREMENTS §10/§12: tip newer than source PR → yellow warn + full overwrite.
-    contents, _ = apply_tip_newer_policy(
-        repo_path,
-        contents,
-        source_ref=ru_content_ref,
-        tip_ref=merge_base_with,
-    )
     return contents
 
 
