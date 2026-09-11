@@ -75,10 +75,11 @@ _MERMAID_START = re.compile(
 )
 _MERMAID_ARROW = re.compile(r"(--x|->>|->|--)")
 # Collapse label tokens; keep arrows, punctuation, and mermaid keywords.
-_MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")
+_MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")  # noqa: RUF001
 # Quoted node/subgraph labels: RU hyphens vs EN spaces must not differ
 # structurally («Дата-центр» → ``*-*`` vs «Data center» → ``* *``; #49578).
 _MERMAID_QUOTED_LABEL = re.compile(r"""\["(?:\\.|[^"\\])*"\]|\['(?:\\.|[^'\\])*'\]""")
+_MERMAID_BRACKET_LABEL = re.compile(r"\[[^\]\n]*\]")
 
 
 def _is_mermaid_fence(content: str) -> bool:
@@ -95,6 +96,9 @@ def _mermaid_structure_line(line: str) -> str:
         return stripped.split()[0].lower()
     # Whole quoted label → one token (word count / hyphens inside must not matter).
     stripped = _MERMAID_QUOTED_LABEL.sub("[*]", stripped)
+    # Unquoted flowchart labels are prose too. Their length or word count must
+    # not turn a valid translation into a graph-structure mismatch.
+    stripped = _MERMAID_BRACKET_LABEL.sub("[*]", stripped)
     if stripped.startswith("participant "):
         rest = stripped[len("participant ") :]
         if " as " in rest:
@@ -164,7 +168,7 @@ def _fence_diff_is_comment_translation_only(
     return saw_diff
 
 
-_CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
+_CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")  # noqa: RUF001
 _ANGLE_PLACEHOLDER = re.compile(r"<([^<>]+)>")
 
 
