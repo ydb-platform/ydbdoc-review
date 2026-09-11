@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from enum import StrEnum
 from importlib import resources
@@ -131,6 +132,13 @@ class OpsConfig(BaseModel):
     )
     allowed_actors: str = ""
     skip_gates: bool = False
+
+    @field_validator("daily_budget_rub")
+    @classmethod
+    def _validate_daily_budget(cls, value: float) -> float:
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("daily budget must be non-negative and finite")
+        return value
 
 
 class PromptsConfig(BaseModel):
@@ -440,9 +448,12 @@ def load_config(
         cfg.ops.allowed_actors = env["YDBDOC_ALLOWED_ACTORS"]
     if env.get("YDBDOC_DAILY_BUDGET_RUB"):
         try:
-            cfg.ops.daily_budget_rub = float(env["YDBDOC_DAILY_BUDGET_RUB"])
-        except ValueError:
-            pass
+            budget = float(env["YDBDOC_DAILY_BUDGET_RUB"])
+        except ValueError as exc:
+            raise ValueError("daily budget must be numeric") from exc
+        if not math.isfinite(budget) or budget < 0:
+            raise ValueError("daily budget must be non-negative and finite")
+        cfg.ops.daily_budget_rub = budget
     if env.get("YDBDOC_TRANSCRIPT_BACKEND"):
         cfg.ops.transcript_backend = env["YDBDOC_TRANSCRIPT_BACKEND"].strip()
     skip = env.get("YDBDOC_SKIP_OPS_GATES", "").strip().lower()
