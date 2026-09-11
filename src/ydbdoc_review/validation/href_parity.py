@@ -1760,6 +1760,16 @@ def check_heading_anchor_parity(
     )
     if outlines_aligned:
         for src_h, tgt_h in zip(ru_heads, en_heads, strict=True):
+            if (
+                src_h.anchor
+                and is_ascii_yfm_anchor(src_h.anchor)
+                and tgt_h.anchor != src_h.anchor
+            ):
+                return [
+                    "anchor_parity: stable explicit id moved to a different section: "
+                    f"`{src_h.anchor}` -> `{tgt_h.anchor or '(missing)'}`"
+                ]
+        for src_h, tgt_h in zip(ru_heads, en_heads, strict=True):
             if not src_h.anchor:
                 continue
             if is_ascii_yfm_anchor(src_h.anchor):
