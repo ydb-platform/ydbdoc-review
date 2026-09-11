@@ -81,6 +81,33 @@ def test_F003_cli_continue_passes_explicit_instruction_without_comment(tmp_path:
     assert continue_.call_args.kwargs["instruction"] == "fix glossary"
 
 
+def test_F003_explicit_continue_instruction_skips_comment_lookup() -> None:
+    config = load_config(env={"GITHUB_TOKEN": "token"})
+    gh = MagicMock()
+    context = SimpleNamespace(head_ref="feature", labels=frozenset())
+    denied_gate = SimpleNamespace(ok=False)
+
+    with (
+        patch("ydbdoc_review.github.workflow.load_config", return_value=config),
+        patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
+        patch("ydbdoc_review.github.workflow.pull_request_context", return_value=context),
+        patch(
+            "ydbdoc_review.github.workflow.begin_ops_job",
+            return_value=(None, denied_gate, None),
+        ),
+    ):
+        result = run_doc_continue(
+            repo_path=".",
+            github_repo="o/r",
+            pr_number=42,
+            dry_run=True,
+            instruction="fix glossary",
+        )
+
+    assert result.blocked is True
+    gh.iter_issue_comments.assert_not_called()
+
+
 def test_F003_cli_verify_dispatches_verification() -> None:
     with patch(
         "ydbdoc_review.cli.run_doc_verify",
