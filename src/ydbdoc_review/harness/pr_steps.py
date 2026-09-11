@@ -173,6 +173,13 @@ class ExecutePairPlansStep:
                 f" err={result.error}" if result.error else "",
             )
             results.append(result)
+            if result.error:
+                logger.warning(
+                    "pair %s/%s failed finally; stopping before next selected file",
+                    idx,
+                    total,
+                )
+                break
             if (
                 ctx.checkpoint is not None
                 and result.source_text is not None
