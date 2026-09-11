@@ -260,6 +260,51 @@ class DocJobResult:
     blocked: bool = False
 
 
+def _publication_side_effects_allowed(*, dry_run: bool, no_commit: bool) -> bool:
+    """Return whether a job may publish GitHub or git side effects."""
+    return not dry_run and not no_commit
+
+
+def _convert_translation_pr_to_draft_if_allowed(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    translation_pr: bool,
+    verify_requires_red: bool,
+    dry_run: bool,
+    no_commit: bool,
+) -> None:
+    if (
+        translation_pr
+        and verify_requires_red
+        and _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit)
+    ):
+        gh.convert_pull_to_draft(owner, repo, pr_number)
+
+
+def _finish_nonpublishing_translate_job(
+    job: DocJobResult,
+    client: object,
+    ops_ctx: OpsContext | None,
+    *,
+    translation_pr: int | None = None,
+) -> None:
+    """Finalize paid-work accounting before a non-publishing early return."""
+    if ops_ctx is None:
+        return
+    usage = client.usage_tracker
+    finish_ops_job(
+        ops_ctx,
+        status="ok",
+        cost_rub=usage.estimate_cost_rub(),
+        input_tokens=sum((r.input_tokens or 0) for r in usage.records if r.success),
+        output_tokens=sum((r.output_tokens or 0) for r in usage.records if r.success),
+        translation_pr=translation_pr,
+    )
+
+
 @dataclass(frozen=True)
 class _BoundArtifactPR:
     """An existing artifact PR bound to one immutable remote branch SHA."""
@@ -2349,7 +2394,7 @@ def run_doc_translate(
             parent_run_id=parent_run_id,
         )
         if not gate.ok:
-            if deny_body and not dry_run:
+            if deny_body and not dry_run and not no_commit:
                 _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
             return DocJobResult(
                 mode=f"doc_{ops_mode}",
@@ -2376,7 +2421,7 @@ def run_doc_translate(
             or not continuability.allows_continue()
             or continuability.source_pr != pr_number
         ):
-            if ops_ctx is not None and not dry_run:
+            if ops_ctx is not None:
                 finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
             return DocJobResult(
                 mode="doc_continue",
@@ -2400,9 +2445,9 @@ def run_doc_translate(
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
     if ctx.state != "open" and not ctx.merged:
-        if ops_ctx is not None and not dry_run:
+        if ops_ctx is not None:
             finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
-        if not dry_run:
+        if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
             _safe_post_issue_comment(
                 gh,
                 owner,
@@ -2555,7 +2600,7 @@ def run_doc_translate(
         _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
         refresh_publication_impact(pr_result)
         job.pr_result = pr_result
-        if not dry_run:
+        if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
             elapsed = time.monotonic() - started
             meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
             job.source_comment_url = _safe_post_issue_comment(
@@ -2585,7 +2630,7 @@ def run_doc_translate(
         pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
         _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
         job.pr_result = pr_result
-        if pr_result.pair_results and not dry_run:
+        if pr_result.pair_results and not dry_run and not no_commit:
             elapsed = time.monotonic() - started
             meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
             job.source_comment_url = _safe_post_issue_comment(
@@ -3103,7 +3148,8 @@ def run_doc_translate(
     job.committed = committed
     job.pushed = pushed
 
-    if dry_run:
+    if dry_run or no_commit:
+        _finish_nonpublishing_translate_job(job, client, ops_ctx)
         return job
 
     tr_pr_number: int | None = None
@@ -3470,7 +3516,7 @@ def run_doc_verify(
             continue_feedback=continue_feedback,
         )
         if not gate.ok:
-            if deny_body and not dry_run:
+            if deny_body and not dry_run and not no_commit:
                 _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
             return DocJobResult(
                 mode=f"doc_{ops_mode}",
@@ -3697,6 +3743,8 @@ def run_doc_verify(
     if not pairs and not nav_pairs:
         if translation_pr and not durable_impact_paths:
             logger.info("No doc or navigation pairs for verify on PR #%s", pr_number)
+            if ops_ctx is not None:
+                finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
             return job
         logger.info(
             "No doc/nav pairs on bilingual/source PR #%s — completeness-only verify",
@@ -4157,7 +4205,16 @@ def run_doc_verify(
         # Convert through the API method immediately before any local/remote
         # mutation. The client method re-fetches current state and confirms the
         # GraphQL draft transition instead of trusting the initial PR snapshot.
-        gh.convert_pull_to_draft(owner, repo, pr_number)
+        _convert_translation_pr_to_draft_if_allowed(
+            gh,
+            owner,
+            repo,
+            pr_number,
+            translation_pr=translation_pr,
+            verify_requires_red=verify_requires_red,
+            dry_run=dry_run,
+            no_commit=no_commit,
+        )
 
     job.pr_result = pr_result
 
@@ -4476,7 +4533,10 @@ def run_doc_verify(
             _ACTIVE_VERIFY_RERUN_CAPABILITY.reset(capability_token)
 
     elapsed = time.monotonic() - started
-    if dry_run:
+    if dry_run or no_commit:
+        _finish_nonpublishing_translate_job(
+            job, client, ops_ctx, translation_pr=pr_number
+        )
         return job
 
     if pushed and not inline_fixup_push:
@@ -4661,7 +4721,7 @@ def run_doc_continue(
                 "```\n/ydbdoc continue use Wikipedia EN link for Sessions\n```\n"
                 "и снова повесьте лейбл **`doc_continue``."
             )
-            if not dry_run:
+            if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
                 _safe_post_issue_comment(gh, owner, repo, pr_number, body, label="continue missing")
             return DocJobResult(
                 mode="doc_continue",
@@ -4692,7 +4752,7 @@ def run_doc_continue(
         continue_feedback=feedback,
     )
     if not gate.ok:
-        if deny_body and not dry_run:
+        if deny_body and not dry_run and not no_commit:
             _safe_post_issue_comment(
                 gh,
                 owner,
@@ -4730,7 +4790,7 @@ def run_doc_continue(
             f"PR #{source_pr_num} нет сохранённого незавершённого этапа после "
             "фиксации SHA. Запустите новый `doc_translate`."
         )
-        if not dry_run:
+        if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
             _safe_post_issue_comment(
                 gh,
                 owner,
