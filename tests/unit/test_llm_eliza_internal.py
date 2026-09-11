@@ -80,7 +80,7 @@ def test_eliza_internal_retries_on_503():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
     ):
         post.side_effect = [
             _resp(503, {"error": "Service unavailable"}),
@@ -699,7 +699,7 @@ def test_eliza_analyze_role_raises_without_yandex_slug():
 def test_eliza_call_once_guard():
     client = _client()
 
-    with pytest.raises(LLMConfigError, match="requests.Session"):
+    with pytest.raises(LLMConfigError, match=r"requests\.Session"):
         client._call_once(
             slug="deepseek-v4-flash",
             messages=[{"role": "user", "content": "x"}],
