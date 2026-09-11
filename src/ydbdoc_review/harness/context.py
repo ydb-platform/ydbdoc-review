@@ -15,6 +15,11 @@ from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 DocsTextReader = Callable[[str], str | None]
 
+# F-056 quality contract: a result may receive at most two repair rounds.
+# This is deliberately not configurable. Transport retries belong to the LLM
+# client and must never change the number of quality rounds.
+QUALITY_REPAIR_ROUNDS = 2
+
 _ACTIVE_CHECKPOINT: ContextVar[CheckpointWriter | None] = ContextVar(
     "ydbdoc_review_active_translation_checkpoint",
     default=None,
@@ -107,11 +112,7 @@ class HarnessContext:
             cache=cache,
             enable_critic=enable_critic,
             allow_verify_realign=allow_verify_realign,
-            critic_feedback_retries=(
-                critic_feedback_retries
-                if critic_feedback_retries is not None
-                else cfg.translation.critic_feedback_retries
-            ),
+            critic_feedback_retries=QUALITY_REPAIR_ROUNDS,
             usage_record_start=(
                 usage_record_start
                 if usage_record_start is not None
