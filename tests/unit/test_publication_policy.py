@@ -32,7 +32,10 @@ from ydbdoc_review.github.workflow import (
     run_doc_verify,
 )
 from ydbdoc_review.ops.gates import GateResult
-from ydbdoc_review.ops.lifecycle import append_retention_footer
+from ydbdoc_review.ops.lifecycle import OpsContext, append_retention_footer
+from ydbdoc_review.ops.recorder import LlmTranscriptRecorder
+from ydbdoc_review.ops.runs import InMemoryRunsLedger
+from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.publication import (
@@ -2093,6 +2096,19 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
             prompt_version="test",
         )
 
+    ops_ctx = OpsContext(
+        actor="test-actor",
+        run_id="test-run",
+        run_day="2026-09-11",
+        mode="translate",
+        repo="o/r",
+        source_pr=7,
+        ledger=InMemoryRunsLedger(),
+        store=InMemoryTranscriptStore(),
+        recorder=LlmTranscriptRecorder(),
+        budget_rub=5000.0,
+    )
+
     with ExitStack() as stack:
         stack.enter_context(
             patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh)
@@ -2157,6 +2173,7 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
             pr_number=7,
             merge_base_with="HEAD",
             config=load_config(env=_env()),
+            _ops_ctx=ops_ctx,
         )
 
     run = job.pr_result.pair_results[0]
