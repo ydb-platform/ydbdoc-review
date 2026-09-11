@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -45,8 +46,10 @@ def check_acl(actor: str, allowed: frozenset[str]) -> GateResult:
 
 
 def check_daily_quota(*, spent_rub: float, budget_rub: float) -> GateResult:
+    if not isinstance(budget_rub, (int, float)) or not math.isfinite(budget_rub):
+        raise ValueError("daily budget must be numeric and finite")
     if budget_rub < 0:
-        return GateResult(ok=True, status="ok")
+        raise ValueError("daily budget must be non-negative")
     if spent_rub >= budget_rub:
         return GateResult(
             ok=False,
