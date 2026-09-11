@@ -216,6 +216,7 @@ def _discover_ru_tocs(
     seed_ru_md: set[str],
     seed_ru_nav: set[str],
     read_ru: ReadFn,
+    read_ru_base: ReadFn | None,
     diff_paths: set[str],
     docs_root: str,
 ) -> set[str]:
@@ -224,9 +225,9 @@ def _discover_ru_tocs(
     for ru_md in seed_ru_md:
         todo.update(_ancestor_ru_tocs(ru_md, docs_root=docs_root))
     seen: set[str] = set()
-    queue = sorted(todo)
+    queue = [(ru_toc, False) for ru_toc in sorted(todo)]
     while queue:
-        ru_toc = queue.pop(0)
+        ru_toc, forced = queue.pop(0)
         if ru_toc in seen:
             continue
         seen.add(ru_toc)
@@ -239,8 +240,17 @@ def _discover_ru_tocs(
             child = _norm(resolve_toc_target_path(ru_toc, rel))
             if child in seen:
                 continue
-            if child in seed_ru_nav or _toc_dir_contains_diff(child, diff_paths):
-                queue.append(child)
+            if ru_toc in seed_ru_nav and read_ru_base is not None:
+                base_text = read_ru_base(ru_toc) or ""
+                base_includes = {
+                    path
+                    for kind, path in collect_toc_link_targets(base_text)
+                    if kind == "include"
+                }
+                if rel not in base_includes:
+                    queue.append((child, True))
+            elif forced or child in seed_ru_nav or _toc_dir_contains_diff(child, diff_paths):
+                queue.append((child, forced))
     return seen
 
 
@@ -314,6 +324,7 @@ def _pages_from_discovered_toc(
     read_ru_base: ReadFn | None,
     docs_root: str,
     redirects_yaml: str,
+    include_all_missing: bool = False,
 ) -> None:
     """Derive markdown scope from one sidebar (§22.5 / §6.72)."""
     if ru_toc in diff_ru_nav:
@@ -321,6 +332,18 @@ def _pages_from_discovered_toc(
             ru_md = _norm(resolve_toc_target_path(ru_toc, rel))
             _add_doc_if_en_absent(
                 ru_md,
+                candidates=candidates,
+                read_ru=read_ru,
+                read_en_base=read_en_base,
+                docs_root=docs_root,
+                redirects_yaml=redirects_yaml,
+            )
+        return
+
+    if include_all_missing:
+        for rel in sorted(_toc_md_hrefs(ru_toc_text)):
+            _add_doc_if_en_absent(
+                _norm(resolve_toc_target_path(ru_toc, rel)),
                 candidates=candidates,
                 read_ru=read_ru,
                 read_en_base=read_en_base,
@@ -477,6 +500,18 @@ def plan_translation_scope(
     discovered_tocs: set[str] = set()
     nav_ru: set[str] = set()
     required_fragment_dependencies: dict[str, set[str]] = {}
+    new_toc_targets: set[str] = set()
+    for ru_toc in diff_ru_nav:
+        ru_text = read_ru(ru_toc) or ""
+        base_text = read_ru_base(ru_toc) if read_ru_base is not None else None
+        base_includes = {
+            path
+            for kind, path in collect_toc_link_targets(base_text or "")
+            if kind == "include"
+        }
+        for kind, rel in collect_toc_link_targets(ru_text):
+            if kind == "include" and rel not in base_includes:
+                new_toc_targets.add(_norm(resolve_toc_target_path(ru_toc, rel)))
     first_round = True
     while True:
         live_docs = doc_ru - deleted_ru_md - tip_tombstone_ru
@@ -487,6 +522,7 @@ def plan_translation_scope(
             seed_ru_md=live_docs,
             seed_ru_nav=diff_ru_nav,
             read_ru=read_ru,
+            read_ru_base=read_ru_base,
             diff_paths=live_docs | diff_ru_nav,
             docs_root=docs_root,
         )
@@ -523,6 +559,7 @@ def plan_translation_scope(
                 read_ru_base=read_ru_base,
                 docs_root=docs_root,
                 redirects_yaml=redirects_yaml,
+                include_all_missing=ru_toc in new_toc_targets,
             )
 
         for ru_toc in sorted(nav_ru):
