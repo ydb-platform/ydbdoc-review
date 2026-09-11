@@ -6,7 +6,11 @@ import logging
 from dataclasses import is_dataclass, replace
 
 from ydbdoc_review.harness.context import HarnessContext
-from ydbdoc_review.harness.profiles import TRANSLATE_PROFILE, VERIFY_PROFILE
+from ydbdoc_review.harness.profiles import (
+    TRANSLATE_PROFILE,
+    TRANSLATE_WITH_QA_PROFILE,
+    VERIFY_PROFILE,
+)
 from ydbdoc_review.harness.runner import FileHarness
 from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.llm.errors import LLMError
@@ -17,6 +21,7 @@ from ydbdoc_review.translation.differential import (
     autotitle_delta_satisfied_in_en,
 )
 from ydbdoc_review.translation.errors import TranslationError
+from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
@@ -173,7 +178,14 @@ def run_pair_plan(
             )
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
     enable_critic = plan.action != "skip"
-    profile = TRANSLATE_PROFILE if enable_translate else VERIFY_PROFILE
+    if enable_translate:
+        profile = (
+            TRANSLATE_WITH_QA_PROFILE
+            if is_glossary_file(plan.source_path) and content.coverage_plan is None
+            else TRANSLATE_PROFILE
+        )
+    else:
+        profile = VERIFY_PROFILE
 
     # Pass base RU / existing EN for QA comparison only; TranslateStep does not
     # seed or splice from old EN (§5 / §13 / P1b).
@@ -339,7 +351,10 @@ def run_pair_plan(
                     read_text=ctx.docs_text_reader,
                 )
             # Critic may reintroduce RU-only hrefs; strip again after restore.
-            if ctx.en_toc_reachable is not None:
+            if ctx.en_toc_reachable is not None and not (
+                is_glossary_file(plan.source_path)
+                or is_glossary_file(plan.target_path)
+            ):
                 from ydbdoc_review.validation.glossary_toc_links import (
                     strip_unreachable_internal_links,
                 )
