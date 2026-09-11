@@ -47,6 +47,10 @@ def test_F014_late_write_failure() -> None:
 
     assert ctx is not None
     assert gate.ok
+    assert gate.status == "ok"
     assert comment is None
 
     finish_ops_job(ctx, status="ok", cost_rub=10.0)
+
+    assert gate.ok
+    assert gate.status == "ok"
