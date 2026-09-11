@@ -85,3 +85,22 @@ def test_F004_action_routes_all_user_modes_through_unified_job():
     assert 'set -- ${CLI} run' not in entrypoint
     assert 'set -- ${CLI} verify' not in entrypoint
     assert 'set -- ${CLI} continue' not in entrypoint
+
+
+def test_F004_cli_aliases_route_through_the_same_job_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_job(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(cli, "job", fake_job)
+
+    cli.run("o/r", 17, tmp_path, "origin/main", True, True)
+    cli.verify("o/r", 17, tmp_path, "origin/main", True, True)
+    cli.continue_("o/r", 17, tmp_path, "origin/main", True, True, "fix it")
+
+    assert [args[0] for args, _ in calls] == ["run", "verify", "continue"]
+    assert all(args[1:] == ("o/r", 17, tmp_path, "origin/main", True, True) for args, _ in calls[:2])
+    assert calls[2][0][1:] == ("o/r", 17, tmp_path, "origin/main", True, True, "fix it")
