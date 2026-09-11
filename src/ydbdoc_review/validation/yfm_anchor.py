@@ -1,5 +1,8 @@
 """YFM heading anchors: parse Cyrillic ids and emit English anchors for EN docs."""
 
+# The transliteration table below intentionally contains Cyrillic source keys.
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import re
@@ -85,7 +88,7 @@ def _legacy_transliterated_slug(text: str) -> str:
 
 def is_ascii_yfm_anchor(anchor: str | None) -> bool:
     """True when §8 requires the EN explicit id to match RU byte-for-byte."""
-    return bool(anchor) and anchor.isascii() and bool(re.fullmatch(r"[A-Za-z0-9_\-.]+", anchor))
+    return bool(anchor) and anchor.isascii() and bool(re.fullmatch(r"[A-Za-z0-9_\-.+:]+", anchor))
 
 
 def english_yfm_anchor(ru_anchor: str | None, english_heading: str) -> str | None:
