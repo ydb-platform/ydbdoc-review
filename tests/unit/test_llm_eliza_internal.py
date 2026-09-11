@@ -80,7 +80,7 @@ def test_eliza_internal_retries_on_503():
 
     with (
         patch.object(client._http, "post") as post,
-        patch("ydbdoc_review.llm.client.interruptible_sleep") as sleep,
+        patch("ydbdoc_review.llm.client.interruptible_sleep"),
     ):
         post.side_effect = [
             _resp(503, {"error": "Service unavailable"}),
@@ -601,6 +601,7 @@ def test_eliza_session_uses_ydbdoc_ca_bundle(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(ca_path))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
     client = _client()
     assert client._http.verify not in (True, False)
@@ -617,6 +618,7 @@ def test_eliza_session_ydbdoc_ca_overrides_requests_env(tmp_path, monkeypatch):
     other_ca.write_text("other", encoding="utf-8")
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(eliza_ca))
     monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(other_ca))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
     client = _client()
     assert client._http.verify != str(other_ca)
@@ -697,7 +699,7 @@ def test_eliza_analyze_role_raises_without_yandex_slug():
 def test_eliza_call_once_guard():
     client = _client()
 
-    with pytest.raises(LLMConfigError, match="requests.Session"):
+    with pytest.raises(LLMConfigError, match=r"requests\.Session"):
         client._call_once(
             slug="deepseek-v4-flash",
             messages=[{"role": "user", "content": "x"}],
