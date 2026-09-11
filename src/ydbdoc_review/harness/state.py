@@ -51,6 +51,7 @@ class FileRunState:
     fence_reference_text: str = ""
 
     manual_actions: list[ManualAction] = field(default_factory=list)
+    fallback_reasons: list[str] = field(default_factory=list)
     segment_alignment_error: str | None = None
 
     critic_initial: CriticResponse | None = None
