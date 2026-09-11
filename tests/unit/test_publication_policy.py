@@ -2753,7 +2753,7 @@ def _run_standalone_soft_keep_verify(
     verify_result: PRTranslationResult,
     translation_draft: bool = True,
     event_log: list[str] | None = None,
-    no_commit: bool = True,
+    no_commit: bool = False,
     ready_transition_after_push: bool = False,
     draft_conversion_fail_on_call: int | None = None,
 ):
@@ -2990,6 +2990,7 @@ def test_verify_with_unresolved_soft_keep_converts_ready_pr_back_to_draft(
         verify_result=_verify_pair_result(path, retained),
         translation_draft=False,
         event_log=events,
+        no_commit=False,
     )
 
     assert job.pr_result.final_tree_blockers == [blocker]
@@ -3020,17 +3021,19 @@ def test_verify_clears_soft_keep_but_keeps_red_body_when_other_pair_is_unsafe(
         verify_result=verify_result,
         translation_draft=False,
         event_log=events,
+        no_commit=False,
     )
 
     assert blocker not in job.pr_result.final_tree_blockers
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
     assert gh.convert_pull_to_draft.call_args_list == [
         (("o", "r", 99), {}),
+        (("o", "r", 99), {}),
     ]
     body = gh.update_pull_body.call_args.args[3]
     assert "QA RED, do not merge" in body
     assert "translation_soft_keep" not in body
-    assert events == ["draft", "body"]
+    assert events == ["draft", "prepare", "commit", "push", "draft", "body"]
 
 
 def test_verify_redrafts_ready_transition_before_red_body_after_branch_push(
