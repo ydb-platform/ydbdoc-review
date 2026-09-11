@@ -1,5 +1,9 @@
 """Unit tests for tip-newer yellow overwrite policy (REQUIREMENTS §10 / §12 / P4)."""
 
+# The fixtures intentionally use Russian prose; mixed-script lint warnings are
+# not meaningful for these translation-policy examples.
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import subprocess
@@ -222,8 +226,8 @@ def test_force_full_overwrite_skips_en_preserve_stitch() -> None:
     assert result.target_text == translated
     assert result.target_text != tip_en
 
-def test_bilingual_source_pr_still_skips_model() -> None:
-    """§10 hard case: source PR itself changed both RU and EN → skip (blocker)."""
+def test_bilingual_source_pr_prefers_ru_for_model() -> None:
+    """F-020: source PR changing both locales still translates RU → EN."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/page.md",
         en_path="ydb/docs/en/core/page.md",
@@ -233,8 +237,8 @@ def test_bilingual_source_pr_still_skips_model() -> None:
     plan = plan_pair_heuristic(
         PairContent(pair=pair, ru_text="# RU\n", en_text="# EN\n")
     )
-    assert plan.action == "skip"
-    assert "§6.76" in plan.summary
+    assert plan.action == "translate_to_en"
+    assert "RU has priority" in plan.summary
 
 
 def test_tip_ru_newer_uses_tip_ru_body(tmp_path: Path) -> None:
