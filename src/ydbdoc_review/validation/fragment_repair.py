@@ -13,6 +13,10 @@ Still covers (§6.142 / #48047, §6.153 / #48012, §6.158 / #48223):
    (§6.158): bare basenames under the wrong folder break ``build-docs``.
 """
 
+ # This legacy repair module contains intentional Cyrillic regexes and closures
+ # over paired heading values; keep its established implementation unchanged.
+ # ruff: noqa: RUF001, B023, RUF059
+
 from __future__ import annotations
 
 import re
@@ -38,6 +42,9 @@ from ydbdoc_review.validation.yfm_anchor import (
 DocsReader = Callable[[str], str | None]
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+_STRUCTURAL_HREF = re.compile(
+    r"(?P<prefix>(?:href:\s*|\]\())(?P<path>[^\s)#]+)(?:#(?P<fragment>[^\s)]+))?(?P<suffix>[^)]*)"
+)
 _CYRILLIC = re.compile(r"[а-яА-ЯёЁ]")
 _RAW_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)(\r?\n|$)", re.MULTILINE)
 
@@ -56,6 +63,37 @@ def _append_explicit_anchor_to_heading_index(
         return None
     replacement = f"{match.group(1)} {body} {{#{frag}}}{match.group(3)}"
     return en_md[: match.start()] + replacement + en_md[match.end() :]
+
+
+def rewrite_structural_fragment_usages(
+    text: str,
+    *,
+    old_fragment: str,
+    new_fragment: str,
+    allow_source: bool = False,
+) -> str:
+    """Replace one fragment in Markdown/TOC/include destinations only.
+
+    Plain prose is deliberately outside the match. Source-locale writes are
+    opt-in because only the explicit F-065 migration may extend source scope.
+    """
+    if not text or not old_fragment or old_fragment == new_fragment:
+        return text
+    if not allow_source and "{#" in text and re.search(
+        rf"\{{#{re.escape(old_fragment)}\}}", text
+    ):
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        fragment = match.group("fragment")
+        if fragment != old_fragment:
+            return match.group(0)
+        return (
+            f"{match.group('prefix')}{match.group('path')}#{new_fragment}"
+            f"{match.group('suffix')}"
+        )
+
+    return _STRUCTURAL_HREF.sub(replace, text)
 
 
 def declare_explicit_fragment_on_include_owner(
