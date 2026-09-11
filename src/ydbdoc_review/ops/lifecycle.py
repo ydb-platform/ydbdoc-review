@@ -250,7 +250,16 @@ def begin_ops_job(
             )
         except Exception as exc:
             logger.warning("Failed to record denied_quota: %s", exc)
-        return None, quota, quota_deny_comment(spent_rub=spent, budget_rub=budget)
+        return (
+            None,
+            quota,
+            quota_deny_comment(
+                spent_rub=spent,
+                budget_rub=budget,
+                run_day=run_day,
+                mode=mode,
+            ),
+        )
 
     continue_index = 0
     if mode == "continue":
