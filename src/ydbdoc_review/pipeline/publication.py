@@ -42,6 +42,21 @@ def _has_unrestored_marker(result: PRTranslationResult) -> bool:
     return False
 
 
+def _has_critic_execution_failure(result: PRTranslationResult) -> bool:
+    """Technical critic failure keeps the candidate publishable as RED."""
+    for run in result.pair_results:
+        critic = (
+            run.file_result.critic_unresolved
+            if run.file_result is not None
+            else None
+        )
+        if critic is not None and any(
+            issue.category == "critic_execution_failed" for issue in critic.issues
+        ):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class ClassifiedPublicationBlockers:
     """Typed publication view of every merge-blocking result signal."""
@@ -147,6 +162,12 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
         if critic is not None and (
             critic.verdict == "blocked"
             or any(issue.severity == "blocked" for issue in critic.issues)
+        ) and not (
+            critic.issues
+            and all(
+                issue.category == "critic_execution_failed"
+                for issue in critic.issues
+            )
         ):
             return True
         repairable_messages = repairable_messages_by_path.get(
@@ -195,6 +216,7 @@ def classify_publication_blockers(
         for blocker in result.final_tree_blockers
     )
     repairable = repairable or _has_unrestored_marker(result)
+    repairable = repairable or _has_critic_execution_failure(result)
     return ClassifiedPublicationBlockers(
         incomplete=incomplete,
         unsafe=unsafe,
