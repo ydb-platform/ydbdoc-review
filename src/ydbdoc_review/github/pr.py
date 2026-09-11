@@ -282,12 +282,18 @@ def _source_pr_head_ref(data: dict, owner: str, repo: str, source_pr: int) -> tu
 def source_pr_content_ref_from_pull(
     data: dict, owner: str, repo: str, source_pr: int
 ) -> tuple[str, str, str]:
-    """Primary RU git ref: source PR **head** (fork head when applicable, §6.31).
+    """Return the one immutable source snapshot for a source PR.
 
-    ``doc_translate`` checks out the labeled PR head; verify must start from the
-    same tree. For merged PRs, ``load_verify_pair_contents`` also loads the merge
-    commit as an alternate candidate (§6.109).
+    An open PR is read from its head, including a contributor fork. Once merged,
+    GitHub's ``merge_commit_sha`` is the landed tree for merge, squash, and
+    rebase merges. It is intentionally preferred over ``head.sha`` because the
+    author branch may be deleted or may not be the tree that landed in base.
     """
+    if source_pr_merged(data):
+        merge_sha = str(data.get("merge_commit_sha") or "")
+        if not merge_sha:
+            raise ValueError(f"Merged source PR #{source_pr} has no merge commit sha")
+        return owner, repo, merge_sha
     return _source_pr_head_ref(data, owner, repo, source_pr)
 
 
