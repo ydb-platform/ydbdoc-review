@@ -62,7 +62,12 @@ def test_F004_job_dispatches_explicitly_to_each_mode(monkeypatch: pytest.MonkeyP
 
 
 def test_F004_verify_does_not_derive_source_pr_from_arbitrary_title():
-    assert "parse_source_pr_from_text" not in inspect.getsource(workflow.run_doc_verify)
+    source = inspect.getsource(workflow.run_doc_verify)
+    foreign_title = "Critic fixes for #999"
+
+    assert foreign_title not in source
+    assert "parse_source_pr_from_text" not in source
+    assert "pr_number" in source
 
 
 def test_F004_action_rejects_modes_that_job_does_not_expose():
