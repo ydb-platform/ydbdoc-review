@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.pipeline.translate_file import translate_file
 
 
 def _unit_cfg(**extra: str):
@@ -70,9 +70,6 @@ def _translate_json(segments, mapping: dict[str, str]) -> str:
         ]
     }
     return json.dumps(payload, ensure_ascii=False)
-
-
-from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 
 def test_translate_file_no_segments():
@@ -140,7 +137,19 @@ def test_translate_file_applies_critic_fix():
     )
     verify_raw = json.dumps({"verdict": "ok", "issues": []})
 
-    client = _mock_client([translate_raw, critic_raw, verify_raw])
+    # The fixed F-056 contract performs two bounded repair rounds.  Include
+    # responses for each repair, its finalization, and the following verify.
+    client = _mock_client([
+        translate_raw,
+        critic_raw,
+        verify_raw,
+        translate_raw,
+        verify_raw,
+        verify_raw,
+        translate_raw,
+        verify_raw,
+        verify_raw,
+    ])
     result = translate_file(
         source,
         client,
@@ -194,22 +203,21 @@ def test_translate_file_verdict_blocked_on_unresolved():
             ],
         }
     )
-    verify_raw = json.dumps(
-        {
-            "verdict": "blocked",
-            "issues": [
-                {
-                    "segment_id": seg_id,
-                    "severity": "blocked",
-                    "category": "meaning",
-                    "comment": "unresolved",
-                    "suggested_text": None,
-                }
-            ],
-        }
-    )
+    final_text = "Problem.\n"
 
-    client = _mock_client([translate_raw, critic_raw, verify_raw])
+    # The fixed F-056 contract performs two bounded repair rounds.  Include
+    # responses for each repair, its finalization, and the following verify.
+    client = _mock_client([
+        translate_raw,
+        critic_raw,
+        final_text,
+        translate_raw,
+        final_text,
+        critic_raw,
+        translate_raw,
+        final_text,
+        critic_raw,
+    ])
     result = translate_file(
         source,
         client,
@@ -224,7 +232,7 @@ def test_translate_file_verdict_blocked_on_unresolved():
 
 
 def test_translate_file_critic_only_alignment_mismatch_blocks():
-    source = "Первый.\n\nВторой.\n"
+    source = "Первый.\n\nВторой.\n"  # noqa: RUF001
     target = "Only one paragraph.\n"
     client = _mock_client([])
     result = translate_file(
@@ -244,7 +252,6 @@ def test_translate_file_critic_only_alignment_mismatch_blocks():
 def test_translate_file_critic_only_mode():
     source = "Привет.\n"
     target = "Hello.\n"
-    segments = extract_segments(parse_markdown(source))
     critic_raw = json.dumps({"verdict": "ok", "issues": []})
     # critic_only: no translate call — only critic
     client = _mock_client([critic_raw])
@@ -285,7 +292,6 @@ def test_translate_file_verify_preserves_en_fence_bodies():
         "Conclusion.\n"
     )
     ru_segs = extract_segments(parse_markdown(source))
-    en_segs = extract_segments(parse_markdown(target))
     # Critic fixes the second paragraph but leaves the first alone.
     fixed_id = ru_segs[1].id
     critic_raw = json.dumps(

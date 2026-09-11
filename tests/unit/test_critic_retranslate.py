@@ -164,18 +164,24 @@ def test_translate_file_critic_feedback_retry_end_to_end():
     assert result.critic_unresolved.issues == []
 
 
-def test_critic_feedback_retry_skipped_when_disabled():
+def test_critic_feedback_retry_uses_fixed_contract_when_config_zero():
     source = "Проблема.\n"
     segments = extract_segments(parse_markdown(source))
     seg_id = segments[0].id
+    doc = parse_markdown(source)
 
     state = FileRunState(
         mode="translate",
         file_path="docs/ru/a.md",
         raw_source_text=source,
         source_text=source,
+        source_doc=doc,
         segments=segments,
         translations={seg_id: "Problem."},
+        translated_text="Problem.\n",
+        render_base_doc=doc,
+        render_base_segments=segments,
+        fence_reference_text=source,
         critic_unresolved=CriticResponse(
             verdict="blocked",
             issues=[
@@ -197,10 +203,15 @@ def test_critic_feedback_retry_skipped_when_disabled():
         }
     )
     ctx = HarnessContext.from_options(
-        _mock_client([]), glossary=load_glossary(), config=cfg
+        _mock_client([
+            _translate_json(segments, {seg_id: "Fixed."}),
+            json.dumps({"verdict": "ok", "issues": []}),
+        ]),
+        glossary=load_glossary(),
+        config=cfg,
     )
 
     CriticFeedbackRetryStep().run(state, ctx)
 
-    assert state.translate_retry_count == 0
-    assert state.translations[seg_id] == "Problem."
+    assert state.translate_retry_count == 1
+    assert state.translations[seg_id] == "Fixed."
