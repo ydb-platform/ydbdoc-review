@@ -26,6 +26,7 @@ def test_eliza_tls_verify_merges_internal_with_certifi(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(internal))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
     verify = eliza_tls_verify()
     assert verify != certifi.where()

@@ -601,6 +601,7 @@ def test_eliza_session_uses_ydbdoc_ca_bundle(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(ca_path))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
     client = _client()
     assert client._http.verify not in (True, False)
@@ -617,6 +618,7 @@ def test_eliza_session_ydbdoc_ca_overrides_requests_env(tmp_path, monkeypatch):
     other_ca.write_text("other", encoding="utf-8")
     monkeypatch.setenv("YDBDOC_ELIZA_CA_BUNDLE", str(eliza_ca))
     monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(other_ca))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
     client = _client()
     assert client._http.verify != str(other_ca)

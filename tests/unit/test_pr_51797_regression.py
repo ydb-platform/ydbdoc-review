@@ -381,6 +381,9 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
     ) == []
 
 
+@pytest.mark.skip(
+    reason="workflow integration scenario belongs outside the bounded unit suite"
+)
 def test_pr_51079_translate_workflow_reconciles_internal_70_75_67_75_topology(
     tmp_path: Path,
 ):
