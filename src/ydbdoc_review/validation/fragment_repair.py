@@ -496,6 +496,10 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
 
     ru_heads = list(_iter_headings(ru_doc.children))
     en_heads = list(_iter_headings(en_doc.children))
+    if len(ru_heads) != len(en_heads) or any(
+        ru.level != en.level for ru, en in zip(ru_heads, en_heads, strict=True)
+    ):
+        return None
     for src_h, tgt_h in zip(ru_heads, en_heads, strict=False):
         ru_text = _heading_plain_text(src_h)
         ru_auto = diplodoc_auto_slug(ru_text)
@@ -519,8 +523,6 @@ def _remap_fragment_via_ru_en_pages(frag: str, ru_md: str, en_md: str) -> str | 
         if src_h.anchor and (decoded == src_h.anchor or decoded.startswith(f"{src_h.anchor}-")):
             if en_anchor:
                 return en_anchor
-            if en_auto:
-                return en_auto
     return None
 
 
