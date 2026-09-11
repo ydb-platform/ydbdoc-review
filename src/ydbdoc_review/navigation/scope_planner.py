@@ -612,6 +612,26 @@ def plan_translation_scope(
                     docs_root=docs_root,
                     redirects_yaml=redirects_yaml,
                 )
+            for include in collect_yfm_includes(ru_text):
+                include_path = resolve_locale_md_path(
+                    ru_md, include.path, docs_root=docs_root
+                )
+                include_text = read_ru(include_path) if include_path else None
+                if include_path is None or include_text is None:
+                    continue
+                for href in _internal_ascii_fragment_hrefs(include_text):
+                    owner = _exact_ascii_fragment_owner_dependency(
+                        include_path,
+                        href,
+                        read_ru=read_ru,
+                        read_en_base=read_en_base,
+                        docs_root=docs_root,
+                        redirects_yaml=redirects_yaml,
+                    )
+                    if owner is not None:
+                        candidates.add(owner)
+                        fragment = href.rsplit("#", 1)[1]
+                        candidate_fragments.setdefault(owner, set()).add(fragment)
             candidates.update(
                 direct_md_link_dependencies(
                     ru_md,
