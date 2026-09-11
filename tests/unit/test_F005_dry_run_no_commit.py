@@ -87,6 +87,44 @@ def test_F005_no_commit_keeps_local_result_without_publication(tmp_path: Path):
     ) is False
 
 
+@pytest.mark.parametrize(
+    ("dry_run", "writes_local_result"),
+    [(True, False), (False, True)],
+)
+def test_F005_dry_run_only_blocks_local_result_writes(
+    tmp_path: Path, dry_run: bool, writes_local_result: bool
+):
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, target_text="Translated.\n")]
+    )
+
+    target = tmp_path / "ydb/docs/en/a.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("Original.\n", encoding="utf-8")
+    touched = workflow._apply_results_to_disk(
+        str(tmp_path), result, dry_run=dry_run
+    )
+
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == (
+        "Translated.\n" if writes_local_result else "Original.\n"
+    )
+    assert touched.written == ["ydb/docs/en/a.md"]
+
+
 @pytest.mark.parametrize("flag", ["dry_run", "no_commit"])
 def test_F005_verify_red_does_not_change_existing_pr(flag):
     gh = SimpleNamespace(convert_pull_to_draft=Mock())
