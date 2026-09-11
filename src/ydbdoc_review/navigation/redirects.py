@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import unquote
 
 _ENTRY_SPLIT = re.compile(r"(?m)^- from: ")
@@ -14,6 +15,17 @@ _PREFIX_FROM = re.compile(
     r"^\^?/((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+)/\(\.\*\)\$$"
 )
 _PREFIX_TO = re.compile(r"^/((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+)/\$1$")
+
+
+@lru_cache(maxsize=8)
+def _load_redirect_yaml(text: str) -> object:
+    """Parse one immutable redirect document once per process."""
+    try:
+        import yaml
+
+        return yaml.safe_load(text)
+    except Exception:
+        return None
 
 
 def parse_redirect_entries(yaml_text: str) -> list[dict[str, str]]:
@@ -52,12 +64,7 @@ def iter_redirect_from_paths(redirects_yaml: str) -> set[str]:
     text = (redirects_yaml or "").strip()
     if not text:
         return set()
-    try:
-        import yaml
-
-        data = yaml.safe_load(text)
-    except Exception:
-        data = None
+    data = _load_redirect_yaml(text)
     out: set[str] = set()
     if isinstance(data, dict):
         for key in ("common", "ru", "en"):
@@ -83,12 +90,7 @@ def iter_redirect_mappings(redirects_yaml: str) -> dict[str, str]:
     text = (redirects_yaml or "").strip()
     if not text:
         return {}
-    try:
-        import yaml
-
-        data = yaml.safe_load(text)
-    except Exception:
-        data = None
+    data = _load_redirect_yaml(text)
     out: dict[str, str] = {}
     if isinstance(data, dict):
         for key in ("common", "ru", "en"):
@@ -127,12 +129,7 @@ def _redirect_rows_for_locale(
     text = (redirects_yaml or "").strip()
     if not text:
         return []
-    try:
-        import yaml
-
-        data = yaml.safe_load(text)
-    except Exception:
-        data = None
+    data = _load_redirect_yaml(text)
     rows: list[tuple[str, str]] = []
     if isinstance(data, dict):
         sections = ("common", locale) if locale in {"ru", "en"} else ("common",)
