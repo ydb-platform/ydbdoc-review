@@ -1,5 +1,6 @@
 """F-005: translation work remains executable without publication."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,7 +10,9 @@ from ydbdoc_review import cli
 from ydbdoc_review.github import workflow
 from ydbdoc_review.github.pr import PullRequestContext
 from ydbdoc_review.github.workflow import DocJobResult
-from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.pipeline.analyze import PairPlan
+from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.types import PairRunResult, PRTranslationResult
 
 
 @pytest.mark.parametrize("flag", ["dry_run", "no_commit"])
@@ -51,6 +54,37 @@ def test_F005_noop_suppresses_comment_for_no_commit(monkeypatch):
     assert workflow._publication_side_effects_allowed(dry_run=True, no_commit=False) is False
     assert workflow._publication_side_effects_allowed(dry_run=False, no_commit=False) is True
     comment.assert_not_called()
+
+
+def test_F005_no_commit_keeps_local_result_without_publication(tmp_path: Path):
+    pair = DocPair(
+        ru_path="ydb/docs/ru/a.md",
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=pair.ru_path,
+        target_path=pair.en_path,
+        source_lang="ru",
+        target_lang="en",
+    )
+    result = PRTranslationResult(
+        pair_results=[PairRunResult(plan=plan, target_text="Translated.\n")]
+    )
+
+    touched = workflow._apply_results_to_disk(
+        str(tmp_path), result, dry_run=False
+    )
+
+    assert (
+        tmp_path / "ydb/docs/en/a.md"
+    ).read_text(encoding="utf-8") == "Translated.\n"
+    assert touched.written == ["ydb/docs/en/a.md"]
+    assert workflow._publication_side_effects_allowed(
+        dry_run=False, no_commit=True
+    ) is False
 
 
 @pytest.mark.parametrize("flag", ["dry_run", "no_commit"])
