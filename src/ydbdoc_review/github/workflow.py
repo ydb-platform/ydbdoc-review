@@ -639,6 +639,7 @@ def _apply_results_to_disk(
     *,
     dry_run: bool,
     docs_root: str = "ydb/docs",
+    changed_paths: frozenset[str] = frozenset(),
 ) -> TouchedPaths:
     """Write translated markdown, navigation YAML, locale assets, and deletes."""
     from ydbdoc_review.translation.file_profiles import is_glossary_file
@@ -688,6 +689,7 @@ def _apply_results_to_disk(
             repo_path=repo_path,
             docs_root=docs_root,
             dry_run=dry_run,
+            changed_paths=changed_paths,
         )
     )
     return TouchedPaths(written=list(dict.fromkeys(written)), deleted=deleted)
@@ -2565,6 +2567,7 @@ def run_doc_translate(
         and (en_path := counterpart(path, docs_root)) is not None
         and en_path.endswith(".md")
     )
+    direct_changed_paths = frozenset(path.replace("\\", "/") for path, _kind in changes)
     changes = merge_pr_file_changes(changes, synthetic_changes_from_plan(scope_plan))
     job = DocJobResult(
         mode="doc_translate" if ops_mode == "translate" else f"doc_{ops_mode}",
@@ -2857,6 +2860,7 @@ def run_doc_translate(
             pr_result,
             dry_run=dry_run,
             docs_root=cfg.paths.docs_root,
+            changed_paths=direct_changed_paths,
         )
         redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
         if any(path == redirects_path for path, _kind in changes):
@@ -4259,11 +4263,16 @@ def run_doc_verify(
                 write_text(repo_path, path, wrapper_repairs[path])
             touched = TouchedPaths(sorted(wrapper_repairs), [])
         else:
+            asset_changed_paths = frozenset(
+                path.replace("\\", "/")
+                for path, _kind in (source_changes if source_changes is not None else changes)
+            )
             touched = _apply_results_to_disk(
                 repo_path,
                 pr_result,
                 dry_run=dry_run,
                 docs_root=cfg.paths.docs_root,
+                changed_paths=asset_changed_paths,
             )
             if translation_pr and source_scope_en:
                 protected_impact_paths = frozenset(

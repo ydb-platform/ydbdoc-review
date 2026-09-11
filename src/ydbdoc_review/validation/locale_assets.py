@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+from collections.abc import Collection
 from pathlib import Path, PurePosixPath
 
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -121,6 +122,7 @@ def copy_locale_assets_for_pair(
     source_text: str,
     docs_root: str = "ydb/docs",
     dry_run: bool = False,
+    changed_paths: Collection[str] = (),
 ) -> list[str]:
     """Copy missing/outdated RU assets to EN; return written EN paths."""
     written: list[str] = []
@@ -135,6 +137,8 @@ def copy_locale_assets_for_pair(
             )
             continue
         if dest.is_file() and dest.read_bytes() == src.read_bytes():
+            continue
+        if dest.is_file() and src_rel not in {_norm(path) for path in changed_paths}:
             continue
         written.append(en_rel)
         if dry_run:
@@ -151,6 +155,7 @@ def apply_locale_asset_copies(
     repo_path: str,
     docs_root: str = "ydb/docs",
     dry_run: bool = False,
+    changed_paths: Collection[str] = (),
 ) -> list[str]:
     """Copy RU→EN assets for every successful markdown pair in ``result``."""
     written: list[str] = []
@@ -175,6 +180,7 @@ def apply_locale_asset_copies(
                 source_text=source_text,
                 docs_root=docs_root,
                 dry_run=dry_run,
+                changed_paths=changed_paths,
             )
         )
     return list(dict.fromkeys(written))
