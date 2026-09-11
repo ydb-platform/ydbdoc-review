@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import unquote
 
 _ENTRY_SPLIT = re.compile(r"(?m)^- from: ")
@@ -42,6 +43,7 @@ def parse_redirect_entries(yaml_text: str) -> list[dict[str, str]]:
     return entries
 
 
+@lru_cache(maxsize=8)
 def iter_redirect_from_paths(redirects_yaml: str) -> set[str]:
     """Collect Diplodoc redirect ``from`` public paths from full ``redirects.yaml``.
 
@@ -74,6 +76,7 @@ def iter_redirect_from_paths(redirects_yaml: str) -> set[str]:
     return {e["from_path"] for e in parse_redirect_entries(text)}
 
 
+@lru_cache(maxsize=8)
 def iter_redirect_mappings(redirects_yaml: str) -> dict[str, str]:
     """Collect Diplodoc public ``from`` → ``to`` mappings.
 
