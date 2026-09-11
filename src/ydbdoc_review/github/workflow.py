@@ -633,6 +633,40 @@ def _delete_stale_verify_fixup(
         )
 
 
+def _deleted_markdown_usages(
+    repo_path: str,
+    target_path: str,
+    *,
+    docs_root: str,
+) -> list[str]:
+    """Return Markdown files that still reference a deleted local resource."""
+    target = target_path.replace("\\", "/")
+    target_without_repo = target[4:] if target.startswith("ydb/") else target
+    root = Path(repo_path) / docs_root.replace("/", os.sep).strip(os.sep)
+    if not root.is_dir():
+        return []
+
+    usages: list[str] = []
+    for source in root.rglob("*.md"):
+        source_rel = source.relative_to(repo_path).as_posix()
+        if source_rel == target:
+            continue
+        source_text = source.read_text(encoding="utf-8")
+        relative_target = os.path.relpath(
+            Path(repo_path) / target,
+            source.parent,
+        ).replace(os.sep, "/")
+        candidates = {
+            target,
+            target_without_repo,
+            relative_target,
+            f"./{relative_target}",
+        }
+        if any(candidate in source_text for candidate in candidates):
+            usages.append(source_rel)
+    return usages
+
+
 def _apply_results_to_disk(
     repo_path: str,
     result: PRTranslationResult,
@@ -656,6 +690,16 @@ def _apply_results_to_disk(
             continue
         if run.deleted:
             deleted.append(rel)
+            usages = _deleted_markdown_usages(repo_path, rel, docs_root=docs_root)
+            if usages:
+                deleted.pop()
+                run.deleted = False
+                run.error = (
+                    "resource_delete_blocked: remaining Markdown usage of "
+                    f"`{rel}` in "
+                    + ", ".join(f"`{path}`" for path in usages[:6])
+                )
+                continue
             if dry_run:
                 continue
             path = Path(repo_path) / rel.replace("/", os.sep)
