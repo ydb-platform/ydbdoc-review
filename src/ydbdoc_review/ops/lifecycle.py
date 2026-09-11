@@ -157,6 +157,15 @@ def _ops_enabled(env: dict[str, str]) -> bool:
     return True
 
 
+def _accounting_unavailable_comment(source_pr: int, detail: str) -> str:
+    return (
+        "⛔ **ydbdoc-review:** учёт дневного бюджета недоступен, "
+        "поэтому оплачиваемые запросы не запускались. "
+        f"Повторите запуск после восстановления учёта для PR `#{source_pr}`.\n\n"
+        f"Детали: `{detail}`"
+    )
+
+
 def begin_ops_job(
     *,
     mode: str,
@@ -208,11 +217,19 @@ def begin_ops_job(
             backend=env_map.get("YDBDOC_RUNS_LEDGER", "auto"),
             env=env_map,
         )
+        spent = ledger_impl.sum_cost_for_day(run_day)
     except Exception as exc:
-        logger.warning("Runs ledger unavailable (%s); continuing without quota", exc)
-        ledger_impl = InMemoryRunsLedger()
+        logger.warning("Runs ledger unavailable (%s); denying paid work", exc)
+        return (
+            None,
+            GateResult(
+                ok=False,
+                reason="budget accounting unavailable",
+                status="denied_accounting",
+            ),
+            _accounting_unavailable_comment(source_pr, str(exc)),
+        )
 
-    spent = ledger_impl.sum_cost_for_day(run_day)
     quota = check_daily_quota(spent_rub=spent, budget_rub=budget)
     if not quota.ok:
         # record denial
