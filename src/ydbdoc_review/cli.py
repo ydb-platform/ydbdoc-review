@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -56,21 +55,10 @@ def _setup_logging(verbose: bool) -> None:
     _setup_logging._configured = True  # type: ignore[attr-defined]
 
 
-def _resolve_repo_path(repo_path: Path | None) -> Path:
-    if repo_path is not None:
-        return repo_path.expanduser().resolve()
-    env_raw = os.environ.get("YDBDOC_REPO_PATH", "")
-    if env_raw:
-        env = Path(env_raw).expanduser()
-        if env.is_dir():
-            return env.resolve()
-    cwd = Path.cwd()
-    if (cwd / ".git").exists():
-        return cwd
-    raise typer.BadParameter(
-        "Repository path required: pass --repo-path or set YDBDOC_REPO_PATH "
-        "to a git checkout of the docs repo."
-    )
+def _resolve_repo_path(repo_path: Path) -> Path:
+    if repo_path is None:
+        raise typer.BadParameter("Repository path required: pass --repo-path.")
+    return repo_path.expanduser().resolve()
 
 
 @app.callback()
@@ -91,9 +79,9 @@ def run(
     repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
     pr: Annotated[int, typer.Option(help="Source PR number (doc_translate).")],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the PR head."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
@@ -108,32 +96,7 @@ def run(
     ] = False,
 ) -> None:
     """Translate changed doc pairs for a source PR (``doc_translate``)."""
-    path = _resolve_repo_path(repo_path)
-    try:
-        result = run_doc_translate(
-            repo_path=str(path),
-            github_repo=repo,
-            pr_number=pr,
-            merge_base_with=merge_base_with,
-            dry_run=dry_run,
-            no_commit=no_commit,
-        )
-    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
-
-    _print_job_summary(result.mode, result)
-    if result.pr_result.failed_count:
-        console.print(
-            f"[yellow]Warning:[/yellow] {result.pr_result.failed_count} pair(s) failed — "
-            "see logs and translation PR report."
-        )
-    if job_requires_nonzero_exit(result, no_commit=no_commit):
-        console.print(
-            "[red]Error:[/red] translate did not publish a translation PR "
-            "(blocking error skipped commit/push/PR)."
-        )
-        raise typer.Exit(code=1)
+    job("run", repo, pr, repo_path, merge_base_with, dry_run, no_commit)
 
 
 @app.command()
@@ -146,9 +109,9 @@ def verify(
         ),
     ],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the PR head (or merge commit)."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
@@ -160,24 +123,7 @@ def verify(
     ] = False,
 ) -> None:
     """Critic QA + completeness on a translation PR or bilingual source PR (``doc_verify``)."""
-    path = _resolve_repo_path(repo_path)
-    try:
-        result = run_doc_verify(
-            repo_path=str(path),
-            github_repo=repo,
-            pr_number=pr,
-            merge_base_with=merge_base_with,
-            dry_run=dry_run,
-            no_commit=no_commit,
-        )
-    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
-
-    _print_job_summary(result.mode, result)
-    if job_requires_nonzero_exit(result, no_commit=no_commit):
-        console.print("[red]Error:[/red] verify finished with blocking findings.")
-        raise typer.Exit(code=1)
+    job("verify", repo, pr, repo_path, merge_base_with, dry_run, no_commit)
 
 
 @app.command("continue")
@@ -188,9 +134,9 @@ def continue_(
         typer.Option(help="Translation PR number (doc_continue)."),
     ],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the translation PR head."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
@@ -206,28 +152,7 @@ def continue_(
     ] = None,
 ) -> None:
     """Continue translation with operator feedback (``doc_continue``)."""
-    path = _resolve_repo_path(repo_path)
-    try:
-        result = run_doc_continue(
-            repo_path=str(path),
-            github_repo=repo,
-            pr_number=pr,
-            merge_base_with=merge_base_with,
-            dry_run=dry_run,
-            no_commit=no_commit,
-            instruction=instruction,
-        )
-    except (GitHubError, GitHubConfigError, LLMConfigError, LLMError) as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
-
-    _print_job_summary(result.mode, result)
-    if job_requires_nonzero_exit(result, no_commit=no_commit):
-        console.print(
-            "[red]Error:[/red] continue refused or did not publish "
-            "(need continuable job state, or blocking publish skip)."
-        )
-        raise typer.Exit(code=1)
+    job("continue", repo, pr, repo_path, merge_base_with, dry_run, no_commit, instruction)
 
 
 @app.command()
@@ -242,9 +167,9 @@ def job(
     repo: Annotated[str, typer.Option(help="GitHub repo owner/name.")],
     pr: Annotated[int, typer.Option(help="PR number (source for translate; translation for verify/continue).")],
     repo_path: Annotated[
-        Path | None,
+        Path,
         typer.Option(help="Local git checkout of the PR head."),
-    ] = None,
+    ],
     merge_base_with: Annotated[
         str,
         typer.Option(help="Second ref for git merge-base."),
