@@ -10,7 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.llm.errors import LLMParseError, LLMRetryExhaustedError
-from ydbdoc_review.llm.retry import is_rate_limit_error
+from ydbdoc_review.llm.retry import (
+    is_eliza_model_unavailable,
+    is_model_unavailable,
+    is_rate_limit_error,
+)
 from ydbdoc_review.llm.structured import parse_json_model
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
@@ -67,6 +71,44 @@ def _is_timeout_exhausted(exc: BaseException) -> bool:
     """True when the model chain entry failed on transport/timeout budget."""
     msg = str(exc).lower()
     return "timed out" in msg or "timeout" in msg or "connection" in msg
+
+
+_MODEL_REFUSAL_MARKERS = (
+    "я не могу обсуждать",
+    "не могу помочь с этой темой",  # noqa: RUF001
+    "i can't discuss",
+    "i cannot discuss",
+    "unable to discuss this",
+    "content policy",
+)
+
+
+def _is_model_refusal(text: str) -> bool:
+    normalized = (text or "").strip().casefold()
+    return bool(normalized) and any(
+        marker in normalized for marker in _MODEL_REFUSAL_MARKERS
+    )
+
+
+def _fallback_cause(exc: BaseException, *, content: str = "") -> str | None:
+    """Return a stable report reason when the next model must be tried."""
+    if isinstance(exc, LLMRetryExhaustedError):
+        if is_model_unavailable(exc) or is_eliza_model_unavailable(exc):
+            return "model unavailable after retries"
+        if is_rate_limit_error(exc) or _is_timeout_exhausted(exc):
+            return "model unavailable after retries"
+        return None
+    if isinstance(exc, LLMParseError):
+        if _is_model_refusal(content):
+            return "model refusal"
+        if not content.strip():
+            return "empty model response"
+        if "Segment id mismatch" in str(exc):
+            return "incomplete model response"
+        return "unreadable model response"
+    if isinstance(exc, TranslationValidationError) and _PLACEHOLDER_MISMATCH_HINT in str(exc):
+        return "placeholder validation failure"
+    return None
 
 
 def parse_translate_response(raw: str, *, expected_ids: set[str]) -> dict[str, str]:
@@ -174,7 +216,7 @@ def _apply_placeholder_realignment(
 
 
 def _segment_location(seg: Segment) -> str:
-    return " › ".join(seg.path) if seg.path else "(начало документа)"
+    return " › ".join(seg.path) if seg.path else "(начало документа)"  # noqa: RUF001
 
 
 def _translate_batch_with_model(
@@ -282,6 +324,7 @@ def _translate_batch_once(
     last_attempt: dict[str, str] | None = None,
     allow_resplit: bool = True,
     last_raw_content: list[str] | None = None,
+    fallback_reasons: list[str] | None = None,
 ) -> dict[str, str]:
     model_chain = client.model_chain_for_role("translate")
     last_validation_exc: LLMParseError | TranslationValidationError | None = None
@@ -310,7 +353,10 @@ def _translate_batch_once(
             # Advance on rate-limit or transport timeout — same slug already
             # burned its retry budget (§6.230 / #40385 monitoring_config).
             if model_idx + 1 < len(model_chain) and (
-                is_rate_limit_error(exc) or _is_timeout_exhausted(exc)
+                is_rate_limit_error(exc)
+                or _is_timeout_exhausted(exc)
+                or is_model_unavailable(exc)
+                or is_eliza_model_unavailable(exc)
             ):
                 logger.warning(
                     "Translate batch %s model %s exhausted, trying fallback %s: %s",
@@ -319,22 +365,21 @@ def _translate_batch_once(
                     model_chain[model_idx + 1],
                     exc,
                 )
+                if fallback_reasons is not None:
+                    fallback_reasons.append(
+                        f"{model} -> {model_chain[model_idx + 1]}: "
+                        f"{_fallback_cause(exc) or 'model failure'}"
+                    )
                 continue
             raise
         except (LLMParseError, TranslationValidationError) as exc:
             last_validation_exc = exc
+            cause = _fallback_cause(
+                exc, content=raw_holder[0] if raw_holder else ""
+            )
             if (
                 model_idx + 1 < len(model_chain)
-                and (
-                    _PLACEHOLDER_MISMATCH_HINT in str(exc)
-                    or (
-                        isinstance(exc, LLMParseError)
-                        and _is_length_resplit_failure(
-                            exc,
-                            content=raw_holder[0] if raw_holder else "",
-                        )
-                    )
-                )
+                and cause is not None
             ):
                 logger.warning(
                     "Translate batch %s retry with fallback model %s: %s",
@@ -342,6 +387,10 @@ def _translate_batch_once(
                     model_chain[model_idx + 1],
                     exc,
                 )
+                if fallback_reasons is not None:
+                    fallback_reasons.append(
+                        f"{model} -> {model_chain[model_idx + 1]}: {cause}"
+                    )
                 continue
             raise
 
@@ -431,6 +480,7 @@ def translate_batch(
     target_lang: str = "en",
     prompt_version: str = DEFAULT_PROMPT_VERSION,
     manual_actions: list[ManualAction] | None = None,
+    fallback_reasons: list[str] | None = None,
     allow_resplit: bool = True,
 ) -> dict[str, str]:
     """Translate one batch; fall back to per-segment calls on batch failure."""
@@ -448,6 +498,7 @@ def translate_batch(
             last_attempt=last_attempt,
             allow_resplit=allow_resplit,
             last_raw_content=last_raw_content,
+            fallback_reasons=fallback_reasons,
         )
     except (LLMParseError, TranslationValidationError) as exc:
         if len(batch.segments) == 1:
@@ -501,6 +552,7 @@ def translate_batch(
                     target_lang=target_lang,
                     prompt_version=prompt_version,
                     last_attempt=seg_attempt,
+                    fallback_reasons=fallback_reasons,
                 )
             )
         except TranslationValidationError as exc:
@@ -540,6 +592,7 @@ def translate_segments(
     cache: dict[str, str] | None = None,
     max_parallel_batches: int = 3,
     manual_actions: list[ManualAction] | None = None,
+    fallback_reasons: list[str] | None = None,
     on_validated_segment: Callable[[Segment, str], None] | None = None,
     load_validated_segment: Callable[[Segment], str | None] | None = None,
 ) -> dict[str, str]:
@@ -620,6 +673,7 @@ def translate_segments(
             target_lang=target_lang,
             prompt_version=prompt_version,
             manual_actions=manual_actions,
+            fallback_reasons=fallback_reasons,
         )
 
     def _accept_completed_batch(

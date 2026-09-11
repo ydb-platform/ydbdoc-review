@@ -251,7 +251,7 @@ class ParseStep:
         state.source_doc = parse_markdown(state.source_text)
         state.segments = extract_segments(state.source_doc)
         state.segment_locations = {
-            seg.id: " › ".join(seg.path) if seg.path else "(начало документа)"
+            seg.id: " › ".join(seg.path) if seg.path else "(начало документа)"  # noqa: RUF001
             for seg in state.segments
         }
         if state.coverage_plan is not None:
@@ -406,6 +406,7 @@ class TranslateStep:
                     cache=ctx.cache,
                     max_parallel_batches=ctx.parallel,
                     manual_actions=state.manual_actions,
+                    fallback_reasons=state.fallback_reasons,
                     on_validated_segment=_retain_validated_segment,
                     load_validated_segment=(
                         _load_validated_segment
@@ -450,7 +451,7 @@ class TranslateStep:
                 "low_magnitude_patch": False,
                 "semantic_noop": False,
                 "enabled": True,
-                "fallback_reasons": (),
+                "fallback_reasons": tuple(state.fallback_reasons),
             }
             if ctx.target_lang.lower() in {"en", "english"}:
                 _apply_en_structural_repair(state, ctx)
@@ -476,7 +477,9 @@ class TranslateStep:
             "low_magnitude_patch": False,
             "semantic_noop": False,
             "enabled": False,
-            "fallback_reasons": fallback_reasons,
+            "fallback_reasons": tuple(
+                dict.fromkeys((*fallback_reasons, *state.fallback_reasons))
+            ),
         }
 
         state.translations = translate_segments(
@@ -495,6 +498,7 @@ class TranslateStep:
             cache=ctx.cache,
             max_parallel_batches=ctx.parallel,
             manual_actions=state.manual_actions,
+            fallback_reasons=state.fallback_reasons,
             on_validated_segment=_retain_validated_segment,
             load_validated_segment=(
                 _load_validated_segment if ctx.resume_parent_run_id is not None else None
@@ -583,6 +587,7 @@ def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> boo
         cache=ctx.cache,
         max_parallel_batches=ctx.parallel,
         manual_actions=state.manual_actions,
+        fallback_reasons=state.fallback_reasons,
     )
     state.translations = {**seeded, **new_trans}
     state.render_base_doc = state.source_doc
@@ -682,6 +687,7 @@ class RoundTripStep:
             cache=ctx.cache,
             max_parallel_batches=ctx.parallel,
             manual_actions=state.manual_actions,
+            fallback_reasons=state.fallback_reasons,
         )
         state.render_base_doc = state.source_doc
         state.render_base_segments = state.segments

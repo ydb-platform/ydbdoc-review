@@ -125,8 +125,9 @@ def test_translate_batch_falls_back_to_single_segment():
             _json_response([{"id": "s1", "text": "only one"}]),
             _json_response([{"id": "s1", "text": "only one"}]),
             _json_response([{"id": "s1", "text": "only one"}]),
-            _json_response([{"id": "s1", "text": "Alpha"}]),
-            _json_response([{"id": "s2", "text": "Beta"}]),
+                _json_response([{"id": "s1", "text": "only one"}]),
+                _json_response([{"id": "s1", "text": "Alpha"}]),
+                _json_response([{"id": "s2", "text": "Beta"}]),
         ]
     )
     out = translate_batch(
@@ -230,7 +231,7 @@ def test_translate_batch_placeholder_mismatch_tries_fallback_model():
 def test_translate_batch_retries_homoglyph_cyrillic_then_accepts_clean_en():
     seg = _segment("s1", "Это можно сделать")
     batch = Batch(index=0, segments=[seg])
-    bad = _json_response([{"id": "s1", "text": "This сould be done"}])
+    bad = _json_response([{"id": "s1", "text": "This сould be done"}])  # noqa: RUF001
     good = _json_response([{"id": "s1", "text": "This could be done"}])
     client = _mock_client([bad, good])
 
@@ -548,25 +549,24 @@ def test_empty_length_failure_without_fallback_keeps_irreducible_monolith_blocke
     assert [action.segment_id for action in actions] == ["s1"]
 
 
-def test_non_length_wrong_ids_does_not_advance_to_fallback():
-    """Catches broadening the new branch to ordinary schema/id failures."""
+def test_non_length_wrong_ids_advances_to_fallback():
+    """An incomplete response must use the next configured model."""
     seg = _segment("s1", "Привет")
     wrong_ids = _json_response([{"id": "not-s1", "text": "Hello"}])
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary", "fallback"]
-    client.chat.side_effect = [SimpleNamespace(content=wrong_ids)] * 3
+    client.chat.side_effect = [SimpleNamespace(content=wrong_ids)] * 4
 
     with pytest.raises(LLMParseError, match="Segment id mismatch"):
         translate_batch(
             client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
         )
-
     assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
         "primary",
         "primary",
         "primary",
+        "fallback",
     ]
-
 
 @pytest.mark.parametrize(
     ("source", "unsafe", "error"),
