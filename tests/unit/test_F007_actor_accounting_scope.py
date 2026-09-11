@@ -10,6 +10,7 @@ def test_F007_provider_switch_keeps_actor_budget_and_ignores_diagnostics() -> No
     store = InMemoryTranscriptStore()
     common = {
         "GITHUB_ACTOR": "worker",
+        "YDBDOC_ALLOWED_ACTORS": "worker",
         "YDBDOC_DAILY_BUDGET_RUB": "10",
         "YDBDOC_TRANSCRIPT_BACKEND": "memory",
     }

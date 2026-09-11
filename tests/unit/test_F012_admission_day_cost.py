@@ -34,6 +34,7 @@ def test_F012_concurrent_costs(monkeypatch):
     monkeypatch.setattr(lifecycle, "msk_today", lambda: "2026-09-10")
     env = {
         "GITHUB_ACTOR": "sintjuri",
+        "YDBDOC_ALLOWED_ACTORS": "sintjuri",
         "YDBDOC_DAILY_BUDGET_RUB": "100",
         "YDBDOC_TRANSCRIPT_BACKEND": "memory",
     }

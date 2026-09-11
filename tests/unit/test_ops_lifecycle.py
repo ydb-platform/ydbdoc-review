@@ -64,7 +64,7 @@ def test_published_red_is_selected_as_doc_continue_parent():
     ledger = InMemoryRunsLedger()
     store = InMemoryTranscriptStore()
     env = {
-        "YDBDOC_ALLOWED_ACTORS": "",
+        "YDBDOC_ALLOWED_ACTORS": "sintjuri",
         "GITHUB_ACTOR": "sintjuri",
         "YDBDOC_DAILY_BUDGET_RUB": "5000",
     }
@@ -113,7 +113,7 @@ def test_three_published_red_continues_exhaust_limit():
         repo="o/r",
         source_pr=7,
         env={
-            "YDBDOC_ALLOWED_ACTORS": "",
+            "YDBDOC_ALLOWED_ACTORS": "sintjuri",
             "GITHUB_ACTOR": "sintjuri",
             "YDBDOC_DAILY_BUDGET_RUB": "5000",
         },
@@ -135,7 +135,7 @@ def test_expired_continue():
         source_pr=7,
         parent_run_id="missing-run",
         env={
-            "YDBDOC_ALLOWED_ACTORS": "",
+            "YDBDOC_ALLOWED_ACTORS": "sintjuri",
             "GITHUB_ACTOR": "sintjuri",
             "YDBDOC_DAILY_BUDGET_RUB": "5000",
         },
@@ -156,7 +156,7 @@ def test_continue_store_unavailable_is_not_ttl_message():
         source_pr=48047,
         parent_run_id="any",
         env={
-            "YDBDOC_ALLOWED_ACTORS": "",
+            "YDBDOC_ALLOWED_ACTORS": "sintjuri",
             "GITHUB_ACTOR": "sintjuri",
             "YDBDOC_DAILY_BUDGET_RUB": "5000",
             "YDBDOC_TRANSCRIPT_BACKEND": "ydb",

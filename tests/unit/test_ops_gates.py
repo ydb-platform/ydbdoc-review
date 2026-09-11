@@ -23,8 +23,16 @@ def test_parse_allowed_actors_list():
     )
 
 
-def test_acl_empty_allowlist_allows_all():
-    assert check_acl("anyone", frozenset()).ok
+def test_F009_acl_empty_allowlist_denies_everyone():
+    denied = check_acl("anyone", frozenset())
+    assert not denied.ok
+    assert denied.status == "denied_acl"
+
+
+def test_F009_missing_actor_denies_even_with_allowlist():
+    denied = check_acl("", frozenset({"trusted"}))
+    assert not denied.ok
+    assert denied.status == "denied_acl"
 
 
 def test_acl_allow_and_deny():

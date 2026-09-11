@@ -20,9 +20,13 @@ def parse_allowed_actors(raw: str | None) -> frozenset[str]:
 
 
 def check_acl(actor: str, allowed: frozenset[str]) -> GateResult:
-    """If ``allowed`` is empty, allow everyone (local/tests). Else require membership."""
+    """Require a configured allowlist and a matching, trustworthy actor."""
     if not allowed:
-        return GateResult(ok=True, status="ok")
+        return GateResult(
+            ok=False,
+            reason="empty allowlist",
+            status="denied_acl",
+        )
     actor_l = (actor or "").strip()
     if not actor_l:
         return GateResult(
@@ -125,7 +129,7 @@ def expired_context_comment(source_pr: int) -> str:
 def store_unavailable_comment(source_pr: int, *, detail: str = "") -> str:
     """Continue denied because YDB/S3 transcript backend is not usable (not TTL)."""
     hint = (detail or "").strip()
-    extra = f"\n\nДетали: `{hint}`" if hint else ""
+    extra = f"\n\nДетали: `{hint}`" if hint else ""  # noqa: RUF001
     return (
         "⛔ **ydbdoc-review:** хранилище контекста LLM недоступно "
         "(нет `YDB_SA_KEY` / бэкенд не поднялся). Continue недоступен — "

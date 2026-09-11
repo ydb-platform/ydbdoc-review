@@ -143,7 +143,7 @@ def compose_continue_feedback(instruction: str | None, parent_context: str) -> s
 
 def resolve_actor(env: dict[str, str] | None = None) -> str:
     env = env or dict(os.environ)
-    return (env.get("GITHUB_ACTOR") or env.get("YDBDOC_ACTOR") or "local").strip()
+    return (env.get("GITHUB_ACTOR") or env.get("YDBDOC_ACTOR") or "").strip()
 
 
 def _ops_enabled(env: dict[str, str]) -> bool:
