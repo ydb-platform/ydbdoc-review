@@ -19,6 +19,7 @@ class CountingLedger(InMemoryRunsLedger):
 def _env() -> dict[str, str]:
     return {
         "GITHUB_ACTOR": "worker",
+        "YDBDOC_ALLOWED_ACTORS": "worker",
         "YDBDOC_DAILY_BUDGET_RUB": "100",
         "YDBDOC_TRANSCRIPT_BACKEND": "memory",
     }

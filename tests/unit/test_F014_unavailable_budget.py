@@ -21,7 +21,11 @@ def test_F014_read_failure() -> None:
         mode="translate",
         repo="ydb-platform/ydb",
         source_pr=123,
-        env={"YDBDOC_DAILY_BUDGET_RUB": "100"},
+        env={
+            "GITHUB_ACTOR": "worker",
+            "YDBDOC_ALLOWED_ACTORS": "worker",
+            "YDBDOC_DAILY_BUDGET_RUB": "100",
+        },
         ledger=UnavailableLedger(),
     )
 
@@ -36,7 +40,12 @@ def test_F014_late_write_failure() -> None:
         mode="translate",
         repo="ydb-platform/ydb",
         source_pr=123,
-        env={"YDBDOC_DAILY_BUDGET_RUB": "100"},
+        env={
+            "GITHUB_ACTOR": "worker",
+            "YDBDOC_ALLOWED_ACTORS": "worker",
+            "YDBDOC_DAILY_BUDGET_RUB": "100",
+            "YDBDOC_TRANSCRIPT_BACKEND": "memory",
+        },
         ledger=LateWriteFailureLedger(),
     )
 
