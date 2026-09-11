@@ -265,6 +265,25 @@ def _publication_side_effects_allowed(*, dry_run: bool, no_commit: bool) -> bool
     return not dry_run and not no_commit
 
 
+def _convert_translation_pr_to_draft_if_allowed(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    translation_pr: bool,
+    verify_requires_red: bool,
+    dry_run: bool,
+    no_commit: bool,
+) -> None:
+    if (
+        translation_pr
+        and verify_requires_red
+        and _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit)
+    ):
+        gh.convert_pull_to_draft(owner, repo, pr_number)
+
+
 def _finish_nonpublishing_translate_job(
     job: DocJobResult,
     client: object,
@@ -4186,7 +4205,16 @@ def run_doc_verify(
         # Convert through the API method immediately before any local/remote
         # mutation. The client method re-fetches current state and confirms the
         # GraphQL draft transition instead of trusting the initial PR snapshot.
-        gh.convert_pull_to_draft(owner, repo, pr_number)
+        _convert_translation_pr_to_draft_if_allowed(
+            gh,
+            owner,
+            repo,
+            pr_number,
+            translation_pr=translation_pr,
+            verify_requires_red=verify_requires_red,
+            dry_run=dry_run,
+            no_commit=no_commit,
+        )
 
     job.pr_result = pr_result
 

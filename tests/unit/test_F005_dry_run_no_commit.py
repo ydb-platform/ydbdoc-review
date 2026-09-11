@@ -53,6 +53,24 @@ def test_F005_noop_suppresses_comment_for_no_commit(monkeypatch):
     comment.assert_not_called()
 
 
+@pytest.mark.parametrize("flag", ["dry_run", "no_commit"])
+def test_F005_verify_red_does_not_change_existing_pr(flag):
+    gh = SimpleNamespace(convert_pull_to_draft=Mock())
+
+    workflow._convert_translation_pr_to_draft_if_allowed(
+        gh,
+        "owner",
+        "repo",
+        7,
+        translation_pr=True,
+        verify_requires_red=True,
+        dry_run=flag == "dry_run",
+        no_commit=flag == "no_commit",
+    )
+
+    gh.convert_pull_to_draft.assert_not_called()
+
+
 def test_F005_continue_no_commit_suppresses_ops_deny_comment(monkeypatch):
     cfg = SimpleNamespace(
         paths=SimpleNamespace(
