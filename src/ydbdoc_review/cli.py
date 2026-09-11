@@ -24,6 +24,7 @@ from ydbdoc_review.github.workflow import (
 )
 from ydbdoc_review.llm.client import create_llm_client
 from ydbdoc_review.llm.errors import LLMConfigError, LLMError
+from ydbdoc_review.ops.lifecycle import begin_ops_job, finish_ops_job
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.segmentation.extractor import extract_segments
@@ -311,14 +312,20 @@ def translate_file_cmd(
 ) -> None:
     """Translate one markdown file locally (no GitHub)."""
     cfg = load_config(yaml_path=config)
+    ops_ctx, gate, deny_body = begin_ops_job(
+        mode="translate",
+        repo="local",
+        source_pr=0,
+    )
+    if not gate.ok:
+        if deny_body:
+            console.print(deny_body)
+        raise typer.Exit(code=1)
+
+    client = None
     try:
         client = create_llm_client(cfg)
-    except (RuntimeError, LLMConfigError) as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(code=1) from exc
-
-    text = source.read_text(encoding="utf-8")
-    try:
+        text = source.read_text(encoding="utf-8")
         result = translate_file(
             text,
             client,
@@ -329,15 +336,29 @@ def translate_file_cmd(
             target_lang=target_lang,
             enable_critic=with_critic and not no_critic,
         )
-    except (LLMError, ValueError) as exc:
+        if output:
+            output.write_text(result.final_text, encoding="utf-8")
+            console.print(f"Wrote {output} (verdict={result.verdict})")
+        else:
+            sys.stdout.write(result.final_text)
+    except (OSError, RuntimeError, LLMConfigError, LLMError, ValueError) as exc:
+        usage = client.usage_tracker if client is not None else None
+        finish_ops_job(
+            ops_ctx,
+            status="failed",
+            cost_rub=usage.estimate_cost_rub() if usage is not None else 0.0,
+        )
         console.print(f"[red]Translation failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
-
-    if output:
-        output.write_text(result.final_text, encoding="utf-8")
-        console.print(f"Wrote {output} (verdict={result.verdict})")
     else:
-        sys.stdout.write(result.final_text)
+        usage = client.usage_tracker
+        finish_ops_job(
+            ops_ctx,
+            status="failed" if result.verdict == "blocked" else "ok",
+            cost_rub=usage.estimate_cost_rub(),
+            input_tokens=usage.total_input_tokens,
+            output_tokens=usage.total_output_tokens,
+        )
 
 
 @app.command()
