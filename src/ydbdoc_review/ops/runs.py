@@ -11,6 +11,8 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 SUCCESSFUL_PUBLICATION_STATUSES = ("ok", "published_red")
+ACTIVE_RUN_STATUSES = ("running",)
+IDEMPOTENT_RUN_STATUSES = ACTIVE_RUN_STATUSES + SUCCESSFUL_PUBLICATION_STATUSES
 
 
 @dataclass
@@ -50,6 +52,8 @@ class RunsLedger(Protocol):
     ) -> str | None: ...
 
     def upsert_run(self, record: RunRecord) -> None: ...
+
+    def claim_run(self, record: RunRecord) -> bool: ...
 
 
 class InMemoryRunsLedger:
@@ -100,8 +104,26 @@ class InMemoryRunsLedger:
         self.records = [r for r in self.records if r.run_id != record.run_id]
         self.records.append(record)
 
+    def claim_run(self, record: RunRecord) -> bool:
+        """Claim an idempotent run before any paid work or publication."""
+        existing = next(
+            (
+                current
+                for current in self.records
+                if current.run_id == record.run_id
+                and current.status in IDEMPOTENT_RUN_STATUSES
+            ),
+            None,
+        )
+        if existing is not None:
+            return False
+        self.upsert_run(record)
+        return True
 
-def new_run_id() -> str:
+
+def new_run_id(idempotency_key: str | None = None) -> str:
+    if idempotency_key:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency_key))
     return str(uuid.uuid4())
 
 
@@ -243,6 +265,23 @@ class YdbRunsLedger:
             session.transaction().execute(prep, params, commit_tx=True)  # type: ignore[attr-defined]
 
         self._pool.retry_operation_sync(_cal)
+
+    def claim_run(self, record: RunRecord) -> bool:
+        """Claim a deterministic run ID; finalization remains an upsert.
+
+        The run ID is derived from the event key, so a repeated event can only
+        replace the same ledger row and can never create a second expense row.
+        The read is deliberately scoped to the same source PR and run ID.
+        """
+        if self.latest_run_id(
+            record.source_pr,
+            statuses=IDEMPOTENT_RUN_STATUSES,
+            repo=record.repo,
+            run_id=record.run_id,
+        ) is not None:
+            return False
+        self.upsert_run(record)
+        return True
 
     def _fetch_by_source_pr(self, source_pr: int) -> list[dict]:
         query = """
