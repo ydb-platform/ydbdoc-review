@@ -2592,11 +2592,9 @@ def run_doc_translate(
         len(scope_plan.doc_from_main),
         len(scope_plan.nav_ru_paths),
     )
-    bilingual_skip = frozenset(bilingual_en_mirrors(changes, docs_root=docs_root))
     pairs = doc_pairs_from_plan(
         scope_plan,
         docs_root=docs_root,
-        skip_en_paths=bilingual_skip,
     )
     nav_pairs = merge_navigation_pair_lists(
         navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
@@ -2674,7 +2672,7 @@ def run_doc_translate(
         # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
         # ``skip_en_paths`` before analyze — still post «перевод не требуется»
         # (§6.76 / #48751). Without this early path the comment never appeared.
-        pr_result = _pr_result_for_bilingual_skips(bilingual_skip, docs_root=docs_root)
+        pr_result = _pr_result_for_bilingual_skips(frozenset(), docs_root=docs_root)
         _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
         job.pr_result = pr_result
         if pr_result.pair_results and not dry_run and not no_commit:

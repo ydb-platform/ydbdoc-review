@@ -79,7 +79,7 @@ def test_heuristic_pr_45949_deleted_ru_stale_en():
     assert plan.action == "delete_en"
 
 
-def test_heuristic_both_changed_skip_bilingual():
+def test_heuristic_both_changed_prefers_ru():
     plan = plan_pair_heuristic(
         _content(
             ru_text="RU",
@@ -87,8 +87,8 @@ def test_heuristic_both_changed_skip_bilingual():
             pair=_pair(ru_changed=True, en_changed=True),
         )
     )
-    assert plan.action == "skip"
-    assert "§6.76" in plan.summary
+    assert plan.action == "translate_to_en"
+    assert "RU has priority" in plan.summary
 
 
 def test_plan_from_analyze_critic_only():
@@ -105,7 +105,7 @@ def test_plan_from_analyze_critic_only():
     assert plan.action == "critic_only"
 
 
-def test_plan_pairs_skip_when_both_changed():
+def test_plan_pairs_translates_when_both_changed():
     content = _content(
         ru_text="RU body",
         en_text="EN body",
@@ -113,7 +113,7 @@ def test_plan_pairs_skip_when_both_changed():
     )
     plans = plan_pairs([content])
     assert len(plans) == 1
-    assert plans[0].action == "skip"
+    assert plans[0].action == "translate_to_en"
 
 
 def test_plan_pairs_rejects_analyze_llm():
@@ -155,8 +155,8 @@ def test_heuristic_both_changed_en_only_text():
             pair=_pair(ru_changed=True, en_changed=True),
         )
     )
-    assert plan.action == "skip"
-    assert "§6.76" in plan.summary
+    assert plan.action == "translate_to_en"
+    assert "RU has priority" in plan.summary
 
 
 def test_heuristic_skip_when_unchanged():

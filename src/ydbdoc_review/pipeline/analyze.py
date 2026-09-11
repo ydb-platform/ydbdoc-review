@@ -75,8 +75,8 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     pass (REQUIREMENTS §5 / §13 — no differential EN seed/splice).
 
     Source language: whichever side the PR authors edited. RU→EN when only RU
-    changed; EN→RU when only EN changed. When **both** sides changed in the
-    source PR, skip auto-translate (§6.76) — authors updated the bilingual pair.
+    changed; EN→RU when only EN changed. When **both** sides changed, RU still
+    remains the authoritative source and the complete EN mirror is regenerated.
     """
     pair = content.pair
     ru_ok = _non_trivial(content.ru_text)
@@ -96,12 +96,12 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     if pair.ru_changed and pair.en_changed:
         return PairPlan(
             pair=pair,
-            action="skip",
+            action="translate_to_en",
             source_path=pair.ru_path,
             target_path=pair.en_path,
             source_lang="ru",
             target_lang="en",
-            summary=BILINGUAL_SKIP_SUMMARY,
+            summary="RU and EN changed — RU has priority; full EN re-translate",
         )
 
     if not ru_ok and not en_ok:

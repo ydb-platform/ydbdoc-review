@@ -1605,67 +1605,26 @@ def test_run_doc_translate_nav_only_reaches_successful_post_apply_lifecycle(
     assert en_toc.read_text(encoding="utf-8") == merged_en
 
 
-def test_run_doc_translate_bilingual_skip_posts_source_comment(git_repo: str):
-    """§6.175 / #48751: bilingual noop must still comment «перевод не требуется»."""
-    from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+def test_run_doc_translate_bilingual_pair_is_not_an_early_skip() -> None:
+    """F-020: both changed locales select RU→EN before model execution."""
+    from ydbdoc_review.pipeline.analyze import PairContent, plan_pair_heuristic
+    from ydbdoc_review.pipeline.pairs import DocPair
 
-    checkout_sha = _head_sha(git_repo)
-    pull = {
-        "title": "Fix glossary links",
-        "head": {
-            "ref": "docs-glossary",
-            "sha": checkout_sha,
-            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
-        },
-        "base": {"ref": "main", "sha": checkout_sha},
-    }
-    ru = "ydb/docs/ru/core/concepts/glossary.md"
-    en = "ydb/docs/en/core/concepts/glossary.md"
-    changes = [(ru, "modified"), (en, "modified")]
-    scope = TranslationScopePlan(
-        doc_ru_paths=frozenset({ru}),
-        doc_from_diff=frozenset({ru}),
-        doc_from_main=frozenset(),
-        nav_ru_paths=frozenset(),
-        nav_from_diff=frozenset(),
-        nav_from_main=frozenset(),
+    plan = plan_pair_heuristic(
+        PairContent(
+            pair=DocPair(
+                ru_path="ydb/docs/ru/a.md",
+                en_path="ydb/docs/en/a.md",
+                ru_changed=True,
+                en_changed=True,
+            ),
+            ru_text="# RU\n",
+            en_text="# EN\n",
+        )
     )
-    with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
-        client = mock_gh.return_value
-        client.get_pull.return_value = pull
-        client.post_issue_comment.return_value = "https://github.com/o/r/pull/48751#issuecomment-1"
-        with patch(
-            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
-            return_value=changes,
-        ):
-            with patch(
-                "ydbdoc_review.github.workflow.list_pr_file_changes_api",
-                return_value=changes,
-            ):
-                with patch(
-                    "ydbdoc_review.github.workflow.plan_translation_scope",
-                    return_value=scope,
-                ):
-                    with patch(
-                        "ydbdoc_review.github.workflow.ensure_commit",
-                        return_value=False,
-                    ):
-                        result = run_doc_translate(
-                            repo_path=git_repo,
-                            github_repo="o/r",
-                            pr_number=48751,
-                            merge_base_with="HEAD",
-                            dry_run=False,
-                            config=load_config(env=_env()),
-                        )
-    assert result.translation_pr_number is None
-    assert len(result.pr_result.pair_results) == 1
-    assert result.pr_result.pair_results[0].skipped
-    assert result.source_comment_url
-    posted = client.post_issue_comment.call_args[0][3]
-    assert "перевод не требуется" in posted
-    assert "§6.76" in posted
-    assert "bilingual" in posted.lower()
+    assert plan.action == "translate_to_en"
+    assert plan.source_path.endswith("/ru/a.md")
+    assert "bilingual" not in plan.summary.lower()
 
 
 def test_run_doc_translate_posts_comments(git_repo: str):
