@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from ydbdoc_review.cli import app
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.workflow import DocJobResult
+from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import (
@@ -166,7 +167,14 @@ def test_cli_verify_dry_run(mock_verify, git_repo: Path):
 @patch("ydbdoc_review.cli.translate_file")
 @patch("ydbdoc_review.cli.create_llm_client")
 @patch("ydbdoc_review.cli.load_config")
+@patch(
+    "ydbdoc_review.cli.begin_ops_job",
+    return_value=(object(), GateResult(ok=True), None),
+)
+@patch("ydbdoc_review.cli.finish_ops_job")
 def test_cli_translate_file_stdout(
+    mock_finish_ops,
+    mock_begin_ops,
     mock_load_config,
     mock_create_client,
     mock_translate_file,
@@ -195,7 +203,14 @@ def test_cli_translate_file_stdout(
 @patch("ydbdoc_review.cli.translate_file")
 @patch("ydbdoc_review.cli.create_llm_client")
 @patch("ydbdoc_review.cli.load_config")
+@patch(
+    "ydbdoc_review.cli.begin_ops_job",
+    return_value=(object(), GateResult(ok=True), None),
+)
+@patch("ydbdoc_review.cli.finish_ops_job")
 def test_cli_translate_file_writes_output(
+    mock_finish_ops,
+    mock_begin_ops,
     mock_load_config,
     mock_create_client,
     mock_translate_file,
@@ -226,7 +241,14 @@ def test_cli_translate_file_writes_output(
 
 
 @patch("ydbdoc_review.cli.load_config")
-def test_cli_translate_file_missing_credentials(mock_load_config):
+@patch(
+    "ydbdoc_review.cli.begin_ops_job",
+    return_value=(object(), GateResult(ok=True), None),
+)
+@patch("ydbdoc_review.cli.finish_ops_job")
+def test_cli_translate_file_missing_credentials(
+    mock_finish_ops, mock_begin_ops, mock_load_config
+):
     cfg = load_config(env={})
     mock_load_config.return_value = cfg
     with patch("ydbdoc_review.cli.create_llm_client") as mock_create:
