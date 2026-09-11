@@ -138,7 +138,13 @@ class JobAnchorDictionary:
     def __contains__(self, ru_anchor: object) -> bool:
         return isinstance(ru_anchor, str) and ru_anchor in self._ru_to_en
 
-    def lookup_or_insert(self, ru_anchor: str, english_heading: str = "") -> str:
+    def lookup_or_insert(
+        self,
+        ru_anchor: str,
+        english_heading: str = "",
+        *,
+        preferred_anchor: str | None = None,
+    ) -> str:
         """Return the EN id for ``ru_anchor``, minting once for Cyrillic keys."""
         if not ru_anchor:
             return ru_anchor
@@ -147,7 +153,8 @@ class JobAnchorDictionary:
         existing = self._ru_to_en.get(ru_anchor)
         if existing is not None:
             return existing
-        minted = english_yfm_anchor(ru_anchor, english_heading) or ""
+        minted = preferred_anchor if is_ascii_yfm_anchor(preferred_anchor) else None
+        minted = minted or english_yfm_anchor(ru_anchor, english_heading) or ""
         if not is_ascii_yfm_anchor(minted):
             minted = _legacy_transliterated_slug(ru_anchor) or "anchor"
         owned = set(self._ru_to_en.values())
@@ -179,7 +186,16 @@ def apply_job_anchors_to_document(
         if not ru_anchor:
             continue
         en_text = _heading_plain_text(tgt_h)
-        tgt_h.anchor = dictionary.lookup_or_insert(ru_anchor, en_text)
+        preferred_anchor = (
+            tgt_h.anchor
+            if tgt_h.anchor and is_ascii_yfm_anchor(tgt_h.anchor) and not is_ascii_yfm_anchor(ru_anchor)
+            else None
+        )
+        tgt_h.anchor = dictionary.lookup_or_insert(
+            ru_anchor,
+            en_text,
+            preferred_anchor=preferred_anchor,
+        )
 
 
 def _heading_plain_text(heading: Heading) -> str:
