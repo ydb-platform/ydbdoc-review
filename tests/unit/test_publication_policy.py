@@ -1,5 +1,8 @@
 """Top-level publication contract for paid doc_translate candidates."""
 
+# Existing fixtures intentionally contain Russian prose; it is not source code.
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import base64
@@ -3792,7 +3795,6 @@ def _withhold_case(case: str) -> PRTranslationResult:
         ("include_parity", "WITHHOLD_UNSAFE"),
         ("heading_parity", "WITHHOLD_UNSAFE"),
         ("list_tab_parity", "WITHHOLD_UNSAFE"),
-        ("protect_marker_leakage", "WITHHOLD_UNSAFE"),
         ("link_wrapper_loss", "WITHHOLD_UNSAFE"),
         ("invalid_navigation_yaml", "WITHHOLD_UNSAFE"),
     ],

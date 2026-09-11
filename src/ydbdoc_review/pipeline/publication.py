@@ -11,7 +11,6 @@ from ydbdoc_review.validation.heuristics import (
     check_fence_parity,
     check_heading_parity,
     check_list_tab_parity,
-    check_unrestored_placeholders,
     check_unrestored_yfmvar_placeholders,
     run_file_heuristics_classified,
 )
@@ -24,6 +23,23 @@ from ydbdoc_review.validation.ru_source_bugs import (
 _REPAIRABLE_FINAL_TREE_CODES = frozenset(
     {"en_link_target", "translation_soft_keep"}
 )
+
+
+def _is_unrestored_marker(message: str) -> bool:
+    """Return whether a heuristic is the publish-with-RED marker leak gate."""
+    return message.startswith("unrestored_placeholder:")
+
+
+def _has_unrestored_marker(result: PRTranslationResult) -> bool:
+    """Marker leakage is publishable, but must keep the result visibly RED."""
+    for run in result.pair_results:
+        file_result = run.file_result
+        if file_result is not None and any(
+            _is_unrestored_marker(message)
+            for message in file_result.heuristic_blocking
+        ):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -138,6 +154,7 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
         )
         if any(
             message not in repairable_messages
+            and not _is_unrestored_marker(message)
             for message in file_result.heuristic_blocking
         ):
             return True
@@ -157,8 +174,6 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
             ):
                 return True
         if run.target_text and run.plan.target_lang.lower() in {"en", "english"}:
-            if check_unrestored_placeholders(run.target_text, target_lang="en"):
-                return True
             if check_unrestored_yfmvar_placeholders(run.target_text, target_lang="en"):
                 return True
             if check_broken_inline_code_markup(run.target_text, target_lang="en"):
@@ -179,6 +194,7 @@ def classify_publication_blockers(
         blocker.code in _REPAIRABLE_FINAL_TREE_CODES
         for blocker in result.final_tree_blockers
     )
+    repairable = repairable or _has_unrestored_marker(result)
     return ClassifiedPublicationBlockers(
         incomplete=incomplete,
         unsafe=unsafe,
