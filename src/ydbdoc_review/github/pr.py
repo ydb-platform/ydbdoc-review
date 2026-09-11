@@ -206,6 +206,12 @@ def list_pr_file_changes_api(
         if not filename:
             continue
         status = str(item.get("status") or "modified")
+        if status == "renamed":
+            previous = str(item.get("previous_filename") or "").replace("\\", "/")
+            if previous and previous != filename:
+                out.append((previous, "deleted"))
+            out.append((filename, "modified"))
+            continue
         kind = _STATUS_TO_KIND.get(status, "modified")
         out.append((filename, kind))
     return out
