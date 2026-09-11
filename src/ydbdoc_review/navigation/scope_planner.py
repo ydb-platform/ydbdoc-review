@@ -66,6 +66,8 @@ class TranslationScopePlan:
     nav_from_diff: frozenset[str]
     nav_from_main: frozenset[str]
     doc_deleted: frozenset[str] = frozenset()
+    doc_en_changed: frozenset[str] = frozenset()
+    doc_en_deleted: frozenset[str] = frozenset()
     dependency_budget: MarkdownDependencyBudget = field(
         default_factory=MarkdownDependencyBudget,
         compare=False,
@@ -466,6 +468,8 @@ def plan_translation_scope(
     root = docs_root.strip("/")
     diff_ru_md: set[str] = set()
     deleted_ru_md: set[str] = set()
+    diff_en_md: set[str] = set()
+    deleted_en_md: set[str] = set()
     diff_ru_nav: set[str] = set()
 
     for raw_path, kind in changes:
@@ -475,6 +479,10 @@ def plan_translation_scope(
                 deleted_ru_md.add(path)
             else:
                 diff_ru_md.add(path)
+        elif path.startswith(f"{root}/en/") and is_docs_markdown(path, docs_root):
+            diff_en_md.add(path)
+            if kind == "deleted":
+                deleted_en_md.add(path)
         elif kind == "deleted":
             continue
         elif path.startswith(f"{root}/ru/") and is_navigation_yaml(path):
@@ -489,6 +497,11 @@ def plan_translation_scope(
     # Deleted RU pages are translation actions too: their existing EN mirrors
     # must enter the pair pipeline as ``delete_en`` (#50904).
     doc_ru: set[str] = set(source_roots)
+    doc_ru.update(
+        counterpart(path, docs_root)
+        for path in diff_en_md
+        if counterpart(path, docs_root) is not None
+    )
 
     tip_tombstone_ru = redirect_source_repo_md_paths(
         redirects_yaml,
@@ -728,8 +741,16 @@ def plan_translation_scope(
         }
 
     nav_from_diff = nav_ru & diff_ru_nav
-    doc_from_diff = frozenset(diff_ru_md | deleted_ru_md)
-    doc_from_main = frozenset(doc_ru - diff_ru_md - deleted_ru_md)
+    doc_from_diff = frozenset(
+        diff_ru_md
+        | deleted_ru_md
+        | {
+            counterpart(path, docs_root)
+            for path in diff_en_md
+            if counterpart(path, docs_root) is not None
+        }
+    )
+    doc_from_main = frozenset(doc_ru - doc_from_diff)
     nav_from_main = frozenset(nav_ru - nav_from_diff)
 
     return TranslationScopePlan(
@@ -737,6 +758,8 @@ def plan_translation_scope(
         doc_from_diff=doc_from_diff,
         doc_from_main=doc_from_main,
         doc_deleted=frozenset(deleted_ru_md),
+        doc_en_changed=frozenset(diff_en_md),
+        doc_en_deleted=frozenset(deleted_en_md),
         nav_ru_paths=frozenset(nav_ru),
         nav_from_diff=frozenset(nav_from_diff),
         nav_from_main=nav_from_main,
@@ -811,9 +834,13 @@ def doc_pairs_from_plan(
     *,
     docs_root: str = "ydb/docs",
     skip_en_paths: frozenset[str] | None = None,
+    changes: list[tuple[str, ChangeKind]] | None = None,
 ) -> list[DocPair]:
     """``DocPair`` list for all markdown paths in the scope plan."""
     skip = skip_en_paths or frozenset()
+    changed = {
+        _norm(path): kind for path, kind in (changes or [])
+    }
     pairs: list[DocPair] = []
     for ru_path in sorted(plan.doc_ru_paths):
         en_path = counterpart(ru_path, docs_root)
@@ -823,8 +850,14 @@ def doc_pairs_from_plan(
             DocPair(
                 ru_path=ru_path,
                 en_path=en_path,
-                ru_changed=True,
+                ru_changed=(
+                    ru_path in changed
+                    if changes is not None
+                    else True
+                ),
+                en_changed=en_path in changed,
                 ru_deleted=ru_path in plan.doc_deleted,
+                en_deleted=changed.get(en_path) == "deleted",
             )
         )
     return pairs

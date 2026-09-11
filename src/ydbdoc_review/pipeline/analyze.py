@@ -21,6 +21,7 @@ PairAction = Literal[
     "critic_only",
     "skip",
     "delete_en",
+    "delete_ru",
 ]
 
 BILINGUAL_SKIP_MARKER = "§6.76"
@@ -90,7 +91,18 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             target_path=pair.en_path,
             source_lang="ru",
             target_lang="en",
-            summary="RU file deleted in PR — remove EN mirror",
+            summary="RU file deleted in PR — remove EN mirror and keep redirect",
+        )
+
+    if pair.en_deleted and not pair.ru_changed:
+        return PairPlan(
+            pair=pair,
+            action="delete_ru",
+            source_path=pair.en_path,
+            target_path=pair.ru_path,
+            source_lang="en",
+            target_lang="ru",
+            summary="EN file deleted in PR — remove RU mirror and keep redirect",
         )
 
     if pair.ru_changed and pair.en_changed:

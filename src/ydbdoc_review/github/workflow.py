@@ -2595,6 +2595,7 @@ def run_doc_translate(
     pairs = doc_pairs_from_plan(
         scope_plan,
         docs_root=docs_root,
+        changes=changes,
     )
     nav_pairs = merge_navigation_pair_lists(
         navigation_pairs_from_plan(scope_plan, docs_root=docs_root),

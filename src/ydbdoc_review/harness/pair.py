@@ -131,7 +131,7 @@ def run_pair_plan(
     if plan.action == "skip":
         return PairRunResult(plan=plan, skipped=True)
 
-    if plan.action == "delete_en":
+    if plan.action in {"delete_en", "delete_ru"}:
         return PairRunResult(plan=plan, deleted=True, target_text=None)
 
     source_text = _read_source_text(content, plan)
