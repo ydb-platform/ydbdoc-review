@@ -65,11 +65,25 @@ def acl_deny_comment(actor: str) -> str:
     )
 
 
-def quota_deny_comment(*, spent_rub: float, budget_rub: float) -> str:
+def quota_deny_comment(
+    *,
+    spent_rub: float,
+    budget_rub: float,
+    run_day: str | None = None,
+    mode: str = "translate",
+) -> str:
+    """Explain a quota denial and name the manual retry command."""
+    command = {
+        "translate": "doc_translate",
+        "verify": "doc_verify",
+        "continue": "doc_continue",
+    }.get(mode, f"doc_{mode}")
+    day = run_day or "текущий московский день"
     return (
         "⛔ **ydbdoc-review:** дневная квота исчерпана "
-        f"(~₽{spent_rub:.2f} из ₽{budget_rub:.2f} за сегодня, MSK).\n\n"
-        "Повторите завтра или попросите поднять `YDBDOC_DAILY_BUDGET_RUB`."
+        f"(~₽{spent_rub:.2f} из ₽{budget_rub:.2f}, дата MSK: `{day}`).\n\n"
+        f"Автоматический повтор не выполняется. Повторите вручную команду "
+        f"`{command}` после восстановления доступного бюджета."
     )
 
 

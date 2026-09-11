@@ -50,7 +50,15 @@ def test_quota_gate():
     denied = check_daily_quota(spent_rub=5000, budget_rub=5000)
     assert not denied.ok
     assert denied.status == "denied_quota"
-    assert "5000" in quota_deny_comment(spent_rub=5000, budget_rub=5000)
+    comment = quota_deny_comment(
+        spent_rub=5000,
+        budget_rub=5000,
+        run_day="2026-09-11",
+        mode="verify",
+    )
+    assert "5000" in comment
+    assert "2026-09-11" in comment
+    assert "doc_verify" in comment
 
 
 def test_retention_and_expired_messages():
