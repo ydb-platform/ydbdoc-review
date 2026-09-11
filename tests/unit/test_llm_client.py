@@ -196,7 +196,7 @@ def test_chat_exhausted_raises():
     llm = _llm_config(
         models=ModelsConfig(
             analyze=ModelChoice(primary="a", fallbacks=[]),
-            translate=ModelChoice(primary="bad", fallbacks=[]),
+                translate=ModelChoice(primary="bad", fallbacks=["fallback"]),
             critic=ModelChoice(primary="c", fallbacks=[]),
         ),
         retries=RetriesConfig(max_attempts=1, backoff_initial_s=0.0, backoff_factor=1.0),

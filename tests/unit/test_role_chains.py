@@ -17,13 +17,12 @@ def test_disjoint_keeps_distinct_primaries_and_non_overlapping_fallbacks():
     assert critic == ["yandexgpt-5.1", "yandexgpt-5-lite"]
 
 
-def test_disjoint_strips_shared_fallbacks():
-    translate, critic = ensure_disjoint_translate_critic_chains(
-        ["deepseek-v4-flash", "gpt-oss-120b"],
-        ["gpt-oss-120b", "deepseek-v4-flash"],
-    )
-    assert translate == ["deepseek-v4-flash"]
-    assert critic == ["gpt-oss-120b"]
+def test_disjoint_rejects_shared_models():
+    with pytest.raises(LLMConfigError, match="overlap"):
+        ensure_disjoint_translate_critic_chains(
+            ["deepseek-v4-flash", "gpt-oss-120b"],
+            ["gpt-oss-120b", "deepseek-v4-flash"],
+        )
 
 
 def test_disjoint_rejects_same_primary():
@@ -34,14 +33,6 @@ def test_disjoint_rejects_same_primary():
         )
 
 
-def test_disjoint_rejects_empty_after_strip():
-    # Critic primary is only model and also appears in translate → impossible
-    # after primary-equality check; use critic whose only remaining model is
-    # stripped via being translate primary in fallbacks... 
-    # translate [A,B], critic [B] → both keep primaries A and B.
-    translate, critic = ensure_disjoint_translate_critic_chains(
-        ["A", "B"],
-        ["B"],
-    )
-    assert translate == ["A"]
-    assert critic == ["B"]
+def test_disjoint_rejects_shared_critic_primary():
+    with pytest.raises(LLMConfigError, match="overlap"):
+        ensure_disjoint_translate_critic_chains(["A", "B"], ["B"])

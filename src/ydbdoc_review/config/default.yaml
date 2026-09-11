@@ -47,7 +47,8 @@ llm:
   eliza:
     translate:
       primary: deepseek-v4-flash
-      fallbacks: []
+      fallbacks:
+        - deepseek-v4-flash-fallback
     critic:
       primary: gpt-oss-120b
       fallbacks: []

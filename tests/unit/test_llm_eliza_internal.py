@@ -469,18 +469,21 @@ def test_eliza_translate_chain_uses_yaml_eliza_defaults(monkeypatch):
     monkeypatch.delenv("YDBDOC_MODEL_CHECK", raising=False)
     monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     client = _client()
-    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
+    assert client.model_chain_for_role("translate") == [
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-fallback",
+    ]
     assert client.model_chain_for_role("critic") == ["gpt-oss-120b"]
 
 
-def test_eliza_strips_overlapping_translate_fallback_into_critic(monkeypatch):
+def test_eliza_rejects_overlapping_translate_fallback_into_critic(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
     monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "gpt-oss-120b")
     monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
     monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
     client = _client()
-    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
-    assert client.model_chain_for_role("critic") == ["gpt-oss-120b"]
+    with pytest.raises(LLMConfigError, match="overlap"):
+        client.model_chain_for_role("translate")
 
 
 def test_eliza_internal_503_retries_until_exhausted():
@@ -715,7 +718,10 @@ def test_eliza_public_surface_translate_critic_usage():
     client = _client()
 
     assert client.model_uri("deepseek-v4-flash") == "deepseek-v4-flash"
-    assert client.model_chain_for_role("translate") == ["deepseek-v4-flash"]
+    assert client.model_chain_for_role("translate") == [
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-fallback",
+    ]
     assert client.model_chain_for_role("critic") == ["gpt-oss-120b"]
     assert client.usage_tracker.records == []
 
