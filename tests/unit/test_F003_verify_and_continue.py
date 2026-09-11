@@ -108,14 +108,23 @@ def test_F003_explicit_continue_instruction_skips_comment_lookup() -> None:
     gh.iter_issue_comments.assert_not_called()
 
 
-def test_F003_cli_verify_dispatches_verification() -> None:
+def test_F003_cli_verify_dispatches_verification(tmp_path: Path) -> None:
     with patch(
         "ydbdoc_review.cli.run_doc_verify",
         return_value=_job("doc_verify"),
     ) as verify:
         result = runner.invoke(
             app,
-            ["verify", "--repo", "o/r", "--pr", "42", "--dry-run"],
+            [
+                "verify",
+                "--repo",
+                "o/r",
+                "--pr",
+                "42",
+                "--repo-path",
+                str(tmp_path),
+                "--dry-run",
+            ],
         )
 
     assert result.exit_code == 0, result.stdout
