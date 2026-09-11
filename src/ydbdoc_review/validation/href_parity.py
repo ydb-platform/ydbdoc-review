@@ -1178,6 +1178,19 @@ def collect_internal_hrefs(text: str) -> list[str]:
     return found
 
 
+def _normalize_internal_href(href: str) -> str:
+    """Canonicalize an internal URL without changing its query or fragment."""
+    decoded = unquote(href.strip())
+    before_fragment, fragment_marker, fragment = decoded.partition("#")
+    path, query_marker, query = before_fragment.partition("?")
+    if path:
+        path = posixpath.normpath(path)
+        if path == ".":
+            path = ""
+    normalized = path + (query_marker + query if query_marker else "")
+    return normalized + (fragment_marker + fragment if fragment_marker else "")
+
+
 def _localized_en_fragment_pairs_ru_remap(
     source_fragment: str,
     target_fragment: str,
@@ -1387,8 +1400,10 @@ def check_href_parity(
 
     # Markdown renderers may percent-encode Unicode fragments. URL decoding is
     # semantics-preserving and avoids false mismatches such as #50854.
-    src_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
-    tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
+    src_raw_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
+    tgt_raw_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
+    src_ordered = [_normalize_internal_href(href) for href in src_raw_ordered]
+    tgt_ordered = [_normalize_internal_href(href) for href in tgt_raw_ordered]
     src = Counter(src_ordered)
     tgt = Counter(tgt_ordered)
     if ignore_basenames:
@@ -1417,8 +1432,8 @@ def check_href_parity(
 
     exact_ascii_issues = (
         _exact_ascii_fragment_issues(
-            src_ordered,
-            tgt_ordered,
+            src_raw_ordered,
+            tgt_raw_ordered,
             en_page_path=en_page_path,
             docs_text_reader=docs_text_reader,
         )
@@ -1448,7 +1463,8 @@ def check_href_parity(
         if canonical_source != source_text:
             source_text = canonical_source
             src_ordered = [
-                unquote(href) for href in collect_internal_hrefs(source_text)
+                _normalize_internal_href(href)
+                for href in collect_internal_hrefs(source_text)
             ]
             src = Counter(src_ordered)
             if ignore_basenames:
@@ -1468,7 +1484,8 @@ def check_href_parity(
     # fragment parity above is never grandfathered.
     if en_baseline_text is not None and source_baseline_text is None:
         tip_hrefs = Counter(
-            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
+            _normalize_internal_href(href)
+            for href in collect_internal_hrefs(en_baseline_text)
         )
         if tgt == tip_hrefs:
             return []
@@ -1529,8 +1546,14 @@ def check_href_parity(
     # newly added RU href is not grandfathered because it is absent from the
     # source baseline (#45949/#50904).
     if source_baseline_text is not None and en_baseline_text is not None:
-        src_base = Counter(unquote(href) for href in collect_internal_hrefs(source_baseline_text))
-        en_base = Counter(unquote(href) for href in collect_internal_hrefs(en_baseline_text))
+        src_base = Counter(
+            _normalize_internal_href(href)
+            for href in collect_internal_hrefs(source_baseline_text)
+        )
+        en_base = Counter(
+            _normalize_internal_href(href)
+            for href in collect_internal_hrefs(en_baseline_text)
+        )
         old_missing = src_base - en_base
         old_extra = en_base - src_base
         current_missing = Counter(missing)
@@ -1571,7 +1594,8 @@ def check_href_parity(
         used_extra: set[int] = set()
         kept_missing: list[str] = []
         baseline_ordered = [
-            unquote(href) for href in collect_internal_hrefs(en_baseline_text or "")
+            _normalize_internal_href(href)
+            for href in collect_internal_hrefs(en_baseline_text or "")
         ]
         occurrence_seen: Counter[str] = Counter()
         for source_href in missing:
@@ -1685,7 +1709,10 @@ def check_href_parity(
         extra = kept_extra
     # After pairing missings, drop leftover tip-ambient EN extras (§6.228).
     if extra and en_baseline_text is not None and source_baseline_text is None:
-        en_base = Counter(unquote(href) for href in collect_internal_hrefs(en_baseline_text))
+        en_base = Counter(
+            _normalize_internal_href(href)
+            for href in collect_internal_hrefs(en_baseline_text)
+        )
         extra = sorted((Counter(extra) - en_base).elements())
     if not missing and not extra:
         return []
