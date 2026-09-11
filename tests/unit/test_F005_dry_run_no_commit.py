@@ -186,3 +186,38 @@ def test_F005_verify_noop_keeps_ops_accounting_and_reports_no_published_pr(
     finished.assert_called_once_with(ops_ctx, status="ok", cost_rub=0.0)
     comment.assert_not_called()
     assert "Published PR: none" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("dry_run", "no_commit"),
+    [(True, False), (False, True)],
+)
+def test_F005_closed_pr_early_return_keeps_ops_accounting(
+    monkeypatch, dry_run, no_commit
+):
+    cfg = SimpleNamespace()
+    ops_ctx = SimpleNamespace(continue_feedback=None)
+    finished = Mock()
+    ctx = SimpleNamespace(state="closed", merged=False)
+
+    monkeypatch.setattr(workflow, "_github_tokens", lambda _cfg: ("api", "push"))
+    monkeypatch.setattr(workflow, "parse_repo", lambda _repo: ("owner", "repo"))
+    monkeypatch.setattr(workflow, "GitHubClient", lambda _token: object())
+    monkeypatch.setattr(workflow, "begin_ops_job", lambda **_kwargs: (
+        ops_ctx, SimpleNamespace(ok=True), None
+    ))
+    monkeypatch.setattr(workflow, "resolve_commit_ref", lambda *_args: "sha")
+    monkeypatch.setattr(workflow, "pull_request_context", lambda *_args: ctx)
+    monkeypatch.setattr(workflow, "finish_ops_job", finished)
+
+    result = workflow.run_doc_translate(
+        repo_path="/tmp/repo",
+        github_repo="owner/repo",
+        pr_number=7,
+        dry_run=dry_run,
+        no_commit=no_commit,
+        config=cfg,
+    )
+
+    assert result.blocked is True
+    finished.assert_called_once_with(ops_ctx, status="failed", cost_rub=0.0)

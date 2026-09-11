@@ -2421,7 +2421,7 @@ def run_doc_translate(
             or not continuability.allows_continue()
             or continuability.source_pr != pr_number
         ):
-            if ops_ctx is not None and not dry_run:
+            if ops_ctx is not None:
                 finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
             return DocJobResult(
                 mode="doc_continue",
@@ -2445,7 +2445,7 @@ def run_doc_translate(
 
     ctx = pull_request_context(gh, owner, repo, pr_number)
     if ctx.state != "open" and not ctx.merged:
-        if ops_ctx is not None and not dry_run:
+        if ops_ctx is not None:
             finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
         if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
             _safe_post_issue_comment(
