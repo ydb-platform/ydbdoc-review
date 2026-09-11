@@ -166,6 +166,19 @@ def _accounting_unavailable_comment(source_pr: int, detail: str) -> str:
     )
 
 
+def _duplicate_event_result() -> tuple[None, GateResult, None]:
+    """Suppress a repeated event without posting a duplicate GitHub comment."""
+    return (
+        None,
+        GateResult(
+            ok=False,
+            reason="event already claimed",
+            status="duplicate_event",
+        ),
+        None,
+    )
+
+
 def begin_ops_job(
     *,
     mode: str,
@@ -174,6 +187,7 @@ def begin_ops_job(
     translation_pr: int | None = None,
     parent_run_id: str | None = None,
     continue_feedback: str | None = None,
+    idempotency_key: str | None = None,
     env: dict[str, str] | None = None,
     ledger: RunsLedger | None = None,
     store: TranscriptStore | None = None,
@@ -188,9 +202,14 @@ def begin_ops_job(
     budget = float(env_map.get("YDBDOC_DAILY_BUDGET_RUB") or "5000")
     allowed = parse_allowed_actors(env_map.get("YDBDOC_ALLOWED_ACTORS"))
     run_day = msk_today()
-    run_id = new_run_id()
+    event_key = idempotency_key or env_map.get("GITHUB_EVENT_ID") or env_map.get("GITHUB_SHA")
+    scoped_event_key = (
+        f"{repo}:{source_pr}:{mode}:{event_key}" if event_key else None
+    )
+    run_id = new_run_id(scoped_event_key)
 
     if not _ops_enabled(env_map):
+        ledger_impl = ledger or InMemoryRunsLedger()
         ctx = OpsContext(
             actor=actor,
             run_id=run_id,
@@ -199,13 +218,31 @@ def begin_ops_job(
             repo=repo,
             source_pr=source_pr,
             translation_pr=translation_pr,
-            ledger=ledger or InMemoryRunsLedger(),
+            ledger=ledger_impl,
             store=store or NullTranscriptStore(),
             recorder=LlmTranscriptRecorder(),
             budget_rub=budget,
             parent_run_id=parent_run_id,
             continue_feedback=continue_feedback,
         )
+        if scoped_event_key:
+            record = RunRecord(
+                run_day=run_day,
+                run_id=run_id,
+                actor=actor,
+                mode=mode,
+                repo=repo,
+                source_pr=source_pr,
+                translation_pr=translation_pr,
+                status="running",
+                parent_run_id=parent_run_id,
+            )
+            claim = getattr(ledger_impl, "claim_run", None)
+            if claim is not None:
+                if not claim(record):
+                    return _duplicate_event_result()
+            else:
+                ledger_impl.upsert_run(record)
         return ctx, GateResult(ok=True), None
 
     acl = check_acl(actor, allowed)
@@ -374,6 +411,25 @@ def begin_ops_job(
         continue_index=continue_index,
         continue_feedback=continue_feedback,
     )
+    if scoped_event_key:
+        record = RunRecord(
+            run_day=run_day,
+            run_id=run_id,
+            actor=actor,
+            mode=mode,
+            repo=repo,
+            source_pr=source_pr,
+            translation_pr=translation_pr,
+            status="running",
+            parent_run_id=parent_run_id,
+            continue_index=continue_index,
+        )
+        claim = getattr(ledger_impl, "claim_run", None)
+        if claim is not None:
+            if not claim(record):
+                return _duplicate_event_result()
+        else:
+            ledger_impl.upsert_run(record)
     return ctx, GateResult(ok=True), None
 
 
