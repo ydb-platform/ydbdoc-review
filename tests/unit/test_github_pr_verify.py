@@ -7,13 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from ydbdoc_review.github.pr import (
+    PullRequestContext,
     load_verify_navigation_ru_texts,
     load_verify_pair_contents,
     pick_verify_ru_text,
     source_pr_content_ref,
     source_pr_content_ref_from_pull,
     translate_ru_content_ref,
-    PullRequestContext,
 )
 from ydbdoc_review.pipeline.pairs import DocPair, NavigationPair
 from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
@@ -37,8 +37,8 @@ def test_source_pr_content_ref_fork_head():
     assert ref == "abc123"
 
 
-def test_source_pr_content_ref_merged_keeps_head():
-    """§6.109: primary ref is PR head (doc_translate checkout), not merge commit."""
+def test_source_pr_content_ref_merged_uses_landed_result():
+    """Merged verification reads the landed tree, not the author branch head."""
     gh = MagicMock()
     gh.get_pull.return_value = {
         "merged": True,
@@ -49,9 +49,9 @@ def test_source_pr_content_ref_merged_keeps_head():
         },
     }
     owner, repo, ref = source_pr_content_ref(gh, "ydb-platform", "ydb", 44457)
-    assert owner == "contributor"
+    assert owner == "ydb-platform"
     assert repo == "ydb"
-    assert ref == "pr-head"
+    assert ref == "merge999"
 
 
 def test_translate_ru_content_ref_merged_uses_merge_commit():
@@ -89,8 +89,9 @@ def test_translate_ru_content_ref_open_pr_uses_checkout():
     assert translate_ru_content_ref(ctx) is None
 
 
-def test_source_pr_content_ref_from_pull_merged_without_merge_sha_falls_back_to_head():
-    owner, repo, ref = source_pr_content_ref_from_pull(
+def test_source_pr_content_ref_from_pull_merged_without_merge_sha_is_invalid():
+    with pytest.raises(ValueError, match="no merge commit sha"):
+        source_pr_content_ref_from_pull(
         {
             "merged": True,
             "merge_commit_sha": "",
@@ -99,11 +100,10 @@ def test_source_pr_content_ref_from_pull_merged_without_merge_sha_falls_back_to_
                 "repo": {"owner": {"login": "o"}, "name": "r"},
             },
         },
-        "o",
-        "r",
-        1,
-    )
-    assert ref == "head-only"
+            "o",
+            "r",
+            1,
+        )
 
 
 def test_load_verify_pair_contents_ru_from_api(tmp_path):
@@ -186,8 +186,8 @@ def test_load_verify_pair_contents_binds_en_to_immutable_target_ref(tmp_path, mo
     assert contents[0].en_text == "current EN with #sid\n"
 
 
-def test_load_verify_pair_contents_merged_prefers_head_when_segments_match(tmp_path):
-    """Regression #46674: merge commit grew vs translate-from-head EN."""
+def test_load_verify_pair_contents_merged_uses_landed_result(tmp_path):
+    """Merged verification must not fall back to the stale author head."""
     repo = tmp_path / "repo"
     en_dir = repo / "ydb" / "docs" / "en"
     en_dir.mkdir(parents=True)
@@ -231,8 +231,8 @@ def test_load_verify_pair_contents_merged_prefers_head_when_segments_match(tmp_p
         repo="r",
         source_pr=44457,
     )
-    assert contents[0].ru_text == ru_head
-    assert gh.get_file_text.call_count == 2
+    assert contents[0].ru_text == ru_merge
+    assert gh.get_file_text.call_count == 1
 
 
 def test_pick_verify_ru_text_prefers_head_over_longer_merge():
