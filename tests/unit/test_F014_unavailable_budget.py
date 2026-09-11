@@ -17,6 +17,7 @@ class LateWriteFailureLedger(InMemoryRunsLedger):
 
 
 def test_F014_read_failure() -> None:
+    paid_calls: list[str] = []
     ctx, gate, comment = begin_ops_job(
         mode="translate",
         repo="ydb-platform/ydb",
@@ -29,6 +30,10 @@ def test_F014_read_failure() -> None:
     assert gate.status == "denied_accounting"
     assert "учёт дневного бюджета недоступен" in (comment or "")
     assert "исчерпан" not in (comment or "")
+
+    if ctx is not None:
+        paid_calls.append("llm")
+    assert paid_calls == []
 
 
 def test_F014_late_write_failure() -> None:
