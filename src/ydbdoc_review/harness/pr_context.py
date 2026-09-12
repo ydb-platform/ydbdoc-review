@@ -1,0 +1,57 @@
+"""Runtime dependencies for PR-level harness."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ydbdoc_review.config.loader import Config, load_config
+from ydbdoc_review.harness.context import DocsTextReader
+from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.translation_checkpoint import CheckpointWriter
+from ydbdoc_review.translation.glossary import Glossary, load_glossary
+from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
+
+
+@dataclass
+class PRHarnessContext:
+    client: YandexLLMClient
+    glossary: Glossary
+    config: Config
+    use_analyze_llm: bool = False
+    en_toc_reachable: frozenset[str] | None = None
+    redirect_source_en_paths: frozenset[str] | None = None
+    docs_text_reader: DocsTextReader | None = None
+    docs_repo_path: str | None = None
+    job_anchor_dictionary: JobAnchorDictionary | None = None
+    checkpoint: CheckpointWriter | None = None
+    resume_parent_run_id: str | None = None
+
+    @classmethod
+    def from_options(
+        cls,
+        client: YandexLLMClient,
+        *,
+        glossary: Glossary | None = None,
+        config: Config | None = None,
+        use_analyze_llm: bool = False,
+        en_toc_reachable: frozenset[str] | None = None,
+        redirect_source_en_paths: frozenset[str] | None = None,
+        docs_text_reader: DocsTextReader | None = None,
+        docs_repo_path: str | None = None,
+        job_anchor_dictionary: JobAnchorDictionary | None = None,
+        checkpoint: CheckpointWriter | None = None,
+        resume_parent_run_id: str | None = None,
+    ) -> PRHarnessContext:
+        return cls(
+            client=client,
+            glossary=glossary or load_glossary(),
+            config=config or load_config(),
+            use_analyze_llm=use_analyze_llm,
+            en_toc_reachable=en_toc_reachable,
+            redirect_source_en_paths=redirect_source_en_paths,
+            docs_text_reader=docs_text_reader,
+            docs_repo_path=docs_repo_path,
+            job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
+            checkpoint=checkpoint,
+            resume_parent_run_id=resume_parent_run_id,
+        )

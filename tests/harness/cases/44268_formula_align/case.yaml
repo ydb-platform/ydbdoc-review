@@ -1,0 +1,21 @@
+id: "44268_formula_align"
+description: >-
+  RU/EN formula inline-code text differs but shares one slot (#44268).
+  Critic phantom C1→C2 swap must be dropped; verdict stays ok.
+profile: verify
+file_path: ydb/docs/ru/core/limitations.md
+source: source.ru.md
+target: target.en.md
+enable_critic: true
+llm:
+  responses:
+    - |
+      {"verdict":"warnings","issues":[{"segment_id":"s0001","severity":"warning","category":"placeholder corruption","comment":"Placeholder ⟦C1⟧ in source was incorrectly changed to ⟦C2⟧ in translation. The atom_map defines only ⟦C1⟧ for this segment.","suggested_text":null}]}
+expect:
+  verdict: ok
+  critic_unresolved_verdict: ok
+  critic_unresolved_issues: 0
+  segments:
+    s0001:
+      placeholders: ["⟦C1⟧"]
+      text_excludes: ["⟦C2⟧"]

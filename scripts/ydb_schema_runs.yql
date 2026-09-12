@@ -1,0 +1,32 @@
+-- Phase K (§20.8) — run ledger for ACL/quota/continue.
+-- Database: /ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k
+--
+-- Apply with YDB CLI, e.g.:
+--   ydb -e grpcs://ydb.serverless.yandexcloud.net:2135 \
+--     -d /ru-central1/b1g7gqj2vnq67gjseuva/etns0641qf73btm7j21k \
+--     --sa-key-file /path/to/sa_key.json \
+--     scripting yql --file scripts/ydb_schema_runs.yql
+--
+-- Or paste into YDB Console → Query (run CREATE, then ALTER).
+
+CREATE TABLE runs (
+    run_day Utf8,
+    run_id Utf8,
+    started_at Timestamp,
+    finished_at Timestamp?,
+    actor Utf8,
+    mode Utf8,
+    repo Utf8,
+    source_pr Uint64,
+    translation_pr Uint64?,
+    status Utf8,
+    cost_rub Double,
+    input_tokens Uint64,
+    output_tokens Uint64,
+    parent_run_id Utf8?,
+    continue_index Uint32,
+    s3_prefix Utf8?,
+    PRIMARY KEY (run_day, run_id)
+);
+
+ALTER TABLE runs ADD INDEX runs_by_source_pr GLOBAL ON (source_pr, run_id);

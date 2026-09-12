@@ -1,0 +1,81 @@
+"""Unit tests for ACL / quota gates."""
+
+from ydbdoc_review.ops.gates import (
+    acl_deny_comment,
+    check_acl,
+    check_daily_quota,
+    expired_context_comment,
+    parse_allowed_actors,
+    quota_deny_comment,
+    retention_notice,
+)
+
+
+def test_parse_allowed_actors_empty():
+    assert parse_allowed_actors(None) == frozenset()
+    assert parse_allowed_actors("") == frozenset()
+    assert parse_allowed_actors("  ") == frozenset()
+
+
+def test_parse_allowed_actors_list():
+    assert parse_allowed_actors("sintjuri, alice ,bob") == frozenset(
+        {"sintjuri", "alice", "bob"}
+    )
+
+
+def test_F009_acl_empty_allowlist_denies_everyone():
+    denied = check_acl("anyone", frozenset())
+    assert not denied.ok
+    assert denied.status == "denied_acl"
+
+
+def test_F009_missing_actor_denies_even_with_allowlist():
+    denied = check_acl("", frozenset({"trusted"}))
+    assert not denied.ok
+    assert denied.status == "denied_acl"
+
+
+def test_acl_allow_and_deny():
+    allowed = frozenset({"sintjuri"})
+    assert check_acl("sintjuri", allowed).ok
+    assert check_acl("SintJuri", allowed).ok
+    denied = check_acl("hacker", allowed)
+    assert not denied.ok
+    assert denied.status == "denied_acl"
+    assert "hacker" in acl_deny_comment("hacker")
+
+
+def test_quota_gate():
+    assert check_daily_quota(spent_rub=100, budget_rub=5000).ok
+    denied = check_daily_quota(spent_rub=5000, budget_rub=5000)
+    assert not denied.ok
+    assert denied.status == "denied_quota"
+    comment = quota_deny_comment(
+        spent_rub=5000,
+        budget_rub=5000,
+        run_day="2026-09-11",
+        mode="verify",
+    )
+    assert "5000" in comment
+    assert "2026-09-11" in comment
+    assert "doc_verify" in comment
+
+
+def test_retention_and_expired_messages():
+    notice = retention_notice()
+    assert "14" in notice
+    assert "/ydbdoc continue" in notice
+    assert "doc_continue" in notice
+    assert "3" in notice
+    assert "translation PR" in notice
+    text = expired_context_comment(41271)
+    assert "ydbdoc-review/pr-41271" in text
+    assert "doc_translate" in text
+    assert "doc_verify" in text
+
+
+def test_soft_keep_retention_notice_prefers_manual_doc_verify():
+    notice = retention_notice(soft_keep_manual_repair=True)
+    assert "translation branch" in notice
+    assert "doc_verify" in notice
+    assert "doc_continue" not in notice
