@@ -2058,6 +2058,36 @@ def _run_verify_pairs(
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
 
+def _verify_coverage_semantically(
+    critic,
+    client: YandexLLMClient,
+    glossary: Glossary,
+    config: Config,
+    target_path,
+    unit,
+    segments,
+    translations,
+) -> bool:
+    """Validate ordinary coverage with the model; keep glossary coverage read-only."""
+    from ydbdoc_review.translation.file_profiles import is_glossary_file
+
+    del unit
+    if is_glossary_file(target_path):
+        return True
+    response = critic(
+        client,
+        segments=segments,
+        translations=translations,
+        glossary=glossary,
+        file_path=target_path,
+        source_lang="ru",
+        target_lang="en",
+        prompt_version=config.prompts.version,
+        max_chars=config.translation.segments_per_batch_chars,
+    )
+    return response.verdict == "ok" and not response.issues
+
+
 def job_requires_nonzero_exit(job: DocJobResult, *, no_commit: bool = False) -> bool:
     """§11: do not exit success when blockers skipped commit/push/PR creation."""
     if job.dry_run or no_commit:
@@ -4175,19 +4205,16 @@ def run_doc_verify(
             segments,
             translations,
         ) -> bool:
-            del unit
-            response = run_coverage_critic(
+            return _verify_coverage_semantically(
+                run_coverage_critic,
                 client,
-                segments=segments,
-                translations=translations,
-                glossary=glossary,
-                file_path=target_path,
-                source_lang="ru",
-                target_lang="en",
-                prompt_version=cfg.prompts.version,
-                max_chars=cfg.translation.segments_per_batch_chars,
+                glossary,
+                cfg,
+                target_path,
+                unit,
+                segments,
+                translations,
             )
-            return response.verdict == "ok" and not response.issues
 
         validate_coverage_evidence(
             coverage_evidence,
