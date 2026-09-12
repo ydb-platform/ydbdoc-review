@@ -35,6 +35,11 @@ def _pull(*, head_ref: str, merged: bool = False, fork: bool = False) -> dict:
     return {
         "title": "docs",
         "body": "authority",
+        "user": {
+            "login": "github-actions[bot]"
+            if head_ref.startswith(("ydbdoc-review/pr-", "ydbdoc-review/verify-"))
+            else "author"
+        },
         "head": {
             "ref": head_ref,
             "sha": "candidate",

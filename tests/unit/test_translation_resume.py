@@ -935,6 +935,7 @@ def test_valid_receipt_alone_never_admits_doc_continue(tmp_path: Path) -> None:
     )
     pull = {
         "title": "Auto-translate docs from PR #51079",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/pr-51079",
             "sha": "abc",

@@ -137,6 +137,7 @@ def _continue_pull(head_sha: str) -> dict[str, object]:
     return {
         "title": f"Auto-translate docs from PR #{SOURCE_PR}",
         "body": "",
+        "user": {"login": "github-actions[bot]"},
         "state": "open",
         "merged": False,
         "head": {
