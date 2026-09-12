@@ -318,7 +318,7 @@ def check_orphan_pages_for_locale(
         extra_md_paths=(
             frozenset(pending_texts)
             if pending_texts_supplied
-            else pending_md
+            else pending_md - unavailable
         ),
         extra_toc_paths=extra,
         seed_extra_md=False,

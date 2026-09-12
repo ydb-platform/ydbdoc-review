@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from collections.abc import Callable
 from pathlib import PurePosixPath
-from typing import Callable
 
 from ydbdoc_review.navigation.toc import collect_toc_link_targets, resolve_toc_target_path
 from ydbdoc_review.parsing.ast_types import (
@@ -142,6 +142,16 @@ def collect_en_toc_reachable_md(
     reachable: set[str] = set(pending_md) if seed_extra_md else set()
     toc_queue: deque[str] = deque()
     seen_tocs: set[str] = set()
+    root_parts = PurePosixPath(normalize_repo_path(root_toc)).parts
+    locale_index = next(
+        (index for index, part in enumerate(root_parts) if part in {"en", "ru"}),
+        None,
+    )
+    locale_root = (
+        "/".join(root_parts[: locale_index + 1]) + "/"
+        if locale_index is not None
+        else ""
+    )
 
     for toc in (root_toc, *extra_toc_paths):
         normalized = normalize_repo_path(toc)
@@ -162,6 +172,8 @@ def collect_en_toc_reachable_md(
             continue
         for kind, rel in collect_toc_link_targets(yaml_text):
             resolved = normalize_repo_path(resolve_toc_target_path(toc_path, rel))
+            if locale_root and not resolved.startswith(locale_root):
+                continue
             if kind == "href" and resolved.endswith(".md"):
                 # Diplodoc YFM003: href must exist on disk in EN checkout
                 # (or be a pending translate target for this PR).
