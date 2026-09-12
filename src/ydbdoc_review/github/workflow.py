@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import unquote
@@ -91,6 +92,7 @@ from ydbdoc_review.navigation.scope_planner import (
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.coverage_rebind import load_attested_coverage_evidence
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
+from ydbdoc_review.ops.gates import parse_allowed_actors
 from ydbdoc_review.ops.job_state import (
     CONTINUABILITY_STORE_KEY,
     ContinuabilityState,
@@ -4983,6 +4985,7 @@ def run_doc_continue(
     (``ydbdoc-review/verify-N``, §6.146). Instruction comes from ``instruction``
     or the latest ``/ydbdoc continue …`` comment on that PR.
     """
+    started_at = datetime.now(UTC)
     cfg = config or load_config()
     api_token, _push = _github_tokens(cfg)
     owner, repo = parse_repo(github_repo)
@@ -4992,7 +4995,11 @@ def run_doc_continue(
     feedback = (instruction or "").strip()
     if not feedback:
         comments = list(gh.iter_issue_comments(owner, repo, pr_number))
-        found = find_latest_continue_instruction(comments)
+        found = find_latest_continue_instruction(
+            comments,
+            allowed_actors=parse_allowed_actors(os.environ.get("YDBDOC_ALLOWED_ACTORS")),
+            before=started_at,
+        )
         if not found:
             body = (
                 "⛔ **ydbdoc-review:** не найдена инструкция "
