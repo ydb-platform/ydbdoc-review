@@ -54,6 +54,7 @@ from ydbdoc_review.github.pr import (
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
+    source_pr_scope_changes,
     translate_ru_content_ref,  # noqa: F401 - A05 mutation-injection seam
     translation_branch_base,
     translation_pr_base,
@@ -3973,7 +3974,8 @@ def run_doc_verify(
         else merge_base_with
     )
 
-    changes = merge_pr_file_changes(
+    changes = source_pr_scope_changes(
+        ctx,
         list_pr_file_changes_git(repo_path, merge_base_with),
         list_pr_file_changes_api(gh, owner, repo, pr_number),
     )
