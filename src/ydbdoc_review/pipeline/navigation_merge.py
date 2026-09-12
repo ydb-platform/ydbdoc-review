@@ -77,6 +77,20 @@ def _navigation_verdict(warnings: list[str]) -> FileVerdict:
         return "warnings"
     return "ok"
 
+
+def add_verify_navigation_recommendations(
+    results: list[NavigationRunResult],
+) -> None:
+    """Attach operator guidance after every verify navigation validator ran."""
+    recommendation = (
+        "verify_navigation_boundary: use `/ydbdoc continue ...` or repair "
+        "TOC/redirect manually, then rerun `doc_verify`; verify does not "
+        "rebuild navigation"
+    )
+    for result in results:
+        if result.verdict == "blocked" and recommendation not in result.warnings:
+            result.warnings.append(recommendation)
+
 _MENU_LABELS_PROMPT = """\
 Translate Russian Diplodoc sidebar menu labels to English.
 Return JSON only: {"translations": [{"ru": "<source>", "en": "<translation>"}, ...]}
@@ -162,9 +176,9 @@ def _resolve_toc_merge_scope(
     """Return merge scope and whether gap-fill is restricted to that scope.
 
     When EN sidebar yaml is absent, mirror the full RU structure (§6.85).
-    Otherwise scope = ``toc_translate_scope`` (RU base→PR diff) ∪ planned
+    Otherwise scope = ``toc_translate_scope`` (RU base→PR diff) union planned
     extras from the translation plan. ``supplement_only`` no longer expands to
-    every RU−EN missing href (§6.72 / #46878).
+    every RU-EN missing href (§6.72 / #46878).
 
     When the source PR also changed EN toc (``pair.en_changed``, bilingual),
     drop href/include entries that already exist on EN main from the *name*
@@ -206,7 +220,7 @@ def _resolve_toc_merge_scope(
         scope = TocTranslateScope(keep_hrefs, keep_includes)
 
     # Always restrict gap-fill to ``scope`` (§6.82). For ``supplement_only``
-    # parents (§6.72 / #46878) do **not** expand scope with every RU−EN missing
+    # parents (§6.72 / #46878) do **not** expand scope with every RU-EN missing
     # href — that pulled ``secondary_indexes.md`` / stale flat paths into EN and
     # failed ``missing_toc_target``. Planned extras already list the pages/includes
     # that caused the parent to be queued.
