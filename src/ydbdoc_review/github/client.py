@@ -275,3 +275,8 @@ class GitHubClient:
         """Replace the body of an existing pull request."""
         url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
         self._request("PATCH", url, json_body={"body": body})
+
+    def close_pull(self, owner: str, repo: str, pr_number: int, body: str) -> None:
+        """Close a pull request while recording why it was superseded."""
+        url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+        self._request("PATCH", url, json_body={"state": "closed", "body": body})

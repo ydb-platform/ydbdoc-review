@@ -327,6 +327,49 @@ def _snapshot_destination_lease(
     )
 
 
+def _restart_owned_translation_pr(
+    gh: GitHubClient,
+    owner: str,
+    repo: str,
+    *,
+    source_pr: int,
+    branch: str,
+    base: str,
+    explicit: bool,
+) -> None:
+    """Retire the active service artifact before an explicit fresh translate."""
+    if not explicit:
+        return
+    found = gh.find_open_pull_by_head(owner, repo, head_branch=branch, base=base)
+    if not isinstance(found, tuple) or len(found) != 2:
+        return
+    _url, translation_pr = found
+    pull = gh.get_pull(owner, repo, translation_pr)
+    head = pull.get("head") or {}
+    head_repo = head.get("repo") if isinstance(head, dict) else None
+    if (
+        not isinstance(head, dict)
+        or str(head.get("ref") or "") != branch
+        or not isinstance(head_repo, dict)
+        or str(head_repo.get("full_name") or "") != f"{owner}/{repo}"
+    ):
+        return
+    previous_body = str(pull.get("body") or "").rstrip()
+    message = (
+        "\n\n> This service translation PR was closed because `doc_translate` "
+        f"was explicitly restarted for source PR #{source_pr}."
+    )
+    gh.close_pull(owner, repo, translation_pr, previous_body + message)
+    if gh.get_branch_sha(owner, repo, branch) is None:
+        raise RuntimeError(
+            f"explicit translation restart could not confirm service branch {branch}"
+        )
+    if not gh.delete_branch(owner, repo, branch):
+        raise RuntimeError(
+            f"explicit translation restart could not delete service branch {branch}"
+        )
+
+
 def _await_inline_fixup_pr_context(
     gh: GitHubClient,
     owner: str,
@@ -2698,6 +2741,22 @@ def run_doc_translate(
         if ops_ctx is not None:
             finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job
+
+    if (
+        ops_mode == "translate"
+        and bool(os.environ.get("GITHUB_EVENT_ID") or os.environ.get("GITHUB_SHA"))
+        and not dry_run
+        and not no_commit
+    ):
+        _restart_owned_translation_pr(
+            gh,
+            owner,
+            repo,
+            source_pr=pr_number,
+            branch=f"{cfg.paths.translation_branch_prefix}{pr_number}",
+            base=translation_pr_base(ctx),
+            explicit=True,
+        )
 
     client = create_llm_client(cfg)
     if ops_ctx is not None:
