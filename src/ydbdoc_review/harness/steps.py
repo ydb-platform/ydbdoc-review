@@ -24,7 +24,6 @@ from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.qa import (
     compose_file_verdict,
     gate_round_trip,
-    partial_align_translations_from_target,
 )
 from ydbdoc_review.reporting.locations import (
     build_segment_excerpts,
@@ -234,7 +233,6 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         state.critic_unresolved,
         state.segments,
         state.translations,
-        skipped=state.critic_skipped,
         source_text=state.raw_source_text,
         source_file=state.file_path,
         en_toc_reachable=ctx.en_toc_reachable,
@@ -320,7 +318,6 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         state.critic_unresolved,
         state.segments,
         state.translations,
-        skipped=state.critic_skipped,
         source_text=state.raw_source_text,
         source_file=state.file_path,
         en_toc_reachable=ctx.en_toc_reachable,
@@ -618,10 +615,9 @@ class LoadTargetStep:
             state.fence_reference_text = state.existing_target_text
 
 
-# Full verify realign retranslates every RU segment. Glossary-scale pages
-# (400+) hang CI on Eliza timeouts (#49578 / #45667). Cap and leave 🔴.
+# Structural mismatches remain diagnostic blockers in verify. The size threshold
+# only selects the more useful diagnostic for unusually large pages.
 _VERIFY_REALIGN_MAX_SEGMENTS = 80
-_PARTIAL_VERIFY_REALIGN_MAX_PENDING = 80
 
 
 def _apply_en_structural_repair(state: FileRunState, ctx: HarnessContext) -> None:
@@ -641,57 +637,11 @@ def _apply_en_structural_repair(state: FileRunState, ctx: HarnessContext) -> Non
         )
 
 
-def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> bool:
-    """Translate only RU segments missing from EN (§6.191 / #49957)."""
-    assert state.source_doc is not None
-    seeded = partial_align_translations_from_target(
-        state.segments,
-        state.translated_text,
-        require_trustworthy=False,
-    )
-    if not seeded:
-        return False
-    pending = [seg for seg in state.segments if seg.id not in seeded]
-    if not pending or len(pending) > _PARTIAL_VERIFY_REALIGN_MAX_PENDING:
-        return False
-    logger.info(
-        "partial verify realign for %s: translate %d gap segment(s)",
-        state.file_path,
-        len(pending),
-    )
-    new_trans = translate_segments(
-        pending,
-        ctx.client,
-        ctx.glossary,
-        file_path=state.file_path,
-        source_lang=ctx.source_lang,
-        target_lang=ctx.target_lang,
-        max_chars=ctx.batch_chars,
-        max_output_chars=ctx.batch_max_output_chars,
-        expansion_ratio=ctx.batch_output_expansion_ratio,
-        json_overhead=ctx.batch_json_overhead_chars,
-        segment_max_chars=ctx.segment_max_source_chars,
-        prompt_version=ctx.prompt_version,
-        cache=ctx.cache,
-        max_parallel_batches=ctx.parallel,
-        manual_actions=state.manual_actions,
-        fallback_reasons=state.fallback_reasons,
-    )
-    state.translations = {**seeded, **new_trans}
-    state.render_base_doc = state.source_doc
-    state.render_base_segments = state.segments
-    state.fence_reference_text = state.source_text
-    _render_translated_from_source(state, ctx)
-    state.finalize_warnings.append(
-        f"verify_realign_partial: translated {len(pending)} gap segment(s) from RU"
-    )
-    return True
-
-
 class RoundTripStep:
     name = "round_trip"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
+        target_before_structural_repair = state.translated_text
         if state.mode == "verify" and ctx.target_lang.lower() in {"en", "english"}:
             _apply_en_structural_repair(state, ctx)
             # Repair renderer-added legacy markers before parsing/alignment.
@@ -703,10 +653,20 @@ class RoundTripStep:
         state.translations, state.segment_alignment_error = gate_round_trip(
             state.segments, state.translated_text
         )
+        if (
+            state.segment_alignment_error
+            and state.mode == "verify"
+            and state.translated_text != target_before_structural_repair
+        ):
+            _, original_alignment_error = gate_round_trip(
+                state.segments, target_before_structural_repair
+            )
+            if original_alignment_error:
+                state.segment_alignment_error = original_alignment_error
         if not state.segment_alignment_error or state.mode != "verify":
             return
         # Structural RU/EN mismatch (YFM↔GFM rows, condensed sections, …):
-        # rebuild EN from RU so critic/heuristics can finish (§6.147).
+        # keep EN unchanged and report the first divergent element.
         logger.info(
             "verify realign for %s: %s",
             state.file_path,
@@ -737,12 +697,6 @@ class RoundTripStep:
             )
             state.segment_alignment_error = None
             return
-        if _try_partial_verify_realign(state, ctx):
-            state.translations, state.segment_alignment_error = gate_round_trip(
-                state.segments, state.translated_text
-            )
-            if not state.segment_alignment_error:
-                return
         if len(state.segments) > _VERIFY_REALIGN_MAX_SEGMENTS:
             logger.warning(
                 "verify realign skipped for %s (%d segments > %d); "

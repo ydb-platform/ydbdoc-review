@@ -29,6 +29,16 @@ FileVerdict = Literal["ok", "warnings", "blocked"]
 _MAX_PARTIAL_STRUCTURE_DRIFT = 0.25
 
 
+def _same_structural_element(source: Segment, target: Segment) -> bool:
+    if source.kind != target.kind or source.path != target.path:
+        return False
+    if source.kind == SegmentKind.HEADING and (
+        source.heading_anchor or target.heading_anchor
+    ):
+        return source.heading_anchor == target.heading_anchor
+    return True
+
+
 def describe_segment_alignment_mismatch(
     source_segments: list[Segment],
     target_segments: list[Segment],
@@ -39,18 +49,20 @@ def describe_segment_alignment_mismatch(
     base = f"segment count mismatch: source {n_src} vs target {n_tgt}"
 
     for idx, (src, tgt) in enumerate(zip(source_segments, target_segments, strict=False)):
-        if src.kind != tgt.kind or src.path != tgt.path:
-            src_loc = " › ".join(src.path) if src.path else "(начало документа)"
-            tgt_loc = " › ".join(tgt.path) if tgt.path else "(начало документа)"
+        if not _same_structural_element(src, tgt):
+            src_loc = " > ".join(src.path) if src.path else "(начало документа)"
+            tgt_loc = " > ".join(tgt.path) if tgt.path else "(начало документа)"
+            src_preview = re.sub(r"\s+", " ", src.text)[:80]
+            tgt_preview = re.sub(r"\s+", " ", tgt.text)[:80]
             return (
                 f"{base}; first structural diff at pair index {idx}: "
-                f"RU `{src.id}` ({src.kind.value}, {src_loc}) vs "
-                f"EN `{tgt.id}` ({tgt.kind.value}, {tgt_loc})"
+                f"RU `{src.id}` ({src.kind.value}, {src_loc}): «{src_preview}» vs "
+                f"EN `{tgt.id}` ({tgt.kind.value}, {tgt_loc}): «{tgt_preview}»"
             )
 
     if n_src > n_tgt:
         extra = source_segments[n_tgt]
-        loc = " › ".join(extra.path) if extra.path else "(начало документа)"
+        loc = " > ".join(extra.path) if extra.path else "(начало документа)"
         preview = re.sub(r"\s+", " ", extra.text)[:80]
         return (
             f"{base}; first extra RU segment `{extra.id}` "
@@ -59,7 +71,7 @@ def describe_segment_alignment_mismatch(
 
     if n_tgt > n_src:
         extra = target_segments[n_src]
-        loc = " › ".join(extra.path) if extra.path else "(начало документа)"
+        loc = " > ".join(extra.path) if extra.path else "(начало документа)"
         preview = re.sub(r"\s+", " ", extra.text)[:80]
         return (
             f"{base}; first extra EN segment `{extra.id}` "
@@ -141,7 +153,7 @@ def partial_seed_is_trustworthy(
     src: Segment,
     en_text: str,
     *,
-    target_heading_anchor: str | None | object = _MISSING,
+    target_heading_anchor: str | object | None = _MISSING,
 ) -> bool:
     """True when an LCS EN candidate is safe to reuse (§6.171 / §6.172 / §6.176).
 
@@ -179,7 +191,7 @@ def partial_align_translations_from_target(
     *,
     require_trustworthy: bool = True,
 ) -> dict[str, str]:
-    """Best-effort seed map when full structural align fails (§6.168–§6.176).
+    """Best-effort seed map when full structural align fails (§6.168-§6.176).
 
     LCS over ``(kind, placeholder-letter signature[, heading_anchor])``. Refuse
     the whole partial map when segment-count drift is high. Keep only

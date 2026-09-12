@@ -48,7 +48,6 @@ from ydbdoc_review.reporting.locations import (
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
 from ydbdoc_review.validation.link_contract import LinkContractIssue
-from ydbdoc_review.validation.placeholder_drift import exclude_skipped_issues
 from ydbdoc_review.version import action_release_label
 
 _FINAL_TREE_BLOCKERS_MARKER_V1 = "ydbdoc-final-tree-blockers:v1"
@@ -416,15 +415,20 @@ def _remaining_critic_issues(fr) -> list[CriticIssueOut]:
     """Issues the reviewer still needs to look at (unresolved after apply)."""
     if not fr.critic_unresolved:
         return []
-    return exclude_skipped_issues(
-        list(fr.critic_unresolved.issues),
-        list(fr.critic_skipped),
-    )
+    return list(fr.critic_unresolved.issues)
 
 
 def _skipped_critic_issues(fr) -> list[CriticIssueOut]:
     """Critic suggestions that were not auto-applied (safety / validation)."""
-    return list(fr.critic_skipped)
+    confirmed = {
+        (issue.segment_id, issue.category.casefold())
+        for issue in _remaining_critic_issues(fr)
+    }
+    return [
+        issue
+        for issue in fr.critic_skipped
+        if (issue.segment_id, issue.category.casefold()) not in confirmed
+    ]
 
 
 def _lang_label(code: str) -> str:

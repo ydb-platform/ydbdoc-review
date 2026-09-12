@@ -849,7 +849,7 @@ def test_full_report_skipped_critic_in_collapsed_section():
 
 
 def test_full_report_dedupes_skipped_from_main_critic_list():
-    """§6.57: verify echo of skipped issues must not appear in main list."""
+    """A verify-confirmed skipped issue remains a single blocking finding."""
     cfg = _cfg()
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -871,6 +871,12 @@ def test_full_report_dedupes_skipped_from_main_critic_list():
         comment="order change rejected by pipeline",
         suggested_text="would break EN",
     )
+    confirmed = skipped.model_copy(
+        update={
+            "comment": "command placeholder remains missing",
+            "suggested_text": None,
+        }
+    )
     fr = FileTranslationResult(
         file_path=pair.en_path,
         final_text="Hello",
@@ -878,7 +884,7 @@ def test_full_report_dedupes_skipped_from_main_critic_list():
         verdict="blocked",
         prompt_version="v1",
         critic_skipped=[skipped],
-        critic_unresolved=CriticResponse(verdict="blocked", issues=[skipped]),
+        critic_unresolved=CriticResponse(verdict="blocked", issues=[confirmed]),
         segment_locations={"s0013": "Overview"},
     )
     body = build_full_report(
@@ -886,8 +892,10 @@ def test_full_report_dedupes_skipped_from_main_critic_list():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert body.count("order change rejected by pipeline") == 1
-    assert "Автоисправление не применено" in body
+    assert "order change rejected by pipeline" not in body
+    assert body.count("command placeholder remains missing") == 1
+    assert "Статус QA (K): 🔴 RED" in body
+    assert "Автоисправление не применено" not in body
 
 
 def test_excerpt_found_in_file_rejects_broken_preview():
