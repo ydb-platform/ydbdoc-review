@@ -89,8 +89,8 @@ def test_F098_continue_existing(publication_repo: str) -> None:
         if call.args[2] == 99
     ]
     assert len(red_comments) == 1
-    assert "QA RED" in red_comments[0]
-    assert "QA RED" in gh.update_pull_body.call_args.args[3]
+    assert "Статус QA (K): 🔴 RED" in red_comments[0]
+    assert "QA K: 🔴 RED" in gh.update_pull_body.call_args.args[3]
     preserved = parse_authority_evidence(gh.update_pull_body.call_args.args[3])
     assert preserved.coverage_version == 1
     assert preserved.coverage_run_id == "parent-run"

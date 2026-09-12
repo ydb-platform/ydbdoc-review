@@ -27,6 +27,10 @@ def _cfg():
     return load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
 
 
+def _qa_status(body: str) -> str:
+    return body.split("Статус QA (K):", 1)[1].split("\n", 1)[0]
+
+
 def _sample_result(*, new_file: bool = False) -> PRTranslationResult:
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -198,7 +202,7 @@ def test_build_full_report_reviewer_focused():
         config=cfg,
         link=ReportLinkContext(github_repo="ydb-platform/ydb", ref="ydbdoc-review/pr-1"),
     )
-    assert "Рекомендация:" in body
+    assert "Статус QA (K): 🔴 RED" in body
     assert "Что исправить" in body
     assert "Overview" in body and "`s0042`" in body
     assert "string table" in body
@@ -416,7 +420,7 @@ def test_full_report_shows_alignment_error():
     assert "отчёт №1" in body
     assert "отчёт #1" not in body
     assert "(alignment)" in body
-    assert "не мержить" in body or "требует правок" in body
+    assert "Статус QA (K): 🔴 RED" in body
 
 
 def test_full_report_does_not_hide_alignment_error_behind_completeness_gap():
@@ -487,7 +491,7 @@ def test_full_report_includes_info_section():
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "Справка (не блокирует merge EN)" in body
+    assert "Справка (не влияет на статус QA K)" in body
     assert "ru_source" in body
 
 
@@ -506,7 +510,7 @@ def test_merge_recommendation_red_when_navigation_blocked():
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "не мержить" in body
+    assert "Статус QA (K): 🔴 RED" in body
     assert "🔴" in body
 
 
@@ -530,7 +534,7 @@ def test_merge_recommendation_green_for_nav_only_ok():
         config=cfg,
     )
     assert "🟢" in body
-    assert "можно мержить" in body
+    assert "Статус QA (K): 🟢 GREEN" in body
     assert "нет обработанных файлов" not in body
 
 
@@ -567,9 +571,9 @@ def test_merge_recommendation_red_when_scope_file_missing_despite_green_files():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "не мержить — в переводном PR нет 1 ожидаемых EN-путей" in body
+    assert "Статус QA (K): 🔴 RED — в переводном PR нет 1 ожидаемых EN-путей" in body
     assert "monitoring_config.md" in body
-    assert "🟢" not in body.split("Рекомендация:")[1].split("\n", 1)[0]
+    assert "🟢" not in _qa_status(body)
 
 
 def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
@@ -601,8 +605,8 @@ def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "можно мержить" in body
-    assert "требует правок" not in body
+    assert "Статус QA (K): 🟢 GREEN" in body
+    assert "Рекомендация:" not in body
 
 
 def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
@@ -656,9 +660,9 @@ def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "можно мержить" in body
-    assert "требует правок" not in body
-    assert "Справка (не блокирует merge EN)" in body
+    assert "Статус QA (K): 🟢 GREEN" in body
+    assert "Рекомендация:" not in body
+    assert "Справка (не влияет на статус QA K)" in body
     assert en_path in body
     assert "отказала" in body
 
@@ -700,9 +704,9 @@ def test_r_gl_5_refusal_still_blocks_when_heuristic_blocking_present():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "не мержить" in body or "требует правок" in body
+    assert "Статус QA (K): 🔴 RED" in body
     assert "🔴" in body or "🟡" in body
-    assert "можно мержить" not in body
+    assert "Статус QA (K): 🟢 GREEN" not in body
 
 
 def test_merge_recommendation_green_when_stale_blocked_verdict_all_files_ok():
@@ -746,11 +750,9 @@ def test_merge_recommendation_green_when_stale_blocked_verdict_all_files_ok():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    rec = body.split("Рекомендация:")[1].split("\n", 1)[0]
-    assert "🟢" in rec
-    assert "можно мержить" in rec
-    assert "🔴" not in rec
-    assert "не мержить" not in body
+    assert "Статус QA (K): 🟢 GREEN" in body
+    assert "Статус QA (K): 🔴 RED" not in body
+    assert "Рекомендация:" not in body
     assert "По всем файлам открытых замечаний нет" in body
     assert "- 🟢 `ydb/docs/en/a.md`" in body
 
@@ -789,7 +791,7 @@ def test_build_full_report_all_ok():
         config=cfg,
         usage=tracker,
     )
-    assert "можно мержить" in body
+    assert "Статус QA (K): 🟢 GREEN" in body
     assert "открытых замечаний нет" in body
     assert "Стоимость и токены" in body
     assert "Оценка стоимости" in body
@@ -840,10 +842,10 @@ def test_full_report_skipped_critic_in_collapsed_section():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "можно мержить" in body or "открытых замечаний нет" in body
+    assert "Статус QA (K): 🟢 GREEN" in body
     assert "Автоисправление не применено" in body
     assert "order change rejected" in body
-    assert body.index("Автоисправление") > body.find("Без замечаний") or "можно мержить" in body
+    assert body.index("Автоисправление") > body.find("Без замечаний")
 
 
 def test_full_report_dedupes_skipped_from_main_critic_list():
