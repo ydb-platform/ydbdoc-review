@@ -66,6 +66,54 @@ class PullRequestContext:
     labels: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True)
+class PublicationPlan:
+    """Frozen publication target selected from source-PR state."""
+
+    publish: bool
+    branch_base_ref: str
+    pr_base_ref: str
+    publication_base_ref: str
+    source_head_sha: str
+    source_base_sha: str
+    reason: str
+
+
+def publication_plan(ctx: PullRequestContext) -> PublicationPlan:
+    """Select publication base without changing the source snapshot."""
+    source_head_sha = (
+        ctx.merge_commit_sha if ctx.merged and ctx.merge_commit_sha else ctx.head_sha
+    )
+    if ctx.state != "open" and not ctx.merged:
+        return PublicationPlan(
+            publish=False,
+            branch_base_ref="",
+            pr_base_ref="",
+            publication_base_ref="",
+            source_head_sha=source_head_sha,
+            source_base_sha=ctx.base_sha,
+            reason="closed source PR without merge",
+        )
+    if ctx.merged:
+        reason = "merged source PR"
+        base_ref = ctx.base_ref
+    elif is_fork_head(ctx):
+        reason = "open fork source PR"
+        base_ref = ctx.base_ref
+    else:
+        reason = "open same-repository source PR"
+        base_ref = ctx.head_ref
+    return PublicationPlan(
+        publish=True,
+        branch_base_ref=base_ref,
+        pr_base_ref=base_ref,
+        publication_base_ref=base_ref,
+        source_head_sha=source_head_sha,
+        source_base_sha=ctx.base_sha,
+        reason=reason,
+    )
+
+
 def pull_request_context(
     client: GitHubClient, owner: str, repo: str, pr_number: int
 ) -> PullRequestContext:
@@ -161,10 +209,10 @@ def translation_branch_base(ctx: PullRequestContext) -> tuple[str, str]:
     Merged PRs (any repo): branch from ``base_ref`` — the head branch is often
     deleted after merge (e.g. ``alexnick88-patch-1`` on #40070).
     """
-    upstream = repo_https_clone_url(ctx.owner, ctx.repo)
-    if is_fork_head(ctx) or ctx.merged:
-        return upstream, ctx.base_ref
-    return upstream, ctx.head_ref
+    plan = publication_plan(ctx)
+    if not plan.publish:
+        raise ValueError(f"cannot publish from {plan.reason}")
+    return repo_https_clone_url(ctx.owner, ctx.repo), plan.branch_base_ref
 
 
 def translation_pr_base(ctx: PullRequestContext) -> str:
