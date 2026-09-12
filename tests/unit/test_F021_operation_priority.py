@@ -38,3 +38,10 @@ def test_F021_both_and_en_only() -> None:
     assert en_only_deleted.action == "delete_ru"
     assert en_only_deleted.target_path.endswith("/ru/page.md")
     assert "redirect" in en_only_deleted.summary
+
+
+def test_F021_ru_deletion_wins_over_translation_obligation() -> None:
+    obligated_delete = _plan(translation_required=True, ru_deleted=True)
+
+    assert obligated_delete.action == "delete_en"
+    assert "redirect" in obligated_delete.summary

@@ -76,6 +76,8 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     Source language: whichever side the PR authors edited. RU→EN when only RU
     changed; EN→RU when only EN changed. When **both** sides changed, RU still
     remains the authoritative source and the complete EN mirror is regenerated.
+    Scope-admitted dependencies are explicit RU→EN obligations independent of
+    those source-PR provenance flags.
     """
     pair = content.pair
     ru_ok = _non_trivial(content.ru_text)
@@ -101,6 +103,17 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
             source_lang="en",
             target_lang="ru",
             summary="EN file deleted in PR — remove RU mirror and keep redirect",
+        )
+
+    if pair.translation_required:
+        return PairPlan(
+            pair=pair,
+            action="translate_to_en",
+            source_path=pair.ru_path,
+            target_path=pair.en_path,
+            source_lang="ru",
+            target_lang="en",
+            summary="Admitted RU dependency — translate required EN coverage",
         )
 
     if pair.ru_changed and pair.en_changed:
@@ -217,8 +230,12 @@ def _pair_to_analyze_payload(content: PairContent) -> dict[str, object]:
     return {
         "ru_path": pair.ru_path,
         "en_path": pair.en_path,
-        "source_lang": "ru" if pair.ru_changed or not pair.en_changed else "en",
-        "target_lang": "en" if pair.ru_changed or not pair.en_changed else "ru",
+        "source_lang": (
+            "ru" if pair.translation_required or pair.ru_changed or not pair.en_changed else "en"
+        ),
+        "target_lang": (
+            "en" if pair.translation_required or pair.ru_changed or not pair.en_changed else "ru"
+        ),
         "ru_text": content.ru_text,
         "en_text": content.en_text,
         "ru_diff_vs_base": content.ru_diff_vs_base,
@@ -240,7 +257,9 @@ def plan_from_analyze(content: PairContent, result: AnalyzePairResult) -> PairPl
     # Analyze is advisory. A missing target with source prose is an
     # unconditional translation obligation, even if a stale or malformed
     # Analyze response claims that no generation is needed.
-    if content.pair.ru_changed and content.ru_text and not content.en_text:
+    if content.pair.translation_required:
+        action = "translate_to_en"
+    elif content.pair.ru_changed and content.ru_text and not content.en_text:
         action = "translate_to_en"
     elif content.pair.en_changed and content.en_text and not content.ru_text:
         action = "translate_to_ru"
