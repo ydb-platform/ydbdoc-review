@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+TRANSCRIPT_RETENTION = timedelta(days=14)
 
 
 @dataclass(frozen=True)
@@ -94,15 +97,28 @@ def retention_notice(
     *,
     completeness_only: bool = False,
     soft_keep_manual_repair: bool = False,
+    saved_at: datetime | None = None,
+    continue_used: int = 0,
+    continue_limit: int = 3,
+    launch_mode: str = "doc_translate",
 ) -> str:
     """Footer under QA comments.
 
     When the only blocker is completeness (path missing from PR diff),
     ``doc_continue`` cannot invent a commit — prefer re-translate.
     """
+    used = max(0, continue_used)
+    remaining = max(0, continue_limit - used)
+    expiry = (
+        f" до **{retention_expires_at(saved_at).strftime('%Y-%m-%d %H:%M UTC')}**"
+        if saved_at is not None
+        else " 14 дней с момента сохранения"  # noqa: RUF001
+    )
     base = (
-        "_Контекст LLM (промпты/ответы) хранится **14 дней**, затем удаляется — "
+        f"_Контекст LLM (промпты/ответы) хранится{expiry}, затем удаляется — "
         "после этого continue недоступен._\n\n"
+        f"Контекст: continue использовано **{used}/{continue_limit}**, "
+        f"осталось: **{remaining}**; способ запуска: **`{launch_mode}`**.\n\n"
     )
     if completeness_only:
         return (
@@ -128,6 +144,13 @@ def retention_notice(
         "```\n"
         "и повесьте лейбл **`doc_continue`**."
     )
+
+
+def retention_expires_at(saved_at: datetime) -> datetime:
+    """Return the exclusive expiry instant used by transcript TTL."""
+    if saved_at.tzinfo is None:
+        saved_at = saved_at.replace(tzinfo=UTC)
+    return saved_at.astimezone(UTC) + TRANSCRIPT_RETENTION
 
 
 def expired_context_comment(source_pr: int) -> str:
