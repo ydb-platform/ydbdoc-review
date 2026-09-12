@@ -22,6 +22,7 @@ from ydbdoc_review.github.git_ops import (
     RefMutationStatus,
     RemoteRefLease,
     RemoteRefLeaseConflict,
+    RemoteRefMutationError,
     commit_changes_between,
     commit_parent_sha,
     delete_remote_branch_with_lease,
@@ -443,6 +444,7 @@ def _await_inline_fixup_pr_context(
     previous_context: PullRequestContext,
     expected_sha: str,
 ) -> PullRequestContext:
+    """Confirm one branch/PR snapshot for K without polling API convergence."""
     if (
         not expected_sha
         or len(expected_sha) != 40
@@ -458,100 +460,61 @@ def _await_inline_fixup_pr_context(
     ):
         raise RuntimeError("invalid inline fixup PR-context preconditions")
 
-    delays = (1.0, 2.0, 4.0, 8.0, 15.0)
-    for attempt in range(6):
-        local_head = resolve_commit_ref(repo_path, "HEAD")
-        if local_head != expected_sha:
-            raise RuntimeError(
-                "inline verify PR-head visibility checkout changed before REST read: "
-                f"expected {expected_sha}, found {local_head}"
-            )
-        _require_remote_sha(
-            gh,
-            owner,
-            repo,
-            previous_context.head_ref,
-            expected_sha,
-            context="inline verify PR-head visibility before REST read",
+    local_head = resolve_commit_ref(repo_path, "HEAD")
+    if local_head != expected_sha:
+        raise _publication_failure_error(
+            stage="inline verify confirmation",
+            branch=previous_context.head_ref,
+            pr_number=pr_number,
+            candidate_sha=expected_sha,
+            reason=f"checkout is {local_head}, expected K",
         )
+    _require_remote_sha(
+        gh,
+        owner,
+        repo,
+        previous_context.head_ref,
+        expected_sha,
+        context="inline verify branch confirmation",
+    )
 
-        fresh = pull_request_context(gh, owner, repo, pr_number)
-        previous_identity = (
-            previous_context.owner,
-            previous_context.repo,
-            previous_context.number,
-            previous_context.head_ref,
-            previous_context.head_repo_full_name,
-            previous_context.head_repo_https_url,
-            previous_context.base_ref,
+    fresh = pull_request_context(gh, owner, repo, pr_number)
+    previous_identity = (
+        previous_context.owner,
+        previous_context.repo,
+        previous_context.number,
+        previous_context.head_ref,
+        previous_context.head_repo_full_name,
+        previous_context.head_repo_https_url,
+        previous_context.base_ref,
+    )
+    fresh_identity = (
+        fresh.owner,
+        fresh.repo,
+        fresh.number,
+        fresh.head_ref,
+        fresh.head_repo_full_name,
+        fresh.head_repo_https_url,
+        fresh.base_ref,
+    )
+    if (
+        fresh_identity != previous_identity
+        or fresh.state != "open"
+        or fresh.merged
+        or fresh.body != previous_context.body
+        or fresh.head_sha != expected_sha
+    ):
+        raise _publication_failure_error(
+            stage="inline verify PR confirmation",
+            branch=previous_context.head_ref,
+            pr_number=pr_number,
+            candidate_sha=expected_sha,
+            reason=(
+                "PR snapshot does not confirm the expected identity, authority, "
+                f"and K (observed K={fresh.head_sha or '<missing>'})"
+            ),
         )
-        fresh_identity = (
-            fresh.owner,
-            fresh.repo,
-            fresh.number,
-            fresh.head_ref,
-            fresh.head_repo_full_name,
-            fresh.head_repo_https_url,
-            fresh.base_ref,
-        )
-        if (
-            fresh_identity != previous_identity
-            or fresh.state != "open"
-            or fresh.merged
-        ):
-            raise RuntimeError(
-                "inline verify PR identity or publication inputs changed while "
-                "waiting for head visibility"
-            )
-        if fresh.body != previous_context.body:
-            raise ValueError(
-                "inline verify PR authority evidence/body changed while "
-                "waiting for head visibility"
-            )
-        if fresh.head_sha not in {previous_context.head_sha, expected_sha}:
-            raise RuntimeError(
-                "inline verify PR head changed to an unexpected SHA while waiting "
-                f"for visibility: expected {previous_context.head_sha} or "
-                f"{expected_sha}, found {fresh.head_sha or '<missing>'}"
-            )
-
-        _require_remote_sha(
-            gh,
-            owner,
-            repo,
-            previous_context.head_ref,
-            expected_sha,
-            context="inline verify PR-head visibility after REST read",
-        )
-        local_head = resolve_commit_ref(repo_path, "HEAD")
-        if local_head != expected_sha:
-            raise RuntimeError(
-                "inline verify PR-head visibility checkout changed during REST read: "
-                f"expected {expected_sha}, found {local_head}"
-            )
-
-        if fresh.head_sha == expected_sha:
-            return fresh
-        if attempt == 5:
-            raise RuntimeError(
-                "inline verify PR head visibility did not converge for "
-                f"PR #{pr_number}: expected {expected_sha}, last observed "
-                f"{fresh.head_sha or '<missing>'} after {attempt + 1} attempts; "
-                "the already published branch is retained"
-            )
-        delay = delays[attempt]
-        logger.info(
-            "Waiting for PR #%s head visibility (%s/6): old=%s expected=%s; "
-            "retrying in %.1fs",
-            pr_number,
-            attempt + 1,
-            previous_context.head_sha,
-            expected_sha,
-            delay,
-        )
-        time.sleep(delay)
-
-    raise AssertionError("unreachable inline fixup PR-context wait")
+    return fresh
 
 
 def _freeze_candidate_sha(repo_path: str) -> str:
@@ -582,10 +545,52 @@ def _require_remote_sha(
 ) -> None:
     actual = gh.get_branch_sha(owner, repo, branch)
     if actual != expected_sha:
-        raise RuntimeError(
-            f"{context}: remote branch {branch} changed: "
-            f"expected {expected_sha or '<absent>'}, found {actual or '<absent>'}"
+        raise _publication_failure_error(
+            stage=context,
+            branch=branch,
+            candidate_sha=expected_sha,
+            reason=(
+                f"remote branch changed: expected {expected_sha or '<absent>'}, "
+                f"found {actual or '<absent>'}"
+            ),
         )
+
+
+def _publication_failure_error(
+    *,
+    stage: str,
+    branch: str,
+    candidate_sha: str | None,
+    reason: str,
+    pr_number: int | None = None,
+) -> RuntimeError:
+    """Build a terminal publication error with every known artifact."""
+    pr_label = f"#{pr_number}" if pr_number is not None else "<unconfirmed>"
+    return RuntimeError(
+        f"Publication failed during {stage}: branch={branch}, PR={pr_label}, "
+        f"K={candidate_sha or '<unconfirmed>'}; {reason}. Full manual retry: "
+        "run `doc_translate`; no automatic retry was scheduled"
+    )
+
+
+def _raise_publication_failure(
+    error: Exception,
+    *,
+    stage: str,
+    branch: str,
+    candidate_sha: str | None,
+    pr_number: int | None = None,
+) -> NoReturn:
+    failure = _publication_failure_error(
+        stage=stage,
+        branch=branch,
+        pr_number=pr_number,
+        candidate_sha=candidate_sha,
+        reason=str(error),
+    )
+    if isinstance(error, RemoteRefMutationError):
+        raise RemoteRefMutationError(str(failure), error.receipt) from error
+    raise failure from error
 
 
 def _raise_with_owned_rollback(
@@ -3385,8 +3390,13 @@ def run_doc_translate(
                 )
                 refresh_publication_impact(pr_result)
                 job.blocked = True
-            else:
-                pushed = True
+            except Exception as exc:
+                _raise_publication_failure(
+                    exc,
+                    stage="translation branch push",
+                    branch=branch,
+                    candidate_sha=pushed_candidate_sha,
+                )
         elif pr_result.has_soft_keep:
             _require_remote_sha(
                 gh,
@@ -3499,7 +3509,7 @@ def run_doc_translate(
             if ops_ctx is not None:
                 finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
             raise
-    if pushed or reused_existing_artifact_pr is not None:
+    if push_receipt is not None or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
         provisional_body = build_translation_pr_body(
             pr_number,
@@ -3522,6 +3532,9 @@ def run_doc_translate(
             expected_artifact_sha,
             context="before translation PR metadata",
         )
+        if push_receipt is not None:
+            pushed = True
+            job.pushed = True
 
         created = False
         if reused_existing_artifact_pr is not None:
@@ -4721,29 +4734,11 @@ def run_doc_verify(
                     pr_number,
                     ctx.head_repo_full_name,
                 )
-            if inline_fixup_push or destination_lease.expected_sha == verify_candidate_sha:
-                verify_push_receipt = push_branch(
-                    repo_path,
-                    "ydbdoc-review-push",
-                    push_branch_name,
-                    push_token,
-                    upstream_url,
-                    guard_remote_ref=True,
-                    expected_remote_sha=destination_lease.expected_sha,
-                    source_sha=verify_candidate_sha,
-                )
-            else:
-                deleted_receipt: RefMutationReceipt | None = None
-                if destination_lease.expected_sha is not None:
-                    deleted_receipt = delete_remote_branch_with_lease(
-                        repo_path,
-                        "ydbdoc-review-push",
-                        push_branch_name,
-                        push_token,
-                        upstream_url,
-                        expected_remote_sha=destination_lease.expected_sha,
-                    )
-                try:
+            try:
+                if (
+                    inline_fixup_push
+                    or destination_lease.expected_sha == verify_candidate_sha
+                ):
                     verify_push_receipt = push_branch(
                         repo_path,
                         "ydbdoc-review-push",
@@ -4751,44 +4746,73 @@ def run_doc_verify(
                         push_token,
                         upstream_url,
                         guard_remote_ref=True,
-                        expected_remote_sha=None,
+                        expected_remote_sha=destination_lease.expected_sha,
                         source_sha=verify_candidate_sha,
                     )
-                except Exception as create_error:
-                    if (
-                        deleted_receipt is not None
-                        and deleted_receipt.status is RefMutationStatus.CHANGED
-                        and destination_lease.expected_sha is not None
-                    ):
-                        try:
-                            remote_after_failure = gh.get_branch_sha(
-                                owner,
-                                repo,
-                                push_branch_name,
-                            )
-                        except Exception as snapshot_error:
-                            raise ExceptionGroup(
-                                "verify candidate creation and remote inspection both failed",
-                                [create_error, snapshot_error],
-                            ) from None
-                        if remote_after_failure is None:
+                else:
+                    deleted_receipt: RefMutationReceipt | None = None
+                    if destination_lease.expected_sha is not None:
+                        deleted_receipt = delete_remote_branch_with_lease(
+                            repo_path,
+                            "ydbdoc-review-push",
+                            push_branch_name,
+                            push_token,
+                            upstream_url,
+                            expected_remote_sha=destination_lease.expected_sha,
+                        )
+                    try:
+                        verify_push_receipt = push_branch(
+                            repo_path,
+                            "ydbdoc-review-push",
+                            push_branch_name,
+                            push_token,
+                            upstream_url,
+                            guard_remote_ref=True,
+                            expected_remote_sha=None,
+                            source_sha=verify_candidate_sha,
+                        )
+                    except Exception as create_error:
+                        if (
+                            deleted_receipt is not None
+                            and deleted_receipt.status is RefMutationStatus.CHANGED
+                            and destination_lease.expected_sha is not None
+                        ):
                             try:
-                                rollback_pushed_branch(
-                                    repo_path,
-                                    "ydbdoc-review-push",
+                                remote_after_failure = gh.get_branch_sha(
+                                    owner,
+                                    repo,
                                     push_branch_name,
-                                    push_token,
-                                    upstream_url,
-                                    expected_pushed_sha=None,
-                                    previous_sha=destination_lease.expected_sha,
                                 )
-                            except Exception as restore_error:
+                            except Exception as snapshot_error:
                                 raise ExceptionGroup(
-                                    "verify candidate creation and branch restoration both failed",
-                                    [create_error, restore_error],
+                                    "verify candidate creation and remote inspection both failed",
+                                    [create_error, snapshot_error],
                                 ) from None
-                    raise
-            pushed = True
+                            if remote_after_failure is None:
+                                try:
+                                    rollback_pushed_branch(
+                                        repo_path,
+                                        "ydbdoc-review-push",
+                                        push_branch_name,
+                                        push_token,
+                                        upstream_url,
+                                        expected_pushed_sha=None,
+                                        previous_sha=destination_lease.expected_sha,
+                                    )
+                                except Exception as restore_error:
+                                    raise ExceptionGroup(
+                                        "verify candidate creation and branch restoration both failed",
+                                        [create_error, restore_error],
+                                    ) from None
+                        raise
+            except Exception as exc:
+                _raise_publication_failure(
+                    exc,
+                    stage="verify branch push",
+                    branch=push_branch_name,
+                    pr_number=pr_number if inline_fixup_push else None,
+                    candidate_sha=verify_candidate_sha,
+                )
             _require_remote_sha(
                 gh,
                 owner,
@@ -4797,6 +4821,7 @@ def run_doc_verify(
                 verify_candidate_sha,
                 context="after verify branch publication",
             )
+            pushed = True
             if translation_pr and coverage_evidence is not None:
                 if artifact_provenance is None:
                     raise RuntimeError("repaired coverage provenance is missing")
