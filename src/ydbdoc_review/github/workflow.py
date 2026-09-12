@@ -91,7 +91,10 @@ from ydbdoc_review.navigation.scope_planner import (
 )
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
 from ydbdoc_review.ops.coverage_rebind import load_attested_coverage_evidence
-from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
+from ydbdoc_review.ops.feedback_ctx import (
+    continue_feedback_scope,
+    get_continue_feedback,
+)
 from ydbdoc_review.ops.gates import parse_allowed_actors
 from ydbdoc_review.ops.job_state import (
     CONTINUABILITY_STORE_KEY,
@@ -327,6 +330,12 @@ def _analyzed_noop_result(
     prompt_version: str,
 ) -> PRTranslationResult | None:
     """Return a no-op result only when Analyze proves every exact pair aligned."""
+    # A new operator instruction invalidates a saved no-op decision. Continue
+    # must re-enter the ordinary full-pair path with the current target and the
+    # instruction in context, rather than silently reusing the old verdict.
+    if get_continue_feedback().strip():
+        logger.info("Continue instruction invalidates Analyze no-op decision")
+        return None
     if any(
         content.pair.ru_deleted
         or content.pair.en_deleted
