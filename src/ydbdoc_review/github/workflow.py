@@ -2362,13 +2362,25 @@ def _persist_candidate_coverage_evidence(
     candidate_sha: str,
     authority: RuAuthority,
     contents: list[PairContent],
+    pair_results: list[PairRunResult],
     store: TranscriptStore,
     run_id: str,
 ) -> CoverageEvidence | None:
+    materialized_pairs = {
+        (result.plan.pair.ru_path, result.plan.pair.en_path)
+        for result in pair_results
+        if result.plan.target_path == result.plan.pair.en_path
+        and result.target_text is not None
+        and not result.skipped
+        and not result.deleted
+        and result.error is None
+        and result.soft_keep_reason is None
+    }
     planned = {
         content.pair.en_path: content.coverage_plan
         for content in contents
         if content.coverage_plan is not None
+        and (content.pair.ru_path, content.pair.en_path) in materialized_pairs
     }
     if not any(plan.mode == "units" for plan in planned.values()):
         return None
@@ -3420,6 +3432,7 @@ def run_doc_translate(
                     candidate_sha=pushed_candidate_sha,
                     authority=authority,
                     contents=contents,
+                    pair_results=pr_result.pair_results,
                     store=active_checkpoint.store,
                     run_id=active_checkpoint.run_id,
                 )
