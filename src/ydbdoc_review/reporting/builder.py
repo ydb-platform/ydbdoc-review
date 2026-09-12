@@ -207,42 +207,39 @@ def result_has_blocking_findings(result: PRTranslationResult) -> bool:
     return classify_publication_blockers(result).any
 
 
-def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
-    """Return (emoji, short Russian label) for merge readiness."""
+def _qa_status(result: PRTranslationResult) -> tuple[str, str]:
+    """Return the quality status for the concrete translation artifact K."""
     if result.completeness_gaps:
         n = len(result.completeness_gaps)
         return (
             "🔴",
-            f"не мержить — в переводном PR нет {n} ожидаемых EN-путей "
-            "(см. блок ниже)",
+            f"RED — в переводном PR нет {n} ожидаемых EN-путей (см. блок ниже)",
         )
     if result.final_tree_blockers:
-        return "🔴", "не мержить — QA RED, есть блокеры финального дерева"
+        return "🔴", "RED — есть блокеры финального дерева"
     if any(_typed_link_issues(run) for run in result.pair_results):
-        return "🔴", "не мержить — есть блокирующие проблемы"
+        return "🔴", "RED — есть блокирующие проблемы"
     ok, warn, blocked = _count_verdicts(result)
-    nav_blocked = any(
-        _nav_has_blocking_findings(n) for n in result.navigation_results
-    )
     nav_warn = any(
         n.verdict == "warnings" and not n.error for n in result.navigation_results
     )
-    nav_ok = any(
-        not n.error
-        and (
-            n.verdict == "ok"
-            or (n.verdict == "blocked" and not n.warnings)
-        )
-        for n in result.navigation_results
-    )
-    if blocked or nav_blocked:
-        return "🔴", "не мержить — есть блокирующие проблемы"
+    if blocked or any(_nav_has_blocking_findings(n) for n in result.navigation_results):
+        return "🔴", "RED — есть блокирующие проблемы"
     if warn or nav_warn:
-        return "🟡", "требует правок перед merge"
-    # Nav-only PRs (e.g. #47856 toc reorder) have no markdown pair_results (§6.151).
-    if ok or nav_ok:
-        return "🟢", "GREEN — можно мержить вручную; сервис merge не выполняет"
+        return "🟡", "YELLOW — есть предупреждения качества"
+    if ok or any(not n.error for n in result.navigation_results):
+        return "🟢", "GREEN — открытых замечаний качества нет"
     return "⚪", "нет обработанных файлов"
+
+
+def _artifact_status(result: PRTranslationResult) -> str:
+    """Describe publication separately from the quality of artifact K."""
+    if result.publication_impact in {
+        PublicationImpact.PUBLISH_NORMAL,
+        PublicationImpact.PUBLISH_RED,
+    }:
+        return "опубликован"
+    return "не опубликован"
 
 
 def _is_new_file(run: PairRunResult) -> bool:
@@ -875,16 +872,12 @@ def build_translation_pr_body(
     provenance: TranslationArtifactProvenance | None = None,
     publication_plan: PublicationPlan | None = None,
 ) -> str:
-    red = bool(
-        publication_result and result_has_blocking_findings(publication_result)
-    )
+    qa_status = _qa_status(publication_result) if publication_result else ("⚪", "не определён")
+    red = bool(publication_result and result_has_blocking_findings(publication_result))
     banner = ""
     blockers = ""
     if red and publication_result is not None:
-        banner = (
-            "> [!CAUTION]\n"
-            "> **QA RED, do not merge.** Candidate опубликован для ручного исправления.\n\n"
-        )
+        banner = "> [!CAUTION]\n> **QA K: RED.** Candidate опубликован для ручного исправления.\n\n"
     if publication_result is not None and publication_result.final_tree_blockers:
         blockers = "\n\n**Final-tree/manual-repair blockers:**\n\n" + "\n".join(
             f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}"
@@ -898,7 +891,9 @@ def build_translation_pr_body(
         f"Auto-generated translation for [{source_repo}#{source_pr}]"
         f"(https://github.com/{source_repo}/pull/{source_pr}).\n\n"
         f"Branch: `ydbdoc-review/pr-{source_pr}`\n\n"
-        "QA (`doc_verify`) runs inline in the same `doc_translate` CI job; "
+        f"Артефакт: {_artifact_status(publication_result) if publication_result else 'не определён'}\n\n"
+        f"QA K: {qa_status[0]} {qa_status[1]}\n\n"
+        "QA K (`doc_verify`) runs for the published candidate; "
         "re-run manually via the **`doc_verify`** label (`ydbdoc-verify.yml`)."
         f"{blockers}"
     )
@@ -1187,8 +1182,8 @@ def build_source_pr_comment(
             "|---|---|\n"
             f"| Translation PR | — |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
-            f"| Статус | 🔴 не мержить — {failure_label} |\n\n"
-            "**Не переведены:**\n\n"
+            f"| Статус QA (K) | 🔴 RED — {failure_label} |\n\n"
+            "**Не переведены:**\n\n"  # noqa: RUF001
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
@@ -1271,19 +1266,19 @@ def build_source_pr_comment(
     qa_line = ""
     if translation_pr_number:
         if published_red:
-            qa_line = "| Статус QA | 🔴 published_red, не мержить |\n"
+            qa_line = "| Артефакт | опубликован |\n| Статус QA (K) | 🔴 RED |\n"
         elif result.completeness_gaps:
             n = len(result.completeness_gaps)
             qa_line = (
-                f"| Статус QA | 🔴 не мержить — в переводном PR нет {n} "
+                f"| Статус QA (K) | 🔴 RED — в переводном PR нет {n} "
                 "ожидаемых EN-путей |\n"
             )
         elif verify_result is not None:
-            qa_emoji, qa_label = _merge_recommendation(verify_result)
-            qa_line = f"| Статус QA | {qa_emoji} {qa_label} |\n"
+            qa_emoji, qa_label = _qa_status(verify_result)
+            qa_line = f"| Статус QA (K) | {qa_emoji} {qa_label} |\n"
 
     headline = (
-        "🤖 **ydbdoc-review** — published_red, QA RED, не мержить"
+        "🤖 **ydbdoc-review** — published_red, QA RED"
         if published_red
         else "🤖 **ydbdoc-review** — перевод готов"
     )
@@ -1354,7 +1349,7 @@ def build_full_report(
 ) -> str:
     """Reviewer-focused QA report: open problems per file with location and advice."""
     del glossary
-    rec_emoji, rec_label = _merge_recommendation(result)
+    qa_emoji, qa_label = _qa_status(result)
 
     checkout_line = ""
     if meta.checkout_ref:
@@ -1364,7 +1359,7 @@ def build_full_report(
         f"🤖 **ydbdoc-review** — отчёт №{meta.report_number} "
         f"({meta.mode}, {meta.ts_label})\n\n"
         f"{checkout_line}"
-        f"## Рекомендация: {rec_emoji} {rec_label}\n\n"
+        f"## Статус QA (K): {qa_emoji} {qa_label}\n\n"
     )
     coverage_summary = build_coverage_summary(result)
     if coverage_summary:
@@ -1405,15 +1400,15 @@ def build_full_report(
     final_tree_section = ""
     if result.publication_failure == "awaiting_instruction_no_artifact":
         final_tree_section = (
-            "## QA RED, do not merge: awaiting operator instruction\n\n"
+            "## QA K: RED: awaiting operator instruction\n\n"
             "Содержательного diff нет, поэтому существующий translation PR "
             "сохранён без пустого commit. Ответьте на вопрос в source PR и "
             "повторите `doc_continue`.\n\n"
         )
     if result.final_tree_blockers:
         final_tree_section += (
-            "## QA RED, do not merge: блокеры финального дерева\n\n"
-            "Candidate опубликован для ручного исправления, но merge запрещён.\n\n"
+            "## QA K: RED: блокеры финального дерева\n\n"
+            "Candidate опубликован для ручного исправления.\n\n"
         )
         for i, blocker in enumerate(result.final_tree_blockers, start=1):
             final_tree_section += (
@@ -1462,8 +1457,8 @@ def build_full_report(
             )
         elif final_tree_section:
             body += (
-                "В файловых результатах открытых замечаний критика нет — "
-                "merge блокируют проверки финального дерева выше.\n\n"
+                "В файловых результатах открытых замечаний критика нет — "  # noqa: RUF001
+                "статус QA K остаётся RED из-за проверок финального дерева выше.\n\n"
             )
         else:
             body += "По всем файлам открытых замечаний нет.\n\n"
@@ -1501,7 +1496,7 @@ def build_full_report(
             for msg in fr.heuristic_info:
                 info_lines.append(f"- `{run.plan.target_path}` — {msg}")
         if info_lines:
-            body += "## Справка (не блокирует merge EN)\n\n"
+            body += "## Справка (не влияет на статус QA K)\n\n"
             body += "\n".join(info_lines) + "\n\n"
         usage_block = _usage_section(config, result, usage)
         if usage_block:
@@ -1559,7 +1554,7 @@ def build_full_report(
         for msg in fr.heuristic_info:
             info_lines.append(f"- `{run.plan.target_path}` — {msg}")
     if info_lines:
-        body += "## Справка (не блокирует merge EN)\n\n"
+        body += "## Справка (не влияет на статус QA K)\n\n"
         body += "\n".join(info_lines) + "\n\n"
 
     usage_block = _usage_section(config, result, usage)
