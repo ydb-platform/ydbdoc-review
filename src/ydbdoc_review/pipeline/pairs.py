@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
@@ -297,6 +297,29 @@ def build_verify_navigation_pairs(
     ]
 
 
+def merge_translation_pr_verify_scope(
+    pairs: list[DocPair],
+    expected_pairs: list[DocPair],
+) -> list[DocPair]:
+    """Merge source scope with actual EN state from the translation PR diff."""
+    actual_by_en_path = {pair.en_path: pair for pair in pairs}
+    merged_expected = [
+        replace(
+            expected,
+            en_changed=expected.en_changed or actual.en_changed,
+            en_deleted=expected.en_deleted or actual.en_deleted,
+        )
+        if (actual := actual_by_en_path.get(expected.en_path)) is not None
+        else expected
+        for expected in expected_pairs
+    ]
+    expected_en_paths = {pair.en_path for pair in expected_pairs}
+    return [
+        *merged_expected,
+        *(pair for pair in pairs if pair.en_path not in expected_en_paths),
+    ]
+
+
 def filter_translation_pr_verify_scope(
     pairs: list[DocPair],
     nav_pairs: list[NavigationPair],
@@ -306,11 +329,11 @@ def filter_translation_pr_verify_scope(
     allowed_en_paths: frozenset[str] | set[str] | None = None,
     allowed_nav_en_paths: frozenset[str] | set[str] | None = None,
 ) -> tuple[list[DocPair], list[NavigationPair]]:
-    """Narrow ``doc_verify`` on a translation PR to this run's EN commit scope (§6.77 / §6.240).
+    """Narrow ``doc_verify`` to its expected source scope (§6.77 / §6.240).
 
-    Markdown: only pairs whose EN mirror is in the PR diff vs base.
-    Navigation: only EN toc/redirect files present in the PR diff (merged nav),
-    excluding ``supplement_only`` ancestor tocs that were not committed.
+    Without an explicit source scope, keep only EN present in the PR diff. With
+    an explicit source scope, keep every expected target even when its valid
+    final bytes produce no diff. ``supplement_only`` navigation remains context.
 
     When ``allowed_en_paths`` / ``allowed_nav_en_paths`` are set (source-PR
     translation scope), drop tip-ambient EN that drifted into the translation
@@ -332,14 +355,16 @@ def filter_translation_pr_verify_scope(
     scoped_pairs = [
         pair
         for pair in pairs
-        if pair.en_path in en_in_diff
-        and (allowed_en is None or pair.en_path in allowed_en)
+        if (
+            pair.en_path in en_in_diff
+            if allowed_en is None
+            else pair.en_path in allowed_en
+        )
     ]
     scoped_nav = [
         nav
         for nav in nav_pairs
-        if nav.en_path in changed
+        if (nav.en_path in changed if allowed_nav is None else nav.en_path in allowed_nav)
         and not nav.supplement_only
-        and (allowed_nav is None or nav.en_path in allowed_nav)
     ]
     return scoped_pairs, scoped_nav

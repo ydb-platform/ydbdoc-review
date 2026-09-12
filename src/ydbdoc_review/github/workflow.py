@@ -130,8 +130,7 @@ from ydbdoc_review.pipeline.analyze import (
 from ydbdoc_review.pipeline.completeness import (
     bilingual_en_mirrors,
     completeness_gaps,
-    href_only_source_noop_satisfied,
-    translation_pr_scope_gaps,
+    verified_translation_pr_scope_gaps,
 )
 from ydbdoc_review.pipeline.navigation_merge import (
     extra_toc_hrefs_from_md_targets,
@@ -145,6 +144,7 @@ from ydbdoc_review.pipeline.pairs import (
     build_verify_navigation_pairs,
     counterpart,
     filter_translation_pr_verify_scope,
+    merge_translation_pr_verify_scope,
 )
 from ydbdoc_review.pipeline.publication import (
     classify_publication_blockers,
@@ -4092,6 +4092,8 @@ def run_doc_verify(
             skip_en_paths=source_bilingual_skip | redirect_tombstone_en,
         )
         _merge_yellow_warnings(inherited_result, scope_plan.link_dep_warnings)
+    if translation_pr and expected_scope_pairs:
+        pairs = merge_translation_pr_verify_scope(pairs, expected_scope_pairs)
     job = DocJobResult(
         mode="doc_verify",
         pr_number=pr_number,
@@ -4118,104 +4120,6 @@ def run_doc_verify(
     translation_scope_missing: list[str] = []
     source_scope_en: frozenset[str] = frozenset()
     if translation_pr:
-        noop_satisfied: set[str] = set()
-        changed_en_paths = {path.replace("\\", "/") for path, _ in changes}
-        if source_pr is not None:
-            if artifact_provenance is not None:
-                authority = artifact_provenance.authority
-                for pair in expected_scope_pairs:
-                    if pair.en_path in changed_en_paths:
-                        continue
-                    if href_only_source_noop_satisfied(
-                        read_text_at_commit(
-                            repo_path, authority.source_base_sha, pair.ru_path
-                        ),
-                        read_text_at_commit(
-                            repo_path, authority.source_head_sha, pair.ru_path
-                        ),
-                        read_text_at_commit(repo_path, authority.ru_sha, pair.ru_path),
-                        read_text_at_commit(repo_path, verify_content_sha, pair.en_path),
-                    ):
-                        noop_satisfied.add(pair.en_path)
-            else:
-                source_pull = gh.get_pull(owner, repo, source_pr)
-                source_base_sha = str(source_pull.get("base", {}).get("sha") or "")
-                source_head_sha = str(source_pull.get("head", {}).get("sha") or "")
-                for pair in expected_scope_pairs:
-                    if pair.en_path in changed_en_paths:
-                        continue
-                    if href_only_source_noop_satisfied(
-                        gh.get_file_text(owner, repo, pair.ru_path, source_base_sha),
-                        gh.get_file_text(owner, repo, pair.ru_path, source_head_sha),
-                        read_text(repo_path, pair.ru_path),
-                        read_text(repo_path, pair.en_path),
-                    ):
-                        noop_satisfied.add(pair.en_path)
-        # Tip-inherited EN (same as upstream main, not rewritten this run) already
-        # covers the source scope when RU/EN hrefs match (§6.231 / #51199
-        # feature-not-supported identical noop).
-        from ydbdoc_review.validation.href_parity import check_href_parity
-
-        for pair in expected_scope_pairs:
-            if pair.en_path in changed_en_paths or pair.en_path in noop_satisfied:
-                continue
-            en_tip = (
-                read_text_at_commit(repo_path, verify_content_sha, pair.en_path)
-                if artifact_provenance is not None
-                else read_text(repo_path, pair.en_path)
-            )
-            ru_tip = (
-                read_text_at_commit(
-                    repo_path, artifact_provenance.authority.ru_sha, pair.ru_path
-                )
-                if artifact_provenance is not None
-                else read_text(repo_path, pair.ru_path)
-            )
-            if en_tip is None or ru_tip is None:
-                continue
-            if not check_href_parity(ru_tip, en_tip):
-                noop_satisfied.add(pair.en_path)
-        # §6.243 / #52077: tip EN already covers inbound exact-ASCII fragments
-        # from EN pages that *are* in this translation PR diff → no false gap
-        # when translate was a tip noop (nothing to commit).
-        from ydbdoc_review.pipeline.completeness import (
-            tip_en_covers_inbound_fragments_from_changed,
-        )
-
-        changed_en_texts = {
-            path: (
-                read_text_at_commit(repo_path, verify_content_sha, path)
-                if artifact_provenance is not None
-                else read_text(repo_path, path)
-            )
-            or ""
-            for path in changed_en_paths
-            if path.endswith(".md")
-        }
-        for pair in expected_scope_pairs:
-            if pair.en_path in changed_en_paths or pair.en_path in noop_satisfied:
-                continue
-            en_tip = (
-                read_text_at_commit(repo_path, verify_content_sha, pair.en_path)
-                if artifact_provenance is not None
-                else read_text(repo_path, pair.en_path)
-            )
-            if not en_tip:
-                continue
-            if tip_en_covers_inbound_fragments_from_changed(
-                pair.en_path,
-                en_tip,
-                changed_en_pages=changed_en_texts,
-            ):
-                noop_satisfied.add(pair.en_path)
-        translation_scope_missing = translation_pr_scope_gaps(
-            expected_scope_pairs,
-            nav_pairs,
-            changes,
-            already_satisfied=(
-                source_bilingual_skip | redirect_tombstone_en | frozenset(noop_satisfied)
-            ),
-        )
         # §6.240: source-PR scope wins over tip-ambient EN in the translation
         # branch diff (stale compare-configs / auth_config / tracing / …).
         source_scope_en = frozenset(p.en_path for p in expected_scope_pairs) | frozenset(
@@ -4414,6 +4318,14 @@ def run_doc_verify(
             skip_globs=cfg.paths.translate_skip_globs,
             provenance=artifact_provenance,
             target_ref=verify_content_sha,
+        )
+
+    if translation_pr:
+        translation_scope_missing = verified_translation_pr_scope_gaps(
+            expected_scope_pairs,
+            nav_pairs,
+            pr_result,
+            already_satisfied=source_bilingual_skip | redirect_tombstone_en,
         )
 
     apply_include_parity_repair(

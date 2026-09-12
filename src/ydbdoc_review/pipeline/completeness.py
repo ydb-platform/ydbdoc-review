@@ -148,15 +148,38 @@ def translation_pr_scope_gaps(
 ) -> list[str]:
     """Expected source-scope EN paths absent from a translation PR diff.
 
-    This is deliberately independent of the critic result: a critic cannot
-    approve a file it was never given.  ``supplement_only`` navigation files are
-    context for merging and are not required in the resulting commit.
+    Kept for callers that specifically need artifact-diff completeness.
     """
     changed = {_norm(path) for path, _ in translation_changes}
     expected = {pair.en_path for pair in expected_pairs}
     expected.update(nav.en_path for nav in expected_nav_pairs if not nav.supplement_only)
     expected -= already_satisfied or frozenset()
     return sorted(expected - changed)
+
+
+def verified_translation_pr_scope_gaps(
+    expected_pairs: list[DocPair],
+    expected_nav_pairs: list[NavigationPair],
+    result: PRTranslationResult,
+    *,
+    already_satisfied: frozenset[str] | None = None,
+) -> list[str]:
+    """Expected source-scope EN results absent after ``doc_verify``.
+
+    A valid target can be unchanged relative to the base, so git diff is not
+    evidence of completeness. ``supplement_only`` navigation files are context
+    for merging and are not required in the resulting result.
+    """
+    satisfied = committed_en_paths(result)
+    satisfied.update(
+        run.plan.target_path
+        for run in result.pair_results
+        if run.deleted and run.error is None
+    )
+    expected = {pair.en_path for pair in expected_pairs}
+    expected.update(nav.en_path for nav in expected_nav_pairs if not nav.supplement_only)
+    expected -= already_satisfied or frozenset()
+    return sorted(expected - satisfied)
 
 
 def href_only_source_noop_satisfied(
