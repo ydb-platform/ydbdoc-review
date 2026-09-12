@@ -21,6 +21,7 @@ from ydbdoc_review.github.git_ops import (
     RefMutationReceipt,
     RefMutationStatus,
     RemoteRefLease,
+    RemoteRefLeaseConflict,
     commit_changes_between,
     commit_parent_sha,
     delete_remote_branch_with_lease,
@@ -3357,27 +3358,6 @@ def run_doc_translate(
                         existing_pr_number,
                         False,
                     )
-                elif destination_lease.expected_sha is not None:
-                    prepush_opened_pr = gh.create_pull(
-                        owner,
-                        repo,
-                        title=f"Auto-translate docs from PR #{pr_number}",
-                        head=branch,
-                        base=translation_pr_base(ctx),
-                        body=build_translation_pr_body(
-                            pr_number,
-                            github_repo,
-                            publication_result=pr_result,
-                            publication_plan=publication_plan(ctx),
-                        ),
-                        draft=False,
-                    )
-                    if prepush_opened_pr is None:
-                        logger.info(
-                            "Existing translation branch %s has no publishable diff; "
-                            "retry ordinary PR creation after pushing the candidate",
-                            branch,
-                        )
             logger.info(
                 "Pushing translation branch %s to %s/%s (from upstream %s, source PR head: %s)",
                 branch,
@@ -3386,18 +3366,27 @@ def run_doc_translate(
                 branch_start_ref,
                 ctx.head_repo_full_name,
             )
-            push_receipt = push_branch(
-                repo_path,
-                "ydbdoc-review-push",
-                branch,
-                push_token,
-                upstream_url,
-                force=True,
-                guard_remote_ref=True,
-                expected_remote_sha=destination_lease.expected_sha,
-                source_sha=pushed_candidate_sha,
-            )
-            pushed = True
+            try:
+                push_receipt = push_branch(
+                    repo_path,
+                    "ydbdoc-review-push",
+                    branch,
+                    push_token,
+                    upstream_url,
+                    force=True,
+                    guard_remote_ref=True,
+                    expected_remote_sha=destination_lease.expected_sha,
+                    source_sha=pushed_candidate_sha,
+                )
+            except RemoteRefLeaseConflict as exc:
+                pr_result.publication_failure = "target_write_conflict"
+                pr_result.publication_candidate_sha = (
+                    exc.receipt.requested_sha or pushed_candidate_sha
+                )
+                refresh_publication_impact(pr_result)
+                job.blocked = True
+            else:
+                pushed = True
         elif pr_result.has_soft_keep:
             _require_remote_sha(
                 gh,

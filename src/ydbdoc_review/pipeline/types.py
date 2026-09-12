@@ -145,6 +145,8 @@ class PRTranslationResult:
     yellow_warnings: list[str] = field(default_factory=list)
     # Set only after a publication attempt proves there is no real git artifact.
     publication_failure: str | None = None
+    # Frozen local commit retained when the destination lease rejects publication.
+    publication_candidate_sha: str | None = None
 
     @property
     def translated_count(self) -> int:

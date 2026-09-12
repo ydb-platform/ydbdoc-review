@@ -60,6 +60,10 @@ class RemoteRefMutationError(RuntimeError):
         self.receipt = receipt
 
 
+class RemoteRefLeaseConflict(RemoteRefMutationError):
+    """A leased mutation rejected because the destination ref changed."""
+
+
 def _git(repo: str, *args: str) -> str:
     proc = subprocess.run(
         ["git", "-C", repo, *args],
@@ -653,58 +657,50 @@ def _leased_ref_mutation(
                 stderr=stderr,
             )
             detail = (stderr or stdout).strip() or "(no output)"
-            raise RemoteRefMutationError(
+            observed = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    repo,
+                    "ls-remote",
+                    "--exit-code",
+                    remote_name,
+                    remote_ref,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            observed_sha = (
+                str(observed.stdout or "").split(maxsplit=1)[0]
+                if observed.returncode == 0 and observed.stdout
+                else None
+            )
+            error_type = (
+                RemoteRefLeaseConflict
+                if observed.returncode == 2
+                or (observed_sha is not None and observed_sha != expected_remote_sha)
+                else RemoteRefMutationError
+            )
+            raise error_type(
                 f"cannot preserve {remote_ref} before leased mutation: {detail}",
                 receipt,
             ) from None
         actual_remote_sha = _git(repo, "rev-parse", preserved_ref)
         if actual_remote_sha != expected_remote_sha:
-            preserve_expected = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    repo,
-                    "fetch",
-                    remote_name,
-                    f"+{expected_remote_sha}:{preserved_ref}",
-                ],
-                capture_output=True,
-                text=True,
+            receipt = RefMutationReceipt(
+                lease=lease,
+                operation=operation,
+                requested_sha=requested_sha,
+                status=RefMutationStatus.CONFLICT,
+                porcelain_flag=None,
+                stdout=str(fetched.stdout or ""),
+                stderr=str(fetched.stderr or ""),
             )
-            if preserve_expected.returncode != 0:
-                stdout = str(preserve_expected.stdout or "")
-                stderr = str(preserve_expected.stderr or "")
-                receipt = RefMutationReceipt(
-                    lease=lease,
-                    operation=operation,
-                    requested_sha=requested_sha,
-                    status=RefMutationStatus.CONFLICT,
-                    porcelain_flag=None,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-                detail = (stderr or stdout).strip() or "(no output)"
-                raise RemoteRefMutationError(
-                    f"cannot preserve expected object {expected_remote_sha} "
-                    f"for {remote_ref}: {detail}",
-                    receipt,
-                ) from None
-            preserved_sha = _git(repo, "rev-parse", preserved_ref)
-            if preserved_sha != expected_remote_sha:
-                receipt = RefMutationReceipt(
-                    lease=lease,
-                    operation=operation,
-                    requested_sha=requested_sha,
-                    status=RefMutationStatus.CONFLICT,
-                    porcelain_flag=None,
-                    stdout=str(preserve_expected.stdout or ""),
-                    stderr=str(preserve_expected.stderr or ""),
-                )
-                raise RemoteRefMutationError(
-                    f"expected object preservation failed for {remote_ref}: "
-                    f"expected {expected_remote_sha}, found {preserved_sha}",
-                    receipt,
-                )
+            raise RemoteRefLeaseConflict(
+                f"leased destination changed for {remote_ref}: expected "
+                f"{expected_remote_sha}, found {actual_remote_sha}",
+                receipt,
+            )
 
     refspec = (
         f"{requested_sha}:{remote_ref}"
@@ -732,7 +728,13 @@ def _leased_ref_mutation(
         fields = line.split("\t")
         if len(fields) == 3 and fields[1] == refspec:
             matching_rows.append(fields)
-    flag = matching_rows[0][0] if len(matching_rows) == 1 else None
+    raw_flag = matching_rows[0][0] if len(matching_rows) == 1 else None
+    stale_lease = bool(
+        raw_flag == "!"
+        and len(matching_rows) == 1
+        and "(stale info)" in matching_rows[0][2]
+    )
+    flag = raw_flag
     if flag not in {" ", "+", "-", "=", "*"}:
         flag = None
 
@@ -763,7 +765,8 @@ def _leased_ref_mutation(
         detail = "\n".join(
             part.strip() for part in (stdout, stderr) if part.strip()
         ) or "missing or ambiguous porcelain receipt"
-        raise RemoteRefMutationError(
+        error_type = RemoteRefLeaseConflict if stale_lease else RemoteRefMutationError
+        raise error_type(
             f"leased push conflict for {remote_ref}: ownership unconfirmed: {detail}",
             receipt,
         ) from None
