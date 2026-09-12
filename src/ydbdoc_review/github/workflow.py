@@ -278,6 +278,8 @@ class DocJobResult:
     analyzed_noop: bool = False
     # Ops deny, continue refused, or other hard stop (§2 / §11).
     blocked: bool = False
+    # Terminal scope outcome. Empty supported scope is not an alignment verdict.
+    status: str = "completed"
 
 
 def _publication_side_effects_allowed(*, dry_run: bool, no_commit: bool) -> bool:
@@ -2763,10 +2765,12 @@ def run_doc_translate(
         len(scope_plan.doc_from_main),
         len(scope_plan.nav_ru_paths),
     )
+    bilingual_skip = frozenset(bilingual_en_mirrors(changes, docs_root=docs_root))
     pairs = doc_pairs_from_plan(
         scope_plan,
         docs_root=docs_root,
         changes=changes,
+        skip_en_paths=bilingual_skip,
     )
     nav_pairs = merge_navigation_pair_lists(
         navigation_pairs_from_plan(scope_plan, docs_root=docs_root),
@@ -2798,6 +2802,58 @@ def run_doc_translate(
         doc_from_main=frozenset(scope_plan.doc_from_main & executable_ru_paths),
         doc_deleted=frozenset(scope_plan.doc_deleted & executable_ru_paths),
     )
+    # An empty supported scope is terminal before preflight. Preflight is a
+    # document check and must not turn an unsupported/excluded file into a
+    # model or publication failure.
+    if not pairs and not nav_pairs:
+        logger.info("No supported files or mechanical operations in PR #%s", pr_number)
+        if bilingual_skip:
+            pr_result = _pr_result_for_bilingual_skips(
+                bilingual_skip, docs_root=docs_root
+            )
+        else:
+            filtered_paths = sorted(
+                set(source_api_paths) - {path for path, _kind in changes}
+            )
+            reason = (
+                "файлы исключены фильтрами или не входят в поддерживаемую область: "
+                + ", ".join(filtered_paths)
+                if filtered_paths
+                else "в PR не найдено файлов поддерживаемой документации"
+            )
+            pr_result = PRTranslationResult(
+                publication_failure="no_supported_files",
+                scope_reason=reason,
+            )
+            job.status = "no_supported_files"
+        _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
+        job.pr_result = pr_result
+        if not dry_run and not no_commit:
+            elapsed = time.monotonic() - started
+            meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
+            job.source_comment_url = _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                append_retention_footer(
+                    build_source_pr_comment(
+                        pr_result,
+                        translation_pr_number=None,
+                        meta=meta,
+                        config=cfg,
+                        committed=False,
+                    )
+                ),
+                label="source PR summary",
+            )
+        if ops_ctx is not None:
+            finish_ops_job(
+                ops_ctx,
+                status=job.status if job.status == "no_supported_files" else "ok",
+                cost_rub=0.0,
+            )
+        return job
     preflight = preflight_translation(
         preflight_plan,
         read_ru=read_ru,
@@ -2839,37 +2895,6 @@ def run_doc_translate(
         if ops_ctx is not None:
             finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
         return job
-    if not pairs and not nav_pairs:
-        logger.info("No doc or navigation pairs in PR #%s", pr_number)
-        # Bilingual RU+EN in the same source PR are dropped from ``pairs`` via
-        # ``skip_en_paths`` before analyze — still post «перевод не требуется»
-        # (§6.76 / #48751). Without this early path the comment never appeared.
-        pr_result = _pr_result_for_bilingual_skips(frozenset(), docs_root=docs_root)
-        _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
-        job.pr_result = pr_result
-        if pr_result.pair_results and not dry_run and not no_commit:
-            elapsed = time.monotonic() - started
-            meta = ReportMeta(mode="doc_translate", report_number=1, elapsed_s=elapsed)
-            job.source_comment_url = _safe_post_issue_comment(
-                gh,
-                owner,
-                repo,
-                pr_number,
-                append_retention_footer(
-                    build_source_pr_comment(
-                        pr_result,
-                        translation_pr_number=None,
-                        meta=meta,
-                        config=cfg,
-                        committed=False,
-                    )
-                ),
-                label="source PR summary",
-            )
-        if ops_ctx is not None:
-            finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
-        return job
-
     client = create_llm_client(cfg)
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder

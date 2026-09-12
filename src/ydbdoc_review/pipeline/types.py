@@ -145,6 +145,8 @@ class PRTranslationResult:
     yellow_warnings: list[str] = field(default_factory=list)
     # Set only after a publication attempt proves there is no real git artifact.
     publication_failure: str | None = None
+    # Explicit terminal scope outcome, distinct from Analyze's no-op verdict.
+    scope_reason: str | None = None
     # Frozen local commit retained when the destination lease rejects publication.
     publication_candidate_sha: str | None = None
 

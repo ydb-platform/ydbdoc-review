@@ -1135,6 +1135,16 @@ def build_source_pr_comment(
             verify_result is not None and result_has_blocking_findings(verify_result)
         )
     )
+    if result.publication_failure == "no_supported_files":
+        return (
+            "🤖 **ydbdoc-review** — `no_supported_files`\n\n"
+            "В поддерживаемой области нет файлов для обработки. "
+            f"Причина: {result.scope_reason or 'область пуста'}. "
+            "Analyze, переводчик, QA и Translation PR не запускались.\n\n"
+            f"| Translation PR | — |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            "| Стоимость моделей | ₽0.00 |\n"
+        )
     analyzed_noop = bool(result.pair_results) and all(
         run.skipped and run.plan.action == "critic_only"
         for run in result.pair_results
