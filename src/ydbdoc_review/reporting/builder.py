@@ -241,7 +241,7 @@ def _merge_recommendation(result: PRTranslationResult) -> tuple[str, str]:
         return "🟡", "требует правок перед merge"
     # Nav-only PRs (e.g. #47856 toc reorder) have no markdown pair_results (§6.151).
     if ok or nav_ok:
-        return "🟢", "можно мержить"
+        return "🟢", "GREEN — можно мержить вручную; сервис merge не выполняет"
     return "⚪", "нет обработанных файлов"
 
 
