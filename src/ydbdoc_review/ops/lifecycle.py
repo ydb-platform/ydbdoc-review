@@ -44,6 +44,7 @@ _CONTINUE_CONTEXT_ARTIFACTS = (
     ("job/continuability.json", "Saved continuation state"),
     ("translation/v1/manifest.json", "Saved translation scope and result"),
     ("report.md", "Previous run report and open questions"),
+    ("context/context.json", "Saved full continuation context"),
 )
 
 
@@ -264,6 +265,22 @@ def _record_from_payload(payload: dict[str, object]) -> RunRecord:
             str(payload["s3_prefix"]) if payload.get("s3_prefix") is not None else None
         ),
     )
+
+
+def _sanitize_context(value: object, key: str = "") -> object:
+    """Remove integration credentials before context is persisted."""
+    sensitive = ("token", "secret", "password", "credential", "api_key")
+    if key and any(word in key.lower() for word in sensitive):
+        return None
+    if isinstance(value, dict):
+        return {
+            str(child_key): _sanitize_context(child_value, str(child_key))
+            for child_key, child_value in value.items()
+            if not any(word in str(child_key).lower() for word in sensitive)
+        }
+    if isinstance(value, list):
+        return [_sanitize_context(item) for item in value]
+    return value
 
 
 def _recover_unconfirmed_accounting(
@@ -570,6 +587,7 @@ def finish_ops_job(
     output_tokens: int = 0,
     translation_pr: int | None = None,
     report_text: str | None = None,
+    context_payload: dict[str, object] | None = None,
 ) -> None:
     """Persist ledger row + flush LLM transcripts + optional report.md."""
     prefix = f"runs/{ctx.source_pr}/{ctx.run_id}/"
@@ -579,6 +597,16 @@ def finish_ops_job(
             ctx.store.put(ctx.run_id, "report.md", report_text)
         if ctx.continue_feedback:
             ctx.store.put(ctx.run_id, "user/feedback.md", ctx.continue_feedback)
+        if context_payload is not None:
+            ctx.store.put(
+                ctx.run_id,
+                "context/context.json",
+                json.dumps(
+                    _sanitize_context(context_payload),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
         ctx.store.put(
             ctx.run_id,
             "manifest.json",
