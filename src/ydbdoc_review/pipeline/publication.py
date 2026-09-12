@@ -199,10 +199,9 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
                 return True
             if check_broken_inline_code_markup(run.target_text, target_lang="en"):
                 return True
-    return any(
-        nav.verdict == "blocked" and bool(nav.warnings)
-        for nav in result.navigation_results
-    )
+    # Navigation QA findings are addressable RED and must not withhold an
+    # otherwise complete translation candidate.
+    return False
 
 
 def classify_publication_blockers(
@@ -217,6 +216,9 @@ def classify_publication_blockers(
     )
     repairable = repairable or _has_unrestored_marker(result)
     repairable = repairable or _has_critic_execution_failure(result)
+    repairable = repairable or any(
+        navigation.warnings for navigation in result.navigation_results
+    )
     return ClassifiedPublicationBlockers(
         incomplete=incomplete,
         unsafe=unsafe,
