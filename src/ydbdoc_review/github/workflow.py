@@ -2502,6 +2502,7 @@ def run_doc_translate(
         or getattr(ops_ctx, "source_pr", None) != pr_number
     ):
         raise RuntimeError("pre-authorized ops context does not match translation job")
+    continue_translation_pr: int | None = None
     if ops_mode == "continue":
         continuability = _load_continuability_for_continue(
             repo_path,
@@ -2523,6 +2524,7 @@ def run_doc_translate(
                 dry_run=dry_run,
                 blocked=True,
             )
+        continue_translation_pr = continuability.translation_pr
 
     merge_base_with = resolve_commit_ref(repo_path, merge_base_with)
     source_checkout_sha = resolve_commit_ref(repo_path, "HEAD")
@@ -3265,6 +3267,82 @@ def run_doc_translate(
     tr_pr_url: str | None = None
     verify_result: PRTranslationResult | None = None
     artifact_provenance: TranslationArtifactProvenance | None = None
+    awaiting_existing_continue_pr = (
+        pr_result.publication_failure == "awaiting_instruction_no_artifact"
+        and continue_translation_pr is not None
+    )
+    if awaiting_existing_continue_pr:
+        tr_pr_number = continue_translation_pr
+        tr_pr_url = f"https://github.com/{github_repo}/pull/{tr_pr_number}"
+        existing_ctx = pull_request_context(gh, owner, repo, tr_pr_number)
+        expected_base = translation_pr_base(ctx)
+        if (
+            existing_ctx.state != "open"
+            or existing_ctx.head_ref != branch
+            or existing_ctx.head_repo_full_name.casefold()
+            != f"{owner}/{repo}".casefold()
+            or existing_ctx.base_ref != expected_base
+        ):
+            raise RuntimeError(
+                f"continue PR #{tr_pr_number} no longer matches "
+                f"{owner}/{repo}:{branch}->{expected_base}"
+            )
+        artifact_provenance = validate_authority_evidence(
+            repo_path,
+            parse_authority_evidence(existing_ctx.body),
+            expected_repo=github_repo,
+            expected_source_pr=pr_number,
+            current_candidate_sha=existing_ctx.head_sha,
+        )
+        job.translation_pr_number = tr_pr_number
+        job.translation_pr_url = tr_pr_url
+        _persist_continuability(
+            repo_path,
+            source_pr=pr_number,
+            fixed_shas=fixed_shas,
+            translation_pr=tr_pr_number,
+            unfinished=True,
+            unfinished_stage="translation",
+            ops_ctx=ops_ctx,
+        )
+        try:
+            gh.update_pull_body(
+                owner,
+                repo,
+                tr_pr_number,
+                build_translation_pr_body(
+                    pr_number,
+                    github_repo,
+                    publication_result=pr_result,
+                    provenance=artifact_provenance,
+                    publication_plan=publication_plan(ctx),
+                ),
+            )
+            report_num = _next_report_number(gh, owner, repo, tr_pr_number)
+            job.translation_comment_url = _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                tr_pr_number,
+                append_retention_footer(
+                    build_full_report(
+                        pr_result,
+                        meta=ReportMeta(
+                            mode="doc_continue",
+                            report_number=report_num,
+                            elapsed_s=time.monotonic() - started,
+                        ),
+                        config=cfg,
+                        usage=client.usage_tracker,
+                        glossary=glossary,
+                    )
+                ),
+                label="doc_continue QA RED",
+            )
+        except Exception:
+            if ops_ctx is not None:
+                finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+            raise
     if pushed or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
         provisional_body = build_translation_pr_body(
@@ -3431,6 +3509,9 @@ def run_doc_translate(
         verify_result = verify_job.pr_result
 
     if not dry_run and not no_commit:
+        awaiting_instruction = (
+            pr_result.publication_failure == "awaiting_instruction_no_artifact"
+        )
         unfinished_verify = (
             verify_result is not None
             and pr_result.publication_impact != PublicationImpact.PUBLISH_RED
@@ -3441,8 +3522,8 @@ def run_doc_translate(
             source_pr=pr_number,
             fixed_shas=fixed_shas,
             translation_pr=tr_pr_number,
-            unfinished=unfinished_verify,
-            unfinished_stage="verify",
+            unfinished=awaiting_instruction or unfinished_verify,
+            unfinished_stage="translation" if awaiting_instruction else "verify",
             ops_ctx=ops_ctx,
         )
 
@@ -3484,7 +3565,10 @@ def run_doc_translate(
         usage = client.usage_tracker
         if job_requires_nonzero_exit(job, no_commit=no_commit):
             ops_status = "failed"
-        elif pr_result.publication_impact == PublicationImpact.PUBLISH_RED:
+        elif (
+            pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+            or awaiting_existing_continue_pr
+        ):
             ops_status = "published_red"
         else:
             ops_status = "ok"
@@ -4798,9 +4882,10 @@ def run_doc_continue(
 ) -> DocJobResult:
     """Continue with operator feedback (label ``doc_continue``).
 
-    ``pr_number`` is a **translation** PR (``ydbdoc-review/pr-N``) or a
-    **verify fixup** PR (``ydbdoc-review/verify-N``, §6.146). Instruction comes
-    from ``instruction`` or the latest ``/ydbdoc continue …`` comment on that PR.
+    ``pr_number`` is a source PR awaiting an artifact, a **translation** PR
+    (``ydbdoc-review/pr-N``), or a **verify fixup** PR
+    (``ydbdoc-review/verify-N``, §6.146). Instruction comes from ``instruction``
+    or the latest ``/ydbdoc continue …`` comment on that PR.
     """
     cfg = config or load_config()
     api_token, _push = _github_tokens(cfg)
@@ -4833,6 +4918,7 @@ def run_doc_continue(
         ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
     )
     translation_source_pr = source_pr
+    verify_fixup_source_pr: int | None = None
     if source_pr is None and is_verify_fixup_branch(
         ctx.head_ref,
         verify_fixup_branch_prefix=cfg.paths.verify_fixup_branch_prefix,
@@ -4841,13 +4927,19 @@ def run_doc_continue(
             ctx.head_ref,
             prefix=cfg.paths.verify_fixup_branch_prefix,
         )
+        verify_fixup_source_pr = source_pr
     source_pr_num = source_pr or pr_number
+    continue_artifact_pr = (
+        pr_number
+        if translation_source_pr is not None or verify_fixup_source_pr is not None
+        else None
+    )
 
     ops_ctx, gate, deny_body = begin_ops_job(
         mode="continue",
         repo=github_repo,
         source_pr=source_pr_num,
-        translation_pr=pr_number,
+        translation_pr=continue_artifact_pr,
         continue_feedback=feedback,
     )
     if not gate.ok:
@@ -4864,7 +4956,7 @@ def run_doc_continue(
             mode="doc_continue",
             pr_number=pr_number,
             source_pr_number=source_pr,
-            translation_pr_number=pr_number,
+            translation_pr_number=continue_artifact_pr,
             dry_run=dry_run,
             blocked=True,
         )
@@ -4879,10 +4971,7 @@ def run_doc_continue(
         continuability is None
         or not continuability.allows_continue()
         or continuability.source_pr != source_pr_num
-        or (
-            continuability.translation_pr is not None
-            and continuability.translation_pr != pr_number
-        )
+        or continuability.translation_pr != continue_artifact_pr
     ):
         body = (
             "⛔ **ydbdoc-review:** `doc_continue` отклонён: для исходного "
@@ -4904,12 +4993,12 @@ def run_doc_continue(
             mode="doc_continue",
             pr_number=pr_number,
             source_pr_number=source_pr,
-            translation_pr_number=pr_number,
+            translation_pr_number=continue_artifact_pr,
             dry_run=dry_run,
             blocked=True,
         )
 
-    if translation_source_pr is not None:
+    if translation_source_pr is not None or continue_artifact_pr is None:
         # A translation PR may be incomplete. Re-running verify can only edit
         # files already present in its diff, so it can never create an omitted
         # source-scope mirror (#50840). Continue must re-run translation from
@@ -4917,7 +5006,7 @@ def run_doc_continue(
         job = run_doc_translate(
             repo_path=repo_path,
             github_repo=github_repo,
-            pr_number=translation_source_pr,
+            pr_number=translation_source_pr or source_pr_num,
             merge_base_with=merge_base_with,
             dry_run=dry_run,
             no_commit=no_commit,

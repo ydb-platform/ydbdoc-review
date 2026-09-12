@@ -1149,12 +1149,28 @@ def build_source_pr_comment(
             f"{yellow_section()}"
         )
 
-    if (
+    if awaiting_instruction:
+        return (
+            "🤖 **ydbdoc-review** — published_red, QA RED, не мержить\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            f"| Translation PR | #{translation_pr_number} |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            "| Статус | 🔴 `awaiting_instruction_no_artifact` |\n\n"
+            "Содержательного diff нет: существующий translation PR сохранён "
+            "без пустого commit.\n\n"
+            "Вопрос: какой существующий адрес той же локали должен стать "
+            "назначением? Добавьте в translation PR комментарий "
+            "`/ydbdoc continue <адрес>` и повторите `doc_continue`.\n"
+            f"{yellow_section()}"
+        )
+
+    if translation_pr_number is None and (
         result.completeness_gaps
         or result.publication_impact
         in {PublicationImpact.WITHHOLD_INCOMPLETE, PublicationImpact.WITHHOLD_UNSAFE}
-        or (published_red and translation_pr_number is None)
-        or (translation_pr_number is None and committed is True)
+        or published_red
+        or committed is True
     ):
         failure_label = (
             "completeness gaps"
@@ -1387,8 +1403,15 @@ def build_full_report(
             )
 
     final_tree_section = ""
-    if result.final_tree_blockers:
+    if result.publication_failure == "awaiting_instruction_no_artifact":
         final_tree_section = (
+            "## QA RED, do not merge: awaiting operator instruction\n\n"
+            "Содержательного diff нет, поэтому существующий translation PR "
+            "сохранён без пустого commit. Ответьте на вопрос в source PR и "
+            "повторите `doc_continue`.\n\n"
+        )
+    if result.final_tree_blockers:
+        final_tree_section += (
             "## QA RED, do not merge: блокеры финального дерева\n\n"
             "Candidate опубликован для ручного исправления, но merge запрещён.\n\n"
         )
