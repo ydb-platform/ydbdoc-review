@@ -48,8 +48,9 @@ def translate_file(
 ) -> FileTranslationResult:
     """Run the per-file harness.
 
-    ``doc_translate`` uses translate-only; ``doc_verify`` uses critic QA on disk.
-    Pass ``enable_critic=True`` for local ``translate-file --with-critic``.
+    The single-file API uses translate-only by default; ``doc_verify`` uses
+    critic QA on disk. Pass ``enable_critic=True`` for local
+    ``translate-file --with-critic``.
     Optional ``base_source_text`` + ``existing_target_text`` enable §6.132
     differential seeding on translate.
     """

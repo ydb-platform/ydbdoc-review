@@ -2468,14 +2468,6 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
             return real_prepare(*args, **kwargs)
         return None
 
-    real_verify = workflow.run_doc_verify
-    verify_jobs = []
-
-    def _capture_real_verify(**kwargs):
-        verify_job = real_verify(**kwargs)
-        verify_jobs.append(verify_job)
-        return verify_job
-
     def _push(*_args, **kwargs):
         requested = kwargs["source_sha"]
         remote_state["sha"] = requested
@@ -2527,10 +2519,7 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
             side_effect=_prepare_once,
         ),
         patch("ydbdoc_review.github.workflow.push_branch", side_effect=_push),
-        patch(
-            "ydbdoc_review.github.workflow.run_doc_verify",
-            side_effect=_capture_real_verify,
-        ),
+        patch("ydbdoc_review.github.workflow.run_doc_verify") as verify,
     ):
         job = run_doc_translate(
             repo_path=publication_repo,
@@ -2566,11 +2555,11 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
     assert translation_parent_sha == upstream_base_sha
     assert translation_parent_sha != source_checkout_sha
     assert job.committed is True
-    assert verify_jobs
-    assert [(b.path, b.code) for b in verify_jobs[-1].pr_result.final_tree_blockers] == [
+    verify.assert_not_called()
+    assert [(b.path, b.code) for b in job.pr_result.final_tree_blockers] == [
         (impact_path, "en_link_target")
     ]
-    assert verify_jobs[-1].pr_result.publication_impact == "PUBLISH_RED"
+    assert job.pr_result.publication_impact == "PUBLISH_RED"
 
 
 def test_verify_empty_scoped_result_preserves_inherited_no_pair_blocker(

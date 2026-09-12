@@ -787,6 +787,14 @@ class CriticLoopStep:
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
         if not ctx.enable_critic or state.segment_alignment_error:
             return
+        if state.mode == "translate" and state.differential_meta:
+            current_usage = ctx.client.usage_tracker.records[ctx.usage_record_start :]
+            if not any(record.success for record in current_usage):
+                logger.info(
+                    "Translate QA: skip model critic for zero-prose result %s",
+                    state.file_path,
+                )
+                return
         if state.mode == "verify" and is_glossary_file(state.file_path):
             logger.info("Glossary verify: skip critic_loop (§6.188)")
             state.finalize_warnings.append(

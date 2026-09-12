@@ -376,10 +376,11 @@ def test_pr_boundary_saves_validated_file_and_unit_before_navigation() -> None:
         {"segments": [{"id": "s0001", "text": "Hello."}]},
         ensure_ascii=False,
     )
+    critic_ok = json.dumps({"verdict": "ok", "issues": []})
 
     result = run_pr_translation(
         [PairContent(pair=pair, ru_text="Привет.\n")],
-        _client([response]),
+        _client([response, critic_ok]),
         checkpoint=writer,
     )
 
