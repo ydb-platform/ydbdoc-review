@@ -25,17 +25,25 @@ from ydbdoc_review.github.git_ops import (
     RefMutationStatus,
     RemoteRefLease,
 )
-from ydbdoc_review.github.provenance import RuAuthority, TranslationArtifactProvenance
+from ydbdoc_review.github.provenance import (
+    RuAuthority,
+    TranslationArtifactProvenance,
+)
 from ydbdoc_review.github.workflow import (
     _DeferredOutboundFragments,
     _OutboundFragmentOccurrence,
     _recheck_deferred_outbound_fragments,
     job_requires_nonzero_exit,
+    run_doc_continue,
     run_doc_translate,
     run_doc_verify,
 )
 from ydbdoc_review.ops.gates import GateResult
-from ydbdoc_review.ops.lifecycle import OpsContext, append_retention_footer
+from ydbdoc_review.ops.lifecycle import (
+    OpsContext,
+    append_retention_footer,
+    finish_ops_job,
+)
 from ydbdoc_review.ops.recorder import LlmTranscriptRecorder
 from ydbdoc_review.ops.runs import InMemoryRunsLedger
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
@@ -311,6 +319,10 @@ def _run_top_level(
     reconcile_side_effect=None,
     existing_pr_body: str = "",
     existing_pr_draft: bool = True,
+    continue_pr_number: int | None = None,
+    continue_source_pr: bool = False,
+    real_ops_evidence: bool = False,
+    update_body_error: Exception | None = None,
 ):
     source_sha = _repo_head_sha(repo_path)
     pull = {
@@ -333,14 +345,27 @@ def _run_top_level(
             mode=RuAuthorityMode.CURRENT,
         ),
         source_sha,
+        coverage_version=1 if continue_pr_number is not None else None,
+        coverage_run_id="parent-run" if continue_pr_number is not None else None,
+        coverage_digest="a" * 64 if continue_pr_number is not None else None,
     )
+    resolved_existing_pr_body = existing_pr_body
+    if continue_pr_number is not None and not resolved_existing_pr_body:
+        resolved_existing_pr_body = build_translation_pr_body(
+            7,
+            "o/r",
+            provenance=provenance,
+        )
     gh = MagicMock()
     branch_was_present = (
         late_existing_pr if remote_branch_exists is None else remote_branch_exists
     )
     remote_state = {
         "sha": (
-            remote_branch_sha or "old-remote-sha" if branch_was_present else None
+            remote_branch_sha
+            or (source_sha if continue_pr_number is not None else "old-remote-sha")
+            if branch_was_present
+            else None
         )
     }
 
@@ -355,8 +380,10 @@ def _run_top_level(
         if draft is None:
             draft = existing_pr_draft
         return {
+            "html_url": f"https://github.com/o/r/pull/{number}",
+            "state": "open",
             "draft": draft,
-            "body": existing_pr_body,
+            "body": resolved_existing_pr_body,
             "head": {
                 "ref": "ydbdoc-review/pr-7",
                 "sha": remote_state["sha"],
@@ -365,7 +392,7 @@ def _run_top_level(
                     "full_name": "o/r",
                 },
             },
-            "base": {"ref": "main"},
+            "base": {"ref": "feature/docs"},
         }
 
     gh.get_pull.side_effect = _get_pull
@@ -395,9 +422,12 @@ def _run_top_level(
         return created_pull
 
     gh.create_pull.side_effect = _create
-    gh.update_pull_body.side_effect = lambda *_args, **_kwargs: (
-        event_log.append("body") if event_log is not None else None
-    )
+    if update_body_error is not None:
+        gh.update_pull_body.side_effect = update_body_error
+    else:
+        gh.update_pull_body.side_effect = lambda *_args, **_kwargs: (
+            event_log.append("body") if event_log is not None else None
+        )
 
     convert_calls = 0
 
@@ -412,7 +442,49 @@ def _run_top_level(
 
     gh.convert_pull_to_draft.side_effect = _convert
     gh.post_issue_comment.return_value = "https://github.com/o/r/pull/7#issuecomment-1"
-    ops_ctx = SimpleNamespace(recorder=None, continue_feedback=None)
+    if real_ops_evidence:
+        ops_ctx = OpsContext(
+            actor="tester",
+            store=InMemoryTranscriptStore(),
+            ledger=InMemoryRunsLedger(),
+            run_id="continue-run",
+            run_day="2026-09-12",
+            parent_run_id=None,
+            mode="continue",
+            repo="o/r",
+            source_pr=7,
+            translation_pr=continue_pr_number,
+            continue_index=1,
+            continue_feedback="use the approved redirect target",
+            recorder=LlmTranscriptRecorder(),
+            budget_rub=5000.0,
+        )
+    else:
+        ops_ctx = SimpleNamespace(
+            recorder=None,
+            continue_feedback=None,
+            mode=(
+                "continue"
+                if continue_pr_number is not None or continue_source_pr
+                else "translate"
+            ),
+            repo="o/r",
+            source_pr=7,
+            translation_pr=continue_pr_number,
+            parent_run_id=None,
+            store=None,
+        )
+
+    if continue_pr_number is not None:
+        from ydbdoc_review.ops.job_state import mark_continuable
+
+        mark_continuable(
+            repo_path,
+            source_pr=7,
+            unfinished_stage="translation",
+            fixed_shas={"merge_base": source_sha, "head": source_sha},
+            translation_pr=continue_pr_number,
+        )
 
     with ExitStack() as stack:
         stack.enter_context(patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh))
@@ -422,7 +494,12 @@ def _run_top_level(
                 return_value=(ops_ctx, GateResult(ok=True), None),
             )
         )
-        finish = stack.enter_context(patch("ydbdoc_review.github.workflow.finish_ops_job"))
+        finish = stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.finish_ops_job",
+                wraps=finish_ops_job if real_ops_evidence else None,
+            )
+        )
         effective_source_changes = (
             [("ydb/docs/ru/a.md", "modified")]
             if source_changes is None
@@ -568,13 +645,23 @@ def _run_top_level(
                 ),
             )
         )
-        job = run_doc_translate(
-            repo_path=repo_path,
-            github_repo="o/r",
-            pr_number=7,
-            merge_base_with="HEAD",
-            config=load_config(env=_env()),
-        )
+        if continue_pr_number is None and not continue_source_pr:
+            job = run_doc_translate(
+                repo_path=repo_path,
+                github_repo="o/r",
+                pr_number=7,
+                merge_base_with="HEAD",
+                config=load_config(env=_env()),
+            )
+        else:
+            job = run_doc_continue(
+                repo_path=repo_path,
+                github_repo="o/r",
+                pr_number=continue_pr_number or 7,
+                merge_base_with="HEAD",
+                config=load_config(env=_env()),
+                instruction="use the approved redirect target",
+            )
     return job, gh, prepare, commit, push, finish
 
 

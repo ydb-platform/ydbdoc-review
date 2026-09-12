@@ -664,7 +664,7 @@ def _file_reviewer_section(
             index=item_index,
             location="сегменты RU/EN",
             problem=(
-                f"(alignment) EN не совпадает со структурой RU: "  # noqa: RUF001
+                f"(alignment) EN не совпадает со структурой RU: "
                 f"{fr.segment_alignment_error}"
             ),
             severity="blocked",
@@ -1033,7 +1033,7 @@ def build_verify_fixup_source_comment(
     Full QA report lives on the fixup PR (§6.146); this comment is a short pointer.
     """
     if translation_pr:
-        how = "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."  # noqa: RUF001
+        how = "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
     else:
         how = (
             "Это **не** translation PR: замёрджите fixup-PR "
@@ -1110,8 +1110,15 @@ def build_source_pr_comment(
 
     total, new_count, updated_count = _file_translation_counts(result)
     bilingual_skip = _bilingual_skip_count(result)
-    published_red = result.publication_impact == PublicationImpact.PUBLISH_RED or (
-        verify_result is not None and result_has_blocking_findings(verify_result)
+    awaiting_instruction = (
+        result.publication_failure == "awaiting_instruction_no_artifact"
+    )
+    published_red = (
+        result.publication_impact == PublicationImpact.PUBLISH_RED
+        or awaiting_instruction
+        or (
+            verify_result is not None and result_has_blocking_findings(verify_result)
+        )
     )
 
     if total == 0 and bilingual_skip and translation_pr_number is None:
@@ -1122,19 +1129,48 @@ def build_source_pr_comment(
         )
         return (
             "🤖 **ydbdoc-review** — перевод не требуется\n\n"
-            f"В source PR обновлены обе стороны ({pairs_label}); "  # noqa: RUF001
+            f"В source PR обновлены обе стороны ({pairs_label}); "
             f"автоперевод пропущен ({BILINGUAL_SKIP_MARKER}). "
             "Translation PR не создаётся.\n\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             f"{yellow_section()}"
         )
 
-    if (
+    if awaiting_instruction and translation_pr_number is None:
+        return (
+            "🤖 **ydbdoc-review** — translation PR **не создан**\n\n"
+            "Статус: 🔴 `awaiting_instruction_no_artifact`. "
+            "Нерешённое действие не оформлено фиктивным commit/PR, старый файл "
+            "сохранён.\n\n"
+            "Вопрос: какой существующий адрес той же локали должен стать "
+            "назначением? После ответа добавьте комментарий "
+            "`/ydbdoc continue <адрес>` и повторите `doc_continue`.\n\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            f"{yellow_section()}"
+        )
+
+    if awaiting_instruction:
+        return (
+            "🤖 **ydbdoc-review** — published_red, QA RED, не мержить\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            f"| Translation PR | #{translation_pr_number} |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            "| Статус | 🔴 `awaiting_instruction_no_artifact` |\n\n"
+            "Содержательного diff нет: существующий translation PR сохранён "
+            "без пустого commit.\n\n"
+            "Вопрос: какой существующий адрес той же локали должен стать "
+            "назначением? Добавьте в translation PR комментарий "
+            "`/ydbdoc continue <адрес>` и повторите `doc_continue`.\n"
+            f"{yellow_section()}"
+        )
+
+    if translation_pr_number is None and (
         result.completeness_gaps
         or result.publication_impact
         in {PublicationImpact.WITHHOLD_INCOMPLETE, PublicationImpact.WITHHOLD_UNSAFE}
-        or (published_red and translation_pr_number is None)
-        or (translation_pr_number is None and committed is True)
+        or published_red
+        or committed is True
     ):
         failure_label = (
             "completeness gaps"
@@ -1152,7 +1188,7 @@ def build_source_pr_comment(
             f"| Translation PR | — |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             f"| Статус | 🔴 не мержить — {failure_label} |\n\n"
-            "**Не переведены:**\n\n"  # noqa: RUF001
+            "**Не переведены:**\n\n"
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
@@ -1197,7 +1233,7 @@ def build_source_pr_comment(
                 cost_line = f"| Стоимость перевода | {cost_label} |\n"
         return (
             "🤖 **ydbdoc-review** — перевод не требуется\n\n"
-            "После scoped merge EN совпадает с `main` "  # noqa: RUF001
+            "После scoped merge EN совпадает с `main` "
             "(нет коммита / Translation PR не создаётся). "
             "Типичный случай: перестановка пунктов toc, которых нет на EN, "
             "или RU-only правки без изменений зеркала (§6.141).\n\n"
@@ -1367,8 +1403,15 @@ def build_full_report(
             )
 
     final_tree_section = ""
-    if result.final_tree_blockers:
+    if result.publication_failure == "awaiting_instruction_no_artifact":
         final_tree_section = (
+            "## QA RED, do not merge: awaiting operator instruction\n\n"
+            "Содержательного diff нет, поэтому существующий translation PR "
+            "сохранён без пустого commit. Ответьте на вопрос в source PR и "
+            "повторите `doc_continue`.\n\n"
+        )
+    if result.final_tree_blockers:
+        final_tree_section += (
             "## QA RED, do not merge: блокеры финального дерева\n\n"
             "Candidate опубликован для ручного исправления, но merge запрещён.\n\n"
         )
@@ -1414,12 +1457,12 @@ def build_full_report(
     if not problem_runs and not nav_problems:
         if completeness_section:
             body += (
-                "В уже обработанных файлах открытых замечаний критика нет — "  # noqa: RUF001
+                "В уже обработанных файлах открытых замечаний критика нет — "
                 "блокер только в completeness выше.\n\n"
             )
         elif final_tree_section:
             body += (
-                "В файловых результатах открытых замечаний критика нет — "  # noqa: RUF001
+                "В файловых результатах открытых замечаний критика нет — "
                 "merge блокируют проверки финального дерева выше.\n\n"
             )
         else:
