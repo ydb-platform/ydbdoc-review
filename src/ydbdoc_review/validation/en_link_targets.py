@@ -9,6 +9,7 @@ the target file, and require ``#fragment`` to be declared on that page.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Callable
 from pathlib import PurePosixPath
 
@@ -54,6 +55,19 @@ def list_declared_fragments(md: str) -> list[str]:
         seen.add(frag)
         out.append(frag)
     return out
+
+
+def _duplicate_explicit_fragments(md: str) -> list[str]:
+    """Return explicit IDs declared more than once in one final page."""
+    explicit: list[str] = []
+    for heading in _iter_headings(parse_markdown(md).children):
+        _title, inline_anchor = split_heading_anchor_suffix(
+            _render_inline(heading.children).strip()
+        )
+        anchor = heading.anchor or inline_anchor
+        if anchor:
+            explicit.append(anchor)
+    return sorted(anchor for anchor, count in Counter(explicit).items() if count > 1)
 
 
 def _line_number(text: str, offset: int) -> int:
@@ -155,6 +169,16 @@ def check_en_page_link_targets(
                 f"{page_name}:{line}\n"
                 f"  target: {_short_target(target_path)}\n"
                 f"  missing file"
+            )
+            continue
+        duplicates = _duplicate_explicit_fragments(target_md)
+        if duplicates:
+            issues.append(
+                "en_link_target: "
+                f"{page_name}:{line}\n"
+                f"  target: {_short_target(target_path)}\n"
+                "  duplicate explicit fragment(s): "
+                + ", ".join(duplicates)
             )
             continue
         if not fragment:
