@@ -249,7 +249,17 @@ def format_heuristic_reviewer_detail(message: str) -> HeuristicReviewerDetail:
             ),
         )
 
-    return HeuristicReviewerDetail(problem=_humanize_heuristic_problem(message))
+    problem = _humanize_heuristic_problem(message)
+    if message.startswith("orphan_toc_page:"):
+        return HeuristicReviewerDetail(
+            problem=problem,
+            suggestion=(
+                "Какой существующий адрес той же локали должен заменить старый адрес? "
+                "Укажите его через `/ydbdoc continue <адрес>` и добавьте redirect; "  # noqa: RUF001
+                "до этого старый маршрут удалять нельзя."
+            ),
+        )
+    return HeuristicReviewerDetail(problem=problem)
 
 
 def humanize_heuristic(message: str) -> str:
