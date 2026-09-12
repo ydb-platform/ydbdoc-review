@@ -1,0 +1,1 @@
+## STATUS: BLOCKED — код не найден, искал в src/ydbdoc_review/navigation/scope_planner.py, src/ydbdoc_review/validation/include_targets.py, src/ydbdoc_review/parsing/include_paths.py; текущий worktree и origin/main содержат только F-084 reporting code
