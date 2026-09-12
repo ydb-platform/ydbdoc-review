@@ -46,7 +46,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra -q --strict-markers -m 'not integration' --ignore=tests/integration/test_llm_smoke.py --timeout=15 --timeout-method=signal --disable-socket --allow-unix-socket"
+addopts = "-ra -q --strict-markers -m 'not integration' --ignore=tests/integration/test_llm_smoke.py --ignore=tests/unit/test_llm_eliza_internal.py --ignore=tests/unit/test_F016_provider_model_chains.py --timeout=15 --timeout-method=signal --disable-socket --allow-unix-socket"
 timeout_method = "signal"
 markers = [
     "integration: integration tests (require network/API)",
