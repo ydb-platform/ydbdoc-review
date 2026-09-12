@@ -383,6 +383,7 @@ def _run_top_level(
             "state": "open",
             "draft": draft,
             "body": resolved_existing_pr_body,
+            "user": {"login": "github-actions[bot]"},
             "head": {
                 "ref": "ydbdoc-review/pr-7",
                 "sha": remote_state["sha"],
@@ -2161,6 +2162,7 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_open_red(
         return {
             "draft": False,
             "body": "",
+            "user": {"login": "github-actions[bot]"},
             "head": {
                 "ref": "ydbdoc-review/pr-7",
                 "sha": remote_state["sha"],
@@ -2422,6 +2424,7 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
     }
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
+        "user": {"login": "github-actions[bot]"},
         "body": "",
         "head": {
             "ref": "ydbdoc-review/pr-7",
@@ -2581,6 +2584,7 @@ def test_verify_empty_scoped_result_preserves_inherited_no_pair_blocker(
     )
     pull = {
         "title": "Auto-translate docs from PR #7",
+        "user": {"login": "github-actions[bot]"},
         "body": "",
         "head": {
             "ref": "ydbdoc-review/pr-7",
@@ -2662,6 +2666,7 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
 
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
+        "user": {"login": "github-actions[bot]"},
         "body": body,
         "head": {
             "ref": "ydbdoc-review/pr-7",
@@ -2769,6 +2774,7 @@ def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
 
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
+        "user": {"login": "github-actions[bot]"},
         "body": body,
         "head": {
             "ref": "ydbdoc-review/pr-7",
@@ -2898,6 +2904,7 @@ def _run_standalone_soft_keep_verify(
     )
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
+        "user": {"login": "github-actions[bot]"},
         "body": build_translation_pr_body(7, "o/r", publication_result=published),
         "draft": translation_draft,
         "head": {
@@ -3261,6 +3268,7 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
     )
     translation_pull = {
         "title": "Auto-translate docs from PR #7",
+        "user": {"login": "github-actions[bot]"},
         "body": "",
         "head": {
             "ref": "ydbdoc-review/pr-7",

@@ -35,6 +35,7 @@ _STATUS_TO_KIND: dict[str, ChangeKind] = {
     "renamed": "modified",
     "changed": "modified",
 }
+_SERVICE_PR_AUTHOR = "github-actions[bot]"
 
 
 def parse_repo(full_name: str) -> tuple[str, str]:
@@ -64,6 +65,7 @@ class PullRequestContext:
     state: str = "open"
     merge_commit_sha: str | None = None
     labels: frozenset[str] = frozenset()
+    author_login: str = ""
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,7 @@ def pull_request_context(
     head = data.get("head") or {}
     head_repo = head.get("repo") or {}
     base = data.get("base") or {}
+    user = data.get("user") or {}
     clone_url = str(head_repo.get("clone_url") or "")
     if not clone_url:
         raise ValueError(f"PR #{pr_number} missing head repo clone URL")
@@ -153,6 +156,7 @@ def pull_request_context(
         state=str(data.get("state") or "open"),
         merge_commit_sha=merge_sha,
         labels=labels,
+        author_login=str(user.get("login") or ""),
     )
 
 
@@ -231,13 +235,22 @@ def verify_fixup_branch(prefix: str, source_pr: int) -> str:
     return f"{prefix}{source_pr}"
 
 
-def verify_fixup_pr_base(ctx: PullRequestContext, *, translation_branch_prefix: str) -> str:
+def verify_fixup_pr_base(
+    ctx: PullRequestContext,
+    *,
+    translation_branch_prefix: str,
+    translation_pr: bool | None = None,
+) -> str:
     """Base branch for the critic-fixup PR opened after ``doc_verify``.
 
     Translation PR on upstream: target the translation branch so fixes merge there,
     not into the author's feature branch. All other PRs: target ``ctx.base_ref``.
     """
-    if source_pr_number_from_branch(ctx.head_ref, prefix=translation_branch_prefix):
+    if translation_pr is None:
+        translation_pr = (
+            service_branch_source_pr(ctx, prefix=translation_branch_prefix) is not None
+        )
+    if translation_pr:
         return ctx.head_ref
     return ctx.base_ref
 
@@ -296,6 +309,23 @@ def source_pr_number_from_branch(branch: str, *, prefix: str) -> int | None:
     if suffix.isdigit():
         return int(suffix)
     return None
+
+
+def service_branch_source_pr(ctx: PullRequestContext, *, prefix: str) -> int | None:
+    """Return source PR only for a service-owned branch in the upstream repo."""
+    source_pr = source_pr_number_from_branch(ctx.head_ref, prefix=prefix)
+    if source_pr is None:
+        return None
+    if not all(
+        getattr(ctx, name, "")
+        for name in ("owner", "repo", "head_repo_full_name", "author_login")
+    ):
+        return None
+    if is_fork_head(ctx):
+        return None
+    if ctx.author_login.casefold() != _SERVICE_PR_AUTHOR:
+        return None
+    return source_pr
 
 
 def is_translation_pr_branch(branch: str, *, translation_branch_prefix: str) -> bool:

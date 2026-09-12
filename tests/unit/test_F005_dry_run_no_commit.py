@@ -204,6 +204,7 @@ def test_F005_verify_noop_keeps_ops_accounting_and_reports_no_published_pr(
         head_repo_full_name="owner/repo",
         head_repo_https_url="https://github.com/owner/repo.git",
         base_ref="main",
+        author_login="github-actions[bot]",
     )
     ops_ctx = SimpleNamespace()
     finished = Mock()

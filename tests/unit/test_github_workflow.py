@@ -196,6 +196,7 @@ def _wire_translation_publication(
         "title": f"Auto-translate docs from PR #{source_number}",
         "body": "",
         "draft": False,
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": f"ydbdoc-review/pr-{source_number}",
             "sha": None,
@@ -231,6 +232,7 @@ def _wire_verify_publication(
         "title": f"Critic fixes for #{source_number}",
         "body": "",
         "draft": False,
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": branch,
             "sha": initial_sha,
@@ -342,6 +344,7 @@ def test_report_checkout_guard_blocks_in_memory_drift():
 def test_run_doc_continue_retranslates_translation_pr_scope(git_repo: str):
     pull = {
         "title": "Auto-translate docs from PR #40385",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/pr-40385",
             "sha": "abc",
@@ -390,6 +393,7 @@ def test_run_doc_continue_retranslates_translation_pr_scope(git_repo: str):
 def test_run_doc_continue_verifies_non_translation_pr(git_repo: str):
     pull = {
         "title": "Critic fixup",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/verify-40385",
             "sha": "abc",
@@ -440,6 +444,7 @@ def test_run_doc_continue_updates_admission_after_verify_outcome(
 ):
     pull = {
         "title": "Critic fixup",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/verify-40385",
             "sha": "abc",
@@ -516,6 +521,7 @@ def test_run_doc_continue_finishes_one_job_after_recursive_inline_verify(
     initial_sha = _head_sha(git_repo)
     fixup_pull = {
         "title": "Critic fixes for #40385",
+        "user": {"login": "github-actions[bot]"},
         "body": "",
         "head": {
             "ref": "ydbdoc-review/verify-40385",
@@ -658,6 +664,7 @@ def test_direct_gate_skipping_verify_cannot_inject_continue_context(git_repo: st
     initial_sha = _head_sha(git_repo)
     pull = {
         "title": "Critic fixes for #40385",
+        "user": {"login": "github-actions[bot]"},
         "body": "",
         "head": {
             "ref": "ydbdoc-review/verify-40385",
@@ -706,6 +713,7 @@ def test_external_verify_cannot_forge_recursive_continue_admission(git_repo: str
         head_repo_https_url="https://github.com/o/r.git",
         base_ref="main",
         base_sha=initial_sha,
+        author_login="github-actions[bot]",
     )
     mark_continuable(
         git_repo,
@@ -756,6 +764,7 @@ def test_direct_continue_verify_cannot_skip_ops_admission(git_repo: str):
     initial_sha = _head_sha(git_repo)
     pull = {
         "title": "Critic fixes for #40385",
+        "user": {"login": "github-actions[bot]"},
         "body": "",
         "head": {
             "ref": "ydbdoc-review/verify-40385",
@@ -797,6 +806,7 @@ def test_direct_continue_verify_cannot_skip_ops_admission(git_repo: str):
 def test_run_doc_continue_refuses_without_continuability_flag(git_repo: str):
     pull = {
         "title": "Auto-translate docs from PR #40385",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/pr-40385",
             "sha": "abc",
@@ -831,6 +841,7 @@ def test_run_doc_continue_uses_parent_store_admission_in_fresh_checkout(
 ):
     pull = {
         "title": "Auto-translate docs from PR #40385",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/pr-40385",
             "sha": "abc",
@@ -898,6 +909,7 @@ def test_run_doc_continue_rejects_explicit_ineligible_local_state(
 ):
     pull = {
         "title": "Auto-translate docs from PR #40385",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/pr-40385",
             "sha": "abc",
@@ -973,6 +985,7 @@ def test_run_doc_continue_preserves_acl_denial_before_saved_admission(git_repo: 
     )
     pull = {
         "title": "Auto-translate docs from PR #40385",
+        "user": {"login": "github-actions[bot]"},
         "head": {
             "ref": "ydbdoc-review/pr-40385",
             "sha": "abc",
@@ -1347,6 +1360,7 @@ def test_run_doc_verify_dry_run(git_repo: str):
 
     pull = {
         "title": "Auto-translate docs from PR #3",
+        "user": {"login": "github-actions[bot]"},
         "body": _fixture_provenance_body(git_repo, source_pr=3),
         "head": {
             "ref": "ydbdoc-review/pr-3",
@@ -1424,6 +1438,7 @@ def test_attestation_backed_verify_preserves_body_and_never_publishes_k2(
     )
     pull = {
         "title": "Auto-translate docs from PR #3",
+        "user": {"login": "github-actions[bot]"},
         "body": original_body,
         "head": {
             "ref": "ydbdoc-review/pr-3",
@@ -2060,6 +2075,7 @@ def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
 
     pull = {
         "title": "Auto-translate docs from PR #3",
+        "user": {"login": "github-actions[bot]"},
         "body": _fixture_provenance_body(git_repo, source_pr=3),
         "head": {
             "ref": "ydbdoc-review/pr-3",
@@ -2195,6 +2211,7 @@ def test_run_doc_verify_posts_comment(git_repo: str):
 
     pull = {
         "title": "Auto-translate docs from PR #3",
+        "user": {"login": "github-actions[bot]"},
         "body": _fixture_provenance_body(git_repo, source_pr=3),
         "head": {
             "ref": "ydbdoc-review/pr-3",
@@ -2369,6 +2386,7 @@ def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
 
     pull = {
         "title": "Auto-translate docs from PR #45667",
+        "user": {"login": "github-actions[bot]"},
         "body": _fixture_provenance_body(git_repo, source_pr=45667),
         "head": {
             "ref": "ydbdoc-review/pr-45667",

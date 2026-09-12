@@ -134,6 +134,7 @@ def test_verify_fixup_pr_base():
         head_repo_https_url="https://github.com/o/r.git",
         head_repo_full_name="o/r",
         base_ref="feature/docs",
+        author_login="github-actions[bot]",
     )
     author = PullRequestContext(
         number=7,

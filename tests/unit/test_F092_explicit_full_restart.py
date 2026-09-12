@@ -20,7 +20,10 @@ class _GitHub:
 
     def get_pull(self, *_args, **_kwargs):
         self.events.append("get")
-        return {"head": {"ref": "ydbdoc-review/pr-42", "repo": {"full_name": "o/r"}}}
+        return {
+            "user": {"login": "github-actions[bot]"},
+            "head": {"ref": "ydbdoc-review/pr-42", "repo": {"full_name": "o/r"}},
+        }
 
     def close_pull(self, *_args, **_kwargs):
         self.events.append("close")

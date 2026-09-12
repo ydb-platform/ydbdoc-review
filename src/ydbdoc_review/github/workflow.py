@@ -42,8 +42,6 @@ from ydbdoc_review.github.pr import (
     PullRequestContext,
     build_pairs_from_changes,
     is_fork_head,
-    is_translation_pr_branch,
-    is_verify_fixup_branch,
     list_pr_file_changes_api,
     list_pr_file_changes_git,
     load_pair_contents,
@@ -54,7 +52,7 @@ from ydbdoc_review.github.pr import (
     publication_plan,
     pull_request_context,
     repo_https_clone_url,
-    source_pr_number_from_branch,
+    service_branch_source_pr,
     source_pr_scope_changes,
     translate_ru_content_ref,  # noqa: F401 - A05 mutation-injection seam
     translation_branch_base,
@@ -3813,12 +3811,14 @@ def run_doc_verify(
         ctx = _inline_fixup_context
     else:
         ctx = pull_request_context(gh, owner, repo, pr_number)
-    translation_pr = is_translation_pr_branch(
-        ctx.head_ref, translation_branch_prefix=cfg.paths.translation_branch_prefix
+    translation_source_pr = service_branch_source_pr(
+        ctx, prefix=cfg.paths.translation_branch_prefix
     )
-    verify_fixup_pr = is_verify_fixup_branch(
-        ctx.head_ref, verify_fixup_branch_prefix=cfg.paths.verify_fixup_branch_prefix
+    verify_fixup_source_pr = service_branch_source_pr(
+        ctx, prefix=cfg.paths.verify_fixup_branch_prefix
     )
+    translation_pr = translation_source_pr is not None
+    verify_fixup_pr = verify_fixup_source_pr is not None
     durable_final_tree_blockers = list(inherited_final_tree_blockers or ())
     if translation_pr:
         durable_final_tree_blockers = list(
@@ -3837,13 +3837,7 @@ def run_doc_verify(
     refresh_publication_impact(inherited_result)
     # Inline push (no separate fixup PR): translation heads and existing verify-* heads.
     inline_fixup_push = translation_pr or verify_fixup_pr
-    source_pr = source_pr_number_from_branch(
-        ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
-    )
-    if source_pr is None and verify_fixup_pr:
-        source_pr = source_pr_number_from_branch(
-            ctx.head_ref, prefix=cfg.paths.verify_fixup_branch_prefix
-        )
+    source_pr = translation_source_pr or verify_fixup_source_pr
     source_pr_num = source_pr or pr_number
     requested_merge_base_sha = resolve_commit_ref(repo_path, merge_base_with)
     verify_content_sha = resolve_commit_ref(repo_path, "HEAD")
@@ -3965,7 +3959,9 @@ def run_doc_verify(
     fixup_branch = verify_fixup_branch(cfg.paths.verify_fixup_branch_prefix, fixup_source_pr)
     fixup_base_ref, fixup_base_branch = translation_branch_base(ctx)
     fixup_pr_base = verify_fixup_pr_base(
-        ctx, translation_branch_prefix=cfg.paths.translation_branch_prefix
+        ctx,
+        translation_branch_prefix=cfg.paths.translation_branch_prefix,
+        translation_pr=translation_pr,
     )
     destination_branch = ctx.head_ref if inline_fixup_push else fixup_branch
     destination_lease = _snapshot_destination_lease(
@@ -5102,20 +5098,13 @@ def run_doc_continue(
             )
         feedback = found
 
-    source_pr = source_pr_number_from_branch(
-        ctx.head_ref, prefix=cfg.paths.translation_branch_prefix
+    translation_source_pr = service_branch_source_pr(
+        ctx, prefix=cfg.paths.translation_branch_prefix
     )
-    translation_source_pr = source_pr
-    verify_fixup_source_pr: int | None = None
-    if source_pr is None and is_verify_fixup_branch(
-        ctx.head_ref,
-        verify_fixup_branch_prefix=cfg.paths.verify_fixup_branch_prefix,
-    ):
-        source_pr = source_pr_number_from_branch(
-            ctx.head_ref,
-            prefix=cfg.paths.verify_fixup_branch_prefix,
-        )
-        verify_fixup_source_pr = source_pr
+    verify_fixup_source_pr = service_branch_source_pr(
+        ctx, prefix=cfg.paths.verify_fixup_branch_prefix
+    )
+    source_pr = translation_source_pr or verify_fixup_source_pr
     source_pr_num = source_pr or pr_number
     continue_artifact_pr = (
         pr_number
