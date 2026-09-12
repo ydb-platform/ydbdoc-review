@@ -13,6 +13,8 @@ from ydbdoc_review.pipeline.pairs import (
 from ydbdoc_review.pipeline.types import PRTranslationResult
 from ydbdoc_review.validation.href_parity import check_href_parity, is_href_only_change
 
+VERIFY_MISSING_PAIR_SKIP_SUMMARY = "verify skip — missing RU or EN text"
+
 
 def _norm(path: str) -> str:
     return path.replace("\\", "/")
@@ -101,6 +103,8 @@ def committed_en_paths(result: PRTranslationResult) -> set[str]:
         if run.deleted or run.error:
             continue
         if run.skipped:
+            if run.plan.summary == VERIFY_MISSING_PAIR_SKIP_SUMMARY:
+                continue
             # ``skip`` means the EN side at the selected baseline already
             # satisfies this pair.  This is common when translating an old
             # merged PR against current main (#50741), and must count exactly
@@ -221,7 +225,7 @@ def format_completeness_gap_item(
             "в commit)."
         )
         lines.append(
-            "**Что сделать:** не править руками «с нуля». Нужен повторный "
+            "**Что сделать:** не править руками «с нуля». Нужен повторный "  # noqa: RUF001
             "`doc_translate` после фикса пайплайна, либо явный commit EN в "
             "ветку `ydbdoc-review/pr-*`, если tip EN реально устарел относительно RU."
         )

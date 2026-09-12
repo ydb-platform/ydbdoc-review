@@ -15,6 +15,7 @@ from ydbdoc_review.navigation.redirects import (
     should_skip_redirect_tombstone_en,
 )
 from ydbdoc_review.pipeline.analyze import PairPlan, plan_pairs
+from ydbdoc_review.pipeline.completeness import VERIFY_MISSING_PAIR_SKIP_SUMMARY
 from ydbdoc_review.validation.yfm_anchor import JobAnchorDictionary
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ class PlanVerifyPairsStep:
                         target_path=pair.en_path,
                         source_lang="ru",
                         target_lang="en",
-                        summary="verify skip — missing RU or EN text",
+                        summary=VERIFY_MISSING_PAIR_SKIP_SUMMARY,
                     )
                 )
                 continue
