@@ -5023,6 +5023,29 @@ def run_doc_continue(
         if translation_source_pr is not None or verify_fixup_source_pr is not None
         else None
     )
+    if continue_artifact_pr is not None and (ctx.state != "open" or ctx.merged):
+        body = (
+            "⛔ **ydbdoc-review:** `doc_continue` не изменяет закрытый или слитый "
+            f"результирующий PR #{pr_number}. Запустите новый `doc_translate` и "
+            f"повторный Analyze для исходного PR #{source_pr_num}."
+        )
+        if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
+            _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                body,
+                label="continue closed result",
+            )
+        return DocJobResult(
+            mode="doc_continue",
+            pr_number=pr_number,
+            source_pr_number=source_pr,
+            translation_pr_number=continue_artifact_pr,
+            dry_run=dry_run,
+            blocked=True,
+        )
 
     ops_ctx, gate, deny_body = begin_ops_job(
         mode="continue",
