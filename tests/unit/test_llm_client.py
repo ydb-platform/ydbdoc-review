@@ -158,8 +158,8 @@ def test_empty_completion_logs_diagnostics(caplog: pytest.LogCaptureFixture):
 def test_chat_model_fallback_on_unavailable():
     llm = _llm_config(
         models=ModelsConfig(
-            analyze=ModelChoice(primary="missing-model", fallbacks=[]),
-            translate=ModelChoice(primary="missing-model", fallbacks=["yandexgpt-5-pro"]),
+                analyze=ModelChoice(primary="yandexgpt-5.1", fallbacks=[]),
+                translate=ModelChoice(primary="yandexgpt-5.1", fallbacks=["yandexgpt-5-pro"]),
             critic=ModelChoice(primary="q", fallbacks=[]),
         ),
         retries=RetriesConfig(max_attempts=1, backoff_initial_s=0.01, backoff_factor=1.0),
@@ -196,7 +196,7 @@ def test_chat_exhausted_raises():
     llm = _llm_config(
         models=ModelsConfig(
             analyze=ModelChoice(primary="a", fallbacks=[]),
-                translate=ModelChoice(primary="bad", fallbacks=["fallback"]),
+                translate=ModelChoice(primary="yandexgpt-5.1", fallbacks=["yandexgpt-5-pro"]),
             critic=ModelChoice(primary="c", fallbacks=[]),
         ),
         retries=RetriesConfig(max_attempts=1, backoff_initial_s=0.0, backoff_factor=1.0),

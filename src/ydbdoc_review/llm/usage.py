@@ -20,6 +20,12 @@ MODEL_PRICE_RUB_PER_1K: dict[str, tuple[float, float]] = {
 }
 
 
+def validate_model_pricing(model_slug: str) -> None:
+    """Reject a model before a request when its token tariff is unknown."""
+    if model_slug not in MODEL_PRICE_RUB_PER_1K:
+        raise ValueError(f"no configured token price for model {model_slug!r}")
+
+
 def _estimate_cost_rub(records: list[LLMUsage]) -> float:
     total = 0.0
     for record in records:
