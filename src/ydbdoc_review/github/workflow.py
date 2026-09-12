@@ -136,6 +136,7 @@ from ydbdoc_review.pipeline.completeness import (
     translation_pr_scope_gaps,
 )
 from ydbdoc_review.pipeline.navigation_merge import (
+    add_verify_navigation_recommendations,
     extra_toc_hrefs_from_md_targets,
     run_navigation_merges,
     run_navigation_verifies,
@@ -2046,6 +2047,7 @@ def _run_verify_pairs(
     en_toc_reachable: frozenset[str] | None = None,
     docs_text_reader=None,
     docs_repo_path: str | None = None,
+    allow_navigation_retarget: bool = True,
 ) -> PRTranslationResult:
     """Critic-only QA for existing RU/EN pairs."""
     state = PRRunState(contents=contents)
@@ -2056,6 +2058,7 @@ def _run_verify_pairs(
         en_toc_reachable=en_toc_reachable,
         docs_text_reader=docs_text_reader,
         docs_repo_path=docs_repo_path,
+        allow_navigation_retarget=allow_navigation_retarget,
     )
     return PRHarness(VERIFY_PR_PROFILE).run(state, ctx)
 
@@ -4375,6 +4378,7 @@ def run_doc_verify(
                     docs_root=cfg.paths.docs_root,
                 ),
                 docs_repo_path=repo_path,
+                allow_navigation_retarget=ops_mode != "verify",
             )
         else:
             pr_result = PRTranslationResult()
@@ -4458,6 +4462,7 @@ def run_doc_verify(
             candidate_repo_paths={pair.en_path for pair in pairs},
         ),
     )
+    add_verify_navigation_recommendations(pr_result.navigation_results)
     verify_en_paths = {
         r.plan.target_path.replace("\\", "/")
         for r in pr_result.pair_results

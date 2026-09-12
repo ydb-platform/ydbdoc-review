@@ -133,6 +133,7 @@ class ExecutePairPlansStep:
             en_toc_reachable=ctx.en_toc_reachable,
             docs_text_reader=ctx.docs_text_reader,
             docs_repo_path=ctx.docs_repo_path,
+            allow_navigation_retarget=ctx.allow_navigation_retarget,
             job_anchor_dictionary=ctx.job_anchor_dictionary or JobAnchorDictionary(),
             checkpoint=ctx.checkpoint,
             resume_parent_run_id=ctx.resume_parent_run_id,

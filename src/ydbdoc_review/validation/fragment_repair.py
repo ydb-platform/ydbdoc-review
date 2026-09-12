@@ -532,6 +532,7 @@ def prefer_baseline_href_when_fragment_missing(
     *,
     en_page_path: str,
     read_text: DocsReader,
+    preserve_target_path: bool = False,
 ) -> str:
     """Restore a valid same-slot EN baseline href over a broken restored href.
 
@@ -609,6 +610,8 @@ def prefer_baseline_href_when_fragment_missing(
         base_abs = _resolve_href_path(en_page_path, base_path)
         if abs_path is None or base_abs is None:
             continue
+        if preserve_target_path and abs_path != base_abs:
+            continue
         if frag.isascii() and not _proves_implicit_heading_localization(
             frag, base_frag, abs_path, base_abs
         ):
@@ -652,6 +655,7 @@ def repair_en_fragments(
     ru_source: str | None = None,
     en_baseline: str | None = None,
     docs_root: str = "ydb/docs",
+    preserve_target_path: bool = False,
 ) -> str:
     """Fix missing EN ``#fragment`` targets in ``en_text`` for ``en_page_path``.
 
@@ -666,6 +670,7 @@ def repair_en_fragments(
         en_baseline,
         en_page_path=en_page_path,
         read_text=read_text,
+        preserve_target_path=preserve_target_path,
     )
     ru_by_frag = _autotitle_hrefs_by_frag(ru_source or "")
     en_base_by_frag = _autotitle_hrefs_by_frag(en_baseline or "")
@@ -731,6 +736,8 @@ def repair_en_fragments(
         )
         if remapped:
             new_frag, effective_en_abs = remapped
+            if preserve_target_path and effective_en_abs != abs_path:
+                continue
             new_path = path_part
             if effective_en_abs != abs_path:
                 new_path = _posix_relpath(
@@ -746,7 +753,7 @@ def repair_en_fragments(
             base_path, base_frag = base_href.rsplit("#", 1)
             if base_frag == frag:
                 base_abs = _resolve_href_path(en_page_path, base_path)
-                if base_abs:
+                if base_abs and (not preserve_target_path or base_abs == abs_path):
                     base_md = read_text(base_abs)
                     if base_md and fragment_declared_in_markdown(
                         base_md,
@@ -766,7 +773,7 @@ def repair_en_fragments(
                 ru_abs = _resolve_href_path(en_page_path, ru_path)
                 # RU path is locale-agnostic in docs (same relative href); resolve
                 # as EN page under the EN tree.
-                if ru_abs:
+                if ru_abs and (not preserve_target_path or ru_abs == abs_path):
                     ru_en_md = read_text(ru_abs)
                     if ru_en_md and fragment_declared_in_markdown(
                         ru_en_md,
@@ -781,7 +788,9 @@ def repair_en_fragments(
         # missing, or is a stale hub ``index.md`` (§6.153 sessions). If the
         # linked file exists but lacks the frag, leave it: §6.174 / §6.158 —
         # do not invent another path or EN-only fragment id.
-        if en_target is None or PurePosixPath(abs_path).name == "index.md":
+        if not preserve_target_path and (
+            en_target is None or PurePosixPath(abs_path).name == "index.md"
+        ):
             found = _find_href_declaring_frag_via_toc(
                 en_page_path=en_page_path,
                 broken_abs_path=abs_path,
