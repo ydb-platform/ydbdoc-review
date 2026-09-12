@@ -352,23 +352,18 @@ def _usage_lines(
 
     if config.reporting.include_token_usage:
         if usage and usage.records:
-            tr_in, tr_out = usage.tokens_for_role("translate")
-            cr_in, cr_out = usage.tokens_for_role("critic")
-            an_in, an_out = usage.tokens_for_role("analyze")
-            role_lines = 0
-            if tr_in or tr_out:
-                lines.append(f"- Токены (перевод): {tr_in:,} / {tr_out:,}")
-                role_lines += 1
-            if cr_in or cr_out:
-                lines.append(f"- Токены (критик): {cr_in:,} / {cr_out:,}")
-                role_lines += 1
-            if an_in or an_out:
-                lines.append(f"- Токены (analyze): {an_in:,} / {an_out:,}")
-                role_lines += 1
+            role_labels = (
+                ("analyze", "analyze"),
+                ("translate", "перевод"),
+                ("critic", "критик"),
+                ("repair", "repair"),
+            )
+            for role, label in role_labels:
+                role_in, role_out = usage.tokens_for_role(role)
+                lines.append(f"- Токены ({label}): {role_in:,} / {role_out:,}")
             total_in = usage.total_input_tokens
             total_out = usage.total_output_tokens
-            if total_in or total_out:
-                lines.append(f"- Токены (всего): {total_in:,} / {total_out:,}")
+            lines.append(f"- Токены (всего): {total_in:,} / {total_out:,}")
             retries = usage.total_retry_count
             if retries:
                 total_calls = sum(1 for r in usage.records if r.success)
@@ -379,22 +374,43 @@ def _usage_lines(
                 f"- Токены: {file_usage['input_tokens']:,} / "
                 f"{file_usage['output_tokens']:,}"
             )
+        else:
+            lines.extend(
+                [
+                    "- Токены (analyze): 0 / 0",
+                    "- Токены (перевод): 0 / 0",
+                    "- Токены (критик): 0 / 0",
+                    "- Токены (repair): 0 / 0",
+                    "- Токены (всего): 0 / 0",
+                ]
+            )
 
     if config.reporting.include_cost:
         cost_label = _format_cost_estimate(usage=usage, file_usage=file_usage)
         if cost_label:
             lines.append(f"- Оценка стоимости: {cost_label}")
+        elif (usage is None or not usage.records) and not file_usage["estimated_cost_usd"]:
+            lines.append("- Оценка стоимости: ₽0.00 (нет оплачиваемых вызовов)")
 
     if usage:
-        tr_models = usage.models_for_role("translate")
-        cr_models = usage.models_for_role("critic")
-        if tr_models or cr_models:
-            parts: list[str] = []
-            if tr_models:
-                parts.append(f"перевод=`{tr_models[-1]}`")
-            if cr_models:
-                parts.append(f"критик=`{cr_models[-1]}`")
+        role_labels = (
+            ("analyze", "analyze"),
+            ("translate", "перевод"),
+            ("critic", "критик"),
+            ("repair", "repair"),
+        )
+        parts = [
+            f"{label}=`{models[-1]}`"
+            for role, label in role_labels
+            if (models := usage.models_for_role(role))
+        ]
+        if parts:
             lines.append(f"- Модели: {', '.join(parts)}")
+    elif not lines or config.reporting.include_token_usage:
+        lines.append(
+            "- Модели: analyze=`n/a`, перевод=`n/a`, "
+            "критик=`n/a`, repair=`n/a`"
+        )
 
     return lines
 
