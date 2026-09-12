@@ -1120,6 +1120,50 @@ def build_source_pr_comment(
             verify_result is not None and result_has_blocking_findings(verify_result)
         )
     )
+    analyzed_noop = bool(result.pair_results) and all(
+        run.skipped and run.plan.action == "critic_only"
+        for run in result.pair_results
+    )
+
+    if analyzed_noop:
+        cost_line = ""
+        if config.reporting.include_cost:
+            cost_label = _format_cost_estimate(
+                usage=usage,
+                file_usage=_aggregate_file_usage(result),
+            )
+            if cost_label:
+                cost_line = f"| Стоимость Analyze | {cost_label} |\n"
+        pr_line = (
+            f"Существующий continue PR #{translation_pr_number} не изменён."
+            if translation_pr_number is not None
+            else "Translation PR не создаётся."
+        )
+        translation_pr_cell = (
+            f"#{translation_pr_number} (без изменений)"
+            if translation_pr_number is not None
+            else "—"
+        )
+        body = (
+            "🤖 **ydbdoc-review** — перевод не требуется, всё уже согласовано\n\n"
+            "Analyze подтвердил отсутствие перевода и обязательных механических "
+            f"изменений для всех поддерживаемых пар. {pr_line}\n\n"
+            "**Причины по парам:**\n\n"
+        )
+        for run in result.pair_results:
+            reason = " ".join(run.plan.summary.split())
+            body += (
+                f"- `{run.plan.pair.ru_path}` ↔ `{run.plan.pair.en_path}`: {reason}\n"
+            )
+        body += (
+            "\n| | |\n"
+            "|---|---|\n"
+            f"| Translation PR | {translation_pr_cell} |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            f"{cost_line}"
+            f"{yellow_section()}"
+        )
+        return body
 
     if total == 0 and bilingual_skip and translation_pr_number is None:
         pairs_label = (

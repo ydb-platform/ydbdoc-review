@@ -72,6 +72,7 @@ from ydbdoc_review.harness.pr_profiles import VERIFY_PR_PROFILE
 from ydbdoc_review.harness.pr_runner import PRHarness
 from ydbdoc_review.harness.pr_state import PRRunState
 from ydbdoc_review.llm.client import YandexLLMClient, create_llm_client
+from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.navigation.dependency_budget import MarkdownDependencyBudget
 from ydbdoc_review.navigation.redirects import (
     follow_redirect_repo_md_path,
@@ -121,6 +122,9 @@ from ydbdoc_review.pipeline.analyze import (
     BILINGUAL_SKIP_SUMMARY,
     PairContent,
     PairPlan,
+    analyze_payload_is_complete,
+    plan_from_analyze,
+    run_analyze_batch,
 )
 from ydbdoc_review.pipeline.completeness import (
     bilingual_en_mirrors,
@@ -180,6 +184,7 @@ from ydbdoc_review.translation.coverage import (
 from ydbdoc_review.translation.critic import run_critic as run_coverage_critic
 from ydbdoc_review.translation.glossary import Glossary, load_glossary
 from ydbdoc_review.translation.prompts import load_template
+from ydbdoc_review.translation.schemas import AnalyzePairResult
 from ydbdoc_review.validation.en_link_targets import (
     _mask_yfm_include_directives,
     apply_en_link_target_checks,
@@ -257,6 +262,8 @@ class DocJobResult:
     committed: bool = False
     pushed: bool = False
     dry_run: bool = False
+    # Analyze proved every complete RU/EN pair aligned, so publication is unnecessary.
+    analyzed_noop: bool = False
     # Ops deny, continue refused, or other hard stop (§2 / §11).
     blocked: bool = False
 
@@ -286,6 +293,7 @@ def _finish_nonpublishing_translate_job(
     ops_ctx: OpsContext | None,
     *,
     translation_pr: int | None = None,
+    report_text: str | None = None,
 ) -> None:
     """Finalize paid-work accounting before a non-publishing early return."""
     if ops_ctx is None:
@@ -298,7 +306,65 @@ def _finish_nonpublishing_translate_job(
         input_tokens=sum((r.input_tokens or 0) for r in usage.records if r.success),
         output_tokens=sum((r.output_tokens or 0) for r in usage.records if r.success),
         translation_pr=translation_pr,
+        report_text=report_text,
     )
+
+
+def _analyzed_noop_result(
+    contents: list[PairContent],
+    client: YandexLLMClient,
+    glossary: Glossary,
+    *,
+    prompt_version: str,
+) -> PRTranslationResult | None:
+    """Return a no-op result only when Analyze proves every exact pair aligned."""
+    if any(
+        content.pair.ru_deleted
+        or content.pair.en_deleted
+        or not (content.ru_text and content.ru_text.strip())
+        or not (content.en_text and content.en_text.strip())
+        for content in contents
+    ):
+        return None
+    try:
+        analyzed = run_analyze_batch(
+            client,
+            contents,
+            glossary,
+            prompt_version=prompt_version,
+        )
+    except (LLMError, TypeError, ValueError) as exc:
+        logger.warning("Analyze no-op gate unavailable; continue full translation: %s", exc)
+        return None
+
+    by_key: dict[tuple[str, str], AnalyzePairResult] = {}
+    for result in analyzed.results:
+        key = (result.ru_path, result.en_path)
+        if key in by_key:
+            logger.warning("Analyze no-op gate returned duplicate pair %s", key)
+            return None
+        by_key[key] = result
+
+    expected = {(content.pair.ru_path, content.pair.en_path) for content in contents}
+    if set(by_key) != expected:
+        logger.warning(
+            "Analyze no-op gate pair mismatch: expected=%s actual=%s",
+            sorted(expected),
+            sorted(by_key),
+        )
+        return None
+
+    runs: list[PairRunResult] = []
+    for content in contents:
+        key = (content.pair.ru_path, content.pair.en_path)
+        result = by_key[key]
+        if not result.summary.strip():
+            return None
+        plan = plan_from_analyze(content, result)
+        if plan.action != "critic_only":
+            return None
+        runs.append(PairRunResult(plan=plan, skipped=True))
+    return PRTranslationResult(pair_results=runs)
 
 
 @dataclass(frozen=True)
@@ -2001,6 +2067,8 @@ def _allowed_success_without_translation_pr(job: DocJobResult) -> bool:
     """Bilingual no-op / empty scope: publish was not required (§11 / P7)."""
     if job.blocked or _pr_result_has_blockers(job.pr_result):
         return False
+    if job.analyzed_noop:
+        return True
     pairs = job.pr_result.pair_results
     nav = job.pr_result.navigation_results
     if not pairs and not nav:
@@ -2748,22 +2816,6 @@ def run_doc_translate(
             finish_ops_job(ops_ctx, status="ok", cost_rub=0.0)
         return job
 
-    if (
-        ops_mode == "translate"
-        and bool(os.environ.get("GITHUB_EVENT_ID") or os.environ.get("GITHUB_SHA"))
-        and not dry_run
-        and not no_commit
-    ):
-        _restart_owned_translation_pr(
-            gh,
-            owner,
-            repo,
-            source_pr=pr_number,
-            branch=f"{cfg.paths.translation_branch_prefix}{pr_number}",
-            base=translation_pr_base(ctx),
-            explicit=True,
-        )
-
     client = create_llm_client(cfg)
     if ops_ctx is not None:
         client.transcript_recorder = ops_ctx.recorder
@@ -2874,31 +2926,81 @@ def run_doc_translate(
                 raise TranslationCheckpointError(
                     "units-mode translation requires a durable coverage evidence store"
                 )
-            # Always run real translation for doc_translate, including merged
-            # source PRs. Routing merged PRs through critic-only verify planning
-            # skipped any pair missing RU or EN text — so new RU pages never got
-            # EN mirrors and deleted RU pages never removed EN (#45949 / #51696).
-            # Historical EN preservation stays in differential translate +
-            # localized mirror delta with merge_commit^ as RU base (§6.210).
-            pr_result = run_pr_translation(
-                contents,
-                client,
-                glossary,
-                use_analyze_llm=False,
-                config=cfg,
-                en_toc_reachable=en_toc_reachable,
-                redirect_source_en_paths=redirect_source_en,
-                docs_text_reader=_docs_text_reader(
-                    repo_path,
-                    merge_base_with,
-                    authority=authority,
-                    docs_root=docs_root,
-                ),
-                docs_repo_path=repo_path,
-                checkpoint=active_checkpoint,
-                resume_parent_run_id=resume_parent_run_id,
-            )
+            analyzed_noop = None
+            if (
+                isinstance(ops_ctx, OpsContext)
+                and bool(ctx.head_sha)
+                and bool(ctx.base_sha)
+                and ctx.head_sha != ctx.base_sha
+                and not nav_pairs
+                and not scope_plan.link_dep_warnings
+                and all(path.endswith(".md") for path in source_api_paths)
+                and all(analyze_payload_is_complete(content) for content in contents)
+            ):
+                analyzed_noop = _analyzed_noop_result(
+                    contents,
+                    client,
+                    glossary,
+                    prompt_version=cfg.prompts.version,
+                )
+
+            if analyzed_noop is not None:
+                pr_result = analyzed_noop
+            else:
+                if (
+                    ops_mode == "translate"
+                    and bool(
+                        os.environ.get("GITHUB_EVENT_ID") or os.environ.get("GITHUB_SHA")
+                    )
+                    and not dry_run
+                    and not no_commit
+                ):
+                    _restart_owned_translation_pr(
+                        gh,
+                        owner,
+                        repo,
+                        source_pr=pr_number,
+                        branch=f"{cfg.paths.translation_branch_prefix}{pr_number}",
+                        base=translation_pr_base(ctx),
+                        explicit=True,
+                    )
+                # Analyze is only an all-pairs no-op gate. Any non-aligned,
+                # missing, malformed, or unsupported result keeps the existing
+                # deterministic full-render path (#45949 / #51696).
+                pr_result = run_pr_translation(
+                    contents,
+                    client,
+                    glossary,
+                    use_analyze_llm=False,
+                    config=cfg,
+                    en_toc_reachable=en_toc_reachable,
+                    redirect_source_en_paths=redirect_source_en,
+                    docs_text_reader=_docs_text_reader(
+                        repo_path,
+                        merge_base_with,
+                        authority=authority,
+                        docs_root=docs_root,
+                    ),
+                    docs_repo_path=repo_path,
+                    checkpoint=active_checkpoint,
+                    resume_parent_run_id=resume_parent_run_id,
+                )
         else:
+            if (
+                ops_mode == "translate"
+                and bool(os.environ.get("GITHUB_EVENT_ID") or os.environ.get("GITHUB_SHA"))
+                and not dry_run
+                and not no_commit
+            ):
+                _restart_owned_translation_pr(
+                    gh,
+                    owner,
+                    repo,
+                    source_pr=pr_number,
+                    branch=f"{cfg.paths.translation_branch_prefix}{pr_number}",
+                    base=translation_pr_base(ctx),
+                    explicit=True,
+                )
             pr_result = PRTranslationResult()
 
         _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
@@ -2917,6 +3019,71 @@ def run_doc_translate(
                 authority=authority,
                 active_doc_ru_paths=frozenset(p.ru_path for p in pairs),
             )
+
+    analyzed_noop = bool(pr_result.pair_results) and all(
+        run.skipped and run.plan.action == "critic_only"
+        for run in pr_result.pair_results
+    )
+    if analyzed_noop:
+        job.pr_result = pr_result
+        job.analyzed_noop = True
+        if active_checkpoint is not None:
+            _finish_translation_checkpoint(active_checkpoint, pr_result, scope_plan)
+        if not dry_run and not no_commit:
+            _persist_continuability(
+                repo_path,
+                source_pr=pr_number,
+                fixed_shas=fixed_shas,
+                translation_pr=None,
+                unfinished=False,
+                ops_ctx=ops_ctx,
+            )
+        existing_continue_pr = (
+            getattr(ops_ctx, "translation_pr", None)
+            if ops_mode == "continue" and ops_ctx is not None
+            else None
+        )
+        job.translation_pr_number = existing_continue_pr
+        elapsed = time.monotonic() - started
+        comment = build_source_pr_comment(
+            pr_result,
+            translation_pr_number=existing_continue_pr,
+            meta=ReportMeta(
+                mode="doc_translate",
+                report_number=1,
+                elapsed_s=elapsed,
+            ),
+            config=cfg,
+            usage=client.usage_tracker,
+            committed=False,
+        )
+        if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
+            body = append_retention_footer(comment)
+            job.source_comment_url = _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                body,
+                label="source PR analyzed no-op",
+            )
+            if existing_continue_pr is not None:
+                job.translation_comment_url = _safe_post_issue_comment(
+                    gh,
+                    owner,
+                    repo,
+                    existing_continue_pr,
+                    body,
+                    label="continue PR analyzed no-op",
+                )
+        _finish_nonpublishing_translate_job(
+            job,
+            client,
+            ops_ctx,
+            translation_pr=existing_continue_pr,
+            report_text=comment,
+        )
+        return job
 
     _materialize_soft_keep_blockers(
         pr_result,

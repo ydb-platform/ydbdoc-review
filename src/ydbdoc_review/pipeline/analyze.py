@@ -31,6 +31,7 @@ BILINGUAL_SKIP_SUMMARY = (
 )
 
 _ANALYZE_TEXT_LIMIT = 8000
+_ANALYZE_DIFF_LIMIT = 4000
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,19 @@ def _truncate(text: str | None, limit: int = _ANALYZE_TEXT_LIMIT) -> str | None:
     return text[:limit] + "\n… [truncated]"
 
 
+def analyze_payload_is_complete(content: PairContent) -> bool:
+    """Return whether Analyze will receive every character of this pair."""
+    return all(
+        text is None or len(text) <= limit
+        for text, limit in (
+            (content.ru_text, _ANALYZE_TEXT_LIMIT),
+            (content.en_text, _ANALYZE_TEXT_LIMIT),
+            (content.ru_diff_vs_base, _ANALYZE_DIFF_LIMIT),
+            (content.en_diff_vs_base, _ANALYZE_DIFF_LIMIT),
+        )
+    )
+
+
 def _pair_to_analyze_payload(content: PairContent) -> dict[str, object]:
     pair = content.pair
     return {
@@ -217,8 +231,8 @@ def _pair_to_analyze_payload(content: PairContent) -> dict[str, object]:
         "en_path": pair.en_path,
         "ru_text": _truncate(content.ru_text),
         "en_text": _truncate(content.en_text),
-        "ru_diff_vs_base": _truncate(content.ru_diff_vs_base, 4000),
-        "en_diff_vs_base": _truncate(content.en_diff_vs_base, 4000),
+        "ru_diff_vs_base": _truncate(content.ru_diff_vs_base, _ANALYZE_DIFF_LIMIT),
+        "en_diff_vs_base": _truncate(content.en_diff_vs_base, _ANALYZE_DIFF_LIMIT),
     }
 
 
