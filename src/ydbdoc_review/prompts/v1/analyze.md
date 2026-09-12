@@ -6,7 +6,7 @@ You review YDB documentation translation pairs before automatic translation runs
 {pairs_json}
 ```
 
-Each pair has `ru_path`, `en_path`, and optionally truncated `ru_text`, `en_text`, `ru_diff_vs_base`, `en_diff_vs_base`. Prefer diff snippets when present.
+Each pair has `ru_path`, `en_path`, an explicit `source_lang`/`target_lang` direction, and the complete `ru_text`, `en_text`, `ru_diff_vs_base`, and `en_diff_vs_base` values when available. Compare the complete source and target bodies. Use diffs only as merge-base evidence, never as a substitute for either full body.
 
 ## Task
 

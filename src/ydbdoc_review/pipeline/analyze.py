@@ -30,9 +30,6 @@ BILINGUAL_SKIP_SUMMARY = (
     f"skip auto-translate ({BILINGUAL_SKIP_MARKER})"
 )
 
-_ANALYZE_TEXT_LIMIT = 8000
-_ANALYZE_DIFF_LIMIT = 4000
-
 
 @dataclass(frozen=True)
 class PairContent:
@@ -203,25 +200,16 @@ def plan_pair_heuristic(content: PairContent) -> PairPlan:
     )
 
 
-def _truncate(text: str | None, limit: int = _ANALYZE_TEXT_LIMIT) -> str | None:
-    if text is None:
-        return None
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "\n… [truncated]"
-
-
 def analyze_payload_is_complete(content: PairContent) -> bool:
-    """Return whether Analyze will receive every character of this pair."""
-    return all(
-        text is None or len(text) <= limit
-        for text, limit in (
-            (content.ru_text, _ANALYZE_TEXT_LIMIT),
-            (content.en_text, _ANALYZE_TEXT_LIMIT),
-            (content.ru_diff_vs_base, _ANALYZE_DIFF_LIMIT),
-            (content.en_diff_vs_base, _ANALYZE_DIFF_LIMIT),
-        )
-    )
+    """Return whether Analyze will receive every character of this pair.
+
+    Analyze receives the complete pair payload.  Keep this predicate as the
+    workflow seam so callers can express the no-op gate without reintroducing
+    a length-based shortcut that hides technical differences at the end of a
+    document.
+    """
+    del content
+    return True
 
 
 def _pair_to_analyze_payload(content: PairContent) -> dict[str, object]:
@@ -229,10 +217,12 @@ def _pair_to_analyze_payload(content: PairContent) -> dict[str, object]:
     return {
         "ru_path": pair.ru_path,
         "en_path": pair.en_path,
-        "ru_text": _truncate(content.ru_text),
-        "en_text": _truncate(content.en_text),
-        "ru_diff_vs_base": _truncate(content.ru_diff_vs_base, _ANALYZE_DIFF_LIMIT),
-        "en_diff_vs_base": _truncate(content.en_diff_vs_base, _ANALYZE_DIFF_LIMIT),
+        "source_lang": "ru" if pair.ru_changed or not pair.en_changed else "en",
+        "target_lang": "en" if pair.ru_changed or not pair.en_changed else "ru",
+        "ru_text": content.ru_text,
+        "en_text": content.en_text,
+        "ru_diff_vs_base": content.ru_diff_vs_base,
+        "en_diff_vs_base": content.en_diff_vs_base,
     }
 
 
