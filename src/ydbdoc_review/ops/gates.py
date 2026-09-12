@@ -119,6 +119,8 @@ def retention_notice(
         "после этого continue недоступен._\n\n"
         f"Контекст: continue использовано **{used}/{continue_limit}**, "
         f"осталось: **{remaining}**; способ запуска: **`{launch_mode}`**.\n\n"
+        "Сохранность истории подтверждена только после успешного сохранения; "
+        "при сбое хранилища continue недоступен до восстановления доступа.\n\n"  # noqa: RUF001
     )
     if completeness_only:
         return (
