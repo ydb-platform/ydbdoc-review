@@ -30,6 +30,7 @@ def test_F014_read_failure() -> None:
 
     assert ctx is None
     assert not gate.ok
+    assert gate.reason == "budget accounting unavailable"
     assert gate.status == "denied_accounting"
     assert "учёт дневного бюджета недоступен" in (comment or "")
     assert "исчерпан" not in (comment or "")
