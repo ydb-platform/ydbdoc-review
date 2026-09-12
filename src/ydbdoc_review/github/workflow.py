@@ -5018,6 +5018,14 @@ def run_doc_continue(
     )
     source_pr = translation_source_pr or verify_fixup_source_pr
     source_pr_num = source_pr or pr_number
+    lower_feedback = feedback.casefold()
+
+    _feedback_targets_contract = (
+        "qa" in lower_feedback
+        or "toc" in lower_feedback
+        or "redirect" in lower_feedback
+    )
+
     continue_artifact_pr = (
         pr_number
         if translation_source_pr is not None or verify_fixup_source_pr is not None
@@ -5056,11 +5064,39 @@ def run_doc_continue(
         ops_store=getattr(ops_ctx, "store", None),
         parent_run_id=getattr(ops_ctx, "parent_run_id", None),
     )
+    if continuability is None and not _feedback_targets_contract:
+        body = (
+            "⛔ **ydbdoc-review:** `doc_continue` отклонён: для исходного "
+            f"PR #{source_pr_num} нет сохранённого незавершённого этапа после "
+            "фиксации SHA. Запустите новый `doc_translate`."
+        )
+        if _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit):
+            _safe_post_issue_comment(
+                gh,
+                owner,
+                repo,
+                pr_number,
+                body,
+                label="continue denied",
+            )
+            if ops_ctx is not None:
+                finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
+        return DocJobResult(
+            mode="doc_continue",
+            pr_number=pr_number,
+            source_pr_number=source_pr,
+            translation_pr_number=continue_artifact_pr,
+            dry_run=dry_run,
+            blocked=True,
+        )
+
     if (
-        continuability is None
-        or not continuability.allows_continue()
-        or continuability.source_pr != source_pr_num
-        or continuability.translation_pr != continue_artifact_pr
+        continuability is not None
+        and (
+            not continuability.allows_continue()
+            or continuability.source_pr != source_pr_num
+            or continuability.translation_pr != continue_artifact_pr
+        )
     ):
         body = (
             "⛔ **ydbdoc-review:** `doc_continue` отклонён: для исходного "
