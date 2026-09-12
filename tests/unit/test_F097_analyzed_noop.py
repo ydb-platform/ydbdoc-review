@@ -1,109 +1,474 @@
-"""F-097: analyzed no-op boundaries remain side-effect free."""
+"""F-097: Analyze-proven no-op exits at the workflow boundary."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-import pytest
+import json
+import subprocess
+from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.github.workflow import _pr_result_for_bilingual_skips
-from ydbdoc_review.pipeline.analyze import PairContent, plan_from_analyze, plan_pairs
+from ydbdoc_review.github.workflow import (
+    job_requires_nonzero_exit,
+    run_doc_continue,
+    run_doc_translate,
+)
+from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.gates import GateResult
+from ydbdoc_review.ops.job_state import mark_continuable
+from ydbdoc_review.ops.lifecycle import OpsContext
+from ydbdoc_review.ops.recorder import LlmTranscriptRecorder
+from ydbdoc_review.ops.runs import InMemoryRunsLedger
+from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
+from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.pairs import DocPair
-from ydbdoc_review.pipeline.types import PairRunResult
-from ydbdoc_review.reporting.builder import ReportMeta, build_source_pr_comment
-from ydbdoc_review.translation.schemas import AnalyzePairResult
+from ydbdoc_review.pipeline.translation_preflight import PreflightResult
+from ydbdoc_review.pipeline.types import PRTranslationResult
+
+SOURCE_PR = 7
+CONTINUE_PR = 99
+RU_PATH = "ydb/docs/ru/a.md"
+EN_PATH = "ydb/docs/en/a.md"
+ALIGNMENT_REASON = "Formatting changed; the RU and EN meaning is already aligned."
 
 
-def _content() -> PairContent:
-    pair = DocPair(
-        ru_path="ydb/docs/ru/a.md",
-        en_path="ydb/docs/en/a.md",
-        ru_changed=True,
-        en_changed=True,
+def _config():
+    return load_config(
+        env={
+            "YDBDOC_MODEL_PROVIDER": "yandex_cloud",
+            "YDBDOC_YC_FOLDER_ID": "folder",
+            "YDBDOC_YC_API_KEY": "key",
+            "GITHUB_TOKEN": "token",
+            "GITHUB_PUSH_TOKEN": "push-token",
+        }
     )
-    return PairContent(pair=pair, ru_text="RU\n", en_text="EN\n")
 
 
-def test_F097_early_exit() -> None:
-    """An aligned Analyze result is represented without translation artifacts."""
-    analyzed = AnalyzePairResult(
-        ru_path="ydb/docs/ru/a.md",
-        en_path="ydb/docs/en/a.md",
-        ru_present=True,
-        en_present=True,
-        semantically_aligned=True,
-        needs_generation_for=None,
-        summary="RU and EN are already aligned",
+def _analyze_response(*, aligned: bool = True) -> str:
+    return json.dumps(
+        {
+            "results": [
+                {
+                    "ru_path": RU_PATH,
+                    "en_path": EN_PATH,
+                    "ru_present": aligned,
+                    "en_present": True,
+                    "semantically_aligned": aligned,
+                    "needs_generation_for": None,
+                    "summary": ALIGNMENT_REASON if aligned else "RU source is absent",
+                }
+            ]
+        }
     )
-    plan = plan_from_analyze(_content(), analyzed)
-    result = _pr_result_for_bilingual_skips({plan.target_path}, docs_root="ydb/docs")
-    result.pair_results = [PairRunResult(plan=plan, skipped=True)]
 
-    translator = MagicMock()
-    heavy_qa = MagicMock()
-    assert plan.action == "critic_only"
-    assert result.translated_count == 0
-    assert result.navigation_results == []
-    assert result.publication_failure is None
+
+def _client(response: str) -> YandexLLMClient:
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=response))],
+        usage=SimpleNamespace(prompt_tokens=17, completion_tokens=9),
+    )
+    openai = MagicMock()
+    openai.chat.completions.create.return_value = completion
+    cfg = _config()
+    return YandexLLMClient(
+        folder_id="folder",
+        api_key="key",
+        llm=cfg.llm,
+        client=openai,
+    )
+
+
+def _repo(tmp_path: Path) -> tuple[str, str, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=repo, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+    (repo / RU_PATH).parent.mkdir(parents=True)
+    (repo / EN_PATH).parent.mkdir(parents=True)
+    (repo / RU_PATH).write_text("Привет.\n", encoding="utf-8")
+    (repo / EN_PATH).write_text("Hello.\n", encoding="utf-8")
+    (repo / "ydb/docs/en/toc_p.yaml").write_text(
+        "items:\n- name: A\n  href: a.md\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True
+    )
+    base_sha = _git(repo, "rev-parse", "HEAD")
+    (repo / RU_PATH).write_text("Привет.  \n", encoding="utf-8")
+    subprocess.run(["git", "add", RU_PATH], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "format source"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return str(repo), base_sha, _git(repo, "rev-parse", "HEAD")
+
+
+def _git(repo: Path | str, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+def _source_pull(base_sha: str, head_sha: str) -> dict[str, object]:
+    return {
+        "title": "docs: formatting only",
+        "body": "",
+        "state": "open",
+        "merged": False,
+        "head": {
+            "ref": "feature/docs",
+            "sha": head_sha,
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
+            },
+        },
+        "base": {"ref": "main", "sha": base_sha},
+    }
+
+
+def _continue_pull(head_sha: str) -> dict[str, object]:
+    return {
+        "title": f"Auto-translate docs from PR #{SOURCE_PR}",
+        "body": "",
+        "state": "open",
+        "merged": False,
+        "head": {
+            "ref": f"ydbdoc-review/pr-{SOURCE_PR}",
+            "sha": head_sha,
+            "repo": {
+                "clone_url": "https://github.com/o/r.git",
+                "full_name": "o/r",
+            },
+        },
+        "base": {"ref": "main", "sha": head_sha},
+    }
+
+
+def _ops_context(*, mode: str, translation_pr: int | None = None) -> OpsContext:
+    return OpsContext(
+        actor="test-actor",
+        run_id=f"f097-{mode}",
+        run_day="2026-09-12",
+        mode=mode,
+        repo="o/r",
+        source_pr=SOURCE_PR,
+        ledger=InMemoryRunsLedger(),
+        store=InMemoryTranscriptStore(),
+        recorder=LlmTranscriptRecorder(),
+        budget_rub=5000.0,
+        parent_run_id="parent-run" if mode == "continue" else None,
+        continue_index=1 if mode == "continue" else 0,
+        translation_pr=translation_pr,
+        continue_feedback="Keep the agreed terminology" if mode == "continue" else None,
+    )
+
+
+def _workflow_patches(
+    stack: ExitStack,
+    *,
+    github: MagicMock,
+    client: YandexLLMClient,
+    api_changes: list[tuple[str, str]] | None = None,
+) -> tuple[MagicMock, MagicMock, MagicMock, MagicMock, MagicMock]:
+    stack.enter_context(
+        patch("ydbdoc_review.github.workflow.GitHubClient", return_value=github)
+    )
+    stack.enter_context(
+        patch("ydbdoc_review.github.workflow.create_llm_client", return_value=client)
+    )
+    stack.enter_context(
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            return_value=api_changes or [(RU_PATH, "modified")],
+        )
+    )
+    stack.enter_context(
+        patch(
+            "ydbdoc_review.github.workflow.preflight_translation",
+            return_value=PreflightResult(blockers=(), deferred_checks=()),
+        )
+    )
+    translator = MagicMock(name="translator")
+    heavy_qa = MagicMock(name="heavy_qa")
+
+    def heavy_pipeline(*_args, **_kwargs) -> PRTranslationResult:
+        translator()
+        heavy_qa()
+        return PRTranslationResult()
+
+    stack.enter_context(
+        patch("ydbdoc_review.github.workflow.run_pr_translation", side_effect=heavy_pipeline)
+    )
+    prepare = stack.enter_context(
+        patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base")
+    )
+    commit = stack.enter_context(
+        patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True)
+    )
+    push = stack.enter_context(patch("ydbdoc_review.github.workflow.push_branch"))
+    return translator, heavy_qa, prepare, commit, push
+
+
+def test_F097_early_exit(tmp_path: Path) -> None:
+    """Analyze-proven alignment preserves evidence without translation artifacts."""
+    repo, base_sha, head_sha = _repo(tmp_path)
+    client = _client(_analyze_response())
+    ops = _ops_context(mode="translate")
+    github = MagicMock()
+    github.get_pull.return_value = _source_pull(base_sha, head_sha)
+    github.get_branch_sha.return_value = None
+    github.post_issue_comment.return_value = "source-comment"
+    before = (head_sha, _git(repo, "branch", "--format=%(refname:short)"))
+
+    with ExitStack() as stack:
+        translator, heavy_qa, prepare, commit, push = _workflow_patches(
+            stack, github=github, client=client
+        )
+        job = run_doc_translate(
+            repo_path=repo,
+            github_repo="o/r",
+            pr_number=SOURCE_PR,
+            merge_base_with=base_sha,
+            config=_config(),
+            _ops_ctx=ops,
+        )
+
+    assert [record.role for record in client.usage_tracker.records] == ["analyze"]
     translator.assert_not_called()
     heavy_qa.assert_not_called()
-
-
-def test_F097_comments_scope() -> None:
-    """Only an explicit aligned pair gets the no-translation source comment."""
-    aligned = AnalyzePairResult(
-        ru_path="ydb/docs/ru/a.md",
-        en_path="ydb/docs/en/a.md",
-        ru_present=True,
-        en_present=True,
-        semantically_aligned=True,
-        needs_generation_for=None,
-        summary="aligned",
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    github.create_pull.assert_not_called()
+    assert job.translation_pr_number is None
+    assert job.committed is False
+    assert job.pushed is False
+    assert job_requires_nonzero_exit(job) is False
+    assert before == (
+        _git(repo, "rev-parse", "HEAD"),
+        _git(repo, "branch", "--format=%(refname:short)"),
     )
-    unsupported = AnalyzePairResult(
-        ru_path="ydb/docs/ru/b.md",
-        en_path="ydb/docs/en/b.md",
-        ru_present=False,
-        en_present=True,
-        semantically_aligned=False,
-        needs_generation_for=None,
-        summary="unsupported pair",
-    )
-    aligned_plan = plan_from_analyze(_content(), aligned)
-    unsupported_content = PairContent(
-        pair=DocPair(
-            ru_path="ydb/docs/ru/b.md",
-            en_path="ydb/docs/en/b.md",
-            ru_changed=True,
-            en_changed=True,
-        ),
-        ru_text=None,
-        en_text="EN\n",
-    )
-    unsupported_plan = plan_from_analyze(unsupported_content, unsupported)
+    assert Path(repo, ".ydbdoc-state", f"pr-{SOURCE_PR}.json").is_file()
 
-    assert aligned_plan.action == "critic_only"
-    assert unsupported_plan.action == "skip"
-    assert "unsupported" not in aligned_plan.summary.lower()
-    assert "unsupported" in unsupported_plan.summary.lower()
-
-    result = _pr_result_for_bilingual_skips(
-        {aligned_plan.target_path}, docs_root="ydb/docs"
-    )
-    comment = build_source_pr_comment(
-        result,
-        translation_pr_number=None,
-        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=0.0),
-        config=load_config(env={"YDBDOC_MODEL_PROVIDER": "yandex_cloud"}),
-        committed=False,
-    )
-    assert "перевод не требуется" in comment
-    assert aligned_plan.target_path not in comment
-    assert unsupported_plan.target_path not in comment
+    assert len(ops.ledger.records) == 1
+    run = ops.ledger.records[0]
+    assert run.status == "ok"
+    assert run.input_tokens == 17
+    assert run.output_tokens == 9
+    assert run.cost_rub > 0
+    assert {
+        "job/continuability.json",
+        "llm/001-analyze-req.json",
+        "llm/001-analyze-resp.json",
+        "manifest.json",
+        "report.md",
+    } <= set(ops.store.list_keys(ops.run_id))
+    response = ops.store.get(ops.run_id, "llm/001-analyze-resp.json")
+    assert response is not None
+    assert ALIGNMENT_REASON in response.decode()
 
 
-def test_F097_supported_workflow_does_not_enable_deprecated_analyze_path() -> None:
-    """The supported planner cannot silently route unsupported pairs as aligned."""
-    with pytest.raises(ValueError, match="use_analyze_llm"):
-        plan_pairs([_content()], use_analyze_llm=True)
+def test_F097_comments_scope(tmp_path: Path) -> None:
+    """Continue publishes each Analyze reason to source and existing artifact PR."""
+    repo, base_sha, head_sha = _repo(tmp_path)
+    client = _client(_analyze_response())
+    ops = _ops_context(mode="continue", translation_pr=CONTINUE_PR)
+    mark_continuable(
+        repo,
+        source_pr=SOURCE_PR,
+        unfinished_stage="verify",
+        fixed_shas={"merge_base": base_sha, "head": head_sha},
+        translation_pr=CONTINUE_PR,
+    )
+    github = MagicMock()
+    github.get_pull.side_effect = lambda _owner, _repo, number: (
+        _source_pull(base_sha, head_sha)
+        if number == SOURCE_PR
+        else _continue_pull(head_sha)
+    )
+    github.get_branch_sha.return_value = None
+    github.post_issue_comment.side_effect = lambda _o, _r, number, _body: (
+        f"comment-{number}"
+    )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.begin_ops_job",
+                return_value=(ops, GateResult(ok=True), None),
+            )
+        )
+        translator, heavy_qa, prepare, commit, push = _workflow_patches(
+            stack, github=github, client=client
+        )
+        job = run_doc_continue(
+            repo_path=repo,
+            github_repo="o/r",
+            pr_number=CONTINUE_PR,
+            merge_base_with=base_sha,
+            config=_config(),
+            instruction="Keep the agreed terminology",
+        )
+
+    translator.assert_not_called()
+    heavy_qa.assert_not_called()
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    assert job.translation_pr_number == CONTINUE_PR
+    assert job.source_comment_url == f"comment-{SOURCE_PR}"
+    assert job.translation_comment_url == f"comment-{CONTINUE_PR}"
+    comments = github.post_issue_comment.call_args_list
+    assert [call.args[2] for call in comments] == [SOURCE_PR, CONTINUE_PR]
+    for call in comments:
+        body = call.args[3]
+        assert "перевод не требуется" in body
+        assert RU_PATH in body
+        assert EN_PATH in body
+        assert ALIGNMENT_REASON in body
+        assert "unsupported" not in body.lower()
+
+    request = ops.store.get(ops.run_id, "llm/001-analyze-req.json")
+    assert request is not None
+    assert "Keep the agreed terminology" in request.decode()
+
+
+def test_F097_unsupported_pair_cannot_publish_aligned_noop(tmp_path: Path) -> None:
+    """Missing supported content falls through to translation, never aligned no-op."""
+    repo, base_sha, head_sha = _repo(tmp_path)
+    client = _client(_analyze_response(aligned=False))
+    ops = _ops_context(mode="translate")
+    github = MagicMock()
+    github.get_pull.return_value = _source_pull(base_sha, head_sha)
+    github.get_branch_sha.return_value = None
+
+    with ExitStack() as stack:
+        translator, heavy_qa, _prepare, _commit, _push = _workflow_patches(
+            stack, github=github, client=client
+        )
+        run_doc_translate(
+            repo_path=repo,
+            github_repo="o/r",
+            pr_number=SOURCE_PR,
+            merge_base_with=base_sha,
+            no_commit=True,
+            config=_config(),
+            _ops_ctx=ops,
+        )
+
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()
+    github.post_issue_comment.assert_not_called()
+
+
+def test_F097_truncated_evidence_cannot_publish_aligned_noop(tmp_path: Path) -> None:
+    """Analyze cannot authorize no-op when any submitted evidence is truncated."""
+    repo, base_sha, _head_sha = _repo(tmp_path)
+    long_prefix = "X" * 8_100
+    Path(repo, RU_PATH).write_text(f"{long_prefix} RU differs\n", encoding="utf-8")
+    subprocess.run(["git", "-C", repo, "add", RU_PATH], check=True)
+    subprocess.run(
+        ["git", "-C", repo, "commit", "-m", "long source"],
+        check=True,
+        capture_output=True,
+    )
+    head_sha = _git(repo, "rev-parse", "HEAD")
+    client = _client(_analyze_response())
+    ops = _ops_context(mode="translate")
+    github = MagicMock()
+    github.get_pull.return_value = _source_pull(base_sha, head_sha)
+    github.get_branch_sha.return_value = None
+
+    with ExitStack() as stack:
+        translator, heavy_qa, _prepare, _commit, _push = _workflow_patches(
+            stack, github=github, client=client
+        )
+        run_doc_translate(
+            repo_path=repo,
+            github_repo="o/r",
+            pr_number=SOURCE_PR,
+            merge_base_with=base_sha,
+            no_commit=True,
+            config=_config(),
+            _ops_ctx=ops,
+        )
+
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()
+    assert client.usage_tracker.records == []
+
+
+def test_F097_mixed_source_range_cannot_publish_aligned_noop(tmp_path: Path) -> None:
+    """Skipped non-Markdown source files make the Analyze no-op proof incomplete."""
+    repo, base_sha, head_sha = _repo(tmp_path)
+    client = _client(_analyze_response())
+    ops = _ops_context(mode="translate")
+    github = MagicMock()
+    github.get_pull.return_value = _source_pull(base_sha, head_sha)
+    github.get_branch_sha.return_value = None
+
+    with ExitStack() as stack:
+        translator, heavy_qa, _prepare, _commit, _push = _workflow_patches(
+            stack,
+            github=github,
+            client=client,
+            api_changes=[(RU_PATH, "modified"), ("public/materials/logo.svg", "modified")],
+        )
+        run_doc_translate(
+            repo_path=repo,
+            github_repo="o/r",
+            pr_number=SOURCE_PR,
+            merge_base_with=base_sha,
+            no_commit=True,
+            config=_config(),
+            _ops_ctx=ops,
+        )
+
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()
+    assert client.usage_tracker.records == []
+
+
+def test_F097_model_cannot_claim_missing_pair_is_aligned(tmp_path: Path) -> None:
+    """Contradictory Analyze claims cannot conceal an absent translation body."""
+    repo, base_sha, head_sha = _repo(tmp_path)
+    client = _client(_analyze_response())
+    ops = _ops_context(mode="translate")
+    github = MagicMock()
+    github.get_pull.return_value = _source_pull(base_sha, head_sha)
+    github.get_branch_sha.return_value = None
+    missing_en = PairContent(
+        pair=DocPair(ru_path=RU_PATH, en_path=EN_PATH, ru_changed=True),
+        ru_text="Привет.\n",
+        en_text=None,
+    )
+
+    with ExitStack() as stack:
+        translator, heavy_qa, _prepare, _commit, _push = _workflow_patches(
+            stack, github=github, client=client
+        )
+        stack.enter_context(
+            patch(
+                "ydbdoc_review.github.workflow.load_pair_contents",
+                return_value=[missing_en],
+            )
+        )
+        run_doc_translate(
+            repo_path=repo,
+            github_repo="o/r",
+            pr_number=SOURCE_PR,
+            merge_base_with=base_sha,
+            no_commit=True,
+            config=_config(),
+            _ops_ctx=ops,
+        )
+
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()

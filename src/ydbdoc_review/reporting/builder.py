@@ -664,7 +664,7 @@ def _file_reviewer_section(
             index=item_index,
             location="сегменты RU/EN",
             problem=(
-                f"(alignment) EN не совпадает со структурой RU: "  # noqa: RUF001
+                f"(alignment) EN не совпадает со структурой RU: "
                 f"{fr.segment_alignment_error}"
             ),
             severity="blocked",
@@ -1033,7 +1033,7 @@ def build_verify_fixup_source_comment(
     Full QA report lives on the fixup PR (§6.146); this comment is a short pointer.
     """
     if translation_pr:
-        how = "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."  # noqa: RUF001
+        how = "Замёрджите его в ветку перевода или cherry-pick'ните коммиты."
     else:
         how = (
             "Это **не** translation PR: замёрджите fixup-PR "
@@ -1113,6 +1113,50 @@ def build_source_pr_comment(
     published_red = result.publication_impact == PublicationImpact.PUBLISH_RED or (
         verify_result is not None and result_has_blocking_findings(verify_result)
     )
+    analyzed_noop = bool(result.pair_results) and all(
+        run.skipped and run.plan.action == "critic_only"
+        for run in result.pair_results
+    )
+
+    if analyzed_noop:
+        cost_line = ""
+        if config.reporting.include_cost:
+            cost_label = _format_cost_estimate(
+                usage=usage,
+                file_usage=_aggregate_file_usage(result),
+            )
+            if cost_label:
+                cost_line = f"| Стоимость Analyze | {cost_label} |\n"
+        pr_line = (
+            f"Существующий continue PR #{translation_pr_number} не изменён."
+            if translation_pr_number is not None
+            else "Translation PR не создаётся."
+        )
+        translation_pr_cell = (
+            f"#{translation_pr_number} (без изменений)"
+            if translation_pr_number is not None
+            else "—"
+        )
+        body = (
+            "🤖 **ydbdoc-review** — перевод не требуется, всё уже согласовано\n\n"
+            "Analyze подтвердил отсутствие перевода и обязательных механических "
+            f"изменений для всех поддерживаемых пар. {pr_line}\n\n"
+            "**Причины по парам:**\n\n"
+        )
+        for run in result.pair_results:
+            reason = " ".join(run.plan.summary.split())
+            body += (
+                f"- `{run.plan.pair.ru_path}` ↔ `{run.plan.pair.en_path}`: {reason}\n"
+            )
+        body += (
+            "\n| | |\n"
+            "|---|---|\n"
+            f"| Translation PR | {translation_pr_cell} |\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            f"{cost_line}"
+            f"{yellow_section()}"
+        )
+        return body
 
     if total == 0 and bilingual_skip and translation_pr_number is None:
         pairs_label = (
@@ -1122,7 +1166,7 @@ def build_source_pr_comment(
         )
         return (
             "🤖 **ydbdoc-review** — перевод не требуется\n\n"
-            f"В source PR обновлены обе стороны ({pairs_label}); "  # noqa: RUF001
+            f"В source PR обновлены обе стороны ({pairs_label}); "
             f"автоперевод пропущен ({BILINGUAL_SKIP_MARKER}). "
             "Translation PR не создаётся.\n\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
@@ -1152,7 +1196,7 @@ def build_source_pr_comment(
             f"| Translation PR | — |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             f"| Статус | 🔴 не мержить — {failure_label} |\n\n"
-            "**Не переведены:**\n\n"  # noqa: RUF001
+            "**Не переведены:**\n\n"
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
@@ -1197,7 +1241,7 @@ def build_source_pr_comment(
                 cost_line = f"| Стоимость перевода | {cost_label} |\n"
         return (
             "🤖 **ydbdoc-review** — перевод не требуется\n\n"
-            "После scoped merge EN совпадает с `main` "  # noqa: RUF001
+            "После scoped merge EN совпадает с `main` "
             "(нет коммита / Translation PR не создаётся). "
             "Типичный случай: перестановка пунктов toc, которых нет на EN, "
             "или RU-only правки без изменений зеркала (§6.141).\n\n"
@@ -1414,12 +1458,12 @@ def build_full_report(
     if not problem_runs and not nav_problems:
         if completeness_section:
             body += (
-                "В уже обработанных файлах открытых замечаний критика нет — "  # noqa: RUF001
+                "В уже обработанных файлах открытых замечаний критика нет — "
                 "блокер только в completeness выше.\n\n"
             )
         elif final_tree_section:
             body += (
-                "В файловых результатах открытых замечаний критика нет — "  # noqa: RUF001
+                "В файловых результатах открытых замечаний критика нет — "
                 "merge блокируют проверки финального дерева выше.\n\n"
             )
         else:
