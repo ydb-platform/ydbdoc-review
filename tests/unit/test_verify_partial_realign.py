@@ -13,8 +13,8 @@ from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
 
 
-def test_partial_verify_realign_translates_gap_segments_only(monkeypatch):
-    """Large file: one missing table row → partial realign, not full retranslate."""
+def test_verify_reports_gap_without_partial_translation(monkeypatch):
+    """A missing table row stays diagnostic and does not regenerate EN."""
     ru = (
         "| A | B |\n| --- | --- |\n"
         "| `ydb.access.grant` | GRANT |\n"
@@ -46,26 +46,22 @@ def test_partial_verify_realign_translates_gap_segments_only(monkeypatch):
         config=cfg,
     )
 
-    calls: list[int] = []
-
-    def _fake_translate(pending, *_a, **_k):
-        calls.append(len(pending))
-        return {seg.id: "| **Rights from other rights** | | |" for seg in pending}
+    def _forbidden_translation(*_args, **_kwargs):
+        raise AssertionError("verify must not translate gap segments")
 
     monkeypatch.setattr(
-        "ydbdoc_review.harness.steps.translate_segments", _fake_translate
+        "ydbdoc_review.harness.steps.translate_segments", _forbidden_translation
     )
     RoundTripStep().run(state, ctx)
-    assert calls, "partial realign should translate gap segments"
-    assert calls[0] <= 80
-    assert state.segment_alignment_error is None
-    assert any("verify_realign_partial:" in w for w in state.finalize_warnings)
-    assert "**Rights from other rights**" in state.translated_text
+    assert state.translated_text == en
+    assert state.segment_alignment_error
+    assert "table:row3:col1" in state.segment_alignment_error
+    assert any("verify_realign_skipped:" in w for w in state.finalize_warnings)
 
 
 def test_round_trip_verify_restores_missing_heading_anchor_without_llm(monkeypatch):
     """#49957 example-dotnet.md: missing {#csharp-app} is repaired before critic."""
-    ru = "# Приложение на C# {#csharp-app}\n\nТело страницы.\n"
+    ru = "# Приложение на C# {#csharp-app}\n\nТело страницы.\n"  # noqa: RUF001
     en = "# Example app in C# (.NET)\n\nPage body.\n"
     segs = extract_segments(parse_markdown(ru))
     state = FileRunState(

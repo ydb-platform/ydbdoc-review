@@ -122,10 +122,6 @@ def test_F102_local_rounds() -> None:
             return_value=({}, "segment alignment mismatch"),
         ),
         patch(
-            "ydbdoc_review.harness.steps.partial_align_translations_from_target",
-            return_value={},
-        ),
-        patch(
             "ydbdoc_review.harness.steps.translate_segments",
             side_effect=AssertionError("doc_verify must not regenerate a file"),
         ) as full_translate,
