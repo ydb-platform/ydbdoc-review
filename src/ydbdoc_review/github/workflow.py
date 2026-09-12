@@ -429,11 +429,15 @@ def _restart_owned_translation_pr(
     pull = gh.get_pull(owner, repo, translation_pr)
     head = pull.get("head") or {}
     head_repo = head.get("repo") if isinstance(head, dict) else None
+    user = pull.get("user")
     if (
         not isinstance(head, dict)
         or str(head.get("ref") or "") != branch
         or not isinstance(head_repo, dict)
         or str(head_repo.get("full_name") or "") != f"{owner}/{repo}"
+        or not isinstance(user, dict)
+        or str(user.get("login") or "")
+        not in {"github-actions[bot]", "ydbdoc-review[bot]"}
     ):
         return
     previous_body = str(pull.get("body") or "").rstrip()
@@ -442,10 +446,11 @@ def _restart_owned_translation_pr(
         f"was explicitly restarted for source PR #{source_pr}."
     )
     gh.close_pull(owner, repo, translation_pr, previous_body + message)
-    if gh.get_branch_sha(owner, repo, branch) is None:
-        raise RuntimeError(
-            f"explicit translation restart could not confirm service branch {branch}"
-        )
+    branch_sha = gh.get_branch_sha(owner, repo, branch)
+    if branch_sha is None:
+        # The linked service PR is still retired, but there is no remote ref to
+        # delete. Never infer ownership from another branch with the same prefix.
+        return
     if not gh.delete_branch(owner, repo, branch):
         raise RuntimeError(
             f"explicit translation restart could not delete service branch {branch}"
