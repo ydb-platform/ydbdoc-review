@@ -49,6 +49,7 @@ from ydbdoc_review.github.pr import (
     load_verify_pair_contents,
     merge_pr_file_changes,
     parse_repo,
+    publication_plan,
     pull_request_context,
     repo_https_clone_url,
     source_pr_number_from_branch,
@@ -3134,6 +3135,7 @@ def run_doc_translate(
                             pr_number,
                             github_repo,
                             publication_result=pr_result,
+                            publication_plan=publication_plan(ctx),
                         ),
                         draft=True,
                     )
@@ -3210,6 +3212,7 @@ def run_doc_translate(
             pr_number,
             github_repo,
             publication_result=pr_result,
+            publication_plan=publication_plan(ctx),
         )
         expected_artifact_sha = (
             reused_existing_artifact_pr.bound_sha
@@ -3305,6 +3308,7 @@ def run_doc_translate(
             github_repo,
             publication_result=pr_result,
             provenance=artifact_provenance,
+            publication_plan=publication_plan(ctx),
         )
 
         job.translation_pr_url = tr_pr_url
@@ -4521,6 +4525,7 @@ def run_doc_verify(
                     github_repo,
                     publication_result=pr_result,
                     provenance=artifact_provenance,
+                    publication_plan=publication_plan(ctx),
                 )
                 gh.update_pull_body(
                     owner,
@@ -4681,6 +4686,7 @@ def run_doc_verify(
                 github_repo,
                 publication_result=pr_result,
                 provenance=artifact_provenance,
+                publication_plan=publication_plan(ctx),
             ),
         )
     if final_read_only_verify:

@@ -1,5 +1,8 @@
 """Markdown reports for source and translation PR comments."""
 
+# Russian report text intentionally contains Cyrillic characters flagged by RUF001.
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 import base64
@@ -9,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ydbdoc_review.config.loader import Config
+from ydbdoc_review.github.pr import PublicationPlan
 from ydbdoc_review.github.provenance import (
     TranslationArtifactProvenance,
     render_authority_evidence,
@@ -869,6 +873,7 @@ def build_translation_pr_body(
     *,
     publication_result: PRTranslationResult | None = None,
     provenance: TranslationArtifactProvenance | None = None,
+    publication_plan: PublicationPlan | None = None,
 ) -> str:
     red = bool(
         publication_result and result_has_blocking_findings(publication_result)
@@ -903,6 +908,14 @@ def build_translation_pr_body(
         coverage = build_coverage_summary(publication_result)
         if coverage:
             body = f"{body.rstrip()}\n\n{coverage}\n"
+    if publication_plan is not None:
+        publication = (
+            "\n\n**Publication provenance:** "
+            f"head=`{publication_plan.source_head_sha[:12]}`, "
+            f"base=`{publication_plan.publication_base_ref}`, "
+            f"reason: {publication_plan.reason}."
+        )
+        body = f"{body.rstrip()}{publication}\n"
     return body
 
 
