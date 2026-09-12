@@ -1097,7 +1097,9 @@ def build_source_pr_comment(
 
     total, new_count, updated_count = _file_translation_counts(result)
     bilingual_skip = _bilingual_skip_count(result)
-    published_red = result.publication_impact == PublicationImpact.PUBLISH_RED
+    published_red = result.publication_impact == PublicationImpact.PUBLISH_RED or (
+        verify_result is not None and result_has_blocking_findings(verify_result)
+    )
 
     if total == 0 and bilingual_skip and translation_pr_number is None:
         pairs_label = (
@@ -1252,6 +1254,25 @@ def build_source_pr_comment(
             f"Полный QA-отчёт — в комментарии к translation PR #{translation_pr_number}. "
             "Повторная проверка — лейбл **`doc_verify`** (`ydbdoc-verify.yml`).\n"
         )
+        if published_red:
+            details = _withhold_source_details(result)
+            details.extend(
+                (blocker.path, blocker.message.replace(chr(10), " "))
+                for blocker in result.final_tree_blockers
+            )
+            if verify_result is not None:
+                details.extend(_withhold_source_details(verify_result))
+                details.extend(
+                    (blocker.path, blocker.message.replace(chr(10), " "))
+                    for blocker in verify_result.final_tree_blockers
+                )
+            details = list(dict.fromkeys(details))
+            body += "\n**QA RED, do not merge. Актуальные замечания:**\n\n"
+            body += "".join(f"- `{path}`: {reason}\n" for path, reason in details)
+            body += (
+                "\n**Следующее действие:** исправить перечисленные замечания и "
+                "повторить `doc_verify`.\n"
+            )
         soft_keep_blockers = [
             blocker
             for blocker in result.final_tree_blockers
