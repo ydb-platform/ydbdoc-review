@@ -37,9 +37,11 @@ from ydbdoc_review.ops.transcripts import (
 
 logger = logging.getLogger(__name__)
 
-_CONTINUE_CONTEXT_MAX_CHARS = 12_000
-_CONTINUE_EXCHANGE_MAX_CHARS = 2_500
-_CONTINUE_EXCHANGES = 4
+_CONTINUE_CONTEXT_ARTIFACTS = (
+    ("job/continuability.json", "Saved continuation state"),
+    ("translation/v1/manifest.json", "Saved translation scope and result"),
+    ("report.md", "Previous run report and open questions"),
+)
 
 
 @dataclass
@@ -60,35 +62,58 @@ class OpsContext:
     continue_feedback: str | None = None
 
 
+def _parent_artifact_text(object_key: str, raw: bytes) -> str:
+    text = raw.decode("utf-8", errors="replace").strip()
+    if object_key == "translation/v1/manifest.json":
+        try:
+            payload = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            payload = None
+        if isinstance(payload, dict):
+            text = json.dumps(
+                {
+                    key: payload[key]
+                    for key in ("scope", "identity", "status", "blockers")
+                    if key in payload
+                },
+                ensure_ascii=False,
+            )
+    return text
+
+
 def load_parent_run_context(
     ctx: OpsContext,
     *,
-    max_chars: int = _CONTINUE_CONTEXT_MAX_CHARS,
+    max_chars: int | None = None,
 ) -> str:
-    """Load a bounded, prompt-ready context from the parent LLM run.
+    """Load the complete prompt-ready context from the parent LLM run.
 
     The lifecycle gate has always verified that the parent transcript exists,
-    but historically no transcript content reached the next prompt. Keep the
-    most recent exchanges, which are the most useful for iterative correction,
-    and cap both individual fields and the aggregate prompt addition.
+    but historically no transcript content reached the next prompt.
     """
     parent = ctx.parent_run_id
-    if not parent or max_chars <= 0:
+    if not parent or (max_chars is not None and max_chars <= 0):
         return ""
     keys = ctx.store.list_keys(parent)
     response_keys = sorted(
         (key for key in keys if key.startswith("llm/") and key.endswith("-resp.json")),
-        reverse=True,
-    )[:_CONTINUE_EXCHANGES]
+    )
     chunks: list[str] = []
+
+    for object_key, label in _CONTINUE_CONTEXT_ARTIFACTS:
+        raw = ctx.store.get(parent, object_key)
+        if raw:
+            text = _parent_artifact_text(object_key, raw)
+            if text:
+                chunks.append(f"{label} ({object_key}):\n{text}")
 
     previous_feedback = ctx.store.get(parent, "user/feedback.md")
     if previous_feedback:
         text = previous_feedback.decode("utf-8", errors="replace").strip()
         if text:
-            chunks.append(f"Previous operator feedback:\n{text[:_CONTINUE_EXCHANGE_MAX_CHARS]}")
+            chunks.append(f"Previous operator feedback:\n{text}")
 
-    for response_key in reversed(response_keys):
+    for response_key in response_keys:
         request_key = response_key.replace("-resp.json", "-req.json")
         request_raw = ctx.store.get(parent, request_key)
         response_raw = ctx.store.get(parent, response_key)
@@ -119,11 +144,12 @@ def load_parent_run_context(
             continue
         chunks.append(
             f"Previous {role} exchange ({response_key}):\n"
-            f"Request:\n{request_text[:_CONTINUE_EXCHANGE_MAX_CHARS]}\n"
-            f"Response:\n{response_text[:_CONTINUE_EXCHANGE_MAX_CHARS]}"
+            f"Request:\n{request_text}\n"
+            f"Response:\n{response_text}"
         )
 
-    return "\n\n".join(chunks)[:max_chars].strip()
+    context = "\n\n".join(chunks).strip()
+    return context if max_chars is None else context[:max_chars].strip()
 
 
 def compose_continue_feedback(instruction: str | None, parent_context: str) -> str:
