@@ -1,0 +1,508 @@
+# Memory Bank — Pipeline & reporting
+
+> Part of the [Memory Bank index](../../MEMORY_BANK.md).  
+> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+
+---
+
+## 15. Pipeline data flow (detailed, Phase D+)
+
+### 15.1. Per-file pipeline
+
+```
+INPUT: source_text (str), source_lang, target_lang, glossary, models
+   raw_source_text = source_text  # for heuristics / ru_source_bugs on original PR RU
+
+0. RU NORMALIZE (translate only, ru→en)
+   source_text = normalize_ru_source_for_translation(source_text)
+   # e.g. `--config-dir/opt` → `--config-dir /opt` before parse
+
+1. PARSE
+   doc = parse_markdown(source_text)
+   # FencedCode / IndentedCode: NOT segmented — never sent to translate LLM
+
+2. EXTRACT
+   segments = extract_segments(doc)
+   # Each segment has id, kind, path, text (with ⟦C1⟧ markers), placeholders, ast_path.
+   # Front matter → SegmentKind.FRONT_MATTER for title / description (B.4).
+
+3. CHUNK
+   batches = chunk_segments(segments, max_chars=4000)
+
+4. TRANSLATE (parallel batches, limit 3)
+   for batch in batches:
+       response = llm_client.chat(translate_model, build_translate_messages(...))
+       translations = parse_json(response)
+       repair_translation_placeholders()  # per segment, before validate
+       validate: placeholder order + roles (V not in link URL unless source is)
+                 + cli_tokens + fence count per segment
+       # On batch failure: per-segment retry; on segment failure: repair-pass LLM
+       #   (translation/repair.py, prompts/v1/repair.md), then table fail-soft
+
+5. REINSERT + EN FINALIZE (preserves AST structure)
+   translated_doc = reinsert_segments(doc, segments, translations)
+   localize_links_in_document(translated_doc, target_lang)  # §6.34, §6.37
+   rendered = render_markdown(translated_doc)
+   _finalize_en_target(rendered, source_text):
+     enforce_source_fenced_blocks  # verbatim fence bodies from normalized RU
+     translate_cyrillic_fence_comments_with_client  # ``//`` / ``#`` / ``--`` lines; trailing ``//`` (§6.39, §6.46, §6.81)
+     translate_cyrillic_prose_with_client  # residual Cyrillic in prose/backticks (§6.45)
+     localize_links_in_text      # Wikipedia langlinks safety net (§6.37)
+     postprocess_en_target_markdown  # homoglyphs + `<строка>`→`<string>` (§6.28)
+
+6. CRITIC PASS 1 (batched segment pairs)
+   batches = chunk_segments(segments, max_chars=4000)
+   for batch in batches:
+       critic_response = llm_client.chat(critic_model, build_critic_batch_prompt(batch, translations))
+       issues += parse_critic_response(critic_response).issues
+   # issues = [{segment_id, severity, category, comment, suggested_text}]
+
+7. APPLY CRITIC FIXES
+   for issue in issues:
+       if issue.suggested_text:
+           translations[issue.segment_id] = issue.suggested_text
+   translated_doc = reinsert_segments(doc, segments, translations)
+
+8. CRITIC PASS 2 (batched re-validate)
+   for batch in batches:
+       verify_response = llm_client.chat(critic_model, build_verify_batch_prompt(...))
+       unresolved += parse_critic_response(verify_response).issues
+
+9. ROUND-TRIP GATE (translate + verify — same code)
+   translations, err = gate_round_trip(segments, final_text)
+   # fail → segment_alignment_error, critic skipped, verdict blocked
+
+10. HEURISTICS (classified; raw RU + normalized RU for parity checks)
+    blocking / warnings / info = run_file_heuristics_classified(...)
+    # info: ru_source (fix in RU PR). blocking: prose cyrillic, parity, missing_anchor, …
+    # warnings: cyrillic_in_fence (if comment translate missed), borderline length, …
+    verdict = compose_file_verdict(critic, alignment, heuristics, manual_actions)
+
+10. OUTPUT TEXT
+    final_text = translated_text after step 5 (render + link locale + EN postprocess)
+
+OUTPUT: final_text, file_report = {
+    file_path,
+    verdict,                          # ok / warnings / blocked
+    critic_issues,                    # initial issues
+    unresolved_issues,                # after critic pass 2
+    heuristic_warnings,
+    cost,                             # tokens + latency
+    models_used,
+    prompt_version,
+}
+```
+
+### 15.2. PR-level orchestrator (`doc_translate`)
+
+```
+INPUT: pr_number, source_repo, merge_base_with
+
+1. SCOPE PLAN (§22 — before any LLM)
+   # Merged source PR: RU from merge_commit_sha (§6.120), not stale feature head
+   changes = merge_pr_file_changes(git diff, GitHub PR files API)
+   scope_plan = plan_translation_scope(changes, read_ru, read_en_base)
+   pairs = doc_pairs_from_plan(scope_plan, skip bilingual EN mirrors)
+   nav_pairs = merge_navigation_pair_lists(
+       navigation_pairs_from_plan(scope_plan),
+       build_navigation_pairs(changes),
+   )
+   changes += synthetic_changes_from_plan(scope_plan)  # completeness audit
+
+2. PER-FILE TRANSLATION (single pass)
+   contents = load_pair_contents(pairs, ru_content_ref=merge_sha_if_merged)
+   pr_result = run_pr_translation(contents)   # PRHarness / TRANSLATE_PR_PROFILE
+
+3. NAVIGATION MERGE (same scope_plan)
+   for each nav pair (ru_changed):  # §6.123 — still merge if en_changed too
+     merge_navigation_pair(..., scope_plan=scope_plan)
+       # planned_toc_extras_for_pair → _resolve_toc_merge_scope
+       # absent EN → full RU mirror (§6.85)
+       # nav_from_main → supplement_only (§6.72)
+
+4. COMPLETENESS (§6.32)
+   completeness_gaps = expected_en_mirrors(changes) − committed paths
+   if gaps → skip commit/push; 🔴 in source comment
+
+5. GIT + PR
+   branch ydbdoc-review/pr-{N}, push, open translation PR, comments
+```
+
+**Harness (§6.66):** per-file — `translate_file` → `FileHarness`. PR-level —
+`run_pr_translation` / `doc_verify` → `PRHarness` → `run_pair_plan` per pair.
+
+**Legacy (pre-§22):** multi-pass supplement chain (`supplement_include_pairs` →
+translate → `supplement_navigation_pairs` → `supplement_toc_href_pairs` → second
+MD pass). Removed in Phase J — see **09-navigation-scope** §22.
+
+4. GIT
+   branch = f"ydbdoc-review/pr-{pr_number}"
+   upstream_url = repo_https_clone_url(owner, repo)
+   start_ref = translation_branch_base(ctx)
+   # fork or merged source PR → upstream base_ref (main); open same-repo → head_ref
+   git.fetch(upstream_url, start_ref)
+   git.create_branch_from(start_ref, branch)
+   git.commit_all(branch, message=build_commit_message(reports))
+   git.push(branch, remote=upstream_url)
+
+5. GITHUB
+   tr_pr = github.open_pr(
+       head=branch,
+       base=translation_pr_base(ctx),
+       ...
+   )
+   github.post_comment(
+       pr_number,
+       body=f"Translation PR ready: #{tr_pr.number}. See report there.",
+   )
+   github.post_comment(
+       tr_pr.number,
+       body=build_full_report(reports, heuristics, cost),
+   )
+
+OUTPUT: exit code 0 unless infrastructure failure.
+```
+
+### 15.3. Verify mode
+
+```
+INPUT: pr_number  (translation PR OR bilingual source PR — §6.135)
+
+Translation branch ydbdoc-review/pr-N:
+1. Discover source PR from branch / description
+2. Read **EN** from checkout; **RU** from source PR (§6.31 / §6.110 / §6.106)
+3. Critic + heuristics; scope filter §6.77
+4. Push critic fixes onto translation branch
+5. Post report on the translation PR
+
+Bilingual / author source PR (not ydbdoc-review/pr-*):
+1. source_pr = None — both locales from checkout
+2. Critic on RU↔EN pairs present in the PR diff
+3. **Finalize EN** — always translate residual Cyrillic in fences/prose (§6.136)
+4. Completeness gaps: RU docs/nav without EN mirror in the same diff (§6.76/§6.135)
+5. Critic fixes → fixup branch ydbdoc-review/verify-{N} (§6.64/§6.75);
+   stale ``verify-*`` deleted at start of each re-run (§6.136)
+6. Post report on the same PR
+```
+
+---
+
+---
+
+## 16. PR-level behavior
+
+### 16.1. File pairing
+
+For each changed `.md` under `ydb/docs/`:
+
+- `ydb/docs/ru/X` ↔ `ydb/docs/en/X` (mirror), including `ru/…/_includes/*.md`
+  ↔ `en/…/_includes/*.md` (locale-specific fragments: tables, auth snippets, …).
+- `ydb/docs/_includes/Y` and other paths **outside** `docs/ru` / `docs/en` —
+  language-neutral (images, shared assets); not translated.
+- Non-`.md` under `_includes/` (png, svg, …) — never sent to the translator.
+
+If RU changed (EN unchanged) → translate RU→EN; commit replaces EN entirely
+(render from RU AST — §6.30). Prefer **differential** seeding of unchanged
+segments from existing EN when merge-base RU aligns (§6.132); otherwise full
+LLM translate. Existing EN is **not** left as-is as the file body — it only
+seeds segment texts.
+If EN changed and RU did not → full translate EN→RU (overwrite RU).
+If **both** changed in the source PR → **skip** auto-translate (§6.76); authors
+updated the bilingual pair — no translation PR, no EN overwrite.
+If RU exists but EN doesn't → create EN from RU.
+If EN exists but RU doesn't → create RU from EN.
+`critic_only` is **not** used in `doc_translate` (verify mode only).
+
+### 16.2. New / deleted / renamed
+
+- **New file in RU**: create EN.
+- **Deleted file in RU**: also delete EN.
+- **Renamed file**: not auto-detected from git rename info in MVP;
+  treat as delete+add. (Tracked in backlog if needed.)
+
+### 16.3. Translation branch and PR
+
+- Branch name: `ydbdoc-review/pr-<source_pr_number>` on **upstream** (`ydb-platform/ydb`).
+- **Branch creation:** always on upstream, never on the contributor fork.
+  - **Fork PR:** new branch from upstream `base_ref` (`main`, etc.) — the branch
+    the source PR targets / merges into. RU content comes from the PR checkout;
+    only translated EN paths are committed. Do **not** base on the fork head
+    (foreign history breaks push / triggers workflow-scope errors).
+  - **Same-repo PR:** new branch from the source PR head on upstream (stacked PR).
+- One commit per run. Message:
+  ```
+  Auto-translate docs from PR #N
+  ...
+  ```
+- **Translation PR** on upstream: `head=ydbdoc-review/pr-N`, `base` = same ref
+  the translation branch was created from (fork → `main`; same-repo → feature branch).
+- Translation PR title: "Auto-translate docs from PR #N".
+- Committer/author: GitHub Actions bot (`github-actions[bot]`), push/API via job
+  `GITHUB_TOKEN` when workflow grants `contents: write`.
+
+### 16.7. GitHub tokens in `ydb` CI (2026-06)
+
+**Two-job split** ([ydb #43126](https://github.com/ydb-platform/ydb/pull/43126), merged 2026-06-10):
+
+| Job | What | Token |
+|-----|------|--------|
+| `ydbdoc-review` / `ydbdoc-verify` | checkout PR code, run action, push branch / repair commit | `GITHUB_TOKEN` |
+| `trigger-translation-ci` / `trigger-verify-ci` | **no checkout** — add labels on translation PR | `YDBOT_TOKEN` |
+
+Why: events from `GITHUB_TOKEN` **do not cascade** into other workflows (PR-check,
+docs rebuild). Translation PR author is `github-actions[bot]` — PR-check needs
+`ok-to-test`. PAT labels from a job without fork code avoid exposing `YDBOT_TOKEN`
+next to untrusted PR content.
+
+| Step | Token | Workflow `permissions` |
+|------|--------|-------------------------|
+| Action: API (PR, comments, `documentation` label) | `GITHUB_TOKEN` | `pull-requests: write`, `issues: write` |
+| Action: `git push` branch `ydbdoc-review/pr-N` | same (`GITHUB_PUSH_TOKEN` unset → falls back to `GITHUB_TOKEN`) | `contents: write` |
+| `trigger-translation-ci`: `ok-to-test` only (not `rebuild_docs`, §6.161) | `YDBOT_TOKEN` in `github-script` | (job has no checkout; rebuild must dispatch-only, §6.159) |
+| Inline `doc_verify` in `run_doc_translate` (same CI job) | `GITHUB_TOKEN` | same as translate step |
+| `ydbdoc-verify.yml`: manual re-run via `doc_verify` label | `GITHUB_TOKEN` | label workflow |
+
+`trigger-translation-ci` runs only when `needs.ydbdoc-review.result == 'success'`.
+Therefore `run_doc_translate` must not exit 1 after push when only the source-PR
+comment fails — see §6.48 (`_safe_post_issue_comment`).
+
+`doc_verify` critic fixes:
+
+- **Translation PR** (`ydbdoc-review/pr-{N}`): second commit on the same branch (§6.75) — no fixup PR.
+- **Author/fork/manual PR:** separate fixup PR on `ydbdoc-review/verify-{N}` + link comment (§6.64). **Full QA report posts on the fixup PR** (§6.146); source gets a short pointer. ``doc_continue`` on the fixup head iterates inline.
+- **Existing ``verify-*`` PR:** inline push like translation; report stays on that PR.
+- **Alignment mismatch on verify:** rebuild EN from RU (``verify_realign``, §6.147) so critic can run; YFM ``#|`` tables parse as tables.
+- **Fence QA allowances (§6.149):** trailing YAML ``#`` comments and RU→EN ``<…>`` placeholders are not ``fence_body_copy`` (verify keeps author EN wording).
+
+Do **not** set `GITHUB_PUSH_TOKEN` / `YDBDOC_PUSH_PAT` in env unless `git push` returns 403
+(org policy blocking default `GITHUB_TOKEN`).
+
+**Legacy:** `YDBDOC_PUSH_PAT` secret + `GITHUB_PUSH_TOKEN` env still work (`entrypoint.sh`
+maps `YDBDOC_PUSH_PAT` → `GITHUB_PUSH_TOKEN` for older workflows).
+
+**Local CLI:** use a personal PAT in `GITHUB_TOKEN` (or classic `repo` scope) in `.env`.
+
+Examples: [`examples/ydb-github-doc-translate-on-label.yml`](../../examples/ydb-github-doc-translate-on-label.yml),
+[`examples/ydb-github-doc-verify-on-label.yml`](../../examples/ydb-github-doc-verify-on-label.yml).
+
+### 16.4. Verify mode commits
+
+When critic proposes fixes that pass the pipeline guard:
+
+| PR kind | Branch | Follow-up |
+|---------|--------|-----------|
+| Translation PR `ydbdoc-review/pr-{N}` | same branch, 2nd commit (§6.75) | full QA report only (§6.102) |
+| Author / fork / manual | `ydbdoc-review/verify-{N}` + fixup PR (§6.64) | comment with fixup PR link |
+
+Commit message template:
+
+  ```
+  Apply critic fixes from doc_verify run on <timestamp>
+
+  Critic: <model>
+  Fixed segments: K
+  ydbdoc-review @ v0.1.0
+  ```
+
+### 16.5. Repair-pass and EN postprocess
+
+- **Repair-pass** (`translation/repair.py`): after `TranslationValidationError`
+  on a single segment (placeholder order/roles, fence count, CLI tokens), one
+  focused LLM call with `prompts/v1/repair.md` (up to 2 attempts). Used before
+  table fail-soft.
+- **Placeholder repair** (`validation/placeholder_repair.py`): deterministic fixes
+  before validation — restore `⟦U⟧`/`⟦V⟧`/`⟦C⟧`, swap V↔U when the model puts
+  `⟦V⟧` in `[text](...)`, move «on the ⟦V⟧ server» before «Used if […]» when
+  source has variable before link (`placeholder_roles.py` enforces roles).
+- **EN postprocess** (`homoglyphs.postprocess_en_target_markdown`): after render;
+  homoglyphs, `<строка>`→`<string>` in fences (incl. indented `` ``` ``), and
+  **MD031** blank lines around fences (`markdown_layout.fix_blanks_around_fences`).
+- **Renderer MD031** (`markdown_renderer._join_blocks`): prevents missing blank
+  lines after `` ``` `` in tight lists when re-rendering translated AST (root cause
+  of PR #42404 markdownlint warnings).
+
+### 16.6. Fail-soft policy for table segments
+
+- Table cells (`table_header_cell`, `table_body_cell`) are the most fragile
+  segments for placeholder parity.
+- If translation keeps failing with `placeholder mismatch` on a table segment,
+  pipeline does **not** fail the whole file:
+  - keep the source RU table segment text in output as-is;
+  - continue translating other segments/files;
+  - add an explicit manual-action note to the report: table was not translated
+    and must be translated manually.
+- File verdict is bumped to `warnings` when such manual actions exist.
+
+---
+
+---
+
+## 17. Reporting format
+
+### 17.0. Comment posting order (`doc_translate` → inline `doc_verify`)
+
+After push and translation PR open (`doc_translate`):
+
+1. **Inline `doc_verify`** — same action / CI job calls `run_doc_verify`; pushes
+   safe critic fixes onto the translation branch (§6.75), then posts the full QA
+   report (`Checkout:` = commit **with** those fixes). **One** comment on the
+   translation PR — no separate «fixes in this branch» note (§6.102).
+2. **Source PR** — short summary with QA verdict (`build_source_pr_comment`,
+   `verify_result=`).
+
+Label **`doc_verify`** (`ydbdoc-verify.yml`) — manual re-run on a **translation
+PR**, or QA/completeness on a **bilingual source PR** (§6.135). First QA after
+``doc_translate`` is inline and does not need this label.
+
+`trigger-translation-ci` (`YDBOT_TOKEN`, §16.7) adds `rebuild_docs` + `ok-to-test`
+after the translate job succeeds (no workflow changes needed for inline verify).
+
+### 17.1. Short comment in source PR (after `doc_translate`)
+
+```markdown
+🤖 **ydbdoc-review** — перевод готов
+
+| | |
+|---|---|
+| Translation PR | #M |
+| Файлов переведено | 5 (3 новых, 2 обновлено) |
+| Статус QA | 🟡 4 OK, 1 требует ревью |
+| Время | 2m 14s |
+| Стоимость | ~₽10.50 |
+
+Список оставшихся проблем — в комментарии к translation PR #M.
+```
+
+### 17.2. Full report in translation PR (after `doc_translate` or `doc_verify`)
+
+```markdown
+🤖 **ydbdoc-review** — отчёт №1 (doc_translate, 2024-11-05 14:23 UTC)
+
+## Рекомендация: 🟡 требует правок перед merge
+
+## Что исправить
+
+### 🟡 `…/parameterized-query-execution.md`
+
+1. **Overview (`s0003`)** — (terminology) в ссылке осталась кириллица «командой YQL»
+   - 💡 Совет: via the YQL `DECLARE` command
+
+2. **эвристика** — Кириллица в EN-тексте (строка ~12): «…командой YQL DECLARE…»
+
+## Без замечаний
+
+- 🟢 `…/other.md`
+
+## Стоимость и токены
+
+- Токены (перевод): 7,298 / 4,325
+- Токены (критик): 7,055 / 1,957
+- Токены (всего): 14,353 / 8,592
+- Оценка стоимости: ~₽10.6
+- Модели: перевод=`deepseek-v32`, критик=`deepseek-v32`
+
+---
+
+Generated by ydbdoc-review v0.1.0 @ `<sha>`
+```
+
+**All-green path** («По всем файлам открытых замечаний нет») includes the same
+«Стоимость и токены» block (§6.38) — not only the «Что исправить» layout.
+
+Отчёт **не** содержит сводку «N сегментов / M auto-applied» и не перечисляет
+уже автоматически исправленные critic issues — только то, что ревьюеру нужно
+проверить или доправить руками. Локация берётся из `segment.path` + `segment_id`.
+
+### 17.3. Subsequent `doc_verify` runs
+
+On **translation PRs** (``ydbdoc-review/pr-{N}``), verify only files in the
+translation commit diff vs base — scoped pairs (§6.77). When source PR is known,
+``doc_verify`` builds the same ``TranslationScopePlan`` from source diff (§22).
+
+Each `doc_verify` run posts a NEW comment of the same format, with a header
+`🤖 ydbdoc-review — отчёт №N (doc_verify, <timestamp>)` (§6.137: ``№`` not
+``#``, so GitHub does not autolink to unrelated PRs) and optional
+
+Navigation YAML (§6.35): EN ``toc*.yaml`` / redirect files changed in the
+translation PR are validated against RU from source PR head; listed in the
+report as ``(навигация)`` like ``doc_translate``. Inline TOC lines keep the
+list-entry prefix from EN ``main`` (§6.36); ``inconsistent_indent`` is blocking.
+
+``doc_verify`` validates navigation only — it does **not** rewrite YAML on disk.
+To fix a bad ``toc_i.yaml`` already on the translation branch, re-run
+``doc_translate`` or edit the file manually, then ``doc_verify``.
+`Checkout: \`<sha>\``. Previous comments remain visible for history.
+
+**§6.75 / §6.137 checkout semantics:** on translation PRs, report is posted
+**after** the inline critic push; ``Checkout:`` is the translation-branch HEAD
+that **includes** applied fixes. On bilingual source ``doc_verify``, ``Checkout:``
+is the **content SHA under review** (PR tip / merge commit), captured **before**
+``prepare_*`` rewrites HEAD onto the fixup base — not main tip after prepare.
+
+**Legacy (pre-§6.75):** report could precede a separate fixup PR; merging translation
+PR without merging fixup dropped applied critic fixes — see §6.75 problem statement.
+
+**Not a diff against the prior report:** each run re-parses RU + current EN,
+re-runs critic (with verdict alias normalization), heuristics, and optional repair
+commit. Results differ when EN changed, segment alignment fails, LLM batches vary,
+or critic JSON parse fails for a batch.
+
+**`doc_verify` alignment:** `_align_translations` must match segment **counts and
+kinds** (§6.163); on failure → `segment_alignment_error`, critic skipped, 🔴 in
+report (§6.26). Equal length with drifted kinds (stale EN after RU-only rewrite)
+must not seed differentially. Diagnostics name the first structural diff
+(segment kind + id + path) — §6.56 ``describe_segment_alignment_mismatch``;
+see §6.58 ``glossary.md`` example.
+
+**Critic noise filters (verify path):** after ``run_critic`` and ``apply_critic_fixes``,
+``drop_spurious_placeholder_issues`` runs on actionable issues; after ``run_verify``,
+``filter_critic_response(..., skipped=critic_skipped)`` drops spurious placeholder
+issues *and* verify echoes of apply-rejected fixes (§6.56–§6.57). Verdict is
+computed from filtered ``critic_unresolved`` only.
+
+**Report tiers (§6.56–§6.57):**
+
+- **«Что исправить»** — unresolved critic (minus skipped duplicates), manual
+  actions, blocking heuristics, alignment errors. Each item shows (§6.96):
+  - **Оригинал (RU)** / **Перевели (EN)** — segment or line excerpt from disk
+  - **Проблема** — blocking reason (critic category, heuristic, or wiki line link)
+  - **Совет** — critic ``suggested_text`` or heuristic hint (e.g. Wikipedia manual URL)
+- **«Без замечаний»** — files with no open items (🟢).
+- **«Автоисправление не применено»** (collapsed) — ``critic_skipped`` only;
+  does not inflate 🔴 or duplicate main-list numbering
+  (``reporting.include_skipped_critic``, default ``true``).
+
+**Canonical human-translation verify case:** [ydb #40466](https://github.com/ydb-platform/ydb/pull/40466)
+— five-file EN PR; post-§6.57 only ``glossary.md`` remains 🔴 (§6.58).
+
+**Canonical auto-translate case:** [ydb #43365](https://github.com/ydb-platform/ydb/pull/43365)
+— OTel metrics/tracing docs from [#41691](https://github.com/ydb-platform/ydb/pull/41691);
+§6.59 fixes critic apply, ``text`` fences, TOC/index parity (re-run ``doc_translate``).
+
+**Canonical auto-translate case (observability):** [ydb #44103](https://github.com/ydb-platform/ydb/pull/44103)
+from [#43530](https://github.com/ydb-platform/ydb/pull/43530); §6.62 fixes ``text`` fence
+QA noise and parent ``toc_p.yaml`` ``include.path`` merge (+ ``extra_toc_hrefs_for_pair``
+``KeyError``).
+
+**Canonical auto-translate case (ydb-sdk toc):** [ydb #44108](https://github.com/ydb-platform/ydb/pull/44108)
+→ [#44117](https://github.com/ydb-platform/ydb/pull/44117) manual fix; §6.63 fixes nested
+indented ``toc_i.yaml`` parse/merge and adds ``collapsed_toc`` validation.
+
+**Canonical auto-translate case (SQS API toc):** [ydb #46349](https://github.com/ydb-platform/ydb/pull/46349)
+from [#45181](https://github.com/ydb-platform/ydb/pull/45181) — fixed by §6.84–§6.89
+supplement chain; **§22 planner** replaces that chain (`case_45181` golden test).
+Translation PR for #45181 is green on old chain — do not re-run (see §22.8).
+
+**Canonical auto-translate case (§22 rollout):** [ydb #44457](https://github.com/ydb-platform/ydb/pull/44457)
+→ [#46620](https://github.com/ydb-platform/ydb/pull/46620) (bad run: glossary terminology +
+YFM003 hub links). **Re-run** after `v0.1.0` @ §6.107 — glossary profile, Wikipedia
+Wikidata, strip unreachable glossary links (variant A). Scope: `case_44457` (~4 files).
+See **09-navigation-scope** §22.10–§22.11, **03-design-decisions** §6.107.
+
+**Canonical local-debug case:** [ydb #43010](https://github.com/ydb-platform/ydb/pull/43010)
+— merged source PR; local ``job --dry-run`` with Eliza (§19.5); scope 13 doc paths.
+Bad first CI run [#46461](https://github.com/ydb-platform/ydb/pull/46461) had 51 files (pre-§22).
+
+---
+
+[← Memory Bank index](../../MEMORY_BANK.md)

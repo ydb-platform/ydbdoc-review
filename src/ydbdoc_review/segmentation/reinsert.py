@@ -1,0 +1,467 @@
+"""Re-insert translated segment text back into the AST."""
+
+from __future__ import annotations
+
+import re
+from urllib.parse import unquote
+
+from ydbdoc_review.parsing.ast_types import (
+    Document,
+    Heading,
+    InlineCode,
+    InlineImage,
+    InlineLink,
+    InlineNode,
+    InlineText,
+    ListItem,
+    Paragraph,
+    Table,
+    TermDefinition,
+    YfmCut,
+    YfmIf,
+    YfmNote,
+    YfmTab,
+    YfmTabs,
+)
+from ydbdoc_review.parsing.front_matter import apply_front_matter_updates
+from ydbdoc_review.parsing.inline_parser import parse_inline_text
+from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
+
+
+class ReinsertError(Exception):
+    """Raised when a segment cannot be re-inserted into the AST."""
+
+
+def reinsert_segments(
+    doc: Document, segments: list[Segment], translations: dict[str, str]
+) -> Document:
+    """Return a new Document with each segment's inline children replaced.
+
+    ``translations`` maps segment id → translated text (still containing
+    placeholders like ⟦C1⟧). Segments whose id is not in ``translations`` keep
+    their original text.
+
+    The function does **not** mutate the input Document in place — it walks
+    the segments list, applies changes in order, but since the AST is shared,
+    the input doc is modified. (Pydantic models are mutable.) Callers that
+    need immutability should deepcopy first.
+    """
+    fm_updates: dict[str, str] = {}
+    for seg in segments:
+        translated = translations.get(seg.id, seg.text)
+        if seg.kind == SegmentKind.FRONT_MATTER:
+            key = seg.ast_path[0]
+            if isinstance(key, str):
+                fm_updates[key] = translated
+            continue
+        if seg.kind in {SegmentKind.NOTE_TITLE, SegmentKind.CUT_TITLE}:
+            _set_string_title_at_ast_path(doc, seg, translated)
+            continue
+        new_inline = _build_inline_from_translation(translated, seg.placeholders)
+        _set_inline_at_ast_path(doc, seg, new_inline)
+    if fm_updates and doc.front_matter is not None:
+        doc.front_matter = apply_front_matter_updates(doc.front_matter, fm_updates)
+    return doc
+
+
+def _set_string_title_at_ast_path(
+    doc: Document, seg: Segment, translated: str
+) -> None:
+    """Reinsert plain-string YFM note/cut titles without touching markers."""
+    path = seg.ast_path
+    if not path or path[-1] != "title":
+        raise ReinsertError(f"Bad title path: {path}")
+    node = _navigate_to_doc_index(doc, path[:-1])
+    if seg.kind == SegmentKind.NOTE_TITLE:
+        if not isinstance(node, YfmNote):
+            raise ReinsertError(
+                f"Expected YfmNote at {path[:-1]}, got {type(node).__name__}"
+            )
+        node.title = translated
+        return
+    if seg.kind == SegmentKind.CUT_TITLE:
+        if not isinstance(node, YfmCut):
+            raise ReinsertError(
+                f"Expected YfmCut at {path[:-1]}, got {type(node).__name__}"
+            )
+        node.title = translated
+        return
+    raise ReinsertError(f"Unsupported string-title kind: {seg.kind}")
+
+
+def _build_inline_from_translation(
+    text: str, placeholders: list[ProtectedInline]
+) -> list[InlineNode]:
+    """Parse translated text and substitute placeholders for original nodes."""
+    from ydbdoc_review.validation.markdown_layout import fix_image_bang_spacing
+
+    # Normalize ``! [alt](src)`` before parse so image placeholders reinsert as images.
+    text = fix_image_bang_spacing(text)
+    mapping = {p.placeholder: p.node for p in placeholders}
+    text, mapping = _collapse_link_boundaries(text, mapping)
+    # Parse the text as inline markdown — placeholders ⟦K1⟧ will become InlineText.
+    nodes = parse_inline_text(text)
+    # Replace placeholder text nodes with the original protected nodes.
+    return _substitute_placeholders(nodes, mapping)
+
+
+def _collapse_link_boundaries(
+    text: str, mapping: dict[str, InlineNode]
+) -> tuple[str, dict[str, InlineNode]]:
+    copied_mapping = dict(mapping)
+    link_entries = [
+        (key, node)
+        for key, node in mapping.items()
+        if key.startswith("⟦L") and key.endswith("⟧")
+        and isinstance(node, InlineLink)
+        and bool(node.href)
+        and not node.children
+    ]
+    link_entries.sort(key=lambda item: int(item[0][2:-1]))
+
+    for marker, template in link_entries:
+        if text.count(marker) != 2:
+            raise ReinsertError(f"invalid link boundaries for {marker}")
+        opening = text.find(marker)
+        closing = text.find(marker, opening + len(marker))
+        label_text = text[opening + len(marker) : closing]
+        if re.search(r"⟦L\d+⟧", label_text):
+            raise ReinsertError(f"invalid link boundaries for {marker}")
+
+        label_mapping = dict(mapping)
+        label_mapping.pop(marker, None)
+        label_nodes = _substitute_placeholders(
+            parse_inline_text(label_text), label_mapping
+        )
+        completed = template.model_copy(deep=True)
+        completed.children = label_nodes
+
+        index = 1
+        internal_key = f"⟦R{index}⟧"
+        while internal_key in text or internal_key in copied_mapping:
+            index += 1
+            internal_key = f"⟦R{index}⟧"
+        text = text[:opening] + internal_key + text[closing + len(marker) :]
+        copied_mapping.pop(marker, None)
+        copied_mapping[internal_key] = completed
+
+    return text, copied_mapping
+
+
+def _is_url_placeholder_template(node: InlineNode) -> bool:
+    """True for href-only templates stored when protecting link URLs."""
+    return (
+        isinstance(node, InlineLink)
+        and not node.children
+        and bool(node.href)
+    )
+
+
+def _is_image_src_placeholder_template(node: InlineNode) -> bool:
+    """True for src-only templates stored when protecting image paths."""
+    return isinstance(node, InlineImage) and not node.alt and bool(node.src)
+
+
+def _resolve_url_placeholder(
+    href: str, mapping: dict[str, InlineNode]
+) -> InlineNode | None:
+    """Return URL template for href if it is a ⟦U⟧ placeholder (possibly URL-encoded)."""
+    template = mapping.get(href) or mapping.get(unquote(href))
+    if template is not None and _is_url_placeholder_template(template):
+        return template
+    return None
+
+
+def _resolve_image_src_placeholder(
+    src: str, mapping: dict[str, InlineNode]
+) -> InlineNode | None:
+    """Return image-src template for src/href if it is a ⟦S⟧ placeholder."""
+    template = mapping.get(src) or mapping.get(unquote(src))
+    if template is not None and _is_image_src_placeholder_template(template):
+        return template
+    return None
+
+
+def _inline_link_alt_text(node: InlineLink) -> str:
+    parts: list[str] = []
+    for child in node.children:
+        if isinstance(child, InlineText):
+            parts.append(child.content)
+        elif hasattr(child, "children") and isinstance(child.children, list):
+            for nested in child.children:
+                if isinstance(nested, InlineText):
+                    parts.append(nested.content)
+    return "".join(parts)
+
+
+def _substitute_placeholders(
+    nodes: list[InlineNode], mapping: dict[str, InlineNode]
+) -> list[InlineNode]:
+    """Walk inline nodes and replace any text containing placeholders."""
+    out: list[InlineNode] = []
+    for node in nodes:
+        if isinstance(node, InlineLink):
+            template = _resolve_url_placeholder(node.href, mapping)
+            if template is not None:
+                node.href = template.href
+                node.title = template.title
+                if hasattr(node, "children") and isinstance(node.children, list):
+                    node.children = _substitute_placeholders(node.children, mapping)
+                out.append(node)
+                continue
+            # LLM sometimes emits ``! [alt](⟦S1⟧)`` which parses as bang-text + link.
+            # After bang-spacing fix it is an image; without it, recover here.
+            img_template = _resolve_image_src_placeholder(node.href, mapping)
+            if img_template is not None:
+                if out and isinstance(out[-1], InlineText) and out[-1].content.rstrip().endswith("!"):
+                    prev = out[-1].content
+                    stripped = prev.rstrip()
+                    keep = stripped[:-1]
+                    trailing_ws = prev[len(stripped) :]
+                    if keep or trailing_ws:
+                        out[-1] = InlineText(content=keep + trailing_ws)
+                    else:
+                        out.pop()
+                out.append(
+                    InlineImage(
+                        alt=_inline_link_alt_text(node),
+                        src=img_template.src,
+                        title=img_template.title,
+                        width=img_template.width,
+                        height=img_template.height,
+                    )
+                )
+                continue
+            if hasattr(node, "children") and isinstance(node.children, list):
+                node.children = _substitute_placeholders(node.children, mapping)
+            out.append(node)
+            continue
+        if isinstance(node, InlineImage):
+            template = mapping.get(node.src) or mapping.get(unquote(node.src))
+            if template is not None and _is_image_src_placeholder_template(template):
+                node.src = template.src
+                node.title = template.title
+                node.width = template.width
+                node.height = template.height
+            out.append(node)
+            continue
+        if isinstance(node, InlineText):
+            out.extend(_split_text_by_placeholders(node.content, mapping))
+        elif isinstance(node, InlineCode):
+            # LLM sometimes glues prose onto a code atom inside backticks
+            # (``⟦C3⟧_subscriber::fmt``). Expand markers in ``content`` so
+            # leftover protect markers do not survive into EN (#37673 / #50684).
+            node.content = _expand_placeholders_in_plain(node.content, mapping)
+            out.append(node)
+        elif hasattr(node, "children") and isinstance(node.children, list):
+            node.children = _substitute_placeholders(node.children, mapping)
+            out.append(node)
+        else:
+            out.append(node)
+    return out
+
+
+def _expand_placeholders_in_plain(text: str, mapping: dict[str, InlineNode]) -> str:
+    """Replace ``⟦…⟧`` / percent-encoded markers inside a plain string (code body).
+
+    When the model glues a tail onto a full code atom (``⟦C3⟧_subscriber::fmt``
+    while C3 already is ``tracing_subscriber::fmt``), drop the duplicated
+    suffix instead of concatenating (#37673 / #50684).
+    """
+    if not text or not mapping:
+        return text
+    from ydbdoc_review.rendering.markdown_renderer import _render_inline_node
+
+    out = text
+    for key in sorted(mapping.keys(), key=len, reverse=True):
+        replacement = _plain_atom_text(mapping[key], _render_inline_node)
+        candidates = [key]
+        inner = key[1:-1]
+        candidates.extend(
+            (
+                f"%E2%9F%A6{inner}%E2%9F%A7",
+                f"%e2%9f%a6{inner}%e2%9f%a7",
+            )
+        )
+        for needle in candidates:
+            idx = out.find(needle)
+            if idx < 0:
+                continue
+            suffix = out[idx + len(needle) :]
+            # Duplicated tail after a whole-atom marker.
+            if suffix and (
+                replacement.endswith(suffix)
+                or replacement.endswith(suffix.lstrip("_"))
+            ):
+                out = out[:idx] + replacement
+            else:
+                out = out[:idx] + replacement + suffix
+            break
+    return out
+
+
+def _plain_atom_text(node: InlineNode, render) -> str:
+    if isinstance(node, InlineCode):
+        return node.content
+    if isinstance(node, InlineText):
+        return node.content
+    return render(node)
+
+
+def _split_text_by_placeholders(
+    text: str, mapping: dict[str, InlineNode]
+) -> list[InlineNode]:
+    """Split a text string at placeholder markers and substitute originals.
+
+    Also recognizes percent-encoded markers (``%E2%9F%A6U1%E2%9F%A7``) that
+    markdown/link rendering sometimes emits when substitute missed a pass
+    (#48764).
+    """
+    if not mapping:
+        return [InlineText(content=text)] if text else []
+
+    import re
+
+    # Sort by length descending so longer placeholders match first
+    # (defensive; in practice all placeholders are short and unique).
+    keys_sorted = sorted(mapping.keys(), key=len, reverse=True)
+    literal = "|".join(re.escape(k) for k in keys_sorted)
+    # Percent-encoded ⟦X⟧ → %E2%9F%A6X%E2%9F%A7 (UTF-8 of U+27E6 / U+27E7)
+    encoded_alts: list[str] = []
+    for k in keys_sorted:
+        inner = k[1:-1]  # e.g. U1
+        encoded_alts.append(
+            re.escape(f"%E2%9F%A6{inner}%E2%9F%A7")
+        )
+        encoded_alts.append(
+            re.escape(f"%e2%9f%a6{inner}%e2%9f%a7")
+        )
+    pattern = literal
+    if encoded_alts:
+        pattern = f"{literal}|{'|'.join(encoded_alts)}"
+    parts = re.split(f"({pattern})", text)
+
+    out: list[InlineNode] = []
+    for part in parts:
+        if not part:
+            continue
+        key = part if part in mapping else unquote(part)
+        if key in mapping:
+            out.append(mapping[key])
+        else:
+            # Normalize encoded form to ⟦…⟧ then lookup
+            m = re.fullmatch(
+                r"%E2%9F%A6([CLIHVTUS]\d+)%E2%9F%A7", part, flags=re.IGNORECASE
+            )
+            if m:
+                key = f"⟦{m.group(1)}⟧"
+                if key in mapping:
+                    out.append(mapping[key])
+                    continue
+            out.append(InlineText(content=part))
+    return out
+
+
+# --- AST navigation ---
+
+
+def _set_inline_at_ast_path(
+    doc: Document, seg: Segment, new_inline: list[InlineNode]
+) -> None:
+    kind = seg.kind
+    path = seg.ast_path
+
+    if kind == SegmentKind.PARAGRAPH:
+        node = _navigate_to_doc_index(doc, path)
+        if not isinstance(node, Paragraph):
+            raise ReinsertError(
+                f"Expected Paragraph at {path}, got {type(node).__name__}"
+            )
+        node.children = new_inline
+    elif kind == SegmentKind.HEADING:
+        node = _navigate_to_doc_index(doc, path)
+        if not isinstance(node, Heading):
+            raise ReinsertError(
+                f"Expected Heading at {path}, got {type(node).__name__}"
+            )
+        node.children = new_inline
+    elif kind == SegmentKind.TERM_DEFINITION:
+        node = _navigate_to_doc_index(doc, path)
+        if not isinstance(node, TermDefinition):
+            raise ReinsertError(
+                f"Expected TermDefinition at {path}, got {type(node).__name__}"
+            )
+        node.children = new_inline
+    elif kind == SegmentKind.TABLE_HEADER_CELL:
+        # path: [..., "header", col_idx]
+        table = _navigate_to_doc_index(doc, path[:-2])
+        if not isinstance(table, Table):
+            raise ReinsertError(f"Expected Table, got {type(table).__name__}")
+        col = path[-1]
+        if not isinstance(col, int):
+            raise ReinsertError(f"Bad col index in {path}")
+        table.header.cells[col].children = new_inline
+    elif kind == SegmentKind.TABLE_BODY_CELL:
+        # path: [..., "row", row_idx, col_idx]
+        table = _navigate_to_doc_index(doc, path[:-3])
+        if not isinstance(table, Table):
+            raise ReinsertError(f"Expected Table, got {type(table).__name__}")
+        row_idx, col_idx = path[-2], path[-1]
+        if not isinstance(row_idx, int) or not isinstance(col_idx, int):
+            raise ReinsertError(f"Bad row/col index in {path}")
+        table.rows[row_idx].cells[col_idx].children = new_inline
+    elif kind == SegmentKind.TAB_TITLE:
+        # path: [..., yfm_tabs_idx, tab_idx, "title"]
+        tabs = _navigate_to_doc_index(doc, path[:-2])
+        if not isinstance(tabs, YfmTabs):
+            raise ReinsertError(f"Expected YfmTabs, got {type(tabs).__name__}")
+        tab_idx = path[-2]
+        if not isinstance(tab_idx, int):
+            raise ReinsertError(f"Bad tab index in {path}")
+        tabs.children[tab_idx].title = new_inline
+    elif kind == SegmentKind.LIST_ITEM:
+        node = _navigate_to_doc_index(doc, path)
+        if isinstance(node, ListItem):
+            if node.children and isinstance(node.children[0], Paragraph):
+                node.children[0].children = new_inline
+            else:
+                raise ReinsertError(
+                    "List item without leading paragraph cannot accept inline."
+                )
+        else:
+            raise ReinsertError(
+                f"Expected ListItem at {path}, got {type(node).__name__}"
+            )
+    elif kind == SegmentKind.BLOCKQUOTE_PARAGRAPH:
+        node = _navigate_to_doc_index(doc, path)
+        if not isinstance(node, Paragraph):
+            raise ReinsertError(
+                f"Expected Paragraph at {path}, got {type(node).__name__}"
+            )
+        node.children = new_inline
+    else:
+        raise ReinsertError(f"Unsupported segment kind: {kind}")
+
+
+def _navigate_to_doc_index(doc: Document, path: list) -> object:
+    """Walk a numeric path through children/branches; ignore non-int markers."""
+    node: object = doc
+    for step in path:
+        if not isinstance(step, int):
+            raise ReinsertError(
+                f"Unexpected non-int step {step!r} in path {path}; "
+                "use a dedicated helper for typed paths."
+            )
+        if isinstance(node, Document):
+            node = node.children[step]
+        elif isinstance(node, YfmIf):
+            node = node.branches[step]
+        elif hasattr(node, "children") and isinstance(
+            getattr(node, "children"), list
+        ):
+            node = node.children[step]  # type: ignore[index]
+        else:
+            raise ReinsertError(
+                f"Cannot descend into {type(node).__name__} at index {step}"
+            )
+    return node
