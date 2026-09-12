@@ -18,13 +18,12 @@ def test_F089_trace() -> None:
         "run_pr_translation(",
         "_apply_results_to_disk(",
         "prepare_translation_branch_on_base(",
-        "run_doc_verify(",
         "build_source_pr_comment(",
     )
     positions = [source.index(stage) for stage in stages[:-1]]
     positions.append(source.rindex(stages[-1]))
     assert positions == sorted(positions)
-    assert source.count("run_doc_verify(") == 1
+    assert "run_doc_verify(" not in source
 
     analyze = inspect.getsource(PlanTranslatePairsStep.run)
     execute = inspect.getsource(ExecutePairPlansStep.run)

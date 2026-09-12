@@ -1655,21 +1655,12 @@ def test_run_doc_translate_posts_comments(git_repo: str):
         "base": {"ref": "main", "sha": checkout_sha},
     }
 
-    def verify_after_saved_admission(**_kwargs) -> DocJobResult:
-        state = load_continuability(git_repo, 7)
-        assert state is not None
-        assert state.allows_continue()
-        assert state.unfinished_stage == "verify"
-        assert state.translation_pr == 99
-        return _mock_inline_verify_job()
-
     with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch(
                         "ydbdoc_review.github.workflow.run_doc_verify",
-                        side_effect=verify_after_saved_admission,
                     ) as mock_verify:
                         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                             _wire_translation_publication(
@@ -1704,14 +1695,13 @@ def test_run_doc_translate_posts_comments(git_repo: str):
                                 )
 
     assert result.translation_pr_number == 99
-    assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
+    assert result.translation_comment_url is None
     assert result.committed is True
     assert result.pushed is True
     terminal_state = load_continuability(git_repo, 7)
     assert terminal_state is not None
     assert not terminal_state.allows_continue()
-    mock_verify.assert_called_once()
-    assert mock_verify.call_args.kwargs["pr_number"] == 99
+    mock_verify.assert_not_called()
     assert mock_gh.return_value.post_issue_comment.call_count == 1
     comment_calls = mock_gh.return_value.post_issue_comment.call_args_list
     assert comment_calls[0][0][2] == 7
@@ -1723,7 +1713,7 @@ def test_run_doc_translate_posts_comments(git_repo: str):
 
 
 def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str):
-    """Source PR comment failure must not abort after inline verify succeeded."""
+    """Source PR comment failure must not abort after inline QA succeeded."""
     _wire_en_toc_for_a(git_repo)
     checkout_sha = _head_sha(git_repo)
     pull = {
@@ -1741,8 +1731,7 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:
                     with patch(
                         "ydbdoc_review.github.workflow.run_doc_verify",
-                        return_value=_mock_inline_verify_job(),
-                    ):
+                    ) as mock_verify:
                         with patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh:
                             _wire_translation_publication(
                                 mock_gh.return_value,
@@ -1778,8 +1767,9 @@ def test_run_doc_translate_source_comment_failure_still_completes(git_repo: str)
                                     config=load_config(env=_env()),
                                 )
 
-    assert result.translation_comment_url == ("https://github.com/o/r/pull/99#issuecomment-verify")
+    assert result.translation_comment_url is None
     assert result.source_comment_url is None
+    mock_verify.assert_not_called()
     mock_gh.return_value.post_issue_comment.assert_called_once()
     assert mock_gh.return_value.post_issue_comment.call_args[0][2] == 7
 

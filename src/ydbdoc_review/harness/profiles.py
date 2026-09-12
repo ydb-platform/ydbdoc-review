@@ -1,8 +1,8 @@
 """Named step lists for translate vs verify.
 
-``doc_translate`` uses ``TRANSLATE_PROFILE`` (parse + translate only).
+``doc_translate`` uses ``TRANSLATE_WITH_QA_PROFILE`` (translate + inline QA).
 ``doc_verify`` uses ``VERIFY_PROFILE`` (load EN + critic/heuristics/verdict).
-``TRANSLATE_WITH_QA_PROFILE`` is for local ``translate-file --with-critic`` only.
+``TRANSLATE_PROFILE`` remains the single-file translate-only profile.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from ydbdoc_review.harness.steps import (
     CriticFeedbackRetryStep,
     CriticLoopStep,
     FinalizeEnStep,
-    HeuristicsStep,
     HarnessStep,
+    HeuristicsStep,
     LoadTargetStep,
     ParseStep,
     ReportArtifactsStep,

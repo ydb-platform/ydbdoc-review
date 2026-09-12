@@ -187,10 +187,15 @@ def run_pair_plan(
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
     enable_critic = plan.action != "skip"
     if enable_translate:
+        # F-109: every full prose translation completes the shared F-056
+        # quality cycle before workflow publication. Proof-based coverage units
+        # carry their own validated receipts and must preserve zero-call resume.
+        # Glossary full translation follows the same mutable critic/repair path;
+        # its read-only exception is verify-only.
         profile = (
-            TRANSLATE_WITH_QA_PROFILE
-            if is_glossary_file(plan.source_path) and content.coverage_plan is None
-            else TRANSLATE_PROFILE
+            TRANSLATE_PROFILE
+            if content.coverage_plan is not None
+            else TRANSLATE_WITH_QA_PROFILE
         )
     else:
         profile = VERIFY_PROFILE

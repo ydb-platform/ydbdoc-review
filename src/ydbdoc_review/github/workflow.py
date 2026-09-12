@@ -3468,7 +3468,10 @@ def run_doc_translate(
 
     tr_pr_number: int | None = None
     tr_pr_url: str | None = None
-    verify_result: PRTranslationResult | None = None
+    # The translate harness has already completed the shared F-056 QA cycle on
+    # the candidate bytes. Reuse that evidence in the source summary instead of
+    # starting a standalone verify after the branch and PR are published.
+    verify_result: PRTranslationResult | None = pr_result
     artifact_provenance: TranslationArtifactProvenance | None = None
     awaiting_existing_continue_pr = (
         pr_result.publication_failure == "awaiting_instruction_no_artifact"
@@ -3678,41 +3681,6 @@ def run_doc_translate(
                     tr_pr_number,
                     exc,
                 )
-
-    if tr_pr_number is not None and pushed:
-        _persist_continuability(
-            repo_path,
-            source_pr=pr_number,
-            fixed_shas=fixed_shas,
-            translation_pr=tr_pr_number,
-            unfinished=True,
-            unfinished_stage="verify",
-            ops_ctx=ops_ctx,
-        )
-        verify_merge = f"origin/{translation_pr_base(ctx)}"
-        logger.info(
-            "Running inline doc_verify on translation PR #%s (merge_base=%s)",
-            tr_pr_number,
-            verify_merge,
-        )
-        verify_job = run_doc_verify(
-            repo_path=repo_path,
-            github_repo=github_repo,
-            pr_number=tr_pr_number,
-            merge_base_with=verify_merge,
-            dry_run=False,
-            no_commit=no_commit,
-            config=cfg,
-            inherited_completeness_gaps=pr_result.completeness_gaps,
-            inherited_final_tree_blockers=pr_result.final_tree_blockers,
-            continue_feedback=effective_continue_feedback,
-            skip_ops_gates=True,
-            _coverage_store=(
-                active_checkpoint.store if active_checkpoint is not None else None
-            ),
-        )
-        job.translation_comment_url = verify_job.translation_comment_url
-        verify_result = verify_job.pr_result
 
     if not dry_run and not no_commit:
         awaiting_instruction = (

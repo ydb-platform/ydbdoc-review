@@ -450,7 +450,8 @@ def test_runtime_resume_reloads_and_retains_current_receipt() -> None:
         {"segments": [{"id": "s0001", "text": "Hello."}]},
         ensure_ascii=False,
     )
-    first = run_pr_translation(contents, _client([response]), checkpoint=parent)
+    critic_ok = json.dumps({"verdict": "ok", "issues": []})
+    first = run_pr_translation(contents, _client([response, critic_ok]), checkpoint=parent)
     assert first.pair_results[0].target_text == "Hello.\n"
 
     current = CheckpointWriter(store, "run-b", _identity())
@@ -831,7 +832,8 @@ def test_parent_discovery_never_combines_multiple_runs() -> None:
         {"segments": [{"id": missing.id, "text": "Fresh third."}]},
         ensure_ascii=False,
     )
-    client = _client([response])
+    critic_ok = json.dumps({"verdict": "ok", "issues": []})
+    client = _client([response, critic_ok])
     current = CheckpointWriter(store, "current", identity)
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -847,7 +849,7 @@ def test_parent_discovery_never_combines_multiple_runs() -> None:
     )
 
     assert result.pair_results[0].target_text == "First.\n\nSecond.\n\nFresh third.\n"
-    assert len(client.usage_tracker.records) == 1
+    assert len(client.usage_tracker.records) == 2
     assert (
         len([key for key in store.list_keys("current") if key.startswith("translation/v1/units/")])
         == 3
