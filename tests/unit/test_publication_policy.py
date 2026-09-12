@@ -685,17 +685,19 @@ def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
     gh.create_pull.assert_called_once()
     assert gh.create_pull.call_args.kwargs["draft"] is False
     pr_body = gh.create_pull.call_args.kwargs["body"]
-    assert "QA RED, do not merge" in pr_body
+    assert "Артефакт: опубликован" in pr_body
+    assert "QA K: 🔴 RED" in pr_body
     assert "missing.md" in pr_body
     source_summary = gh.post_issue_comment.call_args.args[3]
     assert "published_red" in source_summary
-    assert "🔴" in source_summary and "не мержить" in source_summary
+    assert "QA RED" in source_summary
+    assert "не мержить" not in source_summary
     full_report = build_full_report(
         job.pr_result,
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=load_config(env=_env()),
     )
-    assert "QA RED, do not merge" in full_report
+    assert "Статус QA (K): 🔴 RED" in full_report
     assert "missing.md" in full_report
     assert finish.call_args.kwargs["status"] == "published_red"
     assert job_requires_nonzero_exit(job) is False
@@ -2284,7 +2286,8 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_open_red(
     commit.assert_called_once()
     push.assert_called_once()
     assert gh.create_pull.call_args.kwargs["draft"] is False
-    assert "QA RED, do not merge" in gh.create_pull.call_args.kwargs["body"]
+    assert "Артефакт: опубликован" in gh.create_pull.call_args.kwargs["body"]
+    assert "QA K: 🔴 RED" in gh.create_pull.call_args.kwargs["body"]
     assert job_requires_nonzero_exit(job) is False
 
 
@@ -3116,7 +3119,8 @@ def test_verify_clears_soft_keep_but_keeps_red_body_when_other_pair_is_unsafe(
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
     gh.convert_pull_to_draft.assert_not_called()
     body = gh.update_pull_body.call_args.args[3]
-    assert "QA RED, do not merge" in body
+    assert "Артефакт: не опубликован" in body
+    assert "QA K: 🔴 RED" in body
     assert "translation_soft_keep" not in body
     assert events == ["prepare", "commit", "push", "body"]
 
@@ -3380,7 +3384,8 @@ def test_existing_ready_translation_pr_stays_ready(publication_repo: str):
 
     assert getattr(job.pr_result, "publication_impact", None) == "PUBLISH_RED"
     gh.update_pull_body.assert_called_once()
-    assert "QA RED, do not merge" in gh.update_pull_body.call_args.args[3]
+    assert "Артефакт: опубликован" in gh.update_pull_body.call_args.args[3]
+    assert "QA K: 🔴 RED" in gh.update_pull_body.call_args.args[3]
     gh.convert_pull_to_draft.assert_not_called()
     assert events == ["discover", "push", "refetch", "body"]
     gh.create_pull.assert_not_called()
@@ -4042,7 +4047,7 @@ def test_clean_candidate_keeps_normal_publication(publication_repo: str):
     commit.assert_called_once()
     push.assert_called_once()
     assert gh.create_pull.call_args.kwargs["draft"] is False
-    assert "QA RED, do not merge" not in gh.create_pull.call_args.kwargs["body"]
+    assert "QA K: 🔴 RED" not in gh.create_pull.call_args.kwargs["body"]
     assert finish.call_args.kwargs["status"] == "ok"
     assert job_requires_nonzero_exit(job) is False
 

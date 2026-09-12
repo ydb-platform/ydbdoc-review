@@ -48,6 +48,6 @@ def test_F079_red_candidate() -> None:
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}),
     )
-    assert "QA RED, do not merge" in report
+    assert "Статус QA (K): 🔴 RED" in report
     assert "Candidate опубликован для ручного исправления" in report
     assert "/legacy.md" in report and "/candidate.md" in report

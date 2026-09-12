@@ -66,15 +66,13 @@ def test_F094_red_to_green() -> None:
     )
 
     red_report = _report(result)
-    assert "QA RED" in red_report
-    assert "не мержить" in red_report
+    assert "Статус QA (K): 🔴 RED" in red_report
 
     result.final_tree_blockers.clear()
     green_report = _report(result)
-    recommendation = green_report.split("Рекомендация:", 1)[1].split("\n", 1)[0]
-    assert "GREEN" in recommendation
-    assert "вручную" in recommendation
-    assert "QA RED" not in recommendation
+    assert "Статус QA (K): 🟢 GREEN" in green_report
+    assert "Статус QA (K): 🔴 RED" not in green_report
+    assert "Рекомендация:" not in green_report
 
 
 def test_F094_no_author_mutation() -> None:

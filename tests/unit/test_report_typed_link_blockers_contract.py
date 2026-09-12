@@ -101,9 +101,7 @@ def _report(result: PRTranslationResult) -> str:
 
 def _assert_red_visible_once(result: PRTranslationResult) -> None:
     body = _report(result)
-    recommendation = body.split("Рекомендация:", 1)[1].split("\n", 1)[0]
-    assert "🔴" in recommendation
-    assert "можно мержить" not in recommendation
+    assert "Статус QA (K): 🔴 RED" in body
     assert PATH in body
     assert body.count("missing_link_wrapper") == 1
     assert body.count(HREF) == 1
@@ -195,8 +193,7 @@ def test_pinned_current_issue_is_red_and_repaired_result_is_green() -> None:
         ]
     )
     body = _report(repaired)
-    recommendation = body.split("Рекомендация:", 1)[1].split("\n", 1)[0]
-    assert "🟢" in recommendation
+    assert "Статус QA (K): 🟢 GREEN" in body
     assert not classify_publication_blockers(repaired).any
     assert not result_has_blocking_findings(repaired)
 
@@ -213,8 +210,7 @@ def test_stale_blocked_verdict_and_resolved_refusal_stay_nonblocking() -> None:
             file_result=_file_result(verdict="blocked", critic=critic),
         )
         body = _report(PRTranslationResult(pair_results=[run]))
-        recommendation = body.split("Рекомендация:", 1)[1].split("\n", 1)[0]
-        assert "🟢" in recommendation
+        assert "Статус QA (K): 🟢 GREEN" in body
 
 
 def test_actual_blockers_never_yield_green_with_other_green_file() -> None:
@@ -274,7 +270,4 @@ def test_actual_blockers_never_yield_green_with_other_green_file() -> None:
         ),
     ]
     for result in cases:
-        recommendation = _report(result).split("Рекомендация:", 1)[1].split(
-            "\n", 1
-        )[0]
-        assert "🟢" not in recommendation
+        assert "Статус QA (K): 🟢 GREEN" not in _report(result)
