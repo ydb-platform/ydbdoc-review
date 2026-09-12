@@ -1183,7 +1183,7 @@ def build_source_pr_comment(
             f"| Translation PR | — |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             f"| Статус QA (K) | 🔴 RED — {failure_label} |\n\n"
-            "**Не переведены:**\n\n"  # noqa: RUF001
+            "**Не переведены:**\n\n"
         )
         for path in result.completeness_gaps:
             body += f"- {gap_label(path)}\n"
@@ -1457,7 +1457,7 @@ def build_full_report(
             )
         elif final_tree_section:
             body += (
-                "В файловых результатах открытых замечаний критика нет — "  # noqa: RUF001
+                "В файловых результатах открытых замечаний критика нет — "
                 "статус QA K остаётся RED из-за проверок финального дерева выше.\n\n"
             )
         else:
