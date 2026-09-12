@@ -2014,6 +2014,14 @@ def _pr_result_has_blockers(result: PRTranslationResult) -> bool:
     return result_has_blocking_findings(result)
 
 
+def _has_unresolved_instruction_without_artifact(result: PRTranslationResult) -> bool:
+    """Identify unresolved navigation actions when no candidate bytes exist."""
+    return any(
+        navigation.target_text is None and bool(navigation.warnings)
+        for navigation in result.navigation_results
+    )
+
+
 def _publication_withheld(result: PRTranslationResult) -> bool:
     return result.publication_impact in {
         PublicationImpact.WITHHOLD_INCOMPLETE,
@@ -3117,6 +3125,9 @@ def run_doc_translate(
                 pr_number,
             )
             touched = TouchedPaths([], [])
+
+    if not touched and _has_unresolved_instruction_without_artifact(pr_result):
+        pr_result.publication_failure = "awaiting_instruction_no_artifact"
 
     if active_checkpoint is not None:
         _finish_translation_checkpoint(active_checkpoint, pr_result, scope_plan)
