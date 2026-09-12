@@ -1178,19 +1178,6 @@ def collect_internal_hrefs(text: str) -> list[str]:
     return found
 
 
-def _normalize_internal_href(href: str) -> str:
-    """Canonicalize an internal URL without changing its query or fragment."""
-    decoded = unquote(href.strip())
-    before_fragment, fragment_marker, fragment = decoded.partition("#")
-    path, query_marker, query = before_fragment.partition("?")
-    if path:
-        path = posixpath.normpath(path)
-        if path == ".":
-            path = ""
-    normalized = path + (query_marker + query if query_marker else "")
-    return normalized + (fragment_marker + fragment if fragment_marker else "")
-
-
 def _localized_en_fragment_pairs_ru_remap(
     source_fragment: str,
     target_fragment: str,
@@ -1400,10 +1387,8 @@ def check_href_parity(
 
     # Markdown renderers may percent-encode Unicode fragments. URL decoding is
     # semantics-preserving and avoids false mismatches such as #50854.
-    src_raw_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
-    tgt_raw_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
-    src_ordered = [_normalize_internal_href(href) for href in src_raw_ordered]
-    tgt_ordered = [_normalize_internal_href(href) for href in tgt_raw_ordered]
+    src_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
+    tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
     src = Counter(src_ordered)
     tgt = Counter(tgt_ordered)
     if ignore_basenames:
@@ -1432,8 +1417,8 @@ def check_href_parity(
 
     exact_ascii_issues = (
         _exact_ascii_fragment_issues(
-            src_raw_ordered,
-            tgt_raw_ordered,
+            src_ordered,
+            tgt_ordered,
             en_page_path=en_page_path,
             docs_text_reader=docs_text_reader,
         )
@@ -1463,8 +1448,7 @@ def check_href_parity(
         if canonical_source != source_text:
             source_text = canonical_source
             src_ordered = [
-                _normalize_internal_href(href)
-                for href in collect_internal_hrefs(source_text)
+                unquote(href) for href in collect_internal_hrefs(source_text)
             ]
             src = Counter(src_ordered)
             if ignore_basenames:
@@ -1484,8 +1468,7 @@ def check_href_parity(
     # fragment parity above is never grandfathered.
     if en_baseline_text is not None and source_baseline_text is None:
         tip_hrefs = Counter(
-            _normalize_internal_href(href)
-            for href in collect_internal_hrefs(en_baseline_text)
+            unquote(href) for href in collect_internal_hrefs(en_baseline_text)
         )
         if tgt == tip_hrefs:
             return []
@@ -1546,14 +1529,8 @@ def check_href_parity(
     # newly added RU href is not grandfathered because it is absent from the
     # source baseline (#45949/#50904).
     if source_baseline_text is not None and en_baseline_text is not None:
-        src_base = Counter(
-            _normalize_internal_href(href)
-            for href in collect_internal_hrefs(source_baseline_text)
-        )
-        en_base = Counter(
-            _normalize_internal_href(href)
-            for href in collect_internal_hrefs(en_baseline_text)
-        )
+        src_base = Counter(unquote(href) for href in collect_internal_hrefs(source_baseline_text))
+        en_base = Counter(unquote(href) for href in collect_internal_hrefs(en_baseline_text))
         old_missing = src_base - en_base
         old_extra = en_base - src_base
         current_missing = Counter(missing)
@@ -1594,8 +1571,7 @@ def check_href_parity(
         used_extra: set[int] = set()
         kept_missing: list[str] = []
         baseline_ordered = [
-            _normalize_internal_href(href)
-            for href in collect_internal_hrefs(en_baseline_text or "")
+            unquote(href) for href in collect_internal_hrefs(en_baseline_text or "")
         ]
         occurrence_seen: Counter[str] = Counter()
         for source_href in missing:
@@ -1709,10 +1685,7 @@ def check_href_parity(
         extra = kept_extra
     # After pairing missings, drop leftover tip-ambient EN extras (§6.228).
     if extra and en_baseline_text is not None and source_baseline_text is None:
-        en_base = Counter(
-            _normalize_internal_href(href)
-            for href in collect_internal_hrefs(en_baseline_text)
-        )
+        en_base = Counter(unquote(href) for href in collect_internal_hrefs(en_baseline_text))
         extra = sorted((Counter(extra) - en_base).elements())
     if not missing and not extra:
         return []
@@ -1736,61 +1709,73 @@ def check_heading_anchor_parity(
     target_lang: str = "en",
     dictionary: JobAnchorDictionary | None = None,
 ) -> list[str]:
-    """Blocking when expected EN explicit ``{#id}`` multisets differ.
+    """Block when explicit heading IDs do not survive either translation direction.
 
-    ASCII RU anchors must appear unchanged on EN. Cyrillic RU anchors must map
-    to their job-dictionary (or ``english_yfm_anchor``) English counterparts.
+    RU→EN keeps ASCII RU IDs byte-identical and maps Cyrillic RU IDs through the
+    job dictionary. EN→RU keeps only canonical ASCII EN IDs byte-identical. A
+    noncanonical EN source ID is an EN-source defect and must not be silently
+    repaired by granting the RU target permission to change it.
     """
-    if source_lang.lower() not in {"ru", "russian"}:
-        return []
-    if target_lang.lower() not in {"en", "english"}:
+    source_locale = source_lang.lower()
+    target_locale = target_lang.lower()
+    ru_to_en = source_locale in {"ru", "russian"} and target_locale in {
+        "en",
+        "english",
+    }
+    en_to_ru = source_locale in {"en", "english"} and target_locale in {
+        "ru",
+        "russian",
+    }
+    if not (ru_to_en or en_to_ru):
         return []
 
     from ydbdoc_review.parsing.markdown_parser import parse_markdown
 
-    ru_doc = parse_markdown(source_text)
-    en_doc = parse_markdown(target_text)
-    ru_heads = list(_iter_headings(ru_doc.children))
-    en_heads = list(_iter_headings(en_doc.children))
+    source_doc = parse_markdown(source_text)
+    target_doc = parse_markdown(target_text)
+    source_heads = list(_iter_headings(source_doc.children))
+    target_heads = list(_iter_headings(target_doc.children))
     dict_ = dictionary if dictionary is not None else JobAnchorDictionary()
 
-    expected: list[str] = []
-    outlines_aligned = len(ru_heads) == len(en_heads) and all(
-        src.level == tgt.level for src, tgt in zip(ru_heads, en_heads, strict=True)
-    )
-    if outlines_aligned:
-        for src_h, tgt_h in zip(ru_heads, en_heads, strict=True):
-            if (
-                src_h.anchor
-                and is_ascii_yfm_anchor(src_h.anchor)
-                and tgt_h.anchor != src_h.anchor
-            ):
-                return [
-                    "anchor_parity: stable explicit id moved to a different section: "
-                    f"`{src_h.anchor}` -> `{tgt_h.anchor or '(missing)'}`"
-                ]
-        for src_h, tgt_h in zip(ru_heads, en_heads, strict=True):
-            if not src_h.anchor:
-                continue
-            if is_ascii_yfm_anchor(src_h.anchor):
-                expected.append(src_h.anchor)
-            else:
-                en_text = _heading_plain_text(tgt_h)
-                expected.append(dict_.lookup_or_insert(src_h.anchor, en_text))
+    if en_to_ru:
+        source_anchors = collect_explicit_anchors(source_text)
+        invalid = sorted({anchor for anchor in source_anchors if not is_ascii_yfm_anchor(anchor)})
+        if invalid:
+            preview = ", ".join(f"`{{#{anchor}}}`" for anchor in invalid[:8])
+            return [
+                "anchor_parity: noncanonical EN source explicit ID(s) "
+                f"{preview}; fix the EN source separately before editing RU"
+            ]
+        expected = source_anchors
     else:
-        # Drifted outlines: compare ASCII multiset only; Cyrillic RU must not
-        # appear verbatim on EN (REQUIREMENTS §8).
-        for anchor in collect_explicit_anchors(source_text):
-            if is_ascii_yfm_anchor(anchor):
-                expected.append(anchor)
-            elif dictionary is not None and dictionary.get(anchor):
-                expected.append(dictionary.get(anchor) or anchor)
-            else:
-                minted = english_yfm_anchor(anchor, "") or anchor
-                if is_ascii_yfm_anchor(minted):
-                    expected.append(minted)
+        outlines_aligned = len(source_heads) == len(target_heads) and all(
+            src.level == tgt.level
+            for src, tgt in zip(source_heads, target_heads, strict=True)
+        )
+        expected = []
+        if outlines_aligned:
+            for src_h, tgt_h in zip(source_heads, target_heads, strict=True):
+                if not src_h.anchor:
+                    continue
+                if is_ascii_yfm_anchor(src_h.anchor):
+                    expected.append(src_h.anchor)
                 else:
-                    expected.append(dict_.lookup_or_insert(anchor, ""))
+                    en_text = _heading_plain_text(tgt_h)
+                    expected.append(dict_.lookup_or_insert(src_h.anchor, en_text))
+        else:
+            # Drifted outlines: compare ASCII multiset only; Cyrillic RU must
+            # not appear verbatim on EN (REQUIREMENTS §8).
+            for anchor in collect_explicit_anchors(source_text):
+                if is_ascii_yfm_anchor(anchor):
+                    expected.append(anchor)
+                elif dictionary is not None and dictionary.get(anchor):
+                    expected.append(dictionary.get(anchor) or anchor)
+                else:
+                    minted = english_yfm_anchor(anchor, "") or anchor
+                    if is_ascii_yfm_anchor(minted):
+                        expected.append(minted)
+                    else:
+                        expected.append(dict_.lookup_or_insert(anchor, ""))
 
     src = Counter(expected)
     tgt = Counter(collect_explicit_anchors(target_text))
