@@ -114,6 +114,11 @@ def _has_direct_structural_failure(
 def _is_incomplete(result: PRTranslationResult) -> bool:
     if result.completeness_gaps or result.publication_failure:
         return True
+    # Dependency scope warnings are deliberately yellow in ordinary reports,
+    # but an unresolved dependency with an explicit manual action means the
+    # candidate is incomplete and must not be reported GREEN.
+    if any("manual action required" in warning for warning in result.yellow_warnings):
+        return True
     for run in result.pair_results:
         if run.error:
             return True

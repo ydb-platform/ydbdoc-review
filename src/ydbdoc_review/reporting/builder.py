@@ -214,6 +214,8 @@ def _qa_status(result: PRTranslationResult) -> tuple[str, str]:
             "🔴",
             f"RED — в переводном PR нет {n} ожидаемых EN-путей (см. блок ниже)",
         )
+    if any("manual action required" in warning for warning in result.yellow_warnings):
+        return "🔴", "QA RED — есть нерешённые зависимости, требующие ручного действия"
     if result.final_tree_blockers:
         return "🔴", "RED — есть блокеры финального дерева"
     if any(_typed_link_issues(run) for run in result.pair_results):

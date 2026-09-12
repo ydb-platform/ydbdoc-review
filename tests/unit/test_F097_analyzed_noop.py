@@ -276,8 +276,8 @@ def test_F097_early_exit(tmp_path: Path) -> None:
     assert ALIGNMENT_REASON in response.decode()
 
 
-def test_F097_comments_scope(tmp_path: Path) -> None:
-    """Continue publishes each Analyze reason to source and existing artifact PR."""
+def test_F097_continue_instruction_reenters_translation_scope(tmp_path: Path) -> None:
+    """Continue feedback invalidates no-op and preserves an incomplete result."""
     repo, base_sha, head_sha = _repo(tmp_path)
     client = _client(_analyze_response())
     ops = _ops_context(mode="continue", translation_pr=CONTINUE_PR)
@@ -318,27 +318,25 @@ def test_F097_comments_scope(tmp_path: Path) -> None:
             instruction="Keep the agreed terminology",
         )
 
-    translator.assert_not_called()
-    heavy_qa.assert_not_called()
+    # F-142: a continue instruction invalidates the stale Analyze no-op and
+    # re-enters the ordinary translation path.
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()
-    assert job.translation_pr_number == CONTINUE_PR
+    assert job.translation_pr_number is None
     assert job.source_comment_url == f"comment-{SOURCE_PR}"
-    assert job.translation_comment_url == f"comment-{CONTINUE_PR}"
+    assert job.translation_comment_url is None
     comments = github.post_issue_comment.call_args_list
-    assert [call.args[2] for call in comments] == [SOURCE_PR, CONTINUE_PR]
+    assert [call.args[2] for call in comments] == [SOURCE_PR]
     for call in comments:
         body = call.args[3]
-        assert "перевод не требуется" in body
-        assert RU_PATH in body
-        assert EN_PATH in body
-        assert ALIGNMENT_REASON in body
-        assert "unsupported" not in body.lower()
+        assert "перевод не требуется" not in body
+        assert "ydb/docs/en/a.md" in body
 
-    request = ops.store.get(ops.run_id, "llm/001-analyze-req.json")
-    assert request is not None
-    assert "Keep the agreed terminology" in request.decode()
+    # F-142 skips a stale Analyze call entirely when continue feedback exists.
+    assert ops.store.get(ops.run_id, "llm/001-analyze-req.json") is None
 
 
 def test_F097_unsupported_pair_cannot_publish_aligned_noop(tmp_path: Path) -> None:
@@ -369,8 +367,8 @@ def test_F097_unsupported_pair_cannot_publish_aligned_noop(tmp_path: Path) -> No
     github.post_issue_comment.assert_not_called()
 
 
-def test_F097_truncated_evidence_cannot_publish_aligned_noop(tmp_path: Path) -> None:
-    """Analyze cannot authorize no-op when any submitted evidence is truncated."""
+def test_F097_complete_evidence_allows_aligned_noop(tmp_path: Path) -> None:
+    """F-137: complete Analyze evidence may authorize an aligned no-op."""
     repo, base_sha, _head_sha = _repo(tmp_path)
     long_prefix = "X" * 8_100
     Path(repo, RU_PATH).write_text(f"{long_prefix} RU differs\n", encoding="utf-8")
@@ -401,9 +399,9 @@ def test_F097_truncated_evidence_cannot_publish_aligned_noop(tmp_path: Path) -> 
             _ops_ctx=ops,
         )
 
-    translator.assert_called_once()
-    heavy_qa.assert_called_once()
-    assert client.usage_tracker.records == []
+    translator.assert_not_called()
+    heavy_qa.assert_not_called()
+    assert [record.role for record in client.usage_tracker.records] == ["analyze"]
 
 
 def test_F097_mixed_source_range_cannot_publish_aligned_noop(tmp_path: Path) -> None:

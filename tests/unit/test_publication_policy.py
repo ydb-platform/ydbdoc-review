@@ -4069,7 +4069,7 @@ def test_normal_publication_uses_exact_remote_lease_for_existing_and_new_branch(
     assert push.call_args.kwargs["expected_remote_sha"] == remote_sha
 
 
-def test_clean_empty_scope_keeps_existing_success_without_pr(publication_repo: str):
+def test_clean_empty_scope_is_explicit_no_supported_files(publication_repo: str):
     result = PRTranslationResult()
 
     job, gh, prepare, commit, push, finish = _run_top_level(
@@ -4078,13 +4078,14 @@ def test_clean_empty_scope_keeps_existing_success_without_pr(publication_repo: s
         source_changes=[],
     )
 
-    assert job.pr_result.publication_impact == "PUBLISH_NORMAL"
+    assert job.status == "no_supported_files"
+    assert job.pr_result.publication_failure == "no_supported_files"
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "ok"
-    assert job_requires_nonzero_exit(job) is False
+    assert finish.call_args.kwargs["status"] == "no_supported_files"
+    assert job_requires_nonzero_exit(job) is True
 
 
 def test_withhold_source_comment_names_file_reason_and_action(publication_repo: str):

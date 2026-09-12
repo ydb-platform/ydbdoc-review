@@ -12,7 +12,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from ydbdoc_review.validation.autotitle_hrefs import _AUTO_LINK
 from ydbdoc_review.validation.link_contract import LinkContractIssue, LinkContractResult
@@ -32,6 +32,19 @@ _HTTP = re.compile(r"^https?://", re.IGNORECASE)
 _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(?<!`)`+[^`\n]*`+(?!`)")
 _HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
+
+
+def _canonical_href_for_parity(href: str) -> str:
+    """Normalize equivalent internal URL spellings for RU/EN comparison."""
+    parts = urlsplit(href)
+    path = unquote(parts.path)
+    if path:
+        path = posixpath.normpath(path)
+        if path == ".":
+            path = ""
+    query = unquote(parts.query)
+    fragment = unquote(parts.fragment)
+    return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
 
 
 def _mask_link_protected_ranges(text: str) -> str:
@@ -1387,8 +1400,14 @@ def check_href_parity(
 
     # Markdown renderers may percent-encode Unicode fragments. URL decoding is
     # semantics-preserving and avoids false mismatches such as #50854.
-    src_ordered = [unquote(href) for href in collect_internal_hrefs(source_text)]
-    tgt_ordered = [unquote(href) for href in collect_internal_hrefs(target_text)]
+    src_raw_ordered = collect_internal_hrefs(source_text)
+    tgt_raw_ordered = collect_internal_hrefs(target_text)
+    src_ordered = [
+        _canonical_href_for_parity(href) for href in collect_internal_hrefs(source_text)
+    ]
+    tgt_ordered = [
+        _canonical_href_for_parity(href) for href in collect_internal_hrefs(target_text)
+    ]
     src = Counter(src_ordered)
     tgt = Counter(tgt_ordered)
     if ignore_basenames:
@@ -1417,8 +1436,8 @@ def check_href_parity(
 
     exact_ascii_issues = (
         _exact_ascii_fragment_issues(
-            src_ordered,
-            tgt_ordered,
+            src_raw_ordered,
+            tgt_raw_ordered,
             en_page_path=en_page_path,
             docs_text_reader=docs_text_reader,
         )
@@ -1778,8 +1797,9 @@ def check_heading_anchor_parity(
                         expected.append(dict_.lookup_or_insert(anchor, ""))
 
     src = Counter(expected)
-    tgt = Counter(collect_explicit_anchors(target_text))
-    if src == tgt:
+    target_anchors = collect_explicit_anchors(target_text)
+    tgt = Counter(target_anchors)
+    if src == tgt and expected == target_anchors:
         return []
 
     missing = sorted((src - tgt).elements())
