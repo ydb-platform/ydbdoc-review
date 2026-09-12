@@ -14,8 +14,8 @@ import time
 from dataclasses import dataclass
 from typing import Literal
 
-from openai import OpenAI
 import requests
+from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from ydbdoc_review.config.loader import Config, LLMConfig
@@ -25,7 +25,6 @@ from ydbdoc_review.llm.errors import (
     LLMRetryableRequestError,
     LLMRetryExhaustedError,
 )
-from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV
 from ydbdoc_review.llm.retry import (
     HTTP_RATE_LIMIT,
     classify_api_error,
@@ -39,15 +38,13 @@ from ydbdoc_review.llm.retry import (
     should_advance_eliza_model_chain,
 )
 from ydbdoc_review.llm.role_chains import ensure_disjoint_translate_critic_chains
+from ydbdoc_review.llm.tls import ELIZA_CA_BUNDLE_ENV, eliza_tls_verify
+from ydbdoc_review.llm.usage import LLMUsage, UsageTracker, validate_model_pricing
 from ydbdoc_review.shutdown import interruptible_sleep
-from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 
 logger = logging.getLogger(__name__)
 
 LLMRole = Literal["analyze", "translate", "critic"]
-
-from ydbdoc_review.llm.tls import eliza_tls_verify
-
 
 def _message_char_count(messages: list[ChatCompletionMessageParam]) -> tuple[int, int]:
     """Return (message_count, total content characters) for diagnostics."""
@@ -176,6 +173,9 @@ class YandexLLMClient:
             chain = self._model_chain_for_role(role)
         else:
             raise LLMConfigError("Either role= or model= is required")
+
+        for slug in chain:
+            validate_model_pricing(slug)
 
         temp = self._llm.temperature if temperature is None else temperature
         tokens = self._llm.max_tokens if max_tokens is None else max_tokens
@@ -431,7 +431,7 @@ class ElizaLLMClient(YandexLLMClient):
     def _model_chain_for_role(self, role: LLMRole) -> list[str]:
         if role == "analyze":
             raise LLMConfigError(
-                f'role "analyze" has no internal Eliza model '
+                'role "analyze" has no internal Eliza model '
                 "(doc_translate uses deterministic planning — §6.30); "
                 "pass model= explicitly or use yandex_cloud provider"
             )
@@ -564,6 +564,9 @@ class ElizaLLMClient(YandexLLMClient):
             chain = self._model_chain_for_role(role)
         else:
             raise LLMConfigError("Either role= or model= is required")
+
+        for slug in chain:
+            validate_model_pricing(slug)
 
         temp = self._llm.temperature if temperature is None else temperature
         tokens = self._llm.max_tokens if max_tokens is None else max_tokens
