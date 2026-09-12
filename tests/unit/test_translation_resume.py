@@ -23,7 +23,7 @@ from ydbdoc_review.github.git_ops import (
     RefMutationReceipt,
     RefMutationStatus,
     RemoteRefLease,
-    RemoteRefMutationError,
+    RemoteRefLeaseConflict,
 )
 from ydbdoc_review.github.provenance import RuAuthority
 from ydbdoc_review.github.workflow import (
@@ -794,7 +794,7 @@ def test_workflow_propagates_selected_resume_parent(tmp_path: Path) -> None:
 
 
 def test_parent_discovery_never_combines_multiple_runs() -> None:
-    source_text = "Первый.\n\nВторой.\n\nТретий.\n"
+    source_text = "Первый.\n\nВторой.\n\nТретий.\n"  # noqa: RUF001
     segments = extract_segments(parse_markdown(source_text))
     assert len(segments) == 3
     store = InMemoryTranscriptStore()
@@ -1349,7 +1349,7 @@ def test_all_reuse_still_runs_real_unsafe_gate(tmp_path: Path) -> None:
 
 def test_all_reuse_still_honors_destination_branch_drift(tmp_path: Path) -> None:
     destination_sha = "a" * 40
-    conflict = RemoteRefMutationError(
+    conflict = RemoteRefLeaseConflict(
         "destination branch changed",
         RefMutationReceipt(
             lease=RemoteRefLease(
@@ -1366,15 +1366,14 @@ def test_all_reuse_still_honors_destination_branch_drift(tmp_path: Path) -> None
     )
     observed: dict[str, Any] = {}
 
-    with pytest.raises(RemoteRefMutationError, match="destination branch changed"):
-        _run_all_reuse_gate_workflow(
-            tmp_path,
-            source_text="Привет.\n",
-            resumed_segment_text="Hello.",
-            destination_sha=destination_sha,
-            push_error=conflict,
-            observed=observed,
-        )
+    job, _client, _github, _push = _run_all_reuse_gate_workflow(
+        tmp_path,
+        source_text="Привет.\n",
+        resumed_segment_text="Hello.",
+        destination_sha=destination_sha,
+        push_error=conflict,
+        observed=observed,
+    )
 
     client = observed["client"]
     github = observed["github"]
@@ -1382,6 +1381,10 @@ def test_all_reuse_still_honors_destination_branch_drift(tmp_path: Path) -> None
     assert client.usage_tracker.records == []
     github.get_branch_sha.assert_called_once()
     assert push.call_args.kwargs["expected_remote_sha"] == destination_sha
+    assert job.blocked is True
+    assert job.pushed is False
+    assert job.pr_result.publication_failure == "target_write_conflict"
+    assert job.pr_result.publication_candidate_sha == "b" * 40
 
 
 def test_changed_baseline_refreezes_and_does_not_inherit_approval() -> None:

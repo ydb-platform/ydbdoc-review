@@ -310,7 +310,6 @@ def _run_top_level(
     postpush_pr_draft: bool | None = None,
     postpush_confirmation_error: BaseException | None = None,
     rollback_error: Exception | None = None,
-    prepush_create_returns_none: bool = False,
     real_push_remote: str | None = None,
     remote_branch_sha: str | None = None,
     push_fails: bool = False,
@@ -417,8 +416,6 @@ def _run_top_level(
         create_calls += 1
         if event_log is not None:
             event_log.append("create")
-        if prepush_create_returns_none and create_calls == 1:
-            return None
         return created_pull
 
     gh.create_pull.side_effect = _create
@@ -3517,7 +3514,7 @@ def test_late_existing_red_pr_stays_ready_before_body_mutation(
         event_log=events,
     )
 
-    assert events == ["discover", "create", "push", "refetch", "body"]
+    assert events == ["discover", "push", "create", "refetch", "body"]
     gh.convert_pull_to_draft.assert_not_called()
 
 
@@ -3536,7 +3533,7 @@ def test_late_existing_red_pr_is_not_mutated_before_body(
     )
 
     gh.convert_pull_to_draft.assert_not_called()
-    assert events == ["discover", "create", "push", "refetch", "body"]
+    assert events == ["discover", "push", "create", "refetch", "body"]
 
 
 def test_post_push_existing_pr_fallback_stays_ready_before_body_mutation(
@@ -3583,7 +3580,7 @@ def test_post_push_existing_pr_fallback_does_not_mutate_existing_pr(
     ]
 
 
-def test_stale_remote_branch_without_diff_falls_through_to_post_push_open_creation(
+def test_stale_remote_branch_creates_open_pr_only_after_push(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
@@ -3593,13 +3590,12 @@ def test_stale_remote_branch_without_diff_falls_through_to_post_push_open_creati
         publication_repo,
         result,
         remote_branch_exists=True,
-        prepush_create_returns_none=True,
         event_log=events,
     )
 
-    assert events == ["discover", "create", "push", "create", "refetch", "body"]
+    assert events == ["discover", "push", "create", "refetch", "body"]
     assert job.translation_pr_number == 99
-    assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [False, False]
+    assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [False]
 
 
 def test_red_push_lease_failure_does_not_mutate_pull_request(
@@ -3770,7 +3766,6 @@ def test_post_push_open_red_pr_does_not_restore_previous_sha(
         late_existing_pr=True,
         remote_branch_exists=True,
         remote_branch_sha=previous_sha,
-        prepush_create_returns_none=True,
         postpush_pr_draft=False,
         draft_conversion_fails=True,
         real_push_remote=str(upstream),

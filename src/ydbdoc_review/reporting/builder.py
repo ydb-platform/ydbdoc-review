@@ -1165,6 +1165,30 @@ def build_source_pr_comment(
             f"{yellow_section()}"
         )
 
+    if result.publication_failure == "target_write_conflict":
+        candidate = result.publication_candidate_sha or "недоступен"
+        cost_line = ""
+        if config.reporting.include_cost:
+            cost_label = _format_cost_estimate(
+                usage=usage,
+                file_usage=_aggregate_file_usage(result),
+            )
+            if cost_label:
+                cost_line = f"| Стоимость перевода | {cost_label} |\n"
+        return (
+            "🤖 **ydbdoc-review** — translation PR **не создан**\n\n"
+            "Publication заблокирована: `target_write_conflict`. Целевая ветка "
+            "изменилась после фиксации B/K и оставлена без изменений.\n\n"
+            "Candidate K сохранён локально; его commit: "
+            f"`{candidate}`. Результат не переносился автоматически на новую базу.\n\n"
+            "**Следующее действие:** выполнить полный ручной перезапуск F-131.\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            f"| Время | {_format_duration(meta.elapsed_s)} |\n"
+            f"{cost_line}"
+            f"{yellow_section()}"
+        )
+
     if translation_pr_number is None and (
         result.completeness_gaps
         or result.publication_impact
