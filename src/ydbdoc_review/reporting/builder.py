@@ -1417,6 +1417,11 @@ def build_full_report(
 ) -> str:
     """Reviewer-focused QA report: open problems per file with location and advice."""
     del glossary
+    if link is not None and meta.checkout_ref:
+        link = ReportLinkContext(
+            github_repo=link.github_repo,
+            ref=meta.checkout_ref,
+        )
     qa_emoji, qa_label = _qa_status(result)
 
     checkout_line = ""
