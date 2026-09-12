@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+
+from ydbdoc_review.ops.gates import check_acl
 
 CONTINUE_PREFIX = "/ydbdoc continue"
 MAX_CONTINUES_PER_PR = 3
@@ -34,6 +37,9 @@ def parse_continue_instruction(comment_body: str) -> str | None:
 
 def find_latest_continue_instruction(
     comments: list[dict[str, Any]],
+    *,
+    allowed_actors: frozenset[str] | None = None,
+    before: datetime | None = None,
 ) -> str | None:
     """Newest matching ``/ydbdoc continue`` instruction, or None."""
     ordered = sorted(
@@ -42,6 +48,24 @@ def find_latest_continue_instruction(
         reverse=True,
     )
     for comment in ordered:
+        if before is not None:
+            created_at_raw = str(comment.get("created_at") or "")
+            try:
+                created_at = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if created_at > before:
+                continue
+        if allowed_actors is not None:
+            user = comment.get("user")
+            if not isinstance(user, dict):
+                continue
+            author = str(user.get("login") or "")
+            author_type = str(user.get("type") or "")
+            if author_type.casefold() == "bot" or author.casefold().endswith("[bot]"):
+                continue
+            if not check_acl(author, allowed_actors).ok:
+                continue
         body = str(comment.get("body") or "")
         instr = parse_continue_instruction(body)
         if instr:
