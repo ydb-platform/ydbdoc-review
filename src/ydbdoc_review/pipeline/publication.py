@@ -199,8 +199,11 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
                 return True
             if check_broken_inline_code_markup(run.target_text, target_lang="en"):
                 return True
+    # Navigation QA findings are addressable RED, except invalid YAML, which
+    # leaves the navigation artifact unsafe to publish.
     return any(
-        nav.verdict == "blocked" and bool(nav.warnings)
+        nav.verdict == "blocked"
+        and any(w.split(":", 1)[0] == "invalid_yaml" for w in nav.warnings)
         for nav in result.navigation_results
     )
 
@@ -217,6 +220,9 @@ def classify_publication_blockers(
     )
     repairable = repairable or _has_unrestored_marker(result)
     repairable = repairable or _has_critic_execution_failure(result)
+    repairable = repairable or any(
+        navigation.warnings for navigation in result.navigation_results
+    )
     return ClassifiedPublicationBlockers(
         incomplete=incomplete,
         unsafe=unsafe,
