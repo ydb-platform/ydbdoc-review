@@ -637,10 +637,31 @@ def _apply_en_structural_repair(state: FileRunState, ctx: HarnessContext) -> Non
         )
 
 
+def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> bool:
+    """Compatibility hook: F-108 keeps verify realignment disabled."""
+    del state, ctx
+    return False
+
+
 class RoundTripStep:
     name = "round_trip"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
+        if state.mode == "verify" and is_glossary_file(state.file_path):
+            # The glossary is a historical hub whose RU/EN rows are not expected
+            # to align segment-for-segment. Verify its exact EN bytes with the
+            # deterministic checks below, without an in-memory structural repair
+            # or a hidden translation pass.
+            state.translations, state.segment_alignment_error = gate_round_trip(
+                state.segments, state.translated_text
+            )
+            if state.segment_alignment_error:
+                state.finalize_warnings.append(
+                    "glossary_verify_alignment_skipped: structural RU/EN "
+                    "segment drift is outside read-only coverage"
+                )
+                state.segment_alignment_error = None
+            return
         target_before_structural_repair = state.translated_text
         if state.mode == "verify" and ctx.target_lang.lower() in {"en", "english"}:
             _apply_en_structural_repair(state, ctx)
@@ -729,7 +750,9 @@ class CriticLoopStep:
         if state.mode == "verify" and is_glossary_file(state.file_path):
             logger.info("Glossary verify: skip critic_loop (§6.188)")
             state.finalize_warnings.append(
-                "glossary_verify_critic_skipped: hub page; heuristics only on verify"
+                "glossary_verify_critic_skipped: coverage is informational; semantic critic, "
+                "text rewrite, and realign are disabled; fix findings through "
+                "doc_translate or doc_continue"
             )
             return
         run_critic_loop(state, ctx)

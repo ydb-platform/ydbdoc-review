@@ -67,6 +67,7 @@ class HarnessContext:
     en_toc_reachable: frozenset[str] | None = None
     docs_text_reader: DocsTextReader | None = None
     docs_repo_path: str | None = None
+    allow_navigation_retarget: bool = True
     job_anchor_dictionary: JobAnchorDictionary | None = None
     checkpoint: CheckpointWriter | None = None
     resume_parent_run_id: str | None = None
@@ -91,6 +92,7 @@ class HarnessContext:
         en_toc_reachable: frozenset[str] | None = None,
         docs_text_reader: DocsTextReader | None = None,
         docs_repo_path: str | None = None,
+        allow_navigation_retarget: bool = True,
         job_anchor_dictionary: JobAnchorDictionary | None = None,
         checkpoint: CheckpointWriter | None = None,
         resume_parent_run_id: str | None = None,
@@ -121,6 +123,7 @@ class HarnessContext:
             en_toc_reachable=en_toc_reachable,
             docs_text_reader=docs_text_reader,
             docs_repo_path=docs_repo_path,
+            allow_navigation_retarget=allow_navigation_retarget,
             job_anchor_dictionary=job_anchor_dictionary or JobAnchorDictionary(),
             checkpoint=checkpoint or _ACTIVE_CHECKPOINT.get(),
             resume_parent_run_id=(

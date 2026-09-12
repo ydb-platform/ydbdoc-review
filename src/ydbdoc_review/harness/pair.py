@@ -65,14 +65,16 @@ def _try_deterministic_en_preserve(
                 read_text=ctx.docs_text_reader,
                 ru_source=source_text,
                 en_baseline=content.en_base_text or existing_target,
+                preserve_target_path=not ctx.allow_navigation_retarget,
             )
             # §6.233: inverted tip→merge RU deltas must not clobber tip-valid EN.
-            localized = prefer_resolvable_en_hrefs(
-                localized,
-                existing_target,
-                en_page_path=plan.target_path,
-                read_text=ctx.docs_text_reader,
-            )
+            if ctx.allow_navigation_retarget:
+                localized = prefer_resolvable_en_hrefs(
+                    localized,
+                    existing_target,
+                    en_page_path=plan.target_path,
+                    read_text=ctx.docs_text_reader,
+                )
         logger.info(
             "Deterministic localized mirror delta for %s; bypassing LLM and repairs",
             plan.target_path,
@@ -88,6 +90,7 @@ def _try_deterministic_en_preserve(
                 read_text=ctx.docs_text_reader,
                 ru_source=source_text,
                 en_baseline=content.en_base_text or existing_target,
+                preserve_target_path=not ctx.allow_navigation_retarget,
             )
         logger.info(
             "RU autotitle delta already satisfied in EN for %s; preserving bytes",
@@ -104,6 +107,7 @@ def _try_deterministic_en_preserve(
                 read_text=ctx.docs_text_reader,
                 ru_source=source_text,
                 en_baseline=content.en_base_text or existing_target,
+                preserve_target_path=not ctx.allow_navigation_retarget,
             )
         logger.info(
             "RU/EN href parity OK for %s despite structural drift; preserving EN",
@@ -153,9 +157,13 @@ def run_pair_plan(
     # comparison remains OK via FileRunState.existing_target_text.
     # REQUIREMENTS §10: tip-newer also forces full overwrite (force_full_overwrite).
     # Verify (critic_only) may still short-circuit when the target is already fine.
+    glossary_verify_readonly = plan.action == "critic_only" and (
+        is_glossary_file(plan.source_path) or is_glossary_file(plan.target_path)
+    )
     if (
         not content.force_full_overwrite
         and plan.action == "critic_only"
+        and not glossary_verify_readonly
     ):
         preserved = _try_deterministic_en_preserve(
             content, plan, source_text, existing_target, ctx
@@ -308,7 +316,12 @@ def run_pair_plan(
         plan.target_lang.lower() in {"en", "english"} or plan.target_path == content.pair.en_path
     )
     before_pair_repairs: str | None = None
-    if target_text and content.ru_text and not semantic_noop:
+    if (
+        target_text
+        and content.ru_text
+        and not semantic_noop
+        and not glossary_verify_readonly
+    ):
         if plan.action == "translate_to_ru":
             target_text = restore_autotitle_hrefs(target_text, content.ru_text)
         elif is_en_target:
@@ -373,12 +386,13 @@ def run_pair_plan(
                     read_text=ctx.docs_text_reader,
                     ru_source=content.ru_text,
                     en_baseline=content.en_text or content.en_base_text,
+                    preserve_target_path=not ctx.allow_navigation_retarget,
                 )
                 # A source PR can carry an ambient/broken RU path while tip EN
                 # already points at the valid owner of the same stable fragment.
                 # Apply the tip-preservation rule to normal LLM translations too,
                 # not only to the deterministic mirror-delta fast path.
-                if existing_target is not None:
+                if existing_target is not None and ctx.allow_navigation_retarget:
                     from ydbdoc_review.validation.href_parity import (
                         prefer_resolvable_en_hrefs,
                     )
