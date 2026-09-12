@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from ydbdoc_review.navigation.paths import is_navigation_yaml
@@ -301,10 +301,21 @@ def merge_translation_pr_verify_scope(
     pairs: list[DocPair],
     expected_pairs: list[DocPair],
 ) -> list[DocPair]:
-    """Add source-scope pairs that have no entry in the translation PR diff."""
+    """Merge source scope with actual EN state from the translation PR diff."""
+    actual_by_en_path = {pair.en_path: pair for pair in pairs}
+    merged_expected = [
+        replace(
+            expected,
+            en_changed=expected.en_changed or actual.en_changed,
+            en_deleted=expected.en_deleted or actual.en_deleted,
+        )
+        if (actual := actual_by_en_path.get(expected.en_path)) is not None
+        else expected
+        for expected in expected_pairs
+    ]
     expected_en_paths = {pair.en_path for pair in expected_pairs}
     return [
-        *expected_pairs,
+        *merged_expected,
         *(pair for pair in pairs if pair.en_path not in expected_en_paths),
     ]
 

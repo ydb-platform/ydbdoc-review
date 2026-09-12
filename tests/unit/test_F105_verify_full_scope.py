@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from ydbdoc_review.pipeline.analyze import PairPlan
+from unittest.mock import MagicMock
+
+from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.harness import (
+    VERIFY_PR_PROFILE,
+    PRHarness,
+    PRHarnessContext,
+    PRRunState,
+)
+from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.completeness import (
     VERIFY_MISSING_PAIR_SKIP_SUMMARY,
     verified_translation_pr_scope_gaps,
@@ -20,6 +29,7 @@ from ydbdoc_review.pipeline.types import (
     PairRunResult,
     PRTranslationResult,
 )
+from ydbdoc_review.translation.glossary import load_glossary
 
 
 def _pair(name: str, *, deleted: bool = False) -> DocPair:
@@ -81,12 +91,35 @@ def test_F105_missing_kinds() -> None:
     missing_fragment = _pair("missing-fragment")
     incomplete = _pair("incomplete")
     deleted = _pair("deleted", deleted=True)
+    translation_deleted = DocPair(
+        ru_path=deleted.ru_path,
+        en_path=deleted.en_path,
+        en_changed=True,
+        en_deleted=True,
+    )
     redirect = NavigationPair(
         ru_path="ydb/docs/ru/redirects.yaml",
         en_path="ydb/docs/en/redirects.yaml",
         ru_changed=True,
     )
     expected = [valid_noop, missing_file, missing_fragment, incomplete, deleted]
+    full_scope = merge_translation_pr_verify_scope([translation_deleted], expected)
+    scoped, _ = filter_translation_pr_verify_scope(
+        full_scope,
+        [],
+        [(deleted.en_path, "deleted")],
+        allowed_en_paths={pair.en_path for pair in expected},
+        allowed_nav_en_paths=set(),
+    )
+    merged_deleted = next(pair for pair in scoped if pair.en_path == deleted.en_path)
+    deletion_result = PRHarness(VERIFY_PR_PROFILE).run(
+        PRRunState(contents=[PairContent(pair=merged_deleted)]),
+        PRHarnessContext(
+            client=MagicMock(),
+            glossary=load_glossary(),
+            config=load_config(),
+        ),
+    )
     result = PRTranslationResult(
         pair_results=[
             _run(valid_noop, target_text="Current verified target.\n"),
@@ -103,7 +136,7 @@ def test_F105_missing_kinds() -> None:
                 ),
             ),
             _run(incomplete, error="semantic coverage rejected"),
-            _run(deleted, deleted=True),
+            *deletion_result.pair_results,
         ],
         navigation_results=[
             NavigationRunResult(

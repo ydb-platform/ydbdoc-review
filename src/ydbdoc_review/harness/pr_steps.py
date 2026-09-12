@@ -92,6 +92,19 @@ class PlanVerifyPairsStep:
         plans: list[PairPlan] = []
         for content in state.contents:
             pair = content.pair
+            if pair.ru_deleted and pair.en_deleted:
+                plans.append(
+                    PairPlan(
+                        pair=pair,
+                        action="delete_en",
+                        source_path=pair.ru_path,
+                        target_path=pair.en_path,
+                        source_lang="ru",
+                        target_lang="en",
+                        summary="doc_verify confirmed EN mirror deletion",
+                    )
+                )
+                continue
             if not content.ru_text or not content.en_text:
                 plans.append(
                     PairPlan(
