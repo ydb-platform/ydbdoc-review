@@ -81,7 +81,7 @@ def counterpart(path: str, docs_root: str) -> str | None:
 
 @dataclass(frozen=True)
 class DocPair:
-    """Mirrored RU/EN paths with PR change flags."""
+    """Mirrored RU/EN paths with provenance and execution flags."""
 
     ru_path: str
     en_path: str
@@ -89,6 +89,8 @@ class DocPair:
     en_changed: bool = False
     ru_deleted: bool = False
     en_deleted: bool = False
+    # Execution obligation discovered by scope closure, not source-PR provenance.
+    translation_required: bool = False
 
 
 def build_doc_pairs(

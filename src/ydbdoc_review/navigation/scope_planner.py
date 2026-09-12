@@ -858,6 +858,7 @@ def doc_pairs_from_plan(
                 en_changed=en_path in changed,
                 ru_deleted=ru_path in plan.doc_deleted,
                 en_deleted=changed.get(en_path) == "deleted",
+                translation_required=ru_path in plan.doc_from_main,
             )
         )
     return pairs
