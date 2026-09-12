@@ -6,6 +6,7 @@ from ydbdoc_review.ops.continue_cmd import (
     parse_continue_instruction,
 )
 from ydbdoc_review.ops.gates import (
+    TRANSCRIPT_RETENTION,
     GateResult,
     acl_deny_comment,
     check_acl,
@@ -13,6 +14,7 @@ from ydbdoc_review.ops.gates import (
     expired_context_comment,
     parse_allowed_actors,
     quota_deny_comment,
+    retention_expires_at,
     retention_notice,
 )
 from ydbdoc_review.ops.msk import msk_today
@@ -27,6 +29,7 @@ from ydbdoc_review.ops.transcripts import (
 
 __all__ = [
     "MAX_CONTINUES_PER_PR",
+    "TRANSCRIPT_RETENTION",
     "GateResult",
     "InMemoryRunsLedger",
     "InMemoryTranscriptStore",
@@ -46,5 +49,6 @@ __all__ = [
     "parse_allowed_actors",
     "parse_continue_instruction",
     "quota_deny_comment",
+    "retention_expires_at",
     "retention_notice",
 ]
