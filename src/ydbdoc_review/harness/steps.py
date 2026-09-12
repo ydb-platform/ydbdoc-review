@@ -239,6 +239,92 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         source_file=state.file_path,
         en_toc_reachable=ctx.en_toc_reachable,
     )
+    if state.mode != "verify" or not state.critic_unresolved.issues:
+        return
+
+    second_actionable = drop_spurious_placeholder_issues(
+        state.critic_unresolved.issues,
+        state.segments,
+        state.translations,
+        source_text=state.raw_source_text,
+        source_file=state.file_path,
+        en_toc_reachable=ctx.en_toc_reachable,
+    )
+    second_translations, second_applied, second_skipped = apply_critic_fixes(
+        state.translations,
+        state.segments,
+        second_actionable,
+        strict_placeholder_order=True,
+    )
+    state.critic_applied.extend(second_applied)
+    state.critic_skipped.extend(second_skipped)
+    if not second_applied:
+        return
+
+    state.translations = second_translations
+    render_translations = (
+        state.translations
+        if state.render_base_segments is state.segments
+        else remap_translations_by_position(
+            state.segments, state.render_base_segments, state.translations
+        )
+    )
+    state.translated_text = render_with_translations(
+        state.render_base_doc,
+        state.render_base_segments,
+        render_translations,
+        target_lang=ctx.target_lang,
+        job_anchor_dictionary=ctx.job_anchor_dictionary,
+    )
+    if ctx.target_lang.lower() in {"en", "english"}:
+        contract = coerce_link_contract(
+            finalize_en_target(
+                state.translated_text,
+                state.fence_reference_text,
+                client=ctx.client,
+                glossary=ctx.glossary,
+                file_path=state.file_path,
+                source_lang=ctx.source_lang,
+                target_lang=ctx.target_lang,
+                prompt_version=ctx.prompt_version,
+                out_warnings=state.finalize_warnings,
+                en_toc_reachable=ctx.en_toc_reachable,
+                layout_source_text=state.source_text,
+                protected_source_text=state.source_text,
+                source_base_text=state.base_source_text,
+                target_baseline_text=state.base_target_text or state.existing_target_text,
+            )
+        )
+        state.translated_text = contract.text
+        state.link_contract_issues = list(
+            dict.fromkeys([*state.link_contract_issues, *contract.issues])
+        )
+    state.translations, state.segment_alignment_error = gate_round_trip(
+        state.segments, state.translated_text
+    )
+    if state.segment_alignment_error:
+        return
+    state.critic_unresolved = run_verify(
+        ctx.client,
+        segments=state.segments,
+        translations=state.translations,
+        prior_issues=second_actionable,
+        glossary=ctx.glossary,
+        file_path=state.file_path,
+        source_lang=ctx.source_lang,
+        target_lang=ctx.target_lang,
+        prompt_version=ctx.prompt_version,
+        max_chars=ctx.batch_chars,
+    )
+    state.critic_unresolved = filter_critic_response(
+        state.critic_unresolved,
+        state.segments,
+        state.translations,
+        skipped=state.critic_skipped,
+        source_text=state.raw_source_text,
+        source_file=state.file_path,
+        en_toc_reachable=ctx.en_toc_reachable,
+    )
 
 
 class ParseStep:
@@ -563,6 +649,8 @@ def _try_partial_verify_realign(state: FileRunState, ctx: HarnessContext) -> boo
         state.translated_text,
         require_trustworthy=False,
     )
+    if not seeded:
+        return False
     pending = [seg for seg in state.segments if seg.id not in seeded]
     if not pending or len(pending) > _PARTIAL_VERIFY_REALIGN_MAX_PENDING:
         return False
@@ -668,33 +756,13 @@ class RoundTripStep:
                 "alignment mismatch left as blocker"
             )
             return
+        logger.warning(
+            "verify realign left unresolved for %s; keeping existing target",
+            state.file_path,
+        )
         state.finalize_warnings.append(
-            "verify_realign: rebuilt EN from RU due to segment alignment mismatch"
-        )
-        state.translations = translate_segments(
-            state.segments,
-            ctx.client,
-            ctx.glossary,
-            file_path=state.file_path,
-            source_lang=ctx.source_lang,
-            target_lang=ctx.target_lang,
-            max_chars=ctx.batch_chars,
-            max_output_chars=ctx.batch_max_output_chars,
-            expansion_ratio=ctx.batch_output_expansion_ratio,
-            json_overhead=ctx.batch_json_overhead_chars,
-            segment_max_chars=ctx.segment_max_source_chars,
-            prompt_version=ctx.prompt_version,
-            cache=ctx.cache,
-            max_parallel_batches=ctx.parallel,
-            manual_actions=state.manual_actions,
-            fallback_reasons=state.fallback_reasons,
-        )
-        state.render_base_doc = state.source_doc
-        state.render_base_segments = state.segments
-        state.fence_reference_text = state.source_text
-        _render_translated_from_source(state, ctx)
-        state.translations, state.segment_alignment_error = gate_round_trip(
-            state.segments, state.translated_text
+            "verify_realign_skipped: full translation is not allowed in doc_verify; "
+            "alignment mismatch left as blocker"
         )
 
 
