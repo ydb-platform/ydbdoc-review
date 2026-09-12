@@ -277,12 +277,7 @@ def _convert_translation_pr_to_draft_if_allowed(
     dry_run: bool,
     no_commit: bool,
 ) -> None:
-    if (
-        translation_pr
-        and verify_requires_red
-        and _publication_side_effects_allowed(dry_run=dry_run, no_commit=no_commit)
-    ):
-        gh.convert_pull_to_draft(owner, repo, pr_number)
+    """Keep the verified PR's publication mode unchanged for QA RED."""
 
 
 def _finish_nonpublishing_translate_job(
@@ -3177,7 +3172,6 @@ def run_doc_translate(
                 )
                 if preexisting_translation_pr is not None:
                     existing_pr_url, existing_pr_number = preexisting_translation_pr
-                    gh.convert_pull_to_draft(owner, repo, existing_pr_number)
                     prepush_opened_pr = (
                         existing_pr_url,
                         existing_pr_number,
@@ -3196,18 +3190,14 @@ def run_doc_translate(
                             publication_result=pr_result,
                             publication_plan=publication_plan(ctx),
                         ),
-                        draft=True,
+                        draft=False,
                     )
                     if prepush_opened_pr is None:
                         logger.info(
                             "Existing translation branch %s has no publishable diff; "
-                            "retry draft PR creation after pushing the candidate",
+                            "retry ordinary PR creation after pushing the candidate",
                             branch,
                         )
-                    else:
-                        _, existing_pr_number, created = prepush_opened_pr
-                        if not created:
-                            gh.convert_pull_to_draft(owner, repo, existing_pr_number)
             logger.info(
                 "Pushing translation branch %s to %s/%s (from upstream %s, source PR head: %s)",
                 branch,
@@ -3266,7 +3256,6 @@ def run_doc_translate(
     artifact_provenance: TranslationArtifactProvenance | None = None
     if pushed or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
-        publish_red = pr_result.publication_impact == PublicationImpact.PUBLISH_RED
         provisional_body = build_translation_pr_body(
             pr_number,
             github_repo,
@@ -3304,7 +3293,7 @@ def run_doc_translate(
                     head=branch,
                     base=translation_pr_base(ctx),
                     body=provisional_body,
-                    draft=publish_red,
+                    draft=False,
                 )
                 if opened is None:
                     raise RuntimeError(
@@ -3373,8 +3362,6 @@ def run_doc_translate(
         job.translation_pr_url = tr_pr_url
         job.translation_pr_number = tr_pr_number
         try:
-            if publish_red and current_pull.get("draft") is not True:
-                gh.convert_pull_to_draft(owner, repo, tr_pr_number)
             gh.update_pull_body(owner, repo, tr_pr_number, body)
         except Exception as metadata_error:
             _raise_with_owned_rollback(
@@ -4559,23 +4546,6 @@ def run_doc_verify(
                 verify_candidate_sha,
                 context="after verify branch publication",
             )
-            if translation_pr and verify_requires_red:
-                try:
-                    gh.convert_pull_to_draft(owner, repo, pr_number)
-                except Exception as confirmation_error:
-                    _raise_with_owned_rollback(
-                        confirmation_error,
-                        verify_push_receipt,
-                        destination_lease.expected_sha,
-                        repo_path=repo_path,
-                        branch=push_branch_name,
-                        push_token=push_token,
-                        upstream_url=upstream_url,
-                        message=(
-                            "RED verify draft confirmation and branch rollback "
-                            "both failed"
-                        ),
-                    )
             if translation_pr and coverage_evidence is not None:
                 if artifact_provenance is None:
                     raise RuntimeError("repaired coverage provenance is missing")
@@ -4666,6 +4636,7 @@ def run_doc_verify(
                 head=fixup_branch,
                 base=fixup_pr_base,
                 body=body,
+                draft=False,
             )
             if opened is None:
                 raise RuntimeError(

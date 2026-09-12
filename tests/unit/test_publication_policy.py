@@ -578,7 +578,7 @@ def _run_top_level(
     return job, gh, prepare, commit, push, finish
 
 
-def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
+def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     result.pair_results[0].source_text = "См. [missing](missing.md).\n"
 
@@ -596,7 +596,7 @@ def test_safe_final_link_blocker_publishes_draft_red(publication_repo: str):
     assert push.call_args.kwargs["guard_remote_ref"] is True
     assert push.call_args.kwargs["expected_remote_sha"] is None
     gh.create_pull.assert_called_once()
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
     pr_body = gh.create_pull.call_args.kwargs["body"]
     assert "QA RED, do not merge" in pr_body
     assert "missing.md" in pr_body
@@ -647,7 +647,7 @@ def test_early_outbound_finding_reaches_final_link_gate_and_publishes_red(
     prepare.assert_called_once()
     commit.assert_called_once()
     push.assert_called_once()
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
     assert finish.call_args.kwargs["status"] == "published_red"
 
 
@@ -935,7 +935,7 @@ def test_skipped_pair_keeps_outbound_fragment_as_unsafe_veto(publication_repo: s
     assert finish.call_args.kwargs["status"] == "failed"
 
 
-def test_safe_soft_keep_with_eight_git_artifacts_publishes_draft_red(
+def test_safe_soft_keep_with_eight_git_artifacts_publishes_open_red(
     publication_repo: str,
 ):
     repo = Path(publication_repo)
@@ -1028,7 +1028,7 @@ def test_safe_soft_keep_with_eight_git_artifacts_publishes_draft_red(
     assert job.pr_result.completeness_gaps == []
     assert prepare.call_count == commit.call_count == push.call_count == 1
     assert push.call_args.kwargs["guard_remote_ref"] is True
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
     body = gh.create_pull.call_args.kwargs["body"]
     assert auth_en in body
     assert "Invalid JSON in LLM response" in body
@@ -1172,7 +1172,7 @@ def test_real_git_soft_keep_commit_contains_eight_translations_and_retained_auth
         text=True,
     ).stdout.splitlines()
     assert changed == sorted(expected_translations)
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
 
 
 def test_real_git_soft_keep_without_diff_creates_no_artifact_pr(
@@ -1273,7 +1273,7 @@ def test_soft_keep_no_new_commit_rejects_nonmatching_existing_artifact(
     assert finish.call_args.kwargs["status"] == "failed"
 
 
-def test_soft_keep_no_new_commit_existing_ready_artifact_is_drafted_before_body(
+def test_soft_keep_no_new_commit_existing_ready_artifact_stays_ready_before_body(
     publication_repo: str,
 ):
     retained = "Hello.\n"
@@ -1303,8 +1303,8 @@ def test_soft_keep_no_new_commit_existing_ready_artifact_is_drafted_before_body(
 
     assert job.translation_pr_number == 99
     push.assert_not_called()
-    gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
-    assert events[-2:] == ["draft", "body"]
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events[-1:] == ["body"]
 
 
 def test_soft_keep_without_target_withholds_incomplete(publication_repo: str):
@@ -1549,7 +1549,7 @@ def test_soft_keep_post_reconciliation_hash_uses_exact_published_bytes(
     assert parsed == [blocker]
 
 
-def test_soft_keep_and_safe_en_link_target_publish_one_draft_red(
+def test_soft_keep_and_safe_en_link_target_publish_one_open_red(
     publication_repo: str,
 ):
     retained = "Existing reviewed English.\n"
@@ -1583,7 +1583,7 @@ def test_soft_keep_and_safe_en_link_target_publish_one_draft_red(
         "translation_soft_keep",
         "en_link_target",
     }
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
 
 
 def test_final_link_blocker_does_not_exempt_different_link_message(
@@ -2021,7 +2021,7 @@ def test_soft_keep_reports_only_failed_path_and_manual_doc_verify_action():
     assert auth_path not in commit_message
 
 
-def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red(
+def test_structurally_safe_real_translation_publishes_broken_target_as_open_red(
     publication_repo: str,
 ):
     repo = Path(publication_repo)
@@ -2073,7 +2073,7 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
         if number == 7:
             return pull
         return {
-            "draft": True,
+            "draft": False,
             "body": "",
             "head": {
                 "ref": "ydbdoc-review/pr-7",
@@ -2196,7 +2196,7 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_draft_red
     prepare.assert_called_once()
     commit.assert_called_once()
     push.assert_called_once()
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
     assert "QA RED, do not merge" in gh.create_pull.call_args.kwargs["body"]
     assert job_requires_nonzero_exit(job) is False
 
@@ -2219,7 +2219,7 @@ def test_missing_red_pr_is_hard_failure_and_not_false_green(publication_repo: st
     assert events == ["discover", "push", "create", "rollback"]
 
 
-def test_final_tree_blocker_without_pair_survives_as_draft_red(publication_repo: str):
+def test_final_tree_blocker_without_pair_survives_as_open_red(publication_repo: str):
     impact_path = "ydb/docs/en/impact.md"
     Path(publication_repo, impact_path).write_text(
         "Redirected page links to [missing](gone.md).\n",
@@ -2240,7 +2240,7 @@ def test_final_tree_blocker_without_pair_survives_as_draft_red(publication_repo:
     prepare.assert_called_once()
     commit.assert_called_once()
     push.assert_called_once()
-    assert gh.create_pull.call_args.kwargs["draft"] is True
+    assert gh.create_pull.call_args.kwargs["draft"] is False
     assert job_requires_nonzero_exit(job) is False
 
 
@@ -2981,7 +2981,7 @@ def test_soft_keep_manifest_survives_inline_verify_when_bytes_unchanged(
     assert job.pr_result.publication_impact == "PUBLISH_RED"
 
 
-def test_verify_with_unresolved_soft_keep_converts_ready_pr_back_to_draft(
+def test_verify_with_unresolved_soft_keep_preserves_ready_pr(
     publication_repo: str,
 ):
     path = "ydb/docs/en/core/security/authentication.md"
@@ -2998,10 +2998,8 @@ def test_verify_with_unresolved_soft_keep_converts_ready_pr_back_to_draft(
 
     assert job.pr_result.final_tree_blockers == [blocker]
     assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
-    assert gh.convert_pull_to_draft.call_args_list == [
-        (("o", "r", 99), {}),
-    ]
-    assert events == ["draft", "body"]
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events == ["body"]
 
 
 def test_verify_clears_soft_keep_but_keeps_red_body_when_other_pair_is_unsafe(
@@ -3029,17 +3027,14 @@ def test_verify_clears_soft_keep_but_keeps_red_body_when_other_pair_is_unsafe(
 
     assert blocker not in job.pr_result.final_tree_blockers
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    assert gh.convert_pull_to_draft.call_args_list == [
-        (("o", "r", 99), {}),
-        (("o", "r", 99), {}),
-    ]
+    gh.convert_pull_to_draft.assert_not_called()
     body = gh.update_pull_body.call_args.args[3]
     assert "QA RED, do not merge" in body
     assert "translation_soft_keep" not in body
-    assert events == ["draft", "prepare", "commit", "push", "draft", "body"]
+    assert events == ["prepare", "commit", "push", "body"]
 
 
-def test_verify_redrafts_ready_transition_before_red_body_after_branch_push(
+def test_verify_preserves_ready_transition_before_red_body_after_branch_push(
     publication_repo: str,
 ):
     path = "ydb/docs/en/core/security/authentication.md"
@@ -3064,11 +3059,11 @@ def test_verify_redrafts_ready_transition_before_red_body_after_branch_push(
     )
 
     assert job.pushed is True
-    assert events == ["draft", "prepare", "commit", "push", "draft", "body"]
-    assert gh.convert_pull_to_draft.call_count == 2
+    assert events == ["prepare", "commit", "push", "body"]
+    gh.convert_pull_to_draft.assert_not_called()
 
 
-def test_verify_post_push_redraft_failure_rolls_back_before_body(
+def test_verify_post_push_failure_rolls_back_before_body(
     publication_repo: str,
 ):
     path = "ydb/docs/en/core/security/authentication.md"
@@ -3082,25 +3077,22 @@ def test_verify_post_push_redraft_failure_rolls_back_before_body(
     )
     events: list[str] = []
 
-    with pytest.raises(GitHubAPIError, match="cannot confirm verify draft"):
-        _run_standalone_soft_keep_verify(
-            publication_repo,
-            current_text=repaired,
-            verify_result=verify_result,
-            translation_draft=False,
-            event_log=events,
-            no_commit=False,
-            ready_transition_after_push=True,
-            draft_conversion_fail_on_call=2,
-        )
+    _run_standalone_soft_keep_verify(
+        publication_repo,
+        current_text=repaired,
+        verify_result=verify_result,
+        translation_draft=False,
+        event_log=events,
+        no_commit=False,
+        ready_transition_after_push=True,
+        draft_conversion_fail_on_call=2,
+    )
 
     assert events == [
-        "draft",
         "prepare",
         "commit",
         "push",
-        "draft",
-        "rollback",
+        "body",
     ]
 
 
@@ -3288,7 +3280,7 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
     assert job.pr_result.publication_impact == "PUBLISH_RED"
 
 
-def test_existing_ready_translation_pr_is_converted_to_draft(publication_repo: str):
+def test_existing_ready_translation_pr_stays_ready(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     events: list[str] = []
 
@@ -3302,30 +3294,30 @@ def test_existing_ready_translation_pr_is_converted_to_draft(publication_repo: s
     assert getattr(job.pr_result, "publication_impact", None) == "PUBLISH_RED"
     gh.update_pull_body.assert_called_once()
     assert "QA RED, do not merge" in gh.update_pull_body.call_args.args[3]
-    gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
-    assert events == ["discover", "draft", "push", "refetch", "body"]
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events == ["discover", "push", "refetch", "body"]
     gh.create_pull.assert_not_called()
 
 
-def test_existing_ready_pr_conversion_failure_leaves_remote_untouched(
+def test_existing_ready_pr_is_not_mutated(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     events: list[str] = []
 
-    with pytest.raises(GitHubAPIError, match="cannot convert"):
-        _run_top_level(
-            publication_repo,
-            result,
-            existing_pr=True,
-            event_log=events,
-            draft_conversion_fails=True,
-        )
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        existing_pr=True,
+        event_log=events,
+        draft_conversion_fails=True,
+    )
 
-    assert events == ["discover", "draft"]
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events == ["discover", "push", "refetch", "body"]
 
 
-def test_existing_red_pr_ready_transition_after_push_is_converted_again(
+def test_existing_red_pr_ready_transition_after_push_is_preserved(
     publication_repo: str,
 ):
     events: list[str] = []
@@ -3340,28 +3332,28 @@ def test_existing_red_pr_ready_transition_after_push_is_converted_again(
         event_log=events,
     )
 
-    assert events == ["discover", "draft", "push", "refetch", "draft", "body"]
-    assert gh.convert_pull_to_draft.call_count == 2
+    assert events == ["discover", "push", "refetch", "body"]
+    gh.convert_pull_to_draft.assert_not_called()
 
 
-def test_existing_red_pr_postpush_reconversion_failure_rolls_back_before_body(
+def test_existing_red_pr_postpush_failure_rolls_back_before_body(
     publication_repo: str,
 ):
     events: list[str] = []
 
-    with pytest.raises(GitHubAPIError, match="cannot convert"):
-        _run_top_level(
-            publication_repo,
-            _pair_result(target_text="See [missing](missing.md).\n"),
-            existing_pr=True,
-            remote_branch_exists=True,
-            remote_branch_sha="previous-sha",
-            postpush_pr_draft=False,
-            draft_conversion_fail_on_call=2,
-            event_log=events,
-        )
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        _pair_result(target_text="See [missing](missing.md).\n"),
+        existing_pr=True,
+        remote_branch_exists=True,
+        remote_branch_sha="previous-sha",
+        postpush_pr_draft=False,
+        draft_conversion_fail_on_call=2,
+        event_log=events,
+    )
 
-    assert events == ["discover", "draft", "push", "refetch", "draft", "rollback"]
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events == ["discover", "push", "refetch", "body"]
 
 
 def test_red_pr_transport_failure_rolls_back_and_preserves_original_exception(
@@ -3382,7 +3374,7 @@ def test_red_pr_transport_failure_rolls_back_and_preserves_original_exception(
         )
 
     assert raised.value is transport_error
-    assert events == ["discover", "draft", "push", "refetch", "rollback"]
+    assert events == ["discover", "push", "refetch", "rollback"]
 
 
 def test_red_pr_confirmation_and_rollback_failures_preserve_both_exceptions(
@@ -3405,7 +3397,7 @@ def test_red_pr_confirmation_and_rollback_failures_preserve_both_exceptions(
         )
 
     assert raised.value.exceptions == (transport_error, rollback_error)
-    assert events == ["discover", "draft", "push", "refetch", "rollback"]
+    assert events == ["discover", "push", "refetch", "rollback"]
 
 
 def test_red_pr_confirmation_does_not_catch_system_exit(publication_repo: str):
@@ -3422,10 +3414,10 @@ def test_red_pr_confirmation_does_not_catch_system_exit(publication_repo: str):
             event_log=events,
         )
 
-    assert events == ["discover", "draft", "push", "refetch"]
+    assert events == ["discover", "push", "refetch"]
 
 
-def test_late_existing_red_pr_is_converted_before_body_mutation(
+def test_late_existing_red_pr_stays_ready_before_body_mutation(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
@@ -3438,29 +3430,29 @@ def test_late_existing_red_pr_is_converted_before_body_mutation(
         event_log=events,
     )
 
-    assert events == ["discover", "create", "draft", "push", "refetch", "body"]
-    gh.convert_pull_to_draft.assert_called_once_with("o", "r", 99)
+    assert events == ["discover", "create", "push", "refetch", "body"]
+    gh.convert_pull_to_draft.assert_not_called()
 
 
-def test_late_existing_red_pr_conversion_failure_does_not_mutate_body(
+def test_late_existing_red_pr_is_not_mutated_before_body(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     events: list[str] = []
 
-    with pytest.raises(GitHubAPIError, match="cannot convert"):
-        _run_top_level(
-            publication_repo,
-            result,
-            late_existing_pr=True,
-            event_log=events,
-            draft_conversion_fails=True,
-        )
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        late_existing_pr=True,
+        event_log=events,
+        draft_conversion_fails=True,
+    )
 
-    assert events == ["discover", "create", "draft"]
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events == ["discover", "create", "push", "refetch", "body"]
 
 
-def test_post_push_existing_pr_fallback_converts_before_body_mutation(
+def test_post_push_existing_pr_fallback_stays_ready_before_body_mutation(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
@@ -3475,37 +3467,36 @@ def test_post_push_existing_pr_fallback_converts_before_body_mutation(
         event_log=events,
     )
 
-    assert events == ["discover", "push", "create", "refetch", "draft", "body"]
+    assert events == ["discover", "push", "create", "refetch", "body"]
 
 
-def test_post_push_existing_pr_fallback_conversion_failure_is_fail_closed(
+def test_post_push_existing_pr_fallback_does_not_mutate_existing_pr(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     events: list[str] = []
 
-    with pytest.raises(GitHubAPIError, match="cannot convert"):
-        _run_top_level(
-            publication_repo,
-            result,
-            late_existing_pr=True,
-            remote_branch_exists=False,
-            postpush_pr_draft=False,
-            event_log=events,
-            draft_conversion_fails=True,
-        )
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        result,
+        late_existing_pr=True,
+        remote_branch_exists=False,
+        postpush_pr_draft=False,
+        event_log=events,
+        draft_conversion_fails=True,
+    )
 
+    gh.convert_pull_to_draft.assert_not_called()
     assert events == [
         "discover",
         "push",
         "create",
         "refetch",
-        "draft",
-        "rollback",
+        "body",
     ]
 
 
-def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creation(
+def test_stale_remote_branch_without_diff_falls_through_to_post_push_open_creation(
     publication_repo: str,
 ):
     result = _pair_result(target_text="See [missing](missing.md).\n")
@@ -3521,7 +3512,7 @@ def test_stale_remote_branch_without_diff_falls_through_to_post_push_draft_creat
 
     assert events == ["discover", "create", "push", "create", "refetch", "body"]
     assert job.translation_pr_number == 99
-    assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [True, True]
+    assert [call.kwargs["draft"] for call in gh.create_pull.call_args_list] == [False, False]
 
 
 def test_red_push_lease_failure_does_not_mutate_pull_request(
@@ -3541,7 +3532,7 @@ def test_red_push_lease_failure_does_not_mutate_pull_request(
     assert events == ["discover", "push"]
 
 
-def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
+def test_post_push_open_red_pr_keeps_new_remote_ref(
     publication_repo: str,
     tmp_path: Path,
 ):
@@ -3584,29 +3575,29 @@ def test_failed_post_push_draft_conversion_deletes_new_red_remote_ref(
         )
     ]
 
-    with pytest.raises(GitHubAPIError, match="cannot convert"):
-        _run_top_level(
-            publication_repo,
-            rollback_result,
-            late_existing_pr=True,
-            remote_branch_exists=False,
-            postpush_pr_draft=False,
-            event_log=events,
-            draft_conversion_fails=True,
-            real_push_remote=str(upstream),
-        )
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        rollback_result,
+        late_existing_pr=True,
+        remote_branch_exists=False,
+        postpush_pr_draft=False,
+        event_log=events,
+        draft_conversion_fails=True,
+        real_push_remote=str(upstream),
+    )
 
     remote_ref = subprocess.run(
         ["git", "--git-dir", str(upstream), "rev-parse", "refs/heads/ydbdoc-review/pr-7"],
         capture_output=True,
         text=True,
     )
-    assert remote_ref.returncode != 0
-    assert red_sha not in remote_ref.stdout
-    assert events == ["discover", "push", "create", "refetch", "draft"]
+    assert remote_ref.returncode == 0
+    assert remote_ref.stdout.strip() == red_sha
+    gh.convert_pull_to_draft.assert_not_called()
+    assert events == ["discover", "push", "create", "refetch", "body"]
 
 
-def test_failed_post_push_conversion_restores_remote_only_previous_sha(
+def test_post_push_open_red_pr_does_not_restore_previous_sha(
     publication_repo: str,
     tmp_path: Path,
 ):
@@ -3686,18 +3677,17 @@ def test_failed_post_push_conversion_restores_remote_only_previous_sha(
         )
     ]
 
-    with pytest.raises(GitHubAPIError, match="cannot convert"):
-        _run_top_level(
-            publication_repo,
-            rollback_result,
-            late_existing_pr=True,
-            remote_branch_exists=True,
-            remote_branch_sha=previous_sha,
-            prepush_create_returns_none=True,
-            postpush_pr_draft=False,
-            draft_conversion_fails=True,
-            real_push_remote=str(upstream),
-        )
+    _job, gh, _prepare, _commit, _push, _finish = _run_top_level(
+        publication_repo,
+        rollback_result,
+        late_existing_pr=True,
+        remote_branch_exists=True,
+        remote_branch_sha=previous_sha,
+        prepush_create_returns_none=True,
+        postpush_pr_draft=False,
+        draft_conversion_fails=True,
+        real_push_remote=str(upstream),
+    )
 
     restored_sha = subprocess.run(
         ["git", "--git-dir", str(upstream), "rev-parse", branch_ref],
@@ -3705,7 +3695,8 @@ def test_failed_post_push_conversion_restores_remote_only_previous_sha(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert restored_sha == previous_sha
+    assert restored_sha != previous_sha
+    gh.convert_pull_to_draft.assert_not_called()
 
 
 def _withhold_case(case: str) -> PRTranslationResult:

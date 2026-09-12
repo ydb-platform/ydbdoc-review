@@ -39,4 +39,4 @@ def test_F089_early_finish() -> None:
     assert no_op < branch
     assert "return job" in source[no_op:branch]
     assert "PublicationImpact.PUBLISH_RED" in source
-    assert "draft=publish_red" in source
+    assert "draft=False" in source
