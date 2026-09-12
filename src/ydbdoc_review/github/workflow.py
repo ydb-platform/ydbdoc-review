@@ -221,7 +221,12 @@ logger = logging.getLogger(__name__)
 
 _GITHUB_ACTOR_NAME = "github-actions[bot]"
 _GITHUB_ACTOR_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
-_REPORT_MARKER = "ydbdoc-review — отчёт"
+_REPORT_MARKERS = (
+    "**ydbdoc-review** — отчёт №",
+    "**ydbdoc-review** — отчёт #",
+    "ydbdoc-review — отчёт №",
+    "ydbdoc-review — отчёт #",
+)
 _ACTIVE_VERIFY_RERUN_CAPABILITY: ContextVar[object | None] = ContextVar(
     "ydbdoc_review_active_verify_rerun_capability",
     default=None,
@@ -644,7 +649,7 @@ def _next_report_number(client: GitHubClient, owner: str, repo: str, issue_numbe
     count = 0
     for comment in client.iter_issue_comments(owner, repo, issue_number):
         body = str(comment.get("body") or "")
-        if _REPORT_MARKER in body:
+        if any(marker in body for marker in _REPORT_MARKERS):
             count += 1
     return count + 1
 
