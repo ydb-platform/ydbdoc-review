@@ -158,9 +158,9 @@ def expired_context_comment(source_pr: int) -> str:
         "⛔ **ydbdoc-review:** контекст предыдущего прогона (промпты/ответы модели) "
         "уже удалён (хранится **14 дней**). Continue недоступен.\n\n"
         "Что можно сделать:\n"
-        f"1. Удалить ветку перевода `ydbdoc-review/pr-{source_pr}` "
-        "(и закрыть translation PR) и заново повесить лейбл **`doc_translate`** "
-        "на исходный PR — полный цикл.\n"
+        "1. Заново повесить лейбл **`doc_translate`** на исходный PR — полный "
+        "перезапуск сам закроет прежний сервисный translation PR и удалит только "
+        f"свою ветку `ydbdoc-review/pr-{source_pr}`.\n"
         "2. Или править EN вручную и повесить **`doc_verify`** на translation PR — "
         "без истории LLM."
     )
