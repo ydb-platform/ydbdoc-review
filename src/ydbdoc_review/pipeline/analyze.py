@@ -237,7 +237,15 @@ def _action_from_analyze(result: AnalyzePairResult) -> PairAction:
 
 
 def plan_from_analyze(content: PairContent, result: AnalyzePairResult) -> PairPlan:
-    action = _action_from_analyze(result)
+    # Analyze is advisory. A missing target with source prose is an
+    # unconditional translation obligation, even if a stale or malformed
+    # Analyze response claims that no generation is needed.
+    if content.pair.ru_changed and content.ru_text and not content.en_text:
+        action = "translate_to_en"
+    elif content.pair.en_changed and content.en_text and not content.ru_text:
+        action = "translate_to_ru"
+    else:
+        action = _action_from_analyze(result)
     if action == "translate_to_en":
         src, tgt, sl, tl = content.pair.ru_path, content.pair.en_path, "ru", "en"
     elif action == "translate_to_ru":
