@@ -176,14 +176,17 @@ def build_later_ru_drift_report(
     baseline_sha: str,
     source_paths: Iterable[str],
     docs_root: str,
+    dependency_paths: Iterable[str] = (),
 ) -> str:
     """Render relevant first-parent RU drift in ``H..B`` with proven PR identity."""
+    frozen_source_paths = frozenset(source_paths)
+    allowed_paths = frozen_source_paths | frozenset(dependency_paths)
     relevant: list[_RelevantCommit] = []
     for sha in first_parent_commits_between(repo_path, source_head_sha, baseline_sha):
         changes = tuple(
             (path, kind)
             for path, kind in first_parent_commit_changes(repo_path, sha)
-            if _is_relevant_ru_path(path, docs_root=docs_root)
+            if path in allowed_paths and _is_relevant_ru_path(path, docs_root=docs_root)
         )
         if not changes:
             continue
@@ -205,7 +208,6 @@ def build_later_ru_drift_report(
     if not relevant:
         return ""
 
-    frozen_source_paths = frozenset(source_paths)
     lines = [
         "## Later RU provenance drift",
         "",
@@ -217,7 +219,8 @@ def build_later_ru_drift_report(
         lines.append("")
         if commit.verified_pr is not None:
             lines.append(
-                f"### Verified PR #{commit.verified_pr} at {_markdown_code_literal(commit.sha)}"
+                "### Confirmed merge association: "
+                f"PR #{commit.verified_pr} at {_markdown_code_literal(commit.sha)}"
             )
         else:
             candidate_note = (

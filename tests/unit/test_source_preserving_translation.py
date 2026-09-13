@@ -918,7 +918,7 @@ def test_composed_frozen_pr51079_candidate_is_source_preserving_and_verifiable(
         source_paths=case.ru_paths,
         docs_root="ydb/docs",
     )
-    assert "Verified PR #52355" in later
+    assert "Confirmed merge association: PR #52355" in later
     assert "Поздняя правка" not in "\n".join(case.candidate_files.values())
 
 

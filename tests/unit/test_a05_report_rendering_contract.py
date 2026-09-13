@@ -205,6 +205,7 @@ def hostile_drift(tmp_path: Path) -> _Fixture:
         baseline_sha=later_sha,
         source_paths=(source_path,),
         docs_root="ydb/docs",
+        dependency_paths=(hostile_path, newline_path, relation_path),
     )
     return _Fixture(
         report=report,
@@ -265,7 +266,7 @@ def _assert_safe_attributable_report(fixture: _Fixture, report: str) -> None:
     }
     assert _heading_texts(tokens) == [
         ("h2", "Later RU provenance drift"),
-        ("h3", f"Verified PR #50704 at {fixture.later_sha}"),
+        ("h3", f"Confirmed merge association: PR #50704 at {fixture.later_sha}"),
     ]
 
     expected_items = Counter(
@@ -299,6 +300,7 @@ def _exact_scope_report(fixture: _ScopeFixture) -> str:
         baseline_sha=fixture.later_sha,
         source_paths=(fixture.source_path,),
         docs_root="ydb/docs",
+        dependency_paths=(fixture.nested_path,),
     )
 
 
@@ -311,7 +313,8 @@ def _safe_exact_scope_report(fixture: _ScopeFixture) -> str:
             "Frozen first-parent range "
             f"{_code_literal(fixture.source_sha)}..{_code_literal(fixture.later_sha)}:",
             "",
-            f"### Verified PR #50704 at {_code_literal(fixture.later_sha)}",
+            "### Confirmed merge association: "
+            f"PR #50704 at {_code_literal(fixture.later_sha)}",
             "",
             f"- {_code_literal(fixture.source_path)} — modified, same-path with source PR",
             f"- {_code_literal(fixture.nested_path)} — added",
@@ -325,7 +328,7 @@ def _assert_exact_path_scope(fixture: _ScopeFixture, report: str) -> None:
     tokens = MarkdownIt("commonmark", {"html": True}).parse(report)
     assert _heading_texts(tokens) == [
         ("h2", "Later RU provenance drift"),
-        ("h3", f"Verified PR #50704 at {fixture.later_sha}"),
+        ("h3", f"Confirmed merge association: PR #50704 at {fixture.later_sha}"),
     ]
     assert Counter(_list_items(tokens)) == Counter(
         {
@@ -350,7 +353,8 @@ def _safe_report(fixture: _Fixture) -> str:
             "Frozen first-parent range "
             f"{_code_literal(fixture.source_sha)}..{_code_literal(fixture.later_sha)}:",
             "",
-            f"### Verified PR #50704 at {_code_literal(fixture.later_sha)}",
+            "### Confirmed merge association: "
+            f"PR #50704 at {_code_literal(fixture.later_sha)}",
             "",
             *(f"- {_code_literal(path)} — added" for path in fixture.paths),
             "",
@@ -486,7 +490,11 @@ def test_exact_path_scope_oracle_kills_normalization_and_backslash_mutants(
         ),
         (
             "wrong verified PR",
-            lambda fixture, report: report.replace("Verified PR #50704", "Verified PR #50705", 1),
+            lambda fixture, report: report.replace(
+                "Confirmed merge association: PR #50704",
+                "Confirmed merge association: PR #50705",
+                1,
+            ),
         ),
         (
             "wrong verified SHA",
@@ -543,6 +551,7 @@ def test_actual_renderer_mutants_are_killed_and_recover(
             baseline_sha=hostile_drift.later_sha,
             source_paths=("ydb/docs/ru/core/security/source.md",),
             docs_root="ydb/docs",
+            dependency_paths=hostile_drift.paths,
         )
     _assert_safe_attributable_report(hostile_drift, build())
 

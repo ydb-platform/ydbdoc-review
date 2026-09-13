@@ -160,6 +160,16 @@ INPUT: pr_number, source_repo, merge_base_with
    branch ydbdoc-review/pr-{N}, push, open translation PR, comments
 ```
 
+The source-PR comment's later-RU provenance section uses the already frozen scope
+plan only. It admits exact source API paths plus exact planned document/navigation
+dependencies, freezes both inputs once, and filters each first-parent commit before
+subject parsing or PR API lookup. Git path strings are not slash-normalized and
+relation evidence is retained for an admitted changed path even when its target is
+outside the admitted set. `Confirmed merge association` proves only `merged=true`,
+matching PR number, and exact merge SHA. It is not a quality check and cannot add a
+translation pair, navigation operation, blocker, warning, or verdict contribution
+(§6.266).
+
 **Harness (§6.66):** per-file — `translate_file` → `FileHarness`. PR-level —
 `run_pr_translation` / `doc_verify` → `PRHarness` → `run_pair_plan` per pair.
 

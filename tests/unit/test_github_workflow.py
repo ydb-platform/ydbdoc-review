@@ -1221,6 +1221,123 @@ def test_run_doc_translate_dry_run(git_repo: str):
     assert not Path(git_repo, "ydb/docs/en/a.md").exists()
 
 
+def test_workflow_passes_frozen_scope_dependencies(git_repo: str) -> None:
+    from ydbdoc_review.navigation.scope_planner import TranslationScopePlan
+
+    _wire_en_toc_for_a(git_repo)
+    ru_toc = Path(git_repo, "ydb/docs/ru/core/toc_p.yaml")
+    ru_toc.parent.mkdir(parents=True, exist_ok=True)
+    ru_toc.write_text(
+        "items:\n- name: A\n  href: ../a.md\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "ru toc for provenance scope"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+    )
+    checkout_sha = _head_sha(git_repo)
+    source = "ydb/docs/ru/a.md"
+    doc_dependency = "ydb/docs/ru/dependency.md"
+    nav_dependency = "ydb/docs/ru/core/toc_p.yaml"
+    scope = TranslationScopePlan(
+        doc_ru_paths=frozenset({source, doc_dependency}),
+        doc_from_diff=frozenset({source}),
+        doc_from_main=frozenset({doc_dependency}),
+        nav_ru_paths=frozenset({nav_dependency}),
+        nav_from_diff=frozenset(),
+        nav_from_main=frozenset({nav_dependency}),
+    )
+    pull = {
+        "title": "docs",
+        "head": {
+            "ref": "feature/docs",
+            "sha": checkout_sha,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"},
+        },
+        "base": {"ref": "main", "sha": checkout_sha},
+    }
+    source_pair = DocPair(
+        ru_path=source,
+        en_path="ydb/docs/en/a.md",
+        ru_changed=True,
+    )
+
+    with (
+        patch(
+            "ydbdoc_review.github.workflow.run_pr_translation",
+            return_value=_fake_pr_result(),
+        ),
+        patch("ydbdoc_review.github.workflow.GitHubClient") as mock_gh,
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_git",
+            return_value=[(source, "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+            return_value=[(source, "modified")],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.plan_translation_scope",
+            return_value=scope,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.doc_pairs_from_plan",
+            return_value=[source_pair],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.navigation_pairs_from_plan",
+            return_value=[],
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.synthetic_changes_from_plan",
+            return_value=[],
+        ),
+        patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"),
+        patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True),
+        patch("ydbdoc_review.github.workflow.push_branch") as push,
+        patch(
+            "ydbdoc_review.github.workflow.run_doc_verify",
+            return_value=_mock_inline_verify_job(),
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.bind_translation_artifact",
+            side_effect=_bind_fixture_artifact,
+        ),
+        patch(
+            "ydbdoc_review.github.workflow.build_later_ru_drift_report",
+            return_value="",
+        ) as build_drift,
+    ):
+        mock_gh.return_value.get_pull.return_value = pull
+        _wire_translation_publication(mock_gh.return_value, push, pull)
+        mock_gh.return_value.create_pull.return_value = (
+            "https://github.com/o/r/pull/99",
+            99,
+            True,
+        )
+        mock_gh.return_value.iter_issue_comments.return_value = iter([])
+        mock_gh.return_value.post_issue_comment.return_value = "url"
+        result = run_doc_translate(
+            repo_path=git_repo,
+            github_repo="o/r",
+            pr_number=7,
+            merge_base_with="HEAD",
+            dry_run=False,
+            config=load_config(env=_env()),
+        )
+
+    assert result.pr_result.translated_count == 1
+    assert build_drift.call_args.kwargs["source_paths"] == frozenset({source})
+    dependencies = build_drift.call_args.kwargs["dependency_paths"]
+    assert isinstance(dependencies, frozenset)
+    assert dependencies == frozenset({doc_dependency, nav_dependency})
+    assert scope.doc_ru_paths == frozenset({source, doc_dependency})
+    assert scope.nav_ru_paths == frozenset({nav_dependency})
+
+
 def test_run_doc_translate_en_toc_graph_keeps_b_miss_separate_from_r(
     git_repo: str,
 ) -> None:
