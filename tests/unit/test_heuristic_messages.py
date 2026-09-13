@@ -114,7 +114,9 @@ def test_format_critic_model_refusal():
         ),
     )
     assert "отказала" in detail.problem
-    assert "эвристики" in detail.problem
+    assert "языка и стиля не завершена" in detail.problem
+    assert "ручная проверка" in detail.suggestion
+    assert "merge допустим" not in detail.suggestion
     assert "«Я не могу обсуждать эту тему.»" in detail.problem
 
 
@@ -122,4 +124,4 @@ def test_humanize_critic_model_refusal_finalize_warning():
     raw = "critic_model_refusal: model declined review; heuristics only on verify"
     text = humanize_heuristic(raw)
     assert "отказала" in text
-    assert "эвристики" in text
+    assert "ручная проверка" in text

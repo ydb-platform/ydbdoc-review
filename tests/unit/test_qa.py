@@ -224,8 +224,8 @@ def test_verify_blocked_when_round_trip_fails():
     assert result.segment_alignment_error
 
 
-def test_compute_critic_verdict_initial_warnings_without_issues_is_ok():
+def test_compute_critic_verdict_initial_warnings_without_issues_stays_warnings():
     from ydbdoc_review.translation.schemas import CriticResponse
 
     initial = CriticResponse(verdict="warnings", issues=[])
-    assert _compute_critic_verdict(initial=initial, unresolved=None) == "ok"
+    assert _compute_critic_verdict(initial=initial, unresolved=None) == "warnings"

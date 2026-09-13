@@ -338,7 +338,7 @@ def test_is_model_refusal_text_detects_yandexgpt_decline():
     assert not is_model_refusal_text('{"verdict": "ok", "issues": []}')
 
 
-def test_run_critic_model_refusal_falls_back_to_heuristics_only():
+def test_run_critic_model_refusal_requires_manual_review():
     client = _mock_client(["Я не могу обсуждать эту тему."])
     seg = _segment("s1", "x")
     out = run_critic(
@@ -348,7 +348,7 @@ def test_run_critic_model_refusal_falls_back_to_heuristics_only():
         glossary=load_glossary(),
         file_path="docs/ru/reference/ydb-sdk/health-check-api.md",
     )
-    assert out.verdict in {"ok", "warnings"}
+    assert out.verdict == "warnings"
     assert out.issues[0].category == "critic_model_refusal"
     assert client._client.chat.completions.create.call_count == 1
 

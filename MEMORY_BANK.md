@@ -3,7 +3,22 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.263: critic/verify inspect actual target code atoms with
+**Current focus:** §6.264: critic refusal means incomplete language/style review.
+Clean prose stays warnings/yellow with manual review required. All critic passes
+retain complete combined findings, including blocked sibling batches and target
+atom issues. Pair post-repair QA preserves refusal; compatibility warnings with
+empty issues also remain non-green. Technical execution failures remain blocked.
+Final-review correction: refusal also retains accumulated pending findings on
+third-pass verify. Later applied repairs clear their earlier pending diagnosis;
+findings confirmed again after a repair remain blocked. Machine history stays
+intact; skipped repairs cannot hide blockers in reports or permit publication.
+Report-only deduplication omits skipped entries already shown as unresolved,
+preserving one reviewer item per issue without changing machine blocker evidence.
+The coded refusal heuristic mirror is also omitted when its critic event is
+displayed; matching never suppresses distinct findings merely for similar wording.
+This replaces §6.245/R-GL-5's old info/green refusal policy.
+
+Prior focus: §6.263: critic/verify inspect actual target code atoms with
 separate source/target legends and fail closed on alignment mismatch. Residual
 Cyrillic yields deterministic blocked `protected_atom_language` with a null fix,
 even after model ok/refusal, skipped-fix filtering, or reverify. Localized target
@@ -77,7 +92,7 @@ stable cross-references — use them when linking between files.
 | 2026-09-03 | **§6.247 production** — doc_verify run 33752767042 on #52077 emitted 3 blocking ASCII-fragment substitutions, including legacy-translit; false green eliminated |
 | 2026-09-03 | **§6.247** — hard exact-ASCII href parity before baseline grandfather; #52077 false-green regression (R-GL-7) |
 | 2026-09-03 | **§6.246** — include-only fragment-owner enqueue for pre-existing hrefs; include declare fallback (#52077 / R-GL-6) |
-| 2026-09-03 | **§6.245** — ``critic_model_refusal`` classified as info; merge 🟢 when heuristics clean (#52077 / R-GL-5) |
+| 2026-09-13 | **§6.264**: critic refusal is warning/yellow; all sibling findings survive. Supersedes §6.245 info/green policy (#52077 / R-GL-5) |
 | 2026-09-03 | **§6.244** — fragment-owner href delta vs ``read_ru_base``; output-aware translate batching + length resplit (#52077 / R-GL-4) |
 | 2026-09-03 | **§6.243** — tip EN covering inbound exact-ASCII frags satisfies scope gap; clearer completeness QA (#52077 / R-GL-3) |
 | 2026-09-03 | **§6.242** — tip ``redirects.yaml`` for tombstone skip; fragment owners follow tip ``from``→``to`` (#40385 / R-GL-2) |
