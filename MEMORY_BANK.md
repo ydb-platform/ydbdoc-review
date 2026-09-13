@@ -3,7 +3,14 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.266: later-RU provenance is filtered to exact source paths
+**Current focus:** §6.267: exact offline #51079 replay uses immutable H0/H/B/K
+snapshots, independently reviewed model responses and the real local Git pipeline.
+Exactly six Markdown plus one TOC are translated from two source changes. Original
+defective K and seven isolated regressions must be non-green; report verification
+is bound to exact committed bytes. Network is disabled. Production retry, content
+review and green verify/build on the same production SHA remain deferred.
+
+Prior focus: §6.266: later-RU provenance is filtered to exact source paths
 and already admitted document/navigation dependencies before subject parsing or
 PR API lookup. `Confirmed merge association` proves only merged state, PR number,
 and exact merge SHA. The diagnostic cannot expand translation scope or affect the
