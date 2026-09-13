@@ -51,6 +51,10 @@ _CRITIC_EXECUTION_FAILED = re.compile(
     r"^Critic execution failed: (.+?)(?:\s*\| raw_preview=|$)", re.DOTALL
 )
 _CRITIC_MODEL_REFUSAL_PREVIEW = re.compile(r"Preview:\s*(.+)$", re.DOTALL)
+_EDITORIAL = re.compile(
+    r"^(editorial_link_label_space|editorial_ldap_scheme): "
+    r"line (\d+): «(.*)»$"
+)
 _NAV_KIND = re.compile(
     r"^(scope_not_applied|missing_href|unexpected_href|empty_toc|collapsed_toc|"
     r"inconsistent_indent|missing_toc_target|orphan_toc_page|toc_structure_parity|"
@@ -68,6 +72,9 @@ def heuristic_location_label(message: str) -> str:
     """Short location column for a heuristic line in the PR report."""
     if message.startswith("en_language:"):
         return message.split(":", 2)[1].strip()
+    editorial = _EDITORIAL.match(message)
+    if editorial:
+        return f"строка {editorial.group(2)}"
     if message.startswith("cyrillic_in_fence:"):
         return "комментарии в коде"
     if message.startswith("cyrillic_in_code_fence:") or message.startswith(
@@ -215,6 +222,22 @@ def format_heuristic_reviewer_detail(message: str) -> HeuristicReviewerDetail:
     """Turn internal heuristic codes into reviewer-facing problem + optional advice."""
     if message.startswith("Кириллица в EN-тексте") or message.startswith("… и ещё"):
         return HeuristicReviewerDetail(problem=message)
+
+    editorial = _EDITORIAL.match(message)
+    if editorial:
+        kind, line, context = editorial.groups()
+        if kind == "editorial_link_label_space":
+            return HeuristicReviewerDetail(
+                problem=(
+                    f"Некорректные пробелы в тексте ссылки, строка {line}: "
+                    f"«{context}»"
+                ),
+                suggestion="Уберите пробелы по краям текста ссылки.",
+            )
+        return HeuristicReviewerDetail(
+            problem=f"Терминологическая опечатка, строка {line}: «{context}»",
+            suggestion="Для протокола подключения используйте `ldaps scheme`.",
+        )
 
     m = _LINK_LOCALE_WIKI_RU_SLUG.match(message.strip())
     if m:

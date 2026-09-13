@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+import pytest
+
 from ydbdoc_review.pipeline.qa import compose_file_verdict
 from ydbdoc_review.validation.heuristics import (
     ClassifiedHeuristics,
@@ -472,6 +474,17 @@ def test_md_link_parity_ignores_stripped_basenames():
 def test_r_gl_5_critic_model_refusal_classified_as_warning():
     msg = "critic_model_refusal: model declined review; heuristics only on verify"
     assert _classify_heuristic(msg) == "warnings"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "editorial_link_label_space: line 7: «See [ padded](auth.md).»",
+        "editorial_ldap_scheme: line 9: «Use the ldaps schema.»",
+    ],
+)
+def test_editorial_findings_are_warnings(message: str) -> None:
+    assert _classify_heuristic(message) == "warnings"
 
 
 def test_r_gl_5_compose_file_verdict_warnings_when_only_refusal():

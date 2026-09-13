@@ -5,21 +5,11 @@ Wraps markdown-it-py and converts its flat token stream into our IR tree.
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from mdit_py_plugins.front_matter import front_matter_plugin
-
-from ydbdoc_review.parsing.yfm_plugins.conditionals import yfm_if_plugin
-from ydbdoc_review.parsing.yfm_plugins.cuts import yfm_cut_plugin
-from ydbdoc_review.parsing.yfm_plugins.image_size import yfm_image_size_plugin  # NEW
-from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
-from ydbdoc_review.parsing.yfm_plugins.link_with_variable import yfm_link_with_variable_plugin  # NEW
-from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
-from ydbdoc_review.parsing.yfm_plugins.tables import yfm_table_plugin
-from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
-from ydbdoc_review.parsing.yfm_plugins.terms import yfm_terms_plugin  
-from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
-
 
 from ydbdoc_review.parsing.ast_types import (
     BlockNode,
@@ -39,33 +29,55 @@ from ydbdoc_review.parsing.ast_types import (
     InlineNode,
     InlineSoftBreak,
     InlineStrong,
+    InlineTermRef,
     InlineText,
-    InlineVariable,  
+    InlineVariable,
     ListItem,
     OrderedList,
     Paragraph,
     Table,
     TableCell,
     TableRow,
+    TermDefinition,
     ThematicBreak,
-    InlineTermRef,    
-    TermDefinition,  
-    YfmCut, 
-    YfmIf,         
-    YfmIfBranch,   
+    YfmCut,
+    YfmIf,
+    YfmIfBranch,
     YfmInclude,
-    YfmNote,  
-    YfmTab,    
-    YfmTabs,   
+    YfmNote,
+    YfmTab,
+    YfmTabs,
 )
+from ydbdoc_review.parsing.inline_locations import (
+    LocatedDocument,
+    LocatedInlineSegment,
+    build_located_inline_segment,
+    install_inline_location_tracking,
+    trim_final_text_projection,
+)
+from ydbdoc_review.parsing.yfm_plugins.conditionals import yfm_if_plugin
+from ydbdoc_review.parsing.yfm_plugins.cuts import yfm_cut_plugin
+from ydbdoc_review.parsing.yfm_plugins.image_size import yfm_image_size_plugin  # NEW
+from ydbdoc_review.parsing.yfm_plugins.includes import yfm_include_plugin
+from ydbdoc_review.parsing.yfm_plugins.link_with_variable import (
+    yfm_link_with_variable_plugin,  # NEW
+)
+from ydbdoc_review.parsing.yfm_plugins.notes import yfm_note_plugin
+from ydbdoc_review.parsing.yfm_plugins.tables import yfm_table_plugin
+from ydbdoc_review.parsing.yfm_plugins.tabs import yfm_tabs_plugin
+from ydbdoc_review.parsing.yfm_plugins.terms import yfm_terms_plugin
+from ydbdoc_review.parsing.yfm_plugins.variables import yfm_variable_plugin
 
 
-def create_parser() -> MarkdownIt:
+def create_parser(*, source_locations: bool = False) -> MarkdownIt:
     md = MarkdownIt("commonmark", {"html": True, "breaks": False, "linkify": False})
     md.enable("table")
     md.enable("strikethrough")
     md.use(front_matter_plugin)
-    md.use(yfm_link_with_variable_plugin)  # must be early (mutates source)
+    md.use(
+        yfm_link_with_variable_plugin,
+        source_preserving=source_locations,
+    )  # must be early (mutates source)
     md.use(yfm_variable_plugin)
     md.use(yfm_note_plugin)
     md.use(yfm_table_plugin)
@@ -75,15 +87,22 @@ def create_parser() -> MarkdownIt:
     md.use(yfm_cut_plugin)
     md.use(yfm_terms_plugin)
     md.use(yfm_image_size_plugin)
+    if source_locations:
+        install_inline_location_tracking(md)
     return md
 
 
 class _TokenStream:
     """Cursor over a flat list of markdown-it tokens."""
 
-    def __init__(self, tokens: list[Token]) -> None:
+    def __init__(
+        self,
+        tokens: list[Token],
+        located_segments: list[LocatedInlineSegment] | None = None,
+    ) -> None:
         self.tokens = tokens
         self.pos = 0
+        self.located_segments = located_segments
 
     def peek(self) -> Token | None:
         if self.pos >= len(self.tokens):
@@ -113,6 +132,16 @@ def parse_markdown(text: str) -> Document:
     return _parse_document(stream)
 
 
+def parse_markdown_located(text: str) -> LocatedDocument:
+    """Parse Markdown once with validation-only inline source provenance."""
+    md = create_parser(source_locations=True)
+    tokens = md.parse(text)
+    located_segments: list[LocatedInlineSegment] = []
+    stream = _TokenStream(tokens, located_segments)
+    document = _parse_document(stream)
+    return LocatedDocument(document=document, inline_segments=tuple(located_segments))
+
+
 def _parse_document(stream: _TokenStream) -> Document:
     children: list[BlockNode] = []
     front_matter: str | None = None
@@ -135,7 +164,7 @@ def _parse_term_definition(stream: _TokenStream) -> TermDefinition:
     term_id = open_tok.meta.get("term_id", "")
     inline_tok = stream.expect("inline")
     stream.expect("term_definition_close")
-    children = _parse_inline_children(inline_tok.children or [])
+    children = _parse_inline_token(stream, inline_tok)
     return TermDefinition(term_id=term_id, children=children)
 
 def _parse_block(stream: _TokenStream) -> BlockNode | None:
@@ -197,7 +226,7 @@ def _parse_paragraph(stream: _TokenStream) -> Paragraph:
     stream.expect("paragraph_open")
     inline_tok = stream.expect("inline")
     stream.expect("paragraph_close")
-    children = _parse_inline_children(inline_tok.children or [])
+    children = _parse_inline_token(stream, inline_tok)
     return Paragraph(children=children)
 
 
@@ -219,10 +248,14 @@ def _parse_heading(stream: _TokenStream) -> Heading:
         if m:
             anchor = m.group(1)
             new_text = text[: m.start()].rstrip()
+            if stream.located_segments is not None:
+                trim_final_text_projection(inline_tok, new_text)
             if new_text:
                 children[-1] = InlineText(content=new_text)
             else:
                 children.pop()
+
+    _record_located_inline(stream, inline_tok, children)
 
     return Heading(level=level, children=children, anchor=anchor)
 
@@ -230,7 +263,7 @@ def _parse_heading(stream: _TokenStream) -> Heading:
 def _parse_fence(stream: _TokenStream) -> FencedCode:
     tok = stream.expect("fence")
     # markup is the fence character sequence, e.g. "```" or "~~~~".
-    fence_char = "`" if tok.markup.startswith("`") else "~"
+    fence_char: Literal["`", "~"] = "`" if tok.markup.startswith("`") else "~"
     fence_len = len(tok.markup)
     content = tok.content
     # markdown-it includes the trailing newline; preserve as-is.
@@ -343,7 +376,7 @@ def _parse_table(stream: _TokenStream) -> Table:
         stream.expect("th_close")
         header_cells.append(
             TableCell(
-                children=_parse_inline_children(inline_tok.children or []),
+                children=_parse_inline_token(stream, inline_tok),
                 is_header=True,
                 align=align,  # type: ignore[arg-type]
             )
@@ -375,7 +408,7 @@ def _parse_table(stream: _TokenStream) -> Table:
                 stream.expect("td_close")
                 cells.append(
                     TableCell(
-                        children=_parse_inline_children(inline_tok.children or []),
+                        children=_parse_inline_token(stream, inline_tok),
                         is_header=False,
                         align=align,  # type: ignore[arg-type]
                     )
@@ -511,7 +544,7 @@ def _list_item_to_tab(item: ListItem) -> YfmTab:
 
 
 def _extract_align(cell_open: Token) -> str:
-    style = cell_open.attrGet("style") or ""
+    style = cast(str, cell_open.attrGet("style") or "")
     if "left" in style:
         return "left"
     if "right" in style:
@@ -522,6 +555,21 @@ def _extract_align(cell_open: Token) -> str:
 
 
 # --- Inline parsing ---
+
+
+def _record_located_inline(
+    stream: _TokenStream,
+    token: Token,
+    nodes: list[InlineNode],
+) -> None:
+    if stream.located_segments is not None:
+        stream.located_segments.append(build_located_inline_segment(nodes, token))
+
+
+def _parse_inline_token(stream: _TokenStream, token: Token) -> list[InlineNode]:
+    nodes = _parse_inline_children(token.children or [])
+    _record_located_inline(stream, token, nodes)
+    return nodes
 
 
 def _parse_inline_children(tokens: list[Token]) -> list[InlineNode]:
@@ -569,15 +617,15 @@ def _parse_inline_until(stream: _TokenStream, close_type: str | None) -> list[In
             children.append(InlineStrong(children=inner, marker=marker))  # type: ignore[arg-type]
         elif t == "link_open":
             stream.advance()
-            href = tok.attrGet("href") or ""
-            title = tok.attrGet("title")
+            href = cast(str, tok.attrGet("href") or "")
+            title = cast(str | None, tok.attrGet("title"))
             inner = _parse_inline_until(stream, "link_close")
             stream.expect("link_close")
             children.append(InlineLink(href=href, title=title, children=inner))
         elif t == "image":
             stream.advance()
-            src = tok.attrGet("src") or ""
-            title = tok.attrGet("title")
+            src = cast(str, tok.attrGet("src") or "")
+            title = cast(str | None, tok.attrGet("title"))
             alt = tok.content
             meta = tok.meta or {}
             width = meta.get("width")
