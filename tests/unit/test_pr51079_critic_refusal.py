@@ -31,7 +31,7 @@ def _with_exhausted_refusal_attempts(responses):
     return [
         item
         for response in responses
-        for item in ([response] * 3 if response == REFUSAL else [response])
+        for item in ([response] * 2 if response == REFUSAL else [response])
     ]
 
 
@@ -176,7 +176,7 @@ def test_unchanged_feedback_retry_empty_batch_with_warning_sibling_retains_block
         issue.model_dump() for issue in result.critic_unresolved.issues
         if issue.category == "meaning"
     ] == [blocker]
-    assert ctx.client._client.chat.completions.create.call_count == 9
+    assert ctx.client._client.chat.completions.create.call_count == 8
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=PairPlan(
             pair=DocPair(ru_path=RU, en_path=EN), action="translate_to_en",
@@ -228,7 +228,12 @@ def test_feedback_retry_repaired_atom_is_not_restored_after_critic_refusal():
     assert not result.heuristic_blocking
     assert result.verdict == result.critic_unresolved.verdict == "blocked"
     assert [i.category for i in result.critic_unresolved.issues] == ["critic_model_refusal"]
-    assert ctx.client._client.chat.completions.create.call_count == 10
+    assert ctx.client._client.chat.completions.create.call_count == len(
+        _with_exhausted_refusal_attempts([
+            translation, unchanged_atom, REFUSAL,
+            translation, repaired_atom, REFUSAL,
+        ])
+    )
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=PairPlan(
             pair=DocPair(ru_path=RU, en_path=EN), action="translate_to_en",
@@ -323,7 +328,7 @@ def test_refusal_and_blocked_sibling_batch_preserves_red(refusal_first):
     assert {i.category for i in result.critic_unresolved.issues} == {
         "meaning", "critic_model_refusal",
     }
-    assert ctx.client._client.chat.completions.create.call_count == 4
+    assert ctx.client._client.chat.completions.create.call_count == 3
 
 
 @pytest.mark.parametrize("severity", ["warning", "blocked"])
@@ -341,7 +346,7 @@ def test_second_pass_refusal_remains_blocked(severity):
         "grammar",
         "critic_model_refusal",
     }
-    assert ctx.client._client.chat.completions.create.call_count == 4
+    assert ctx.client._client.chat.completions.create.call_count == 3
 
 
 @pytest.mark.parametrize("include_skipped", [None, True, False])
@@ -371,7 +376,7 @@ def test_third_pass_refusal_preserves_pending_and_unconfirmed_applied_finding(
     expected = "blocked"
     assert result.verdict == result.critic_unresolved.verdict == expected
     assert result.final_text == "Specify the documented authentication method.\n"
-    assert ctx.client._client.chat.completions.create.call_count == 5
+    assert ctx.client._client.chat.completions.create.call_count == 4
     assert [issue.comment for issue in result.critic_applied] == ["Use Apply", "Use Specify"]
     assert [issue.comment for issue in result.critic_skipped] == pending_comments
     assert sorted(
@@ -538,7 +543,7 @@ def test_second_pass_refusal_keeps_unrepaired_first_pass_blocker(suggestion, mix
         {"meaning", "terminology"} if mixed else {"meaning"}
     )
     assert {i.category for i in result.critic_applied} == ({"grammar"} if mixed else set())
-    assert ctx.client._client.chat.completions.create.call_count == 4
+    assert ctx.client._client.chat.completions.create.call_count == 3
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=_plan(), file_result=result, target_text=result.final_text,
     )])
@@ -614,7 +619,7 @@ def test_second_pass_refusal_preserves_blocked_sibling():
     assert {i.category for i in result.critic_unresolved.issues} == {
         "critic_model_refusal", "meaning", "grammar",
     }
-    assert ctx.client._client.chat.completions.create.call_count == 6
+    assert ctx.client._client.chat.completions.create.call_count == 5
 
 
 @pytest.mark.parametrize("second_pass", [False, True])

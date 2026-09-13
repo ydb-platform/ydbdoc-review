@@ -343,15 +343,32 @@ def test_F109_units_translation_is_critic_covered_and_refusal_blocks() -> None:
     assert run.file_result is not None
     assert run.file_result.verdict == "blocked"
     assert run.file_result.critic_initial is not None
+    refusal_issues = run.file_result.critic_initial.issues
     assert [
-        issue.category for issue in run.file_result.critic_initial.issues
-    ] == ["critic_model_refusal"]
+        (issue.category, issue.severity) for issue in refusal_issues
+    ] == [
+        ("critic_model_refusal", "blocked"),
+        ("critic_model_refusal", "blocked"),
+    ]
+    assert all(issue.comment for issue in refusal_issues)
+    assert {
+        segment_id: sum(
+            f"segments: {segment_id}." in issue.comment
+            for issue in refusal_issues
+        )
+        for segment_id in ("s0001", "s0002")
+    } == {"s0001": 1, "s0002": 1}
     critic_requests = transport.chat.completions.create.call_args_list[1:]
     assert len(critic_requests) == 3
+    critic_payloads = [
+        call.kwargs["messages"][-1]["content"] for call in critic_requests
+    ]
     assert all(
-        "Translated required prose." in call.kwargs["messages"][-1]["content"]
-        for call in critic_requests
+        text in critic_payloads[0]
+        for text in ("Accepted existing EN.", "Translated required prose.")
     )
+    assert "Accepted existing EN." in critic_payloads[1]
+    assert "Translated required prose." in critic_payloads[2]
     from ydbdoc_review.pipeline.publication import evaluate_publication_impact
     from ydbdoc_review.pipeline.types import PublicationImpact
 
