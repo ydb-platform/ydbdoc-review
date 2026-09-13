@@ -164,6 +164,17 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
             return True
         if file_result.link_contract_issues:
             return True
+        critics = (
+            file_result.critic_initial,
+            file_result.critic_unresolved,
+        )
+        if any(
+            issue.category == "critic_model_refusal"
+            for critic_response in critics
+            if critic_response is not None
+            for issue in critic_response.issues
+        ):
+            return True
         critic = (
             file_result.critic_unresolved
             if file_result.critic_unresolved is not None

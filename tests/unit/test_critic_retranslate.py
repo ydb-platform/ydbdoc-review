@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.state import FileRunState
-from ydbdoc_review.harness.steps import CriticFeedbackRetryStep
+from ydbdoc_review.harness.steps import CriticFeedbackRetryStep, run_critic_loop
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.pipeline.translate_file import translate_file
@@ -215,3 +215,56 @@ def test_critic_feedback_retry_uses_fixed_contract_when_config_zero():
 
     assert state.translate_retry_count == 1
     assert state.translations[seg_id] == "Fixed."
+
+
+def test_verify_refusal_retains_unconfirmed_repair_as_blocked() -> None:
+    source = "Для подключения нужны имя и пароль.\n"
+    doc = parse_markdown(source)
+    segments = extract_segments(doc)
+    seg_id = segments[0].id
+    issue = json.dumps(
+        {
+            "verdict": "blocked",
+            "issues": [
+                {
+                    "segment_id": seg_id,
+                    "severity": "blocked",
+                    "category": "meaning_drift",
+                    "comment": "Both credentials are required.",
+                    "suggested_text": "A name and a password are required.",
+                }
+            ],
+        }
+    )
+    client = _mock_client([issue] + ["Я не могу обсуждать эту тему."] * 3)
+    cfg = load_config(
+        env={"YDBDOC_YC_FOLDER_ID": "b1x", "YDBDOC_YC_API_KEY": "k"}
+    )
+    state = FileRunState(
+        mode="translate",
+        file_path="docs/ru/a.md",
+        raw_source_text=source,
+        source_text=source,
+        source_doc=doc,
+        segments=segments,
+        translations={seg_id: "A name or a password is required."},
+        translated_text="A name or a password is required.\n",
+        render_base_doc=doc,
+        render_base_segments=segments,
+        fence_reference_text=source,
+    )
+
+    run_critic_loop(
+        state,
+        HarnessContext.from_options(client, glossary=load_glossary(), config=cfg),
+    )
+
+    assert state.translated_text == "A name and a password are required.\n"
+    assert state.critic_unresolved is not None
+    assert state.critic_unresolved.verdict == "blocked"
+    assert {
+        (item.category, item.severity) for item in state.critic_unresolved.issues
+    } == {
+        ("meaning_drift", "blocked"),
+        ("critic_model_refusal", "blocked"),
+    }

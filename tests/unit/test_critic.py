@@ -8,6 +8,17 @@ from unittest.mock import MagicMock
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.pipeline.analyze import PairPlan
+from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.publication import evaluate_publication_impact
+from ydbdoc_review.pipeline.types import (
+    FileTranslationResult,
+    PairRunResult,
+    PRTranslationResult,
+    PublicationImpact,
+)
+from ydbdoc_review.reporting.builder import ReportMeta, build_full_report
+from ydbdoc_review.segmentation.chunker import Batch
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.critic import (
     _drop_impossible_code_link_issues,
@@ -338,8 +349,11 @@ def test_is_model_refusal_text_detects_yandexgpt_decline():
     assert not is_model_refusal_text('{"verdict": "ok", "issues": []}')
 
 
-def test_run_critic_model_refusal_requires_manual_review():
-    client = _mock_client(["Я не могу обсуждать эту тему."])
+def test_run_critic_model_refusal_retries_and_recovers_on_fallback():
+    clean = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(
+        ["Я не могу обсуждать эту тему.", "Я не могу обсуждать эту тему.", clean]
+    )
     seg = _segment("s1", "x")
     out = run_critic(
         client,
@@ -348,9 +362,128 @@ def test_run_critic_model_refusal_requires_manual_review():
         glossary=load_glossary(),
         file_path="docs/ru/reference/ydb-sdk/health-check-api.md",
     )
-    assert out.verdict == "warnings"
-    assert out.issues[0].category == "critic_model_refusal"
-    assert client._client.chat.completions.create.call_count == 1
+    assert out.verdict == "ok"
+    assert out.issues == []
+    calls = client._client.chat.completions.create.call_args_list
+    assert len(calls) == 3
+    assert calls[0].kwargs["model"].endswith("/yandexgpt-5.1")
+    assert calls[2].kwargs["model"].endswith("/yandexgpt-5-lite")
+
+
+def test_run_critic_model_refusal_exhaustion_is_blocking():
+    client = _mock_client(["Я не могу обсуждать эту тему."] * 3)
+    seg = _segment("s1", "x")
+
+    out = run_critic(
+        client,
+        segments=[seg],
+        translations={"s1": "EN x"},
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+
+    assert out.verdict == "blocked"
+    assert [(issue.category, issue.severity) for issue in out.issues] == [
+        ("critic_model_refusal", "blocked")
+    ]
+    assert client._client.chat.completions.create.call_count == 3
+
+
+def test_run_critic_mixed_batches_cannot_mask_exhausted_refusal(monkeypatch):
+    segments = [_segment("s1", "first"), _segment("s2", "second")]
+    monkeypatch.setattr(
+        "ydbdoc_review.translation.critic._critic_batches",
+        lambda *_args, **_kwargs: [
+            Batch(index=0, segments=[segments[0]]),
+            Batch(index=1, segments=[segments[1]]),
+        ],
+    )
+    clean = json.dumps({"verdict": "ok", "issues": []})
+    client = _mock_client(["Я не могу обсуждать эту тему."] * 3 + [clean])
+
+    out = run_critic(
+        client,
+        segments=segments,
+        translations={"s1": "First.", "s2": "Second."},
+        glossary=load_glossary(),
+        file_path="docs/ru/a.md",
+    )
+
+    assert out.verdict == "blocked"
+    assert [issue.category for issue in out.issues] == ["critic_model_refusal"]
+
+
+def test_run_critic_production_shaped_refusals_stay_exact_and_blocked(monkeypatch):
+    segments = [_segment(f"s{i:04d}", f"source {i}") for i in range(1, 15)]
+    monkeypatch.setattr(
+        "ydbdoc_review.translation.critic._critic_batches",
+        lambda *_args, **_kwargs: [
+            Batch(index=index, segments=[segment])
+            for index, segment in enumerate(segments)
+        ],
+    )
+    clean = json.dumps({"verdict": "ok", "issues": []})
+    refusing_batches = {1, 2, 10}
+    responses: list[str] = []
+    for index in range(14):
+        responses.extend(
+            ["Я не могу обсуждать эту тему."] * 3
+            if index in refusing_batches
+            else [clean]
+        )
+    client = _mock_client(responses)
+
+    out = run_critic(
+        client,
+        segments=segments,
+        translations={segment.id: f"target {i}" for i, segment in enumerate(segments)},
+        glossary=load_glossary(),
+        file_path="docs/ru/core/reference/configuration/auth_config.md",
+    )
+
+    refusals = [
+        issue for issue in out.issues if issue.category == "critic_model_refusal"
+    ]
+    assert len(refusals) == 3
+    assert out.verdict == "blocked"
+    assert all(issue.severity == "blocked" for issue in refusals)
+    assert client._client.chat.completions.create.call_count == 20
+    pair = DocPair(
+        ru_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+        en_path="ydb/docs/en/core/reference/configuration/auth_config.md",
+        ru_changed=True,
+    )
+    result = PRTranslationResult(
+        pair_results=[
+            PairRunResult(
+                plan=PairPlan(
+                    pair=pair,
+                    action="translate_to_en",
+                    source_path=pair.ru_path,
+                    target_path=pair.en_path,
+                    source_lang="ru",
+                    target_lang="en",
+                ),
+                source_text="source\n",
+                target_text="target\n",
+                file_result=FileTranslationResult(
+                    file_path=pair.en_path,
+                    final_text="target\n",
+                    segments_count=14,
+                    verdict="blocked",
+                    critic_initial=out,
+                    prompt_version="v1",
+                ),
+            )
+        ]
+    )
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+    report = build_full_report(
+        result,
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
+        config=load_config(env={}),
+    )
+    assert "Статус QA (K): 🔴 RED" in report
 
 
 def test_run_critic_retries_then_parses():

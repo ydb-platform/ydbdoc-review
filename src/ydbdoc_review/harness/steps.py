@@ -272,7 +272,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         translated_text=state.translated_text,
     )
     if _retain_pending_on_incomplete_review(
-        state, state.critic_unresolved, pending, target_lang=ctx.target_lang,
+        state, state.critic_unresolved, actionable_issues, target_lang=ctx.target_lang,
     ):
         return
     state.critic_unresolved = filter_critic_response(
@@ -367,7 +367,10 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         translated_text=state.translated_text,
     )
     if _retain_pending_on_incomplete_review(
-        state, state.critic_unresolved, pending, target_lang=ctx.target_lang,
+        state,
+        state.critic_unresolved,
+        [*pending, *second_actionable],
+        target_lang=ctx.target_lang,
     ):
         return
     state.critic_unresolved = filter_critic_response(

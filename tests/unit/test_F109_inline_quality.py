@@ -287,6 +287,77 @@ def test_F109_full_coverage_unresolved_semantic_issue_is_not_green() -> None:
     assert "QA K: 🟢 GREEN" not in body
 
 
+def test_F109_units_translation_is_critic_covered_and_refusal_blocks() -> None:
+    source = "Сохранённый источник.\n\nНовый источник.\n"  # noqa: RUF001
+    existing = "Accepted existing EN.\n\n"
+    pair = DocPair(
+        ru_path="ydb/docs/ru/concepts/glossary.md",
+        en_path="ydb/docs/en/concepts/glossary.md",
+        ru_changed=True,
+    )
+    coverage = CoveragePlan(
+        source_path=pair.ru_path,
+        source_hash=hashlib.sha256(source.encode()).hexdigest(),
+        en_hash=hashlib.sha256(existing.encode()).hexdigest(),
+        units=(
+            CoverageUnit(
+                key="1" * 64,
+                action="reuse_verified",
+                source="Сохранённый источник.",
+                en_span=(0, len("Accepted existing EN.")),
+                target="Accepted existing EN.",
+                reason="exact verified receipt",
+            ),
+            CoverageUnit(
+                key="2" * 64,
+                action="translate_required",
+                source="Новый источник.\n",
+                en_span=(len(existing), len(existing)),
+                target=None,
+                reason="required missing section",
+            ),
+        ),
+        required_fragments=frozenset(),
+        mode="units",
+    )
+    client, transport = _client(
+        [_translate("Translated required prose.")]
+        + ["Я не могу обсуждать эту тему."] * 3
+    )
+
+    result = run_pr_translation(
+        [
+            PairContent(
+                pair=pair,
+                ru_text=source,
+                en_text=existing,
+                coverage_plan=coverage,
+            )
+        ],
+        client,
+        load_glossary(),
+        use_analyze_llm=False,
+    )
+
+    run = result.pair_results[0]
+    assert run.file_result is not None
+    assert run.file_result.verdict == "blocked"
+    assert run.file_result.critic_initial is not None
+    assert [
+        issue.category for issue in run.file_result.critic_initial.issues
+    ] == ["critic_model_refusal"]
+    critic_requests = transport.chat.completions.create.call_args_list[1:]
+    assert len(critic_requests) == 3
+    assert all(
+        "Translated required prose." in call.kwargs["messages"][-1]["content"]
+        for call in critic_requests
+    )
+    from ydbdoc_review.pipeline.publication import evaluate_publication_impact
+    from ydbdoc_review.pipeline.types import PublicationImpact
+
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+
+
 @pytest.mark.parametrize(
     ("source", "target", "action", "mode"),
     [

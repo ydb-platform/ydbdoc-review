@@ -1,4 +1,4 @@
-"""F-057: critic policy refusal is informational; technical failure is RED."""
+"""F-057: critic refusal is unsafe; technical execution failure stays RED."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def _file_result(critic: CriticResponse) -> FileTranslationResult:
     )
 
 
-def test_F057_policy() -> None:
+def test_F057_policy_refusal_withholds_even_legacy_info_shaped_evidence() -> None:
     refusal = CriticResponse(
         verdict="ok",
         issues=[
@@ -64,9 +64,15 @@ def test_F057_policy() -> None:
         ]
     )
 
-    assert refresh_publication_impact(result) == PublicationImpact.PUBLISH_NORMAL
+    assert refresh_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
     assert result.pair_results[0].target_text
     assert result.pair_results[0].error is None
+    job = DocJobResult(
+        mode="doc_translate",
+        pr_number=1,
+        pr_result=result,
+    )
+    assert job_requires_nonzero_exit(job) is True
 
 
 def test_F057_technical() -> None:
