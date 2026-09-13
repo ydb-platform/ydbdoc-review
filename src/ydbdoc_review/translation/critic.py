@@ -11,6 +11,10 @@ from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.llm.structured import parse_json_content
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.critic_atoms import (
+    protected_atom_language_issues,
+    target_atom_maps,
+)
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import (
@@ -325,6 +329,7 @@ def _run_critic_batches(
     max_tokens: int | None,
     pass_label: str,
     prior_issues: list[CriticIssueOut] | None = None,
+    target_atom_maps: dict[str, dict[str, str]] | None = None,
 ) -> CriticResponse:
     batch_count = len(batches)
     responses: list[CriticResponse] = []
@@ -339,6 +344,7 @@ def _run_critic_batches(
                 source_lang=source_lang,
                 target_lang=target_lang,
                 version=prompt_version,
+                target_atom_maps=target_atom_maps,
             )
             label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
         else:
@@ -356,6 +362,7 @@ def _run_critic_batches(
                 source_lang=source_lang,
                 target_lang=target_lang,
                 version=prompt_version,
+                target_atom_maps=target_atom_maps,
             )
             label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
         response = _fetch_critic_response(
@@ -392,6 +399,7 @@ def _run_critic_batches(
                     source_lang=source_lang,
                     target_lang=target_lang,
                     version=prompt_version,
+                    target_atom_maps=target_atom_maps,
                 )
                 half_responses.append(
                     _fetch_critic_response(
@@ -485,7 +493,9 @@ def apply_critic_fixes(
     skipped: list[CriticIssueOut] = []
 
     for issue in issues:
-        if issue.suggested_text is None:
+        if issue.suggested_text is None or issue.category in {
+            "protected_atom_language", "protected_atom_alignment",
+        }:
             skipped.append(issue)
             continue
         if issue.segment_id is None:
@@ -545,6 +555,39 @@ def apply_critic_fixes(
     return updated, applied, skipped
 
 
+def _target_atom_evidence(
+    segments: list[Segment], translated_text: str | None, *, target_lang: str,
+) -> tuple[dict[str, dict[str, str]] | None, list[CriticIssueOut]]:
+    try:
+        atoms = None if translated_text is None else target_atom_maps(segments, translated_text)
+    except ValueError as exc:
+        return {}, [CriticIssueOut(
+            severity="blocked", category="protected_atom_alignment", comment=str(exc),
+            suggested_text=None,
+        )]
+    return atoms, protected_atom_language_issues(
+        segments, target_atoms=atoms, target_lang=target_lang,
+    )
+
+
+def _merge_atom_evidence(
+    response: CriticResponse, issues: list[CriticIssueOut],
+) -> CriticResponse:
+    """Opaque atom findings cannot authorize a suggested replacement of their markers."""
+    for issue in response.issues:
+        if issue.category in {"protected_atom_language", "protected_atom_alignment"}:
+            issue.suggested_text = None
+            issue.severity = "blocked"
+    if not issues and not any(
+        issue.category in {"protected_atom_language", "protected_atom_alignment"}
+        for issue in response.issues
+    ):
+        return response
+    return merge_critic_responses([
+        response, CriticResponse(verdict="blocked" if issues else "ok", issues=issues),
+    ])
+
+
 def run_critic(
     client: YandexLLMClient,
     *,
@@ -558,10 +601,13 @@ def run_critic(
     max_chars: int = 2500,
     max_tokens: int | None = None,
     source_text: str = "",
-    translated_text: str = "",
+    translated_text: str | None = None,
 ) -> CriticResponse:
     """First-pass batched critic review over segment pairs."""
-    del source_text, translated_text  # kept for call-site compatibility
+    del source_text  # kept for call-site compatibility
+    atoms, atom_issues = _target_atom_evidence(segments, translated_text, target_lang=target_lang)
+    if any(i.category == "protected_atom_alignment" for i in atom_issues):
+        return CriticResponse(verdict="blocked", issues=atom_issues)
     if not segments:
         return CriticResponse(verdict="ok", issues=[])
     batches = _critic_batches(segments, max_chars=max_chars)
@@ -572,7 +618,7 @@ def run_critic(
         len(batches),
         max_chars,
     )
-    return _run_critic_batches(
+    response = _run_critic_batches(
         client,
         batches=batches,
         translations=translations,
@@ -583,7 +629,9 @@ def run_critic(
         prompt_version=prompt_version,
         max_tokens=max_tokens,
         pass_label="Critic",
+        target_atom_maps=atoms,
     )
+    return _merge_atom_evidence(response, atom_issues)
 
 
 def run_verify(
@@ -600,14 +648,17 @@ def run_verify(
     max_chars: int = 2500,
     max_tokens: int | None = None,
     source_text: str = "",
-    translated_text: str = "",
+    translated_text: str | None = None,
 ) -> CriticResponse:
     """Second-pass batched verify after fixes were applied."""
-    del source_text, translated_text
+    del source_text
+    atoms, atom_issues = _target_atom_evidence(segments, translated_text, target_lang=target_lang)
+    if any(i.category == "protected_atom_alignment" for i in atom_issues):
+        return CriticResponse(verdict="blocked", issues=atom_issues)
     if not segments:
         return CriticResponse(verdict="ok", issues=[])
     batches = _critic_batches(segments, max_chars=max_chars)
-    return _run_critic_batches(
+    response = _run_critic_batches(
         client,
         batches=batches,
         translations=translations,
@@ -619,7 +670,9 @@ def run_verify(
         max_tokens=max_tokens,
         pass_label="Verify",
         prior_issues=prior_issues,
+        target_atom_maps=atoms,
     )
+    return _merge_atom_evidence(response, atom_issues)
 
 
 @dataclass
@@ -637,7 +690,7 @@ def review_with_critic(
     client: YandexLLMClient,
     *,
     source_text: str,
-    translated_text: str,
+    translated_text: str | None,
     segments: list[Segment],
     translations: dict[str, str],
     glossary: Glossary,
@@ -651,7 +704,7 @@ def review_with_critic(
     translated_text_after_fixes: str | None = None,
 ) -> CriticReviewResult:
     """Run critic, apply safe fixes, optionally re-verify unresolved issues."""
-    del source_text, translated_text_after_fixes
+    del source_text
     initial = run_critic(
         client,
         segments=segments,
@@ -682,7 +735,10 @@ def review_with_critic(
             prompt_version=prompt_version,
             max_chars=max_chars,
             max_tokens=max_tokens,
-            translated_text=translated_text,
+            translated_text=(
+                translated_text if translated_text_after_fixes is None
+                else translated_text_after_fixes
+            ),
         )
         unresolved = _drop_impossible_code_link_issues(unresolved, fixed, segments)
 

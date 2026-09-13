@@ -3,7 +3,15 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.262: independent final EN language gate scans complete
+**Current focus:** §6.263: critic/verify inspect actual target code atoms with
+separate source/target legends and fail closed on alignment mismatch. Residual
+Cyrillic yields deterministic blocked `protected_atom_language` with a null fix,
+even after model ok/refusal, skipped-fix filtering, or reverify. Localized target
+notation is not judged by its Russian source atom. Shared placeholder alignment
+keeps QA text, critic legends and render/apply marker addresses consistent.
+Final-byte §6.262 remains active.
+
+Prior focus: §6.262: independent final EN language gate scans complete
 candidate text after every pair return and late translation repair. Typed
 `en_language` evidence binds exact UTF-8 SHA-256 and withholds unsafe publication.
 Verify scans immutable K, and report byte checks compare both result text fields.

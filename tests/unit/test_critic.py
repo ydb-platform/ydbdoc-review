@@ -557,7 +557,8 @@ def test_review_50976_ignores_impossible_code_only_link_rewrite():
     result = review_with_critic(
         client,
         source_text="См. команду.",
-        translated_text=current,
+        # This synthetic legacy-marker fixture has no rendered document.
+        translated_text=None,
         segments=[_segment("s1", "См. [⟦C1⟧](⟦U1⟧).")],
         translations={"s1": current},
         glossary=load_glossary(),

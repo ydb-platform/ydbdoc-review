@@ -610,4 +610,36 @@ records byte mismatches without replacing either field. Withheld candidates are
 described as withheld, never as published draft/RED. Language blockers are not
 added to the repairable final-tree allowlist; v1 link manifests remain readable.
 
+### §6.263 Protected target atoms in critic and verify
+
+`translation/critic_atoms.py::target_atom_maps` parses the actual finalized target,
+checks segment count/kind, aligns markers with `normalize_target_segments_to_source`,
+retains target node payloads, and keys legends by source segment IDs. The shared
+`placeholder_align::_code_atom_key` recognizes only the exact Task 3 certificate
+notation pair, including repeated notation beside other atoms. QA target alignment,
+critic legends and render/apply use this same normalization; segment markers and
+legend keys address the same payloads. Actual target node content is unchanged,
+so partially localized repetitions still block. A marker
+count/name mismatch also fails closed with `protected_atom_alignment`; no known
+bad alignment silently falls back to source evidence. Batch and full-document
+critic/verify prompts carry both source `atom_map` and actual `target_atom_map`.
+Both system families explain that protected syntax can contain untranslated text.
+
+`run_critic` and `run_verify` deterministically inspect effective target `code:`
+payloads after model batching/resplits, using the complete Unicode Cyrillic check
+from the final language gate. Residual Cyrillic yields blocked
+`protected_atom_language` and `suggested_text: null` even if the model says ok.
+Russian source certificate notation with English target notation passes this
+atom check. Missing complete text (`None`) retains conservative source-atom
+compatibility; explicitly empty text is a real target and participates in alignment.
+
+The harness supplies current finalized text to both passes. Reverify rebuilds
+target evidence after rendering/finalization, allowing a repaired atom to clear.
+Opaque-atom model suggestions are nulled and never applied, including suggestions
+that preserve marker spelling but cannot actually repair its payload. Skipped-fix
+deduplication and identical-prose/spurious-placeholder filters preserve these
+findings. The existing refusal shortcut preserves atom blockers; general refusal
+aggregation remains the next task. The independent final-byte language barrier
+and publication allowlist are unchanged.
+
 [← Memory Bank index](../../MEMORY_BANK.md)

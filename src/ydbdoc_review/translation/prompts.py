@@ -11,6 +11,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from ydbdoc_review.segmentation.chunker import Batch
 from ydbdoc_review.segmentation.placeholder_align import segment_atom_legend
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.critic_atoms import target_atom_maps as extract_target_atom_maps
 from ydbdoc_review.translation.file_profiles import GLOSSARY_PROFILE, detect_file_profile
 from ydbdoc_review.translation.glossary import Glossary
 
@@ -73,11 +74,21 @@ def segments_to_batch_json(segments: list[Segment]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def segments_to_index_json(segments: list[Segment]) -> str:
+def segments_to_index_json(
+    segments: list[Segment],
+    *,
+    target_atom_maps: dict[str, dict[str, str]] | None = None,
+) -> str:
     """Compact segment list for critic/verify (id, kind, path only)."""
     payload = {
         "segments": [
-            {"id": seg.id, "kind": seg.kind.value, "path": seg.path}
+            {
+                "id": seg.id, "kind": seg.kind.value, "path": seg.path,
+                **({
+                    "atom_map": segment_atom_legend(seg),
+                    "target_atom_map": target_atom_maps[seg.id],
+                } if target_atom_maps is not None else {}),
+            }
             for seg in segments
         ]
     }
@@ -261,6 +272,7 @@ def segments_to_critic_batch_json(
     translations: dict[str, str],
     *,
     include_atom_map: bool = True,
+    target_atom_maps: dict[str, dict[str, str]] | None = None,
 ) -> str:
     """Segment source/target pairs for batched critic or verify."""
     items: list[dict[str, object]] = []
@@ -274,6 +286,8 @@ def segments_to_critic_batch_json(
         }
         if include_atom_map and seg.placeholders:
             entry["atom_map"] = segment_atom_legend(seg)
+        if target_atom_maps is not None:
+            entry["target_atom_map"] = target_atom_maps[seg.id]
         items.append(entry)
     payload = {"segments": items}
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -289,6 +303,7 @@ def build_critic_batch_messages(
     source_lang: str = "ru",
     target_lang: str = "en",
     version: str = DEFAULT_PROMPT_VERSION,
+    target_atom_maps: dict[str, dict[str, str]] | None = None,
 ) -> list[ChatCompletionMessageParam]:
     """Chat messages for one critic batch."""
     critic_template = (
@@ -305,7 +320,9 @@ def build_critic_batch_messages(
             "file_path": file_path,
             "batch_index": str(batch.index + 1),
             "batch_count": str(batch_count),
-            "batch_json": segments_to_critic_batch_json(batch.segments, translations),
+            "batch_json": segments_to_critic_batch_json(
+                batch.segments, translations, target_atom_maps=target_atom_maps,
+            ),
         },
     )
     return [
@@ -330,6 +347,7 @@ def build_verify_batch_messages(
     source_lang: str = "ru",
     target_lang: str = "en",
     version: str = DEFAULT_PROMPT_VERSION,
+    target_atom_maps: dict[str, dict[str, str]] | None = None,
 ) -> list[ChatCompletionMessageParam]:
     """Chat messages for one verify batch."""
     template = load_template("verify_batch", version=version)
@@ -341,7 +359,9 @@ def build_verify_batch_messages(
             "file_path": file_path,
             "batch_index": str(batch.index + 1),
             "batch_count": str(batch_count),
-            "batch_json": segments_to_critic_batch_json(batch.segments, translations),
+            "batch_json": segments_to_critic_batch_json(
+                batch.segments, translations, target_atom_maps=target_atom_maps,
+            ),
             "prior_issues_json": json.dumps(
                 prior_issues, ensure_ascii=False, indent=2
             ),
@@ -379,7 +399,9 @@ def build_critic_messages(
             "file_path": file_path,
             "source_text": source_text,
             "translated_text": translated_text,
-            "segments_index_json": segments_to_index_json(segments),
+            "segments_index_json": segments_to_index_json(
+                segments, target_atom_maps=extract_target_atom_maps(segments, translated_text),
+            ),
         },
     )
     return [
@@ -418,7 +440,9 @@ def build_verify_messages(
             "prior_issues_json": json.dumps(
                 prior_issues, ensure_ascii=False, indent=2
             ),
-            "segments_index_json": segments_to_index_json(segments),
+            "segments_index_json": segments_to_index_json(
+                segments, target_atom_maps=extract_target_atom_maps(segments, translated_text),
+            ),
         },
     )
     return [
