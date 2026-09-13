@@ -3,7 +3,13 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.265: two narrow parser-located AST-visible editorial checks
+**Current focus:** §6.266: later-RU provenance is filtered to exact source paths
+and already admitted document/navigation dependencies before subject parsing or
+PR API lookup. `Confirmed merge association` proves only merged state, PR number,
+and exact merge SHA. The diagnostic cannot expand translation scope or affect the
+quality verdict.
+
+Prior focus: §6.265: two narrow parser-located AST-visible editorial checks
 flag padded Markdown link labels and exact case-insensitive `ldaps schema` wording
 as warnings with original CommonMark line context and concrete corrections.
 Inline-code label text participates; comments, front matter, fenced/indented code
@@ -82,6 +88,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-13 | **§6.266**: exact source plus previously admitted dependency paths filter later-RU drift before PR lookup; confirmed merge association is provenance only and does not change translation scope or verdict |
 | 2026-09-13 | **§6.265**: visible Markdown AST flags padded link labels and exact `ldaps schema` wording as warning/yellow with source line context; no rewrite or general grammar claim |
 | 2026-09-13 | **§6.261**: exact complete ``Имя=Значение,...@<domain>`` inline-code atoms localize parser-safely after href restoration; fuzzy code rewrites are excluded and residual Russian blocks both `en` and `english` |
 | 2026-09-13 | **§6.260**: Mermaid aliases, messages, notes, branch labels and quoted graph labels become ordinary segments; strict grammar/skeleton validation, safe reinsertion, repeated finalization and coverage obligations preserve syntax; whole-line Mermaid fallback removed |

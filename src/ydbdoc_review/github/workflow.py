@@ -3808,6 +3808,9 @@ def run_doc_translate(
         baseline_sha=authority.baseline_sha,
         source_paths=source_api_paths,
         docs_root=cfg.paths.docs_root,
+        dependency_paths=frozenset(
+            (scope_plan.doc_ru_paths | scope_plan.nav_ru_paths) - source_api_paths
+        ),
     )
     if later_ru_drift:
         source_comment = f"{source_comment.rstrip()}\n\n{later_ru_drift}"
