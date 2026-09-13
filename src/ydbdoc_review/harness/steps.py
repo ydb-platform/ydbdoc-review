@@ -337,6 +337,9 @@ class ParseStep:
             seg.id: " › ".join(seg.path) if seg.path else "(начало документа)"  # noqa: RUF001
             for seg in state.segments
         }
+        state.render_base_doc = state.source_doc
+        state.render_base_segments = state.segments
+        state.fence_reference_text = state.source_text
         if state.coverage_plan is not None:
             if state.mode == "translate":
                 if state.coverage_plan.source_path != state.file_path:
@@ -390,22 +393,22 @@ class ParseStep:
                 )
                 else []
             )
-            state.translated_text = (
-                "".join(target for target in protected_targets if target is not None)
-                if protected_targets
-                else state.existing_target_text or state.source_text
-            )
+            if protected_targets:
+                state.translated_text = "".join(
+                    target for target in protected_targets if target is not None
+                )
+            elif state.mode == "verify" and state.existing_target_text is not None:
+                state.translated_text = state.existing_target_text
+            else:
+                state.translated_text = state.existing_target_text or state.source_text
             return
-        state.render_base_doc = state.source_doc
-        state.render_base_segments = state.segments
-        state.fence_reference_text = state.source_text
 
 
 class TranslateStep:
     name = "translate"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
-        if state.mode != "translate":
+        if state.mode != "translate" or not state.segments:
             return
         assert state.source_doc is not None
         def _retain_validated_segment(segment: Segment, target: str) -> None:
@@ -684,6 +687,8 @@ class RoundTripStep:
             )
             if original_alignment_error:
                 state.segment_alignment_error = original_alignment_error
+        if not state.segments:
+            return
         if not state.segment_alignment_error or state.mode != "verify":
             return
         # Structural RU/EN mismatch (YFM↔GFM rows, condensed sections, …):
@@ -745,7 +750,7 @@ class CriticLoopStep:
     name = "critic_loop"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
-        if not ctx.enable_critic or state.segment_alignment_error:
+        if not state.segments or not ctx.enable_critic or state.segment_alignment_error:
             return
         if state.mode == "translate" and state.differential_meta:
             current_usage = ctx.client.usage_tracker.records[ctx.usage_record_start :]
@@ -779,8 +784,6 @@ class FinalizeEnStep:
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
         # Deterministic href/code protections must still run after critic leaves
         # a stale alignment error; otherwise the report sees critic-mutated bytes.
-        if state.stopped_early:
-            return
         if ctx.target_lang.lower() not in {"en", "english"}:
             return
         if not state.translated_text:
@@ -799,7 +802,7 @@ class FinalizeEnStep:
             finalize_en_target(
                 state.translated_text,
                 fence_ref,
-                client=ctx.client,
+                client=ctx.client if state.segments else None,
                 glossary=ctx.glossary,
                 file_path=state.file_path,
                 source_lang=ctx.source_lang,
@@ -844,7 +847,7 @@ class CriticFeedbackRetryStep:
     name = "critic_feedback_retry"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
-        if state.mode != "translate" or not ctx.enable_critic:
+        if state.mode != "translate" or not state.segments or not ctx.enable_critic:
             return
         if ctx.critic_feedback_retries < 1:
             return

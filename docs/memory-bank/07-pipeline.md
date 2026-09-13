@@ -25,6 +25,8 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
    segments = extract_segments(doc)
    # Each segment has id, kind, path, text (with ⟦C1⟧ markers), placeholders, ast_path.
    # Front matter → SegmentKind.FRONT_MATTER for title / description (B.4).
+   # Empty segments set stopped_early only as a no-model diagnostic.
+   # They do not stop deterministic finalization, heuristics, verdict, or reporting.
 
 3. CHUNK
    batches = chunk_segments(segments, max_chars=4000)
@@ -92,6 +94,24 @@ OUTPUT: final_text, file_report = {
     prompt_version,
 }
 ```
+
+The concrete harness profiles share a deterministic tail:
+
+- `TRANSLATE_PROFILE`: parse, translate, finalize, heuristics, verdict, report.
+- `TRANSLATE_WITH_QA_PROFILE`: parse, translate, round trip, critic, critic
+  feedback retry, final finalize, heuristics, verdict, report.
+- `VERIFY_PROFILE`: parse, load target, round trip, pre-critic finalize, critic,
+  post-critic finalize, heuristics, verdict, report.
+
+Only the two QA profiles call the critic. A file without translation segments
+calls neither the translate model nor the critic, including empty and ASCII-only
+protected assets. It still passes through the deterministic tail. Thus residual
+Cyrillic, protect-placeholder leakage, irreparable fence damage, and pair-level
+missing include targets cannot become `ok` merely because extraction returned no
+segments. An exact empty verify target remains empty instead of falling back to
+the RU source. `FileRunState.stopped_early` records the no-model path only and is
+never a successful-validation flag. A no-segment round-trip mismatch remains an
+alignment blocker and never triggers model realignment.
 
 ### 15.2. PR-level orchestrator (`doc_translate`)
 

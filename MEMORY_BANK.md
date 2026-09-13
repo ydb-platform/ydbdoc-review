@@ -2,12 +2,15 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-09-07
-**Current focus:** §6.258: #51079 include-orphan fix locally accepted at `2de6398` + `159e937`;
-immutable candidate reads and TOC-rooted structural YFM include closure preserve existing safety
-gates. Deployment and production acceptance remain pending.
+**Last updated:** 2026-09-13
+**Current focus:** §6.259: every per-file profile runs deterministic
+finalization, heuristics, verdict, and reporting for protected-only inputs.
+No-segment files skip model and critic calls without bypassing validation.
 
-Prior focus: §6.249 — source-owned stable fragments beat resolvable baseline hrefs (#52077 / R-GL-9).
+Prior focus: §6.258: #51079 include-orphan fix locally accepted at `2de6398` +
+`159e937`; immutable candidate reads and TOC-rooted structural YFM include
+closure preserve existing safety gates. Deployment and production acceptance
+remain pending.
 
 The Memory Bank is split into parts below. Section numbers (`§6.12`, `§22.3`, …) are
 stable cross-references — use them when linking between files.
@@ -30,6 +33,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-13 | **§6.259**: protected-only and zero-segment files skip translation/critic calls but still run deterministic finalization, heuristics, verdict, and report artifacts; exact empty verify targets stay empty and alignment failures remain blocking |
 | 2026-09-07 | **§6.258**: #51079 false include-only orphans fixed with immutable candidate overlays and TOC-rooted structural YFM include closure; 58 focused and 157 broader tests passed, four baseline failures deselected; reviewers/tester GO, production pending |
 | 2026-09-07 | **§6.257**: frozen-B wrapper repair and bounded post-push GitHub REST head convergence; #40385 produced PR #52330 at K2 `30f4c4630805`, final action release `1e43737b2508`, green `doc_verify`/docs build/PR-check on one SHA, and fresh independent `PASS / MERGEABLE` |
 | 2026-09-06 | **§6.256**: trusted source-preserving label, all-family shared-20 closure, exact-first bounded redirects, idempotent source-owned pre-strip href repair, and R/B/K reader/final-gate separation; pinned #40385 scope is 8 Markdown / 0 nav / 3 admissions, without later #50704 RU or asset expansion; local gates 35/95/16/61 pass with qualified baseline failures; deployment pending |
