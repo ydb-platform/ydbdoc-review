@@ -180,14 +180,12 @@ def check_broken_inline_code_markup(target_text: str, *, target_lang: str) -> li
 
 def check_cyrillic_in_en(target_text: str, *, target_lang: str) -> list[str]:
     """Cyrillic letters in English target outside verbatim code fences."""
-    if target_lang.lower() != "en":
+    if target_lang.lower() not in {"en", "english"}:
         return []
     body = _strip_fenced_blocks(target_text)
     # Explicit YFM anchors are stable identifiers copied byte-for-byte from RU
     # (§6.192). Cyrillic inside ``{#id}`` is therefore not untranslated prose.
     body = re.sub(r"\{#[^}\s]+\}", "", body)
-    # #50976: protected certificate Subject notation, copied byte-for-byte.
-    body = body.replace("`Имя=Значение,...@<domain>`", "")
     matches = list(_CYRILLIC.finditer(body))
     if not matches:
         return []

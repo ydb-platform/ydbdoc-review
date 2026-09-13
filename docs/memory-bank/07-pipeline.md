@@ -50,7 +50,11 @@ INPUT: source_text (str), source_lang, target_lang, glossary, models
      translate_cyrillic_fence_comments_with_client  # ``//`` / ``#`` / ``--`` lines; trailing ``//`` (§6.39, §6.46, §6.81)
      translate_cyrillic_prose_with_client  # residual Cyrillic in prose/backticks (§6.45)
      localize_links_in_text      # Wikipedia langlinks safety net (§6.37)
-     postprocess_en_target_markdown  # homoglyphs + `<строка>`→`<string>` (§6.28)
+     EN postprocess              # homoglyphs + `<строка>`→`<string>` (§6.28)
+     restore_md_link_hrefs       # deterministic source-owned href authority
+     _localize_certificate_subject_notation
+       # exact complete InlineCode only: `Имя=Значение,...@<domain>`
+       #                              → `Name=Value,...@<domain>` (§6.261)
 
 6. CRITIC PASS 1 (batched segment pairs)
    batches = chunk_segments(segments, max_chars=4000)
@@ -112,6 +116,14 @@ segments. An exact empty verify target remains empty instead of falling back to
 the RU source. `FileRunState.stopped_early` records the no-model path only and is
 never a successful-validation flag. A no-segment round-trip mismatch remains an
 alignment blocker and never triggers model realignment.
+
+Certificate Subject notation is localized only after deterministic href
+restoration. The transform proves through the Markdown parser that one candidate
+edit changes exactly one complete inline-code atom, preserves its backtick
+wrapper and all surrounding bytes, and accepts multiple exact occurrences.
+Fenced examples, HTML comments, larger code atoms and unrelated assignments are
+not rewritten. The residual-Cyrillic heuristic has no exception for the Russian
+template and treats both `en` and `english` as the same blocking target locale.
 
 ### 15.2. PR-level orchestrator (`doc_translate`)
 
@@ -334,9 +346,11 @@ Commit message template:
   before validation — restore `⟦U⟧`/`⟦V⟧`/`⟦C⟧`, swap V↔U when the model puts
   `⟦V⟧` in `[text](...)`, move «on the ⟦V⟧ server» before «Used if […]» when
   source has variable before link (`placeholder_roles.py` enforces roles).
-- **EN postprocess** (`homoglyphs.postprocess_en_target_markdown`): after render;
-  homoglyphs, `<строка>`→`<string>` in fences (incl. indented `` ``` ``), and
-  **MD031** blank lines around fences (`markdown_layout.fix_blanks_around_fences`).
+- **EN postprocess**: after render, applies homoglyph fixes,
+  `<строка>`→`<string>` in fences (incl. indented `` ``` ``), and **MD031** blank
+  lines around fences (`markdown_layout.fix_blanks_around_fences`). The harness
+  excludes the legacy fuzzy inline-notation rewrite and runs the exact
+  parser-checked certificate transform after href restoration (§6.261).
 - **Renderer MD031** (`markdown_renderer._join_blocks`): prevents missing blank
   lines after `` ``` `` in tight lists when re-rendering translated AST (root cause
   of PR #42404 markdownlint warnings).
