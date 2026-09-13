@@ -30,16 +30,16 @@ class FinalTreeBlocker:
     """PR-level deterministic blocker found against the assembled final tree."""
 
     path: str
-    code: Literal["en_link_target", "translation_soft_keep"]
+    code: Literal["en_link_target", "translation_soft_keep", "en_language"]
     message: str
     artifact_sha256: str | None = None
 
     def __post_init__(self) -> None:
-        if self.code == "translation_soft_keep":
+        if self.code in {"translation_soft_keep", "en_language"}:
             if not self.artifact_sha256 or not re.fullmatch(
                 r"[0-9a-f]{64}", self.artifact_sha256
             ):
-                raise ValueError("translation_soft_keep requires a lowercase SHA-256")
+                raise ValueError(f"{self.code} requires a lowercase SHA-256")
         elif self.artifact_sha256 is not None:
             raise ValueError("en_link_target must not carry an artifact SHA-256")
 
@@ -113,6 +113,10 @@ class NavigationRunResult:
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
     verdict: FileVerdict = "ok"
+    # Preserve the independent verdict while the final language gate owns RED.
+    language_gate_prior_verdict: FileVerdict | None = field(default=None, repr=False)
+    # Independent checker contributions, separate from mixed-severity report warnings.
+    heuristic_blocking: list[str] = field(default_factory=list)
 
 
 @dataclass

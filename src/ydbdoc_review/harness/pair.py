@@ -16,13 +16,14 @@ from ydbdoc_review.harness.state import FileRunState
 from ydbdoc_review.llm.errors import LLMError
 from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
 from ydbdoc_review.pipeline.qa import compose_file_verdict
-from ydbdoc_review.pipeline.types import PairRunResult
+from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult
 from ydbdoc_review.translation.differential import (
     autotitle_delta_satisfied_in_en,
 )
 from ydbdoc_review.translation.errors import TranslationError
 from ydbdoc_review.translation.file_profiles import is_glossary_file
 from ydbdoc_review.validation.autotitle_hrefs import restore_autotitle_hrefs
+from ydbdoc_review.validation.final_language import check_final_en_language
 from ydbdoc_review.validation.fragment_repair import repair_en_fragments
 from ydbdoc_review.validation.heuristics import run_file_heuristics_classified
 from ydbdoc_review.validation.href_parity import (
@@ -130,6 +131,26 @@ def _read_target_text(content: PairContent, plan: PairPlan) -> str | None:
     return content.ru_text
 
 
+def _gate_pair_language(run: PairRunResult) -> PairRunResult:
+    """Validate actual pair output after shortcuts and post-harness repairs."""
+    if run.target_text is None or run.deleted:
+        return run
+    messages = check_final_en_language(run.target_text, target_lang=run.plan.target_lang)
+    if run.file_result is None and messages:
+        run.file_result = FileTranslationResult(
+            file_path=run.plan.target_path, final_text=run.target_text,
+            segments_count=0, verdict="ok", prompt_version="final-language",
+        )
+    if run.file_result is not None:
+        run.file_result.final_text = run.target_text
+        for message in messages:
+            if message not in run.file_result.heuristic_blocking:
+                run.file_result.heuristic_blocking.append(message)
+        if messages:
+            run.file_result.verdict = "blocked"
+    return run
+
+
 def run_pair_plan(
     content: PairContent,
     plan: PairPlan,
@@ -169,21 +190,21 @@ def run_pair_plan(
             content, plan, source_text, existing_target, ctx
         )
         if preserved is not None:
-            return PairRunResult(
+            return _gate_pair_language(PairRunResult(
                 plan=plan,
                 target_text=preserved,
                 source_text=source_text,
-            )
+            ))
         if is_href_only_change(content.en_base_text, existing_target):
             logger.info(
                 "Deterministic href-only target %s; critic is read-only/bypassed",
                 plan.target_path,
             )
-            return PairRunResult(
+            return _gate_pair_language(PairRunResult(
                 plan=plan,
                 target_text=existing_target,
                 source_text=source_text,
-            )
+            ))
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
     enable_critic = plan.action != "skip"
     if enable_translate:
@@ -284,7 +305,7 @@ def run_pair_plan(
                 source_baseline_text=content.ru_base_text,
                 glossary=ctx.glossary,
             )
-            return PairRunResult(
+            return _gate_pair_language(PairRunResult(
                 plan=plan,
                 target_text=existing_target,
                 source_text=source_text,
@@ -300,7 +321,7 @@ def run_pair_plan(
                     heuristic_warnings=[*classified.warnings, soft_msg],
                     heuristic_info=classified.info,
                 ),
-            )
+            ))
         logger.exception("Failed to process %s", plan.target_path)
         return PairRunResult(plan=plan, error=str(exc))
 
@@ -478,7 +499,7 @@ def run_pair_plan(
         # branch above. The report byte guard must remain unconditional.
         target_text = existing_target
 
-    return PairRunResult(
+    return _gate_pair_language(PairRunResult(
         plan=plan,
         target_text=target_text,
         file_result=file_result,
@@ -486,4 +507,4 @@ def run_pair_plan(
         validation_issues=locals().get(
             "validation_issues", tuple(file_result.link_contract_issues)
         ),
-    )
+    ))

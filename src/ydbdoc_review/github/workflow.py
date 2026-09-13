@@ -197,6 +197,10 @@ from ydbdoc_review.validation.en_link_targets import (
     apply_en_link_target_checks,
     check_en_page_link_targets,
 )
+from ydbdoc_review.validation.final_language import (
+    apply_final_en_language_gate,
+    check_final_en_language,
+)
 from ydbdoc_review.validation.glossary_toc_links import (
     build_en_toc_reachable_from_repo,
     resolve_internal_md_href,
@@ -682,7 +686,9 @@ def _enforce_report_checkout_bytes(
         if pair.deleted or pair.target_text is None:
             continue
         committed = read_text_at_commit(repo_path, checkout_ref, pair.plan.target_path)
-        if committed == pair.target_text:
+        if committed == pair.target_text and (
+            pair.file_result is None or committed == pair.file_result.final_text
+        ):
             continue
         mismatches.append(pair.plan.target_path)
         if pair.file_result is not None:
@@ -3325,6 +3331,10 @@ def run_doc_translate(
                 len(reconciled_paths),
                 reconciled_paths,
             )
+            touched = TouchedPaths(
+                list(dict.fromkeys([*touched.written, *reconciled_paths])),
+                touched.deleted,
+            )
 
         _freeze_soft_keep_artifact_hashes(pr_result, repo_path=repo_path)
 
@@ -3338,16 +3348,11 @@ def run_doc_translate(
             for p in touched.written
             if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
         }
-        en_deleted = {
-            p
-            for p in touched.deleted
-            if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
-        }
-        final_tree_read = _final_tree_reader(
+        final_tree_read: Callable[[str], str | None] = _final_tree_reader(
             repo_path,
             merge_base_with,
-            en_written if not dry_run else set(),
-            deleted_paths=en_deleted,
+            set(touched.written) if not dry_run else set(),
+            deleted_paths=set(touched.deleted),
         )
         broken_links = apply_en_link_target_checks(
             pr_result,
@@ -3381,6 +3386,33 @@ def run_doc_translate(
                 repo_path, merge_base_with, path
             ),
         )
+        language_paths = {
+            p for p in touched.written
+            if p.startswith(f"{docs_root}/en/") and p.endswith((".md", ".yaml", ".yml"))
+        } | {
+            run.plan.target_path for run in pr_result.pair_results
+            if run.plan.target_lang.casefold() in {"en", "english"}
+            and run.target_text is not None and not run.deleted
+        } | {nav.en_path for nav in pr_result.navigation_results if nav.target_text is not None}
+        pending = {
+            run.plan.target_path: run.target_text for run in pr_result.pair_results
+            if run.target_text is not None and not run.deleted
+        }
+        pending.update({nav.en_path: nav.target_text for nav in pr_result.navigation_results
+                        if nav.target_text is not None})
+        pending_deleted = set(touched.deleted) | {
+            run.plan.target_path for run in pr_result.pair_results if run.deleted
+        }
+        # Freeze B and use explicit pending keys in dry-run. Empty overrides and
+        # tombstones must never fall through to baseline or dirty disk.
+        def read_final_language(path: str) -> str | None:
+            if path in pending_deleted:
+                return None
+            if dry_run and path in pending:
+                return pending[path]
+            return final_tree_read(path)
+
+        apply_final_en_language_gate(pr_result, en_paths=language_paths, read_text=read_final_language)
         refresh_publication_impact(pr_result)
         if _publication_withheld(pr_result):
             logger.error(
@@ -4501,6 +4533,7 @@ def run_doc_verify(
                 [
                     *carried_link_blockers,
                     *carried_soft_keep_blockers,
+                    *(b for b in durable_final_tree_blockers if b.code == "en_language"),
                     *pr_result.final_tree_blockers,
                 ]
             )
@@ -4515,6 +4548,18 @@ def run_doc_verify(
             dict.fromkeys([*pr_result.completeness_gaps, *translation_scope_missing])
         )
 
+    verify_language_paths = verify_en_paths | {
+        nav.en_path for nav in pr_result.navigation_results
+    } | {
+        path for path, _kind in changes
+        if path.startswith(f"{cfg.paths.docs_root}/en/") and path.endswith((".yaml", ".yml"))
+        and (not source_scope_en or path in source_scope_en)
+    } | {b.path for b in pr_result.final_tree_blockers if b.code == "en_language"}
+    apply_final_en_language_gate(
+        pr_result, en_paths=verify_language_paths,
+        read_text=_final_tree_reader(repo_path, verify_content_sha, set(),
+                                     deleted_paths=verify_deleted_en_paths),
+    )
     refresh_publication_impact(pr_result)
 
     if attested_coverage_rebind:
@@ -4548,7 +4593,15 @@ def run_doc_verify(
 
     job.pr_result = pr_result
 
-    final_read_only_verify = attested_coverage_rebind or (
+    final_read_only_verify = any(
+        b.code == "en_language" for b in pr_result.final_tree_blockers
+    ) or any(
+        check_final_en_language(run.target_text, target_lang=run.plan.target_lang)
+        for run in pr_result.pair_results if run.target_text is not None and not run.deleted
+    ) or any(
+        check_final_en_language(nav.target_text)
+        for nav in pr_result.navigation_results if nav.target_text is not None
+    ) or attested_coverage_rebind or (
         _fixup_rerun_depth >= 3 and inline_fixup_push
     )
     if final_read_only_verify:
@@ -4625,6 +4678,38 @@ def run_doc_verify(
     verify_push_receipt: RefMutationReceipt | None = None
     fixup_pr_number: int | None = None
     fixup_pr_url: str | None = None
+    if touched and not dry_run and not no_commit:
+        # Repairs and ambient restoration can add paths after immutable K QA.
+        # Check their actual proposed bytes separately: they are not K evidence.
+        repair_language_result = PRTranslationResult()
+        repair_language_paths = {
+            path for path in touched.written
+            if path.startswith(f"{cfg.paths.docs_root}/en/")
+            and path.endswith((".md", ".yaml", ".yml"))
+        }
+        unsafe_repair_paths = apply_final_en_language_gate(
+            repair_language_result,
+            en_paths=repair_language_paths,
+            read_text=_final_tree_reader(
+                repo_path, verify_content_sha, set(touched.written),
+                deleted_paths=set(touched.deleted),
+            ),
+        )
+        if unsafe_repair_paths:
+            pr_result.final_tree_blockers.extend(
+                replace(
+                    blocker,
+                    message=(
+                        "en_language: unpublished repair candidate "
+                        f"(checkout remains {verify_content_sha[:12]}): "
+                        + blocker.message.removeprefix("en_language: ")
+                    ),
+                )
+                for blocker in repair_language_result.final_tree_blockers
+            )
+            refresh_publication_impact(pr_result)
+            logger.error("Withholding unsafe verify repair bytes: %s", unsafe_repair_paths)
+            touched = None
     if touched and not dry_run and not no_commit:
         msg = build_commit_message(
             fixup_source_pr,
@@ -4964,14 +5049,14 @@ def run_doc_verify(
                 publication_plan=publication_plan(ctx),
             ),
         )
-    if final_read_only_verify:
-        mismatches = _enforce_report_checkout_bytes(repo_path, verify_content_sha, pr_result)
-        if mismatches:
-            logger.error(
-                "Refusing green evidence for checkout %s; in-memory QA differs: %s",
-                verify_content_sha,
-                mismatches,
-            )
+    mismatches = _enforce_report_checkout_bytes(repo_path, verify_content_sha, pr_result)
+    if mismatches:
+        logger.error(
+            "Refusing green evidence for checkout %s; in-memory QA differs: %s",
+            verify_content_sha,
+            mismatches,
+        )
+        refresh_publication_impact(pr_result)
     report_num = _next_report_number(gh, owner, repo, report_pr)
     meta = ReportMeta(
         mode="doc_verify",

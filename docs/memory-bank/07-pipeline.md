@@ -571,4 +571,43 @@ normal pair translation with only model JSON faked, topology mutations, nested
 grammar, safe punctuation, coverage, and repeated finalization. Parseability
 evidence is the supported-grammar parser plus an identical syntax skeleton.
 
+### §6.262 Independent final English artifact language gate
+
+`validation.final_language.check_final_en_language` checks the original string
+using Unicode character names. Every Cyrillic representation is blocking,
+including protected literals, comments, front matter, anchors and code fences.
+The gate does not rewrite text or exempt syntax. It emits original line numbers,
+up to 12 bounded previews and an additional-line count.
+
+All three harness profiles run `FinalLanguageStep` after final heuristics and
+before verdict composition. Pair shortcuts and the final return pass through
+`_gate_pair_language`, synchronizing final_text and preserving other findings.
+Publication policy independently detects Cyrillic even with an invented green
+file result or a pair without a file result.
+
+After late repairs and deferred fragment rechecks, doc_translate scans explicit
+EN Markdown/navigation paths against the final tree. Dry-run uses exact pending
+keys over frozen B. Empty strings override baseline; deletion tombstones do not
+fall through. The PR gate reads each path once, retains unrelated evidence, and
+records typed `en_language` blockers with the SHA-256 of exact UTF-8 bytes.
+Missing outputs remain the responsibility of completeness checks.
+
+doc_verify scans immutable `verify_content_sha`, including include-only and
+navigation paths, and carries durable language evidence for unscanned paths.
+Residual Cyrillic withholds publication, including unsafe in-memory repair
+outputs. The existing recursive verification path remains authoritative for K2.
+After wrapper repairs and ambient restoration, a separate publication gate scans
+every touched EN Markdown/YAML file before prepare/commit/push. Its findings name
+an unpublished repair candidate and hash those exact bytes, preserving K as the
+QA report checkout. Navigation language rescans remember the independent verdict:
+corrected language restores warnings, while independent blockers stay blocked.
+Independent navigation checkers also register blocking messages in
+`NavigationRunResult.heuristic_blocking`. The TOC target checker records this
+contribution even when a language finding already owns the blocked verdict, so
+a later clean language rescan cannot erase a newly discovered missing target.
+The report checkout guard compares both `target_text` and `final_text`; the gate
+records byte mismatches without replacing either field. Withheld candidates are
+described as withheld, never as published draft/RED. Language blockers are not
+added to the repairable final-tree allowlist; v1 link manifests remain readable.
+
 [← Memory Bank index](../../MEMORY_BANK.md)

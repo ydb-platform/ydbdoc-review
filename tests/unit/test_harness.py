@@ -57,6 +57,7 @@ def test_profiles_translate_only_verify_has_qa():
         "translate",
         "finalize_en",
         "heuristics",
+        "final_language",
         "verdict",
         "report_artifacts",
     ]
@@ -68,6 +69,7 @@ def test_profiles_translate_only_verify_has_qa():
         "critic_loop",
         "finalize_en",
         "heuristics",
+        "final_language",
         "verdict",
         "report_artifacts",
     ]
@@ -80,6 +82,7 @@ def test_profiles_translate_only_verify_has_qa():
         "critic_feedback_retry",
         "finalize_en",
         "heuristics",
+        "final_language",
         "verdict",
         "report_artifacts",
     ]

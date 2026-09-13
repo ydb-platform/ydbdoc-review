@@ -916,6 +916,18 @@ class HeuristicsStep:
             getattr(state.heuristics, bucket).append(message)
 
 
+class FinalLanguageStep:
+    name = "final_language"
+
+    def run(self, state: FileRunState, ctx: HarnessContext) -> None:
+        from ydbdoc_review.validation.final_language import check_final_en_language
+
+        assert state.heuristics is not None
+        for message in check_final_en_language(state.translated_text, target_lang=ctx.target_lang):
+            if message not in state.heuristics.blocking:
+                state.heuristics.blocking.append(message)
+
+
 class VerdictStep:
     name = "verdict"
 

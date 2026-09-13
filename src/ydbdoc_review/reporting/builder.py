@@ -112,13 +112,13 @@ def parse_final_tree_blocker_manifest(body: str) -> list[FinalTreeBlocker]:
         if (
             not isinstance(path, str)
             or not path.startswith("ydb/docs/en/")
-            or not path.endswith(".md")
-            or code not in {"en_link_target", "translation_soft_keep"}
+            or not path.endswith((".md", ".yaml", ".yml") if code == "en_language" else ".md")
+            or code not in {"en_link_target", "translation_soft_keep", "en_language"}
             or not isinstance(message, str)
             or not message
             or (marker == _FINAL_TREE_BLOCKERS_MARKER_V1 and code != "en_link_target")
             or (
-                code == "translation_soft_keep"
+                code in {"translation_soft_keep", "en_language"}
                 and (
                     not isinstance(artifact_sha256, str)
                     or len(artifact_sha256) != 64
@@ -192,7 +192,7 @@ def _count_verdicts(result: PRTranslationResult) -> tuple[int, int, int]:
 
 def _nav_has_blocking_findings(nav: NavigationRunResult) -> bool:
     """True for nav errors or blocked verdict with reviewer-visible warnings."""
-    if nav.error:
+    if nav.error or nav.heuristic_blocking:
         return True
     return nav.verdict == "blocked" and bool(nav.warnings)
 
@@ -899,7 +899,17 @@ def build_translation_pr_body(
     banner = ""
     blockers = ""
     if red and publication_result is not None:
-        banner = "> [!CAUTION]\n> **QA K: RED.** Candidate опубликован для ручного исправления.\n\n"
+        banner = (
+            "> [!CAUTION]\n"
+            "> **QA K: RED.** "
+            + (
+                "Публикация candidate удержана. Требуется ручное исправление.\n\n"
+                if publication_result.publication_impact in {
+                    PublicationImpact.WITHHOLD_UNSAFE, PublicationImpact.WITHHOLD_INCOMPLETE
+                }
+                else "Candidate опубликован для ручного исправления.\n\n"
+            )
+        )
     if publication_result is not None and publication_result.final_tree_blockers:
         blockers = "\n\n**Final-tree/manual-repair blockers:**\n\n" + "\n".join(
             f"- `{blocker.path}`: {blocker.message.replace(chr(10), ' ')}"
@@ -1513,7 +1523,13 @@ def build_full_report(
     if result.final_tree_blockers:
         final_tree_section += (
             "## QA K: RED: блокеры финального дерева\n\n"
-            "Candidate опубликован для ручного исправления.\n\n"
+            + (
+                "Candidate опубликован для ручного исправления.\n\n"
+                if result.publication_impact in {
+                    PublicationImpact.PUBLISH_NORMAL, PublicationImpact.PUBLISH_RED
+                } else
+                "Публикация candidate удержана. Исправьте блокеры вручную.\n\n"
+            )
         )
         for i, blocker in enumerate(result.final_tree_blockers, start=1):
             final_tree_section += (

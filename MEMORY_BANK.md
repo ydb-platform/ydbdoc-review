@@ -3,7 +3,15 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.261: the exact complete certificate Subject inline-code
+**Current focus:** §6.262: independent final EN language gate scans complete
+candidate text after every pair return and late translation repair. Typed
+`en_language` evidence binds exact UTF-8 SHA-256 and withholds unsafe publication.
+Verify scans immutable K, and report byte checks compare both result text fields.
+Verify also checks unpublished repair/restore bytes immediately before publication;
+navigation rescans remove only the language gate's verdict contribution.
+Independent TOC blockers have explicit navigation evidence and survive rescans.
+
+Prior focus: §6.261: the exact complete certificate Subject inline-code
 atom localizes to `Name=Value,...@<domain>` after href restoration. Generic code,
 fences and HTML comments remain untouched, while unlocalized Russian is blocking.
 

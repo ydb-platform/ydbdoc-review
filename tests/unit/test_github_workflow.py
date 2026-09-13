@@ -1150,6 +1150,39 @@ def test_job_requires_zero_exit_verify_when_stale_blocked_verdict():
     )
     assert job_requires_nonzero_exit(job) is False
 
+def test_dry_run_final_language_empty_overlay_over_russian_b(git_repo: str):
+    path = "ydb/docs/en/a.md"
+    disk = Path(git_repo, path)
+    disk.parent.mkdir(parents=True)
+    disk.write_text("Русский baseline\n", encoding="utf-8")
+    toc = Path(git_repo, "ydb/docs/en/core/toc_p.yaml")
+    toc.parent.mkdir(parents=True)
+    toc.write_text("items:\n- name: A\n  href: ../a.md\n", encoding="utf-8")
+    subprocess.run(["git", "add", path, "ydb/docs/en/core/toc_p.yaml"], cwd=git_repo, check=True)
+    b = _commit_empty(git_repo)
+    disk.write_text("Грязный EN\n", encoding="utf-8")
+    result = _fake_pr_result()
+    result.pair_results[0].target_text = ""
+    result.pair_results[0].file_result.final_text = ""
+    pull = {"title": "docs", "head": {"ref": "feature/docs", "sha": b,
+            "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+            "base": {"ref": "main", "sha": b}}
+    with (
+        patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=result),
+        patch("ydbdoc_review.github.workflow.GitHubClient") as gh,
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_git",
+              return_value=[("ydb/docs/ru/a.md", "modified")]),
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_api",
+              return_value=[("ydb/docs/ru/a.md", "modified")]),
+    ):
+        gh.return_value.get_pull.return_value = pull
+        job = run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=7,
+                                merge_base_with=b, dry_run=True, config=load_config(env=_env()))
+    assert job.pr_result.publication_impact == "PUBLISH_NORMAL"
+    assert job.pr_result.final_tree_blockers == []
+    assert disk.read_text(encoding="utf-8") == "Грязный EN\n"
+
+
 def test_run_doc_translate_dry_run(git_repo: str):
     checkout_sha = _head_sha(git_repo)
     pull = {
@@ -1350,6 +1383,138 @@ def test_run_doc_translate_missing_github_token(git_repo: str):
             dry_run=True,
             config=load_config(env=env),
         )
+
+
+@pytest.mark.parametrize("dirty_text", ["Clean dirty worktree\n", "Грязный worktree\n"])
+@pytest.mark.parametrize("checked", ["<!-- Русское в K -->\n", "<!-- English K -->\n"])
+def test_verify_gate_uses_immutable_k_despite_dirty_worktree(
+    git_repo: str, dirty_text: str, checked: str,
+):
+    import hashlib
+
+    path = "ydb/docs/en/a.md"
+    en = Path(git_repo, path)
+    en.parent.mkdir(parents=True)
+    en.write_text(checked, encoding="utf-8")
+    subprocess.run(["git", "add", path], cwd=git_repo, check=True)
+    k = _commit_empty(git_repo, "immutable K with residual Cyrillic")
+    en.write_text(dirty_text, encoding="utf-8")
+    pull = {
+        "title": "Auto-translate docs from PR #3",
+        "user": {"login": "github-actions[bot]"},
+        "body": _fixture_provenance_body(git_repo, source_pr=3),
+        "head": {"ref": "ydbdoc-review/pr-3", "sha": k,
+                 "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main"},
+    }
+    source_pull = {"head": {"sha": "source-head-sha",
+                            "repo": {"owner": {"login": "o"}, "name": "r"}}}
+    result = _fake_pr_result()
+    qa_text = "<!-- Русское в K -->\n"
+    result.pair_results[0].target_text = qa_text
+    result.pair_results[0].file_result.final_text = qa_text
+    with (
+        patch("ydbdoc_review.github.workflow._run_verify_pairs", return_value=result),
+        patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls,
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_git",
+              return_value=[(path, "modified")]),
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_api",
+              side_effect=lambda _g, _o, _r, n: [(path if n == 11 else "ydb/docs/ru/a.md", "modified")]),
+        patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prepare,
+        patch("ydbdoc_review.github.workflow.git_commit_paths") as commit,
+        patch("ydbdoc_review.github.workflow.push_branch") as push,
+    ):
+        gh = gh_cls.return_value
+        gh.get_pull.side_effect = lambda _o, _r, n: pull if n == 11 else source_pull
+        gh.get_branch_sha.return_value = k
+        gh.get_file_text.return_value = "RU.\n"
+        gh.iter_issue_comments.return_value = iter(())
+        job = run_doc_verify(repo_path=git_repo, github_repo="o/r", pr_number=11,
+                             merge_base_with="HEAD", config=load_config(env=_env()))
+    blockers = [b for b in job.pr_result.final_tree_blockers if b.code == "en_language"]
+    if checked == qa_text:
+        assert blockers[0].artifact_sha256 == hashlib.sha256(checked.encode()).hexdigest()
+    else:
+        assert blockers == []  # Immutable K is English; mutable QA must still not publish.
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    assert k[:12] in gh.post_issue_comment.call_args.args[3]
+    assert en.read_text(encoding="utf-8") == dirty_text
+
+
+def test_verify_post_restore_language_gate_checks_newly_touched_bytes(git_repo: str):
+    import hashlib
+
+    path = "ydb/docs/en/a.md"
+    ambient = "ydb/docs/en/ambient.md"
+    baseline_text = "<!-- Русский baseline -->\n"
+    h0 = _head_sha(git_repo)
+    Path(git_repo, "ydb/docs/ru/a.md").write_text("Обновлённый текст.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "ydb/docs/ru/a.md"], cwd=git_repo, check=True)
+    h = _commit_empty(git_repo, "H with scoped RU change")
+    en = Path(git_repo, path)
+    en.parent.mkdir(parents=True)
+    en.write_text("Hello.\n", encoding="utf-8")
+    Path(git_repo, ambient).write_text(baseline_text, encoding="utf-8")
+    toc = Path(git_repo, "ydb/docs/en/core/toc_p.yaml")
+    toc.parent.mkdir(parents=True)
+    toc.write_text("items:\n- name: A\n  href: ../a.md\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+    b = _commit_empty(git_repo, "B with ambient Cyrillic")
+    Path(git_repo, ambient).write_text("<!-- English K -->\n", encoding="utf-8")
+    subprocess.run(["git", "add", ambient], cwd=git_repo, check=True)
+    k = _commit_empty(git_repo, "K with clean ambient English")
+    provenance = _fixture_provenance(git_repo, source_pr=3)
+    provenance = replace(provenance, authority=replace(
+        provenance.authority, source_base_sha=h0, source_head_sha=h, ru_sha=h,
+        mode=RuAuthorityMode.SOURCE_PRESERVING,
+    ))
+    pull = {
+        "title": "Auto-translate docs from PR #3",
+        "user": {"login": "github-actions[bot]"},
+        "body": render_authority_evidence(provenance),
+        "head": {"ref": "ydbdoc-review/pr-3", "sha": k,
+                 "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
+        "base": {"ref": "main"},
+    }
+    source_pull = {"head": {"sha": "source-head-sha",
+                            "repo": {"owner": {"login": "o"}, "name": "r"}}}
+    with (
+        patch("ydbdoc_review.github.workflow._run_verify_pairs", return_value=_fake_pr_result()),
+        patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls,
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_git",
+              return_value=[(path, "modified"), (ambient, "modified")]),
+        patch("ydbdoc_review.github.workflow.list_pr_file_changes_api",
+              side_effect=lambda _g, _o, _r, n: (
+                  [(path, "modified"), (ambient, "modified")] if n == 11
+                  else [("ydb/docs/ru/a.md", "modified")]
+              )),
+        patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base") as prepare,
+        patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=False) as commit,
+        patch("ydbdoc_review.github.workflow.push_branch") as push,
+    ):
+        gh = gh_cls.return_value
+        gh.get_pull.side_effect = lambda _o, _r, n: pull if n == 11 else source_pull
+        gh.get_branch_sha.return_value = k
+        gh.get_file_text.return_value = "RU.\n"
+        gh.iter_issue_comments.return_value = iter(())
+        job = run_doc_verify(repo_path=git_repo, github_repo="o/r", pr_number=11,
+                             merge_base_with=b, config=load_config(env=_env()))
+    assert Path(git_repo, ambient).read_text(encoding="utf-8") == baseline_text
+    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
+    blockers = [b for b in job.pr_result.final_tree_blockers if b.code == "en_language"]
+    assert blockers[0].path == ambient
+    assert blockers[0].artifact_sha256 == hashlib.sha256(baseline_text.encode()).hexdigest()
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    assert job.pr_result.pair_results[0].target_text == "Hello.\n"
+    report = gh.post_issue_comment.call_args.args[3]
+    assert k[:12] in report
+    assert "unpublished repair" in report
+    assert "Candidate опубликован" not in report
 
 
 def test_run_doc_verify_dry_run(git_repo: str):
