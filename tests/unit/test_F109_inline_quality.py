@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from ydbdoc_review.config.loader import load_config
+import pytest
+
+from ydbdoc_review.config.loader import RuAuthorityMode, load_config
 from ydbdoc_review.github import workflow
+from ydbdoc_review.github.provenance import RuAuthority
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.translation_checkpoint import CheckpointIdentity
 from ydbdoc_review.pipeline.analyze import PairContent
 from ydbdoc_review.pipeline.navigation_merge import merge_navigation_pair
 from ydbdoc_review.pipeline.orchestrator import run_pr_translation
 from ydbdoc_review.pipeline.pairs import DocPair, NavigationPair
+from ydbdoc_review.reporting.builder import (
+    ReportMeta,
+    build_full_report,
+    build_translation_pr_body,
+)
+from ydbdoc_review.translation.coverage import (
+    CoveragePlan,
+    CoverageUnit,
+    plan_source_coverage,
+)
 from ydbdoc_review.translation.glossary import load_glossary
 
 
@@ -30,6 +46,12 @@ def _client(responses: list[str]) -> tuple[YandexLLMClient, MagicMock]:
         _completion(response) for response in responses
     ]
     cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    # Distinct role models expose critic dispatch even though the current
+    # critic transport selects its model explicitly and leaves usage.role unset.
+    cfg.llm.models.translate.primary = "deepseek-v32"
+    cfg.llm.models.translate.fallbacks = ["yandexgpt-5-pro"]
+    cfg.llm.models.critic.primary = "yandexgpt-5.1"
+    cfg.llm.models.critic.fallbacks = ["yandexgpt-5-lite"]
     return (
         YandexLLMClient(folder_id="b1", api_key="k", llm=cfg.llm, client=transport),
         transport,
@@ -57,16 +79,63 @@ def _critic(*, suggestion: str | None = None) -> str:
     return json.dumps({"verdict": verdict, "issues": issues})
 
 
-def test_F109_one_cycle() -> None:
+def _full_coverage_content(source: str, existing: str | None = None) -> PairContent:
+    pair = DocPair(
+        ru_path="ydb/docs/ru/concepts/connection.md",
+        en_path="ydb/docs/en/concepts/connection.md",
+        ru_changed=True,
+    )
+    authority = RuAuthority(
+        source_repo="ydb-platform/ydb",
+        source_pr=1,
+        source_base_sha="1" * 40,
+        source_head_sha="2" * 40,
+        baseline_sha="3" * 40,
+        ru_sha="3" * 40,
+        mode=RuAuthorityMode.CURRENT,
+    )
+    coverage = plan_source_coverage(
+        source_path=pair.ru_path,
+        source_text=source,
+        existing_en=existing,
+        authority=authority,
+        checkpoint_identity=CheckpointIdentity(authority, "4" * 64),
+    )
+    assert coverage.mode == "full"
+    return PairContent(
+        pair=pair, ru_text=source, en_text=existing, coverage_plan=coverage,
+    )
+
+
+def _semantic_issue(suggestion: str | None = None) -> str:
+    return json.dumps({
+        "verdict": "blocked",
+        "issues": [{
+            "segment_id": "s0001",
+            "severity": "blocked",
+            "category": "meaning_drift",
+            "comment": "Both the name and the password are required, not alternatives.",
+            "suggested_text": suggestion,
+        }],
+    })
+
+
+@pytest.mark.parametrize("coverage_mode", [None, "full"])
+def test_F109_one_cycle(coverage_mode: str | None) -> None:
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
         en_path="ydb/docs/en/a.md",
         ru_changed=True,
     )
     client, transport = _client([_translate("Draft."), _critic()])
+    content = (
+        _full_coverage_content("Текст.\n")
+        if coverage_mode == "full"
+        else PairContent(pair=pair, ru_text="Текст.\n")
+    )
 
     result = run_pr_translation(
-        [PairContent(pair=pair, ru_text="Текст.\n")],
+        [content],
         client,
         load_glossary(),
         use_analyze_llm=False,
@@ -78,6 +147,189 @@ def test_F109_one_cycle() -> None:
     assert file_result.verdict == "ok"
     assert transport.chat.completions.create.call_count == 2
     assert "run_doc_verify(" not in inspect.getsource(workflow.run_doc_translate)
+
+
+@pytest.mark.parametrize(
+    ("existing", "fallback_reason"),
+    [
+        (None, "target does not exist; full translation required"),
+        (
+            "# Old page\n\nOld draft.\n",
+            "missing or ambiguous exact verified-unit receipt",
+        ),
+    ],
+    ids=["missing-target", "existing-target-full-fallback"],
+)
+def test_F109_full_coverage_plan_runs_inline_critic(
+    existing: str | None, fallback_reason: str, monkeypatch,
+) -> None:
+    content = _full_coverage_content("Текст.\n", existing)
+    client, transport = _client([_translate("Draft."), _critic()])
+    separate_verify = MagicMock(side_effect=AssertionError("unexpected whole-PR verify"))
+    monkeypatch.setattr(workflow, "run_doc_verify", separate_verify)
+
+    result = run_pr_translation([content], client, load_glossary())
+
+    run = result.pair_results[0]
+    assert run.error is None
+    assert run.target_text == "Draft.\n"
+    assert run.file_result is not None
+    assert run.file_result.critic_initial is not None
+    assert [record.model_slug for record in client.usage_tracker.records] == [
+        "deepseek-v32", "yandexgpt-5.1",
+    ]
+    review = transport.chat.completions.create.call_args_list[1].kwargs["messages"][-1]["content"]
+    assert review.startswith("Review a ru → en translation batch")
+    assert transport.chat.completions.create.call_count == 2
+    assert run.file_result.verdict == "ok"
+    assert content.coverage_plan is not None
+    assert content.coverage_plan.mode == "full"
+    assert run.file_result.differential_meta["mode"] == "full"
+    assert fallback_reason in run.file_result.differential_meta["fallback_reasons"]
+    body = build_translation_pr_body(1, "ydb-platform/ydb", publication_result=result)
+    assert "QA K: 🟢 GREEN" in body
+    assert fallback_reason in body
+    separate_verify.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("source", "draft", "correction", "expected"),
+    [
+        (
+            "Для подключения нужны имя и пароль.\n",
+            "A name or a password is required to connect.",
+            "A name and a password are required to connect.",
+            "A name and a password are required to connect.\n",
+        ),
+        (
+            "Для подключения нужны имя `account_name` и пароль `account_password`.\n",
+            "A name ⟦C1⟧ or a password ⟦C2⟧ is required to connect.",
+            "A name ⟦C1⟧ and a password ⟦C2⟧ are required to connect.",
+            "A name `account_name` and a password `account_password` are required to connect.\n",
+        ),
+    ],
+    ids=["plain-prose", "protected-identifiers"],
+)
+def test_F109_full_coverage_semantic_issue_is_repaired(
+    source: str, draft: str, correction: str, expected: str,
+) -> None:
+    content = _full_coverage_content(source)
+    client, transport = _client([
+        _translate(draft), _semantic_issue(correction), _critic(),
+    ])
+
+    result = run_pr_translation([content], client, load_glossary())
+
+    run = result.pair_results[0]
+    assert run.error is None
+    assert run.target_text == expected
+    fr = run.file_result
+    assert fr is not None
+    assert fr.final_text == expected
+    assert fr.critic_initial is not None
+    assert fr.critic_initial.verdict == "blocked"
+    assert [(issue.category, issue.suggested_text) for issue in fr.critic_applied] == [
+        ("meaning_drift", correction),
+    ]
+    assert fr.critic_unresolved is not None
+    assert fr.critic_unresolved.verdict == "ok"
+    assert fr.critic_unresolved.issues == []
+    assert [record.model_slug for record in client.usage_tracker.records] == [
+        "deepseek-v32", "yandexgpt-5.1", "yandexgpt-5.1",
+    ]
+    requests = transport.chat.completions.create.call_args_list
+    assert len(requests) == 3
+    verification = requests[2].kwargs["messages"][-1]["content"]
+    assert verification.startswith("Re-verify")
+    pairs = json.loads(verification.split("```json\n", 1)[1].split("\n```", 1)[0])
+    assert pairs["segments"][0]["translated_text"] == correction
+    assert fr.verdict == "ok"
+    assert "QA K: 🟢 GREEN" in build_translation_pr_body(
+        1, "ydb-platform/ydb", publication_result=result,
+    )
+
+
+def test_F109_full_coverage_unresolved_semantic_issue_is_not_green() -> None:
+    content = _full_coverage_content("Для подключения нужны имя и пароль.\n")
+    draft = "A name or a password is required to connect."
+    # Initial translation plus both supported feedback rounds stay blocked;
+    # each critic pass is followed by verification of its unresolved issue.
+    client, transport = _client([
+        _translate(draft), _semantic_issue(), _semantic_issue(),
+    ] * 3)
+
+    result = run_pr_translation([content], client, load_glossary())
+
+    run = result.pair_results[0]
+    assert run.error is None
+    assert run.target_text == draft + "\n"
+    fr = run.file_result
+    assert fr is not None
+    assert fr.critic_initial is not None
+    assert fr.critic_unresolved is not None
+    assert fr.critic_unresolved.verdict == "blocked"
+    assert [(issue.category, issue.severity, issue.suggested_text)
+            for issue in fr.critic_unresolved.issues] == [("meaning_drift", "blocked", None)]
+    assert fr.verdict == "blocked"
+    assert [record.model_slug for record in client.usage_tracker.records] == [
+        "deepseek-v32", "yandexgpt-5.1", "yandexgpt-5.1",
+    ] * 3
+    assert transport.chat.completions.create.call_count == 9
+    report = build_full_report(
+        result,
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=0),
+        config=load_config(env={}),
+    )
+    assert "Both the name and the password are required, not alternatives." in report
+    assert "Статус QA (K): 🔴 RED" in report
+    body = build_translation_pr_body(1, "ydb-platform/ydb", publication_result=result)
+    assert "QA K: 🔴 RED" in body
+    assert "QA K: 🟢 GREEN" not in body
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "action", "mode"),
+    [
+        ("Текст.\n", "Accepted text.\n", "reuse_verified", "units"),
+        ("```bash\necho hi\n```\n", "```bash\necho hi\n```\n", "materialize_protected", "units"),
+        ("```bash\necho hi\n```\n", "```bash\necho hi\n```\n", "materialize_protected", "full"),
+    ],
+    ids=["reused-units", "protected-units", "protected-full"],
+)
+def test_F109_coverage_reuse_and_protected_content_make_no_model_calls(
+    source: str, target: str, action: str, mode: str,
+) -> None:
+    content = _full_coverage_content(source, target)
+    if mode == "units":
+        coverage = CoveragePlan(
+            source_path=content.pair.ru_path,
+            source_hash=hashlib.sha256(source.encode()).hexdigest(),
+            en_hash=hashlib.sha256(target.encode()).hexdigest(),
+            units=(CoverageUnit(
+                key="a" * 64,
+                action=action,
+                source=source,
+                en_span=(0, len(target)),
+                target=target,
+                reason="exact verified receipt" if action == "reuse_verified" else "protected source structure",
+            ),),
+            required_fragments=frozenset(),
+            mode="units",
+        )
+        content = replace(content, coverage_plan=coverage)
+    client, transport = _client([])
+
+    result = run_pr_translation([content], client, load_glossary())
+
+    run = result.pair_results[0]
+    assert run.error is None
+    assert run.target_text == target
+    assert run.file_result is not None
+    assert run.file_result.verdict == "ok"
+    assert run.file_result.critic_initial is None
+    assert run.file_result.differential_meta["mode"] == mode
+    assert client.usage_tracker.records == []
+    transport.chat.completions.create.assert_not_called()
 
 
 def test_F109_special_scopes(tmp_path) -> None:

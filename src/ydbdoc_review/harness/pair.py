@@ -209,13 +209,14 @@ def run_pair_plan(
     enable_critic = plan.action != "skip"
     if enable_translate:
         # F-109: every full prose translation completes the shared F-056
-        # quality cycle before workflow publication. Proof-based coverage units
-        # carry their own validated receipts and must preserve zero-call resume.
+        # quality cycle before workflow publication, including full coverage
+        # fallbacks. Keep the units route separate to preserve zero-call reuse.
         # Glossary full translation follows the same mutable critic/repair path;
         # its read-only exception is verify-only.
         profile = (
             TRANSLATE_PROFILE
             if content.coverage_plan is not None
+            and content.coverage_plan.mode == "units"
             else TRANSLATE_WITH_QA_PROFILE
         )
     else:
