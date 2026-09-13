@@ -11,20 +11,11 @@ def compute_critic_verdict(
     initial: CriticResponse | None,
     unresolved: CriticResponse | None,
 ) -> FileVerdict:
-    if unresolved is None:
-        if initial is None:
-            return "ok"
-        if not initial.issues:
-            if initial.verdict == "blocked":
-                return "blocked"
-            return "ok"
-        if initial.verdict == "blocked":
-            return "blocked"
-        return "warnings"
-    if unresolved.verdict == "blocked":
+    response = unresolved if unresolved is not None else initial
+    if response is None:
+        return "ok"
+    if response.verdict == "blocked" or any(i.severity == "blocked" for i in response.issues):
         return "blocked"
-    if unresolved.issues:
-        if any(i.severity == "blocked" for i in unresolved.issues):
-            return "blocked"
+    if response.issues or response.verdict == "warnings":
         return "warnings"
     return "ok"

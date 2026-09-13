@@ -48,6 +48,7 @@ from ydbdoc_review.reporting.locations import (
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.schemas import CriticIssueOut
 from ydbdoc_review.validation.link_contract import LinkContractIssue
+from ydbdoc_review.validation.placeholder_drift import critic_issue_dedupe_key
 from ydbdoc_review.version import action_release_label
 
 _FINAL_TREE_BLOCKERS_MARKER_V1 = "ydbdoc-final-tree-blockers:v1"
@@ -438,9 +439,19 @@ def _remaining_critic_issues(fr) -> list[CriticIssueOut]:
 
 def _skipped_critic_issues(fr) -> list[CriticIssueOut]:
     """Critic suggestions that were not auto-applied (safety / validation)."""
+    remaining = _remaining_critic_issues(fr)
+    if any(issue.category == "critic_model_refusal" for issue in remaining):
+        # Refusal preserves exact first-pass findings without a fresh assessment.
+        remaining_keys = {critic_issue_dedupe_key(issue) for issue in remaining}
+        applied_keys = {critic_issue_dedupe_key(issue)[:3] for issue in fr.critic_applied}
+        return [
+            issue for issue in fr.critic_skipped
+            if critic_issue_dedupe_key(issue) not in remaining_keys
+            and critic_issue_dedupe_key(issue)[:3] not in applied_keys
+        ]
     confirmed = {
         (issue.segment_id, issue.category.casefold())
-        for issue in _remaining_critic_issues(fr)
+        for issue in remaining
     }
     return [
         issue
@@ -604,6 +615,9 @@ def _file_has_open_issues(run: PairRunResult) -> bool:
         return True
     if _remaining_critic_issues(fr):
         return True
+    critic = fr.critic_unresolved if fr.critic_unresolved is not None else fr.critic_initial
+    if critic is not None and critic.verdict == "warnings":
+        return True
     if fr.manual_actions:
         return True
     if fr.heuristic_blocking:
@@ -665,8 +679,16 @@ def _file_reviewer_section(
         for mid in manual_ids
         if mid in fr.segment_lines
     ]
+    heuristic_messages = _report_heuristic_messages(fr, config=config)
+    if any(issue.category == "critic_model_refusal" for issue in critic_items):
+        # The file-level refusal event is already represented by its critic issue.
+        # Match the event code, never similar prose in unrelated diagnostics.
+        heuristic_messages = [
+            message for message in heuristic_messages
+            if not message.startswith("critic_model_refusal:")
+        ]
     heuristics = consolidate_heuristic_warnings(
-        _report_heuristic_messages(fr, config=config),
+        heuristic_messages,
         manual_ids=manual_ids,
         manual_line_ranges=manual_ranges,
     )

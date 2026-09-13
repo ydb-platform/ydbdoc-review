@@ -168,15 +168,15 @@ def format_critic_reviewer_detail(*, category: str, comment: str) -> HeuristicRe
         preview = preview_match.group(1).strip()[:200] if preview_match else None
         problem = (
             "Модель отказала проверять файл (safety / content policy); "
-            "перевод не оценён LLM-критиком — ориентируйтесь на эвристики."
+            "проверка языка и стиля не завершена."
         )
         if preview:
             problem = f"{problem} Фрагмент ответа модели: «{preview}»."
         return HeuristicReviewerDetail(
             problem=problem,
             suggestion=(
-                "Если эвристики 🟢, merge допустим без critic pass. "
-                "Иначе — doc_continue с уточнением или ручная правка EN."
+                "Требуется ручная проверка языка и стиля перед merge. "
+                "Детерминированные эвристики не заменяют полный critic pass."
             ),
         )
 
@@ -486,8 +486,8 @@ def _humanize_heuristic_problem(message: str) -> str:
 
     if message.startswith("critic_model_refusal:"):
         return (
-            "Модель отказала проверять файл (safety); перевод не оценён критиком — "
-            "смотрите эвристики."
+            "Модель отказала проверять файл (safety); проверка языка и стиля не завершена. "
+            "Требуется ручная проверка перед merge."
         )
 
     if message.startswith("ru_source"):

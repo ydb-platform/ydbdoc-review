@@ -192,19 +192,29 @@ skipped/identical segments или при отказе модели. Только
 без полного документа (`translated_text=None`) используют исходные атомы как
 консервативный compatibility default; явно переданный пустой target авторитетен.
 
-**R-GL-5a** — `critic_model_refusal` не блокирует merge при чистых эвристиках.
+**R-GL-5a**: `critic_model_refusal` означает незавершённую проверку языка и стиля.
 
 Когда LLM-критик возвращает safety/content-policy отказ (§6.235, `is_model_refusal_text`), а детерминированные эвристики файла **не** содержат blocking-сообщений:
 
-1. Файловый `verdict` остаётся **`ok`** (не `warnings`).
-2. PR-level рекомендация merge (`_merge_recommendation`) — **🟢**, если нет других `warn`/`blocked` файлов, completeness gaps и nav blockers.
-3. Уведомление об отказе критика остаётся в отчёте как **информационное** (не в списке «Что исправить»).
+1. Файловый `verdict` равен **`warnings`**. Независимой полной проверки языка и стиля нет, поэтому чистая проза не является исключением.
+2. PR-level рекомендация merge (`_merge_recommendation`) **🟡**, если нет других blocking findings, completeness gaps и nav blockers.
+3. Отказ остаётся warning issue в `critic_unresolved` и в списке «Что исправить». Требуется ручная проверка языка и стиля перед merge.
+4. Отказ в любом batch сохраняет все замечания остальных batches, включая blocked `protected_atom_language`. Первый отказ завершает цикл без спекулятивного model repair. Отказ на любом последующем проходе, включая третий verify, сохраняет весь текущий объединённый результат и накопленные неприменённые замечания предыдущих проходов. Успешное исправление удаляет прежний диагноз из ожидающих исправления по сегменту, категории и точному комментарию; подтверждённый после исправления блокер остаётся нерешённым. История `critic_skipped` и `critic_applied` сохраняется; исправленные замечания не возвращаются в нерешённые или skipped-раздел отчёта, дубли атомных findings не добавляются. Непочиненные blockers сохраняют красный отчёт и запрет публикации, даже если присутствуют в списке skipped.
+5. `warnings` с пустым списком issues в compatibility response не превращается в `ok`; `blocked` не понижается. ASCII-документы без сегментов проходят детерминированные проверки без запроса к критику.
 
-**R-GL-5a.1** — Классификация finalize-warning `critic_model_refusal:` в `_classify_heuristic` — bucket **`info`**, не `warnings` (аналог `glossary_verify_critic_skipped:`).
+**R-GL-5a.1**: Классификация finalize-warning `critic_model_refusal:` в `_classify_heuristic`: bucket **`warnings`**.
 
-**R-GL-5a.2** — Текст для ревьюера сохраняется: `humanize_heuristic("critic_model_refusal: …")` и `format_critic_reviewer_detail(category="critic_model_refusal", …)` без изменения смысла §6.238.
+**R-GL-5a.2**: `humanize_heuristic("critic_model_refusal: …")` и `format_critic_reviewer_detail(category="critic_model_refusal", …)` сообщают, что проверка языка и стиля не завершена и требуется ручная проверка. Чистые эвристики не дают разрешения merge.
 
-**R-GL-5a.3** — Отчёт выводит refusal в секции **«Справка (не блокирует merge EN)»** (`heuristic_info`), с humanized RU текстом.
+**R-GL-5a.3**: Отчёт выводит refusal как предупреждение с humanized RU текстом. После pair-level repair и пересчёта QA warning issue остаётся в `critic_unresolved` и сохраняет жёлтую рекомендацию.
+
+Замечание, присутствующее одновременно в unresolved и skipped, выводится ровно
+один раз как unresolved независимо от `include_skipped_critic` (по умолчанию,
+`true` или `false`). Исключение дублей меняет только представление отчёта;
+машинные blockers, `critic_skipped` и запрет публикации сохраняются.
+Если отказ уже показан как critic issue, его эвристическое зеркало с кодом
+`critic_model_refusal:` не создаёт второе замечание в отчёте. Сопоставляется код
+события, а не похожий текст. Другие эвристики и отдельные critic findings остаются.
 
 **R-GL-5b** — Поведение **`critic_execution_failed`** (пустой JSON после retries, невалидный JSON после repair+fallback, иные технические сбои критика) **не меняется**: `verdict=blocked`, merge 🔴, сообщение §6.238. Safety refusal и execution failure — **разные** категории; R-GL-5 не сливает их.
 
@@ -295,11 +305,11 @@ skipped/identical segments или при отказе модели. Только
 - Внутренние имена классов, плейсхолдеров и служебные маркеры не заменяют пользовательское объяснение.
 - Для изменений после старого pull request показываются старый и текущий идентификаторы содержимого и затронувшие коммиты.
 
-**R-GL-5c** — При единственном замечании `critic_model_refusal` и 🟢 эвристиках:
+**R-GL-5c**: При единственном замечании `critic_model_refusal` и чистых детерминированных эвристиках:
 
-- Файл в списке **«Без замечаний»** (🟢), не в **«Что исправить»**.
-- Строка рекомендации: **«можно мержить»**, не «требует правок перед merge».
-- Информация об отказе критика видна в **«Справка (не блокирует merge EN)»**.
+- Файл в списке **«Что исправить»** (🟡).
+- Рекомендация требует ручной проверки перед merge, без «можно мержить».
+- Отказ виден как предупреждение о незавершённой проверке языка и стиля.
 
 ## 13. Запрещённая инфраструктура
 
@@ -345,7 +355,7 @@ skipped/identical segments или при отказе модели. Только
   Markdown-путях scope #51079. Generic assignment/code, больший code-атом,
   fenced code и HTML comment сохраняются без fuzzy-переписывания.
 - **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
-- **R-GL-5:** fixture `critic_model_refusal` finalize warning + пустые `heuristic_blocking` → `compose_file_verdict` = `ok`; `_file_has_open_issues` = `False` для того же fixture; `build_full_report` / `_merge_recommendation`: рекомендация 🟢 «можно мержить»; refusal в info-секции; regression: `critic_execution_failed` по-прежнему 🔴; `test_run_critic_model_refusal_falls_back_to_heuristics_only` зелёный; `test_merge_recommendation_green_when_critic_warnings_but_no_open_issues` зелёный.
+- **R-GL-5:** настоящий harness с отказом модели на чистой прозе и трёх incident phrases даёт `warnings`, `_file_has_open_issues` = `True`, отчёт 🟡 с ручной проверкой. Mixed batches и Task 5 atom blockers остаются 🔴; повторный отказ и pair post-repair QA сохраняют предупреждение; `critic_execution_failed` остаётся 🔴; ASCII без сегментов не вызывает критика. Compatibility `warnings` с пустыми issues сохраняет жёлтый статус.
 - **R-GL-6:** merged #40385 fixture — 6 пар (5 diff + `_includes/connect.md`); pre-existing `connect.md#tls` на modified `authentication.md` → `doc_from_main` содержит `_includes/connect.md`, `auth_config` — нет; после translate+declare `apply_en_link_target_checks` == `[]` на `authentication.md`; `test_pr_40385_real_tip_without_queued_translation_stays_blocked` остаётся блокирующим при bypass owner pair; declare fallback: synthetic aligned include → append `{#frag}`; real-tip misaligned без translate → fallback `None`.
 - **R-GL-7/R-GL-8:** production/fixture #52077 при `candidate == en_baseline` разрешает доказанный legacy-translit `#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov`→`#enabling-the-node-authentication-and-authorization-mode` и блокирует ровно две подмены критика: `#certificate-auth-config`→`#iam-auth-config` и `#tls`→`#activated-profile`. Explicit, missing-target и ambiguous варианты остаются blocking; duplicate occurrences дают отдельные blockers; same-path ambient extra при наличии точного href не создаёт false positive; path-only redirect с тем же ASCII fragment проходит; URL-encoded кириллический fragment и dictionary localization проходят.
 - **R-GL-9:** fragment-repair fixture сохраняет `#security-auth`/`#certificate-auth-config`/`#tls`, даже если baseline указывает на существующий другой explicit anchor; доказанный implicit heading slug по-прежнему может использовать локализованный baseline. Delete+add same-fragment и duplicate historical fragment не получают final path restore и остаются blocking.

@@ -37,7 +37,7 @@ _TRUNCATED_SUGGESTION = re.compile(r"(?:…|\.\.\.)$")
 _MAX_CRITIC_ATTEMPTS = 3
 _VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
 
-# YandexGPT / safety refusals are prose, not JSON — do not fail-closed (§6.235).
+# Safety refusals leave language/style review incomplete (§6.264).
 _MODEL_REFUSAL_MARKERS: tuple[str, ...] = (
     "я не могу обсуждать",
     "не могу обсуждать эту тему",
@@ -103,7 +103,14 @@ def merge_critic_responses(responses: list[CriticResponse]) -> CriticResponse:
         verdict = "blocked"
     elif issues and verdict == "ok":
         verdict = "warnings"
-    return CriticResponse(verdict=verdict, issues=issues)
+    merged = CriticResponse(verdict=verdict, issues=issues)
+    # A sibling issue must not mask a batch that supplied no semantic verdict.
+    # Carry the evidence through subsequent merges (split batches, atom checks).
+    merged._review_incomplete = any(
+        response._review_incomplete or (response.verdict != "ok" and not response.issues)
+        for response in responses
+    )
+    return merged
 
 
 def _fallback_critic_response(*, reason: str, preview: str = "") -> CriticResponse:
@@ -126,18 +133,18 @@ def _fallback_critic_response(*, reason: str, preview: str = "") -> CriticRespon
 
 
 def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
-    """Skip LLM critic for this file; heuristics-only verify (§6.235)."""
+    """Record incomplete language/style review without hiding other findings."""
     safe = (preview or "").replace("\n", " ").strip()[:200]
     logger.warning(
-        "Critic model refusal; heuristics-only verify (preview=%r)",
+        "Critic model refusal; manual review required (preview=%r)",
         safe[:120],
     )
     comment = (
-        "Model refused critic review; file verified with heuristics only. "
+        "Model refused critic review; language/style review incomplete; manual review required. "
         f"Preview: {safe[:160]}"
     )
     return CriticResponse(
-        verdict="ok",
+        verdict="warnings",
         issues=[
             CriticIssueOut(
                 severity="warning",

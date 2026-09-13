@@ -638,8 +638,44 @@ target evidence after rendering/finalization, allowing a repaired atom to clear.
 Opaque-atom model suggestions are nulled and never applied, including suggestions
 that preserve marker spelling but cannot actually repair its payload. Skipped-fix
 deduplication and identical-prose/spurious-placeholder filters preserve these
-findings. The existing refusal shortcut preserves atom blockers; general refusal
-aggregation remains the next task. The independent final-byte language barrier
+findings. Refusal aggregation follows §6.264. The independent final-byte language barrier
 and publication allowlist are unchanged.
+
+### §6.264 Critic refusal means incomplete review
+
+For prose-bearing documents, safety/content-policy refusal produces
+`CriticResponse(verdict="warnings")` with a warning `critic_model_refusal` issue.
+There is no independent complete language/style checker and no clean-prose
+exception. The harness retains the entire combined first-pass result as unresolved
+and skips speculative model repairs. Refusal in one batch never removes sibling
+findings or deterministic protected-atom blockers. Refusal on every later pass likewise
+keeps its complete combined result before skipped/spurious-issue filtering, plus
+every accumulated finding whose fix was not applied, including third-pass verify.
+Pending diagnoses are reconciled after each repair by segment, category and exact
+comment. A repaired diagnosis is removed from pending; a finding confirmed again
+after an earlier repair remains pending. Applied/skipped machine history stays
+intact, and repaired historical skipped entries are hidden in the refusal report.
+Applied repairs stay separate;
+identical deterministic atom findings are not duplicated. Report presentation must
+not hide these unresolved findings just because their repairs were skipped. A
+retained blocker keeps the report red and publication `WITHHOLD_UNSAFE`.
+The skipped report section excludes issue keys already displayed as unresolved,
+so null/rejected fixes and protected-atom findings appear once with either value
+of `include_skipped_critic`, including its default. Machine issue lists and verdicts
+are not modified by report deduplication.
+The same refusal also has a raw `critic_model_refusal:` heuristic mirror. When
+the critic refusal is displayed, the report suppresses only that coded mirror,
+not unrelated diagnostics with similar prose. Machine heuristics stay unchanged;
+without a displayed critic refusal the heuristic remains available to report.
+
+All refusal paths add a warning that language/style review is incomplete and
+manual review is required. Pair post-repair QA retains the critic response when
+recomputing heuristics, so refusal remains yellow. `compute_critic_verdict` also
+respects compatibility warnings with empty issues and never lowers a current
+blocked response. Report readiness respects explicit critic warnings and presents
+refusal under open warnings, without green merge advice. R-GL-5a/5c replace the
+older §6.245 info/green contract; technical `critic_execution_failed` remains
+blocked and separate under R-GL-5b. Protected-only ASCII files still make no model
+request. This change adds no editorial detector or complete-style-coverage flag.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

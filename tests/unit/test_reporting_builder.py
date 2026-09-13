@@ -576,8 +576,8 @@ def test_merge_recommendation_red_when_scope_file_missing_despite_green_files():
     assert "🟢" not in _qa_status(body)
 
 
-def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
-    """Regression: verdict warnings + empty issue list must not yield yellow header."""
+def test_merge_recommendation_yellow_when_critic_warnings_but_no_open_issues():
+    """Compatibility warnings without issue details still require review."""
     cfg = _cfg()
     pair = DocPair(
         ru_path="ydb/docs/ru/a.md",
@@ -605,12 +605,13 @@ def test_merge_recommendation_green_when_critic_warnings_but_no_open_issues():
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "Статус QA (K): 🟢 GREEN" in body
+    assert "Статус QA (K): 🟡 YELLOW" in body
     assert "Рекомендация:" not in body
+    assert "можно мержить" not in body
 
 
-def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
-    """R-GL-5: safety refusal in info must not yellow merge when heuristics clean."""
+def test_r_gl_5_merge_yellow_when_critic_refusal_heuristics_clean():
+    """R-GL-5: safety refusal requires manual language/style review."""
     cfg = _cfg()
     en_path = "ydb/docs/en/core/reference/configuration/auth_config.md"
     pair = DocPair(
@@ -634,9 +635,9 @@ def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
         file_path=en_path,
         final_text="Auth config EN",
         segments_count=1,
-        verdict="ok",
+        verdict="warnings",
         critic_initial=CriticResponse(
-            verdict="ok",
+            verdict="warnings",
             issues=[
                 CriticIssueOut(
                     segment_id="s0001",
@@ -649,10 +650,10 @@ def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
                 )
             ],
         ),
-        critic_unresolved=CriticResponse(verdict="ok", issues=[]),
+        critic_unresolved=None,
         heuristic_blocking=[],
-        heuristic_warnings=[],
-        heuristic_info=[refusal_humanized],
+        heuristic_warnings=[refusal_humanized],
+        heuristic_info=[],
         prompt_version="v1",
     )
     body = build_full_report(
@@ -660,15 +661,16 @@ def test_r_gl_5_merge_green_when_critic_refusal_heuristics_clean():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "Статус QA (K): 🟢 GREEN" in body
+    assert "Статус QA (K): 🟡 YELLOW" in body
     assert "Рекомендация:" not in body
-    assert "Справка (не влияет на статус QA K)" in body
+    assert "можно мержить" not in body
+    assert "Справка (не влияет на статус QA K)" not in body
     assert en_path in body
     assert "отказала" in body
 
 
 def test_r_gl_5_refusal_still_blocks_when_heuristic_blocking_present():
-    """R-GL-5: refusal info does not override real blocking heuristics."""
+    """R-GL-5: refusal warning does not override real blocking heuristics."""
     cfg = _cfg()
     en_path = "ydb/docs/en/core/reference/configuration/auth_config.md"
     pair = DocPair(
@@ -695,8 +697,8 @@ def test_r_gl_5_refusal_still_blocks_when_heuristic_blocking_present():
         critic_initial=CriticResponse(verdict="ok", issues=[]),
         critic_unresolved=CriticResponse(verdict="ok", issues=[]),
         heuristic_blocking=["href_parity: missing link target"],
-        heuristic_warnings=[],
-        heuristic_info=[humanize_heuristic(refusal_raw)],
+        heuristic_warnings=[humanize_heuristic(refusal_raw)],
+        heuristic_info=[],
         prompt_version="v1",
     )
     body = build_full_report(

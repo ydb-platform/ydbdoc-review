@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class TranslatedSegmentOut(BaseModel):
@@ -44,6 +44,8 @@ class CriticResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     verdict: CriticVerdict
     issues: list[CriticIssueOut] = Field(default_factory=list)
+    # Local batch evidence, outside the LLM JSON contract and serialized reports.
+    _review_incomplete: bool = PrivateAttr(default=False)
 
 
 AnalyzeTarget = Literal["en", "ru"]

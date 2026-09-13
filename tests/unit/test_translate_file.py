@@ -205,18 +205,12 @@ def test_translate_file_verdict_blocked_on_unresolved():
     )
     final_text = "Problem.\n"
 
-    # The fixed F-056 contract performs two bounded repair rounds.  Include
-    # responses for each repair, its finalization, and the following verify.
+    # Initial translation + critic/verify, then two feedback repair rounds.
+    # Already-English prose needs no additional finalization model response.
     client = _mock_client([
-        translate_raw,
-        critic_raw,
-        final_text,
-        translate_raw,
-        final_text,
-        critic_raw,
-        translate_raw,
-        final_text,
-        critic_raw,
+        translate_raw, critic_raw, critic_raw,
+        translate_raw, critic_raw, critic_raw,
+        translate_raw, critic_raw, critic_raw,
     ])
     result = translate_file(
         source,
@@ -229,6 +223,13 @@ def test_translate_file_verdict_blocked_on_unresolved():
 
     assert result.verdict == "blocked"
     assert result.critic_unresolved is not None
+    assert result.final_text == final_text
+    assert result.critic_unresolved.verdict == "blocked"
+    assert [
+        (issue.segment_id, issue.severity, issue.category, issue.comment)
+        for issue in result.critic_unresolved.issues
+    ] == [(seg_id, "blocked", "meaning", "still wrong")]
+    assert client._client.chat.completions.create.call_count == 9
 
 
 def test_translate_file_critic_only_alignment_mismatch_blocks():

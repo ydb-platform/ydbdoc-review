@@ -35,7 +35,9 @@ from ydbdoc_review.segmentation.placeholder_align import normalize_target_segmen
 from ydbdoc_review.segmentation.types import Segment
 from ydbdoc_review.translation.coverage import assemble_coverage
 from ydbdoc_review.translation.critic import (
+    _target_atom_evidence,
     apply_critic_fixes,
+    merge_critic_responses,
     run_verify,
 )
 from ydbdoc_review.translation.critic import (
@@ -46,7 +48,7 @@ from ydbdoc_review.translation.critic_retranslate import (
     retranslate_segments_with_critic_feedback,
 )
 from ydbdoc_review.translation.file_profiles import is_glossary_file
-from ydbdoc_review.translation.schemas import CriticResponse
+from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.translation.translator import translate_segments
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
@@ -57,6 +59,7 @@ from ydbdoc_review.validation.include_targets import repair_missing_includes
 from ydbdoc_review.validation.link_contract import coerce_link_contract
 from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
 from ydbdoc_review.validation.placeholder_drift import (
+    critic_issue_dedupe_key,
     drop_spurious_placeholder_issues,
     filter_critic_response,
 )
@@ -134,6 +137,44 @@ def _needs_critic_feedback_retranslate(state: FileRunState) -> bool:
     return bool(_unresolved_retry_segment_ids(state))
 
 
+def _retain_pending_on_incomplete_review(
+    state: FileRunState, response: CriticResponse | None, pending: list[CriticIssueOut],
+    *, target_lang: str = "en",
+) -> bool:
+    """Keep unapplied findings from every prior pass when review is incomplete."""
+    if response is None:
+        response = CriticResponse(verdict="warnings", issues=[])
+    refused = any(issue.category == "critic_model_refusal" for issue in response.issues)
+    failed = any(issue.category == "critic_execution_failed" for issue in response.issues)
+    no_verdict = response._review_incomplete or (response.verdict != "ok" and not response.issues)
+    if not (refused or failed or no_verdict):
+        return False
+    issues = {critic_issue_dedupe_key(issue): issue for issue in response.issues}
+    atom_categories = {"protected_atom_language", "protected_atom_alignment"}
+    if any(issue.category in atom_categories for issue in pending):
+        _, current_atoms = _target_atom_evidence(
+            state.segments, state.translated_text, target_lang=target_lang,
+        )
+        current_atom_keys = {critic_issue_dedupe_key(issue) for issue in current_atoms}
+        pending = [
+            issue for issue in pending
+            if issue.category not in atom_categories
+            or critic_issue_dedupe_key(issue) in current_atom_keys
+        ]
+    for issue in pending:
+        key = critic_issue_dedupe_key(issue)
+        if key not in issues or issue.severity == "blocked":
+            issues[key] = issue
+    state.critic_unresolved = merge_critic_responses([
+        response.model_copy(update={"issues": list(issues.values())}),
+    ])
+    if refused:
+        warning = "critic_model_refusal: language/style review incomplete; manual review required"
+        if warning not in state.finalize_warnings:
+            state.finalize_warnings.append(warning)
+    return True
+
+
 def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
     """Critic → apply fixes → re-render → verify (mutates ``state``)."""
     state.critic_initial = run_critic_pass(
@@ -148,20 +189,9 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         max_chars=ctx.batch_chars,
         translated_text=state.translated_text,
     )
-    if any(issue.category == "critic_model_refusal" for issue in state.critic_initial.issues):
-        state.finalize_warnings.append(
-            "critic_model_refusal: model declined review; heuristics only on verify"
-        )
-        atom_issues = [
-            issue for issue in state.critic_initial.issues
-            if issue.category in {"protected_atom_language", "protected_atom_alignment"}
-        ]
-        state.critic_unresolved = CriticResponse(
-            verdict="blocked" if atom_issues else "ok", issues=atom_issues,
-        )
-        return
-    if any(issue.category == "critic_execution_failed" for issue in state.critic_initial.issues):
-        state.critic_unresolved = state.critic_initial
+    if _retain_pending_on_incomplete_review(
+        state, state.critic_initial, [], target_lang=ctx.target_lang,
+    ):
         return
     actionable_issues = drop_spurious_placeholder_issues(
         state.critic_initial.issues,
@@ -177,8 +207,12 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         actionable_issues,
         strict_placeholder_order=(state.mode == "verify"),
     )
+    pending = list(state.critic_skipped)
     if not actionable_issues:
-        state.critic_unresolved = CriticResponse(verdict="ok", issues=[])
+        state.critic_unresolved = (
+            state.critic_initial if not state.critic_initial.issues
+            else CriticResponse(verdict="ok", issues=[])
+        )
         return
 
     assert state.render_base_doc is not None
@@ -237,6 +271,10 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         max_chars=ctx.batch_chars,
         translated_text=state.translated_text,
     )
+    if _retain_pending_on_incomplete_review(
+        state, state.critic_unresolved, pending, target_lang=ctx.target_lang,
+    ):
+        return
     state.critic_unresolved = filter_critic_response(
         state.critic_unresolved,
         state.segments,
@@ -262,6 +300,11 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         second_actionable,
         strict_placeholder_order=True,
     )
+    # Reconcile earlier pending diagnoses with this pass's repairs, then retain
+    # current skipped findings even when a previous pass tried the same repair.
+    applied_keys = {critic_issue_dedupe_key(issue)[:3] for issue in second_applied}
+    pending = [issue for issue in pending if critic_issue_dedupe_key(issue)[:3] not in applied_keys]
+    pending.extend(second_skipped)
     state.critic_applied.extend(second_applied)
     state.critic_skipped.extend(second_skipped)
     if not second_applied:
@@ -323,6 +366,10 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         max_chars=ctx.batch_chars,
         translated_text=state.translated_text,
     )
+    if _retain_pending_on_incomplete_review(
+        state, state.critic_unresolved, pending, target_lang=ctx.target_lang,
+    ):
+        return
     state.critic_unresolved = filter_critic_response(
         state.critic_unresolved,
         state.segments,
@@ -869,7 +916,13 @@ class CriticFeedbackRetryStep:
             if not segment_ids:
                 break
 
-            grouped = issues_by_segment_id(state.critic_unresolved.issues)
+            prior_issues = state.critic_unresolved.issues
+            prior_translations = dict(state.translations)
+            prior_text = state.translated_text
+            prior_atoms, _ = _target_atom_evidence(
+                state.segments, prior_text, target_lang=ctx.target_lang,
+            )
+            grouped = issues_by_segment_id(prior_issues)
             state.translations = retranslate_segments_with_critic_feedback(
                 state.segments,
                 segment_ids,
@@ -897,6 +950,26 @@ class CriticFeedbackRetryStep:
             state.critic_skipped = []
             run_critic_loop(state, ctx)
             state.translate_retry_count += 1
+            # A failed/no-op repair cannot resolve a diagnosis merely because
+            # the next critic supplies no semantic verdict. Compare after both
+            # rendering and critic fixes, including actual target atom content
+            # hidden behind unchanged placeholders in state.translations.
+            current_atoms, _ = _target_atom_evidence(
+                state.segments, state.translated_text, target_lang=ctx.target_lang,
+            )
+            pending = [
+                issue for issue in prior_issues
+                if issue.severity == "blocked"
+                and issue.segment_id in prior_translations
+                and state.translations.get(issue.segment_id) == prior_translations[issue.segment_id]
+                and (current_atoms or {}).get(issue.segment_id) == (prior_atoms or {}).get(issue.segment_id)
+            ]
+            incomplete = _retain_pending_on_incomplete_review(
+                state, state.critic_unresolved, pending, target_lang=ctx.target_lang,
+            )
+            if incomplete and state.translated_text == prior_text:
+                # Retain the diagnosis without repeating an unchanged repair.
+                break
 
 
 class HeuristicsStep:

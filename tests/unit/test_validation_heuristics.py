@@ -469,16 +469,16 @@ def test_md_link_parity_ignores_stripped_basenames():
     )
 
 
-def test_r_gl_5_critic_model_refusal_classified_as_info():
+def test_r_gl_5_critic_model_refusal_classified_as_warning():
     msg = "critic_model_refusal: model declined review; heuristics only on verify"
-    assert _classify_heuristic(msg) == "info"
+    assert _classify_heuristic(msg) == "warnings"
 
 
-def test_r_gl_5_compose_file_verdict_ok_when_only_refusal_info():
+def test_r_gl_5_compose_file_verdict_warnings_when_only_refusal():
     refusal_msg = (
         "critic_model_refusal: model declined review; heuristics only on verify"
     )
-    heuristics = ClassifiedHeuristics(info=[refusal_msg], warnings=[], blocking=[])
+    heuristics = ClassifiedHeuristics(info=[], warnings=[refusal_msg], blocking=[])
     assert (
         compose_file_verdict(
             critic_verdict="ok",
@@ -486,5 +486,5 @@ def test_r_gl_5_compose_file_verdict_ok_when_only_refusal_info():
             heuristics=heuristics,
             manual_actions=False,
         )
-        == "ok"
+        == "warnings"
     )
