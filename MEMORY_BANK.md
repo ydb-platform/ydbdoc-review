@@ -3,8 +3,12 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.260: exact #51079 Mermaid assets translate label segments
-through the normal pipeline while byte-exact syntax and technical tokens remain
+**Current focus:** §6.261: the exact complete certificate Subject inline-code
+atom localizes to `Name=Value,...@<domain>` after href restoration. Generic code,
+fences and HTML comments remain untouched, while unlocalized Russian is blocking.
+
+Prior focus: §6.260: exact #51079 Mermaid assets translate label segments through
+the normal pipeline while byte-exact syntax and technical tokens remain
 protected. Unsupported grammar exposes no labels and residual Russian blocks EN.
 
 Prior focus: §6.259: every per-file profile runs deterministic
@@ -37,6 +41,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-13 | **§6.261**: exact complete ``Имя=Значение,...@<domain>`` inline-code atoms localize parser-safely after href restoration; fuzzy code rewrites are excluded and residual Russian blocks both `en` and `english` |
 | 2026-09-13 | **§6.260**: Mermaid aliases, messages, notes, branch labels and quoted graph labels become ordinary segments; strict grammar/skeleton validation, safe reinsertion, repeated finalization and coverage obligations preserve syntax; whole-line Mermaid fallback removed |
 | 2026-09-13 | **§6.259**: protected-only and zero-segment files skip translation/critic calls but still run deterministic finalization, heuristics, verdict, and report artifacts; exact empty verify targets stay empty and alignment failures remain blocking |
 | 2026-09-07 | **§6.258**: #51079 false include-only orphans fixed with immutable candidate overlays and TOC-rooted structural YFM include closure; 58 focused and 157 broader tests passed, four baseline failures deselected; reviewers/tester GO, production pending |

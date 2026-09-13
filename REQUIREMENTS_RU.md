@@ -72,6 +72,15 @@ Mermaid-only файл с подписями имеет обязательств�
 
 Любые другие ключи front matter не переводятся и сохраняются байт-в-байт в пределах защищённых зон.
 
+Шаблон Subject сертификата является узким детерминированным исключением из
+обычной защиты inline code: полный Markdown-атом с точным содержимым
+`Имя=Значение,...@<domain>` после восстановления href локализуется в
+`Name=Value,...@<domain>`. Обёртка backtick и все байты вне содержимого этого
+атома сохраняются. Более широкие code-атомы, произвольные пары ключ/значение,
+fenced code и HTML-комментарии не переписываются по сходству. Русское написание
+не имеет исключения в проверке EN: если оно осталось или было внедрено в любой
+английский Markdown-файл, находка является блокирующей.
+
 Старый английский текст не используется как источник частей нового перевода, шаблон склейки или основа частичной реконструкции.
 
 План доказанного покрытия является отдельным fail-closed контрактом для будущего
@@ -291,6 +300,11 @@ model realignment.
 - после успешного перевода создан pull request;
 - `build-docs` и `doc_verify` зелёные на одном SHA либо явно зафиксирован статус ожидания CI без ложного success при отсутствии PR;
 - полный набор unit-тестов не имеет падений.
+- **R-GL-17:** exact certificate Subject atom локализуется после href restoration
+  при одном или нескольких вхождениях и остаётся английским при повторной
+  финализации; `en` и `english` одинаково блокируют русское написание на всех
+  Markdown-путях scope #51079. Generic assignment/code, больший code-атом,
+  fenced code и HTML comment сохраняются без fuzzy-переписывания.
 - **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
 - **R-GL-5:** fixture `critic_model_refusal` finalize warning + пустые `heuristic_blocking` → `compose_file_verdict` = `ok`; `_file_has_open_issues` = `False` для того же fixture; `build_full_report` / `_merge_recommendation`: рекомендация 🟢 «можно мержить»; refusal в info-секции; regression: `critic_execution_failed` по-прежнему 🔴; `test_run_critic_model_refusal_falls_back_to_heuristics_only` зелёный; `test_merge_recommendation_green_when_critic_warnings_but_no_open_issues` зелёный.
 - **R-GL-6:** merged #40385 fixture — 6 пар (5 diff + `_includes/connect.md`); pre-existing `connect.md#tls` на modified `authentication.md` → `doc_from_main` содержит `_includes/connect.md`, `auth_config` — нет; после translate+declare `apply_en_link_target_checks` == `[]` на `authentication.md`; `test_pr_40385_real_tip_without_queued_translation_stays_blocked` остаётся блокирующим при bypass owner pair; declare fallback: synthetic aligned include → append `{#frag}`; real-tip misaligned без translate → fallback `None`.

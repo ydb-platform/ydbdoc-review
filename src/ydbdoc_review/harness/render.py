@@ -7,8 +7,11 @@ import logging
 import re
 from pathlib import PurePosixPath
 
+from markdown_it.token import Token
+
 from ydbdoc_review.llm.client import YandexLLMClient
 from ydbdoc_review.parsing.ast_types import Document
+from ydbdoc_review.parsing.markdown_parser import create_parser
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.segmentation.reinsert import reinsert_segments
 from ydbdoc_review.segmentation.types import Segment
@@ -26,7 +29,11 @@ from ydbdoc_review.validation.glossary_toc_links import (
     en_mirror_path,
     strip_unreachable_internal_links,
 )
-from ydbdoc_review.validation.homoglyphs import postprocess_en_target_markdown
+from ydbdoc_review.validation.homoglyphs import (
+    decode_percent_encoded_protect_markers,
+    fix_cyrillic_homoglyphs_in_en,
+    fix_russian_angle_placeholders_in_en,
+)
 from ydbdoc_review.validation.href_parity import (
     restore_md_link_hrefs,
     retarget_source_owned_redirect_hrefs,
@@ -36,7 +43,12 @@ from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
 )
-from ydbdoc_review.validation.markdown_layout import repair_generated_markdown_layout
+from ydbdoc_review.validation.markdown_layout import (
+    fix_blanks_around_fences,
+    fix_image_bang_spacing,
+    fix_no_space_in_emphasis,
+    repair_generated_markdown_layout,
+)
 from ydbdoc_review.validation.prose_cyrillic import (
     translate_cyrillic_prose_with_client,
 )
@@ -48,29 +60,98 @@ from ydbdoc_review.validation.yfm_anchor import (
 
 logger = logging.getLogger(__name__)
 
-_INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
-_CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 _SOURCE_CERTIFICATE_SUBJECT_NOTATION = "Имя=Значение,...@<domain>"
 _TARGET_CERTIFICATE_SUBJECT_NOTATION = "Name=Value,...@<domain>"
+_CERTIFICATE_INLINE_CODE = re.compile(
+    rf"(?<!`)(?P<marker>`+)[ \r\n]*"
+    rf"(?P<content>{re.escape(_SOURCE_CERTIFICATE_SUBJECT_NOTATION)})[ \r\n]*"
+    rf"(?P=marker)(?!`)"
+)
 
 
-def _restore_cyrillic_source_code_atoms(text: str, source_text: str) -> str:
-    """Restore the unique certificate-subject notation protected by #50976."""
-    source_atoms = [
-        atom
-        for atom in _INLINE_CODE.finditer(source_text)
-        if atom.group(1) == _SOURCE_CERTIFICATE_SUBJECT_NOTATION
-    ]
-    target_atoms = [
-        atom
-        for atom in _INLINE_CODE.finditer(text)
-        if atom.group(1) == _TARGET_CERTIFICATE_SUBJECT_NOTATION
-    ]
-    if len(source_atoms) != 1 or len(target_atoms) != 1:
-        return text
-    source = source_atoms[0]
-    target = target_atoms[0]
-    return text[: target.start()] + source.group(0) + text[target.end() :]
+def _token_identity(token: Token) -> tuple:
+    """Markdown-it token structure excluding source content and children."""
+    return (
+        token.type,
+        token.tag,
+        token.nesting,
+        token.level,
+        token.markup,
+        token.info,
+        token.attrs,
+        token.meta,
+        token.block,
+        token.hidden,
+        token.map,
+    )
+
+
+def _is_complete_inline_code_replacement(
+    before_text: str,
+    after_text: str,
+) -> bool:
+    """Return whether one source edit changes exactly one parsed InlineCode atom."""
+    try:
+        before_tokens = create_parser().parse(before_text)
+        after_tokens = create_parser().parse(after_text)
+    except Exception:
+        return False
+    if len(before_tokens) != len(after_tokens):
+        return False
+
+    changed_inline_atoms = 0
+    for before, after in zip(before_tokens, after_tokens, strict=True):
+        if _token_identity(before) != _token_identity(after):
+            return False
+        if before.type != "inline":
+            if before.content != after.content:
+                return False
+            continue
+
+        before_children = before.children or []
+        after_children = after.children or []
+        if len(before_children) != len(after_children):
+            return False
+        for before_child, after_child in zip(before_children, after_children, strict=True):
+            if _token_identity(before_child) != _token_identity(after_child):
+                return False
+            if before_child.content == after_child.content:
+                continue
+            if (
+                before_child.type != "code_inline"
+                or before_child.content != _SOURCE_CERTIFICATE_SUBJECT_NOTATION
+                or after_child.content != _TARGET_CERTIFICATE_SUBJECT_NOTATION
+            ):
+                return False
+            changed_inline_atoms += 1
+    return changed_inline_atoms == 1
+
+
+def _localize_certificate_subject_notation(text: str) -> str:
+    """Localize only complete parsed certificate Subject inline-code atoms."""
+    replacements: list[tuple[int, int]] = []
+    for atom in _CERTIFICATE_INLINE_CODE.finditer(text):
+        candidate = (
+            text[: atom.start("content")]
+            + _TARGET_CERTIFICATE_SUBJECT_NOTATION
+            + text[atom.end("content") :]
+        )
+        if _is_complete_inline_code_replacement(text, candidate):
+            replacements.append((atom.start("content"), atom.end("content")))
+
+    for start, end in reversed(replacements):
+        text = text[:start] + _TARGET_CERTIFICATE_SUBJECT_NOTATION + text[end:]
+    return text
+
+
+def _postprocess_en_target_without_inline_notation(text: str) -> str:
+    """Apply the legacy EN postprocessors except their fuzzy notation rewrite."""
+    text = fix_cyrillic_homoglyphs_in_en(text)
+    text = fix_russian_angle_placeholders_in_en(text)
+    text = decode_percent_encoded_protect_markers(text)
+    text = fix_image_bang_spacing(text)
+    text = fix_no_space_in_emphasis(text)
+    return fix_blanks_around_fences(text)
 
 
 def render_with_translations(
@@ -171,7 +252,7 @@ def finalize_en_target_result(
             out_warnings=out_warnings,
         )
     text = localize_links_in_text(text, target_lang="en")
-    text = postprocess_en_target_markdown(text)
+    text = _postprocess_en_target_without_inline_notation(text)
     text = repair_generated_markdown_layout(layout_source_text or normalized_source_text, text)
     protected = protected_source_text or normalized_source_text
     link_result = restore_md_link_hrefs(
@@ -181,7 +262,7 @@ def finalize_en_target_result(
         target_baseline=target_baseline_text,
     )
     text = link_result.text
-    text = _restore_cyrillic_source_code_atoms(text, protected)
+    text = _localize_certificate_subject_notation(text)
     if (
         docs_text_reader is not None
         and source_lang.lower() in {"ru", "russian"}

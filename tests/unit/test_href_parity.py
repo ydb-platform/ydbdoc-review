@@ -690,13 +690,15 @@ def test_href_parity_rejects_localized_path_when_en_target_is_unreachable():
     )
 
 
-def test_finalize_restores_exact_source_links_and_cyrillic_code_atoms():
+def test_finalize_restores_exact_source_links_and_keeps_localized_certificate_atom():
     from ydbdoc_review.harness.render import finalize_en_target
 
     source = "See [SID](authorization.md#sid) in `Имя=Значение,...@<domain>` notation.\n"
     translated = "See [SID](authorization.md#user) in `Name=Value,...@<domain>` notation.\n"
 
-    assert finalize_en_target(translated, source) == source
+    assert finalize_en_target(translated, source) == (
+        "See [SID](authorization.md#sid) in `Name=Value,...@<domain>` notation.\n"
+    )
 
 
 def test_finalize_does_not_restore_unreachable_source_href():
@@ -724,13 +726,13 @@ def test_finalize_does_not_restore_reordered_plain_code_atoms():
     assert finalize_en_target(translated, source) == translated
 
 
-def test_finalize_restores_unique_structured_atom_despite_count_drift():
+def test_finalize_keeps_localized_certificate_atom_despite_count_drift():
     from ydbdoc_review.harness.render import finalize_en_target
 
     source = "Задайте `Имя=Значение,...@<domain>` и `режим`.\n"
     translated = "Set `Name=Value,...@<domain>`.\n"
 
-    assert finalize_en_target(translated, source) == ("Set `Имя=Значение,...@<domain>`.\n")
+    assert finalize_en_target(translated, source) == ("Set `Name=Value,...@<domain>`.\n")
 
 
 def test_finalize_does_not_match_unrelated_assignment_atoms():

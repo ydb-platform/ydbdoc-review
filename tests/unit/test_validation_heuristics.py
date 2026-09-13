@@ -257,9 +257,11 @@ def test_cyrillic_in_explicit_anchor_is_not_untranslated_prose():
     assert check_cyrillic_in_en(text, target_lang="en") == []
 
 
-def test_cyrillic_in_protected_certificate_notation_is_not_prose():
+def test_cyrillic_in_unlocalized_certificate_notation_is_blocking():
     text = "Use the exact `Имя=Значение,...@<domain>` notation.\n"
-    assert check_cyrillic_in_en(text, target_lang="en") == []
+    messages = check_cyrillic_in_en(text, target_lang="english")
+    assert messages
+    assert all(_classify_heuristic(message) == "blocking" for message in messages)
 
 
 def test_fence_parity_mismatch():
