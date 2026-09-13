@@ -52,15 +52,17 @@ def _translate_json(segments, mapping: dict[str, str]) -> str:
 def test_profiles_translate_only_verify_has_qa():
     translate_names = [s.name for s in TRANSLATE_PROFILE.steps]
     verify_names = [s.name for s in VERIFY_PROFILE.steps]
-    assert translate_names == ["parse", "translate"]
-    assert verify_names[0] == "parse"
-    assert verify_names[1] == "load_target"
-    assert verify_names.count("finalize_en") == 2
-    assert verify_names.index("finalize_en") < verify_names.index("critic_loop")
-    assert verify_names.index("finalize_en") < verify_names.index("heuristics")
-    assert verify_names.index("heuristics") < verify_names.index("verdict")
-    assert verify_names.index("verdict") < verify_names.index("report_artifacts")
-    shared_qa = [
+    assert translate_names == [
+        "parse",
+        "translate",
+        "finalize_en",
+        "heuristics",
+        "verdict",
+        "report_artifacts",
+    ]
+    assert verify_names == [
+        "parse",
+        "load_target",
         "round_trip",
         "finalize_en",
         "critic_loop",
@@ -69,11 +71,18 @@ def test_profiles_translate_only_verify_has_qa():
         "verdict",
         "report_artifacts",
     ]
-    assert verify_names[2:] == shared_qa
     with_qa_names = [s.name for s in TRANSLATE_WITH_QA_PROFILE.steps]
-    assert with_qa_names[:2] == ["parse", "translate"]
-    assert "critic_feedback_retry" in with_qa_names
-    assert "finalize_en" not in with_qa_names
+    assert with_qa_names == [
+        "parse",
+        "translate",
+        "round_trip",
+        "critic_loop",
+        "critic_feedback_retry",
+        "finalize_en",
+        "heuristics",
+        "verdict",
+        "report_artifacts",
+    ]
 
 
 def test_verify_profile_translates_yql_trailing_cyrillic_comments():

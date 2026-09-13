@@ -2,7 +2,9 @@
 
 ``doc_translate`` uses ``TRANSLATE_WITH_QA_PROFILE`` (translate + inline QA).
 ``doc_verify`` uses ``VERIFY_PROFILE`` (load EN + critic/heuristics/verdict).
-``TRANSLATE_PROFILE`` remains the single-file translate-only profile.
+``TRANSLATE_PROFILE`` is the single-file profile without a critic.
+Every profile finishes with deterministic finalization, heuristics, verdict, and
+report artifacts. Only the translate QA and verify profiles call a critic.
 """
 
 from __future__ import annotations
@@ -23,18 +25,11 @@ from ydbdoc_review.harness.steps import (
     VerdictStep,
 )
 
-_QA_TAIL: tuple[HarnessStep, ...] = (
-    RoundTripStep(),
-    CriticLoopStep(),
-    HeuristicsStep(),
-    VerdictStep(),
-    ReportArtifactsStep(),
-)
-
 _TRANSLATE_QA_TAIL: tuple[HarnessStep, ...] = (
     RoundTripStep(),
     CriticLoopStep(),
     CriticFeedbackRetryStep(),
+    FinalizeEnStep(),
     HeuristicsStep(),
     VerdictStep(),
     ReportArtifactsStep(),
@@ -65,7 +60,14 @@ class HarnessProfile:
 
 TRANSLATE_PROFILE = HarnessProfile(
     name="translate",
-    steps=(ParseStep(), TranslateStep()),
+    steps=(
+        ParseStep(),
+        TranslateStep(),
+        FinalizeEnStep(),
+        HeuristicsStep(),
+        VerdictStep(),
+        ReportArtifactsStep(),
+    ),
 )
 
 TRANSLATE_WITH_QA_PROFILE = HarnessProfile(

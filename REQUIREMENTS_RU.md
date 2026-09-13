@@ -83,6 +83,17 @@ scope planner. Обычная ссылка не является таким до
 детерминированно. До включения исполнения в Task 7 `doc_translate` продолжает
 полный проход и не применяет coverage plan.
 
+**R-GL-4c** — отсутствие переводимых AST-сегментов отключает только вызовы
+модели перевода и критика, но не завершает файловый pipeline. Для
+protected-only, include-only, пустого и ASCII-only файла обязательны
+детерминированные finalization, эвристики, вычисление verdict и report artifacts.
+Остаточная кириллица, утёкший protect-placeholder, повреждённые fences и
+отсутствующая EN-цель include остаются блокирующими. `FileRunState.stopped_early`
+служит только диагностикой отсутствия model-translation и не означает успешную
+валидацию. Точный пустой `existing_target_text` в verify не заменяется RU
+исходником. No-segment alignment mismatch сохраняется как blocker и не запускает
+model realignment.
+
 **R-GL-4b** — пакеты перевода сегментов: non-overlapping, structure-aware, с учётом лимита JSON-ответа.
 
 1. Запрещены overlapping batches, sliding window, merge пересечений.

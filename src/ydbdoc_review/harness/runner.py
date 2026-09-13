@@ -25,8 +25,6 @@ class FileHarness:
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> FileTranslationResult:
         for step in self._profile.steps:
-            if state.stopped_early:
-                break
             logger.info(
                 "file step start profile=%s step=%s file=%s",
                 self._profile.name,
@@ -52,11 +50,7 @@ class FileHarness:
             file_path=state.file_path,
             final_text=state.translated_text,
             segments_count=len(state.segments),
-            verdict=(
-                "blocked"
-                if state.link_contract_issues
-                else (state.verdict if not state.stopped_early else "ok")
-            ),
+            verdict="blocked" if state.link_contract_issues else state.verdict,
             prompt_version=ctx.prompt_version,
             critic_initial=state.critic_initial,
             critic_applied=state.critic_applied,

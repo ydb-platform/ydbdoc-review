@@ -536,7 +536,8 @@ def test_translate_file_finalizes_fence_comments_via_llm():
     )
     critic_raw = json.dumps({"verdict": "ok", "issues": []})
 
-    client = _mock_client([translate_raw, comment_raw, critic_raw])
+    # The profile's final pass restores source fences and replays comment translation.
+    client = _mock_client([translate_raw, comment_raw, critic_raw, comment_raw])
     result = translate_file(
         source,
         client,
@@ -548,6 +549,9 @@ def test_translate_file_finalizes_fence_comments_via_llm():
     assert "Set up the log provider" in result.final_text
     assert "Настраиваем" not in result.final_text
     assert not any(w.startswith("cyrillic_in_fence:") for w in result.heuristic_warnings)
+    calls = client._client.chat.completions.create.call_args_list
+    assert len(calls) == 4
+    assert calls[1].kwargs["messages"] == calls[-1].kwargs["messages"]
 
 
 def test_fenced_code_excluded_from_segments_only_prose_translated():
@@ -598,7 +602,7 @@ def test_translate_pipeline_prose_then_multiple_fence_comments():
         ensure_ascii=False,
     )
 
-    client = _mock_client([translate_raw, comment_raw])
+    client = _mock_client([translate_raw, comment_raw, comment_raw])
     result = translate_file(
         MULTI_COMMENT_GO_SOURCE,
         client,
@@ -616,6 +620,9 @@ def test_translate_pipeline_prose_then_multiple_fence_comments():
     assert "Аварийный" not in result.final_text
     assert check_cyrillic_in_en_fence_comments(result.final_text, target_lang="en") == []
     assert check_fence_body_copy(MULTI_COMMENT_GO_SOURCE, result.final_text) == []
+    calls = client._client.chat.completions.create.call_args_list
+    assert len(calls) == 3
+    assert calls[1].kwargs["messages"] == calls[-1].kwargs["messages"]
 
 
 def test_finalize_en_copies_code_then_translates_each_comment_line():
