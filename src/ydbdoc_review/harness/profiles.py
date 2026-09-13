@@ -15,6 +15,7 @@ from ydbdoc_review.harness.steps import (
     CriticFeedbackRetryStep,
     CriticLoopStep,
     FinalizeEnStep,
+    FinalLanguageStep,
     HarnessStep,
     HeuristicsStep,
     LoadTargetStep,
@@ -31,6 +32,7 @@ _TRANSLATE_QA_TAIL: tuple[HarnessStep, ...] = (
     CriticFeedbackRetryStep(),
     FinalizeEnStep(),
     HeuristicsStep(),
+    FinalLanguageStep(),
     VerdictStep(),
     ReportArtifactsStep(),
 )
@@ -45,6 +47,7 @@ _VERIFY_QA_TAIL: tuple[HarnessStep, ...] = (
     # main after auto-fix — not the dirty incoming tip.
     FinalizeEnStep(),
     HeuristicsStep(),
+    FinalLanguageStep(),
     VerdictStep(),
     ReportArtifactsStep(),
 )
@@ -65,6 +68,7 @@ TRANSLATE_PROFILE = HarnessProfile(
         TranslateStep(),
         FinalizeEnStep(),
         HeuristicsStep(),
+        FinalLanguageStep(),
         VerdictStep(),
         ReportArtifactsStep(),
     ),

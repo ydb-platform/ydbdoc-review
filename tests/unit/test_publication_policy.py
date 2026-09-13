@@ -663,6 +663,31 @@ def _run_top_level(
     return job, gh, prepare, commit, push, finish
 
 
+@pytest.mark.parametrize("path", ["ydb/docs/en/a.md", "ydb/docs/en/core/toc_p.yaml"])
+def test_gate_uses_disk_overlay_after_late_repair_not_stale_green_result(
+    publication_repo: str, path: str,
+):
+    result = _pair_result()
+    injected = "<!-- Русское после ремонта -->\n"
+
+    def late_repair(*_args, **_kwargs):
+        Path(publication_repo, path).write_text(injected, encoding="utf-8")
+        return [path]
+
+    job, gh, prepare, commit, push, _ = _run_top_level(
+        publication_repo, result, reconcile_side_effect=late_repair,
+    )
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    blockers = [b for b in job.pr_result.final_tree_blockers if b.code == "en_language"]
+    assert blockers[0].path == path
+    assert blockers[0].artifact_sha256 == hashlib.sha256(injected.encode()).hexdigest()
+    assert result.pair_results[0].target_text == "Translated.\n"
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
 def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     result.pair_results[0].source_text = "См. [missing](missing.md).\n"
@@ -1632,7 +1657,15 @@ def test_soft_keep_post_reconciliation_hash_uses_exact_published_bytes(
     )
     assert blocker.artifact_sha256 == hashlib.sha256(repaired.encode()).hexdigest()
     assert blocker.artifact_sha256 != hashlib.sha256(original.encode()).hexdigest()
-    parsed = parse_final_tree_blocker_manifest(gh.create_pull.call_args.kwargs["body"])
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    gh.create_pull.assert_not_called()
+    assert any(
+        m.startswith("report_checkout_mismatch:")
+        for m in job.pr_result.pair_results[0].file_result.heuristic_blocking
+    )
+    parsed = parse_final_tree_blocker_manifest(
+        build_translation_pr_body(7, "o/r", publication_result=job.pr_result)
+    )
     assert parsed == [blocker]
 
 
@@ -2703,7 +2736,7 @@ def test_standalone_verify_rescans_durable_no_pair_blocker_outside_source_scope(
         ),
         patch(
             "ydbdoc_review.github.workflow._run_verify_pairs",
-            return_value=_pair_result(),
+            return_value=_pair_result(target_text="Hello.\n"),
         ),
         patch(
             "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
@@ -2805,7 +2838,7 @@ def test_standalone_verify_keeps_deleted_durable_impact_path_as_tombstone(
         side_effect=api_changes,
     ), patch(
         "ydbdoc_review.github.workflow._run_verify_pairs",
-        return_value=_pair_result(),
+        return_value=_pair_result(target_text="Hello.\n"),
     ), patch(
         "ydbdoc_review.github.workflow.apply_orphan_toc_page_checks",
         return_value=[],
@@ -2841,6 +2874,7 @@ def _run_standalone_soft_keep_verify(
     no_commit: bool = False,
     ready_transition_after_push: bool = False,
     draft_conversion_fail_on_call: int | None = None,
+    manual_change_committed: bool = False,
 ):
     path = "ydb/docs/en/core/security/authentication.md"
     ru_path = path.replace("/en/", "/ru/")
@@ -2861,6 +2895,11 @@ def _run_standalone_soft_keep_verify(
     )
     checkout_sha = _repo_head_sha(publication_repo)
     Path(publication_repo, path).write_text(current_text, encoding="utf-8")
+    if manual_change_committed:
+        subprocess.run(["git", "add", path], cwd=publication_repo, check=True)
+        subprocess.run(["git", "commit", "-m", "manual EN correction"],
+                       cwd=publication_repo, check=True, capture_output=True)
+        checkout_sha = _repo_head_sha(publication_repo)
     verify_candidate_sha: str | None = None
     if not no_commit:
         subprocess.run(["git", "add", path], cwd=publication_repo, check=True)
@@ -3189,6 +3228,7 @@ def test_standalone_verify_clears_soft_keep_after_changed_green_pair(
         publication_repo,
         current_text=repaired,
         verify_result=_verify_pair_result(path, repaired),
+        manual_change_committed=True,
     )
 
     assert job.pr_result.final_tree_blockers == []
@@ -3329,7 +3369,7 @@ def test_verify_critic_fix_recursion_preserves_inherited_no_pair_blocker(
             "ydbdoc_review.github.workflow._run_verify_pairs",
             side_effect=[
                 _pair_result(target_text="Critic fix one.\n"),
-                _pair_result(target_text="Critic fix two.\n"),
+                _pair_result(target_text="Hello.\n"),
             ],
         ),
         patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"),

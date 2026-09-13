@@ -418,6 +418,8 @@ class ClassifiedHeuristics:
 
 
 def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]:
+    if message.startswith("en_language:"):
+        return "blocking"
     if message.startswith("ru_source"):
         return "info"
     if message.startswith("verify_realign:"):

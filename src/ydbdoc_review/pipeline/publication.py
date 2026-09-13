@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from ydbdoc_review.pipeline.types import PRTranslationResult, PublicationImpact
 from ydbdoc_review.validation.fence_integrity import check_absolute_paths_in_fences
+from ydbdoc_review.validation.final_language import check_final_en_language
 from ydbdoc_review.validation.heuristics import (
     check_broken_inline_code_markup,
     check_fence_parity,
@@ -152,6 +153,10 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
     for run in result.pair_results:
         if run.validation_issues:
             return True
+        if not run.deleted and run.target_text is not None and check_final_en_language(
+            run.target_text, target_lang=run.plan.target_lang
+        ):
+            return True
         file_result = run.file_result
         if file_result is None:
             continue
@@ -204,11 +209,18 @@ def _is_unsafe(result: PRTranslationResult) -> bool:
                 return True
             if check_broken_inline_code_markup(run.target_text, target_lang="en"):
                 return True
-    # Navigation QA findings are addressable RED, except invalid YAML, which
-    # leaves the navigation artifact unsafe to publish.
+    # Navigation QA findings are addressable RED. Invalid YAML, residual
+    # Cyrillic and evidence for different candidate bytes remain unsafe.
     return any(
-        nav.verdict == "blocked"
-        and any(w.split(":", 1)[0] == "invalid_yaml" for w in nav.warnings)
+        (
+            nav.verdict == "blocked"
+            and any(w.split(":", 1)[0] == "invalid_yaml" for w in nav.warnings)
+        )
+        or any(
+            message.startswith(("en_language:", "report_checkout_mismatch:"))
+            for message in [*nav.warnings, *nav.heuristic_blocking]
+        )
+        or (nav.target_text is not None and bool(check_final_en_language(nav.target_text)))
         for nav in result.navigation_results
     )
 
@@ -226,7 +238,8 @@ def classify_publication_blockers(
     repairable = repairable or _has_unrestored_marker(result)
     repairable = repairable or _has_critic_execution_failure(result)
     repairable = repairable or any(
-        navigation.warnings for navigation in result.navigation_results
+        navigation.warnings or navigation.heuristic_blocking
+        for navigation in result.navigation_results
     )
     return ClassifiedPublicationBlockers(
         incomplete=incomplete,

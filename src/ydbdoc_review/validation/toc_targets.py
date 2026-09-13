@@ -407,6 +407,9 @@ def apply_toc_target_checks(
         if not msgs:
             continue
         nav.warnings.extend(msgs)
+        nav.heuristic_blocking.extend(
+            message for message in msgs if message not in nav.heuristic_blocking
+        )
         nav.verdict = bump_verdict_for_blocking_heuristics(nav.verdict, msgs)
 
 

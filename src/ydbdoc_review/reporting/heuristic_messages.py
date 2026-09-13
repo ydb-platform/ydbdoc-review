@@ -66,6 +66,8 @@ class HeuristicReviewerDetail:
 
 def heuristic_location_label(message: str) -> str:
     """Short location column for a heuristic line in the PR report."""
+    if message.startswith("en_language:"):
+        return message.split(":", 2)[1].strip()
     if message.startswith("cyrillic_in_fence:"):
         return "комментарии в коде"
     if message.startswith("cyrillic_in_code_fence:") or message.startswith(
@@ -278,6 +280,13 @@ def humanize_heuristic(message: str) -> str:
 
 
 def _humanize_heuristic_problem(message: str) -> str:
+    if message.startswith("en_language:"):
+        return (
+            "Финальный EN-файл содержит кириллицу: "
+            f"{message.split(':', 1)[1].strip()}. "
+            "Исправьте язык вручную в указанной строке и повторите doc_verify. "
+            "Публикация заблокирована."
+        )
     if message.startswith("unrestored_placeholder:"):
         detail = message.split(":", 1)[1].strip()
         return (
