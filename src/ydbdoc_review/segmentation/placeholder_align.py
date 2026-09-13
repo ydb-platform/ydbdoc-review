@@ -61,6 +61,10 @@ _SQL_KEYWORD_ATOMS = frozenset({"null", "not null"})
 
 
 def _code_atom_key(content: str) -> tuple:
+    # Tool-localized certificate notation names the same slot in either language.
+    # Only the comparison key changes; normalized segments retain actual nodes.
+    if content == "Имя=Значение,...@<domain>":
+        return ("code", "Name=Value,...@<domain>")
     lowered = content.strip().lower()
     if lowered in _SQL_KEYWORD_ATOMS:
         return ("code", lowered)

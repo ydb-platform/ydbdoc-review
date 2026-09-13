@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from ydbdoc_review.ops.feedback_ctx import continue_feedback_scope
+from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.segmentation.chunker import Batch
+from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.translation.glossary import load_glossary
 from ydbdoc_review.translation.prompts import (
@@ -31,6 +35,36 @@ def _segment(seg_id: str, text: str) -> Segment:
         placeholders=[],
         ast_path=[0],
     )
+
+
+@pytest.mark.parametrize("template", [
+    "system_common", "system_glossary", "critic_batch", "critic_glossary_batch",
+    "verify_batch", "critic", "verify",
+])
+def test_every_review_prompt_has_effective_target_atom_contract(template):
+    text = " ".join(load_template(template).split())
+    assert "Protected markers and syntax must remain unchanged." in text
+    assert "Protection is not evidence that their human-language payload is translated." in text
+    assert "Inspect target_atom_map when provided; otherwise atom_map describes the effective target atoms." in text
+    assert "Residual Cyrillic in a target code atom is a blocked protected_atom_language issue." in text
+    assert "Use suggested_text: null when a safe fix would require changing an opaque atom." in text
+    assert "Never substitute, remove, or renumber a marker to repair its payload." in text
+
+
+@pytest.mark.parametrize("verify", [False, True])
+def test_full_document_review_index_includes_source_and_target_atom_maps(verify):
+    source = "Use `Имя=Значение,...@<domain>`.\n"
+    target = "Use `Name=Value,...@<domain>`.\n"
+    segments = extract_segments(parse_markdown(source))
+    kwargs = {"prior_issues": []} if verify else {}
+    messages = (build_verify_messages if verify else build_critic_messages)(
+        source_text=source, translated_text=target, segments=segments,
+        glossary=load_glossary(), file_path="ydb/docs/ru/core/a.md", **kwargs,
+    )
+    user = messages[1]["content"]
+    assert '"atom_map"' in user and '"target_atom_map"' in user
+    assert 'code:Имя=Значение,...@<domain>' in user
+    assert 'code:Name=Value,...@<domain>' in user
 
 
 def test_load_template_v1():

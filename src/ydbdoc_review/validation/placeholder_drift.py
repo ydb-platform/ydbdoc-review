@@ -80,7 +80,11 @@ def exclude_skipped_issues(
     if not skipped:
         return issues
     skipped_keys = {critic_issue_dedupe_key(i) for i in skipped}
-    return [i for i in issues if critic_issue_dedupe_key(i) not in skipped_keys]
+    return [
+        i for i in issues
+        if i.category in {"protected_atom_language", "protected_atom_alignment"}
+        or critic_issue_dedupe_key(i) not in skipped_keys
+    ]
 
 
 def is_spurious_variable_placeholder_issue(
@@ -374,6 +378,9 @@ def drop_spurious_placeholder_issues(
         )
     out: list[CriticIssueOut] = []
     for issue in issues:
+        if issue.category in {"protected_atom_language", "protected_atom_alignment"}:
+            out.append(issue)
+            continue
         seg = by_id.get(issue.segment_id) if issue.segment_id else None
         trans = translations.get(issue.segment_id) if issue.segment_id else None
         if (

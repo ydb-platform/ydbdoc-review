@@ -36,6 +36,21 @@ def _segment(seg_id: str, text: str, *, placeholders: list | None = None) -> Seg
     )
 
 
+def test_identical_marker_text_cannot_clear_target_atom_language_evidence():
+    segment = _segment("s1", "Use ⟦C1⟧.")
+    issue = CriticIssueOut(
+        segment_id="s1", severity="blocked", category="protected_atom_language",
+        comment="Untranslated human-language content in protected code atom ⟦C1⟧",
+        suggested_text=None,
+    )
+    response = CriticResponse(verdict="blocked", issues=[issue])
+    filtered = filter_critic_response(
+        response, [segment], {"s1": segment.text}, skipped=[issue],
+    )
+    assert filtered.verdict == "blocked"
+    assert filtered.issues == [issue]
+
+
 def test_variable_placeholder_drift_only_allows_one_missing_v():
     ru = (
         "⟦V1⟧ text ⟦V2⟧ more [link](⟦U1⟧) ⟦V3⟧ topics ⟦V4⟧ end"

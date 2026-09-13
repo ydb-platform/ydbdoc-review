@@ -146,12 +146,19 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         target_lang=ctx.target_lang,
         prompt_version=ctx.prompt_version,
         max_chars=ctx.batch_chars,
+        translated_text=state.translated_text,
     )
     if any(issue.category == "critic_model_refusal" for issue in state.critic_initial.issues):
         state.finalize_warnings.append(
             "critic_model_refusal: model declined review; heuristics only on verify"
         )
-        state.critic_unresolved = CriticResponse(verdict="ok", issues=[])
+        atom_issues = [
+            issue for issue in state.critic_initial.issues
+            if issue.category in {"protected_atom_language", "protected_atom_alignment"}
+        ]
+        state.critic_unresolved = CriticResponse(
+            verdict="blocked" if atom_issues else "ok", issues=atom_issues,
+        )
         return
     if any(issue.category == "critic_execution_failed" for issue in state.critic_initial.issues):
         state.critic_unresolved = state.critic_initial
@@ -228,6 +235,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         target_lang=ctx.target_lang,
         prompt_version=ctx.prompt_version,
         max_chars=ctx.batch_chars,
+        translated_text=state.translated_text,
     )
     state.critic_unresolved = filter_critic_response(
         state.critic_unresolved,
@@ -313,6 +321,7 @@ def run_critic_loop(state: FileRunState, ctx: HarnessContext) -> None:
         target_lang=ctx.target_lang,
         prompt_version=ctx.prompt_version,
         max_chars=ctx.batch_chars,
+        translated_text=state.translated_text,
     )
     state.critic_unresolved = filter_critic_response(
         state.critic_unresolved,
