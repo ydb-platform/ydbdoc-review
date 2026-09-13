@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -34,7 +36,7 @@ _MISSING_CONTENT_ISSUE = re.compile(
 )
 _TRUNCATED_SUGGESTION = re.compile(r"(?:…|\.\.\.)$")
 
-_MAX_CRITIC_ATTEMPTS = 3
+_MAX_CRITIC_SPLIT_DEPTH = 12
 _VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
 
 # Safety refusals leave language/style review incomplete (§6.264).
@@ -132,18 +134,28 @@ def _fallback_critic_response(*, reason: str, preview: str = "") -> CriticRespon
     )
 
 
-def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
+def _heuristic_only_critic_response(
+    *,
+    preview: str,
+    file_path: str = "",
+    batch_label: str = "",
+    segment_ids: tuple[str, ...] = (),
+) -> CriticResponse:
     """Fail closed when every critic attempt refused semantic review."""
     safe = (preview or "").replace("\n", " ").strip()[:200]
     logger.warning(
         "Critic model refusal; manual review required (preview=%r)",
         safe[:120],
     )
+    context = (
+        f" File: {file_path or '<file>'}; batch: {batch_label or '<batch>'}; "
+        f"segments: {', '.join(segment_ids) or '<unknown>'}."
+    )
     comment = (
         "Model refused critic review; language/style review incomplete; manual review required. "
-        f"Preview: {safe[:160]}"
+        f"Preview: {safe[:160]}.{context}"
     )
-    return CriticResponse(
+    response = CriticResponse(
         verdict="blocked",
         issues=[
             CriticIssueOut(
@@ -153,6 +165,37 @@ def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
             )
         ],
     )
+    response._review_incomplete = True
+    return response
+
+
+@dataclass(frozen=True)
+class _CriticFetchResult:
+    response: CriticResponse
+    refused: bool = False
+    refusal_model: str | None = None
+    refusal_preview: str = ""
+
+
+def _model_policy_family(model: str) -> str:
+    """Return a stable provider-policy family from a configured model slug."""
+    slug = model.rsplit("/", 1)[-1].casefold()
+    match = re.match(r"[a-z]+", slug)
+    return match.group(0) if match else slug
+
+
+def _dedupe_models(models: list[str]) -> list[str]:
+    return list(dict.fromkeys(model for model in models if model))
+
+
+def _messages_sha256(messages: list) -> str:
+    serialized = json.dumps(
+        messages,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
 
 
 def _fetch_critic_response(
@@ -161,26 +204,32 @@ def _fetch_critic_response(
     *,
     pass_label: str,
     max_tokens: int | None = None,
-) -> CriticResponse:
-    """Call critic with JSON repair and a model fallback before failing closed."""
+    model_chain: list[str] | None = None,
+    stop_on_refusal: bool = True,
+    file_path: str = "",
+    batch_label: str = "",
+    segment_ids: tuple[str, ...] = (),
+) -> _CriticFetchResult:
+    """Call configured critic models, separating JSON repair from refusals."""
     last_exc: LLMParseError | None = None
     original_messages = list(messages)
-    retry_messages = original_messages
-    model_chain = client.model_chain_for_role("critic")
+    models = _dedupe_models(model_chain or client.model_chain_for_role("critic"))
     last_content = ""
     last_refusal = ""
-    for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
+    refused_families: set[str] = set()
+    attempt = 0
+    for model in models:
+        family = _model_policy_family(model)
+        if family in refused_families:
+            continue
+        attempt += 1
         content = ""
-        # First retry asks the primary model to repair its malformed response.
-        # The final retry uses the configured fallback with the original prompt,
-        # avoiding a deterministic loop on the same model and payload.
-        model = model_chain[0]
-        if attempt == _MAX_CRITIC_ATTEMPTS and len(model_chain) > 1:
-            model = model_chain[1]
-            retry_messages = original_messages
+        request_messages = original_messages
+        request_hash = _messages_sha256(request_messages)
         try:
             result = client.chat(
-                retry_messages,
+                request_messages,
+                role="critic",
                 model=model,
                 max_tokens=max_tokens,
             )
@@ -191,51 +240,147 @@ def _fetch_critic_response(
             if is_model_refusal_text(content):
                 last_refusal = content
                 last_exc = LLMParseError("Critic model refusal")
-                retry_messages = original_messages
+                refused_families.add(family)
                 logger.warning(
-                    "%s attempt %s/%s refused semantic review; model=%s",
+                    "%s refused semantic review; file=%s batch=%s leaf_ids=%s "
+                    "attempt=%s model=%s messages_sha256=%s outcome=refusal",
                     pass_label,
+                    file_path or "<file>",
+                    batch_label or "<batch>",
+                    ",".join(segment_ids),
                     attempt,
-                    _MAX_CRITIC_ATTEMPTS,
                     model,
+                    request_hash,
                 )
+                if stop_on_refusal:
+                    return _CriticFetchResult(
+                        response=_heuristic_only_critic_response(
+                            preview=content,
+                            file_path=file_path,
+                            batch_label=batch_label,
+                            segment_ids=segment_ids,
+                        ),
+                        refused=True,
+                        refusal_model=model,
+                        refusal_preview=content,
+                    )
                 continue
-            return parse_critic_response(content)
+            parsed = parse_critic_response(content)
+            logger.info(
+                "%s semantic review complete; file=%s batch=%s leaf_ids=%s "
+                "attempt=%s model=%s messages_sha256=%s outcome=parsed",
+                pass_label,
+                file_path or "<file>",
+                batch_label or "<batch>",
+                ",".join(segment_ids),
+                attempt,
+                model,
+                request_hash,
+            )
+            return _CriticFetchResult(response=parsed)
         except LLMParseError as exc:
             last_exc = exc
             preview = content[:200]
             logger.warning(
-                "%s parse attempt %s/%s failed: %s; model=%s "
-                "response_chars=%s response_preview=%r",
+                "%s parse failed: %s; file=%s batch=%s leaf_ids=%s attempt=%s "
+                "model=%s messages_sha256=%s response_chars=%s response_preview=%r",
                 pass_label,
-                attempt,
-                _MAX_CRITIC_ATTEMPTS,
                 exc,
+                file_path or "<file>",
+                batch_label or "<batch>",
+                ",".join(segment_ids),
+                attempt,
                 model,
+                request_hash,
                 len(content),
                 preview,
             )
-            if attempt == 1 and content:
-                retry_messages = [
-                    *original_messages,
-                    {
-                        "role": "assistant",
-                        "content": content,
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your previous response was not valid JSON. Return the same "
-                            "critic result as one valid JSON object matching the requested "
-                            "schema. Return JSON only, without Markdown fences or prose."
-                        ),
-                    },
-                ]
+            if not content:
+                continue
+            repair_messages = [
+                *original_messages,
+                {"role": "assistant", "content": content},
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous response was not valid JSON. Return the same "
+                        "critic result as one valid JSON object matching the requested "
+                        "schema. Return JSON only, without Markdown fences or prose."
+                    ),
+                },
+            ]
+            repair_hash = _messages_sha256(repair_messages)
+            repair_content = ""
+            try:
+                repair = client.chat(
+                    repair_messages,
+                    role="critic",
+                    model=model,
+                    max_tokens=max_tokens,
+                )
+                repair_content = (repair.content or "").strip()
+                last_content = repair_content
+                if not repair_content:
+                    raise LLMParseError("Empty LLM response")
+                if is_model_refusal_text(repair_content):
+                    last_refusal = repair_content
+                    last_exc = LLMParseError("Critic model refusal")
+                    refused_families.add(family)
+                    if stop_on_refusal:
+                        return _CriticFetchResult(
+                            response=_heuristic_only_critic_response(
+                                preview=repair_content,
+                                file_path=file_path,
+                                batch_label=batch_label,
+                                segment_ids=segment_ids,
+                            ),
+                            refused=True,
+                            refusal_model=model,
+                            refusal_preview=repair_content,
+                        )
+                    continue
+                parsed = parse_critic_response(repair_content)
+                logger.info(
+                    "%s JSON repair complete; file=%s batch=%s leaf_ids=%s "
+                    "attempt=%s model=%s messages_sha256=%s outcome=parsed",
+                    pass_label,
+                    file_path or "<file>",
+                    batch_label or "<batch>",
+                    ",".join(segment_ids),
+                    attempt,
+                    model,
+                    repair_hash,
+                )
+                return _CriticFetchResult(response=parsed)
+            except LLMParseError as repair_exc:
+                last_exc = repair_exc
+                logger.warning(
+                    "%s JSON repair failed; file=%s batch=%s leaf_ids=%s "
+                    "attempt=%s model=%s messages_sha256=%s outcome=parse_failure",
+                    pass_label,
+                    file_path or "<file>",
+                    batch_label or "<batch>",
+                    ",".join(segment_ids),
+                    attempt,
+                    model,
+                    repair_hash,
+                )
     if last_refusal:
-        return _heuristic_only_critic_response(preview=last_refusal)
-    return _fallback_critic_response(
-        reason=str(last_exc or "unknown parse error"),
-        preview=last_content,
+        return _CriticFetchResult(
+            response=_heuristic_only_critic_response(
+                preview=last_refusal,
+                file_path=file_path,
+                batch_label=batch_label,
+                segment_ids=segment_ids,
+            ),
+            refused=True,
+            refusal_preview=last_refusal,
+        )
+    return _CriticFetchResult(
+        response=_fallback_critic_response(
+            reason=str(last_exc or "unknown parse error"),
+            preview=last_content,
+        )
     )
 
 
@@ -352,8 +497,9 @@ def _run_critic_batches(
     target_atom_maps: dict[str, dict[str, str]] | None = None,
 ) -> CriticResponse:
     batch_count = len(batches)
-    responses: list[CriticResponse] = []
-    for batch in batches:
+    model_chain = client.model_chain_for_role("critic")
+
+    def review_batch(batch: Batch, *, label: str, depth: int) -> CriticResponse:
         if prior_issues is None:
             messages = build_critic_batch_messages(
                 batch,
@@ -366,7 +512,6 @@ def _run_critic_batches(
                 version=prompt_version,
                 target_atom_maps=target_atom_maps,
             )
-            label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
         else:
             messages = build_verify_batch_messages(
                 batch,
@@ -384,53 +529,80 @@ def _run_critic_batches(
                 version=prompt_version,
                 target_atom_maps=target_atom_maps,
             )
-            label = f"{pass_label} batch {batch.index + 1}/{batch_count}"
-        response = _fetch_critic_response(
+        segment_ids = tuple(segment.id for segment in batch.segments)
+        fetched = _fetch_critic_response(
             client,
             messages,
             pass_label=label,
             max_tokens=max_tokens,
+            model_chain=model_chain,
+            stop_on_refusal=True,
+            file_path=file_path,
+            batch_label=f"{batch.index + 1}/{batch_count}",
+            segment_ids=segment_ids,
         )
-        # §6.234: empty JSON on a large batch → resplit once and retry halves.
-        if (
-            prior_issues is None
-            and _is_empty_critic_failure(response)
-            and len(batch.segments) > 1
-        ):
+
+        should_split = (
+            len(batch.segments) > 1
+            and depth < _MAX_CRITIC_SPLIT_DEPTH
+            and (fetched.refused or _is_empty_critic_failure(fetched.response))
+        )
+        if should_split:
             mid = max(1, len(batch.segments) // 2)
             split_batches = [
                 Batch(index=batch.index, segments=batch.segments[:mid]),
                 Batch(index=batch.index, segments=batch.segments[mid:]),
             ]
             logger.warning(
-                "%s empty response; retrying as %s + %s segment halves",
+                "%s incomplete semantic review; splitting at segment boundary as %s + %s",
                 label,
                 mid,
                 len(batch.segments) - mid,
             )
-            half_responses: list[CriticResponse] = []
-            for half_i, half in enumerate(split_batches, start=1):
-                half_messages = build_critic_batch_messages(
+            return merge_critic_responses([
+                review_batch(
                     half,
-                    translations,
-                    glossary,
+                    label=f"{label} split {half_i}/2",
+                    depth=depth + 1,
+                )
+                for half_i, half in enumerate(split_batches, start=1)
+            ])
+
+        if fetched.refused and fetched.refusal_model is not None:
+            refused_family = _model_policy_family(fetched.refusal_model)
+            alternate_chain = [
+                model
+                for model in model_chain
+                if _model_policy_family(model) != refused_family
+            ]
+            if alternate_chain:
+                logger.warning(
+                    "%s leaf refusal; trying configured independent critic families: %s",
+                    label,
+                    ", ".join(alternate_chain),
+                )
+                return _fetch_critic_response(
+                    client,
+                    messages,
+                    pass_label=f"{label} alternate",
+                    max_tokens=max_tokens,
+                    model_chain=alternate_chain,
+                    stop_on_refusal=False,
                     file_path=file_path,
-                    batch_count=batch_count,
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    version=prompt_version,
-                    target_atom_maps=target_atom_maps,
-                )
-                half_responses.append(
-                    _fetch_critic_response(
-                        client,
-                        half_messages,
-                        pass_label=f"{label} half {half_i}/2",
-                        max_tokens=max_tokens,
-                    )
-                )
-            response = merge_critic_responses(half_responses)
-        responses.append(response)
+                    batch_label=f"{batch.index + 1}/{batch_count}",
+                    segment_ids=segment_ids,
+                ).response
+        return fetched.response
+
+    responses: list[CriticResponse] = []
+    for batch in batches:
+        responses.append(
+            review_batch(
+                batch,
+                label=f"{pass_label} batch {batch.index + 1}/{batch_count}",
+                depth=0,
+            )
+        )
     return merge_critic_responses(responses)
 
 

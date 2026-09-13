@@ -351,9 +351,7 @@ def test_is_model_refusal_text_detects_yandexgpt_decline():
 
 def test_run_critic_model_refusal_retries_and_recovers_on_fallback():
     clean = json.dumps({"verdict": "ok", "issues": []})
-    client = _mock_client(
-        ["Я не могу обсуждать эту тему.", "Я не могу обсуждать эту тему.", clean]
-    )
+    client = _mock_client(["Я не могу обсуждать эту тему.", clean])
     seg = _segment("s1", "x")
     out = run_critic(
         client,
@@ -365,9 +363,9 @@ def test_run_critic_model_refusal_retries_and_recovers_on_fallback():
     assert out.verdict == "ok"
     assert out.issues == []
     calls = client._client.chat.completions.create.call_args_list
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert calls[0].kwargs["model"].endswith("/yandexgpt-5.1")
-    assert calls[2].kwargs["model"].endswith("/yandexgpt-5-lite")
+    assert calls[1].kwargs["model"].endswith("/qwen3.6-35b-a3b")
 
 
 def test_run_critic_model_refusal_exhaustion_is_blocking():
@@ -386,7 +384,7 @@ def test_run_critic_model_refusal_exhaustion_is_blocking():
     assert [(issue.category, issue.severity) for issue in out.issues] == [
         ("critic_model_refusal", "blocked")
     ]
-    assert client._client.chat.completions.create.call_count == 3
+    assert client._client.chat.completions.create.call_count == 2
 
 
 def test_run_critic_mixed_batches_cannot_mask_exhausted_refusal(monkeypatch):
@@ -427,7 +425,7 @@ def test_run_critic_production_shaped_refusals_stay_exact_and_blocked(monkeypatc
     responses: list[str] = []
     for index in range(14):
         responses.extend(
-            ["Я не могу обсуждать эту тему."] * 3
+            ["Я не могу обсуждать эту тему."] * 2
             if index in refusing_batches
             else [clean]
         )
@@ -447,7 +445,7 @@ def test_run_critic_production_shaped_refusals_stay_exact_and_blocked(monkeypatc
     assert len(refusals) == 3
     assert out.verdict == "blocked"
     assert all(issue.severity == "blocked" for issue in refusals)
-    assert client._client.chat.completions.create.call_count == 20
+    assert client._client.chat.completions.create.call_count == 17
     pair = DocPair(
         ru_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
         en_path="ydb/docs/en/core/reference/configuration/auth_config.md",
