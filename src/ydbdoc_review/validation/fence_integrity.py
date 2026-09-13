@@ -13,6 +13,11 @@ from ydbdoc_review.parsing.ast_types import (
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import render_markdown
+from ydbdoc_review.segmentation.mermaid import (
+    mermaid_labels,
+    mermaid_skeleton,
+    replace_mermaid_labels,
+)
 from ydbdoc_review.validation.homoglyphs import (
     fix_cyrillic_homoglyphs_in_en,
     fix_russian_angle_placeholders_in_en_fences,
@@ -73,13 +78,6 @@ _MERMAID_START = re.compile(
     r"^(?:sequenceDiagram|graph\s|flowchart\s|classDiagram|stateDiagram|erDiagram|gantt|pie\s)",
     re.IGNORECASE,
 )
-_MERMAID_ARROW = re.compile(r"(--x|->>|->|--)")
-# Collapse label tokens; keep arrows, punctuation, and mermaid keywords.
-_MERMAID_LABEL = re.compile(r"[A-Za-zА-Яа-яЁё0-9_]+")  # noqa: RUF001
-# Quoted node/subgraph labels: RU hyphens vs EN spaces must not differ
-# structurally («Дата-центр» → ``*-*`` vs «Data center» → ``* *``; #49578).
-_MERMAID_QUOTED_LABEL = re.compile(r"""\["(?:\\.|[^"\\])*"\]|\['(?:\\.|[^'\\])*'\]""")
-_MERMAID_BRACKET_LABEL = re.compile(r"\[[^\]\n]*\]")
 
 
 def _is_mermaid_fence(content: str) -> bool:
@@ -87,49 +85,20 @@ def _is_mermaid_fence(content: str) -> bool:
     return bool(_MERMAID_START.match(first))
 
 
-def _mermaid_structure_line(line: str) -> str:
-    """Normalize a mermaid line for structural compare (labels → ``*``)."""
-    stripped = line.strip()
-    if not stripped:
-        return ""
-    if _MERMAID_START.match(stripped):
-        return stripped.split()[0].lower()
-    # Whole quoted label → one token (word count / hyphens inside must not matter).
-    stripped = _MERMAID_QUOTED_LABEL.sub("[*]", stripped)
-    # Unquoted flowchart labels are prose too. Their length or word count must
-    # not turn a valid translation into a graph-structure mismatch.
-    stripped = _MERMAID_BRACKET_LABEL.sub("[*]", stripped)
-    if stripped.startswith("participant "):
-        rest = stripped[len("participant ") :]
-        if " as " in rest:
-            return "participant * as *"
-        return "participant *"
-    if stripped.startswith("Note over "):
-        colon = stripped.find(": ")
-        if colon >= 0:
-            header = _MERMAID_LABEL.sub("*", stripped[:colon])
-            return f"{header}: *"
-    if ": " in stripped and _MERMAID_ARROW.search(stripped):
-        prefix = stripped.split(": ", 1)[0]
-        return _MERMAID_LABEL.sub("*", prefix) + ": *"
-    return _MERMAID_LABEL.sub("*", stripped)
-
-
 def _fence_diff_is_mermaid_label_translation(
     source_content: str,
     target_content: str,
 ) -> bool:
-    """True when EN mermaid differs from RU only in participant/label text."""
-    if not _is_mermaid_fence(source_content):
+    """Accept only valid, supported diagrams with byte-identical syntax."""
+    if not mermaid_labels(source_content):
         return False
-    src_lines = source_content.strip().splitlines()
-    tgt_lines = target_content.strip().splitlines()
-    if len(src_lines) != len(tgt_lines) or not src_lines:
+    try:
+        if mermaid_skeleton(source_content) != mermaid_skeleton(target_content):
+            return False
+        replacements = {label.index: label.text for label in mermaid_labels(target_content)}
+        return replace_mermaid_labels(source_content, replacements) == target_content
+    except ValueError:
         return False
-    return all(
-        _mermaid_structure_line(sl) == _mermaid_structure_line(tl)
-        for sl, tl in zip(src_lines, tgt_lines, strict=True)
-    )
 
 
 def _fence_diff_is_comment_translation_only(
@@ -288,6 +257,10 @@ def fence_content_matches_source(
     fence_info: str = "",
 ) -> bool:
     """True when target fence body equals source, modulo allowed pipeline edits."""
+    if _fence_lang(fence_info) == "mermaid" or _is_mermaid_fence(source_content):
+        return source_content == target_content or _fence_diff_is_mermaid_label_translation(
+            source_content, target_content
+        )
     if _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
         target_content
     ):
@@ -297,8 +270,6 @@ def fence_content_matches_source(
     if _fence_lang(fence_info) == "text" and _fence_diff_is_text_diagram_label_translation(
         source_content, target_content
     ):
-        return True
-    if _fence_diff_is_mermaid_label_translation(source_content, target_content):
         return True
     if _fence_diff_is_comment_translation_only(source_content, target_content):
         return True
@@ -354,6 +325,13 @@ def _copy_fence_body_from_source(
 ) -> bool:
     """Return False for ``text`` diagram fences — keep EN translation (§6.59)."""
     if isinstance(src, FencedCode):
+        if _fence_lang(src.info) == "mermaid" and isinstance(tgt, FencedCode):
+            return not (
+                src.info == tgt.info
+                and src.fence_char == tgt.fence_char
+                and src.fence_len == tgt.fence_len
+                and _fence_diff_is_mermaid_label_translation(src.content, tgt.content)
+            )
         return _fence_lang(src.info) != "text"
     return True
 

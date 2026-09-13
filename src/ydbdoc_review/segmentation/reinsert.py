@@ -7,6 +7,7 @@ from urllib.parse import unquote
 
 from ydbdoc_review.parsing.ast_types import (
     Document,
+    FencedCode,
     Heading,
     InlineCode,
     InlineImage,
@@ -25,6 +26,7 @@ from ydbdoc_review.parsing.ast_types import (
 )
 from ydbdoc_review.parsing.front_matter import apply_front_matter_updates
 from ydbdoc_review.parsing.inline_parser import parse_inline_text
+from ydbdoc_review.segmentation.mermaid import replace_mermaid_labels
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
 
 
@@ -47,8 +49,17 @@ def reinsert_segments(
     need immutability should deepcopy first.
     """
     fm_updates: dict[str, str] = {}
+    mermaid_updates: dict[tuple[int | str, ...], dict[int, str]] = {}
     for seg in segments:
         translated = translations.get(seg.id, seg.text)
+        if seg.kind == SegmentKind.MERMAID_LABEL:
+            if len(seg.ast_path) < 3 or seg.ast_path[-2] != "mermaid_label":
+                raise ReinsertError(f"Bad Mermaid label path: {seg.ast_path}")
+            index = seg.ast_path[-1]
+            if not isinstance(index, int):
+                raise ReinsertError(f"Bad Mermaid label index: {index}")
+            mermaid_updates.setdefault(tuple(seg.ast_path[:-2]), {})[index] = translated
+            continue
         if seg.kind == SegmentKind.FRONT_MATTER:
             key = seg.ast_path[0]
             if isinstance(key, str):
@@ -59,6 +70,14 @@ def reinsert_segments(
             continue
         new_inline = _build_inline_from_translation(translated, seg.placeholders)
         _set_inline_at_ast_path(doc, seg, new_inline)
+    for path, updates in mermaid_updates.items():
+        block = _navigate_to_doc_index(doc, list(path))
+        if not isinstance(block, FencedCode):
+            raise ReinsertError(f"Expected Mermaid fence at {path}")
+        try:
+            block.content = replace_mermaid_labels(block.content, updates)
+        except ValueError as exc:
+            raise ReinsertError(str(exc)) from exc
     if fm_updates and doc.front_matter is not None:
         doc.front_matter = apply_front_matter_updates(doc.front_matter, fm_updates)
     return doc

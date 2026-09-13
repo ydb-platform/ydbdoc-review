@@ -193,7 +193,7 @@ def test_fence_content_rejects_code_line_change_beside_comments():
     assert not fence_content_matches_source(ru, en)
 
 
-def test_fence_content_allows_mermaid_label_translation():
+def test_fence_content_rejects_mermaid_identifier_translation():
     ru = (
         "sequenceDiagram\n"
         "    participant Топик\n"
@@ -206,8 +206,8 @@ def test_fence_content_allows_mermaid_label_translation():
         "    participant Query v1\n"
         "    Topic->>Query v1: Events A..D\n"
     )
-    assert fence_content_matches_source(ru, en)
-    assert not check_fence_body_copy(
+    assert not fence_content_matches_source(ru, en)
+    assert check_fence_body_copy(
         f"```mermaid\n{ru}```",
         f"```mermaid\n{en}```",
         source_lang="ru",
@@ -236,8 +236,8 @@ def test_fence_content_allows_mermaid_quoted_hyphen_vs_space_labels():
     )
 
 
-def test_fence_content_allows_mermaid_note_and_message_translation():
-    """Regression #41206: Note/arrow message text may be shorter in EN."""
+def test_fence_content_rejects_mermaid_note_owner_translation():
+    """Translating bare IDs is not a human-language label edit."""
     ru = (
         "sequenceDiagram\n"
         "    participant Топик\n"
@@ -260,8 +260,8 @@ def test_fence_content_allows_mermaid_note_and_message_translation():
         "    Topic--xQuery v2: E, F (not read)\n"
         "    Topic->>Query v2: G (new)\n"
     )
-    assert fence_content_matches_source(ru, en)
-    assert not check_fence_body_copy(
+    assert not fence_content_matches_source(ru, en)
+    assert check_fence_body_copy(
         f"```mermaid\n{ru}```",
         f"```mermaid\n{en}```",
         source_lang="ru",
