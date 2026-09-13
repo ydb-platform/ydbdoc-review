@@ -676,6 +676,23 @@ blocked response. Report readiness respects explicit critic warnings and present
 refusal under open warnings, without green merge advice. R-GL-5a/5c replace the
 older §6.245 info/green contract; technical `critic_execution_failed` remains
 blocked and separate under R-GL-5b. Protected-only ASCII files still make no model
-request. This change adds no editorial detector or complete-style-coverage flag.
+request.
+
+### §6.265 Narrow visible-prose editorial warnings
+
+Final file heuristics parse English Markdown into the project AST and inspect only
+inline-bearing visible content. `editorial_link_label_space` reports leading or
+trailing visible whitespace in a real link label, including labels containing
+inline-code children. `editorial_ldap_scheme` reports only the exact
+case-insensitive `ldaps schema` collocation after joining visible text and
+inline-code payloads within one prose segment. Paragraphs, headings, term
+definitions, lists, block quotes, tables and nested YFM containers participate;
+front matter, HTML comments, fenced or indented examples, and link destinations
+do not.
+
+Both codes are warnings, retain the original line and context, and produce a
+concrete report correction without rewriting Markdown. They are deliberately not
+a general English grammar/style checker. A critic refusal therefore remains its
+own warning even when neither narrow detector fires.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

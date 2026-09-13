@@ -438,6 +438,8 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "info"
     if message.startswith("critic_model_refusal:"):
         return "warnings"
+    if message.startswith(("editorial_link_label_space:", "editorial_ldap_scheme:")):
+        return "warnings"
     if message.startswith("include_parity_repaired:"):
         return "info"
     if message.startswith("strip_unreachable_links:"):
@@ -507,6 +509,7 @@ def _collect_raw_heuristics(
     source_baseline_text: str | None = None,
     glossary: Glossary | None = None,
 ) -> list[str]:
+    from ydbdoc_review.validation.editorial import check_en_editorial
     from ydbdoc_review.validation.fence_comments import (
         check_cyrillic_in_en_fence_comments,
         check_cyrillic_in_en_text_fences,
@@ -544,6 +547,7 @@ def _collect_raw_heuristics(
         )
     )
     raw.extend(check_broken_inline_code_markup(target_text, target_lang=target_lang))
+    raw.extend(check_en_editorial(target_text, target_lang=target_lang))
     # Any fence language (yaml/yql/go/text/…) — hard gate for residual RU (§6.164).
     # Comment / text-fence helpers still auto-translate; this catches leftovers
     # those paths miss (e.g. ``<SID по умолчанию>`` in yaml examples).

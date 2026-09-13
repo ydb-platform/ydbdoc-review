@@ -3,7 +3,17 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.264: critic refusal means incomplete language/style review.
+**Current focus:** §6.265: two narrow parser-located AST-visible editorial checks
+flag padded Markdown link labels and exact case-insensitive `ldaps schema` wording
+as warnings with original CommonMark line context and concrete corrections.
+Inline-code label text participates; comments, front matter, fenced/indented code
+and link destinations stay excluded. YFM variables protect their structural label
+boundary, while real whitespace outside the complete label still warns. Location
+provenance follows the configured parser's visible token stream and fails closed
+when exact source ownership is unavailable. This is not general grammar coverage,
+does not rewrite content, and the §6.264 critic-refusal warning remains independent.
+
+Prior focus: §6.264: critic refusal means incomplete language/style review.
 Clean prose stays warnings/yellow with manual review required. All critic passes
 retain complete combined findings, including blocked sibling batches and target
 atom issues. Pair post-repair QA preserves refusal; compatibility warnings with
@@ -72,6 +82,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-13 | **§6.265**: visible Markdown AST flags padded link labels and exact `ldaps schema` wording as warning/yellow with source line context; no rewrite or general grammar claim |
 | 2026-09-13 | **§6.261**: exact complete ``Имя=Значение,...@<domain>`` inline-code atoms localize parser-safely after href restoration; fuzzy code rewrites are excluded and residual Russian blocks both `en` and `english` |
 | 2026-09-13 | **§6.260**: Mermaid aliases, messages, notes, branch labels and quoted graph labels become ordinary segments; strict grammar/skeleton validation, safe reinsertion, repeated finalization and coverage obligations preserve syntax; whole-line Mermaid fallback removed |
 | 2026-09-13 | **§6.259**: protected-only and zero-segment files skip translation/critic calls but still run deterministic finalization, heuristics, verdict, and report artifacts; exact empty verify targets stay empty and alignment failures remain blocking |

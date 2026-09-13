@@ -12,6 +12,8 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
+from ydbdoc_review.parsing.inline_locations import concat_located
+
 _OPEN_RE = re.compile(r"^#\|\s*$")
 _CLOSE_RE = re.compile(r"^\|#\s*$")
 # Row: || cell | cell ||  (leading/trailing || required)
@@ -21,14 +23,14 @@ _ROW_RE = re.compile(r"^\|\|\s*(.*?)\s*\|\|\s*$")
 def _split_cells(row_inner: str) -> list[str]:
     """Split YFM row body on `` | `` cell separators (not inside backticks)."""
     cells: list[str] = []
-    buf: list[str] = []
+    parts: list[str] = []
     i = 0
+    last_pos = 0
     in_code = False
     while i < len(row_inner):
         ch = row_inner[i]
         if ch == "`":
             in_code = not in_code
-            buf.append(ch)
             i += 1
             continue
         if (
@@ -39,21 +41,24 @@ def _split_cells(row_inner: str) -> list[str]:
             and i + 1 < len(row_inner)
             and row_inner[i + 1] == " "
         ):
-            cells.append("".join(buf).strip())
-            buf = []
+            parts.append(row_inner[last_pos:i])
+            cells.append(concat_located(parts).strip())
+            parts = []
             i += 2  # skip "| "
+            last_pos = i
             continue
-        buf.append(ch)
         i += 1
-    cells.append("".join(buf).strip())
+    parts.append(row_inner[last_pos:])
+    cells.append(concat_located(parts).strip())
     return cells
 
 
-def _push_inline(state: StateBlock, content: str) -> None:
+def _push_inline(state: StateBlock, content: str, line: int) -> None:
     # Do not call inline.parse here — markdown-it core runs it later on
     # ``token.content`` (same as the built-in GFM table rule).
     token = state.push("inline", "", 0)
     token.content = content
+    token.map = [line, line + 1]
     token.children = []
 
 
@@ -68,7 +73,7 @@ def _yfm_table_rule(
 
     close_line = -1
     next_line = start_line + 1
-    rows_raw: list[str] = []
+    rows_raw: list[tuple[int, str]] = []
     while next_line < end_line:
         pos2 = state.bMarks[next_line] + state.tShift[next_line]
         max_pos2 = state.eMarks[next_line]
@@ -77,23 +82,25 @@ def _yfm_table_rule(
             close_line = next_line
             break
         if line.strip():
-            rows_raw.append(line)
+            rows_raw.append((next_line, line))
         next_line += 1
 
     if close_line == -1 or not rows_raw:
         return False
 
-    parsed_rows: list[list[str]] = []
-    for raw in rows_raw:
-        m = _ROW_RE.match(raw.strip())
+    parsed_rows: list[tuple[int, list[str]]] = []
+    for line_number, raw in rows_raw:
+        stripped = raw.strip()
+        m = _ROW_RE.match(stripped)
         if not m:
             return False
-        parsed_rows.append(_split_cells(m.group(1)))
+        row_inner = stripped[m.start(1) : m.end(1)]
+        parsed_rows.append((line_number, _split_cells(row_inner)))
 
     if silent:
         return True
 
-    header = parsed_rows[0]
+    header_line, header = parsed_rows[0]
     body = parsed_rows[1:]
 
     token = state.push("table_open", "table", 1)
@@ -104,18 +111,18 @@ def _yfm_table_rule(
     state.push("tr_open", "tr", 1)
     for cell in header:
         state.push("th_open", "th", 1)
-        _push_inline(state, cell)
+        _push_inline(state, cell, header_line)
         state.push("th_close", "th", -1)
     state.push("tr_close", "tr", -1)
     state.push("thead_close", "thead", -1)
 
     state.push("tbody_open", "tbody", 1)
-    for row in body:
+    for row_line, row in body:
         state.push("tr_open", "tr", 1)
         for idx in range(len(header)):
             cell = row[idx] if idx < len(row) else ""
             state.push("td_open", "td", 1)
-            _push_inline(state, cell)
+            _push_inline(state, cell, row_line)
             state.push("td_close", "td", -1)
         state.push("tr_close", "tr", -1)
     state.push("tbody_close", "tbody", -1)

@@ -125,3 +125,27 @@ def test_humanize_critic_model_refusal_finalize_warning():
     text = humanize_heuristic(raw)
     assert "отказала" in text
     assert "ручная проверка" in text
+
+
+def test_humanize_editorial_link_label_space() -> None:
+    raw = "editorial_link_label_space: line 3: «See [ padded](auth.md).»"
+    detail = format_heuristic_reviewer_detail(raw)
+
+    assert detail.problem == (
+        "Некорректные пробелы в тексте ссылки, строка 3: "
+        "«See [ padded](auth.md).»"
+    )
+    assert detail.suggestion == "Уберите пробелы по краям текста ссылки."
+    assert heuristic_location_label(raw) == "строка 3"
+
+
+def test_humanize_editorial_ldap_scheme() -> None:
+    raw = "editorial_ldap_scheme: line 4: «Use the `ldaps` schema to connect.»"
+    detail = format_heuristic_reviewer_detail(raw)
+
+    assert detail.problem == (
+        "Терминологическая опечатка, строка 4: "
+        "«Use the `ldaps` schema to connect.»"
+    )
+    assert detail.suggestion == "Для протокола подключения используйте `ldaps scheme`."
+    assert heuristic_location_label(raw) == "строка 4"
