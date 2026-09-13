@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from ydbdoc_review.ops.translation_checkpoint import (
     CheckpointIdentity,
     UnitReceipt,
     VerifiedUnit,
+    translation_unit_key,
     translation_unit_key_for_segment,
 )
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
@@ -41,6 +43,69 @@ def current_authority() -> RuAuthority:
         baseline_sha="3" * 40,
         ru_sha="3" * 40,
         mode=RuAuthorityMode.CURRENT,
+    )
+
+
+@pytest.mark.parametrize("stem", ["user-token", "user-token-lifecycle"])
+def test_mermaid_labels_are_not_materialize_protected_units(current_authority, stem):
+    fixtures = Path(__file__).parents[1] / "fixtures" / "pr51079-mermaid"
+    source = (fixtures / f"{stem}.ru.md").read_text()
+    target = (fixtures / f"{stem}.en.md").read_text()
+    result = plan_source_coverage(
+        source_path=f"ydb/docs/ru/core/security/_assets/{stem}.md",
+        source_text=source, existing_en=target, authority=current_authority,
+    )
+    assert result.units
+    assert all(unit.action == "translate_required" for unit in result.units)
+    assert len(result.units) == (16 if stem == "user-token" else 22)
+    assert result.source_hash == hashlib.sha256(source.encode()).hexdigest()
+
+
+def test_mermaid_coverage_protects_syntax_but_not_labels():
+    from ydbdoc_review.translation.coverage import _document_atoms
+
+    fixtures = Path(__file__).parents[1] / "fixtures" / "pr51079-mermaid"
+    source = (fixtures / "user-token-lifecycle.ru.md").read_text()
+    target = (fixtures / "user-token-lifecycle.en.md").read_text()
+    assert _document_atoms(parse_markdown(source)) == _document_atoms(parse_markdown(target))
+    changed = target.replace("node->>cache", "cache->>node")
+    assert _document_atoms(parse_markdown(source)) != _document_atoms(parse_markdown(changed))
+
+
+def test_stale_whole_file_mermaid_receipt_cannot_waive_label_obligations(current_authority):
+    fixtures = Path(__file__).parents[1] / "fixtures" / "pr51079-mermaid"
+    source = (fixtures / "user-token.ru.md").read_text()
+    target = (fixtures / "user-token.en.md").read_text()
+    source_path = "ydb/docs/ru/core/security/_assets/user-token.md"
+    identity = _identity(current_authority)
+    old_key = translation_unit_key(
+        source=source.encode(), source_path=source_path, target_locale="en",
+        atom_signature=(), parent_context="coverage:protected-only",
+    )
+    target_hash = hashlib.sha256(target.encode()).hexdigest()
+    stale = VerifiedUnit(
+        receipt=UnitReceipt(
+            identity=identity, unit_key=old_key,
+            source_hash=hashlib.sha256(source.encode()).hexdigest(), target_hash=target_hash,
+            object_key=f"translation/v1/objects/{target_hash}", validated=True,
+        ), source=source.encode(), target=target.encode(),
+    )
+    result = plan_source_coverage(
+        source_path=source_path, source_text=source, existing_en=target,
+        authority=current_authority, checkpoint_identity=identity, verified_units=(stale,),
+    )
+    assert len(result.units) == 16
+    assert all(unit.action == "translate_required" and unit.key != old_key for unit in result.units)
+
+
+def test_mermaid_checkpoint_keys_bind_original_label_text():
+    source = "```mermaid\nsequenceDiagram\nactor a as Пользователь\n```\n"
+    changed = source.replace("Пользователь", "Новый пользователь")
+    path = "ydb/docs/ru/core/security/_assets/user-token.md"
+    first = extract_segments(parse_markdown(source))[0]
+    second = extract_segments(parse_markdown(changed))[0]
+    assert translation_unit_key_for_segment(first, source_path=path, target_locale="en") != (
+        translation_unit_key_for_segment(second, source_path=path, target_locale="en")
     )
 
 

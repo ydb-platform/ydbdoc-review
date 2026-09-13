@@ -525,4 +525,36 @@ Bad first CI run [#46461](https://github.com/ydb-platform/ydb/pull/46461) had 51
 
 ---
 
+### §6.260 Mermaid labels as translation segments (#51079)
+
+Supported `mermaid` fences expose `SegmentKind.MERMAID_LABEL` with paths ending
+in `["mermaid_label", index]`. Sequence aliases after `as`, message/Note payloads,
+and opt/alt/else/loop/par/and/critical/option/break captions enter the normal batch
+translator. Quoted and unquoted bracketed graph/flowchart node and subgraph labels
+and plain `%%` comment bodies use the same contract, preserving current F-048
+compatibility. JSON `%%{init: ...}%%` directives remain entirely immutable.
+Extraction includes both RU and EN text in identical order. Unknown syntax stays
+protected and is still subject to the whole-document language checks.
+
+The conservative parser validates the entire supported grammar, including a
+branch stack. `mermaid_skeleton` preserves every non-label byte: identifiers,
+arrows, Note owners, branch keywords, indentation and line endings. Reinsertion
+groups labels by fence and replaces original character spans in descending
+offset order. It rejects control/newline injection and changes to `YDB` or
+`life_time`; literal quotes and `end` are escaped with Mermaid entities.
+Finalization retains a target fence only when this strict contract holds, so
+repeated finalization cannot restore Russian labels in a valid English diagram.
+
+Mermaid is removed from the whole-line diagram fallback; `text` diagrams retain
+it. Coverage atoms hash fence metadata and the syntax skeleton, while labels
+remain translation units. Source hashes and checkpoint identities still bind
+the original source bytes. A former protected whole-file receipt cannot satisfy
+the new per-label obligations.
+
+The exact 21-line `user-token` and 31-line `user-token-lifecycle` incident assets
+and complete English twins live in `tests/fixtures/pr51079-mermaid/`. Tests exercise
+normal pair translation with only model JSON faked, topology mutations, nested
+grammar, safe punctuation, coverage, and repeated finalization. Parseability
+evidence is the supported-grammar parser plus an identical syntax skeleton.
+
 [← Memory Bank index](../../MEMORY_BANK.md)

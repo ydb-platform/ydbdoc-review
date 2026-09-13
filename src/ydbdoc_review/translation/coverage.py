@@ -443,6 +443,8 @@ def _protected_structure_is_proven(source: Document, target: Document) -> bool:
 
 
 def _document_atoms(document: Document) -> tuple[tuple[str, str], ...]:
+    from ydbdoc_review.segmentation.mermaid import mermaid_labels, mermaid_skeleton
+
     atoms: list[tuple[str, str]] = []
     inline_atoms = {
         tuple(segment.ast_path): _atom_signature(segment) for segment in extract_segments(document)
@@ -469,7 +471,11 @@ def _document_atoms(document: Document) -> tuple[tuple[str, str], ...]:
             elif isinstance(block, (Paragraph, TermDefinition)):
                 add_inline(block_path)
             elif isinstance(block, FencedCode):
-                add("fenced_code", block.model_dump(mode="json"))
+                payload = block.model_dump(mode="json")
+                info = block.info.strip().split()
+                if info and info[0].casefold() == "mermaid" and mermaid_labels(block.content):
+                    payload["content"] = mermaid_skeleton(block.content)
+                add("fenced_code", payload)
             elif isinstance(block, IndentedCode):
                 add("indented_code", block.model_dump(mode="json"))
             elif isinstance(block, HTMLBlock):

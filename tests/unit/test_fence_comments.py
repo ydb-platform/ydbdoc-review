@@ -100,7 +100,7 @@ def test_collect_cyrillic_text_fence_lines_increment_chain():
     assert "Инкремент₁" in items[0].body
 
 
-def test_collect_cyrillic_mermaid_fence_lines():
+def test_mermaid_labels_are_excluded_from_whole_line_fallback():
     md = """\
 ```mermaid
 graph LR
@@ -108,8 +108,7 @@ graph LR
 ```
 """
     items = collect_cyrillic_text_fence_lines(md)
-    assert len(items) == 1
-    assert "Клиент" in items[0].body
+    assert items == []
 
 
 def test_check_cyrillic_in_en_text_fences_warns_on_increment_chain():

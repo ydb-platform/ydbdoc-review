@@ -3,7 +3,11 @@
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
 **Last updated:** 2026-09-13
-**Current focus:** §6.259: every per-file profile runs deterministic
+**Current focus:** §6.260: exact #51079 Mermaid assets translate label segments
+through the normal pipeline while byte-exact syntax and technical tokens remain
+protected. Unsupported grammar exposes no labels and residual Russian blocks EN.
+
+Prior focus: §6.259: every per-file profile runs deterministic
 finalization, heuristics, verdict, and reporting for protected-only inputs.
 No-segment files skip model and critic calls without bypassing validation.
 
@@ -33,6 +37,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-13 | **§6.260**: Mermaid aliases, messages, notes, branch labels and quoted graph labels become ordinary segments; strict grammar/skeleton validation, safe reinsertion, repeated finalization and coverage obligations preserve syntax; whole-line Mermaid fallback removed |
 | 2026-09-13 | **§6.259**: protected-only and zero-segment files skip translation/critic calls but still run deterministic finalization, heuristics, verdict, and report artifacts; exact empty verify targets stay empty and alignment failures remain blocking |
 | 2026-09-07 | **§6.258**: #51079 false include-only orphans fixed with immutable candidate overlays and TOC-rooted structural YFM include closure; 58 focused and 157 broader tests passed, four baseline failures deselected; reviewers/tester GO, production pending |
 | 2026-09-07 | **§6.257**: frozen-B wrapper repair and bounded post-push GitHub REST head convergence; #40385 produced PR #52330 at K2 `30f4c4630805`, final action release `1e43737b2508`, green `doc_verify`/docs build/PR-check on one SHA, and fresh independent `PASS / MERGEABLE` |

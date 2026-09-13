@@ -24,6 +24,7 @@ class SegmentKind(str, Enum):
     CUT_TITLE = "cut_title"
     TERM_DEFINITION = "term_definition"
     FRONT_MATTER = "front_matter"
+    MERMAID_LABEL = "mermaid_label"
 
 
 class ProtectedInline(BaseModel):
@@ -47,4 +48,3 @@ class Segment(BaseModel):
     ast_path: list[int | str]
     # Explicit YFM ``{#id}`` for headings (None when absent or non-heading).
     heading_anchor: str | None = None
-

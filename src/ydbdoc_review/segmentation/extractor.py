@@ -20,6 +20,7 @@ from ydbdoc_review.parsing.ast_types import (
     BlockQuote,
     BulletList,
     Document,
+    FencedCode,
     Heading,
     ListItem,
     OrderedList,
@@ -33,6 +34,7 @@ from ydbdoc_review.parsing.ast_types import (
 )
 from ydbdoc_review.parsing.front_matter import translatable_front_matter_fields
 from ydbdoc_review.segmentation.inline_protector import protect_inline
+from ydbdoc_review.segmentation.mermaid import mermaid_labels
 from ydbdoc_review.segmentation.types import Segment, SegmentKind
 from ydbdoc_review.validation.homoglyphs import normalize_confusable_cyrillic
 
@@ -191,7 +193,17 @@ class _ExtractState:
                 ast_path,
                 path + [f"term:{block.term_id}"],
             )
-        # fenced_code, indented_code, thematic_break, html_block, yfm_include:
+        elif isinstance(block, FencedCode):
+            info = block.info.strip().split()
+            if info and info[0].casefold() == "mermaid":
+                for label in mermaid_labels(block.content):
+                    self.segments.append(Segment(
+                        id=self.next_id(), kind=SegmentKind.MERMAID_LABEL,
+                        path=[*path, "mermaid", f"label:{label.index}"],
+                        text=label.text, placeholders=[],
+                        ast_path=[*ast_path, "mermaid_label", label.index],
+                    ))
+        # indented_code, thematic_break, html_block, yfm_include:
         # not translatable, do nothing.
 
     def walk_list_item(
