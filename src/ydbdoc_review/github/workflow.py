@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
@@ -1535,6 +1536,58 @@ def _recheck_deferred_outbound_fragments(
         bundle.file_result.heuristic_blocking.extend(bundle.reattached_messages)
 
 
+def _apply_authorized_late_repair(
+    repo_path: str,
+    path: str,
+    preimage: str,
+    replacement: str,
+    *,
+    result: PRTranslationResult | None,
+    dry_run: bool,
+) -> bool:
+    """Apply one proven edit and advance only QA that describes its preimage.
+
+    Never bless arbitrary disk bytes or clear earlier findings. Validate all
+    matching results before atomically replacing the file, then mutate the
+    existing QA objects so deferred-finding references remain authoritative.
+    """
+    if dry_run or replacement == preimage:
+        return False
+    normalized = path.replace("\\", "/")
+    matching = [
+        run for run in result.pair_results
+        if run.plan.target_path.replace("\\", "/") == normalized
+    ] if result is not None else []
+    runs = [run for run in matching if not (run.deleted or run.skipped or run.error)]
+    if matching and not runs:
+        return False
+    local = Path(repo_path) / normalized
+    if local.read_bytes() != preimage.encode("utf-8") or any(
+        run.target_text != preimage
+        or (run.file_result is not None and run.file_result.final_text != preimage)
+        for run in runs
+    ):
+        raise ValueError(f"late_repair_preimage_mismatch: {normalized}")
+
+    # Do not use write_text: its newline normalization changes the exact
+    # replacement. A failed write/replace must leave both disk and QA untouched.
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=local.parent, delete=False) as output:
+            temporary = output.name
+            output.write(replacement.encode("utf-8"))
+            os.chmod(output.name, local.stat().st_mode & 0o777)
+        os.replace(temporary, local)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+    for run in runs:
+        run.target_text = replacement
+        if run.file_result is not None:
+            run.file_result.final_text = replacement
+    return True
+
+
 def _repair_en_fragments_after_apply(
     repo_path: str,
     paths: list[str],
@@ -1543,6 +1596,7 @@ def _repair_en_fragments_after_apply(
     merge_base_with: str | None = None,
     ru_content_ref: str | None = None,
     docs_root: str = "ydb/docs",
+    result: PRTranslationResult | None = None,
 ) -> list[str]:
     """Re-run fragment repair once all EN targets exist on disk (§6.225).
 
@@ -1583,7 +1637,8 @@ def _repair_en_fragments_after_apply(
         if not rel.endswith(".md") or "/docs/en/" not in rel:
             continue
         # Always edit the bytes we wrote (worktree), not tip.
-        en_text = read_text(repo_path, rel)
+        local = Path(repo_path) / rel
+        en_text = local.read_bytes().decode("utf-8") if local.is_file() else None
         if not en_text:
             continue
         ru_twin = rel.replace("/docs/en/", "/docs/ru/", 1)
@@ -1600,9 +1655,10 @@ def _repair_en_fragments_after_apply(
         )
         if fixed == en_text:
             continue
-        repaired.append(rel)
-        if not dry_run:
-            write_text(repo_path, rel, fixed)
+        if dry_run or _apply_authorized_late_repair(
+            repo_path, rel, en_text, fixed, result=result, dry_run=dry_run,
+        ):
+            repaired.append(rel)
     return repaired
 
 
@@ -1652,7 +1708,8 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
         en_path = content.pair.en_path.replace("\\", "/")
         if en_path not in normalized_paths or not en_path.endswith(".md"):
             continue
-        candidate = read_text(repo_path, en_path)
+        local = Path(repo_path) / en_path
+        candidate = local.read_bytes().decode("utf-8") if local.is_file() else None
         if candidate is None:
             continue
         # E0 is strictly the tip EN snapshot. A historical checkout body is
@@ -1673,9 +1730,10 @@ def _reconcile_final_en_same_fragment_paths_after_apply(
         )
         if fixed == candidate:
             continue
-        reconciled.append(en_path)
-        if not dry_run:
-            write_text(repo_path, en_path, fixed)
+        if dry_run or _apply_authorized_late_repair(
+            repo_path, en_path, candidate, fixed, result=result, dry_run=dry_run,
+        ):
+            reconciled.append(en_path)
     return reconciled
 
 
@@ -1886,8 +1944,13 @@ def _declare_exact_ascii_fragment_targets_after_apply(
     ru_content_ref: str | None = None,
     budget: MarkdownDependencyBudget | None = None,
     docs_root: str = "ydb/docs",
+    result: PRTranslationResult | None = None,
 ) -> list[str]:
     """Admit and apply proven declarations on unique aligned RU owners."""
+    def read_worktree(path: str) -> str | None:
+        local = Path(repo_path) / path.replace("\\", "/")
+        return local.read_bytes().decode("utf-8") if local.is_file() else None
+
     overlay = {p.replace("\\", "/") for p in paths}
     if merge_base_with:
         read_en_candidate = _final_tree_reader(repo_path, merge_base_with, overlay)
@@ -1896,15 +1959,17 @@ def _declare_exact_ascii_fragment_targets_after_apply(
             normalized = path.replace("\\", "/")
             if ru_content_ref and "/docs/ru/" in normalized:
                 return read_text_at_commit(repo_path, ru_content_ref, normalized)
+            if normalized in overlay:
+                return read_worktree(normalized)
             return read_en_candidate(normalized)
     else:
 
         def read_candidate(path: str) -> str | None:
-            return read_text(repo_path, path)
+            return read_worktree(path)
 
     proposals = _discover_exact_ascii_fragment_declaration_proposals(
         paths,
-        read_page=lambda path: read_text(repo_path, path),
+        read_page=read_worktree,
         read_candidate=read_candidate,
         docs_root=docs_root,
         redirects_yaml=read_candidate(f"{docs_root.strip('/')}/redirects.yaml"),
@@ -1917,9 +1982,11 @@ def _declare_exact_ascii_fragment_targets_after_apply(
             warning_path=proposal.en_owner_path,
         ):
             continue
-        declared.append(proposal.en_owner_path)
-        if not dry_run:
-            write_text(repo_path, proposal.en_owner_path, proposal.after_en_text)
+        if dry_run or _apply_authorized_late_repair(
+            repo_path, proposal.en_owner_path, proposal.before_en_text,
+            proposal.after_en_text, result=result, dry_run=dry_run,
+        ):
+            declared.append(proposal.en_owner_path)
     return declared
 
 
@@ -3257,6 +3324,9 @@ def run_doc_translate(
                 docs_root=cfg.paths.docs_root,
                 dry_run=dry_run,
                 allowed_paths=frozenset(redirect_impact_scope - redirect_source_en),
+                apply_repair=lambda path, before, after: _apply_authorized_late_repair(
+                    repo_path, path, before, after, result=pr_result, dry_run=dry_run,
+                ),
             )
             # Translation branches start from current upstream main. Never
             # write the historical source-merge copy of this global file:
@@ -3286,6 +3356,7 @@ def run_doc_translate(
             ru_content_ref=ru_ref,
             budget=late_budget,
             docs_root=docs_root,
+            result=pr_result,
         )
         _merge_yellow_warnings(pr_result, late_budget.warnings)
         if exact_declarations:
@@ -3303,6 +3374,7 @@ def run_doc_translate(
             merge_base_with=merge_base_with,
             ru_content_ref=ru_ref,
             docs_root=docs_root,
+            result=pr_result,
         )
         if late_repair:
             logger.info(

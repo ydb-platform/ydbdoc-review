@@ -368,6 +368,9 @@ def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_pat
 
     auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
     owner_after = (repo / owner_en).read_text(encoding="utf-8")
+    assert auth_run.target_text == auth_after
+    assert auth_run.file_result is not None
+    assert auth_run.file_result.final_text == auth_after
     assert "security_config.md#security-auth" in auth_after
     assert "auth_config.md#certificate-auth-config" in auth_after
     assert "{#certificate-auth-config}" in owner_after

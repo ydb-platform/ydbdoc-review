@@ -705,4 +705,49 @@ concrete report correction without rewriting Markdown. They are deliberately not
 a general English grammar/style checker. A critic refusal therefore remains its
 own warning even when neither narrow detector fires.
 
+### §6.267 Exact offline historical #51079 acceptance
+
+`tests/harness/test_pr51079_exact_e2e.py` consumes authenticated immutable
+H0/H/B/K bytes from `tests/fixtures/pr51079-exact/`. Its manifest records full
+upstream authorities, every text SHA-256, explicit absences and data-file hashes.
+Unknown snapshot reads or model segments fail closed. Context admission also
+guards actual Git object/existence reads below imported adapter
+aliases, so late reconciliation cannot silently treat unrecorded sparse-checkout
+paths as absent. Unknown-read evidence survives caught exceptions and the full
+positive path plus a missing-admission late-reconciliation control exercise it.
+Read-only baseline context
+includes the complete real TOC/include/link closure without expanding the exact
+six-Markdown-plus-security-TOC output scope from the original two RU changes.
+
+The test calls real scope/pair/coverage planning, translation, navigation merge,
+pending-output orphan checks, the result writer, late fragment/path reconciliation
+and final gates. It commits actual temporary Git candidates and verifies their
+immutable bytes through real pair VERIFY behavior, final gates, checkout guards
+and report builder. Full local SHA identity is preserved in authority/ReportMeta;
+only the standard rendered checkout label is shortened to twelve characters.
+Both result text fields must match `git show` of that exact candidate.
+
+Post-apply generic fragment repair, same-fragment reconciliation, exact-anchor
+declaration and redirect retargeting use one authorized before/after writer.
+It checks the exact disk and matching QA preimages before atomic replacement,
+then advances the existing pair/file text objects without clearing critic,
+alignment, link-contract, manual or blocker evidence. Dry-run and unchanged
+repairs do not adopt disk bytes; unexpected drift fails closed. Final language,
+publication and immutable report guards remain independent and unchanged.
+The E2E runs the real deferred-outbound lifecycle and requires normal publication
+both before apply and before its local candidate commit, without test-only QA
+rebinding.
+
+The separately reviewed response dictionary is not renderer-generated expected
+output. It preserves the glossary's section boundary and both authentic Mermaid
+skeletons, reusing the earlier complete diagram fixtures. Original defective K
+and seven isolated language/editorial/refusal regressions must be non-green;
+removing the caching page's real includes must orphan both assets. Model transport
+and two external Wikipedia lookups are explicit fakes; GitHub requests fail and
+sockets remain disabled. No production workflow runs inside this fixture.
+
+This historical R-GL-18 acceptance is separate from the synthetic eight-Markdown
+R-GL-16 case. A production retry and independent content review plus green
+`doc_verify`/build on one production SHA remain deferred until final approval.
+
 [← Memory Bank index](../../MEMORY_BANK.md)

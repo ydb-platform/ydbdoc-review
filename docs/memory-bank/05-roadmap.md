@@ -173,6 +173,16 @@ cloud size quota may block writes until raised.
       `examples/` as reference — do not treat examples as auto-copied);
       create label `doc_continue`; smoke on a small docs PR
 
+### Historical #51079 regression acceptance (§6.267)
+
+- [x] Exact offline H0/H/B/K fixture with SHA-256 inventory, fail-closed reads,
+      independently reviewed model responses and actual local Git translation/
+      VERIFY/report pipeline. Output scope is six Markdown plus security TOC;
+      original K and seven isolated mutations are non-green with sockets disabled.
+- [ ] After final independent approval: production translation retry, independent
+      content review, then green `doc_verify` and documentation build on the same
+      production SHA. Offline success does not complete this operator acceptance.
+
 ---
 
 [← Memory Bank index](../../MEMORY_BANK.md)

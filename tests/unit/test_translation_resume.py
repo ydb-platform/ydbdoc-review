@@ -1317,7 +1317,13 @@ def test_all_reuse_still_runs_real_final_tree_gate(tmp_path: Path) -> None:
     )
 
     assert client.usage_tracker.records == []
-    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert any(
+        message.startswith("report_checkout_mismatch:")
+        for run in job.pr_result.pair_results
+        if run.file_result is not None
+        for message in run.file_result.heuristic_blocking
+    )
     assert [(item.path, item.code) for item in job.pr_result.final_tree_blockers] == [
         ("ydb/docs/en/a.md", "en_link_target")
     ]

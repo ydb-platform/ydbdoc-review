@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
@@ -39,6 +40,7 @@ def retarget_redirect_inbound_links(
     docs_root: str = "ydb/docs",
     dry_run: bool = False,
     allowed_paths: frozenset[str] | None = None,
+    apply_repair: Callable[[str, str, str], bool] | None = None,
 ) -> list[str]:
     """Retarget source-scoped links covered by new redirects."""
     root = Path(repo_path) / docs_root
@@ -51,7 +53,7 @@ def retarget_redirect_inbound_links(
             rel = path.relative_to(repo_path).as_posix()
             if allowed_paths is not None and rel not in allowed_paths:
                 continue
-            text = path.read_text(encoding="utf-8")
+            text = path.read_bytes().decode("utf-8")
             rel_dir = PurePosixPath(path.relative_to(locale_root).as_posix()).parent
 
             def _replace(
@@ -90,9 +92,14 @@ def retarget_redirect_inbound_links(
             updated = _LINK.sub(_replace, text)
             if updated == text:
                 continue
-            changed.append(rel)
-            if not dry_run:
+            if dry_run:
+                changed.append(rel)
+            elif apply_repair is not None:
+                if apply_repair(rel, text, updated):
+                    changed.append(rel)
+            else:
                 path.write_text(updated, encoding="utf-8", newline="")
+                changed.append(rel)
     return changed
 
 
