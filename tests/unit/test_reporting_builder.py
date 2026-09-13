@@ -610,8 +610,8 @@ def test_merge_recommendation_yellow_when_critic_warnings_but_no_open_issues():
     assert "можно мержить" not in body
 
 
-def test_r_gl_5_merge_yellow_when_critic_refusal_heuristics_clean():
-    """R-GL-5: safety refusal requires manual language/style review."""
+def test_r_gl_5_merge_red_when_critic_refusal_left_review_incomplete():
+    """R-GL-5: a refusal is not a semantic verdict and must keep QA RED."""
     cfg = _cfg()
     en_path = "ydb/docs/en/core/reference/configuration/auth_config.md"
     pair = DocPair(
@@ -661,7 +661,7 @@ def test_r_gl_5_merge_yellow_when_critic_refusal_heuristics_clean():
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=cfg,
     )
-    assert "Статус QA (K): 🟡 YELLOW" in body
+    assert "Статус QA (K): 🔴 RED" in body
     assert "Рекомендация:" not in body
     assert "можно мержить" not in body
     assert "Справка (не влияет на статус QA K)" not in body

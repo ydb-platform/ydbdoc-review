@@ -541,7 +541,7 @@ def test_pr51079_defective_original_k_is_non_green(tmp_path, offline_external_re
     (EXPECTED_MD[4], "`ldaps` scheme", "`ldaps` schema", "🟡 YELLOW"),
     (EXPECTED_MD[4], "[section `use_tls`]", "[ section `use_tls` ]", "🟡 YELLOW"),
     (EXPECTED_MD[1], "[using the `StartTls` request]", "[ using the `StartTls` request ]", "🟡 YELLOW"),
-    (EXPECTED_MD[4], None, None, "🟡 YELLOW"),
+    (EXPECTED_MD[4], None, None, "🔴 RED"),
 ])
 def test_pr51079_single_regression_injection_is_non_green(exact_candidate, path, original, mutation, qa_status):
     candidate = exact_candidate
@@ -567,9 +567,9 @@ def test_pr51079_single_regression_injection_is_non_green(exact_candidate, path,
     assert affected is not None and affected.verdict != "ok"
     if original is None:
         assert affected.critic_unresolved is not None
-        assert affected.critic_unresolved.verdict == "warnings"
+        assert affected.critic_unresolved.verdict == "blocked"
         assert any(issue.category == "critic_model_refusal" for issue in affected.critic_unresolved.issues)
-        assert affected.verdict == "warnings"
+        assert affected.verdict == "blocked"
     _assert_qa_status(report, qa_status)
 
 

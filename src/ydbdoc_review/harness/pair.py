@@ -208,16 +208,25 @@ def run_pair_plan(
     enable_translate = plan.action in ("translate_to_en", "translate_to_ru")
     enable_critic = plan.action != "skip"
     if enable_translate:
-        # F-109: every full prose translation completes the shared F-056
-        # quality cycle before workflow publication, including full coverage
-        # fallbacks. Keep the units route separate to preserve zero-call reuse.
+        # Every LLM-produced translation completes the shared quality cycle,
+        # including translate_required units. Only trusted reuse/protected
+        # unit plans keep the zero-call route.
         # Glossary full translation follows the same mutable critic/repair path;
         # its read-only exception is verify-only.
-        profile = (
-            TRANSLATE_PROFILE
-            if content.coverage_plan is not None
+        units_need_translation = (
+            content.coverage_plan is not None
             and content.coverage_plan.mode == "units"
-            else TRANSLATE_WITH_QA_PROFILE
+            and any(
+                unit.action == "translate_required"
+                for unit in content.coverage_plan.units
+            )
+        )
+        profile = (
+            TRANSLATE_WITH_QA_PROFILE
+            if content.coverage_plan is None
+            or content.coverage_plan.mode != "units"
+            or units_need_translation
+            else TRANSLATE_PROFILE
         )
     else:
         profile = VERIFY_PROFILE

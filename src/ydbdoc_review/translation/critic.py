@@ -133,7 +133,7 @@ def _fallback_critic_response(*, reason: str, preview: str = "") -> CriticRespon
 
 
 def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
-    """Record incomplete language/style review without hiding other findings."""
+    """Fail closed when every critic attempt refused semantic review."""
     safe = (preview or "").replace("\n", " ").strip()[:200]
     logger.warning(
         "Critic model refusal; manual review required (preview=%r)",
@@ -144,10 +144,10 @@ def _heuristic_only_critic_response(*, preview: str) -> CriticResponse:
         f"Preview: {safe[:160]}"
     )
     return CriticResponse(
-        verdict="warnings",
+        verdict="blocked",
         issues=[
             CriticIssueOut(
-                severity="warning",
+                severity="blocked",
                 category="critic_model_refusal",
                 comment=comment,
             )
@@ -168,6 +168,7 @@ def _fetch_critic_response(
     retry_messages = original_messages
     model_chain = client.model_chain_for_role("critic")
     last_content = ""
+    last_refusal = ""
     for attempt in range(1, _MAX_CRITIC_ATTEMPTS + 1):
         content = ""
         # First retry asks the primary model to repair its malformed response.
@@ -188,7 +189,17 @@ def _fetch_critic_response(
             if not content:
                 raise LLMParseError("Empty LLM response")
             if is_model_refusal_text(content):
-                return _heuristic_only_critic_response(preview=content)
+                last_refusal = content
+                last_exc = LLMParseError("Critic model refusal")
+                retry_messages = original_messages
+                logger.warning(
+                    "%s attempt %s/%s refused semantic review; model=%s",
+                    pass_label,
+                    attempt,
+                    _MAX_CRITIC_ATTEMPTS,
+                    model,
+                )
+                continue
             return parse_critic_response(content)
         except LLMParseError as exc:
             last_exc = exc
@@ -220,6 +231,8 @@ def _fetch_critic_response(
                         ),
                     },
                 ]
+    if last_refusal:
+        return _heuristic_only_critic_response(preview=last_refusal)
     return _fallback_critic_response(
         reason=str(last_exc or "unknown parse error"),
         preview=last_content,

@@ -663,6 +663,73 @@ def _run_top_level(
     return job, gh, prepare, commit, push, finish
 
 
+def test_critic_refusal_in_one_of_mixed_files_withholds_all_publication(
+    publication_repo: str,
+) -> None:
+    result = _pair_result()
+    refusal_result = result.pair_results[0].file_result
+    assert refusal_result is not None
+    refusal_result.verdict = "warnings"
+    refusal_result.critic_initial = CriticResponse(
+        verdict="warnings",
+        issues=[
+            CriticIssueOut(
+                segment_id="s0001",
+                severity="warning",
+                category="critic_model_refusal",
+                comment="Model refused critic review; review is incomplete.",
+            )
+        ],
+    )
+    clean_pair = DocPair(
+        ru_path="ydb/docs/ru/b.md",
+        en_path="ydb/docs/en/b.md",
+        ru_changed=True,
+    )
+    result.pair_results.append(
+        PairRunResult(
+            plan=PairPlan(
+                pair=clean_pair,
+                action="translate_to_en",
+                source_path=clean_pair.ru_path,
+                target_path=clean_pair.en_path,
+                source_lang="ru",
+                target_lang="en",
+            ),
+            target_text="Clean translation.\n",
+            source_text="Чистый источник.\n",
+            file_result=FileTranslationResult(
+                file_path=clean_pair.en_path,
+                final_text="Clean translation.\n",
+                segments_count=1,
+                verdict="ok",
+                prompt_version="v1",
+                critic_initial=CriticResponse(verdict="ok", issues=[]),
+            ),
+        )
+    )
+
+    report = build_full_report(
+        result,
+        meta=ReportMeta(mode="doc_translate", report_number=7, elapsed_s=1),
+        config=load_config(env={}),
+    )
+    assert "Статус QA (K): 🔴 RED" in report
+    assert evaluate_publication_impact(result) == PublicationImpact.WITHHOLD_UNSAFE
+
+    job, gh, prepare, commit, push, _ = _run_top_level(publication_repo, result)
+
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert job.translation_pr_number is None
+    assert job.committed is False
+    assert job.pushed is False
+    assert job_requires_nonzero_exit(job) is True
+    prepare.assert_not_called()
+    commit.assert_not_called()
+    push.assert_not_called()
+    gh.create_pull.assert_not_called()
+
+
 @pytest.mark.parametrize("path", ["ydb/docs/en/a.md", "ydb/docs/en/core/toc_p.yaml"])
 def test_gate_uses_disk_overlay_after_late_repair_not_stale_green_result(
     publication_repo: str, path: str,

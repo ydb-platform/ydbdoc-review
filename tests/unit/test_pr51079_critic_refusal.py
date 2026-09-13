@@ -27,9 +27,17 @@ RU = "ydb/docs/ru/core/auth.md"
 EN = "ydb/docs/en/core/auth.md"
 
 
+def _with_exhausted_refusal_attempts(responses):
+    return [
+        item
+        for response in responses
+        for item in ([response] * 3 if response == REFUSAL else [response])
+    ]
+
+
 def _context(responses, **options):
     return HarnessContext.from_options(
-        _mock_client(responses),
+        _mock_client(_with_exhausted_refusal_attempts(responses)),
         glossary=load_glossary(),
         allow_verify_realign=False,
         docs_text_reader=lambda _: "# Auth\n\n## TLS {#tls}\n\n## StartTls {#starttls}\n",
@@ -90,7 +98,9 @@ def test_unchanged_feedback_retry_incomplete_review_retains_blocker_through_tran
 
     result = FileHarness(TRANSLATE_WITH_QA_PROFILE).run(state, ctx)
 
-    assert ctx.client._client.chat.completions.create.call_count == len(responses)
+    assert ctx.client._client.chat.completions.create.call_count == len(
+        _with_exhausted_refusal_attempts(responses)
+    )
     assert result.final_text == PROSE + (
         "\nKeep authentication enabled.\n" if mixed_batches else ""
     )
@@ -166,7 +176,7 @@ def test_unchanged_feedback_retry_empty_batch_with_warning_sibling_retains_block
         issue.model_dump() for issue in result.critic_unresolved.issues
         if issue.category == "meaning"
     ] == [blocker]
-    assert ctx.client._client.chat.completions.create.call_count == 7
+    assert ctx.client._client.chat.completions.create.call_count == 9
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=PairPlan(
             pair=DocPair(ru_path=RU, en_path=EN), action="translate_to_en",
@@ -216,9 +226,9 @@ def test_feedback_retry_repaired_atom_is_not_restored_after_critic_refusal():
         target_atoms=target_atom_maps(state.segments, result.final_text),
     ) == []
     assert not result.heuristic_blocking
-    assert result.verdict == result.critic_unresolved.verdict == "warnings"
+    assert result.verdict == result.critic_unresolved.verdict == "blocked"
     assert [i.category for i in result.critic_unresolved.issues] == ["critic_model_refusal"]
-    assert ctx.client._client.chat.completions.create.call_count == 6
+    assert ctx.client._client.chat.completions.create.call_count == 10
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=PairPlan(
             pair=DocPair(ru_path=RU, en_path=EN), action="translate_to_en",
@@ -226,12 +236,12 @@ def test_feedback_retry_repaired_atom_is_not_restored_after_critic_refusal():
         ),
         file_result=result, target_text=result.final_text,
     )])
-    assert refresh_publication_impact(pr) == PublicationImpact.PUBLISH_NORMAL
+    assert refresh_publication_impact(pr) == PublicationImpact.WITHHOLD_UNSAFE
     body = build_full_report(
         pr, meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=load_config(env={}),
     )
-    assert "Статус QA (K): 🟡 YELLOW" in body
+    assert "Статус QA (K): 🔴 RED" in body
     assert "Untranslated human-language content in protected code atom" not in body
     assert body.count("Модель отказала проверять файл") == 1
 
@@ -264,7 +274,9 @@ def test_changed_feedback_retry_clean_review_clears_prior_blocker_through_transl
 
     result = FileHarness(TRANSLATE_WITH_QA_PROFILE).run(state, ctx)
 
-    assert ctx.client._client.chat.completions.create.call_count == len(responses)
+    assert ctx.client._client.chat.completions.create.call_count == len(
+        _with_exhausted_refusal_attempts(responses)
+    )
     assert result.final_text == repaired_text + "\n" + (
         "\nKeep authentication enabled.\n" if mixed_batches else ""
     )
@@ -295,7 +307,7 @@ def test_changed_feedback_retry_clean_review_clears_prior_blocker_through_transl
 ])
 def test_refusal_never_certifies_prose_as_green(text):
     result, _ = _run(text)
-    assert result.verdict == "warnings"
+    assert result.verdict == "blocked"
     assert not result.heuristic_blocking
     assert any(i.category == "critic_model_refusal" for i in result.critic_unresolved.issues)
 
@@ -311,27 +323,30 @@ def test_refusal_and_blocked_sibling_batch_preserves_red(refusal_first):
     assert {i.category for i in result.critic_unresolved.issues} == {
         "meaning", "critic_model_refusal",
     }
-    assert ctx.client._client.chat.completions.create.call_count == 2
+    assert ctx.client._client.chat.completions.create.call_count == 4
 
 
 @pytest.mark.parametrize("severity", ["warning", "blocked"])
-def test_second_pass_refusal_remains_yellow(severity):
+def test_second_pass_refusal_remains_blocked(severity):
     warning = json.dumps({"verdict": "blocked" if severity == "blocked" else "warnings", "issues": [{
         "segment_id": "s0001", "severity": severity, "category": "grammar",
         "comment": "Use Apply", "suggested_text": PROSE.replace("Use", "Apply").strip(),
     }]})
     result, ctx = _run(responses=[warning, REFUSAL], source="Use documented authentication method.\n")
-    assert result.verdict == "warnings"
+    assert result.verdict == "blocked"
     assert any(i.category == "critic_model_refusal" for i in result.critic_unresolved.issues)
     assert any("critic_model_refusal:" in m for m in result.heuristic_warnings)
     assert {i.category for i in result.critic_applied} == {"grammar"}
-    assert {i.category for i in result.critic_unresolved.issues} == {"critic_model_refusal"}
-    assert ctx.client._client.chat.completions.create.call_count == 2
+    assert {i.category for i in result.critic_unresolved.issues} == {
+        "grammar",
+        "critic_model_refusal",
+    }
+    assert ctx.client._client.chat.completions.create.call_count == 4
 
 
 @pytest.mark.parametrize("include_skipped", [None, True, False])
 @pytest.mark.parametrize("blocked_passes", [(), (2,), (1, 2)])
-def test_third_pass_refusal_preserves_pending_without_resurrecting_applied(
+def test_third_pass_refusal_preserves_pending_and_unconfirmed_applied_finding(
     include_skipped, blocked_passes,
 ):
     responses = []
@@ -353,23 +368,24 @@ def test_third_pass_refusal_preserves_pending_without_resurrecting_applied(
     result, ctx = _run(
         responses=[*responses, REFUSAL], source="Use documented authentication method.\n",
     )
-    expected = "blocked" if blocked_passes else "warnings"
+    expected = "blocked"
     assert result.verdict == result.critic_unresolved.verdict == expected
     assert result.final_text == "Specify the documented authentication method.\n"
-    assert ctx.client._client.chat.completions.create.call_count == 3
+    assert ctx.client._client.chat.completions.create.call_count == 5
     assert [issue.comment for issue in result.critic_applied] == ["Use Apply", "Use Specify"]
     assert [issue.comment for issue in result.critic_skipped] == pending_comments
     assert sorted(
         issue.comment for issue in result.critic_unresolved.issues if issue.category == "meaning"
     ) == pending_comments
-    assert all(issue.category != "grammar" for issue in result.critic_unresolved.issues)
+    assert [
+        issue.comment for issue in result.critic_unresolved.issues
+        if issue.category == "grammar"
+    ] == ["Use Specify"]
     assert any(message.startswith("critic_model_refusal:") for message in result.heuristic_warnings)
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=_plan(), file_result=result, target_text=result.final_text,
     )])
-    assert refresh_publication_impact(pr) == (
-        PublicationImpact.WITHHOLD_UNSAFE if blocked_passes else PublicationImpact.PUBLISH_NORMAL
-    )
+    assert refresh_publication_impact(pr) == PublicationImpact.WITHHOLD_UNSAFE
     config = load_config(env={})
     if include_skipped is not None:
         config.reporting.include_skipped_critic = include_skipped
@@ -377,10 +393,11 @@ def test_third_pass_refusal_preserves_pending_without_resurrecting_applied(
     body = build_full_report(
         pr, meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1), config=config,
     )
-    assert ("Статус QA (K): 🔴 RED" if blocked_passes else "Статус QA (K): 🟡 YELLOW") in body
+    assert "Статус QA (K): 🔴 RED" in body
     for comment in pending_comments:
         assert body.count(comment) == 1
-    assert "Use Apply" not in body and "Use Specify" not in body
+    assert "Use Apply" not in body
+    assert body.count("Use Specify") == 1
     assert body.count("Модель отказала проверять файл") == 1
     assert result == original_result
 
@@ -403,7 +420,7 @@ def test_third_pass_refusal_preserves_protected_atom_and_meaning_blockers():
     assert len(result.critic_applied) == 2
     assert result.verdict == "blocked"
     assert {issue.category for issue in result.critic_unresolved.issues} == {
-        "meaning", "protected_atom_language", "critic_model_refusal",
+        "grammar", "meaning", "protected_atom_language", "critic_model_refusal",
     }
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=_plan(), file_result=result, target_text=result.final_text,
@@ -422,7 +439,7 @@ def test_third_pass_refusal_preserves_protected_atom_and_meaning_blockers():
     assert result == original_result
 
 
-def test_third_pass_refusal_does_not_restore_a_skipped_finding_repaired_on_second_pass():
+def test_third_pass_refusal_retains_a_finding_repaired_but_not_reverified():
     first = {"verdict": "blocked", "issues": [
         {"segment_id": "s0001", "severity": "warning", "category": "grammar",
          "comment": "Use Apply", "suggested_text": "Apply the documented authentication method."},
@@ -449,7 +466,10 @@ def test_third_pass_refusal_does_not_restore_a_skipped_finding_repaired_on_secon
     ]
     assert [
         issue.comment for issue in result.critic_unresolved.issues if issue.category == "meaning"
-    ] == ["Missing a separate authentication constraint"]
+    ] == [
+        "Missing a separate authentication constraint",
+        "Missing authentication constraint",
+    ]
     assert result.verdict == "blocked"
     original_result = deepcopy(result)
     for include_skipped in (True, False):
@@ -461,7 +481,7 @@ def test_third_pass_refusal_does_not_restore_a_skipped_finding_repaired_on_secon
             )]),
             meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1), config=config,
         )
-        assert "Missing authentication constraint" not in body
+        assert body.count("Missing authentication constraint") == 1
         assert body.count("Missing a separate authentication constraint") == 1
         assert body.count("Модель отказала проверять файл") == 1
     assert result == original_result
@@ -512,13 +532,13 @@ def test_second_pass_refusal_keeps_unrepaired_first_pass_blocker(suggestion, mix
     assert result.verdict == result.critic_unresolved.verdict == "blocked"
     assert not result.heuristic_blocking
     remaining = {i.category for i in result.critic_unresolved.issues}
-    assert remaining == ({"meaning", "terminology", "critic_model_refusal"}
+    assert remaining == ({"meaning", "terminology", "grammar", "critic_model_refusal"}
                          if mixed else {"meaning", "critic_model_refusal"})
     assert {i.category for i in result.critic_skipped} == (
         {"meaning", "terminology"} if mixed else {"meaning"}
     )
     assert {i.category for i in result.critic_applied} == ({"grammar"} if mixed else set())
-    assert ctx.client._client.chat.completions.create.call_count == 2
+    assert ctx.client._client.chat.completions.create.call_count == 4
     pr = PRTranslationResult(pair_results=[PairRunResult(
         plan=_plan(), file_result=result, target_text=result.final_text,
     )])
@@ -534,7 +554,7 @@ def test_second_pass_refusal_keeps_unrepaired_first_pass_blocker(suggestion, mix
     assert "Статус QA (K): 🔴 RED" in body
     assert body.count("Missing authentication constraint") == 1
     assert body.count("Check preferred term") == int(mixed)
-    assert "Use Apply" not in body
+    assert body.count("Use Apply") == int(mixed)
     assert body.count("Модель отказала проверять файл") == 1
     assert result == original_result
     assert "ручная проверка" in body
@@ -594,7 +614,7 @@ def test_second_pass_refusal_preserves_blocked_sibling():
     assert {i.category for i in result.critic_unresolved.issues} == {
         "critic_model_refusal", "meaning", "grammar",
     }
-    assert ctx.client._client.chat.completions.create.call_count == 4
+    assert ctx.client._client.chat.completions.create.call_count == 6
 
 
 @pytest.mark.parametrize("second_pass", [False, True])
@@ -625,7 +645,7 @@ def test_refusal_warning_survives_pair_post_repair_qa():
         run = run_pair_plan(content, plan, _context([REFUSAL]), {})
     assert qa.call_count == 1
     assert run.target_text == text
-    assert run.file_result.verdict == "warnings"
+    assert run.file_result.verdict == "blocked"
     assert any(i.category == "critic_model_refusal" for i in run.file_result.critic_unresolved.issues)
 
 
@@ -641,7 +661,7 @@ def test_report_does_not_say_can_merge_for_refused_prose(include_skipped):
         config=config,
     )
     assert "можно мержить" not in body
-    assert "🟡" in body
+    assert "🔴" in body
     assert "ручная проверка" in body
     assert "языка и стиля не завершена" in body
     assert body.count("Модель отказала проверять файл") == 1

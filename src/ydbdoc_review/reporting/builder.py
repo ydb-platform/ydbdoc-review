@@ -642,6 +642,13 @@ def _file_has_blocking_findings(run: PairRunResult) -> bool:
         return True
     if fr.heuristic_blocking:
         return True
+    if any(
+        issue.category == "critic_model_refusal"
+        for critic in (fr.critic_initial, fr.critic_unresolved)
+        if critic is not None
+        for issue in critic.issues
+    ):
+        return True
     return any(
         issue.severity == "blocked" for issue in _remaining_critic_issues(fr)
     )

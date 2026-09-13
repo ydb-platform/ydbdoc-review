@@ -22,6 +22,7 @@ from ydbdoc_review.validation.markers import extract_placeholders
 from ydbdoc_review.validation.placeholder_drift import exclude_skipped_issues
 
 OK = '{"verdict":"ok","issues":[]}'
+REFUSAL = "I cannot discuss this topic."
 RU = "Use `Имя=Значение,...@<domain>`.\n"
 EN = "Use `Name=Value,...@<domain>`.\n"
 
@@ -29,8 +30,9 @@ EN = "Use `Name=Value,...@<domain>`.\n"
 def _run(text, *, source=RU, verify=False, response=OK):
     segments = extract_segments(parse_markdown(source))
     kwargs = {"prior_issues": []} if verify else {}
+    responses = response if isinstance(response, list) else [response]
     return (run_verify if verify else run_critic)(
-        _mock_client([response]),
+        _mock_client(responses),
         segments=segments,
         translations={s.id: s.text for s in segments},
         glossary=load_glossary(),
@@ -193,7 +195,7 @@ def test_reverify_uses_post_fix_target_atoms():
 
 
 def test_refusal_cannot_clear_deterministic_atom_blocker():
-    response = _run(RU, response="I cannot discuss this topic.")
+    response = _run(RU, response=[REFUSAL] * 3)
     assert response.verdict == "blocked"
     assert any(i.category == "protected_atom_language" for i in response.issues)
 
@@ -309,7 +311,7 @@ def test_harness_refusal_keeps_protected_atom_blocked():
         translations={segments[0].id: segments[0].text},
         translated_text=RU,
     )
-    client = _mock_client(["I cannot discuss this topic."])
+    client = _mock_client([REFUSAL] * 3)
     run_critic_loop(state, HarnessContext.from_options(client, glossary=load_glossary()))
     assert state.critic_unresolved.verdict == "blocked"
     assert any(i.category == "protected_atom_language" for i in state.critic_unresolved.issues)
