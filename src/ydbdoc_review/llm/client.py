@@ -105,6 +105,7 @@ class ChatResult:
     model_slug: str
     model_uri: str
     usage: LLMUsage
+    finish_reason: str | None = None
 
 
 class YandexLLMClient:
@@ -338,6 +339,7 @@ class YandexLLMClient:
             model_slug=slug,
             model_uri=uri,
             usage=usage,
+            finish_reason=getattr(choice, "finish_reason", None),
         )
 
 
@@ -422,7 +424,7 @@ class ElizaLLMClient(YandexLLMClient):
                 "Eliza HTTP 200: missing content in message"
             )
         content = str(message.get("content") or "")
-        if not content.strip():
+        if not content.strip() and first.get("finish_reason") != "length":
             raise LLMRetryableRequestError(
                 "Eliza HTTP 200: empty content in message"
             )
@@ -633,6 +635,11 @@ class ElizaLLMClient(YandexLLMClient):
                         model_slug=slug,
                         model_uri=url,
                         usage=usage,
+                        finish_reason=(
+                            str(data["choices"][0].get("finish_reason"))
+                            if data["choices"][0].get("finish_reason") is not None
+                            else None
+                        ),
                     )
                     self._record_transcript(
                         role=role,

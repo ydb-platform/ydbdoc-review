@@ -16,7 +16,7 @@ from ydbdoc_review.config.loader import (
     RetriesConfig,
     load_config,
 )
-from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.client import ChatResult, YandexLLMClient
 from ydbdoc_review.llm.errors import LLMConfigError, LLMRetryExhaustedError
 
 
@@ -98,10 +98,29 @@ def test_chat_success_records_usage():
 
     assert result.content == "hello"
     assert result.model_slug == "yandexgpt-5.1"
+    assert result.finish_reason == "stop"
     assert result.usage.input_tokens == 12
     assert result.usage.output_tokens == 3
     assert result.usage.success is True
     assert len(client.usage_tracker.records) == 1
+
+
+def test_chat_result_finish_reason_defaults_to_none_for_existing_callers():
+    client, mock = _client_with_mock()
+    mock.chat.completions.create.return_value = _completion("hello")
+    usage = client.chat(
+        [{"role": "user", "content": "hi"}],
+        model="yandexgpt-5.1",
+    ).usage
+
+    result = ChatResult(
+        content="legacy",
+        model_slug="model",
+        model_uri="uri",
+        usage=usage,
+    )
+
+    assert result.finish_reason is None
 
 
 def test_chat_success_null_completion_tokens():
@@ -146,6 +165,7 @@ def test_empty_completion_logs_diagnostics(caplog: pytest.LogCaptureFixture):
         )
 
     assert result.content == ""
+    assert result.finish_reason == "content_filter"
     joined = caplog.text
     assert "Empty LLM completion" in joined
     assert "content_filter" in joined
