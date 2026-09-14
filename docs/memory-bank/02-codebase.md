@@ -1,7 +1,7 @@
 # Memory Bank — Codebase reference
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -49,7 +49,7 @@ src/ydbdoc_review/
 │   ├── repair.py                  focused LLM repair after validation failure
 │   ├── critic_retranslate.py      critic-feedback segment retranslate (§6.66)
 │   ├── manual.py                  ManualAction for fail-soft table cells
-│   └── critic.py                  batched critic/verify + verdict alias normalize; regression guard on auto-apply (§6.53)
+│   └── critic.py                  batched critic/verify; bounded segment split + deduplicated family fallback; refusal exhaustion blocked (§6.268–§6.270)
 ├── navigation/                    ✅ scoped TOC + redirect merge; scope planner (§22)
 │   ├── scope_planner.py           plan_translation_scope, TranslationScopePlan (§22)
 │   ├── toc.py                     parse (href + include.path), merge, validate (§6.62–§6.85)
@@ -67,6 +67,7 @@ src/ydbdoc_review/
 │   ├── prose_cyrillic.py          residual Cyrillic in EN prose/backticks (§6.45)
 │   ├── ru_source_bugs.py          RU typo normalize (`--config-dir/opt`); anchor lines
 │   ├── link_locale.py             URL locale mirror + link_locale QA (§6.34, §6.37)
+│   ├── link_label_padding.py      safe ordinary-inline label-edge padding repair by unique destination/title identity (PR #172)
 │   ├── wikipedia_links.py         MediaWiki langlinks API (RU↔EN slugs, §6.37)
 │   ├── cli_tokens.py              CLI token preservation (D.3)
 │   ├── toc_targets.py             EN toc href/include.path file existence (§6.83–§6.84)

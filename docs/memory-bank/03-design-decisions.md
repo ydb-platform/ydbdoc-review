@@ -1,7 +1,7 @@
 # Memory Bank — Design decisions
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -6314,5 +6314,64 @@ contract issues, docs-root escape attempts and RU/EN paragraph movement. Link ed
 stable paragraphs before or after the occurrence remain eligible because they do not change
 the target paragraph's ordinal.
 
+
+### §6.268–§6.272 Follow-up safety series after the original nine defects (PRs #169–#173, 2026-09-13–14)
+
+PR #168 is the closed historical series of exactly nine original defects exposed by
+YDB PR #51079. Its nine sequential commits and exact offline fixture retain that
+identity. The five changes below are later production findings. They are not a
+renumbering or expansion of the original nine-defect set.
+
+The PR #168 commits were rebased before merge, so their object IDs changed while
+their patches remained identical. `git patch-id --stable` proves every pair:
+
+| Original PR commit | Merged commit | Stable patch ID |
+|---|---|---|
+| `d306aa9` | `7785f7a` | `bfcd4e766381c88e3dc4ca5d6c42abbd7f1de2d8` |
+| `055a8fe` | `e7210c1` | `c09f6b82f6a5f595f8022f052053e492b549ffab` |
+| `b3fd1fd` | `e5e7bbf` | `0c076fd128725cfb72b5a02a26d2aeb302297088` |
+| `f23cff6` | `97ac685` | `9720a25e409a36e2cc18f2aa1e0945ad0d7583d0` |
+| `1f95ea5` | `48c4b1c` | `b734d065eb2e172aa206870f54a6e81e60405162` |
+| `7cc36e5` | `a48ffb8` | `d34c778572162a22a6f502fad517e7ad46b8188d` |
+| `be565a1` | `b2ad052` | `415182d8cbc8e17df4ba09f11588c513c0d995ae` |
+| `58ed9b0` | `717ea44` | `d2a1a528903d0d1595564f8def932542d6794766` |
+| `94e9bde` | `d819614` | `438fea194968ebcb02ce269a3b4475718b4c0d7a` |
+
+- **§6.268, [PR #169](https://github.com/ydb-platform/ydbdoc-review/pull/169):** full-coverage fallback must use the translation-with-QA
+  profile. Selecting a translation-only profile here was a false-GREEN path because
+  translated output could skip the inline critic. PR-body tested source:
+  [`e9d3dbc`](https://github.com/ydb-platform/ydbdoc-review/commit/e9d3dbc23184f13fedc24e9eaae13784caea91eb).
+- **§6.269, [PR #170](https://github.com/ydb-platform/ydbdoc-review/pull/170):** every LLM-translated unit, including units-mode
+  `translate_required`, must receive critic review. Trusted reuse remains zero-call.
+  Refusal exhaustion is incomplete semantic review and therefore RED/
+  `WITHHOLD_UNSAFE`; it cannot produce safe GREEN. PR-body tested source:
+  [`19a9028`](https://github.com/ydb-platform/ydbdoc-review/commit/19a9028e3d472149a25cd74836351156cfca3fd3).
+- **§6.270, [PR #171](https://github.com/ydb-platform/ydbdoc-review/pull/171):** deterministic critic refusals recover through bounded
+  recursive splitting at segment boundaries, then through the configured,
+  deduplicated independently available critic-model chain. Identical model+payload
+  refusal calls are not repeated. Every leaf requires a parseable semantic verdict.
+  PR-body tested source: [`9aad8d1`](https://github.com/ydb-platform/ydbdoc-review/commit/9aad8d1ab9675f3f4255b1a471e581edb8e6dd10).
+- **§6.271, [PR #172](https://github.com/ydb-platform/ydbdoc-review/pull/172):** translated edge whitespace in an ordinary inline Markdown
+  link label may be removed only when unique destination/title identity pairs it to
+  the source link. Ambiguous duplicates, multiline labels and non-inline forms are
+  byte-preserved. Only label-edge whitespace changes. PR-body tested source:
+  [`4cbd337`](https://github.com/ydb-platform/ydbdoc-review/commit/4cbd3373f2b5c9ad604a78a3fcdb74d82a26fd51).
+- **§6.272, [PR #173](https://github.com/ydb-platform/ydbdoc-review/pull/173):** same-fragment stale-route reconciliation uses the
+  parser-derived AST link slot across all four immutable snapshots and requires a
+  unique final anchor owner. It changes only the path, preserves fragment and other
+  bytes, and fails closed on ambiguity or missing evidence. The production-shaped
+  `test_pr51079_exact_e2e.py` exercises the exact #51079 route through the full local
+  pipeline. PR-body tested source: [`4dd1a5a`](https://github.com/ydb-platform/ydbdoc-review/commit/4dd1a5a8dea70e133681207d77e0187c4f15717a).
+
+These are test results stated in the PR bodies, not a GitHub check-rollup claim.
+
+A proposed deterministic English AND/OR/conjunction guard was rejected and is not
+runtime behavior. The preferred future semantic safety check is a reviewer-model pass
+over the finalized whole sentence or block, but that check is analyzed only and has
+not been implemented.
+
+The human-readable QA report change exists only as local unpublished commit `e56be3d`
+(`fix: show actionable QA in translation PR body`). It is planned work, not behavior
+of `main` or `v0.1.0` at this checkpoint.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -1,7 +1,7 @@
 # Memory Bank — Roadmap
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -184,5 +184,13 @@ cloud size quota may block writes until raised.
       production SHA. Offline success does not complete this operator acceptance.
 
 ---
+
+### Current pending QA work (2026-09-14)
+
+- [ ] Publish and independently review the human-readable QA report change. It
+  exists only in local commit `e56be3d`, not in `main` or `v0.1.0`.
+- [ ] Implement a post-finalization reviewer-model comparison of authoritative
+  source and final translation at whole-sentence or whole-block scope.
+- [x] Do not ship the rejected deterministic AND/OR/conjunction guard.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

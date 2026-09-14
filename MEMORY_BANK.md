@@ -1,14 +1,19 @@
-# Memory Bank — ydbdoc-review v2 (doc-translate-ng)
+# Memory Bank — ydbdoc-review
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-**Last updated:** 2026-09-13
-**Current focus:** §6.267: exact offline #51079 replay uses immutable H0/H/B/K
-snapshots, independently reviewed model responses and the real local Git pipeline.
-Exactly six Markdown plus one TOC are translated from two source changes. Original
-defective K and seven isolated regressions must be non-green; report verification
-is bound to exact committed bytes. Network is disabled. Production retry, content
-review and green verify/build on the same production SHA remain deferred.
+**Last updated:** 2026-09-14
+**Current focus:** §6.268–§6.272 record the shipped follow-up safety fixes from PRs
+#169–#173: full-fallback inline critic, critic coverage/refusal fail-closed behavior,
+bounded split/model recovery, safe Markdown label-padding repair, and AST-slot
+same-fragment route reconciliation with exact #51079 E2E coverage.
+
+The original PR #168 history remains a separate, closed nine-defect series: exactly
+nine sequential commits and its exact offline replay. PRs #169–#173 are follow-up
+production findings and must not be folded into that count. No local deterministic
+AND/OR language guard was accepted or shipped.
+Canonical acceptance labels the former clean-prose YELLOW refusal case as
+historical and requires complete leaf review or RED/`WITHHOLD_UNSAFE`.
 
 Prior focus: §6.266: later-RU provenance is filtered to exact source paths
 and already admitted document/navigation dependencies before subject parsing or
@@ -16,7 +21,7 @@ PR API lookup. `Confirmed merge association` proves only merged state, PR number
 and exact merge SHA. The diagnostic cannot expand translation scope or affect the
 quality verdict.
 
-Prior focus: §6.265: two narrow parser-located AST-visible editorial checks
+Historical PR #168 focus: §6.265: two narrow parser-located AST-visible editorial checks
 flag padded Markdown link labels and exact case-insensitive `ldaps schema` wording
 as warnings with original CommonMark line context and concrete corrections.
 Inline-code label text participates; comments, front matter, fenced/indented code
@@ -24,11 +29,13 @@ and link destinations stay excluded. YFM variables protect their structural labe
 boundary, while real whitespace outside the complete label still warns. Location
 provenance follows the configured parser's visible token stream and fails closed
 when exact source ownership is unavailable. This is not general grammar coverage,
-does not rewrite content, and the §6.264 critic-refusal warning remains independent.
+does not rewrite content. Its reference to the §6.264 warning policy is superseded
+by PR #170 / R-GL-19: exhausted refusal is RED and `WITHHOLD_UNSAFE`.
 
-Prior focus: §6.264: critic refusal means incomplete language/style review.
-Clean prose stays warnings/yellow with manual review required. All critic passes
-retain complete combined findings, including blocked sibling batches and target
+Historical PR #168 focus: §6.264 first made refusal non-green, but its
+warnings/yellow classification is superseded by PR #170 / R-GL-19. Exhausted
+refusal is now blocked, RED and `WITHHOLD_UNSAFE`. The historical implementation
+retained complete combined findings, including blocked sibling batches and target
 atom issues. Pair post-repair QA preserves refusal; compatibility warnings with
 empty issues also remain non-green. Technical execution failures remain blocked.
 Final-review correction: refusal also retains accumulated pending findings on
@@ -39,7 +46,8 @@ Report-only deduplication omits skipped entries already shown as unresolved,
 preserving one reviewer item per issue without changing machine blocker evidence.
 The coded refusal heuristic mirror is also omitted when its critic event is
 displayed; matching never suppresses distinct findings merely for similar wording.
-This replaces §6.245/R-GL-5's old info/green refusal policy.
+This historically replaced §6.245/R-GL-5's info/green policy; PR #170 replaced
+the remaining YELLOW outcome.
 
 Prior focus: §6.263: critic/verify inspect actual target code atoms with
 separate source/target legends and fail closed on alignment mismatch. Residual
@@ -95,6 +103,12 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-14 | **§6.272 / PR #173**: same-fragment path reconciliation requires the same parser-derived AST link slot across four snapshots, a unique owner and final target; ambiguity fails closed; exact PR #51079 E2E is green locally |
+| 2026-09-14 | **§6.271 / PR #172**: ordinary inline Markdown link-label edge padding is repaired only from unique destination/title identity; ambiguous, multiline and non-inline forms remain unchanged |
+| 2026-09-14 | **§6.270 / PR #171**: critic refusal recovery recursively splits only at segment boundaries within a bound and uses the configured deduplicated independent model chain; exhausted leaves remain RED/WITHHOLD_UNSAFE |
+| 2026-09-14 | **§6.269 / PR #170**: every LLM-translated unit receives critic review; exhausted refusal is incomplete review and cannot produce safe GREEN or publication |
+| 2026-09-13 | **§6.268 / PR #169**: full-coverage fallback runs the inline critic instead of selecting a translation-only profile |
+| 2026-09-13 | **PR #168 history**: exactly nine original #51079 defects, nine sequential commits; later PRs #169–#173 are follow-ups, not defects ten through fourteen |
 | 2026-09-13 | **§6.266**: exact source plus previously admitted dependency paths filter later-RU drift before PR lookup; confirmed merge association is provenance only and does not change translation scope or verdict |
 | 2026-09-13 | **§6.265**: visible Markdown AST flags padded link labels and exact `ldaps schema` wording as warning/yellow with source line context; no rewrite or general grammar claim |
 | 2026-09-13 | **§6.261**: exact complete ``Имя=Значение,...@<domain>`` inline-code atoms localize parser-safely after href restoration; fuzzy code rewrites are excluded and residual Russian blocks both `en` and `english` |
@@ -117,7 +131,7 @@ stable cross-references — use them when linking between files.
 | 2026-09-03 | **§6.247 production** — doc_verify run 33752767042 on #52077 emitted 3 blocking ASCII-fragment substitutions, including legacy-translit; false green eliminated |
 | 2026-09-03 | **§6.247** — hard exact-ASCII href parity before baseline grandfather; #52077 false-green regression (R-GL-7) |
 | 2026-09-03 | **§6.246** — include-only fragment-owner enqueue for pre-existing hrefs; include declare fallback (#52077 / R-GL-6) |
-| 2026-09-13 | **§6.264**: critic refusal is warning/yellow; all sibling findings survive. Supersedes §6.245 info/green policy (#52077 / R-GL-5) |
+| 2026-09-13 | **§6.264 historical**: PR #168 changed refusal from info/green to warning/yellow while preserving sibling findings; PR #170 / R-GL-19 now supersedes that outcome with RED/WITHHOLD_UNSAFE on exhaustion |
 | 2026-09-03 | **§6.244** — fragment-owner href delta vs ``read_ru_base``; output-aware translate batching + length resplit (#52077 / R-GL-4) |
 | 2026-09-03 | **§6.243** — tip EN covering inbound exact-ASCII frags satisfies scope gap; clearer completeness QA (#52077 / R-GL-3) |
 | 2026-09-03 | **§6.242** — tip ``redirects.yaml`` for tombstone skip; fragment owners follow tip ``from``→``to`` (#40385 / R-GL-2) |
@@ -264,16 +278,16 @@ stable cross-references — use them when linking between files.
 
 Older §6.x entries remain in [03-design-decisions](docs/memory-bank/03-design-decisions.md).
 
-## Deploy status (navigation redesign)
+## Current deployment status
 
 | Artifact | State |
 |----------|--------|
-| `main` | §22 planner + §6.101–§6.106 (tagged `v0.1.0`) |
-| Tag `v0.1.0` | **moved** on 2026-07-15 — §6.106 verify RU authority + §6.104–§6.105 |
+| `main` | `66e8533ed3fb97cd7dbd1e512200746d387074fa`, PR #173 |
+| Tag `v0.1.0` | Same `66e8533ed3fb97cd7dbd1e512200746d387074fa` deployed commit |
 | Tag `v0.2.0` | Unchanged — Reactor/Nirvana schedulers only |
 | ydb CI `doc_translate` | **Yandex Cloud** (`YANDEX_CLOUD_*` secrets); default `YDBDOC_MODEL_PROVIDER=yandex_cloud` — **not** Eliza |
 | Local `job` / Reactor | **Eliza** when `YDBDOC_MODEL_PROVIDER=eliza` + `ELIZA_OAUTH_TOKEN` (typically `~/.zshrc`) |
-| Validation | [#46609](https://github.com/ydb-platform/ydb/pull/46609): re-run **`doc_verify`** after tag @ §6.106 (expect ~8 fewer false fence 🟡) |
+| Validation | Embedded QA and docs build must be green on the same translation PR SHA; historical #46609 instructions above are not the current checkpoint |
 
 ## For AI assistants
 
