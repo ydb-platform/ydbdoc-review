@@ -2,17 +2,66 @@
 
 Этот файл является единственным источником действующих требований к конвейеру перевода. Исторические спецификации, отчёты агентов и старые решения не изменяют этот контракт.
 
+## 0. Уточнения владельца продукта — 2026-09-14
+
+Эти решения пользователя имеют приоритет над прежними формулировками этого
+файла и историей Memory Bank в вопросах создания PR, порядка QA и повторного
+`doc_translate`. Это согласованные требования; соответствие текущего кода ещё
+не подтверждено.
+
+### D-001. Перевод, PR и критик
+
+1. Взять исходные файлы и перевести их. Сохранить перевод в отдельной ветке
+   и создать переводной PR до проверки критиком.
+2. Первый проход критика: если найдены замечания, выполнить первую попытку
+   исправления и сохранить правки в той же ветке.
+3. Второй проход критика: если замечания остались, выполнить вторую попытку
+   исправления и сохранить правки в той же ветке.
+4. Третий проход критика: записать итоговый вердикт и оставшиеся замечания в PR.
+   Третьей попытки исправления в этом запуске нет.
+5. Если критик раньше не нашёл замечаний, записать успешный итог в PR и закончить
+   цикл без лишних исправлений.
+6. PR с переводом должен существовать независимо от результата QA. Замечания
+   к переводу, повреждённая разметка, служебные маркеры и отказ/ошибка критика
+   отражаются в вердикте, но не запрещают создание PR и не удаляют его.
+   Неполную проверку нельзя описывать как успешную.
+
+Плохой вердикт не отменяет PR. Прежние ограничения `WITHHOLD_UNSAFE` и
+`WITHHOLD_INCOMPLETE` не являются разрешением скрывать результат из-за QA.
+Создание PR и готовность перевода к merge — разные факты; отчёт показывает оба.
+Draft или обычный PR, а также поведение при невозможности получить перевод
+или выполнить GitHub-операцию этими решениями отдельно не согласованы.
+
+### D-002. Новая постановка doc_translate
+
+Каждая новая постановка метки `doc_translate` означает полный перезапуск:
+
+1. Удалить текущую ветку перевода данного исходного PR.
+2. Создать ветку заново и перевести исходные файлы с нуля.
+3. Обеспечить переводной PR и выполнить цикл критика из D-001.
+
+Это выполняется даже при неизменённых исходных файлах. Старый перевод,
+checkpoint, ответ Analyze об актуальности перевода или прежний запуск на том же
+SHA не должны заменять полный перевод пропуском или продолжением работы.
+Удаляется ветка перевода; исходная ветка авторского PR не изменяется.
+Повторная доставка одного события не равна новой постановке метки.
+
+Приёмка D-001: замечания на каждом из трёх проходов дают ровно две попытки
+исправления, PR существует до первого critic, итог третьего прохода находится
+в PR. При раннем отсутствии замечаний лишних попыток нет.
+Приёмка D-002: две отдельные постановки метки на одном исходном SHA дают два
+полных запуска; во втором старая ветка удаляется, перевод строится заново.
+
+Связанные записи: [Memory Bank: решения продукта](docs/memory-bank/10-product-decisions.md).
+
 ## 1. Назначение
 
 Конвейер переводит изменения русской документации YDB на английский язык, создаёт отдельный переводной pull request и проверяет, что опубликованный Markdown не повреждён.
 
 ## 2. Запуск
 
-- `doc_translate` запускает создание нового перевода и переводной pull request.
-- После перевода `doc_translate` в том же job запускает embedded QA,
-  функционально эквивалентную `doc_verify`. Завершение translation-фазы
-  не требует повторного лейбла `doc_verify`: оператор дожидается embedded
-  critic и его отчёта.
+- `doc_translate` выполняет полный запуск D-001; новая постановка метки выполняет удаление прежней ветки и перезапуск D-002.
+- После сохранения перевода и создания PR `doc_translate` в том же job запускает цикл критика D-001: до трёх проверок и до двух исправлений. Отдельная постановка `doc_verify` для этого не требуется.
 - `doc_verify` проверяет уже существующий английский текст без повторного перевода.
 - `doc_continue` продолжает только job, у которой в артефактах состояния явно сохранён флаг продолжаемости и незавершённый этап после успешной фиксации SHA. Иные остановки требуют нового `doc_translate`.
 - Повторная проверка не должна запускать новый перевод, если английский текст менять не требуется.
@@ -24,7 +73,7 @@
 - Для слитого PR все решения scope (существование файла, fragment-owner зависимости, живой путь страницы) принимаются по зафиксированному tip этой базы (`merge_base_with`), а не по историческому merge-дереву, если tip уже переместил, удалил или сделал путь redirect-`from`.
 - Если на tip `redirects.yaml` путь является redirect `from` (tombstone), конвейер не создаёт и не обновляет EN на `from`: пара — skip; completeness для tombstone удовлетворена. Exact-ASCII fragment owner при необходимости ставит в очередь живой tip-путь (`to`), не tombstone. Orphan gate и tombstone-skip читают один и тот же tip `redirects.yaml`.
 - Если EN-путь ожидался в scope переводного PR, но не вошёл в diff ветки, completeness gap **не** ставится, когда tip EN уже объявляет все exact-ASCII `#fragment`, на которые ссылаются EN-страницы из diff этого PR (tip уже закрывает inbound-ссылки; translate мог быть noop относительно tip).
-- Если `translate_to_en` падает, но конвейер сохраняет exact non-empty существующий tip EN (soft-keep), это не маскируется под успешный перевод: pair получает typed `translation_soft_keep` с нормализованной причиной, а PR-level blocker фиксирует путь и SHA-256 фактически публикуемых retained bytes. При отсутствии completeness/structural/integrity/critic blocker и наличии реального git artifact весь candidate публикуется только native draft/RED; soft-kept файл считается `Retained for manual repair`, а не переведённым. Отсутствующий/new target или raw error остаётся `WITHHOLD_INCOMPLETE`, unsafe evidence — `WITHHOLD_UNSAFE`, отсутствие commit/diff — hard `no_publishable_artifact` без пустого PR.
+- Сохранённый старый EN нельзя выдавать за новый перевод. Новая постановка `doc_translate` требует полного перезапуска D-002. Ошибки качества полученного перевода не отменяют PR (D-001); случай, когда получить перевод вообще не удалось, требует отдельного уточнения и не описывается как успешный перевод.
 - QA-отчёт при completeness gap называет конкретные EN/RU пути и отличие «нет на tip» vs «есть на tip, нет в diff PR»; не маскирует блокер списком 🟢; не предлагает `doc_continue` как основной путь для gap «нет в diff».
 - Русские файлы, исторически удалённые в исходном pull request, не входят в перевод.
 - Историческое удаление русского файла никогда автоматически не удаляет и не перезаписывает актуальный английский файл.
@@ -148,14 +197,14 @@ model realignment.
 от LLM-переводчика, обязана пройти critic. Это включает full-coverage
 fallback и units-mode `translate_required`. Trusted reuse не тратит model calls.
 Исчерпанный refusal означает незавершённый semantic review,
-блокирует safe GREEN и публикацию.
+блокирует safe GREEN; PR сохраняется, а незавершённый review отражается в вердикте (D-001).
 
 **R-GL-20 (доставлено в PR #171):** при deterministic refusal critic может
 рекурсивно делить batch только по границе сегментов и только в
 заданном пределе. Затем он переходит по настроенной,
 дедуплицированной и независимо доступной цепочке fallback-моделей.
 Одинаковые model+payload refusal не повторяются; каждый leaf должен
-получить parseable semantic verdict, иначе RED/WITHHOLD_UNSAFE.
+получить parseable semantic verdict, иначе RED в существующем PR (D-001).
 
 - При технической ошибке ответа разрешена повторная попытка.
 - При недоступности выбранной модели разрешено переключение на другую настроенную модель.
@@ -164,7 +213,7 @@ fallback и units-mode `translate_required`. Trusted reuse не тратит mod
 - Для локальной исправимой проблемы модели передаётся ограниченный фрагмент, описание проблемы и необходимый контекст.
 - Разрешено не более двух локальных попыток исправления одной проблемы.
 - После каждой попытки критик повторно проверяет результат.
-- Если проблема не исправлена, merge блокируется и пользователь получает понятный красный отчёт. Полный структурно безопасный candidate с repairable QA-blocker может быть опубликован только как draft/RED по R-GL-12–R-GL-13.
+- Если проблема не исправлена, merge блокируется и пользователь получает понятный красный отчёт. Переводной PR уже существует по D-001; все оставшиеся замечания записываются в него.
 - Бесконечные циклы перевода и исправления запрещены.
 
 Минимальный обязательный набор красных проверок критика и пост-валидации документа:
@@ -180,7 +229,7 @@ fallback и units-mode `translate_required`. Trusted reuse не тратит mod
 Он работает в трёх FileHarness-профилях, на ранних возвратах pair, на финальном
 дереве doc_translate и на immutable `verify_content_sha` в doc_verify.
 Находка содержит номер строки, ограниченный preview и SHA-256 точных проверенных
-байтов. Это `WITHHOLD_UNSAFE`, никогда не repairable `PUBLISH_RED`.
+байтов. Это красный QA-вердикт; создание PR не блокируется (D-001).
 Пустой explicit overlay авторитетен; tombstone не воскрешается из baseline.
 Dry-run читает pending overlay поверх frozen B, verify читает K независимо от
 грязного worktree. K2 проверяется в существующем рекурсивном verify.
@@ -213,7 +262,7 @@ skipped/identical segments или при отказе модели. Только
 `critic_model_refusal` всегда означает незавершённую проверку. Описанная
 ниже классификация YELLOW была промежуточным контрактом PR #168
 и больше не является нормативной. После ограниченного recovery исчерпание
-refusal остаётся **blocked, RED, `WITHHOLD_UNSAFE`** и не публикуется.
+refusal остаётся **blocked, RED** и явно показывается в существующем PR (D-001).
 
 Когда LLM-критик возвращает safety/content-policy отказ (§6.235, `is_model_refusal_text`), а детерминированные эвристики файла **не** содержат blocking-сообщений:
 
@@ -288,8 +337,8 @@ evidence, несовпавший slot или неразрешимый target о�
 - **R-GL-9** — разрешимость baseline href не доказывает семантическую эквивалентность section target. `prefer_baseline_href_when_fragment_missing` не заменяет source-owned ASCII fragment другим baseline fragment; исключение только то же доказанное implicit heading auto-slug соответствие из R-GL-8. При неравном числе link-slots path-only restore допустим только для final EN candidate slot, который доказан четырьмя снимками: уникальный `(normalized label, decoded full href)` occurrence в RU base/current, historical RU-base/tip-EN slot, и unique identical ASCII fragment на обеих historical сторонах. Delete+add и duplicate historical fragment остаются blocker, а не pairing.
 - **R-GL-10** — pre-existing stable-fragment href на source-diff странице ставит RU owner в translation scope, только если RU target однозначно объявляет fragment, а EN target его не объявляет. Broken RU href без RU declaration не расширяет scope. Для такого ambient broken RU path разрешено сохранить tip EN path только с тем же decoded fragment, когда current RU `path#fragment` не разрешается в immutable `ru_content_ref`, candidate target не разрешается в final EN tree, а baseline target разрешяется в ней. Подмена fragment запрещена. Это уточняет R-GL-4a и §6.233, не отменяя их защиту от произвольного ambient scope.
 - **R-GL-11** — post-translate обработка обязана использовать две временные проекции: финальный EN candidate читается поверх `merge_base_with`, а RU-владелец exact fragment читается из `ru_content_ref` исходного PR. После declaration и late repair, непосредственно перед final `apply_en_link_target_checks`, выполняется fail-closed final-tree reconciliation; она меняет только path и сохраняет raw candidate fragment. Приёмочный тест проходит полный локальный маршрут `load contents → run_pr_translation → apply → declare → late repair → final reconciliation → en_link_target` на production-shaped #40385 fixture с разными non-empty RU base/current и EN tip commits, 3 current против 2 baseline links, и одновременно проверяет `security-auth` и `certificate-auth-config`; helper-only тесты недостаточны.
-- **R-GL-12** — публикация paid candidate отделена от merge readiness typed-осью `WITHHOLD_INCOMPLETE | WITHHOLD_UNSAFE | PUBLISH_RED | PUBLISH_NORMAL`, с приоритетом incomplete > unsafe > repairable RED > normal. Pair error, отсутствующий/new ожидаемый output, нематериализованный soft-keep, source-retaining `ManualAction`, segment alignment failure, deterministic link-contract failure, protect-marker leakage и invalid mandatory navigation YAML запрещают prepare/commit/push/PR. Полный structurally safe candidate может быть draft/RED только для явного allowlist PR-level blockers: `en_link_target` и `translation_soft_keep`, причём у каждого soft-kept target обязаны существовать exact non-empty tip bytes и durable SHA-256 фактически опубликованного artifact. Остальные blocker classes остаются withheld.
-- **R-GL-13** — published-blocked candidate обязан иметь native draft state, явный `QA RED, do not merge` banner и blocker summary в translation PR, красную merge recommendation в полном отчёте и `published_red` в source summary, CLI и ops ledger. Soft-keep summary отдельно показывает `Translated`, `Retained for manual repair` и `Failed without target`, называет path/reason/manual action и направляет к ручной правке translation branch с последующим `doc_verify`, а не к `doc_continue`. Durable `translation_soft_keep` снимается standalone/inline verify только когда bytes изменились относительно manifest hash и matching pair прошла current structural/integrity/critic validation; PR автоматически ready не становится. Exit 0 после успешного создания draft разрешает downstream CI и означает только успешную публикацию artifact; отсутствие translation PR или `no_publishable_artifact` остаётся hard failure. Existing ready-for-review PR перед продолжением переводится обратно в draft.
+- **R-GL-12 — пересмотрено D-001:** ошибки качества и незавершённая проверка не запрещают ветку и переводной PR. Все findings сохраняются в отчёте. `WITHHOLD_UNSAFE`/`WITHHOLD_INCOMPLETE` из прежнего контракта не применяются как запрет публикации из-за QA; историческое деление кандидатов не меняет обязательный порядок D-001.
+- **R-GL-13 — пересмотрено D-001:** переводной PR создаётся до первого прохода критика. Исправления сохраняются в его ветке, итоговый вердикт публикуется в этом PR. RED означает оставшиеся замечания или незавершённую проверку, а не отсутствие PR. Создание PR не объявляется доказательством готовности к merge. Выбор draft/обычного состояния отдельно не согласован.
 - **R-GL-14** — `doc_verify` может автоматически восстановить потерянную Markdown-обёртку ссылки только по immutable frozen-B evidence. H0 и H/R должны содержать byte-identical source paragraph; B должен содержать ровно одну ссылку с английским label, а K должен содержать этот label ровно один раз как plain complete-word text в соответствующем неизменённом source-owned paragraph. В K вставляется только обёртка `[label](B-href)` без изменения label, href, fragment и остальных байтов. B target обязан безопасно оставаться внутри настроенного `docs_root/en/core` как при raw component walk, так и после canonical resolve; leave-and-return traversal, cross-locale/encoded traversal, ambiguous occurrence, code/comment/existing-link/image/include/title context, missing final target или fragment блокируют proposal. Граница слова учитывает alphanumeric, `_` и Unicode combining categories Mn/Mc/Me. При единственном proposal обычный result writer первой verify-фазы не запускается; repair проходит существующий lease, создаёт ровно один K→K2 commit/push и требует fresh recursive verify K2. K2 no-proposal apply обязан быть пустым no-op без writer, touched paths и второго push. Typed `validation_issues` и `link_contract_issues` всегда видны в отчёте и блокируют merge до успешного repair/verify.
 - **R-GL-15** — после собственного подтверждённого inline push K→K2 recursive `doc_verify` обязан ограниченно дождаться видимости K2 в свежем GitHub REST PR context. Разрешено не более шести REST-чтений и ожидания 1, 2, 4, 8 и 15 секунд, суммарно не более 30 intentional seconds. Только точный предыдущий owned K считается transient и допускает retry. K2 принимается лишь при неизменных destination ref и local checkout, равных K2 до и после REST-read; полный доказанный K2 context передаётся во внутреннюю рекурсию без нового непроверенного чтения. Любой третий SHA, ref/repository/state drift, lease/checkout drift или исчерпание stale K завершается fail-closed. Основной инвариант `remote E == PR head == checkout C` не ослабляется. Подмена или исчезновение authority body/evidence сохраняет контракт `ValueError`; структурный drift публикации сохраняет `RuntimeError`.
 - **R-GL-16:** orphan gate должен признавать Markdown-фрагмент достижимым по транзитивной цепочке структурных YFM include от обычной TOC-reachable страницы. Доказательство использует только frozen B с pending output при translate либо проверяемый K с pending output при verify; exact pending key, включая пустой текст, перекрывает baseline. Missing/deleted/errored output не восстанавливается из HEAD, RU или worktree. Допустимы только существующие targets той же локали без выхода за её границу на любом шаге raw path traversal; циклы ограничиваются visited set. Include определяется только токеном `yfm_include` существующего Markdown tokenizer: обычные ссылки, code, comments и front matter доказательством не являются; fallback к line scan при ошибке запрещён. QA verdict не отменяет существование материализованных candidate bytes. Освобождение от orphan не снимает другие blockers, не изменяет href stripping и не создаёт blanket exemption для `_assets`.
@@ -344,12 +393,12 @@ verdict.
 ## 11. Публикация
 
 - Все результаты сначала проверяются как единое финальное дерево.
-- Изменения применяются транзакционно. Частичный или повреждённый результат не подготавливается к публикации.
-- Полный безопасный результат проходит stage, commit и push в переводную ветку; incomplete или unsafe результат не публикуется.
-- Создаётся открытый переводной pull request: обычный для clean candidate либо draft с явным RED для допустимого repairable blocker.
+- Перевод сохраняется в ветке и PR до critic. Проверки целостности и качества дают замечания в PR, а не запрещают его создание (D-001).
+- Замечания к полученному переводу не запрещают stage, commit, push и PR; исправления критика сохраняются в той же ветке (D-001).
+- Переводной PR создаётся после перевода до первого прохода критика, согласно D-001. Замечания QA не отменяют PR.
 - На него устанавливается `ok-to-test`.
 - Готовность означает зелёный `build-docs` и зелёный отчёт `doc_verify` на одном и том же SHA переводной ветки.
-- Workflow не ждёт бесконечно: при отсутствии зелёного `build-docs` в пределах обычного CI-ожидания job оставляет жёлтое или красное состояние с указанием проверить checks, но не сообщает `success`, пока PR не создан и блокирующих ошибок перевода нет. Отсутствие зелёного `build-docs` из-за очереди CI само по себе не откатывает уже созданный PR.
+- Workflow не ждёт бесконечно: при отсутствии зелёного `build-docs` в пределах обычного CI-ожидания job оставляет жёлтое или красное состояние с указанием проверить checks, при этом факт создания PR и итог качества сообщаются раздельно (D-001). Отсутствие зелёного `build-docs` из-за очереди CI само по себе не откатывает уже созданный PR.
 - Workflow не имеет права завершаться с `success`, если блокирующая ошибка привела к пропуску commit, push или создания pull request. `success` после создания draft/RED означает только успешную публикацию artifact для запуска downstream CI и не означает merge readiness.
 
 ## 11.1 Навигация и redirects
@@ -375,7 +424,7 @@ verdict.
 исчерпания recovery:
 
 - файл виден в «Что исправить» с диагностикой refusal;
-- вердикт 🔴, merge и unsafe publication запрещены;
+- вердикт 🔴, готовность к merge не подтверждена; PR и диагностика сохраняются (D-001);
 - требуется новый полный semantic verdict, а не ручное понижение до YELLOW.
 
 ## 13. Запрещённая инфраструктура
@@ -437,14 +486,14 @@ verdict.
   как история и заменено PR #170. Текущая приёмка требует bounded
   segment-split и configured independent-family fallback; продолжение допустимо
   только после complete semantic review каждого leaf. Исчерпанный refusal даёт
-  `blocked`/🔴/`WITHHOLD_UNSAFE`, запрещает merge и publication. `critic_execution_failed`
+  `blocked`/🔴 и незавершённую проверку в PR; PR не отменяется (D-001). `critic_execution_failed`
   остаётся отдельным 🔴; ASCII без сегментов не вызывает critic.
 - **R-GL-6:** merged #40385 fixture — 6 пар (5 diff + `_includes/connect.md`); pre-existing `connect.md#tls` на modified `authentication.md` → `doc_from_main` содержит `_includes/connect.md`, `auth_config` — нет; после translate+declare `apply_en_link_target_checks` == `[]` на `authentication.md`; `test_pr_40385_real_tip_without_queued_translation_stays_blocked` остаётся блокирующим при bypass owner pair; declare fallback: synthetic aligned include → append `{#frag}`; real-tip misaligned без translate → fallback `None`.
 - **R-GL-7/R-GL-8:** production/fixture #52077 при `candidate == en_baseline` разрешает доказанный legacy-translit `#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov`→`#enabling-the-node-authentication-and-authorization-mode` и блокирует ровно две подмены критика: `#certificate-auth-config`→`#iam-auth-config` и `#tls`→`#activated-profile`. Explicit, missing-target и ambiguous варианты остаются blocking; duplicate occurrences дают отдельные blockers; same-path ambient extra при наличии точного href не создаёт false positive; path-only redirect с тем же ASCII fragment проходит; URL-encoded кириллический fragment и dictionary localization проходят.
 - **R-GL-9:** fragment-repair fixture сохраняет `#security-auth`/`#certificate-auth-config`/`#tls`, даже если baseline указывает на существующий другой explicit anchor; доказанный implicit heading slug по-прежнему может использовать локализованный baseline. Delete+add same-fragment и duplicate historical fragment не получают final path restore и остаются blocking.
 - **R-GL-10:** #40385 scope fixture с pre-existing `auth_config#security-auth` (не объявлен в RU owner) и `auth_config#certificate-auth-config` (explicit в RU, отсутствует EN) ставит `auth_config.md` в `doc_from_main` из-за certificate fragment, не из-за broken security fragment. Source-valid current RU target не откатывается на tip EN path.
 - **R-GL-11:** production-shaped #40385 fixture проходит полный post-translate lifecycle локально с 3 current RU links против 2 RU/EN baseline links: disabled reconciliation оставляет `en_link_target` blocker; final reconciliation сохраняет tip `security_config.md#security-auth`, declaration читает `auth_config.md` из source `ru_content_ref` и добавляет `{#certificate-auth-config}` byte-identically; финальный `apply_en_link_target_checks` возвращает `[]` без запуска GitHub Actions.
-- **R-GL-12/R-GL-13:** top-level `run_doc_translate` tests на real temporary git tree доказывают, что safe final `en_link_target` blocker сохраняет `completeness_gaps == []`, не очищает touched paths, вызывает prepare/commit/push и `create_pull(draft=True)`, а blocker на declaration/redirect impact path без `PairRunResult` остаётся в `final_tree_blockers`. Production-shaped soft-keep fixture воспроизводит 8 clean translations + retained `authentication.md`: result даёт `Translated: 8`, `Retained for manual repair: 1`, draft `PUBLISH_RED`, exact published-bytes hash и durable manifest. Missing/new target, raw error, unsafe structure/critic и no-diff artifact остаются withheld; standalone verify сохраняет unchanged hash и снимает blocker только после changed green pair validation. Existing ready PR получает `convertPullRequestToDraft`; clean candidate остаётся `PUBLISH_NORMAL`.
+- **R-GL-12/R-GL-13:** приёмка следует D-001: PR создаётся до critic, остаётся доступным при ошибках разметки/markers/навигации/critic; максимум два исправления, итог после третьей проверки записан в PR. Прежние тесты, ожидающие запрет публикации по QA, необходимо пересмотреть. Приёмка полного перезапуска — D-002.
 - **R-GL-14:** production-shaped #52330 fixture доказывает единственный frozen-B wrapper proposal, точный one-file/one-line K→K2 diff, `+103` bytes и идемпотентность. Негативные случаи покрывают raw leave-and-return traversal, custom core root, query/fragment classification, `_` и Unicode Mn/Mc/Me на границах label, ambiguous/missing/unsafe target, отсутствие K fragment, typed report blockers, bypass repair application и bypass fresh recursive verify. Real-Git workflow создаёт один commit/push, подтверждает K2 parentage, пустой K2 apply и отсутствие второго push.
 - **R-GL-15:** real-Git workflow воспроизводит stale PR head K после успешного push K2 и доказывает успех при двух и пяти stale reads, bounded failure после шести stale reads, точные waits `1,2,4,8,15`, отсутствие повторного push и model/apply/comment work до согласования. Отдельные controls немедленно блокируют третий SHA во время REST-read, изменение ref после handshake и удаление recursive equality gate. Неизменённые A05 evidence-drop/foreign-identity tests обязаны по-прежнему получать `ValueError`. Production acceptance требует final `doc_verify`, docs build и PR-check success на одном K2; локальные тесты или перемещение release tag этого не заменяют.
 - **R-GL-16:** fixture #51079 с восемью Markdown и `security/toc_p.yaml` освобождает оба include-only `_assets/user-token*.md` до записи pending файлов на диск. Controls сохраняют orphan для include из недостижимого referrer, ordinary link, fenced/code/comment/front-matter example, missing/deleted/errored target, cross-locale и raw leave-and-return пути. Обязательны отдельные RED→GREEN tests с настоящим TAB-indented example и YAML block scalar. Проверяются nested includes, завершение циклов, пустой существующий fragment, authoritative empty/replaced pending text и отсутствие fallback к dirty worktree. Existing include-target blocker и независимые QA/publication blockers сохраняются. Production acceptance требует нового translation PR, независимой проверки содержания, зелёных `doc_verify` и build на одном SHA.
