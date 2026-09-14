@@ -10,6 +10,7 @@ import hashlib
 import json
 import subprocess
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -532,7 +533,10 @@ def _run_top_level(
         stack.enter_context(
             patch(
                 "ydbdoc_review.github.workflow.bind_translation_artifact",
-                return_value=provenance,
+                side_effect=lambda _repo_path, _selection, candidate_sha: replace(
+                    provenance,
+                    candidate_sha=candidate_sha,
+                ),
             )
         )
         stack.enter_context(
@@ -790,7 +794,7 @@ def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
     assert gh.create_pull.call_args.kwargs["draft"] is False
     pr_body = gh.create_pull.call_args.kwargs["body"]
     assert "Артефакт: опубликован" in pr_body
-    assert "QA K: 🔴 RED" in pr_body
+    assert "QA K: RED" in pr_body
     assert "missing.md" in pr_body
     source_summary = gh.post_issue_comment.call_args.args[3]
     assert "published_red" in source_summary
@@ -3557,7 +3561,7 @@ def test_existing_ready_translation_pr_stays_ready(publication_repo: str):
     assert getattr(job.pr_result, "publication_impact", None) == "PUBLISH_RED"
     gh.update_pull_body.assert_called_once()
     assert "Артефакт: опубликован" in gh.update_pull_body.call_args.args[3]
-    assert "QA K: 🔴 RED" in gh.update_pull_body.call_args.args[3]
+    assert "QA K: RED" in gh.update_pull_body.call_args.args[3]
     gh.convert_pull_to_draft.assert_not_called()
     assert events == ["discover", "push", "refetch", "body"]
     gh.create_pull.assert_not_called()
