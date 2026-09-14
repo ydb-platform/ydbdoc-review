@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import replace
 from functools import cache, lru_cache
@@ -67,8 +69,7 @@ EXPECTED_OUTPUT = (*EXPECTED_MD, EXPECTED_TOC)
 pytestmark = pytest.mark.timeout(180)
 
 
-@pytest.fixture(autouse=True)
-def offline_external_read_adapters(monkeypatch):
+def _install_offline_external_read_adapters(monkeypatch):
     from ydbdoc_review.github import git_ops
     from ydbdoc_review.validation.wikipedia_links import WikipediaResolver
 
@@ -147,6 +148,12 @@ def offline_external_read_adapters(monkeypatch):
         return original_read(repo, ref, path)
 
     monkeypatch.setattr(git_ops, "read_text_at_upstream_tip", read_known)
+    return audit
+
+
+@pytest.fixture(autouse=True)
+def offline_external_read_adapters(monkeypatch):
+    audit = _install_offline_external_read_adapters(monkeypatch)
     yield audit
     # Callers may catch reader errors. Such reads must still fail the test.
     assert not audit.unknown, sorted(audit.unknown)
@@ -434,9 +441,28 @@ def _verify_local_candidate(candidate, sha, *, refusal_path=None):
     return verified, report
 
 
+@pytest.fixture(scope="module")
+def _exact_candidate_base(tmp_path_factory):
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        audit = _install_offline_external_read_adapters(monkeypatch)
+        candidate = _run_exact_candidate(tmp_path_factory.mktemp("pr51079-exact-base"), audit)
+    assert not audit.unknown, sorted(audit.unknown)
+    return candidate
+
+
 @pytest.fixture
-def exact_candidate(tmp_path, offline_external_read_adapters):
-    return _run_exact_candidate(tmp_path, offline_external_read_adapters)
+def exact_candidate(tmp_path, offline_external_read_adapters, _exact_candidate_base):
+    repo = tmp_path / "frozen"
+    shutil.copytree(_exact_candidate_base.repo, repo)
+    candidate = copy.deepcopy(_exact_candidate_base)
+    candidate.repo = repo
+    candidate.case = _load_fixture()
+    candidate.audit = offline_external_read_adapters
+    resolved_repo = str(repo.resolve())
+    for snapshot_name, sha in candidate.shas.items():
+        candidate.audit.refs[(resolved_repo, sha)] = snapshot_name
+    candidate.audit.refs[(resolved_repo, candidate.candidate_sha)] = "B"
+    return candidate
 
 
 def test_pr51079_exact_candidate_translates_all_six_markdown_and_toc(exact_candidate):
