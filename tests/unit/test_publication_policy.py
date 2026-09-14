@@ -1430,7 +1430,7 @@ def test_soft_keep_no_new_commit_reuses_matching_existing_draft_artifact_pr(
         result,
         existing_pr=True,
         remote_branch_exists=True,
-        remote_branch_sha="artifact-sha",
+        remote_branch_sha=_repo_head_sha(publication_repo),
         existing_pr_body=existing_body,
         existing_pr_draft=True,
         commit_succeeds=False,
@@ -1502,7 +1502,7 @@ def test_soft_keep_no_new_commit_existing_ready_artifact_stays_ready_before_body
         result,
         existing_pr=True,
         remote_branch_exists=True,
-        remote_branch_sha="artifact-sha",
+        remote_branch_sha=_repo_head_sha(publication_repo),
         existing_pr_body=build_translation_pr_body(
             7,
             "o/r",
