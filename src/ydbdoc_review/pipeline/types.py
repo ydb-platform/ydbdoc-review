@@ -9,6 +9,8 @@ from typing import Literal
 
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import PairPlan
+from ydbdoc_review.pipeline.final_candidate import FinalCandidate
+from ydbdoc_review.translation.review_blocks import ReviewPlan
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.validation.link_contract import LinkContractIssue
@@ -84,6 +86,8 @@ class FileTranslationResult:
     output_tokens: int = 0
     estimated_cost_usd: float = 0.0
     link_contract_issues: tuple[LinkContractIssue, ...] = ()
+    final_review_plan: ReviewPlan | None = None
+    final_review_response: CriticResponse | None = None
 
     @classmethod
     def from_usage(
@@ -153,6 +157,8 @@ class PRTranslationResult:
     scope_reason: str | None = None
     # Frozen local commit retained when the destination lease rejects publication.
     publication_candidate_sha: str | None = None
+    final_candidate: FinalCandidate | None = None
+    candidate_repo_path: str | None = None
 
     @property
     def translated_count(self) -> int:

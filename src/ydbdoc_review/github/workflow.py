@@ -2257,6 +2257,7 @@ def _review_translation_candidate(
             plan = prepare_review_document(candidate, AuthoritativeDocument(
                 run.plan.source_path, hashlib.sha256(run.source_text.encode()).hexdigest(),
                 run.source_text.encode()), run.plan.target_path, raw)
+            fr.final_review_plan = plan
             response = run_readonly_semantic_critic(
                 client, units=plan, glossary=glossary,
                 file_path=run.plan.target_path, source_lang=run.plan.source_lang,
@@ -2271,6 +2272,7 @@ def _review_translation_candidate(
                 fr.segment_source_excerpts[unit.id] = unit.ru_text
             fr.critic_initial = response
             fr.critic_unresolved = response
+            fr.final_review_response = response
             if response.verdict == "blocked":
                 fr.verdict = "blocked"
             elif response.verdict == "warnings" and fr.verdict == "ok":
@@ -3876,6 +3878,8 @@ def run_doc_translate(
             ),
         )
         require_reviewed_candidate(final_candidate, review_receipt)
+        pr_result.final_candidate = final_candidate
+        pr_result.candidate_repo_path = repo_path
         _refresh_translation_qa_impact(pr_result)
         body = build_translation_pr_body(
             pr_number,
@@ -3883,6 +3887,7 @@ def run_doc_translate(
             publication_result=pr_result,
             provenance=artifact_provenance,
             publication_plan=publication_plan(ctx),
+            link=ReportLinkContext(github_repo=github_repo, ref=expected_artifact_sha),
         )
 
         job.translation_pr_url = tr_pr_url
