@@ -1,10 +1,11 @@
 # Memory Bank — Pipeline & reporting
 
 > **Обновление требований, 2026-09-14:** порядок публикации и повторного запуска
-> задают [D-001 и D-002](10-product-decisions.md) и
+> задают [D-001–D-007](10-product-decisions.md) и
 > [канонические требования, §0](../../REQUIREMENTS_RU.md).
-> Сначала перевод, ветка и PR; затем до трёх проверок критика и двух исправлений.
-> Итоговый вердикт находится в PR, замечания QA не отменяют PR.
+> Сначала полный перевод и все repairs, затем ветка, PR и exact candidate SHA.
+> После этого один read-only critic проверяет целые смысловые блоки и публикует
+> понятный отчёт. Он не исправляет перевод и не запускает translator повторно.
 > Новая постановка `doc_translate` удаляет прежнюю ветку перевода и запускает
 > полный перевод с нуля, даже на том же SHA. Противоречащие описания ниже
 > сохраняют историю реализации и не являются действующими требованиями.
@@ -787,8 +788,10 @@ When the report identifies a substantive defect, the remediation loop is:
 
 Cosmetic whitespace alone is nonblocking and may be repaired manually. The shipped
 PR #172 auto-repair is intentionally limited to safely paired ordinary inline link
-labels. The local human-readable QA report commit `e56be3d` is not published. A
-post-finalization reviewer-model check over a whole sentence/block is analyzed but
-not implemented; no deterministic AND/OR guard is part of the pipeline.
+labels. The local human-readable QA report commit `e56be3d` is not published. The
+post-finalization reviewer-model check over whole sentence/block context is the
+agreed contract in [§23–§24](11-final-candidate-qa.md), but is not implemented.
+It replaces the old mutable translate critic loop instead of running beside it.
+No deterministic AND/OR guard is part of the pipeline.
 
 [← Memory Bank index](../../MEMORY_BANK.md)

@@ -2,9 +2,11 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-> **Решения владельца продукта, 2026-09-14:** действуют [D-001–D-003](docs/memory-bank/10-product-decisions.md).
-> Перевод сохраняется в ветке, PR создаётся до critic и остаётся при любом QA-вердикте.
-> Критик: до трёх проходов и двух исправлений; итог записывается в PR.
+> **Решения владельца продукта, 2026-09-14:** действуют [D-001–D-007](docs/memory-bank/10-product-decisions.md).
+> Перевод полностью собирается и фиксируется как exact candidate SHA до critic.
+> PR создаётся до critic и остаётся при любом QA-вердикте.
+> Критик делает одну read-only смысловую проверку целых блоков; неточность даёт
+> понятный YELLOW без автоисправления, неполная проверка даёт RED.
 > Новая постановка `doc_translate` удаляет прежнюю ветку перевода и запускает полный перевод заново, даже на том же SHA.
 > Прежние запреты публикации по QA и shortcuts повторного перевода в разделах ниже — история, а не действующее правило.
 > В блоках кода переводятся только комментарии отдельными запросами; остальной код сохраняется. Кириллица в коде — warning с файлом и строкой (D-003).
@@ -12,10 +14,11 @@
 
 
 **Last updated:** 2026-09-14
-**Current focus:** §6.268–§6.272 record the shipped follow-up safety fixes from PRs
-#169–#173: full-fallback inline critic, critic coverage/refusal fail-closed behavior,
-bounded split/model recovery, safe Markdown label-padding repair, and AST-slot
-same-fragment route reconciliation with exact #51079 E2E coverage.
+**Current focus:** D-004–D-007 and §23–§24 define four independent implementation
+tasks: freeze the complete candidate before critic, cover every whole semantic
+block, make critic read-only, and bind a human-readable report to exact SHA bytes.
+§6.268–§6.272 still record shipped PRs #169–#173: fallback coverage,
+fail-closed refusal recovery, safe label-padding repair and fragment reconciliation.
 
 The original PR #168 history remains a separate, closed nine-defect series: exactly
 nine sequential commits and its exact offline replay. PRs #169–#173 are follow-up
@@ -107,12 +110,14 @@ stable cross-references — use them when linking between files.
 | Pipeline & reporting | [07-pipeline](docs/memory-bank/07-pipeline.md) | 15–17 | Per-file flow, PR workflow, reports |
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
 | Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
-| Product decisions | [10-product-decisions](docs/memory-bank/10-product-decisions.md) | D-001–D-003 | Явные решения владельца продукта; приоритет над историей |
+| Product decisions | [10-product-decisions](docs/memory-bank/10-product-decisions.md) | D-001–D-007 | Явные решения владельца продукта; приоритет над историей |
+| Final candidate QA | [11-final-candidate-qa](docs/memory-bank/11-final-candidate-qa.md) | 23–24 | Четыре независимых требования: exact candidate, block coverage, read-only critic, понятный отчёт |
 
 ## Recent changes
 
 | When | What |
 |------|------|
+| 2026-09-14 | **§23–§24 / D-004–D-007**: critic проверяет exact finalized candidate целыми блоками, не меняет перевод и выдаёт проверяемый человеком отчёт; четыре независимые TDD-задачи готовы к разработке |
 | 2026-09-14 | **§6.272 / PR #173**: same-fragment path reconciliation requires the same parser-derived AST link slot across four snapshots, a unique owner and final target; ambiguity fails closed; exact PR #51079 E2E is green locally |
 | 2026-09-14 | **§6.271 / PR #172**: ordinary inline Markdown link-label edge padding is repaired only from unique destination/title identity; ambiguous, multiline and non-inline forms remain unchanged |
 | 2026-09-14 | **§6.270 / PR #171**: critic refusal recovery recursively splits only at segment boundaries within a bound and uses the configured deduplicated independent model chain; exhausted leaves remain RED/WITHHOLD_UNSAFE |
