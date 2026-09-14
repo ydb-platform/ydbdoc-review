@@ -1489,7 +1489,7 @@ def build_source_pr_comment(
             body += "\n**QA RED, do not merge. Актуальные замечания:**\n\n"
             body += "".join(f"- `{path}`: {reason}\n" for path, reason in details)
             body += (
-                "\n**Следующее действие:** исправить перечисленные замечания и "
+                "\n**Действие:** исправить перечисленные замечания и "
                 "повторить `doc_verify`.\n"
             )
         soft_keep_blockers = [
