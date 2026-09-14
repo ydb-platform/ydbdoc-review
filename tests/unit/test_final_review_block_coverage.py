@@ -1,7 +1,11 @@
 """Whole frozen input must survive preparation and payload validation."""
 
+# Russian source fixtures intentionally contain Cyrillic characters.
+# ruff: noqa: RUF001
+
 import importlib
 import importlib.util
+import json
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
@@ -122,3 +126,111 @@ def test_pr53007_exact_whole_paragraph(api):
     assert plan.units[0].ru_text.encode() == ru
     assert plan.units[0].en_text.encode() == en
     assert not api.validate_payloads(plan, ((replace(plan.units[0], en_text="bind_dn or bind_password"),),)).complete
+
+
+def test_translated_mixed_nested_document_serializes_every_primary_block(api):
+    directory = Path(__file__).parents[1] / "fixtures/final-review-block-coverage"
+    ru = (directory / "mixed.ru.md").read_text()
+    en = (directory / "mixed.en.md").read_text()
+    plan = prepare(api, ru, en)
+    assert plan.complete, plan.issues
+    assert tuple(b.kind for b in plan.en.blocks) == (
+        "front_matter", "heading", "paragraph", "bullet_list", "blockquote",
+        "table", "table", "yfm_note", "yfm_tabs", "yfm_cut", "yfm_if",
+        "term_definition", "fence", "fence", "paragraph",
+    )
+    manifest = api.batch_review_units(plan, budget_bytes=2500, hard_limit_bytes=12000)
+    assert manifest.complete, manifest.issues
+    captured = [json.loads(api.serialize_review_batch(batch)) for batch in manifest.batches]
+    delivered = [unit for payload in captured for unit in payload["units"]]
+    assert len(delivered) >= 12
+    assert sorted(i for unit in delivered for i in unit["en_block_ids"]) == sorted(b.id for b in plan.en.blocks)
+    assert sorted(i for unit in delivered for i in unit["ru_block_ids"]) == sorted(b.id for b in plan.ru.blocks)
+    for required in ["Extra cell", "Note body.", "First tab", "Tab body.", "Details", "Section body.",
+                     "Main branch.", "Fallback branch.", "Term definition.", '# Comment\nprint("Message")',
+                     "A[Start] --> B[End]", '![Description](image.png "Title")']:
+        assert sum(required in unit["en_text"] for unit in delivered) == 1
+    assert any("Item continuation." in u["en_text"] and "Nested item." in u["en_text"] for u in delivered)
+
+
+def test_partial_parser_inventory_loss_is_red_with_prose_still_present(api, monkeypatch):
+    real_parse = api.parse_review_blocks
+    monkeypatch.setattr(api, "parse_review_blocks", lambda text: tuple(
+        block for block in real_parse(text) if block.kind != "table"))
+    plan = prepare(api, "Before.\n\n| H |\n|---|\n| V |\n\nAfter.\n")
+    assert not plan.complete
+    assert "unparsed readable source" in plan.issues[0].reason
+
+
+@pytest.mark.parametrize("field", ["commit_sha", "tree_sha"])
+def test_swapping_plan_candidate_invalidates_old_inventory_and_payload(api, field):
+    plan = prepare(api, "Source", "Target")
+    swapped = replace(plan, candidate=replace(plan.candidate, **{field: "c" * 40}))
+    assert not api.validate_payloads(swapped, (plan.units,)).complete
+    # Even changing submitted and expected unit identity cannot rebind old evidence.
+    units = tuple(replace(u, candidate_sha=swapped.candidate.commit_sha,
+                          candidate_tree_sha=swapped.candidate.tree_sha) for u in plan.units)
+    assert not api.validate_payloads(replace(swapped, units=units), (units,)).complete
+
+
+def test_translated_blocks_use_enclosing_heading_without_full_document_grouping(api):
+    plan = prepare(api, "# Настройка\n\nПервый.\n\n- Пункт\n\nПоследний.\n",
+                   "# Setup\n\nFirst.\n\n- Item\n\nLast.\n")
+    assert plan.complete, plan.issues
+    assert len(plan.units) == 4
+    assert plan.units[1].context == ("# Настройка\n", "# Setup\n")
+    assert plan.units[1].en_text == "First.\n"
+
+
+def test_consecutive_prose_is_grouped_only_inside_proven_heading(api):
+    plan = prepare(api, "# Раздел {#a}\n\nПервый.\n\nВторой.\n\n## Далее {#b}\n\nТретий.\n",
+                   "# Section {#a}\n\nFirst.\n\nSecond.\n\n## Next {#b}\n\nThird.\n")
+    assert plan.complete, plan.issues
+    assert len(plan.units) == 4
+    assert plan.units[1].en_text == "First.\n\nSecond.\n"
+    assert len(plan.units[1].en_block_ids) == 2
+    assert plan.units[-1].context == ("# Раздел {#a}\n", "# Section {#a}\n", "## Далее {#b}\n", "## Next {#b}\n")
+
+
+def test_swapped_inventory_with_different_shape_is_red_not_exception(api):
+    plan = prepare(api, "Source", "Target")
+    other = prepare(api, "Source\n\nExtra", "Target\n\nExtra")
+    swapped = replace(plan, en=other.en)
+    assert not api.validate_payloads(swapped, (plan.units,)).complete
+
+
+def test_dropping_only_table_payload_cannot_use_context_as_coverage(api):
+    plan = prepare(api, "# Источник {#a}\n\nАбзац.\n\n| Ключ |\n|---|\n| Значение |\n",
+                   "# Source {#a}\n\nParagraph.\n\n| Key |\n|---|\n| Value |\n")
+    assert plan.complete
+    omitted = plan.en.blocks[-1].id
+    manifest = api.validate_payloads(plan, (plan.units[:-1],))
+    assert not manifest.complete
+    assert any(omitted in issue.en_block_ids for issue in manifest.issues)
+
+
+@pytest.mark.parametrize("en", [
+    "# A {#b}\n\nParagraph.\n\n# B {#a}\n\nParagraph.\n",
+    "# A {#a}\n\nParagraph.\n\n# B {#a}\n\nParagraph.\n",
+])
+def test_changed_or_duplicate_section_anchors_are_ambiguous(api, en):
+    plan = prepare(api, "# А {#a}\n\nАбзац.\n\n# Б {#b}\n\nАбзац.\n", en)
+    assert not plan.complete
+    assert not api.validate_payloads(plan, (plan.units,)).complete
+
+
+def test_distinct_unanchored_sibling_section_structure_proves_correspondence(api):
+    plan = prepare(api, "# Настройка\n\n## Ключи\n\n| Ключ |\n|---|\n| Значение |\n\n## Действия\n\n- Пункт\n",
+                   "# Setup\n\n## Keys\n\n| Key |\n|---|\n| Value |\n\n## Actions\n\n- Item\n")
+    assert plan.complete, plan.issues
+    assert len(plan.units) == 5
+    assert plan.units[2].context == ("# Настройка\n", "# Setup\n", "## Ключи\n", "## Keys\n")
+
+
+def test_root_mixed_translation_uses_distinct_container_boundary(api):
+    plan = prepare(api, "До.\n\n| Ключ |\n|---|\n| Значение |\n\nПосле.\n",
+                   "Before.\n\n| Key |\n|---|\n| Value |\n\nAfter.\n")
+    assert plan.complete, plan.issues
+    assert len(plan.units) == 3
+    assert plan.units[0].en_text == "Before.\n"
+    assert plan.units[-1].en_text == "After.\n"

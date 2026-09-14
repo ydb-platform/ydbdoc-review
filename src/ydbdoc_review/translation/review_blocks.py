@@ -1,15 +1,15 @@
 """Immutable, lossless preparation evidence for final-candidate semantic review.
 
-Document pairing is explicit authority supplied by the caller. Unanchored
-translated blocks are reviewed together in that safely paired container; equal
-counts/kinds are only a rejection guard, never proof of positional alignment.
+Document pairing is explicit authority supplied by the caller. Parser-owned
+container structure and enclosing headings establish local correspondence.
+Indistinguishable neighboring blocks may be grouped inside a proven section;
+ambiguous sections remain incomplete. Context includes only enclosing headings.
 This manifest proves input delivery, not model completion or verdict quality.
 """
 
 import json
-import re
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 
 from ydbdoc_review.parsing.inline_locations import SourceSpan
@@ -36,6 +36,9 @@ class ReviewBlock:
     line_start: int
     line_end: int
     text: str
+    structure: tuple[str, ...] = ()
+    heading_level: int = 0
+    anchor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,8 @@ class BlockInventory:
     text: str
     blocks: tuple[ReviewBlock, ...]
     empty_reason: str | None = None
+    candidate_sha: str = ""
+    candidate_tree_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -111,6 +116,7 @@ def _inventory(path: str, snapshot: str, content: bytes) -> BlockInventory:
         sha256(f"{snapshot}\0{path}\0{digest}\0{b.address}".encode()).hexdigest(),
         path, snapshot, digest, b.kind, b.address, b.span,
         b.line_start, b.line_end, text[b.span.start:b.span.end],
+        b.structure, b.heading_level, b.anchor,
     ) for b in located)
     cursor = 0
     for block in blocks:
@@ -151,8 +157,10 @@ def prepare_review_document(
                                 1, max(1, len(text.splitlines())), text)
             return BlockInventory(path, snapshot, digest, text, (block,) if text else ())
 
-    ru = inventory(source.path, source.source_id, source.content)
-    en = inventory(en_path, candidate.commit_sha, en_bytes)
+    ru = replace(inventory(source.path, source.source_id, source.content),
+                 candidate_sha=candidate.commit_sha, candidate_tree_sha=candidate.tree_sha)
+    en = replace(inventory(en_path, candidate.commit_sha, en_bytes),
+                 candidate_sha=candidate.commit_sha, candidate_tree_sha=candidate.tree_sha)
     if en_path not in candidate.en_paths or not source.source_id:
         issues.append(ReviewIssue(candidate.commit_sha, en_path, SourceSpan(0, len(en.text)),
                                   "unproved candidate membership or source authority"))
@@ -163,28 +171,108 @@ def prepare_review_document(
                                   "missing or structurally unmatched whole blocks", en_ids, ru_ids))
     units = ()
     if not issues and (ru_ids or en_ids):
-        pairs = tuple(zip(ru.blocks, en.blocks, strict=True))
-        anchors = [re.search(r"\{#([^}]+)\}", b.text) if b.kind == "heading" else None
-                   for b in ru.blocks]
-        anchor_ids = [m.group(1) for m in anchors if m]
-        proven = []
-        for (rb, eb), anchor in zip(pairs, anchors, strict=True):
-            target_anchor = re.search(r"\{#([^}]+)\}", eb.text) if eb.kind == "heading" else None
-            anchored = (anchor is not None and target_anchor is not None
-                        and anchor.group(1) == target_anchor.group(1)
-                        and anchor_ids.count(anchor.group(1)) == 1)
-            if len(pairs) != 1 and ru.text != en.text and not anchored:
-                issues.append(ReviewIssue(candidate.commit_sha, en_path, eb.span,
-                    "ambiguous whole-block correspondence", (eb.id,), (rb.id,)))
-                continue
-            identity = sha256(f"{rb.id}\0{eb.id}".encode()).hexdigest()
-            proven.append(ReviewUnit(identity, candidate.commit_sha, candidate.tree_sha,
-                source.path, en_path, source.source_id, (rb.id,), (eb.id,), rb.text, eb.text,
-                "stable-heading-anchor" if anchored else
-                "identical-document" if ru.text == en.text else "authoritative-file-pair",
-                (ru.text, en.text) if len(pairs) > 1 else ()))
-        units = tuple(proven)
+        units, alignment_issues = _align_blocks(candidate, ru, en)
+        issues.extend(alignment_issues)
     return ReviewPlan(candidate, ru, en, units, tuple(issues))
+
+
+def _heading_paths(blocks: tuple[ReviewBlock, ...]) -> tuple[tuple[int, ...], ...]:
+    stack: list[int] = []
+    paths = []
+    for index, block in enumerate(blocks):
+        if block.heading_level:
+            while stack and blocks[stack[-1]].heading_level >= block.heading_level:
+                stack.pop()
+        paths.append(tuple(stack))
+        if block.heading_level:
+            stack.append(index)
+    return tuple(paths)
+
+
+def _section_shapes(blocks: tuple[ReviewBlock, ...]) -> dict[int, tuple[tuple[str, ...], ...]]:
+    shapes = {}
+    for index, block in enumerate(blocks):
+        if not block.heading_level:
+            continue
+        end = index + 1
+        while end < len(blocks):
+            level = blocks[end].heading_level
+            if level and level <= block.heading_level:
+                break
+            end += 1
+        shapes[index] = tuple(b.structure for b in blocks[index:end])
+    return shapes
+
+
+def _align_blocks(candidate: FinalCandidate, ru: BlockInventory,
+                  en: BlockInventory) -> tuple[tuple[ReviewUnit, ...], tuple[ReviewIssue, ...]]:
+    if tuple(b.kind for b in ru.blocks) != tuple(b.kind for b in en.blocks):
+        return (), (ReviewIssue(candidate.commit_sha, en.path, SourceSpan(0, len(en.text)),
+                    "missing or structurally unmatched whole blocks",
+                    tuple(b.id for b in en.blocks), tuple(b.id for b in ru.blocks)),)
+    paths = _heading_paths(ru.blocks)
+    target_paths = _heading_paths(en.blocks)
+    sibling_counts = Counter((paths[i], b.heading_level) for i, b in enumerate(ru.blocks) if b.heading_level)
+    source_shapes, target_shapes = _section_shapes(ru.blocks), _section_shapes(en.blocks)
+    sibling_shapes = Counter((paths[i], shape) for i, shape in source_shapes.items())
+    target_sibling_shapes = Counter((target_paths[i], shape) for i, shape in target_shapes.items())
+    source_anchors = Counter(b.anchor for b in ru.blocks if b.anchor)
+    target_anchors = Counter(b.anchor for b in en.blocks if b.anchor)
+    headings: dict[int, bool] = {}
+    for i, (rb, eb) in enumerate(zip(ru.blocks, en.blocks, strict=True)):
+        if rb.heading_level:
+            anchor_proof = (rb.anchor == eb.anchor and rb.anchor is not None
+                            and source_anchors[rb.anchor] == target_anchors[eb.anchor] == 1)
+            distinct_section = (source_shapes[i] == target_shapes.get(i)
+                                and sibling_shapes[(paths[i], source_shapes[i])] == 1
+                                and target_sibling_shapes[(target_paths[i], source_shapes[i])] == 1)
+            unique_child = (rb.anchor is None and eb.anchor is None
+                            and (sibling_counts[(paths[i], rb.heading_level)] == 1 or distinct_section))
+            headings[i] = (paths[i] == target_paths[i] and rb.structure == eb.structure
+                           and all(headings.get(parent, False) for parent in paths[i])
+                           and (anchor_proof or unique_child or ru.text == en.text))
+
+    units = []
+    issues = []
+    i = 0
+    while i < len(ru.blocks):
+        rb, eb = ru.blocks[i], en.blocks[i]
+        parent_proven = bool(paths[i]) and all(headings.get(parent, False) for parent in paths[i])
+        # A single unique root container also bounds the prose on either side.
+        # This excludes a file consisting solely of repeated root paragraphs.
+        root_boundaries = [b.structure for b in ru.blocks if not b.heading_level and b.kind != "paragraph"]
+        root_proven = (not paths[i] and not any(b.heading_level for b in ru.blocks)
+                       and bool(root_boundaries) and len(set(root_boundaries)) == len(root_boundaries)
+                       and tuple(b.structure for b in ru.blocks) == tuple(b.structure for b in en.blocks))
+        proven = (rb.structure == eb.structure and paths[i] == target_paths[i]
+                  and (ru.text == en.text or len(ru.blocks) == 1
+                       or headings.get(i, False) or parent_proven or root_proven
+                       or (rb.kind == "front_matter" and i == 0)))
+        if not proven:
+            issues.append(ReviewIssue(candidate.commit_sha, en.path, eb.span,
+                          "ambiguous whole-block correspondence", (eb.id,), (rb.id,)))
+            i += 1
+            continue
+        end = i + 1
+        # Group only a local indistinguishable run, bounded by a proven heading
+        # or structural container. Never collapse the whole document to align it.
+        if ru.text != en.text and not rb.heading_level and (parent_proven or root_proven):
+            while end < len(ru.blocks) and paths[end] == paths[i] and target_paths[end] == paths[i]:
+                if ru.blocks[end].structure != rb.structure or en.blocks[end].structure != rb.structure:
+                    break
+                end += 1
+        rbs, ebs = ru.blocks[i:end], en.blocks[i:end]
+        ru_ids, en_ids = tuple(b.id for b in rbs), tuple(b.id for b in ebs)
+        identity = sha256("\0".join((*ru_ids, *en_ids)).encode()).hexdigest()
+        context = tuple(text for parent in paths[i]
+                        for text in (ru.blocks[parent].text, en.blocks[parent].text))
+        units.append(ReviewUnit(identity, candidate.commit_sha, candidate.tree_sha,
+            ru.path, en.path, ru.snapshot_id, ru_ids, en_ids,
+            ru.text[rbs[0].span.start:rbs[-1].span.end],
+            en.text[ebs[0].span.start:ebs[-1].span.end],
+            "enclosing-structure" if parent_proven or root_proven else "authoritative-file-pair", context))
+        i = end
+    return tuple(units), tuple(issues)
 
 
 def load_review_document(repo_path: str, candidate: FinalCandidate,
@@ -198,6 +286,16 @@ def serialize_review_batch(units: tuple[ReviewUnit, ...]) -> str:
                       separators=(",", ":"))
 
 
+def _inventory_matches_candidate(inventory: BlockInventory, candidate: FinalCandidate) -> bool:
+    if (inventory.candidate_sha, inventory.candidate_tree_sha) != (candidate.commit_sha, candidate.tree_sha):
+        return False
+    try:
+        canonical = _inventory(inventory.path, inventory.snapshot_id, inventory.text.encode("utf-8"))
+    except (ValueError, TypeError, IndexError):
+        return False
+    return canonical == replace(inventory, candidate_sha="", candidate_tree_sha="")
+
+
 def validate_payloads(plan: ReviewPlan, batches: tuple[tuple[ReviewUnit, ...], ...]) -> CoverageManifest:
     """Validate actual typed payloads, including exact text, before transmission."""
     units = tuple(unit for batch in batches for unit in batch)
@@ -206,6 +304,21 @@ def validate_payloads(plan: ReviewPlan, batches: tuple[tuple[ReviewUnit, ...], .
     sent_en = tuple(i for unit in units for i in unit.en_block_ids)
     sent_ru = tuple(i for unit in units for i in unit.ru_block_ids)
     issues = list(plan.issues)
+    identity_valid = (plan.en.snapshot_id == plan.candidate.commit_sha
+                      and plan.en.path in plan.candidate.en_paths
+                      and bool(plan.ru.snapshot_id)
+                      and _inventory_matches_candidate(plan.ru, plan.candidate)
+                      and _inventory_matches_candidate(plan.en, plan.candidate))
+    if identity_valid and not plan.issues:
+        canonical_units, alignment_issues = _align_blocks(plan.candidate, plan.ru, plan.en)
+        identity_valid = not alignment_issues and canonical_units == plan.units
+    if not identity_valid or any(
+        (unit.candidate_sha, unit.candidate_tree_sha) !=
+        (plan.candidate.commit_sha, plan.candidate.tree_sha)
+        for unit in (*plan.units, *units)
+    ):
+        issues.append(ReviewIssue(plan.candidate.commit_sha, plan.en.path,
+            SourceSpan(0, len(plan.en.text)), "candidate or inventory identity mismatch", en_ids, ru_ids))
     expected = {unit.id: unit for unit in plan.units}
     if (Counter(sent_en) != Counter(en_ids) or Counter(sent_ru) != Counter(ru_ids)
             or Counter(unit.id for unit in units) != Counter(unit.id for unit in plan.units)
@@ -232,8 +345,10 @@ def batch_review_units(plan: ReviewPlan, *, budget_bytes: int,
     for unit in plan.units:
         size = len(serialize_review_batch((unit,)).encode()) + overhead_bytes
         if size > hard_limit_bytes:
+            blocks = [b for b in plan.en.blocks if b.id in unit.en_block_ids]
+            span = SourceSpan(min(b.span.start for b in blocks), max(b.span.end for b in blocks)) if blocks else SourceSpan(0, len(plan.en.text))
             overflow.append(ReviewIssue(plan.candidate.commit_sha, unit.en_path,
-                SourceSpan(0, len(unit.en_text)), "whole unit exceeds reviewer hard limit",
+                span, "whole unit exceeds reviewer hard limit",
                 unit.en_block_ids, unit.ru_block_ids))
             continue
         combined = len(serialize_review_batch((*pending, unit)).encode()) + overhead_bytes
@@ -245,6 +360,5 @@ def batch_review_units(plan: ReviewPlan, *, budget_bytes: int,
         batches.append(pending)
     manifest = validate_payloads(plan, tuple(batches))
     if overflow:
-        from dataclasses import replace
         manifest = replace(manifest, issues=tuple(overflow) + manifest.issues)
     return manifest

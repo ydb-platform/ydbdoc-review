@@ -5,8 +5,8 @@ Wraps markdown-it-py and converts its flat token stream into our IR tree.
 
 from __future__ import annotations
 
-from typing import Literal, cast
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -153,6 +153,9 @@ class LocatedReviewBlock:
     span: SourceSpan
     line_start: int
     line_end: int
+    structure: tuple[str, ...]
+    heading_level: int = 0
+    anchor: str | None = None
 
 
 def parse_review_blocks(text: str) -> tuple[LocatedReviewBlock, ...]:
@@ -169,7 +172,7 @@ def parse_review_blocks(text: str) -> tuple[LocatedReviewBlock, ...]:
     if offsets[-1] != len(text):
         offsets.append(len(text))
     blocks = []
-    for token in tokens:
+    for index, token in enumerate(tokens):
         if token.level != 0 or token.nesting == -1:
             continue
         if token.map is None:
@@ -177,9 +180,25 @@ def parse_review_blocks(text: str) -> tuple[LocatedReviewBlock, ...]:
         start, end = token.map
         if not 0 <= start < end < len(offsets):
             raise ValueError("root block has invalid source map")
+        end_index = index + 1
+        if token.nesting == 1:
+            while end_index < len(tokens):
+                if tokens[end_index].level == 0 and tokens[end_index].nesting == -1:
+                    end_index += 1
+                    break
+                end_index += 1
+        structure = tuple(
+            repr((nested.type, nested.tag, nested.info if nested.type == "fence" else "",
+                  tuple((key, nested.meta[key]) for key in ("note_type", "condition", "branch_kind", "term_id")
+                        if key in nested.meta)))
+            for nested in tokens[index:end_index] if nested.type != "inline"
+        )
+        anchor = re.search(r"\{#([^}]+)\}\s*$", text[offsets[start]:offsets[end]]) if token.type == "heading_open" else None
         blocks.append(LocatedReviewBlock(
             token.type.removesuffix("_open"), (len(blocks),),
             SourceSpan(offsets[start], offsets[end]), start + 1, end,
+            structure, int(token.tag[1:]) if token.type == "heading_open" else 0,
+            anchor.group(1) if anchor else None,
         ))
     return tuple(blocks)
 
