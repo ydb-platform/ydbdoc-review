@@ -20,10 +20,14 @@ from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github import workflow
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 from ydbdoc_review.ops.gates import GateResult
+from ydbdoc_review.pipeline.types import PublicationImpact
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 
 
-@pytest.mark.parametrize("scenario", ["publish", "dry_run", "no_commit", "drift", "mismatch"])
+@pytest.mark.parametrize("scenario", [
+    "publish", "dry_run", "no_commit", "drift", "mismatch",
+    "early_incomplete", "early_unsafe", "late_unsafe",
+])
 def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
     nonpublishing = scenario if scenario in {"dry_run", "no_commit"} else None
     import subprocess
@@ -51,6 +55,7 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
     published = {"exists": False}
     client = MagicMock()
     client.usage_tracker = UsageTracker()
+    candidate_a = "Hello мир.\r\n" if scenario == "late_unsafe" else "Hello final.\r\n"
 
     def translate(segments, *_args, **kwargs):
         assert not reviewed, "translator called after final critic"
@@ -64,12 +69,25 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         result = original_late(*args, **kwargs)
         events.append("late_repair")
         if not kwargs["dry_run"]:
-            (en / "a.md").write_bytes(b"Hello final.\r\n")
+            (en / "a.md").write_bytes(candidate_a.encode())
             for run in kwargs["result"].pair_results:
                 if run.plan.target_path.endswith("/a.md"):
-                    run.target_text = "Hello final.\r\n"
+                    run.target_text = candidate_a
                     run.file_result.final_text = run.target_text
         return result
+
+    original_orphans = workflow.apply_orphan_toc_page_checks
+    def orphan_check(pr_result, **kwargs):
+        orphans = original_orphans(pr_result, **kwargs)
+        if scenario == "early_incomplete":
+            # A deterministic scope diagnostic must survive publication.
+            return [*orphans, "ydb/docs/en/b.md"]
+        if scenario == "early_unsafe":
+            fr = pr_result.pair_results[0].file_result
+            fr.segment_alignment_error = "Unmatched source block"
+            fr.heuristic_blocking.append("segment_alignment: Unmatched source block")
+            fr.verdict = "blocked"
+        return orphans
 
     def critic(*_args, **kwargs):
         assert published["exists"], "critic ran before candidate PR exists"
@@ -100,6 +118,7 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         push = stub("push_branch")
         _wire_translation_publication(gh, push, pull)
         gh.create_pull.side_effect = create
+        gh.find_open_pull_by_head.return_value = None
         gh.iter_issue_comments.return_value = iter([])
         gh.post_issue_comment.return_value = "url"
         stub("begin_ops_job", return_value=(None, GateResult(ok=True), None))
@@ -109,6 +128,7 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         stub("list_pr_file_changes_api", return_value=changes)
         stub("bind_translation_artifact", side_effect=_bind_fixture_artifact)
         stub("_repair_en_fragments_after_apply", side_effect=late)
+        stub("apply_orphan_toc_page_checks", side_effect=orphan_check)
         stack.enter_context(patch("ydbdoc_review.harness.steps.translate_segments", side_effect=translate))
         stack.enter_context(patch("ydbdoc_review.harness.steps.run_critic_pass", side_effect=critic))
         stack.enter_context(patch("ydbdoc_review.translation.critic.run_critic", side_effect=critic))
@@ -153,7 +173,19 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         assert sha != source_sha
         assert (_head_sha(git_repo) != sha) if scenario == "drift" else (_head_sha(git_repo) == sha)
         assert push.call_count == 1
-        assert reviewed[0][2] == b"Hello final.\r\n"
+        assert reviewed[0][2] == candidate_a.encode()
         assert result.pr_result.pair_results[0].file_result.critic_unresolved.issues[0].suggested_text
         assert "Do not apply" not in result.pr_result.pair_results[0].target_text
         assert events.index("late_repair") < events.index("prepare") < events.index("create_pr")
+        if scenario in {"early_incomplete", "early_unsafe", "late_unsafe"}:
+            assert result.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+            if scenario == "early_incomplete":
+                assert "ydb/docs/en/b.md" in result.pr_result.completeness_gaps
+            else:
+                fr = result.pr_result.pair_results[0].file_result
+                assert fr.verdict == "blocked"
+                assert fr.heuristic_blocking
+                if scenario == "early_unsafe":
+                    assert fr.segment_alignment_error == "Unmatched source block"
+                else:
+                    assert any(message.startswith("en_language:") for message in fr.heuristic_blocking)

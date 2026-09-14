@@ -1,10 +1,11 @@
 """Named step lists for translate vs verify.
 
-``doc_translate`` uses ``TRANSLATE_WITH_QA_PROFILE`` (translate + inline QA).
+``doc_translate`` prepares files with ``TRANSLATE_PROFILE`` or
+``PREPARE_EXISTING_PROFILE``; PR-level review follows candidate commit and PR creation.
 ``doc_verify`` uses ``VERIFY_PROFILE`` (load EN + critic/heuristics/verdict).
-``TRANSLATE_PROFILE`` is the single-file profile without a critic.
-Every profile finishes with deterministic finalization, heuristics, verdict, and
-report artifacts. Only the translate QA and verify profiles call a critic.
+``TRANSLATE_WITH_QA_PROFILE`` remains the legacy standalone mutable QA profile.
+Preparation profiles finish deterministic finalization, heuristics, verdict,
+and report artifacts without invoking a critic.
 """
 
 from __future__ import annotations
