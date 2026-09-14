@@ -568,7 +568,20 @@ def test_translate_segments_auth_config_preserves_all_ids_after_s0052_fallback()
 
 
 def test_authentication_s0090_explicit_length_immediately_uses_fallback():
-    seg = next(seg for seg in _auth_config_segments() if seg.id == "s0090")
+    authentication_path = "ydb/docs/ru/core/security/authentication.md"
+    snapshots_path = (
+        Path(__file__).parent.parent
+        / "fixtures"
+        / "pr51079-exact"
+        / "snapshots.json"
+    )
+    snapshots = json.loads(snapshots_path.read_bytes())
+    source = snapshots["H"][authentication_path]
+    seg = next(
+        seg
+        for seg in extract_segments(parse_markdown(source))
+        if seg.id == "s0090"
+    )
     assert len(seg.text) == 837
     assert len(seg.placeholders) == 8
     good = _json_response([{"id": seg.id, "text": _ascii_candidate(seg.text)}])
@@ -583,7 +596,7 @@ def test_authentication_s0090_explicit_length_immediately_uses_fallback():
         client,
         Batch(index=0, segments=[seg]),
         load_glossary(),
-        file_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+        file_path=authentication_path,
     )
 
     assert out == {seg.id: _ascii_candidate(seg.text)}
