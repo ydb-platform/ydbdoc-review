@@ -230,7 +230,8 @@ def _align_blocks(candidate: FinalCandidate, ru: BlockInventory,
                             and (sibling_counts[(paths[i], rb.heading_level)] == 1 or distinct_section))
             headings[i] = (paths[i] == target_paths[i] and rb.structure == eb.structure
                            and all(headings.get(parent, False) for parent in paths[i])
-                           and (anchor_proof or unique_child or ru.text == en.text))
+                           and (anchor_proof or unique_child
+                                or (ru.text == en.text and rb.anchor is None and eb.anchor is None)))
 
     units = []
     issues = []
@@ -244,10 +245,14 @@ def _align_blocks(candidate: FinalCandidate, ru: BlockInventory,
         root_proven = (not paths[i] and not any(b.heading_level for b in ru.blocks)
                        and bool(root_boundaries) and len(set(root_boundaries)) == len(root_boundaries)
                        and tuple(b.structure for b in ru.blocks) == tuple(b.structure for b in en.blocks))
-        proven = (rb.structure == eb.structure and paths[i] == target_paths[i]
-                  and (ru.text == en.text or len(ru.blocks) == 1
-                       or headings.get(i, False) or parent_proven or root_proven
-                       or (rb.kind == "front_matter" and i == 0)))
+        if rb.heading_level:
+            # A proven parent provides context, not the child's identity.
+            proven = headings.get(i, False)
+        else:
+            proven = (rb.structure == eb.structure and paths[i] == target_paths[i]
+                      and (ru.text == en.text or len(ru.blocks) == 1
+                           or parent_proven or root_proven
+                           or (rb.kind == "front_matter" and i == 0)))
         if not proven:
             issues.append(ReviewIssue(candidate.commit_sha, en.path, eb.span,
                           "ambiguous whole-block correspondence", (eb.id,), (rb.id,)))

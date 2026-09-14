@@ -234,3 +234,25 @@ def test_root_mixed_translation_uses_distinct_container_boundary(api):
     assert len(plan.units) == 3
     assert plan.units[0].en_text == "Before.\n"
     assert plan.units[-1].en_text == "After.\n"
+
+
+@pytest.mark.parametrize("child_anchors", [("b", "a"), ("a", "a")])
+def test_proven_parent_cannot_prove_swapped_or_duplicate_child_anchors(api, child_anchors):
+    ru = "# Родитель {#parent}\n\n## Первый {#a}\n\n## Второй {#b}\n"
+    first, second = child_anchors
+    en = f"# Parent {{#parent}}\n\n## First {{#{first}}}\n\n## Second {{#{second}}}\n"
+    plan = prepare(api, ru, en)
+    assert not plan.complete
+    child_ids = {plan.en.blocks[1].id, plan.en.blocks[2].id}
+    assert child_ids <= {i for issue in plan.issues for i in issue.en_block_ids}
+    assert not child_ids.intersection(i for unit in plan.units for i in unit.en_block_ids)
+    assert not api.validate_payloads(plan, (plan.units,)).complete
+    # Validation recomputes correspondence, even if a caller clears prior errors.
+    assert not api.validate_payloads(replace(plan, issues=()), (plan.units,)).complete
+
+
+def test_identical_documents_do_not_make_duplicate_explicit_child_anchors_unique(api):
+    text = "# Parent {#parent}\n\n## First {#a}\n\n## Second {#a}\n"
+    plan = prepare(api, text)
+    assert not plan.complete
+    assert not api.validate_payloads(replace(plan, issues=()), (plan.units,)).complete
