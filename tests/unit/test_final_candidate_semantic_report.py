@@ -248,3 +248,74 @@ def test_verify_red_is_never_replaced_by_semantic_projection(monkeypatch, semant
     assert body(result).startswith("RED")
     assert builder.build_full_report(result, meta=meta, config=cfg).startswith("RED")
     assert result.publication_impact.value == "PUBLISH_NORMAL"
+
+
+@pytest.mark.parametrize("copy_result", [False, True])
+@pytest.mark.parametrize("previous_observation", ["valid", "provenance_conflict", "verify_red"])
+def test_new_candidate_starts_fresh_with_matching_review_evidence(
+    monkeypatch, copy_result, previous_observation,
+):
+    result, fr = sample(monkeypatch)
+    assert body(result).startswith("YELLOW")
+    if previous_observation == "provenance_conflict":
+        provenance = TranslationArtifactProvenance(RuAuthority(
+            source_repo="ydb-platform/ydb", source_pr=53007,
+            source_base_sha="a" * 40, source_head_sha="b" * 40,
+            baseline_sha="d" * 40, ru_sha="b" * 40,
+            mode=RuAuthorityMode.SOURCE_PRESERVING), candidate_sha="c" * 40)
+        assert body(result, provenance=provenance).startswith("RED")
+    elif previous_observation == "verify_red":
+        cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+        meta = builder.ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1,
+                                  checkout_ref=K)
+        assert builder.build_source_pr_comment(result, translation_pr_number=42,
+            meta=meta, config=cfg,
+            verify_result=PRTranslationResult(completeness_gaps=["missing.md"])).startswith("RED")
+    old_projection = result.final_candidate_report
+    original_result = result
+    candidate = FinalCandidate("e" * 40, "f" * 40, (PATH,), ())
+    raw = b"Updated finalized text.\n"
+    plan = prepare_review_document(candidate, AuthoritativeDocument(
+        "ydb/docs/ru/a.md", "new-source", raw), PATH, raw)
+    new_fr = replace(fr, final_review_plan=plan, final_review_response=CriticResponse(verdict="ok"),
+                     final_text=raw.decode(), segment_lines={}, segment_excerpts={})
+    new_run = replace(result.pair_results[0], file_result=new_fr, target_text=raw.decode())
+    if copy_result:
+        result = replace(result, final_candidate=candidate, pair_results=[new_run])
+    else:
+        result.final_candidate = candidate
+        result.pair_results = [new_run]
+    # dataclasses.replace deliberately carries the old presentation cache.
+    assert result.final_candidate_report is old_projection
+    from ydbdoc_review.pipeline import final_candidate
+    def read(repo, actual, path):
+        assert repo == "/frozen-reader" and actual == candidate and path == PATH
+        return raw
+    monkeypatch.setattr(final_candidate, "read_candidate_bytes", read)
+    rendered = body(result)
+    assert rendered.startswith("GREEN") and candidate.commit_sha in rendered
+    assert K not in rendered and "SHA mismatch" not in rendered
+    assert result.final_candidate_report.validated_refs == (candidate.commit_sha,)
+    assert result.final_candidate_report.independent_status == "GREEN"
+    if copy_result:
+        assert original_result.final_candidate_report is old_projection
+
+
+@pytest.mark.parametrize("copy_result", [False, True])
+def test_same_candidate_copy_retains_provenance_conflict(monkeypatch, copy_result):
+    result, _ = sample(monkeypatch)
+    provenance = TranslationArtifactProvenance(RuAuthority(
+        source_repo="ydb-platform/ydb", source_pr=53007,
+        source_base_sha="a" * 40, source_head_sha="b" * 40,
+        baseline_sha="d" * 40, ru_sha="b" * 40,
+        mode=RuAuthorityMode.SOURCE_PRESERVING), candidate_sha="c" * 40)
+    assert body(result, provenance=provenance).startswith("RED")
+    projection = result.final_candidate_report
+    # A different Python object for the same K is not a new candidate generation.
+    if copy_result:
+        result = replace(result, final_candidate=replace(result.final_candidate))
+    else:
+        result.final_candidate = replace(result.final_candidate)
+    rendered = body(result)
+    assert rendered.startswith("RED") and "SHA mismatch" in rendered
+    assert result.final_candidate_report is projection

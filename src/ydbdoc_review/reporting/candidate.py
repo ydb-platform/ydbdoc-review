@@ -59,6 +59,11 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
         (r.file_result.final_review_plan.candidate.commit_sha for r in files
          if r.file_result.final_review_plan is not None), "недоступен")
     cached = result.final_candidate_report
+    if cached is not None and candidate is not None and cached.candidate_sha != candidate.commit_sha:
+        # Observations belong to one immutable K, even when a mutable result or
+        # dataclasses.replace copy carries the prior generation's cache. The new
+        # candidate still has to pass every plan/reader/evidence check below.
+        cached = None
     supplied_refs = tuple(dict.fromkeys(ref for ref in (
         sha,
         *(cached.validated_refs if cached else ()),
