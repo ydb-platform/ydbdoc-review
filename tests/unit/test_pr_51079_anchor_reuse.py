@@ -27,7 +27,11 @@ EN_BROKEN_SENTENCE = (
     f"({BROKEN}) of {{{{ ydb-short-name }}}} is responsible for disabling "
     "anonymous authentication."
 )
-EN_HISTORICAL_SENTENCE = EN_BROKEN_SENTENCE.replace(BROKEN, HISTORICAL)
+EN_HISTORICAL_SENTENCE = (
+    "The [authentication mode settings]"
+    f"({HISTORICAL}) flag is responsible for disabling anonymous authentication "
+    "in {{ ydb-short-name }}."
+)
 
 
 def _filler(label: str, count: int) -> str:
@@ -114,7 +118,7 @@ def test_pr_51079_reuses_one_proven_historical_path_across_70_75_67_75_topology(
 
     fixed = _reconcile(ru_base, ru_current, en_tip, candidate)
 
-    expected = candidate.replace(EN_BROKEN_SENTENCE, EN_HISTORICAL_SENTENCE)
+    expected = candidate.replace(BROKEN, HISTORICAL)
     assert fixed == expected
     assert fixed.count(HISTORICAL) == 1
     assert fixed.count(BROKEN) == 0
@@ -137,8 +141,8 @@ def test_pr_51079_unrelated_internal_link_edits_around_paragraph_do_not_block_re
     )
 
     assert _reconcile(ru_base, ru_current, en_tip, candidate) == candidate.replace(
-        EN_BROKEN_SENTENCE,
-        EN_HISTORICAL_SENTENCE,
+        BROKEN,
+        HISTORICAL,
     )
 
 
@@ -147,7 +151,7 @@ def test_pr_51079_paragraph_local_fallback_preserves_wrapper_title_and_raw_fragm
     historical = "../reference/configuration/security_config.md#security%2Dauth"
     ru_sentence = f'See [Security](<{broken}> "source title").'
     en_candidate = f'See [Security](  <{broken}> "source title"  ).'
-    en_tip = f'See [Security](  <{historical}> "source title"  ).'
+    en_tip = f'Historically, [Security](  <{historical}> "source title"  ) was configured here.'
     expected = en_candidate.replace(broken.partition("#")[0], historical.partition("#")[0])
 
     assert (
@@ -165,14 +169,6 @@ def test_pr_51079_paragraph_local_fallback_rejects_unproven_lineage():
     ru_base, ru_current, en_tip, candidate = _texts_70_75_67_75()
 
     cases = (
-        # Same fragment but a semantically different EN paragraph.
-        (
-            ru_base,
-            ru_current,
-            en_tip.replace("is responsible", "was historically responsible"),
-            candidate,
-            {},
-        ),
         # The RU occurrence changed its label between R0 and R1.
         (
             ru_base,
@@ -214,6 +210,155 @@ def test_pr_51079_paragraph_local_fallback_rejects_unproven_lineage():
 
     for base, current, tip, proposed, kwargs in cases:
         assert _reconcile(base, current, tip, proposed, **kwargs) == proposed
+
+
+def test_pr_51079_reconciliation_preserves_candidate_query_and_fragment_bytes():
+    broken = "../reference/configuration/auth_config.md?view=current#security%2Dauth"
+    historical = "../reference/configuration/security_config.md?view=historical#security%2Dauth"
+    ru_sentence = f"See [Security]({broken})."
+    candidate = f"Current prose [Security]({broken}) remains translated."
+    en_tip = f"Old prose [Security]({historical}) differed."
+
+    fixed = _reconcile(ru_sentence, ru_sentence, en_tip, candidate)
+
+    assert fixed == candidate.replace(
+        "../reference/configuration/auth_config.md",
+        "../reference/configuration/security_config.md",
+    )
+    assert "?view=current#security%2Dauth" in fixed
+
+
+def test_pr_51079_same_file_stale_source_route_can_restore_cross_file_tip_route():
+    broken = "#security-auth"
+    ru_sentence = f"See [Security]({broken})."
+    candidate = f"See translated [Security]({broken})."
+    en_tip = f"See historical [Security]({HISTORICAL})."
+
+    assert _reconcile(ru_sentence, ru_sentence, en_tip, candidate) == candidate.replace(
+        broken,
+        HISTORICAL,
+    )
+
+
+def test_pr_51079_unique_auto_slug_owner_is_valid_historical_route():
+    ru_base, ru_current, en_tip, candidate = _texts_70_75_67_75()
+
+    assert _reconcile(
+        ru_base,
+        ru_current,
+        en_tip,
+        candidate,
+        historical_owner="# Security auth\n",
+    ) == candidate.replace(BROKEN, HISTORICAL)
+
+
+def test_pr_51079_duplicate_effective_anchor_owners_fail_closed():
+    ru_base, ru_current, en_tip, candidate = _texts_70_75_67_75()
+    ambiguous_owner = "# Security {#security-auth}\n\n## Security auth\n"
+
+    fixed = _reconcile(
+        ru_base,
+        ru_current,
+        en_tip,
+        candidate,
+        historical_owner=ambiguous_owner,
+    )
+
+    assert fixed == candidate
+    _, final_read = _readers(candidate, en_security=ambiguous_owner)
+    assert check_en_page_link_targets(EN_PAGE, fixed, read_text=final_read)
+
+
+def test_pr_51079_only_link_contract_issue_for_this_slot_blocks_reconciliation():
+    ru_base, ru_current, en_tip, candidate = _texts_70_75_67_75()
+    unrelated = LinkContractIssue(
+        "missing_link_wrapper",
+        "other slot",
+        file_path=EN_PAGE,
+        slot=0,
+        href="../reference/configuration/other.md#other",
+    )
+    matching = LinkContractIssue(
+        "missing_link_wrapper",
+        "same href",
+        file_path=EN_PAGE,
+        href=BROKEN,
+    )
+
+    assert _reconcile(
+        ru_base,
+        ru_current,
+        en_tip,
+        candidate,
+        issues=(unrelated,),
+    ) == candidate.replace(BROKEN, HISTORICAL)
+    assert _reconcile(
+        ru_base,
+        ru_current,
+        en_tip,
+        candidate,
+        issues=(matching,),
+    ) == candidate
+
+
+def test_pr_51079_reconciliation_keeps_protected_link_like_bytes_unchanged():
+    protected = (
+        f"`[inline]({BROKEN})`\n\n"
+        f"![image]({BROKEN})\n\n"
+        f"```md\n[fenced]({BROKEN})\n```\n\n"
+    )
+    ru_base, ru_current, en_tip, candidate = _texts_70_75_67_75()
+
+    fixed = _reconcile(
+        protected + ru_base,
+        protected + ru_current,
+        protected + en_tip,
+        protected + candidate,
+    )
+
+    assert fixed.startswith(protected)
+    assert fixed[len(protected) :] == candidate.replace(BROKEN, HISTORICAL)
+
+
+def test_pr_51079_cross_kind_block_reorder_invalidates_structural_slot():
+    fence = "```text\nprotected\n```"
+    ru_base = RU_SENTENCE + "\n\n" + fence
+    ru_current = fence + "\n\n" + RU_SENTENCE
+    en_tip = EN_HISTORICAL_SENTENCE + "\n\n" + fence
+    candidate = EN_BROKEN_SENTENCE + "\n\n" + fence
+
+    assert _reconcile(ru_base, ru_current, en_tip, candidate) == candidate
+
+
+def test_pr_51079_same_fragment_on_unrelated_route_does_not_create_ambiguity():
+    unrelated = "../reference/configuration/other.md#security-auth"
+    ru = RU_SENTENCE + f"\n\n[Other route]({unrelated})."
+    en_tip = EN_HISTORICAL_SENTENCE + f"\n\n[Other route]({unrelated})."
+    candidate = EN_BROKEN_SENTENCE + f"\n\n[Other route]({unrelated})."
+
+    assert _reconcile(ru, ru, en_tip, candidate) == candidate.replace(
+        BROKEN,
+        HISTORICAL,
+    )
+
+
+def test_pr_51079_equal_tip_and_candidate_paths_do_not_read_target_context():
+    same = "../reference/configuration/other.md#same-fragment"
+    source = f"See [Same]({same})."
+
+    def unexpected_read(path: str) -> str | None:
+        raise AssertionError(f"unexpected target read: {path}")
+
+    assert reconcile_final_en_same_fragment_paths(
+        source,
+        source,
+        source,
+        source,
+        ru_page_path=RU_PAGE,
+        en_page_path=EN_PAGE,
+        read_source_ru=unexpected_read,
+        read_final_en=unexpected_read,
+    ) == source
 
 
 def test_pr_51079_paragraph_local_fallback_rejects_duplicate_historical_fragment():

@@ -8,7 +8,7 @@
   "defective_translation_pr": 52948,
   "defective_translation_head": "a1be7c4f2521da74f759a4a2277f9a9e442ae840",
   "artifact_sha256": {
-    "snapshots.json": "08130a57407fbe695f6a75093cf6ce6eb3d9747de1c1a607a94ce393e47a131b",
+    "snapshots.json": "c24239ef76ceb0d23135227037ca1403da2f30a3d3ac6a0c478ecd15f4890cee",
     "source-pr-files.json": "a9622258d6012cfb360761f2b3839e6bea1dcba54a5a4d8dcb4b4dfb8d342895",
     "model-translations.json": "ffeee8d34505d53460dd23de3d65bf5ed26ec2bcd0efb7e5d813af307f2262e7"
   },
@@ -6442,6 +6442,16 @@
       "snapshot": "B",
       "path": "ydb/docs/ru/core/_includes/do-not-create-users-in-ldap.md",
       "sha256": "e7a2da80b1d1db7d9ba9b5ab4507795afab6c5ff21ca4f02a44537ab4c573504"
+    },
+    {
+      "snapshot": "B",
+      "path": "ydb/docs/ru/core/_includes/not_allow_for_olap_text.md",
+      "sha256": "5596e6ba9b55f1c4bb583281987b17c7d7b12edd8a65d95d94a4f9e75adbbcb4"
+    },
+    {
+      "snapshot": "B",
+      "path": "ydb/docs/ru/core/yql/reference/_includes/limitation-column-row-in-read-only-tx.md",
+      "sha256": "fc872c97a55b431ed9461f98830b4d1ea67efdf046cc3f75d2f75521cb5dd0e7"
     },
     {
       "snapshot": "B",
