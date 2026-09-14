@@ -645,17 +645,26 @@ def test_pr51079_all_git_context_reads_are_recorded(tmp_path, monkeypatch, offli
     monkeypatch.setattr(subprocess, "run", audit_run)
     candidate = _run_exact_candidate(tmp_path, offline_external_read_adapters)
     _verify_local_candidate(candidate, candidate.candidate_sha)
+    assert "ydb/docs/ru/core/reference/configuration/auth_config.md" in actual_reads
     assert {
         "ydb/docs/ru/core/concepts/query_execution/execution_process.md",
         "ydb/docs/ru/core/reference/ydb-sdk/error_handling.md",
-    } <= actual_reads
+    }.isdisjoint(actual_reads)
     assert unknown == set()
     assert not candidate.audit.unknown
 
 
 def test_pr51079_late_reconciliation_unknown_read_fails_closed(exact_candidate):
     candidate = exact_candidate
-    path = "ydb/docs/ru/core/concepts/query_execution/execution_process.md"
+    en_path = EXPECTED_MD[4]
+    local = candidate.repo / en_path
+    repaired = local.read_bytes()
+    historical_href = b"../reference/configuration/security_config.md#security-auth"
+    stale_href = b"../reference/configuration/auth_config.md#security-auth"
+    assert historical_href in repaired
+    assert stale_href not in repaired
+    local.write_bytes(repaired.replace(historical_href, stale_href, 1))
+    path = "ydb/docs/ru/core/reference/configuration/auth_config.md"
     expected = candidate.audit.snapshots["B"].pop(path)
     assert expected is not None
     assert (candidate.repo / path).read_bytes() == expected.encode()
@@ -671,3 +680,4 @@ def test_pr51079_late_reconciliation_unknown_read_fails_closed(exact_candidate):
         candidate.audit.unknown.remove(expected_key)
     finally:
         candidate.audit.snapshots["B"][path] = expected
+        local.write_bytes(repaired)

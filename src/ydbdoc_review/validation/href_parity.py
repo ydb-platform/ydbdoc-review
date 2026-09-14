@@ -817,22 +817,143 @@ def reconcile_final_en_same_fragment_paths(
     corresponding historical EN target remains resolvable in the final tree.
     Any missing evidence is a no-op so the final EN link gate can block.
     """
-    from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+    from ydbdoc_review.parsing.ast_types import Heading
+    from ydbdoc_review.parsing.include_paths import (
+        collect_yfm_includes,
+        resolve_locale_md_path,
+    )
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.validation.fragment_repair import _heading_declares_frag
     from ydbdoc_review.validation.glossary_toc_links import resolve_internal_md_href
+    from ydbdoc_review.validation.yfm_anchor import _iter_headings
 
     if (
         not ru_base_text
         or not ru_current_text
         or not en_tip_text
         or not en_candidate_text
-        or any(link_contract_issues)
     ):
         return en_candidate_text or ""
 
-    LinkOccurrence = tuple[str, str, int, int, int, int]
+    AstSlot = tuple[tuple[tuple[int, int], ...], tuple[tuple[str, int], ...], int]
+    LinkOccurrence = tuple[str, str, int, int, int, int, AstSlot]
+
+    def _inline_hrefs(children: Iterable[object]) -> list[str]:
+        hrefs: list[str] = []
+        for child in children:
+            if getattr(child, "kind", None) == "link":
+                href = getattr(child, "href", "")
+                if _is_internal_href(href):
+                    hrefs.append(href)
+            nested = getattr(child, "children", None)
+            if getattr(child, "kind", None) != "link" and isinstance(nested, list):
+                hrefs.extend(_inline_hrefs(nested))
+        return hrefs
+
+    def _ast_slots(text: str) -> list[tuple[str, AstSlot]]:
+        """Return structural LinkSlots without depending on translated prose."""
+        try:
+            document = parse_markdown(text)
+        except Exception:
+            return []
+
+        slots: list[tuple[str, AstSlot]] = []
+        heading_counts = [0] * 6
+        heading_lineage: tuple[tuple[int, int], ...] = ()
+        section_block_ordinal = 0
+
+        def emit_inline(
+            children: Iterable[object],
+            lineage: tuple[tuple[int, int], ...],
+            container: tuple[tuple[str, int], ...],
+        ) -> None:
+            for ordinal, href in enumerate(_inline_hrefs(children)):
+                slots.append((href, (lineage, container, ordinal)))
+
+        def walk_children(
+            children: Iterable[object],
+            lineage: tuple[tuple[int, int], ...],
+            parent: tuple[tuple[str, int], ...],
+        ) -> None:
+            for sibling_ordinal, child in enumerate(children):
+                kind = getattr(child, "kind", type(child).__name__)
+                walk_block(child, lineage, (*parent, (kind, sibling_ordinal)))
+
+        def walk_block(
+            block: object,
+            lineage: tuple[tuple[int, int], ...],
+            container: tuple[tuple[str, int], ...],
+        ) -> None:
+            kind = getattr(block, "kind", "")
+            if kind in {"paragraph", "heading", "term_definition"}:
+                emit_inline(getattr(block, "children", ()), lineage, container)
+                return
+            if kind in {"bullet_list", "ordered_list"}:
+                for item_index, item in enumerate(getattr(block, "children", ())):
+                    walk_children(
+                        getattr(item, "children", ()),
+                        lineage,
+                        (*container, ("list_item", item_index)),
+                    )
+                return
+            if kind in {"blockquote", "yfm_note", "yfm_cut"}:
+                walk_children(getattr(block, "children", ()), lineage, container)
+                return
+            if kind == "yfm_tabs":
+                for tab_index, tab in enumerate(getattr(block, "children", ())):
+                    emit_inline(
+                        getattr(tab, "title", ()),
+                        lineage,
+                        (*container, ("yfm_tab_title", tab_index)),
+                    )
+                    walk_children(
+                        getattr(tab, "children", ()),
+                        lineage,
+                        (*container, ("yfm_tab", tab_index)),
+                    )
+                return
+            if kind == "yfm_if":
+                for branch_index, branch in enumerate(getattr(block, "branches", ())):
+                    walk_children(
+                        getattr(branch, "children", ()),
+                        lineage,
+                        (*container, ("yfm_if_branch", branch_index)),
+                    )
+                return
+            if kind == "table":
+                rows = [getattr(block, "header", None), *getattr(block, "rows", ())]
+                for row_index, row in enumerate(row for row in rows if row is not None):
+                    for cell_index, cell in enumerate(getattr(row, "cells", ())):
+                        emit_inline(
+                            getattr(cell, "children", ()),
+                            lineage,
+                            (
+                                *container,
+                                ("table_row", row_index),
+                                ("table_cell", cell_index),
+                            ),
+                        )
+
+        for block in document.children:
+            if isinstance(block, Heading):
+                level = block.level
+                heading_counts[level - 1] += 1
+                heading_counts[level:] = [0] * (6 - level)
+                heading_lineage = tuple(
+                    (index + 1, count)
+                    for index, count in enumerate(heading_counts[:level])
+                    if count
+                )
+                section_block_ordinal = 0
+                walk_block(block, heading_lineage, (("heading", level),))
+                continue
+            kind = getattr(block, "kind", type(block).__name__)
+            walk_block(block, heading_lineage, ((kind, section_block_ordinal),))
+            section_block_ordinal += 1
+        return slots
 
     def _links(text: str) -> list[LinkOccurrence]:
-        links: list[LinkOccurrence] = []
+        raw_links: list[tuple[str, str, int, int, int, int]] = []
         for match in _iter_visible_md_link_matches(text):
             destination = _markdown_destination_span(match.group(2))
             if destination is None:
@@ -840,7 +961,7 @@ def reconcile_final_en_same_fragment_paths(
             local_start, local_end, href = destination
             if not _is_internal_href(href):
                 continue
-            links.append(
+            raw_links.append(
                 (
                     match.group(1),
                     href,
@@ -850,7 +971,16 @@ def reconcile_final_en_same_fragment_paths(
                     match.start(2) + local_end,
                 )
             )
-        return links
+        ast_slots = _ast_slots(text)
+        if len(ast_slots) != len(raw_links) or any(
+            unquote(ast_href) != unquote(raw[1])
+            for (ast_href, _slot), raw in zip(ast_slots, raw_links, strict=True)
+        ):
+            return []
+        return [
+            (*raw, slot)
+            for raw, (_ast_href, slot) in zip(raw_links, ast_slots, strict=True)
+        ]
 
     def _decoded_fragment(href: str) -> str | None:
         _path, marker, fragment = href.partition("#")
@@ -862,40 +992,78 @@ def reconcile_final_en_same_fragment_paths(
     def _key(label: str, href: str) -> tuple[str, str]:
         return (" ".join(label.split()).casefold(), unquote(href))
 
-    def _resolves(page_path: str, href: str, reader: DocsTextReader) -> bool:
-        path_part, marker, raw_fragment = href.partition("#")
-        fragment = unquote(raw_fragment)
-        if not marker or not fragment:
-            return False
-        target = page_path if not path_part else resolve_internal_md_href(page_path, href)
+    def _safe_target(page_path: str, href: str) -> str | None:
+        before_fragment = href.partition("#")[0]
+        raw_path = before_fragment.partition("?")[0]
+        if (
+            raw_path.startswith(("/", "//"))
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", raw_path)
+            or "\\" in raw_path
+            or unquote(raw_path) != raw_path
+        ):
+            return None
+        target = page_path if not raw_path else resolve_internal_md_href(page_path, raw_path)
         if target is None:
-            return False
+            return None
         docs_root = _en_page_docs_root(page_path.replace("/ru/", "/en/", 1))
         if docs_root is None:
-            return False
-        if "/docs/ru/" in page_path:
-            # ``resolve_internal_md_href`` intentionally resolves an EN
-            # counterpart for the ordinary translation contract. Here the
-            # source-authority proof must instead inspect the immutable RU
-            # projection at the equivalent locale path.
+            return None
+        locale = "ru" if "/docs/ru/" in page_path else "en"
+        if locale == "ru":
             target = target.replace("/docs/en/", "/docs/ru/", 1)
-            allowed_prefix = f"{docs_root}/ru/core/"
-        else:
-            allowed_prefix = f"{docs_root}/en/core/"
-        if not target.startswith(allowed_prefix):
-            return False
+        allowed_prefix = f"{docs_root}/{locale}/core/"
+        if not target.startswith(allowed_prefix) or posixpath.normpath(target) != target:
+            return None
+        return target
+
+    def _owner_count(
+        page_path: str,
+        href: str,
+        reader: DocsTextReader,
+        *,
+        stack: tuple[str, ...] = (),
+    ) -> int:
+        _path_part, marker, raw_fragment = href.partition("#")
+        fragment = unquote(raw_fragment)
+        if not marker or not fragment:
+            return 0
+        target = _safe_target(page_path, href)
+        if target is None or target in stack:
+            return 0
         target_text = reader(target)
-        return target_text is not None and fragment_declared_in_markdown(
-            target_text,
-            fragment,
-            page_path=target,
-            read_text=reader,
+        if target_text is None:
+            return 0
+        try:
+            headings = list(_iter_headings(parse_markdown(target_text).children))
+        except Exception:
+            return 0
+        owners = sum(
+            heading.anchor == fragment
+            or (heading.anchor is None and _heading_declares_frag(heading, fragment))
+            for heading in headings
         )
+        docs_root = _en_page_docs_root(target.replace("/ru/", "/en/", 1))
+        if docs_root is None:
+            return owners
+        for include in collect_yfm_includes(target_text):
+            included_path = resolve_locale_md_path(target, include.path, docs_root=docs_root)
+            if included_path is None:
+                continue
+            owners += _owner_count(
+                included_path,
+                f"#{raw_fragment}",
+                reader,
+                stack=(*stack, target),
+            )
+        return owners
 
     ru_base_links = _links(ru_base_text)
     ru_current_links = _links(ru_current_text)
     en_tip_links = _links(en_tip_text)
     candidate_links = _links(en_candidate_text)
+
+    if not all((ru_base_links, ru_current_links, en_tip_links, candidate_links)):
+        return en_candidate_text
 
     base_keys = [_key(label, href) for label, href, *_offsets in ru_base_links]
     current_keys = [_key(label, href) for label, href, *_offsets in ru_current_links]
@@ -904,59 +1072,15 @@ def reconcile_final_en_same_fragment_paths(
     base_slot_by_key = {
         key: slot for slot, key in enumerate(base_keys) if base_key_counts[key] == 1
     }
-    base_fragment_counts = Counter(
-        fragment
-        for _label, href, *_offsets in ru_base_links
-        if (fragment := _decoded_fragment(href)) is not None
-    )
-    tip_fragment_counts = Counter(
-        fragment
-        for _label, href, *_offsets in en_tip_links
-        if (fragment := _decoded_fragment(href)) is not None
-    )
-    current_href_counts = Counter(unquote(href) for _label, href, *_ in ru_current_links)
-    candidate_href_counts = Counter(unquote(href) for _label, href, *_ in candidate_links)
-    current_fragment_counts = Counter(
-        fragment
-        for _label, href, *_offsets in ru_current_links
-        if (fragment := _decoded_fragment(href)) is not None
-    )
-    candidate_fragment_counts = Counter(
-        fragment
-        for _label, href, *_offsets in candidate_links
-        if (fragment := _decoded_fragment(href)) is not None
-    )
+    def _route(href: str) -> tuple[str, str]:
+        path_query, _marker, fragment = href.partition("#")
+        path = path_query.partition("?")[0]
+        return unquote(path), unquote(fragment)
 
-    def _paragraph_span(text: str, occurrence: LinkOccurrence) -> tuple[int, int]:
-        start = 0
-        end = len(text)
-        for boundary in re.finditer(r"\n[ \t]*\n", text):
-            if boundary.end() <= occurrence[2]:
-                start = boundary.end()
-                continue
-            if boundary.start() >= occurrence[3]:
-                end = boundary.start()
-                break
-        return start, end
-
-    def _paragraph_ordinal(text: str, occurrence: LinkOccurrence) -> int:
-        return sum(
-            boundary.end() <= occurrence[2]
-            for boundary in re.finditer(r"\n[ \t]*\n", text)
-        )
-
-    def _paragraph_path_skeleton(text: str, occurrence: LinkOccurrence) -> str:
-        paragraph_start, paragraph_end = _paragraph_span(text, occurrence)
-        path, separator, _fragment = occurrence[1].partition("#")
-        if not separator:
-            return ""
-        path_start = occurrence[4]
-        path_end = path_start + len(path)
-        return (
-            text[paragraph_start:path_start]
-            + "<historical-en-path>"
-            + text[path_end:paragraph_end]
-        )
+    base_route_counts = Counter(_route(href) for _label, href, *_ in ru_base_links)
+    current_route_counts = Counter(_route(href) for _label, href, *_ in ru_current_links)
+    tip_route_counts = Counter(_route(href) for _label, href, *_ in en_tip_links)
+    candidate_route_counts = Counter(_route(href) for _label, href, *_ in candidate_links)
 
     replacements: list[tuple[int, int, str]] = []
     replaced_spans: set[tuple[int, int]] = set()
@@ -965,19 +1089,23 @@ def reconcile_final_en_same_fragment_paths(
         candidate: LinkOccurrence,
         baseline_href: str,
     ) -> None:
-        _label, candidate_href, start, end, href_start, _href_end = candidate
+        _label, candidate_href, start, end, href_start, _href_end, _slot = candidate
         if (start, end) in replaced_spans:
             return
-        if _resolves(ru_page_path, candidate_href, read_source_ru):
+        if _route(candidate_href)[0] == _route(baseline_href)[0]:
             return
-        if _resolves(en_page_path, candidate_href, read_final_en):
+        if _owner_count(ru_page_path, candidate_href, read_source_ru) == 1:
             return
-        if not _resolves(en_page_path, baseline_href, read_final_en):
+        if _owner_count(en_page_path, candidate_href, read_final_en) == 1:
             return
-        baseline_path, separator, _baseline_fragment = baseline_href.partition("#")
-        candidate_path, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
+        if _owner_count(en_page_path, baseline_href, read_final_en) != 1:
+            return
+        baseline_path_query, separator, _baseline_fragment = baseline_href.partition("#")
+        candidate_path_query, _candidate_separator, raw_candidate_fragment = candidate_href.partition("#")
         if not separator or not raw_candidate_fragment:
             return
+        baseline_path = baseline_path_query.partition("?")[0]
+        candidate_path = candidate_path_query.partition("?")[0]
         replacement = (
             en_candidate_text[start:href_start]
             + baseline_path
@@ -986,116 +1114,56 @@ def reconcile_final_en_same_fragment_paths(
         replacements.append((start, end, replacement))
         replaced_spans.add((start, end))
 
-    # Keep the existing positional proof when all four snapshots have aligned
-    # cardinality. It preserves established behavior for encoded fragments and
-    # other path-only fidelity cases.
-    if len(candidate_links) == len(ru_current_links) and len(ru_base_links) == len(
-        en_tip_links
-    ):
-        for slot, (candidate, current) in enumerate(
-            zip(candidate_links, ru_current_links, strict=True)
-        ):
-            candidate_href = candidate[1]
-            current_href = current[1]
-            if unquote(candidate_href) != unquote(current_href):
-                continue
-            fragment = _decoded_fragment(candidate_href)
-            if fragment is None:
-                continue
-            key = current_keys[slot]
-            if current_key_counts[key] != 1 or base_key_counts[key] != 1:
-                continue
-            historical_slot = base_slot_by_key[key]
-            historical_ru = ru_base_links[historical_slot]
-            baseline = en_tip_links[historical_slot]
-            baseline_href = en_tip_links[historical_slot][1]
-            if (
-                _decoded_fragment(current_href) != fragment
-                or _decoded_fragment(historical_ru[1]) != fragment
-                or _decoded_fragment(baseline_href) != fragment
-                or base_fragment_counts[fragment] != 1
-                or tip_fragment_counts[fragment] != 1
-            ):
-                continue
-            if _paragraph_ordinal(ru_base_text, historical_ru) != _paragraph_ordinal(
-                ru_current_text,
-                current,
-            ):
-                continue
-            if _paragraph_ordinal(en_tip_text, baseline) != _paragraph_ordinal(
-                en_candidate_text,
-                candidate,
-            ):
-                continue
-            _schedule_path_restore(candidate, baseline_href)
-
-    # Unequal document-wide counts do not disprove one stable occurrence. This
-    # fallback is deliberately paragraph-local: every source and candidate
-    # occurrence is unique, and the historical/candidate EN paragraphs must be
-    # identical after masking only this link path.
-    candidates_by_href: dict[str, list[LinkOccurrence]] = {}
+    # Document-wide edits do not disprove one stable occurrence.  Admission is
+    # instead bound to a unique four-snapshot AST block/link slot; translated
+    # prose is intentionally absent from the proof.
+    candidates_by_route: dict[tuple[str, str], list[LinkOccurrence]] = {}
     for candidate in candidate_links:
-        candidates_by_href.setdefault(unquote(candidate[1]), []).append(candidate)
-    tip_by_fragment: dict[str, list[LinkOccurrence]] = {}
+        candidates_by_route.setdefault(_route(candidate[1]), []).append(candidate)
+    tip_by_slot: dict[AstSlot, list[LinkOccurrence]] = {}
     for tip in en_tip_links:
-        fragment = _decoded_fragment(tip[1])
-        if fragment is not None:
-            tip_by_fragment.setdefault(fragment, []).append(tip)
+        tip_by_slot.setdefault(tip[6], []).append(tip)
 
     for current_slot, current in enumerate(ru_current_links):
         current_href = current[1]
-        current_href_key = unquote(current_href)
+        current_route = _route(current_href)
         key = current_keys[current_slot]
         fragment = _decoded_fragment(current_href)
         if (
             fragment is None
             or current_key_counts[key] != 1
             or base_key_counts[key] != 1
-            or current_href_counts[current_href_key] != 1
-            or candidate_href_counts[current_href_key] != 1
-            or current_fragment_counts[fragment] != 1
-            or candidate_fragment_counts[fragment] != 1
-            or base_fragment_counts[fragment] != 1
-            or tip_fragment_counts[fragment] != 1
+            or base_route_counts[current_route] != 1
+            or current_route_counts[current_route] != 1
+            or candidate_route_counts[current_route] != 1
         ):
             continue
         historical_ru = ru_base_links[base_slot_by_key[key]]
         if _decoded_fragment(historical_ru[1]) != fragment:
             continue
-        candidate = candidates_by_href[current_href_key][0]
-        baseline = tip_by_fragment[fragment][0]
-        if _decoded_fragment(candidate[1]) != fragment:
+        candidate = candidates_by_route[current_route][0]
+        baseline_matches = tip_by_slot.get(candidate[6], ())
+        if len(baseline_matches) != 1:
             continue
-        if _paragraph_ordinal(ru_base_text, historical_ru) != _paragraph_ordinal(
-            ru_current_text,
-            current,
-        ):
-            continue
-        if _paragraph_ordinal(en_tip_text, baseline) != _paragraph_ordinal(
-            en_candidate_text,
-            candidate,
-        ):
-            continue
-        if _paragraph_path_skeleton(en_tip_text, baseline) != _paragraph_path_skeleton(
-            en_candidate_text,
-            candidate,
-        ):
-            continue
-        baseline_skeleton = _paragraph_path_skeleton(en_tip_text, baseline)
-        if not baseline_skeleton:
-            continue
+        baseline = baseline_matches[0]
+        baseline_route = _route(baseline[1])
         if (
-            sum(
-                _paragraph_path_skeleton(en_tip_text, occurrence) == baseline_skeleton
-                for occurrence in en_tip_links
+            _decoded_fragment(candidate[1]) != fragment
+            or _decoded_fragment(baseline[1]) != fragment
+            or tip_route_counts[baseline_route] != 1
+        ):
+            continue
+        if historical_ru[6] != current[6]:
+            continue
+        candidate_slot = candidate_links.index(candidate)
+        if any(
+            (not issue.file_path or issue.file_path == en_page_path)
+            and (
+                (issue.href is None and issue.slot is None)
+                or (issue.href is not None and _route(issue.href) == current_route)
+                or (issue.href is None and issue.slot == candidate_slot)
             )
-            != 1
-            or sum(
-                _paragraph_path_skeleton(en_candidate_text, occurrence)
-                == baseline_skeleton
-                for occurrence in candidate_links
-            )
-            != 1
+            for issue in link_contract_issues
         ):
             continue
         _schedule_path_restore(candidate, baseline[1])
