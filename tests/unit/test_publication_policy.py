@@ -322,6 +322,8 @@ def _run_top_level(
     continue_source_pr: bool = False,
     real_ops_evidence: bool = False,
     update_body_error: Exception | None = None,
+    readonly_critic_response: CriticResponse | None = None,
+    mock_readonly_critic: bool = True,
 ):
     source_sha = _repo_head_sha(repo_path)
     pull = {
@@ -536,6 +538,14 @@ def _run_top_level(
         stack.enter_context(
             patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=pr_result)
         )
+        if mock_readonly_critic:
+            stack.enter_context(
+                patch(
+                    "ydbdoc_review.translation.critic.run_readonly_semantic_critic",
+                    return_value=readonly_critic_response
+                    or CriticResponse(verdict="ok", issues=[]),
+                )
+            )
         stack.enter_context(
             patch("ydbdoc_review.github.workflow.apply_orphan_toc_page_checks", return_value=[])
         )
@@ -759,7 +769,11 @@ def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
     result = _pair_result(target_text="See [missing](missing.md).\n")
     result.pair_results[0].source_text = "См. [missing](missing.md).\n"
 
-    job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
+    job, gh, prepare, commit, push, finish = _run_top_level(
+        publication_repo,
+        result,
+        real_git_commit=True,
+    )
 
     assert job.pr_result.completeness_gaps == []
     assert getattr(job.pr_result, "publication_impact", None) == "PUBLISH_RED"
