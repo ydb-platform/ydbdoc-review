@@ -2,11 +2,12 @@
 
 > Living, opinionated document. Treat it as authoritative for design intent.  
 
-> **Решения владельца продукта, 2026-09-14:** действуют [D-001 и D-002](docs/memory-bank/10-product-decisions.md).
+> **Решения владельца продукта, 2026-09-14:** действуют [D-001–D-003](docs/memory-bank/10-product-decisions.md).
 > Перевод сохраняется в ветке, PR создаётся до critic и остаётся при любом QA-вердикте.
 > Критик: до трёх проходов и двух исправлений; итог записывается в PR.
 > Новая постановка `doc_translate` удаляет прежнюю ветку перевода и запускает полный перевод заново, даже на том же SHA.
 > Прежние запреты публикации по QA и shortcuts повторного перевода в разделах ниже — история, а не действующее правило.
+> В блоках кода переводятся только комментарии отдельными запросами; остальной код сохраняется. Кириллица в коде — warning с файлом и строкой (D-003).
 > Это согласование требований; реализация и тесты ещё требуют синхронизации.
 
 
@@ -106,7 +107,7 @@ stable cross-references — use them when linking between files.
 | Pipeline & reporting | [07-pipeline](docs/memory-bank/07-pipeline.md) | 15–17 | Per-file flow, PR workflow, reports |
 | Operations | [08-operations](docs/memory-bank/08-operations.md) | 19–21 | Action runtime, cost, glossary |
 | Navigation scope | [09-navigation-scope](docs/memory-bank/09-navigation-scope.md) | 22 | TOC planner + **§22.14 regression catalog** |
-| Product decisions | [10-product-decisions](docs/memory-bank/10-product-decisions.md) | D-001–D-002 | Явные решения владельца продукта; приоритет над историей |
+| Product decisions | [10-product-decisions](docs/memory-bank/10-product-decisions.md) | D-001–D-003 | Явные решения владельца продукта; приоритет над историей |
 
 ## Recent changes
 
