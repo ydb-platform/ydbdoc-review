@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 
 from ydbdoc_review.llm.client import YandexLLMClient
-from ydbdoc_review.llm.errors import LLMParseError
+from ydbdoc_review.llm.errors import LLMError, LLMParseError
 from ydbdoc_review.llm.structured import parse_json_content
 from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
 from ydbdoc_review.segmentation.types import Segment
@@ -24,6 +24,7 @@ from ydbdoc_review.translation.prompts import (
     build_critic_batch_messages,
     build_verify_batch_messages,
 )
+from ydbdoc_review.translation.review_blocks import ReviewPlan
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, CriticVerdict
 from ydbdoc_review.translation.translator import validate_segment_translation
 from ydbdoc_review.validation.markers import extract_placeholders
@@ -209,6 +210,7 @@ def _fetch_critic_response(
     file_path: str = "",
     batch_label: str = "",
     segment_ids: tuple[str, ...] = (),
+    response_parser=None,
 ) -> _CriticFetchResult:
     """Call configured critic models, separating JSON repair from refusals."""
     last_exc: LLMParseError | None = None
@@ -265,7 +267,7 @@ def _fetch_critic_response(
                         refusal_preview=content,
                     )
                 continue
-            parsed = parse_critic_response(content)
+            parsed = (response_parser or parse_critic_response)(content)
             logger.info(
                 "%s semantic review complete; file=%s batch=%s leaf_ids=%s "
                 "attempt=%s model=%s messages_sha256=%s outcome=parsed",
@@ -339,7 +341,7 @@ def _fetch_critic_response(
                             refusal_preview=repair_content,
                         )
                     continue
-                parsed = parse_critic_response(repair_content)
+                parsed = (response_parser or parse_critic_response)(repair_content)
                 logger.info(
                     "%s JSON repair complete; file=%s batch=%s leaf_ids=%s "
                     "attempt=%s model=%s messages_sha256=%s outcome=parsed",
@@ -495,12 +497,33 @@ def _run_critic_batches(
     pass_label: str,
     prior_issues: list[CriticIssueOut] | None = None,
     target_atom_maps: dict[str, dict[str, str]] | None = None,
+    message_builder=None,
+    response_parser=None,
 ) -> CriticResponse:
     batch_count = len(batches)
     model_chain = client.model_chain_for_role("critic")
 
+    def fetch_response(messages: list, **kwargs) -> _CriticFetchResult:
+        try:
+            fetched = _fetch_critic_response(client, messages, **kwargs)
+        except LLMError as exc:
+            # Legacy critic/verify retain their existing exception contract.
+            if message_builder is None:
+                raise
+            fetched = _CriticFetchResult(response=_fallback_critic_response(reason=str(exc)))
+        if message_builder is not None:
+            context = (f" File: {file_path}; {kwargs['pass_label']}; units: "
+                       + ", ".join(kwargs["segment_ids"]) + ".")
+            for issue in fetched.response.issues:
+                if issue.category == "critic_execution_failed":
+                    issue.comment += context
+                    fetched.response._review_incomplete = True
+        return fetched
+
     def review_batch(batch: Batch, *, label: str, depth: int) -> CriticResponse:
-        if prior_issues is None:
+        if message_builder is not None:
+            messages = message_builder(batch)
+        elif prior_issues is None:
             messages = build_critic_batch_messages(
                 batch,
                 translations,
@@ -530,8 +553,7 @@ def _run_critic_batches(
                 target_atom_maps=target_atom_maps,
             )
         segment_ids = tuple(segment.id for segment in batch.segments)
-        fetched = _fetch_critic_response(
-            client,
+        fetched = fetch_response(
             messages,
             pass_label=label,
             max_tokens=max_tokens,
@@ -540,6 +562,7 @@ def _run_critic_batches(
             file_path=file_path,
             batch_label=f"{batch.index + 1}/{batch_count}",
             segment_ids=segment_ids,
+            response_parser=(lambda raw: response_parser(raw, batch)) if response_parser else None,
         )
 
         should_split = (
@@ -581,8 +604,7 @@ def _run_critic_batches(
                     label,
                     ", ".join(alternate_chain),
                 )
-                return _fetch_critic_response(
-                    client,
+                return fetch_response(
                     messages,
                     pass_label=f"{label} alternate",
                     max_tokens=max_tokens,
@@ -591,6 +613,7 @@ def _run_critic_batches(
                     file_path=file_path,
                     batch_label=f"{batch.index + 1}/{batch_count}",
                     segment_ids=segment_ids,
+                    response_parser=(lambda raw: response_parser(raw, batch)) if response_parser else None,
                 ).response
         return fetched.response
 
@@ -604,6 +627,80 @@ def _run_critic_batches(
             )
         )
     return merge_critic_responses(responses)
+
+
+def run_readonly_semantic_critic(
+    client: YandexLLMClient, *, units: ReviewPlan, glossary: Glossary, file_path: str,
+    source_lang: str = "ru", target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION, max_chars: int = 12000,
+    max_tokens: int | None = None,
+) -> CriticResponse:
+    """Review one immutable ReviewPlan, returning advice without any content writes."""
+    from ydbdoc_review.segmentation.types import SegmentKind
+    from ydbdoc_review.translation.prompts import build_final_readonly_messages
+    from ydbdoc_review.translation.review_blocks import batch_review_units
+
+    plan = units
+    def failed(reason):
+        response = _fallback_critic_response(reason=f"{file_path}: {reason}")
+        response._review_incomplete = True
+        return response
+
+    # The request budget covers the actual serialized units and static instructions.
+    overhead = sum(len(m["content"].encode()) for m in build_final_readonly_messages(
+        (), glossary, file_path=file_path, source_lang=source_lang,
+        target_lang=target_lang, version=prompt_version))
+    # max_chars budgets content, not the glossary. UTF-8 takes at most four
+    # bytes per character; include static request overhead in both limits.
+    manifest = batch_review_units(plan, budget_bytes=max_chars + overhead,
+                                  hard_limit_bytes=4 * max_chars + overhead,
+                                  overhead_bytes=overhead)
+    if not manifest.complete or file_path != plan.en.path:
+        return failed("incomplete review input: " + "; ".join(i.reason for i in manifest.issues))
+    if not plan.units:
+        return CriticResponse(verdict="ok", issues=[])
+    by_id = {unit.id: unit for unit in plan.units}
+    batches = [Batch(index=index, segments=[Segment(
+        id=unit.id, kind=SegmentKind.PARAGRAPH, path=[unit.en_path],
+        text=unit.ru_text, placeholders=[], ast_path=[],
+    ) for unit in batch]) for index, batch in enumerate(manifest.batches)]
+
+    def messages(batch):
+        return build_final_readonly_messages(tuple(by_id[s.id] for s in batch.segments),
+            glossary, file_path=file_path, source_lang=source_lang,
+            target_lang=target_lang, version=prompt_version)
+
+    def parse(raw, batch):
+        # Do not use legacy rewrite/default-diagnosis coercion for final evidence.
+        try:
+            data = parse_json_content(raw)
+            if not isinstance(data, dict) or "issues" not in data:
+                raise ValueError("missing explicit issues")
+            response = CriticResponse.model_validate(data)
+            ids = {segment.id for segment in batch.segments}
+            if response.verdict != "ok" and not response.issues:
+                raise ValueError("non-ok response without actionable issues")
+            for issue in response.issues:
+                if issue.segment_id not in ids or not issue.comment.strip():
+                    raise ValueError("unknown unit or missing diagnosis")
+            return CriticResponse(verdict="warnings" if response.issues else "ok",
+                issues=[issue.model_copy(update={"severity": "warning", "category": "translation_quality"})
+                        for issue in response.issues])
+        except (ValueError, TypeError) as exc:
+            raise LLMParseError(f"incomplete semantic response: {exc}") from exc
+
+    try:
+        response = _run_critic_batches(client, batches=batches,
+            translations={u.id: u.en_text for u in plan.units}, glossary=glossary,
+            file_path=file_path, source_lang=source_lang, target_lang=target_lang,
+            prompt_version=prompt_version, max_tokens=max_tokens, pass_label="Final read-only critic",
+            message_builder=messages, response_parser=parse)
+    except LLMError as exc:
+        return failed(str(exc))
+    if response.verdict == "blocked" or response._review_incomplete:
+        response._review_incomplete = True
+        response.verdict = "blocked"
+    return response
 
 
 def _critic_fix_would_regress(

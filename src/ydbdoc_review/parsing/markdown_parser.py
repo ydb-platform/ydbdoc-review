@@ -5,6 +5,7 @@ Wraps markdown-it-py and converts its flat token stream into our IR tree.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal, cast
 
 from markdown_it import MarkdownIt
@@ -51,6 +52,7 @@ from ydbdoc_review.parsing.ast_types import (
 from ydbdoc_review.parsing.inline_locations import (
     LocatedDocument,
     LocatedInlineSegment,
+    SourceSpan,
     build_located_inline_segment,
     install_inline_location_tracking,
     trim_final_text_projection,
@@ -140,6 +142,65 @@ def parse_markdown_located(text: str) -> LocatedDocument:
     stream = _TokenStream(tokens, located_segments)
     document = _parse_document(stream)
     return LocatedDocument(document=document, inline_segments=tuple(located_segments))
+
+
+@dataclass(frozen=True)
+class LocatedReviewBlock:
+    """An indivisible root container, including every nested source character."""
+
+    kind: str
+    address: tuple[int, ...]
+    span: SourceSpan
+    line_start: int
+    line_end: int
+    structure: tuple[str, ...]
+    heading_level: int = 0
+    anchor: str | None = None
+
+
+def parse_review_blocks(text: str) -> tuple[LocatedReviewBlock, ...]:
+    """Use the configured parser's root maps, never AST rendering or text search.
+
+    Nested nodes belong to their complete root container. Full tables include
+    cells the AST cannot represent. The caller independently checks source gaps.
+    """
+    tokens = create_parser(source_locations=True).parse(text)
+    offsets = [0]
+    # markdown-it normalizes CRLF and CR, but its maps still count source lines.
+    import re
+    offsets.extend(match.end() for match in re.finditer(r"\r\n|\r|\n", text))
+    if offsets[-1] != len(text):
+        offsets.append(len(text))
+    blocks = []
+    for index, token in enumerate(tokens):
+        if token.level != 0 or token.nesting == -1:
+            continue
+        if token.map is None:
+            raise ValueError("root block has no source map")
+        start, end = token.map
+        if not 0 <= start < end < len(offsets):
+            raise ValueError("root block has invalid source map")
+        end_index = index + 1
+        if token.nesting == 1:
+            while end_index < len(tokens):
+                if tokens[end_index].level == 0 and tokens[end_index].nesting == -1:
+                    end_index += 1
+                    break
+                end_index += 1
+        structure = tuple(
+            repr((nested.type, nested.tag, nested.info if nested.type == "fence" else "",
+                  tuple((key, nested.meta[key]) for key in ("note_type", "condition", "branch_kind", "term_id")
+                        if key in nested.meta)))
+            for nested in tokens[index:end_index] if nested.type != "inline"
+        )
+        anchor = re.search(r"\{#([^}]+)\}\s*$", text[offsets[start]:offsets[end]]) if token.type == "heading_open" else None
+        blocks.append(LocatedReviewBlock(
+            token.type.removesuffix("_open"), (len(blocks),),
+            SourceSpan(offsets[start], offsets[end]), start + 1, end,
+            structure, int(token.tag[1:]) if token.type == "heading_open" else 0,
+            anchor.group(1) if anchor else None,
+        ))
+    return tuple(blocks)
 
 
 def _parse_document(stream: _TokenStream) -> Document:

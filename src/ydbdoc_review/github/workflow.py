@@ -138,6 +138,13 @@ from ydbdoc_review.pipeline.completeness import (
     completeness_gaps,
     verified_translation_pr_scope_gaps,
 )
+from ydbdoc_review.pipeline.final_candidate import (
+    FinalCandidate,
+    bind_final_candidate,
+    read_candidate_bytes,
+    require_reviewed_candidate,
+    review_final_candidate,
+)
 from ydbdoc_review.pipeline.navigation_merge import (
     add_verify_navigation_recommendations,
     extra_toc_hrefs_from_md_targets,
@@ -2224,11 +2231,81 @@ def _has_unresolved_instruction_without_artifact(result: PRTranslationResult) ->
     )
 
 
+def _review_translation_candidate(
+    repo_path: str,
+    candidate: FinalCandidate,
+    result: PRTranslationResult,
+    client: YandexLLMClient,
+    glossary: Glossary,
+    config: Config,
+) -> None:
+    """Attach one semantic result and trusted whole-block evidence from frozen K."""
+    from ydbdoc_review.translation.critic import run_readonly_semantic_critic
+    from ydbdoc_review.translation.errors import TranslationError
+    from ydbdoc_review.translation.review_blocks import AuthoritativeDocument, prepare_review_document
+
+    for run in result.pair_results:
+        if run.deleted or run.skipped or run.plan.target_path not in candidate.en_paths:
+            continue
+        fr = run.file_result
+        if fr is None:
+            continue
+        try:
+            raw = read_candidate_bytes(repo_path, candidate, run.plan.target_path)
+            if raw is None or run.source_text is None:
+                raise ValueError("final_candidate_review_missing_text")
+            plan = prepare_review_document(candidate, AuthoritativeDocument(
+                run.plan.source_path, hashlib.sha256(run.source_text.encode()).hexdigest(),
+                run.source_text.encode()), run.plan.target_path, raw)
+            fr.final_review_plan = plan
+            response = run_readonly_semantic_critic(
+                client, units=plan, glossary=glossary,
+                file_path=run.plan.target_path, source_lang=run.plan.source_lang,
+                target_lang=run.plan.target_lang, prompt_version=config.prompts.version,
+                max_chars=config.translation.segments_per_batch_chars,
+            )
+            for unit in plan.units:
+                blocks = [b for b in plan.en.blocks if b.id in unit.en_block_ids]
+                fr.segment_locations[unit.id] = unit.en_path
+                fr.segment_lines[unit.id] = (min(b.line_start for b in blocks), max(b.line_end for b in blocks))
+                fr.segment_excerpts[unit.id] = unit.en_text
+                fr.segment_source_excerpts[unit.id] = unit.ru_text
+            fr.critic_initial = response
+            fr.critic_unresolved = response
+            fr.final_review_response = response
+            if response.verdict == "blocked":
+                fr.verdict = "blocked"
+            elif response.verdict == "warnings" and fr.verdict == "ok":
+                fr.verdict = "warnings"
+        except (LLMError, TranslationError, ValueError) as exc:
+            fr.verdict = "blocked"
+            fr.heuristic_blocking.append(f"final_candidate_review_failed: {exc}")
+
+
 def _publication_withheld(result: PRTranslationResult) -> bool:
     return result.publication_impact in {
         PublicationImpact.WITHHOLD_INCOMPLETE,
         PublicationImpact.WITHHOLD_UNSAFE,
     }
+
+
+def _refresh_translation_qa_impact(
+    result: PRTranslationResult,
+    *,
+    candidate: FinalCandidate | None = None,
+    reusable_artifact: _BoundArtifactPR | None = None,
+) -> PublicationImpact:
+    """Publish QA findings as RED only when a real translation artifact exists."""
+    refresh_publication_impact(result)
+    if (
+        (candidate is not None or reusable_artifact is not None)
+        and result.publication_failure is None
+        and _publication_withheld(result)
+    ):
+        # D-001 separates an existing translation PR from readiness to merge.
+        # The underlying incomplete/unsafe findings and verdicts remain intact.
+        result.publication_impact = PublicationImpact.PUBLISH_RED
+    return result.publication_impact
 
 
 def _translation_checkpoint_fingerprint(
@@ -3153,6 +3230,7 @@ def run_doc_translate(
                     docs_repo_path=repo_path,
                     checkpoint=active_checkpoint,
                     resume_parent_run_id=resume_parent_run_id,
+                    prepare_only=True,
                 )
         else:
             if (
@@ -3287,213 +3365,194 @@ def run_doc_translate(
         repo_path=repo_path,
         baseline_ref=merge_base_with,
     )
-    refresh_publication_impact(pr_result)
-    if _publication_withheld(pr_result):
-        _restore_deferred_outbound_fragments(deferred_outbound)
-        refresh_publication_impact(pr_result)
-        logger.error(
-            "Publication withheld (%s) — skip commit/push for PR #%s: gaps=%s",
-            pr_result.publication_impact.value,
-            pr_number,
-            pr_result.completeness_gaps,
-        )
-        touched = TouchedPaths([], [])
-    else:
-        touched = _apply_results_to_disk(
+    _refresh_translation_qa_impact(pr_result)
+    touched = _apply_results_to_disk(
+        repo_path,
+        pr_result,
+        dry_run=dry_run,
+        docs_root=cfg.paths.docs_root,
+        changed_paths=direct_changed_paths,
+    )
+    redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
+    if any(path == redirects_path for path, _kind in changes):
+        redirects_current = (
+            read_text_at_commit(repo_path, ru_ref, redirects_path)
+            if ru_ref is not None
+            else read_ru(redirects_path)
+        ) or ""
+        redirects_base = read_ru_base(redirects_path) or ""
+        redirect_mappings = added_redirects(redirects_base, redirects_current)
+        # Never retarget/write EN at redirects.yaml ``from`` paths — those are
+        # tombstones. Source-branch leftovers + inbound retarget otherwise
+        # recreate orphan EN pages on the translation branch (#45949 / #51703).
+        impact_paths = retarget_redirect_inbound_links(
             repo_path,
-            pr_result,
-            dry_run=dry_run,
+            redirect_mappings,
             docs_root=cfg.paths.docs_root,
-            changed_paths=direct_changed_paths,
-        )
-        redirects_path = f"{cfg.paths.docs_root}/redirects.yaml"
-        if any(path == redirects_path for path, _kind in changes):
-            redirects_current = (
-                read_text_at_commit(repo_path, ru_ref, redirects_path)
-                if ru_ref is not None
-                else read_ru(redirects_path)
-            ) or ""
-            redirects_base = read_ru_base(redirects_path) or ""
-            redirect_mappings = added_redirects(redirects_base, redirects_current)
-            # Never retarget/write EN at redirects.yaml ``from`` paths — those are
-            # tombstones. Source-branch leftovers + inbound retarget otherwise
-            # recreate orphan EN pages on the translation branch (#45949 / #51703).
-            impact_paths = retarget_redirect_inbound_links(
-                repo_path,
-                redirect_mappings,
-                docs_root=cfg.paths.docs_root,
-                dry_run=dry_run,
-                allowed_paths=frozenset(redirect_impact_scope - redirect_source_en),
-                apply_repair=lambda path, before, after: _apply_authorized_late_repair(
-                    repo_path, path, before, after, result=pr_result, dry_run=dry_run,
-                ),
-            )
-            # Translation branches start from current upstream main. Never
-            # write the historical source-merge copy of this global file:
-            # doing so reverted unrelated redirects in #50901.
-            redirects_worktree = (
-                read_text_at_commit(repo_path, merge_base_with, redirects_path)
-                or redirects_current
-            )
-            mirrored_redirects = mirror_redirects_to_en(redirects_worktree, redirect_mappings)
-            if mirrored_redirects != redirects_worktree:
-                impact_paths.append(redirects_path)
-                if not dry_run:
-                    write_text(repo_path, redirects_path, mirrored_redirects)
-            touched = TouchedPaths(
-                list(dict.fromkeys([*touched.written, *impact_paths])),
-                touched.deleted,
-            )
-
-        late_budget = MarkdownDependencyBudget.from_state(
-            scope_plan.dependency_budget.snapshot()
-        )
-        exact_declarations = _declare_exact_ascii_fragment_targets_after_apply(
-            repo_path,
-            touched.written,
             dry_run=dry_run,
-            merge_base_with=merge_base_with,
-            ru_content_ref=ru_ref,
-            budget=late_budget,
-            docs_root=docs_root,
-            result=pr_result,
-        )
-        _merge_yellow_warnings(pr_result, late_budget.warnings)
-        if exact_declarations:
-            touched = TouchedPaths(
-                list(dict.fromkeys([*touched.written, *exact_declarations])),
-                touched.deleted,
-            )
-
-        # After all EN targets and inbound retargets are on disk, remap any
-        # leftover RU translit / Cyrillic fragments (§6.225 / #45949).
-        late_repair = _repair_en_fragments_after_apply(
-            repo_path,
-            touched.written,
-            dry_run=dry_run,
-            merge_base_with=merge_base_with,
-            ru_content_ref=ru_ref,
-            docs_root=docs_root,
-            result=pr_result,
-        )
-        if late_repair:
-            logger.info(
-                "Late EN fragment repair on %d path(s): %s",
-                len(late_repair),
-                late_repair,
-            )
-            touched = TouchedPaths(
-                list(dict.fromkeys([*touched.written, *late_repair])),
-                touched.deleted,
-            )
-
-        reconciled_paths = _reconcile_final_en_same_fragment_paths_after_apply(
-            repo_path,
-            contents,
-            pr_result,
-            touched.written,
-            dry_run=dry_run,
-            merge_base_with=merge_base_with,
-            ru_content_ref=ru_ref,
-            deleted_paths=touched.deleted,
-        )
-        if reconciled_paths:
-            logger.info(
-                "Final EN same-fragment path reconciliation on %d path(s): %s",
-                len(reconciled_paths),
-                reconciled_paths,
-            )
-            touched = TouchedPaths(
-                list(dict.fromkeys([*touched.written, *reconciled_paths])),
-                touched.deleted,
-            )
-
-        _freeze_soft_keep_artifact_hashes(pr_result, repo_path=repo_path)
-
-        # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
-        # Baseline = upstream tip EN so ambient tip link debt does not block
-        # push when this PR did not introduce it (§6.228 / #40385).
-        # Target resolution = tip + written overlays (§6.229): merge-commit
-        # checkout must not make tip-only siblings look missing.
-        en_written = {
-            p
-            for p in touched.written
-            if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
-        }
-        final_tree_read: Callable[[str], str | None] = _final_tree_reader(
-            repo_path,
-            merge_base_with,
-            set(touched.written) if not dry_run else set(),
-            deleted_paths=set(touched.deleted),
-        )
-        broken_links = apply_en_link_target_checks(
-            pr_result,
-            repo_path=repo_path,
-            en_md_paths=en_written,
-            baseline_read=lambda p: read_text_at_commit(repo_path, merge_base_with, p),
-            docs_read=final_tree_read,
-        )
-        if broken_links:
-            logger.error(
-                "Broken EN link targets after apply — publish candidate as draft/RED "
-                "for PR #%s: %s",
-                pr_number,
-                broken_links,
-            )
-            for path in broken_links:
-                for run in pr_result.pair_results:
-                    if run.plan.target_path.replace("\\", "/") != path:
-                        continue
-                    fr = run.file_result
-                    if fr is None:
-                        continue
-                    for msg in fr.heuristic_blocking:
-                        if msg.startswith("en_link_target:"):
-                            logger.error("%s", msg)
-        _recheck_deferred_outbound_fragments(
-            pr_result,
-            deferred_outbound,
-            read_final_docs=final_tree_read,
-            baseline_read_text=lambda path: read_text_at_commit(
-                repo_path, merge_base_with, path
+            allowed_paths=frozenset(redirect_impact_scope - redirect_source_en),
+            apply_repair=lambda path, before, after: _apply_authorized_late_repair(
+                repo_path, path, before, after, result=pr_result, dry_run=dry_run,
             ),
         )
-        language_paths = {
-            p for p in touched.written
-            if p.startswith(f"{docs_root}/en/") and p.endswith((".md", ".yaml", ".yml"))
-        } | {
-            run.plan.target_path for run in pr_result.pair_results
-            if run.plan.target_lang.casefold() in {"en", "english"}
-            and run.target_text is not None and not run.deleted
-        } | {nav.en_path for nav in pr_result.navigation_results if nav.target_text is not None}
-        pending = {
-            run.plan.target_path: run.target_text for run in pr_result.pair_results
-            if run.target_text is not None and not run.deleted
-        }
-        pending.update({nav.en_path: nav.target_text for nav in pr_result.navigation_results
-                        if nav.target_text is not None})
-        pending_deleted = set(touched.deleted) | {
-            run.plan.target_path for run in pr_result.pair_results if run.deleted
-        }
-        # Freeze B and use explicit pending keys in dry-run. Empty overrides and
-        # tombstones must never fall through to baseline or dirty disk.
-        def read_final_language(path: str) -> str | None:
-            if path in pending_deleted:
-                return None
-            if dry_run and path in pending:
-                return pending[path]
-            return final_tree_read(path)
+        # Translation branches start from current upstream main. Never
+        # write the historical source-merge copy of this global file:
+        # doing so reverted unrelated redirects in #50901.
+        redirects_worktree = (
+            read_text_at_commit(repo_path, merge_base_with, redirects_path)
+            or redirects_current
+        )
+        mirrored_redirects = mirror_redirects_to_en(redirects_worktree, redirect_mappings)
+        if mirrored_redirects != redirects_worktree:
+            impact_paths.append(redirects_path)
+            if not dry_run:
+                write_text(repo_path, redirects_path, mirrored_redirects)
+        touched = TouchedPaths(
+            list(dict.fromkeys([*touched.written, *impact_paths])),
+            touched.deleted,
+        )
 
-        apply_final_en_language_gate(pr_result, en_paths=language_paths, read_text=read_final_language)
-        refresh_publication_impact(pr_result)
-        if _publication_withheld(pr_result):
-            logger.error(
-                "Publication withheld after final-tree validation (%s) — "
-                "skip commit/push for PR #%s",
-                pr_result.publication_impact.value,
-                pr_number,
-            )
-            touched = TouchedPaths([], [])
+    late_budget = MarkdownDependencyBudget.from_state(
+        scope_plan.dependency_budget.snapshot()
+    )
+    exact_declarations = _declare_exact_ascii_fragment_targets_after_apply(
+        repo_path,
+        touched.written,
+        dry_run=dry_run,
+        merge_base_with=merge_base_with,
+        ru_content_ref=ru_ref,
+        budget=late_budget,
+        docs_root=docs_root,
+        result=pr_result,
+    )
+    _merge_yellow_warnings(pr_result, late_budget.warnings)
+    if exact_declarations:
+        touched = TouchedPaths(
+            list(dict.fromkeys([*touched.written, *exact_declarations])),
+            touched.deleted,
+        )
+
+    # After all EN targets and inbound retargets are on disk, remap any
+    # leftover RU translit / Cyrillic fragments (§6.225 / #45949).
+    late_repair = _repair_en_fragments_after_apply(
+        repo_path,
+        touched.written,
+        dry_run=dry_run,
+        merge_base_with=merge_base_with,
+        ru_content_ref=ru_ref,
+        docs_root=docs_root,
+        result=pr_result,
+    )
+    if late_repair:
+        logger.info(
+            "Late EN fragment repair on %d path(s): %s",
+            len(late_repair),
+            late_repair,
+        )
+        touched = TouchedPaths(
+            list(dict.fromkeys([*touched.written, *late_repair])),
+            touched.deleted,
+        )
+
+    reconciled_paths = _reconcile_final_en_same_fragment_paths_after_apply(
+        repo_path,
+        contents,
+        pr_result,
+        touched.written,
+        dry_run=dry_run,
+        merge_base_with=merge_base_with,
+        ru_content_ref=ru_ref,
+        deleted_paths=touched.deleted,
+    )
+    if reconciled_paths:
+        logger.info(
+            "Final EN same-fragment path reconciliation on %d path(s): %s",
+            len(reconciled_paths),
+            reconciled_paths,
+        )
+        touched = TouchedPaths(
+            list(dict.fromkeys([*touched.written, *reconciled_paths])),
+            touched.deleted,
+        )
+
+    _freeze_soft_keep_artifact_hashes(pr_result, repo_path=repo_path)
+
+    # Final EN tree gate: href-only pairs skip per-file heuristics (§6.226).
+    # Baseline = upstream tip EN so ambient tip link debt does not block
+    # push when this PR did not introduce it (§6.228 / #40385).
+    # Target resolution = tip + written overlays (§6.229): merge-commit
+    # checkout must not make tip-only siblings look missing.
+    en_written = {
+        p
+        for p in touched.written
+        if p.endswith(".md") and "/docs/en/" in p.replace("\\", "/")
+    }
+    final_tree_read: Callable[[str], str | None] = _final_tree_reader(
+        repo_path,
+        merge_base_with,
+        set(touched.written) if not dry_run else set(),
+        deleted_paths=set(touched.deleted),
+    )
+    broken_links = apply_en_link_target_checks(
+        pr_result,
+        repo_path=repo_path,
+        en_md_paths=en_written,
+        baseline_read=lambda p: read_text_at_commit(repo_path, merge_base_with, p),
+        docs_read=final_tree_read,
+    )
+    if broken_links:
+        logger.error(
+            "Broken EN link targets after apply — publish candidate as draft/RED "
+            "for PR #%s: %s",
+            pr_number,
+            broken_links,
+        )
+        for path in broken_links:
+            for run in pr_result.pair_results:
+                if run.plan.target_path.replace("\\", "/") != path:
+                    continue
+                fr = run.file_result
+                if fr is None:
+                    continue
+                for msg in fr.heuristic_blocking:
+                    if msg.startswith("en_link_target:"):
+                        logger.error("%s", msg)
+    _recheck_deferred_outbound_fragments(
+        pr_result,
+        deferred_outbound,
+        read_final_docs=final_tree_read,
+        baseline_read_text=lambda path: read_text_at_commit(
+            repo_path, merge_base_with, path
+        ),
+    )
+    language_paths = {
+        p for p in touched.written
+        if p.startswith(f"{docs_root}/en/") and p.endswith((".md", ".yaml", ".yml"))
+    } | {
+        run.plan.target_path for run in pr_result.pair_results
+        if run.plan.target_lang.casefold() in {"en", "english"}
+        and run.target_text is not None and not run.deleted
+    } | {nav.en_path for nav in pr_result.navigation_results if nav.target_text is not None}
+    pending = {
+        run.plan.target_path: run.target_text for run in pr_result.pair_results
+        if run.target_text is not None and not run.deleted
+    }
+    pending.update({nav.en_path: nav.target_text for nav in pr_result.navigation_results
+                    if nav.target_text is not None})
+    pending_deleted = set(touched.deleted) | {
+        run.plan.target_path for run in pr_result.pair_results if run.deleted
+    }
+    # Freeze B and use explicit pending keys in dry-run. Empty overrides and
+    # tombstones must never fall through to baseline or dirty disk.
+    def read_final_language(path: str) -> str | None:
+        if path in pending_deleted:
+            return None
+        if dry_run and path in pending:
+            return pending[path]
+        return final_tree_read(path)
+
+    apply_final_en_language_gate(pr_result, en_paths=language_paths, read_text=read_final_language)
+    _refresh_translation_qa_impact(pr_result)
 
     if not touched and _has_unresolved_instruction_without_artifact(pr_result):
         pr_result.publication_failure = "awaiting_instruction_no_artifact"
@@ -3504,6 +3563,7 @@ def run_doc_translate(
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None
     pushed_candidate_sha: str | None = None
+    final_candidate: FinalCandidate | None = None
     coverage_evidence: CoverageEvidence | None = None
     push_receipt: RefMutationReceipt | None = None
     reused_existing_artifact_pr: _BoundArtifactPR | None = None
@@ -3530,6 +3590,15 @@ def run_doc_translate(
         )
         if committed:
             pushed_candidate_sha = _freeze_candidate_sha(repo_path)
+            final_candidate = bind_final_candidate(
+                repo_path, candidate_sha=pushed_candidate_sha,
+                en_paths=tuple(set(touched.written) | {
+                    run.plan.target_path for run in pr_result.pair_results
+                    if not run.deleted and run.target_text is not None
+                }),
+                deleted_paths=tuple(touched.deleted),
+            )
+            _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
             if active_checkpoint is not None:
                 coverage_evidence = _persist_candidate_coverage_evidence(
                     repo_path=repo_path,
@@ -3617,6 +3686,10 @@ def run_doc_translate(
                 pr_result.publication_failure = "no_publishable_artifact"
                 refresh_publication_impact(pr_result)
                 job.blocked = True
+            else:
+                _refresh_translation_qa_impact(
+                    pr_result, reusable_artifact=reused_existing_artifact_pr,
+                )
     job.committed = committed
     job.pushed = pushed
 
@@ -3626,9 +3699,7 @@ def run_doc_translate(
 
     tr_pr_number: int | None = None
     tr_pr_url: str | None = None
-    # The translate harness has already completed the shared F-056 QA cycle on
-    # the candidate bytes. Reuse that evidence in the source summary instead of
-    # starting a standalone verify after the branch and PR are published.
+    # The read-only candidate review below supplies QA after PR creation.
     verify_result: PRTranslationResult | None = pr_result
     artifact_provenance: TranslationArtifactProvenance | None = None
     awaiting_existing_continue_pr = (
@@ -3707,6 +3778,15 @@ def run_doc_translate(
             if ops_ctx is not None:
                 finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
             raise
+    if (
+        not committed
+        and reused_existing_artifact_pr is None
+        and not awaiting_existing_continue_pr
+        and pr_result.publication_failure is None
+    ):
+        pr_result.publication_failure = "no_publishable_artifact"
+        refresh_publication_impact(pr_result)
+        job.blocked = True
     if push_receipt is not None or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
         provisional_body = build_translation_pr_body(
@@ -3807,12 +3887,30 @@ def run_doc_translate(
                 coverage_run_id=active_checkpoint.run_id if active_checkpoint else None,
                 coverage_digest=coverage_evidence.digest,
             )
+        if final_candidate is None:
+            final_candidate = bind_final_candidate(
+                repo_path, candidate_sha=expected_artifact_sha,
+                en_paths=tuple(run.plan.target_path for run in pr_result.pair_results
+                               if not run.deleted and run.target_text is not None),
+                deleted_paths=tuple(touched.deleted),
+            )
+        review_receipt = review_final_candidate(
+            final_candidate,
+            lambda candidate: _review_translation_candidate(
+                repo_path, candidate, pr_result, client, glossary, cfg,
+            ),
+        )
+        require_reviewed_candidate(final_candidate, review_receipt)
+        pr_result.final_candidate = final_candidate
+        pr_result.candidate_repo_path = repo_path
+        _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
         body = build_translation_pr_body(
             pr_number,
             github_repo,
             publication_result=pr_result,
             provenance=artifact_provenance,
             publication_plan=publication_plan(ctx),
+            link=ReportLinkContext(github_repo=github_repo, ref=expected_artifact_sha),
         )
 
         job.translation_pr_url = tr_pr_url

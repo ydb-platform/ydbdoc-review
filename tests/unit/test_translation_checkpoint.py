@@ -487,6 +487,7 @@ def _run_checkpoint_workflow(
     *,
     gaps: list[str],
     identity_mismatch: bool = False,
+    publication_mocks: tuple[MagicMock, MagicMock, MagicMock] | None = None,
 ):  # type: ignore[no-untyped-def]
     repo, sha = _workflow_repo(tmp_path)
     config = load_config(
@@ -543,10 +544,9 @@ def _run_checkpoint_workflow(
     )
     gh = MagicMock()
     gh.get_branch_sha.return_value = None
+    gh.find_open_pull_by_head.return_value = None
     gh.post_issue_comment.return_value = "comment-url"
-    prepare = MagicMock()
-    commit = MagicMock()
-    push = MagicMock()
+    prepare, commit, push = publication_mocks or (MagicMock(), MagicMock(), MagicMock())
 
     def retained_result(*_args, **kwargs):  # type: ignore[no-untyped-def]
         assert kwargs["checkpoint"] is writer
@@ -617,7 +617,10 @@ def _run_checkpoint_workflow(
     return job, prepare, commit, push
 
 
-def test_withheld_workflow_finishes_checkpoint_before_publication_calls(tmp_path) -> None:
+@pytest.mark.parametrize("has_artifact", [True, False])
+def test_workflow_finishes_checkpoint_before_publication_calls(tmp_path, has_artifact) -> None:
+    from ydbdoc_review.github.git_ops import git_commit_paths
+
     store = InMemoryTranscriptStore()
     writer = CheckpointWriter(
         store,
@@ -625,15 +628,63 @@ def test_withheld_workflow_finishes_checkpoint_before_publication_calls(tmp_path
         CheckpointIdentity(_authority(), "4" * 64),
     )
 
-    job, prepare, commit, push = _run_checkpoint_workflow(
-        tmp_path,
-        writer,
-        _workflow_result(),
-        gaps=["ydb/docs/en/missing.md"],
-    )
+    result = _workflow_result()
+    if not has_artifact:
+        result.pair_results[0].target_text = None
+        result.pair_results[0].error = "translation failed before producing a candidate"
 
+    def assert_retained(*_args, **_kwargs):
+        raw = store.get("run-a", "translation/v1/manifest.json")
+        assert raw is not None
+        manifest = json.loads(raw)
+        # Retention precedes K, so its status still records incomplete QA.
+        assert manifest["status"] == "WITHHOLD_INCOMPLETE"
+        assert "ydb/docs/en/missing.md" in manifest["blockers"]
+
+    def commit_retained(*args, **kwargs):
+        assert_retained()
+        return git_commit_paths(*args, **kwargs)
+
+    class PublicationBoundaryReached(Exception):
+        pass
+
+    def observe_push(repo_path, *_args, **kwargs):
+        assert_retained()
+        assert result.publication_impact == PublicationImpact.PUBLISH_RED
+        assert subprocess.check_output(
+            ["git", "show", f"{kwargs['source_sha']}:ydb/docs/en/a.md"],
+            cwd=repo_path,
+        ) == b"Hello.\n"
+        raise PublicationBoundaryReached("checkpoint-publication-boundary")
+
+    prepare = MagicMock(side_effect=assert_retained)
+    commit = MagicMock(side_effect=commit_retained)
+    push = MagicMock(side_effect=observe_push)
+
+    def run_workflow():
+        return _run_checkpoint_workflow(
+            tmp_path,
+            writer,
+            result,
+            gaps=["ydb/docs/en/missing.md"],
+            publication_mocks=(prepare, commit, push),
+        )
+
+    if has_artifact:
+        # D-001 publishes the real K as RED despite the missing dependent file.
+        # Stop at the remote boundary; this test owns retention ordering only.
+        with pytest.raises(RuntimeError, match="checkpoint-publication-boundary") as exc:
+            run_workflow()
+        assert isinstance(exc.value.__cause__, PublicationBoundaryReached)
+        prepare.assert_called_once()
+        commit.assert_called_once()
+        push.assert_called_once()
+        return
+
+    job, _, _, _ = run_workflow()
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
-    assert store.get("run-a", "translation/v1/manifest.json") is not None
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert_retained()
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()

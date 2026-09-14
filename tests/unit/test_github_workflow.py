@@ -1937,7 +1937,14 @@ def test_run_doc_translate_posts_comments(git_repo: str):
         "base": {"ref": "main", "sha": checkout_sha},
     }
 
-    with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=_fake_pr_result()):
+    prepared = _fake_pr_result()
+    prepared.pair_results[0].source_text = "Привет.\n"
+    from ydbdoc_review.translation.schemas import CriticResponse
+
+    with patch("ydbdoc_review.github.workflow.run_pr_translation", return_value=prepared), patch(
+        "ydbdoc_review.translation.critic.run_critic",
+        return_value=CriticResponse(verdict="ok", issues=[]),
+    ):
         with patch("ydbdoc_review.github.workflow.prepare_translation_branch_on_base"):
             with patch("ydbdoc_review.github.workflow.git_commit_paths", return_value=True):
                 with patch("ydbdoc_review.github.workflow.push_branch") as push:

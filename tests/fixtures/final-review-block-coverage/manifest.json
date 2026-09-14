@@ -1,0 +1,6 @@
+{
+  "candidate_sha": "432f16a5749cc40dc9233545b66d8e98f5288efc",
+  "provenance": "Exact local snapshot paragraphs; commit attribution from /private/tmp/pr53007-post-finalization-semantic-review-analyst.md, not independently reverified with GitHub.",
+  "ru": {"path": "ydb/docs/ru/core/security/authentication.md", "line": 106, "file_sha256": "c0e5234a4ed7143a447b0e81253403a451c3ae27868213345d7bea446d778e33", "paragraph_sha256": "5167eeed69a0b593fff3d3708192ed0806ef32fe1bf5db8df656a7578db4ac5b"},
+  "en": {"path": "ydb/docs/en/core/security/authentication.md", "line": 104, "file_sha256": "af36f83f4e1f09440a8a09263f780414132558a573bf56634075104f47e6bf11", "paragraph_sha256": "eb8d640034c9d8ee23b2050fea0a68912284909edc8b32de276a4f02a8cd63d9"}
+}

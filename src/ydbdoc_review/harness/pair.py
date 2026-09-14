@@ -7,6 +7,7 @@ from dataclasses import is_dataclass, replace
 
 from ydbdoc_review.harness.context import HarnessContext
 from ydbdoc_review.harness.profiles import (
+    PREPARE_EXISTING_PROFILE,
     TRANSLATE_PROFILE,
     TRANSLATE_WITH_QA_PROFILE,
     VERIFY_PROFILE,
@@ -156,6 +157,8 @@ def run_pair_plan(
     plan: PairPlan,
     ctx: HarnessContext,
     cache: dict[str, str],
+    *,
+    prepare_only: bool = False,
 ) -> PairRunResult:
     """Run one pair plan; delegates to ``FileHarness`` for translate/verify."""
     if plan.action == "skip":
@@ -230,6 +233,10 @@ def run_pair_plan(
         )
     else:
         profile = VERIFY_PROFILE
+
+    if prepare_only:
+        profile = TRANSLATE_PROFILE if enable_translate else PREPARE_EXISTING_PROFILE
+        enable_critic = False
 
     # Pass base RU / existing EN for QA comparison only; TranslateStep does not
     # seed or splice from old EN (§5 / §13 / P1b).

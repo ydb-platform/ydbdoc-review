@@ -31,6 +31,7 @@ _TEMPLATE_NAMES = frozenset(
         "translate_glossary",
         "critic",
         "critic_batch",
+        "critic_final_readonly",
         "critic_glossary_batch",
         "verify",
         "verify_batch",
@@ -62,6 +63,19 @@ def render_template(template: str, variables: dict[str, str]) -> str:
     for key, value in variables.items():
         out = out.replace("{" + key + "}", value)
     return out
+
+
+def build_final_readonly_messages(units, glossary: Glossary, *, file_path: str,
+                                 source_lang: str, target_lang: str,
+                                 version: str = DEFAULT_PROMPT_VERSION) -> list:
+    from ydbdoc_review.translation.review_blocks import serialize_review_batch
+
+    instruction = load_template("critic_final_readonly", version=version)
+    return [
+        {"role": "system", "content": instruction + "\n" + glossary.to_prompt_yaml()
+         + f"\nFile: {file_path}; languages: {source_lang} -> {target_lang}"},
+        {"role": "user", "content": serialize_review_batch(units)},
+    ]
 
 
 def segments_to_batch_json(segments: list[Segment]) -> str:

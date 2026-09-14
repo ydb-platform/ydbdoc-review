@@ -1,6 +1,10 @@
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.pipeline.types import PRTranslationResult
-from ydbdoc_review.reporting.builder import _format_reviewer_item, build_source_pr_comment
+from ydbdoc_review.reporting.builder import (
+    ReportMeta,
+    _format_reviewer_item,
+    build_source_pr_comment,
+)
 
 
 def _config():
@@ -31,7 +35,7 @@ def test_F133_file_categories() -> None:
     report = build_source_pr_comment(
         result,
         translation_pr_number=None,
-        meta=type("Meta", (), {"mode": "doc_translate", "report_number": 1, "elapsed_s": 1})(),
+        meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1),
         config=_config(),
     )
 

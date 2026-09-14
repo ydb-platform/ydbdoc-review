@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -915,6 +916,22 @@ def build_commit_message(
     return "\n".join(lines)
 
 
+def _final_report_projection(result, *, link=None, refs=(), verify_result=None):
+    from ydbdoc_review.reporting.candidate import legacy_without_final, project_candidate_report
+    legacy = legacy_without_final(result)
+    label = _qa_status(legacy)[1]
+    independent = "RED" if "RED" in label else "YELLOW" if "YELLOW" in label else "GREEN"
+    if result_has_blocking_findings(legacy):
+        independent = "RED"
+    if verify_result is not None:
+        verify_label = _qa_status(verify_result)[1]
+        if result_has_blocking_findings(verify_result) or "RED" in verify_label:
+            independent = "RED"
+        elif independent == "GREEN" and "YELLOW" in verify_label:
+            independent = "YELLOW"
+    return project_candidate_report(result, link=link, refs=refs, independent_status=independent), legacy
+
+
 def build_translation_pr_body(
     source_pr: int,
     source_repo: str,
@@ -922,7 +939,18 @@ def build_translation_pr_body(
     publication_result: PRTranslationResult | None = None,
     provenance: TranslationArtifactProvenance | None = None,
     publication_plan: PublicationPlan | None = None,
+    link: ReportLinkContext | None = None,
 ) -> str:
+    if publication_result is not None:
+        projection, legacy = _final_report_projection(
+            publication_result, link=link or ReportLinkContext(github_repo=source_repo),
+            refs=(provenance.candidate_sha if provenance else None,),
+        )
+        if projection is not None:
+            body = build_translation_pr_body(source_pr, source_repo, publication_result=legacy,
+                provenance=provenance, publication_plan=publication_plan)
+            body = re.sub(r"^QA K: [^\n]*", f"QA K: {projection.status}", body, flags=re.MULTILINE)
+            return projection.render() + body
     qa_status = _qa_status(publication_result) if publication_result else ("⚪", "не определён")
     red = bool(publication_result and result_has_blocking_findings(publication_result))
     banner = ""
@@ -1156,6 +1184,14 @@ def build_source_pr_comment(
     committed: bool | None = None,
 ) -> str:
     """Short summary comment for the source PR after ``doc_translate``."""
+    projection, legacy = _final_report_projection(result, refs=(meta.checkout_ref,),
+                                                 verify_result=verify_result)
+    if projection is not None:
+        body = build_source_pr_comment(legacy, translation_pr_number=translation_pr_number,
+            meta=meta, config=config, usage=usage, verify_result=verify_result, committed=committed)
+        body = body.replace("в комментарии к translation PR", "в body translation PR")
+        body = re.sub(r"(Статус QA \(K\) \| )[^\n]*", rf"\g<1>{projection.status} |", body)
+        return projection.render(summary=translation_pr_number is not None) + body
 
     def yellow_section() -> str:
         warnings = tuple(dict.fromkeys(result.yellow_warnings))
@@ -1453,7 +1489,7 @@ def build_source_pr_comment(
             body += "\n**QA RED, do not merge. Актуальные замечания:**\n\n"
             body += "".join(f"- `{path}`: {reason}\n" for path, reason in details)
             body += (
-                "\n**Следующее действие:** исправить перечисленные замечания и "
+                "\n**Действие:** исправить перечисленные замечания и "
                 "повторить `doc_verify`.\n"
             )
         soft_keep_blockers = [
@@ -1487,6 +1523,21 @@ def build_full_report(
     link: ReportLinkContext | None = None,
 ) -> str:
     """Reviewer-focused QA report: open problems per file with location and advice."""
+    projection, legacy = _final_report_projection(result, link=link, refs=(meta.checkout_ref,))
+    if projection is not None:
+        legacy_link = link
+        if ((link and link.ref is not None and link.ref != projection.candidate_sha)
+                or (meta.checkout_ref is not None and meta.checkout_ref != projection.candidate_sha)):
+            legacy_link = None
+        body = build_full_report(legacy, meta=meta, config=config, usage=usage,
+                                 glossary=glossary, link=legacy_link)
+        body = re.sub(r"(Статус QA \(K\): )[^\n]*", rf"\g<1>{projection.status}", body)
+        body = body.replace("По всем файлам открытых замечаний нет.",
+                            "Прочие результаты проверок приведены ниже.")
+        for run in result.pair_results:
+            if run.file_result and run.file_result.final_review_plan is not None:
+                body = body.replace(f"- 🟢 `{run.plan.target_path}`\n", "")
+        return projection.render() + body
     del glossary
     if link is not None and meta.checkout_ref:
         link = ReportLinkContext(

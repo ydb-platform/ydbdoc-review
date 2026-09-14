@@ -45,7 +45,8 @@ def test_F052_sequence_failure():
     )
     calls: list[str] = []
 
-    def run_one(_content, plan, _ctx, _cache):
+    def run_one(_content, plan, _ctx, _cache, *, prepare_only=False):
+        assert prepare_only is False
         calls.append(plan.target_path)
         return PairRunResult(plan=plan, error="translation chain exhausted")
 
