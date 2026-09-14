@@ -68,6 +68,33 @@ def test_eliza_internal_builds_url_with_model_in_path_and_oauth_header():
     assert "model" not in (kwargs.get("json") or {})
 
 
+def test_eliza_preserves_length_finish_reason_with_empty_content():
+    client = _client()
+
+    with patch.object(client._http, "post") as post:
+        post.return_value = _resp(
+            200,
+            {
+                "choices": [
+                    {
+                        "message": {"content": ""},
+                        "finish_reason": "length",
+                    }
+                ],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 8000},
+            },
+        )
+        out = client.chat(
+            [{"role": "user", "content": "translate"}],
+            role="translate",
+            model="deepseek-v4-flash",
+        )
+
+    assert out.content == ""
+    assert out.finish_reason == "length"
+    assert post.call_count == 1
+
+
 def test_eliza_internal_retries_on_503():
     cfg = load_config(env={"ELIZA_OAUTH_TOKEN": "t"})
     cfg.llm.retries.max_attempts = 2

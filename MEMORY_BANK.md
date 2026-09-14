@@ -16,7 +16,12 @@
 
 
 **Last updated:** 2026-09-14
-**Current focus:** D-004–D-007 and §23–§24 define four independent implementation
+**Current focus:** R-GL-21 / §6.273 forbids identical translator retries after
+explicit `finish_reason=length`: multi-segment batches split recursively at
+segment boundaries, singleton batches immediately advance to configured fallback.
+The recovery path contains no language heuristics. PR #51079 is the production
+performance fixture with a 15-minute translation objective.
+D-004–D-007 and §23–§24 define four independent implementation
 tasks: freeze the complete candidate before critic, cover every whole semantic
 block, restore up to two automatic repairs between three critic passes, and bind a human-readable report to exact SHA bytes.
 §6.268–§6.272 still record shipped PRs #169–#173: fallback coverage,
@@ -119,6 +124,7 @@ stable cross-references — use them when linking between files.
 
 | When | What |
 |------|------|
+| 2026-09-14 | **R-GL-21 / §6.273**: explicit translator `finish_reason=length` forbids an identical retry; recurse by segment boundaries for multi-segment batches and immediately use fallback for singleton; exact #51079 evidence sets a 15-minute production objective |
 | 2026-09-14 | **§23–§24 / D-004–D-007**: critic проверяет каждый exact candidate целыми блоками; между проверками выполняются максимум два автоматических исправления; итоговый отчёт относится к последнему SHA; четыре независимые TDD-задачи готовы к разработке |
 | 2026-09-14 | **§6.272 / PR #173**: same-fragment path reconciliation requires the same parser-derived AST link slot across four snapshots, a unique owner and final target; ambiguity fails closed; exact PR #51079 E2E is green locally |
 | 2026-09-14 | **§6.271 / PR #172**: ordinary inline Markdown link-label edge padding is repaired only from unique destination/title identity; ambiguous, multiline and non-inline forms remain unchanged |

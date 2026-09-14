@@ -271,7 +271,14 @@ model realignment.
 3. Перед `chunk_segments` сегменты длиннее `segment_max_source_chars` (default 1200) подразделяются `split_segment_for_batching` на внутренние структурные границы (`\n\n` для paragraph/blockquote/list item).
 4. Размер пакета ограничивает оценку JSON-ответа: `estimate_translate_batch_output_chars` = сумма `len(text)` × `batch_output_expansion_ratio` (1.35) + `batch_json_overhead_chars` (512) + 40 × число сегментов; оценка ≤ `batch_max_output_chars` (6000). Дополнительно сумма source chars ≤ `segments_per_batch_chars` (2500).
 5. Dense table cells (`placeholders >= 8`): solo batch; при нарушении бюджета сначала split, затем packing.
-6. При `finish_reason=length` или empty JSON: один deterministic resplit пакета на два non-overlapping подпакета по границе сегментов (не более одного уровня). Irreducible monolith после resplit → `ManualAction` «segment exceeds safe translate output budget» и блокирующая ошибка (не soft-keep).
+6. Явный ответ модели `finish_reason=length` не повторяется с теми же
+   `model + payload`. Пакет из нескольких сегментов рекурсивно делится пополам
+   только по границам сегментов, пока каждый непереведённый лист не получит
+   валидный ответ либо не станет одиночным. Одиночный сегмент немедленно
+   передаётся следующей настроенной fallback-модели. Исчерпание цепочки для
+   одиночного сегмента даёт `ManualAction` «segment exceeds safe translate
+   output budget» и блокирующую ошибку, не soft-keep. Все подпакеты образуют
+   точное, упорядоченное, непересекающееся покрытие исходных сегментов.
 
 ## 6. Связанные документы
 
@@ -299,6 +306,24 @@ fallback и units-mode `translate_required`. Trusted reuse не тратит mod
 дедуплицированной и независимо доступной цепочке fallback-моделей.
 Одинаковые model+payload refusal не повторяются; каждый leaf должен
 получить parseable semantic verdict, иначе RED в существующем PR (D-001).
+
+**R-GL-21 — восстановление перевода после лимита ответа модели:** сигналом
+является явное provider metadata `finish_reason=length`, а не догадка по тексту
+ответа. Такой сигнал запрещает повтор того же `model + payload`. Для batch из
+нескольких сегментов применяется рекурсивное деление по границе сегментов; для
+singleton — немедленный переход к следующей configured fallback-модели. Маршрут
+восстановления не анализирует русский или английский язык, союзы `AND`/`OR`,
+отрицания, пунктуацию или предметную область текста.
+
+Production evidence для PR #51079: в run `34805529876` одиночные translate
+batches `3` (`auth_config.md`, `s0052`, 1213 source chars, 18 placeholders,
+8705 request chars) и `7` (`authentication.md`, `s0090`, 837 source chars,
+8 placeholders, 8287 request chars) завершились `finish_reason=length` после
+8000 completion tokens. Поэтому одного source/output size ceiling недостаточно:
+singleton обязан менять модель, а не повторять идентичный запрос. Цель повторного
+production-прогона — завершить перевод PR #51079 не более чем за 15 минут; при
+превышении запуск останавливается и выдаёт времена и identity незавершённых
+batches вместо продолжения одинаковых retries.
 
 - При технической ошибке ответа разрешена повторная попытка.
 - При недоступности выбранной модели разрешено переключение на другую настроенную модель.
@@ -583,7 +608,17 @@ verdict.
   финализации; `en` и `english` одинаково блокируют русское написание на всех
   Markdown-путях scope #51079. Generic assignment/code, больший code-атом,
   fenced code и HTML comment сохраняются без fuzzy-переписывания.
-- **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
+- **R-GL-4 / R-GL-21:** modified diff page с pre-existing href к missing tip
+  fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на
+  tip EN не ставит owner; new href на diff page к missing tip fragment ставит
+  owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized
+  paragraph split на `\n\n`; нет overlapping batches. Явный
+  `finish_reason=length` не повторяет тот же `model + payload`: multi-segment
+  batch рекурсивно делится по границам сегментов с точным покрытием, singleton
+  сразу переходит к fallback. Исчерпание цепочки даёт `ManualAction`, не
+  soft-keep. Exact #51079 regressions фиксируют singleton batches `s0052` и
+  `s0090`; production retry укладывается в 15 минут либо останавливается с
+  диагностикой незавершённых batches.
 - **R-GL-5 / R-GL-19:** исторический harness PR #168 фиксировал
   clean-prose refusal как `warnings`/🟡; это доказательство сохранено только
   как история и заменено PR #170. Текущая приёмка требует bounded

@@ -319,7 +319,7 @@ def test_r_gl_4_translate_resplit_on_length():
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary"]
     client.chat.side_effect = [
-        SimpleNamespace(content=""),
+        SimpleNamespace(content="", finish_reason="length"),
         SimpleNamespace(content=good_s1),
         SimpleNamespace(content=good_s2),
     ]
@@ -328,6 +328,101 @@ def test_r_gl_4_translate_resplit_on_length():
     )
     assert out == {"s1": "Alpha", "s2": "Beta"}
     assert client.chat.call_count == 3
+
+
+def test_explicit_length_singleton_falls_back_without_primary_retry():
+    seg = _segment("s1", "Привет")
+    good = _json_response([{"id": "s1", "text": "Hello"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [
+        SimpleNamespace(content='{"segments":[', finish_reason="length"),
+        SimpleNamespace(content=good, finish_reason="stop"),
+    ]
+
+    out = translate_batch(
+        client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
+    )
+
+    assert out == {"s1": "Hello"}
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "fallback",
+    ]
+
+
+def test_explicit_length_batch_recursively_splits_without_payload_retry():
+    segments = [_segment(f"s{i}", f"Текст {i}") for i in range(1, 5)]
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def chat(messages, *, model, role):
+        assert role == "translate"
+        user = messages[-1]["content"]
+        payload = user.split("```json\n", 1)[1].split("\n```", 1)[0]
+        requested = json.loads(payload)["segments"]
+        ids = tuple(item["id"] for item in requested)
+        calls.append((model, ids))
+        if len(ids) > 1:
+            return SimpleNamespace(
+                content='{"segments":[', finish_reason="length"
+            )
+        if ids == ("s2",) and model == "primary":
+            return SimpleNamespace(
+                content='{"segments":[', finish_reason="length"
+            )
+        return SimpleNamespace(
+            content=_json_response([{"id": ids[0], "text": f"Text {ids[0][1:]}"}]),
+            finish_reason="stop",
+        )
+
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = chat
+
+    out = translate_batch(
+        client,
+        Batch(index=0, segments=segments),
+        load_glossary(),
+        file_path="docs/ru/x.md",
+    )
+
+    assert out == {f"s{i}": f"Text {i}" for i in range(1, 5)}
+    assert calls == [
+        ("primary", ("s1", "s2", "s3", "s4")),
+        ("primary", ("s1", "s2")),
+        ("primary", ("s1",)),
+        ("primary", ("s2",)),
+        ("fallback", ("s2",)),
+        ("primary", ("s3", "s4")),
+        ("primary", ("s3",)),
+        ("primary", ("s4",)),
+    ]
+    assert len(calls) == len(set(calls))
+
+
+def test_invalid_json_with_stop_finish_reason_keeps_primary_retry_contract():
+    seg = _segment("s1", "Привет")
+    good = _json_response([{"id": "s1", "text": "Hello"}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [
+        SimpleNamespace(content="not-json", finish_reason="stop"),
+        SimpleNamespace(content="not-json", finish_reason="stop"),
+        SimpleNamespace(content="not-json", finish_reason="stop"),
+        SimpleNamespace(content=good, finish_reason="stop"),
+    ]
+
+    out = translate_batch(
+        client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
+    )
+
+    assert out == {"s1": "Hello"}
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "primary",
+        "primary",
+        "fallback",
+    ]
 
 
 def test_r_gl_4_irreducible_segment_raises_manual_action():
@@ -390,17 +485,15 @@ def _auth_config_s0052_batch() -> tuple[Segment, Batch]:
     return seg, batches[0]
 
 
-def test_auth_config_s0052_empty_primary_retries_then_uses_fallback():
-    """Catches removal of the length/empty parse-error fallback branch."""
+def test_auth_config_s0052_explicit_length_immediately_uses_fallback():
+    """Catches retrying a known truncated auth-config response."""
     seg, batch = _auth_config_s0052_batch()
     good = _json_response([{"id": "s0052", "text": _ascii_candidate(seg.text)}])
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary", "fallback"]
     client.chat.side_effect = [
-        SimpleNamespace(content=""),
-        SimpleNamespace(content=""),
-        SimpleNamespace(content=""),
-        SimpleNamespace(content=good),
+        SimpleNamespace(content='{"segments":[', finish_reason="length"),
+        SimpleNamespace(content=good, finish_reason="stop"),
     ]
     actions: list[ManualAction] = []
 
@@ -415,8 +508,6 @@ def test_auth_config_s0052_empty_primary_retries_then_uses_fallback():
     assert out == {"s0052": _ascii_candidate(seg.text)}
     assert actions == []
     assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
-        "primary",
-        "primary",
         "primary",
         "fallback",
     ]
@@ -439,12 +530,15 @@ def test_translate_segments_auth_config_preserves_all_ids_after_s0052_fallback()
         calls.append((model, ids))
         if ids == ("s0052",) and model == "primary":
             primary_s0052_attempts += 1
-            if primary_s0052_attempts <= 3:
-                return SimpleNamespace(content="")
+            if primary_s0052_attempts == 1:
+                return SimpleNamespace(
+                    content='{"segments":[', finish_reason="length"
+                )
         return SimpleNamespace(
             content=_json_response(
                 [{"id": item["id"], "text": expected[item["id"]]} for item in requested]
-            )
+            ),
+            finish_reason="stop",
         )
 
     client = MagicMock(spec=YandexLLMClient)
@@ -469,7 +563,44 @@ def test_translate_segments_auth_config_preserves_all_ids_after_s0052_fallback()
     assert actions == []
     assert [model for model, ids in calls if ids == ("s0052",)] == [
         "primary",
-        "primary",
+        "fallback",
+    ]
+
+
+def test_authentication_s0090_explicit_length_immediately_uses_fallback():
+    authentication_path = "ydb/docs/ru/core/security/authentication.md"
+    snapshots_path = (
+        Path(__file__).parent.parent
+        / "fixtures"
+        / "pr51079-exact"
+        / "snapshots.json"
+    )
+    snapshots = json.loads(snapshots_path.read_bytes())
+    source = snapshots["H"][authentication_path]
+    seg = next(
+        seg
+        for seg in extract_segments(parse_markdown(source))
+        if seg.id == "s0090"
+    )
+    assert len(seg.text) == 837
+    assert len(seg.placeholders) == 8
+    good = _json_response([{"id": seg.id, "text": _ascii_candidate(seg.text)}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [
+        SimpleNamespace(content='{"segments":[', finish_reason="length"),
+        SimpleNamespace(content=good, finish_reason="stop"),
+    ]
+
+    out = translate_batch(
+        client,
+        Batch(index=0, segments=[seg]),
+        load_glossary(),
+        file_path=authentication_path,
+    )
+
+    assert out == {seg.id: _ascii_candidate(seg.text)}
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
         "primary",
         "fallback",
     ]
@@ -502,12 +633,15 @@ def test_empty_length_failure_advances_through_three_model_chain():
     ]
 
 
-def test_empty_length_failure_exhaustion_is_blocking_after_fallback_chain():
+@pytest.mark.parametrize("finish_reason", [None, "stop"])
+def test_empty_non_length_failure_uses_bounded_retries_then_blocks(finish_reason):
     """Catches false success or unbounded retries after every model is empty."""
     seg = _segment("s1", "Привет")
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary", "fallback"]
-    client.chat.return_value = SimpleNamespace(content="")
+    client.chat.return_value = SimpleNamespace(
+        content="", finish_reason=finish_reason
+    )
     actions: list[ManualAction] = []
 
     with pytest.raises(TranslationValidationError, match="safe translate output budget"):

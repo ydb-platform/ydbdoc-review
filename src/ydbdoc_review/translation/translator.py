@@ -51,9 +51,12 @@ def _is_length_resplit_failure(
     exc: LLMParseError,
     *,
     content: str,
+    finish_reason: str | None = None,
 ) -> bool:
     """True when empty/truncated JSON likely came from output length limits."""
     msg = str(exc)
+    if finish_reason == "length":
+        return True
     if "Segment id mismatch" in msg:
         return False
     if "JSON schema validation failed" in msg:
@@ -233,9 +236,11 @@ def _translate_batch_with_model(
     last_attempt: dict[str, str] | None = None,
     allow_resplit: bool = True,
     last_raw_content: list[str] | None = None,
+    fallback_reasons: list[str] | None = None,
 ) -> dict[str, str]:
     last_exc: LLMParseError | TranslationValidationError | None = None
     last_content = ""
+    last_finish_reason: str | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             messages = build_translate_messages(
@@ -248,6 +253,7 @@ def _translate_batch_with_model(
             )
             result = client.chat(messages, model=model, role="translate")
             last_content = result.content or ""
+            last_finish_reason = getattr(result, "finish_reason", None)
             if last_raw_content is not None:
                 last_raw_content[:] = [last_content]
             expected = {seg.id for seg in batch.segments}
@@ -264,11 +270,20 @@ def _translate_batch_with_model(
             return translations
         except (LLMParseError, TranslationValidationError) as exc:
             last_exc = exc
+            length_failure = (
+                isinstance(exc, LLMParseError)
+                and _is_length_resplit_failure(
+                    exc,
+                    content=last_content,
+                    finish_reason=last_finish_reason,
+                )
+            )
+            explicit_length = last_finish_reason == "length"
             if (
                 allow_resplit
-                and isinstance(exc, LLMParseError)
+                and length_failure
                 and len(batch.segments) > 1
-                and _is_length_resplit_failure(exc, content=last_content)
+                and (explicit_length or attempt == max_attempts)
             ):
                 mid = max(1, len(batch.segments) // 2)
                 split_batches = [
@@ -284,7 +299,7 @@ def _translate_batch_with_model(
                 merged: dict[str, str] = {}
                 for half in split_batches:
                     merged.update(
-                        _translate_batch_with_model(
+                        _translate_batch_once(
                             client,
                             half,
                             glossary,
@@ -292,14 +307,19 @@ def _translate_batch_with_model(
                             source_lang=source_lang,
                             target_lang=target_lang,
                             prompt_version=prompt_version,
-                            model=model,
-                            max_attempts=max_attempts,
                             last_attempt=last_attempt,
-                            allow_resplit=False,
+                            allow_resplit=True,
                             last_raw_content=last_raw_content,
+                            fallback_reasons=fallback_reasons,
                         )
                     )
                 return merged
+            if explicit_length:
+                if (
+                    "finish_reason=length" not in str(exc)
+                ):
+                    raise LLMParseError(f"{exc}; finish_reason=length") from exc
+                raise
             if attempt < max_attempts:
                 logger.warning(
                     "Translate batch %s attempt %s/%s failed: %s",
@@ -347,6 +367,7 @@ def _translate_batch_once(
                 last_attempt=last_attempt,
                 allow_resplit=allow_resplit,
                 last_raw_content=raw_holder,
+                fallback_reasons=fallback_reasons,
             )
         except LLMRetryExhaustedError as exc:
             last_infra_exc = exc
