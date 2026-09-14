@@ -719,15 +719,15 @@ def test_critic_refusal_in_one_of_mixed_files_withholds_all_publication(
 
     job, gh, prepare, commit, push, _ = _run_top_level(publication_repo, result)
 
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    assert job.translation_pr_number is None
-    assert job.committed is False
-    assert job.pushed is False
-    assert job_requires_nonzero_exit(job) is True
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert job.translation_pr_number == 99
+    assert job.committed is True
+    assert job.pushed is True
+    assert job_requires_nonzero_exit(job) is False
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
 
 
 @pytest.mark.parametrize("path", ["ydb/docs/en/a.md", "ydb/docs/en/core/toc_p.yaml"])
@@ -744,15 +744,15 @@ def test_gate_uses_disk_overlay_after_late_repair_not_stale_green_result(
     job, gh, prepare, commit, push, _ = _run_top_level(
         publication_repo, result, reconcile_side_effect=late_repair,
     )
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
     blockers = [b for b in job.pr_result.final_tree_blockers if b.code == "en_language"]
     assert blockers[0].path == path
     assert blockers[0].artifact_sha256 == hashlib.sha256(injected.encode()).hexdigest()
     assert result.pair_results[0].target_text == "Translated.\n"
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
 
 
 def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
@@ -860,13 +860,13 @@ def test_yfm_include_anchor_finding_stays_early_unsafe_veto(
 
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    assert file_result.heuristic_blocking == early
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "failed"
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert all(message in file_result.heuristic_blocking for message in early)
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
+    assert finish.call_args.kwargs["status"] == "published_red"
 
 
 def test_masked_include_outbound_does_not_collide_with_visible_same_basename_target(
@@ -914,13 +914,17 @@ def test_masked_include_outbound_does_not_collide_with_visible_same_basename_tar
 
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    assert file_result.heuristic_blocking == early
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "failed"
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert early[1] in file_result.heuristic_blocking
+    assert any(
+        b.code == "en_link_target" and "part.md" in b.message
+        for b in job.pr_result.final_tree_blockers
+    )
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
+    assert finish.call_args.kwargs["status"] == "published_red"
 
 
 def test_recheck_deferred_outbound_missing_twice_keeps_duplicate_occurrences(
@@ -1011,7 +1015,7 @@ def test_early_outbound_snapshot_restores_before_unrelated_veto(
     publication_repo: str,
     veto: str,
 ):
-    """Deferral cannot erase original evidence when another gate already withholds."""
+    """A committed RED candidate retains independent and final link evidence."""
     candidate = "See [target](target.md#missing-anchor).\n"
     result = _pair_result(target_text=candidate)
     file_result = result.pair_results[0].file_result
@@ -1033,25 +1037,32 @@ def test_early_outbound_snapshot_restores_before_unrelated_veto(
             ManualAction("s0001", "paragraph 1", "manual completion required")
         )
         expected_impact = PublicationImpact.WITHHOLD_INCOMPLETE
-    before_blocking = list(file_result.heuristic_blocking)
-    before_bytes = Path(publication_repo, "ydb/docs/en/a.md").read_bytes()
+    assert evaluate_publication_impact(result) == expected_impact
 
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
-    assert job.pr_result.publication_impact == expected_impact
-    assert file_result.heuristic_blocking == before_blocking
-    assert Path(publication_repo, "ydb/docs/en/a.md").read_bytes() == before_bytes
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "failed"
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert any(
+        b.path == "ydb/docs/en/a.md" and b.code == "en_link_target"
+        and "target.md" in b.message
+        for b in job.pr_result.final_tree_blockers
+    )
+    if veto == "unknown_unsafe":
+        assert "unknown_policy_veto: retain" in file_result.heuristic_blocking
+    else:
+        assert file_result.manual_actions[0].message == "manual completion required"
+    assert Path(publication_repo, "ydb/docs/en/a.md").read_bytes() == candidate.encode()
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
+    assert finish.call_args.kwargs["status"] == "published_red"
 
 
 def test_final_unsafe_after_deferred_outbound_blocks_all_publication(
     publication_repo: str,
 ):
-    """A structural finding introduced at final reconciliation still vetoes publish."""
+    """A structural finding introduced at final reconciliation stays RED."""
     candidate = "See [target](target.md#missing-anchor).\n"
     result = _pair_result(target_text=candidate)
     file_result = result.pair_results[0].file_result
@@ -1074,15 +1085,15 @@ def test_final_unsafe_after_deferred_outbound_blocks_all_publication(
         reconcile_side_effect=add_final_structural_veto,
     )
 
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
     assert "heading_parity: final reconciliation removed required heading" in (
         file_result.heuristic_blocking
     )
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "failed"
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
+    assert finish.call_args.kwargs["status"] == "published_red"
 
 
 def test_skipped_pair_keeps_outbound_fragment_as_unsafe_veto(publication_repo: str):
@@ -1105,7 +1116,10 @@ def test_skipped_pair_keeps_outbound_fragment_as_unsafe_veto(publication_repo: s
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
     assert job.pr_result.completeness_gaps == []
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
+    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
     assert run.file_result.heuristic_blocking == early
     prepare.assert_not_called()
     commit.assert_not_called()
@@ -1496,6 +1510,9 @@ def test_soft_keep_without_target_withholds_incomplete(publication_repo: str):
     )
 
     assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
     assert job.pr_result.final_tree_blockers == []
     prepare.assert_not_called()
     commit.assert_not_called()
@@ -1516,11 +1533,15 @@ def test_soft_keep_with_substituted_nonempty_target_withholds_incomplete(
     )
 
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
     assert "materialized existing EN" in (job.pr_result.pair_results[0].error or "")
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
+    assert _finish.call_args.kwargs["status"] == "failed"
 
 
 def test_soft_keep_does_not_override_completeness_gap(publication_repo: str):
@@ -1543,6 +1564,7 @@ def test_soft_keep_does_not_override_completeness_gap(publication_repo: str):
     job, gh, prepare, commit, push, _finish = _run_top_level(
         publication_repo,
         result,
+        commit_succeeds=False,
         source_changes=[
             ("ydb/docs/ru/a.md", "modified"),
             ("ydb/docs/ru/missing-page.md", "added"),
@@ -1551,10 +1573,14 @@ def test_soft_keep_does_not_override_completeness_gap(publication_repo: str):
 
     assert "ydb/docs/en/missing-page.md" in job.pr_result.completeness_gaps
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
-    prepare.assert_not_called()
-    commit.assert_not_called()
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
+    prepare.assert_called_once()
+    commit.assert_called_once()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
+    assert _finish.call_args.kwargs["status"] == "failed"
 
 
 def test_soft_keep_does_not_override_raw_pair_error(publication_repo: str):
@@ -1583,13 +1609,19 @@ def test_soft_keep_does_not_override_raw_pair_error(publication_repo: str):
     job, gh, prepare, commit, push, _finish = _run_top_level(
         publication_repo,
         result,
+        commit_succeeds=False,
     )
 
     assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_INCOMPLETE
-    prepare.assert_not_called()
-    commit.assert_not_called()
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
+    assert job.pr_result.pair_results[1].error == "raw translation failure"
+    prepare.assert_called_once()
+    commit.assert_called_once()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
+    assert _finish.call_args.kwargs["status"] == "failed"
 
 
 def test_soft_keep_for_new_missing_target_withholds_incomplete(publication_repo: str):
@@ -1640,11 +1672,15 @@ def test_soft_keep_for_new_missing_target_withholds_incomplete(publication_repo:
     )
 
     assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
     assert "materialized existing EN" in (job.pr_result.pair_results[0].error or "")
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
+    assert _finish.call_args.kwargs["status"] == "failed"
 
 
 def test_soft_keep_with_structural_drift_withholds_unsafe(publication_repo: str):
@@ -1664,11 +1700,16 @@ def test_soft_keep_with_structural_drift_withholds_unsafe(publication_repo: str)
     job, gh, prepare, commit, push, finish = _run_top_level(
         publication_repo,
         result,
+        commit_succeeds=False,
     )
 
-    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
-    prepare.assert_not_called()
-    commit.assert_not_called()
+    assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
+    assert classify_publication_blockers(job.pr_result).unsafe is True
+    prepare.assert_called_once()
+    commit.assert_called_once()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
     assert finish.call_args.kwargs["status"] == "failed"
@@ -1724,8 +1765,8 @@ def test_soft_keep_post_reconciliation_hash_uses_exact_published_bytes(
     )
     assert blocker.artifact_sha256 == hashlib.sha256(repaired.encode()).hexdigest()
     assert blocker.artifact_sha256 != hashlib.sha256(original.encode()).hexdigest()
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    gh.create_pull.assert_not_called()
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    gh.create_pull.assert_called_once()
     assert any(
         m.startswith("report_checkout_mismatch:")
         for m in job.pr_result.pair_results[0].file_result.heuristic_blocking
@@ -1776,7 +1817,7 @@ def test_soft_keep_and_safe_en_link_target_publish_one_open_red(
 def test_final_link_blocker_does_not_exempt_different_link_message(
     publication_repo: str,
 ):
-    """Removing full-message matching must withhold this href mismatch."""
+    """RED publication must retain this independent href mismatch."""
     result = _pair_result(
         target_text="Translated.\n",
         blocking=["href_parity: missing auth_config.md#security-auth"],
@@ -1791,12 +1832,15 @@ def test_final_link_blocker_does_not_exempt_different_link_message(
 
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "failed"
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert "href_parity: missing auth_config.md#security-auth" in (
+        result.pair_results[0].file_result.heuristic_blocking
+    )
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
+    assert finish.call_args.kwargs["status"] == "published_red"
 
 
 @pytest.mark.parametrize(
@@ -1810,7 +1854,7 @@ def test_final_link_blocker_does_not_exempt_unrelated_link_heuristic(
     publication_repo: str,
     blocking: str,
 ):
-    """Removing global link-prefix bypass must withhold unrelated pair findings."""
+    """RED publication must retain unrelated pair findings."""
     result = _pair_result(
         target_text="Translated.\n",
         blocking=[blocking],
@@ -1825,12 +1869,13 @@ def test_final_link_blocker_does_not_exempt_unrelated_link_heuristic(
 
     job, gh, prepare, commit, push, finish = _run_top_level(publication_repo, result)
 
-    assert job.pr_result.publication_impact == PublicationImpact.WITHHOLD_UNSAFE
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    gh.create_pull.assert_not_called()
-    assert finish.call_args.kwargs["status"] == "failed"
+    assert job.pr_result.publication_impact == PublicationImpact.PUBLISH_RED
+    assert blocking in result.pair_results[0].file_result.heuristic_blocking
+    prepare.assert_called_once()
+    commit.assert_called_once()
+    push.assert_called_once()
+    gh.create_pull.assert_called_once()
+    assert finish.call_args.kwargs["status"] == "published_red"
 
 
 def test_final_link_blocker_requires_an_identical_full_message_on_same_path():
@@ -1941,11 +1986,18 @@ def test_mutation_or_has_materialized_soft_keep_with_unsafe_blocker_withholds(
     job, gh, prepare, commit, push, finish = _run_top_level(
         publication_repo,
         result,
+        commit_succeeds=False,
     )
 
-    assert job.pr_result.publication_impact == "WITHHOLD_UNSAFE"
-    prepare.assert_not_called()
-    commit.assert_not_called()
+    assert job.pr_result.publication_impact == "WITHHOLD_INCOMPLETE"
+    assert job.pr_result.publication_failure == "no_publishable_artifact"
+    assert job.blocked is True
+    assert job.translation_pr_number is None
+    assert "include_target: missing required include" in (
+        job.pr_result.pair_results[0].file_result.heuristic_blocking
+    )
+    prepare.assert_called_once()
+    commit.assert_called_once()
     push.assert_not_called()
     gh.create_pull.assert_not_called()
     assert finish.call_args.kwargs["status"] == "failed"

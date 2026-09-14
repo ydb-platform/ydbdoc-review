@@ -2289,10 +2289,19 @@ def _publication_withheld(result: PRTranslationResult) -> bool:
     }
 
 
-def _refresh_translation_qa_impact(result: PRTranslationResult) -> PublicationImpact:
-    """Keep all QA blockers while publishing available doc_translate content."""
+def _refresh_translation_qa_impact(
+    result: PRTranslationResult,
+    *,
+    candidate: FinalCandidate | None = None,
+    reusable_artifact: _BoundArtifactPR | None = None,
+) -> PublicationImpact:
+    """Publish QA findings as RED only when a real translation artifact exists."""
     refresh_publication_impact(result)
-    if _publication_withheld(result):
+    if (
+        (candidate is not None or reusable_artifact is not None)
+        and result.publication_failure is None
+        and _publication_withheld(result)
+    ):
         # D-001 separates an existing translation PR from readiness to merge.
         # The underlying incomplete/unsafe findings and verdicts remain intact.
         result.publication_impact = PublicationImpact.PUBLISH_RED
@@ -3589,6 +3598,7 @@ def run_doc_translate(
                 }),
                 deleted_paths=tuple(touched.deleted),
             )
+            _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
             if active_checkpoint is not None:
                 coverage_evidence = _persist_candidate_coverage_evidence(
                     repo_path=repo_path,
@@ -3676,6 +3686,10 @@ def run_doc_translate(
                 pr_result.publication_failure = "no_publishable_artifact"
                 refresh_publication_impact(pr_result)
                 job.blocked = True
+            else:
+                _refresh_translation_qa_impact(
+                    pr_result, reusable_artifact=reused_existing_artifact_pr,
+                )
     job.committed = committed
     job.pushed = pushed
 
@@ -3764,6 +3778,14 @@ def run_doc_translate(
             if ops_ctx is not None:
                 finish_ops_job(ops_ctx, status="failed", cost_rub=0.0)
             raise
+    if (
+        not committed
+        and reused_existing_artifact_pr is None
+        and not awaiting_existing_continue_pr
+    ):
+        pr_result.publication_failure = "no_publishable_artifact"
+        refresh_publication_impact(pr_result)
+        job.blocked = True
     if push_receipt is not None or reused_existing_artifact_pr is not None:
         title = f"Auto-translate docs from PR #{pr_number}"
         provisional_body = build_translation_pr_body(
@@ -3880,7 +3902,7 @@ def run_doc_translate(
         require_reviewed_candidate(final_candidate, review_receipt)
         pr_result.final_candidate = final_candidate
         pr_result.candidate_repo_path = repo_path
-        _refresh_translation_qa_impact(pr_result)
+        _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
         body = build_translation_pr_body(
             pr_number,
             github_repo,
