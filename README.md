@@ -3,8 +3,9 @@
 GitHub Action и CLI для автоматического перевода документации YDB (**RU ↔ EN**) с QA-критиком.
 
 Продакшен-ссылка **`v0.1.0`** для CI в `ydb` указывает на текущий
-задеплоенный commit. Пайплайн: parse → segment → translate →
-embedded QA critic → render → final-tree gates → publication.
+задеплоенный commit. Согласованный пайплайн: parse → segment → translate →
+assemble/repair → freeze exact candidate SHA → read-only semantic critic → report.
+Этот новый порядок документирован, но ещё не реализован в текущем коде.
 
 Дополнительно: **`v0.2.0`** — вводит переключаемый LLM-провайдер
 `YDBDOC_MODEL_PROVIDER` (`yandex_cloud` по умолчанию, `eliza` для внутренней Eliza)
@@ -34,14 +35,18 @@ embedded QA critic → render → final-tree gates → publication.
 1. Находит изменённые пары `ydb/docs/ru/…` ↔ `ydb/docs/en/…` (включая locale `_includes/*.md`).
 2. Переводит `.md` через Yandex AI Studio; мержит изменённые `toc*.yaml` / redirect YAML.
 3. Дочищает остатки кириллицы в EN prose, inline `` `…` `` и комментарии ``//`` / ``#`` / ``--`` в fenced code.
-4. До prepare/push запускает embedded QA, эквивалентную `doc_verify`,
-   и final-tree publication gates.
-5. Только безопасный publishable result подготавливает commit, пушит
-   `ydbdoc-review/pr-<N>` в **upstream** и открывает **translation PR**.
+4. Собирает окончательные EN-файлы, завершает final-tree gates и фиксирует exact
+   candidate SHA в `ydbdoc-review/pr-<N>`.
+5. Открывает **translation PR**, затем read-only critic сравнивает авторитетный
+   RU с exact EN-кандидатом целыми смысловыми блоками. Он не меняет перевод.
+6. Публикует GREEN/YELLOW/RED отчёт с файлом, строкой, цитатой, понятной
+   проблемой и ожидаемым исправлением.
 
 ### `doc_verify` (inline + лейбл на translation PR)
 
-Critic + эвристики + nav validation + вердикт; на translation PR — правки критика вторым коммитом в той же ветке (§6.75); на author/fork PR — fixup PR (§6.64).
+Critic + эвристики + nav validation + вердикт. Для нового `doc_translate`
+semantic critic является read-only: замечание показывается техпису и не
+применяется автоматически. Standalone `doc_verify` сохраняет отдельный контракт.
 
 - **Авто:** inline в том же job, что `doc_translate` (§6.73). После завершения
   `doc_translate` не надо перевешивать `doc_verify` только ради QA: дождитесь
@@ -205,6 +210,7 @@ pytest tests/integration/test_llm_smoke.py -m llm   # локально, с кл�
 | [ARCHITECTURE.md](ARCHITECTURE.md) | архитектура v2, package map |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | разработчики |
 | [MEMORY_BANK.md](MEMORY_BANK.md) | полный design doc (index) |
+| [REQUIREMENTS_RU.md](REQUIREMENTS_RU.md) | канонические функциональные требования |
 
 ## Лицензия
 
