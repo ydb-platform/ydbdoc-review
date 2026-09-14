@@ -83,3 +83,11 @@ VERIFY_PROFILE = HarnessProfile(
     name="verify",
     steps=(ParseStep(), LoadTargetStep(), *_VERIFY_QA_TAIL),
 )
+
+# Existing targets in a doc_translate scope still finish mechanical preparation
+# before the PR-level immutable review. Standalone VERIFY_PROFILE is unchanged.
+PREPARE_EXISTING_PROFILE = HarnessProfile(
+    name="verify",
+    steps=(ParseStep(), LoadTargetStep(), FinalizeEnStep(), HeuristicsStep(),
+           FinalLanguageStep(), VerdictStep(), ReportArtifactsStep()),
+)

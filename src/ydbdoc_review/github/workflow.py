@@ -138,6 +138,13 @@ from ydbdoc_review.pipeline.completeness import (
     completeness_gaps,
     verified_translation_pr_scope_gaps,
 )
+from ydbdoc_review.pipeline.final_candidate import (
+    FinalCandidate,
+    bind_final_candidate,
+    read_candidate_bytes,
+    require_reviewed_candidate,
+    review_final_candidate,
+)
 from ydbdoc_review.pipeline.navigation_merge import (
     add_verify_navigation_recommendations,
     extra_toc_hrefs_from_md_targets,
@@ -2224,6 +2231,56 @@ def _has_unresolved_instruction_without_artifact(result: PRTranslationResult) ->
     )
 
 
+def _review_translation_candidate(
+    repo_path: str,
+    candidate: FinalCandidate,
+    result: PRTranslationResult,
+    client: YandexLLMClient,
+    glossary: Glossary,
+    config: Config,
+) -> None:
+    """Attach existing critic findings from frozen EN without applying fixes.
+
+    This adapter deliberately reuses the current alignment and critic contract.
+    Semantic block extraction and result normalization belong to their own layer.
+    """
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    from ydbdoc_review.pipeline.qa import align_translations_from_target
+    from ydbdoc_review.segmentation.extractor import extract_segments
+    from ydbdoc_review.translation.critic import run_critic
+    from ydbdoc_review.translation.errors import TranslationError
+
+    for run in result.pair_results:
+        if run.deleted or run.skipped or run.plan.target_path not in candidate.en_paths:
+            continue
+        fr = run.file_result
+        if fr is None:
+            continue
+        try:
+            raw = read_candidate_bytes(repo_path, candidate, run.plan.target_path)
+            if raw is None or run.source_text is None:
+                raise ValueError("final_candidate_review_missing_text")
+            target_text = raw.decode("utf-8")
+            segments = extract_segments(parse_markdown(run.source_text))
+            translations = align_translations_from_target(segments, target_text)
+            response = run_critic(
+                client, segments=segments, translations=translations, glossary=glossary,
+                file_path=run.plan.target_path, source_lang=run.plan.source_lang,
+                target_lang=run.plan.target_lang, prompt_version=config.prompts.version,
+                max_chars=config.translation.segments_per_batch_chars, source_text=run.source_text,
+                translated_text=target_text,
+            )
+            fr.critic_initial = response
+            fr.critic_unresolved = response
+            if response.verdict == "blocked":
+                fr.verdict = "blocked"
+            elif response.verdict == "warnings" and fr.verdict == "ok":
+                fr.verdict = "warnings"
+        except (LLMError, TranslationError, ValueError) as exc:
+            fr.verdict = "blocked"
+            fr.heuristic_blocking.append(f"final_candidate_review_failed: {exc}")
+
+
 def _publication_withheld(result: PRTranslationResult) -> bool:
     return result.publication_impact in {
         PublicationImpact.WITHHOLD_INCOMPLETE,
@@ -3153,6 +3210,7 @@ def run_doc_translate(
                     docs_repo_path=repo_path,
                     checkpoint=active_checkpoint,
                     resume_parent_run_id=resume_parent_run_id,
+                    prepare_only=True,
                 )
         else:
             if (
@@ -3504,6 +3562,7 @@ def run_doc_translate(
     preexisting_translation_pr: tuple[str, int] | None = None
     prepush_opened_pr: tuple[str, int, bool] | None = None
     pushed_candidate_sha: str | None = None
+    final_candidate: FinalCandidate | None = None
     coverage_evidence: CoverageEvidence | None = None
     push_receipt: RefMutationReceipt | None = None
     reused_existing_artifact_pr: _BoundArtifactPR | None = None
@@ -3530,6 +3589,14 @@ def run_doc_translate(
         )
         if committed:
             pushed_candidate_sha = _freeze_candidate_sha(repo_path)
+            final_candidate = bind_final_candidate(
+                repo_path, candidate_sha=pushed_candidate_sha,
+                en_paths=tuple(set(touched.written) | {
+                    run.plan.target_path for run in pr_result.pair_results
+                    if not run.deleted and run.target_text is not None
+                }),
+                deleted_paths=tuple(touched.deleted),
+            )
             if active_checkpoint is not None:
                 coverage_evidence = _persist_candidate_coverage_evidence(
                     repo_path=repo_path,
@@ -3626,9 +3693,7 @@ def run_doc_translate(
 
     tr_pr_number: int | None = None
     tr_pr_url: str | None = None
-    # The translate harness has already completed the shared F-056 QA cycle on
-    # the candidate bytes. Reuse that evidence in the source summary instead of
-    # starting a standalone verify after the branch and PR are published.
+    # The read-only candidate review below supplies QA after PR creation.
     verify_result: PRTranslationResult | None = pr_result
     artifact_provenance: TranslationArtifactProvenance | None = None
     awaiting_existing_continue_pr = (
@@ -3807,6 +3872,21 @@ def run_doc_translate(
                 coverage_run_id=active_checkpoint.run_id if active_checkpoint else None,
                 coverage_digest=coverage_evidence.digest,
             )
+        if final_candidate is None:
+            final_candidate = bind_final_candidate(
+                repo_path, candidate_sha=expected_artifact_sha,
+                en_paths=tuple(run.plan.target_path for run in pr_result.pair_results
+                               if not run.deleted and run.target_text is not None),
+                deleted_paths=tuple(touched.deleted),
+            )
+        review_receipt = review_final_candidate(
+            final_candidate,
+            lambda candidate: _review_translation_candidate(
+                repo_path, candidate, pr_result, client, glossary, cfg,
+            ),
+        )
+        require_reviewed_candidate(final_candidate, review_receipt)
+        refresh_publication_impact(pr_result)
         body = build_translation_pr_body(
             pr_number,
             github_repo,

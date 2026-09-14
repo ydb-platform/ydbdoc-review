@@ -166,7 +166,9 @@ class ExecutePairPlansStep:
             )
             started = time.monotonic()
             with checkpoint_scope(ctx.checkpoint, ctx.resume_parent_run_id):
-                result = run_pair_plan(content, plan, file_ctx, state.cache)
+                result = run_pair_plan(
+                    content, plan, file_ctx, state.cache, prepare_only=ctx.prepare_only,
+                )
             elapsed = time.monotonic() - started
             status = "error" if result.error else ("skip" if result.skipped else "ok")
             soft_keep = bool(
