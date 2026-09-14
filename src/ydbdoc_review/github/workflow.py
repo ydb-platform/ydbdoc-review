@@ -2239,16 +2239,10 @@ def _review_translation_candidate(
     glossary: Glossary,
     config: Config,
 ) -> None:
-    """Attach existing critic findings from frozen EN without applying fixes.
-
-    This adapter deliberately reuses the current alignment and critic contract.
-    Semantic block extraction and result normalization belong to their own layer.
-    """
-    from ydbdoc_review.parsing.markdown_parser import parse_markdown
-    from ydbdoc_review.pipeline.qa import align_translations_from_target
-    from ydbdoc_review.segmentation.extractor import extract_segments
-    from ydbdoc_review.translation.critic import run_critic
+    """Attach one semantic result and trusted whole-block evidence from frozen K."""
+    from ydbdoc_review.translation.critic import run_readonly_semantic_critic
     from ydbdoc_review.translation.errors import TranslationError
+    from ydbdoc_review.translation.review_blocks import AuthoritativeDocument, prepare_review_document
 
     for run in result.pair_results:
         if run.deleted or run.skipped or run.plan.target_path not in candidate.en_paths:
@@ -2260,16 +2254,21 @@ def _review_translation_candidate(
             raw = read_candidate_bytes(repo_path, candidate, run.plan.target_path)
             if raw is None or run.source_text is None:
                 raise ValueError("final_candidate_review_missing_text")
-            target_text = raw.decode("utf-8")
-            segments = extract_segments(parse_markdown(run.source_text))
-            translations = align_translations_from_target(segments, target_text)
-            response = run_critic(
-                client, segments=segments, translations=translations, glossary=glossary,
+            plan = prepare_review_document(candidate, AuthoritativeDocument(
+                run.plan.source_path, hashlib.sha256(run.source_text.encode()).hexdigest(),
+                run.source_text.encode()), run.plan.target_path, raw)
+            response = run_readonly_semantic_critic(
+                client, units=plan, glossary=glossary,
                 file_path=run.plan.target_path, source_lang=run.plan.source_lang,
                 target_lang=run.plan.target_lang, prompt_version=config.prompts.version,
-                max_chars=config.translation.segments_per_batch_chars, source_text=run.source_text,
-                translated_text=target_text,
+                max_chars=config.translation.segments_per_batch_chars,
             )
+            for unit in plan.units:
+                blocks = [b for b in plan.en.blocks if b.id in unit.en_block_ids]
+                fr.segment_locations[unit.id] = unit.en_path
+                fr.segment_lines[unit.id] = (min(b.line_start for b in blocks), max(b.line_end for b in blocks))
+                fr.segment_excerpts[unit.id] = unit.en_text
+                fr.segment_source_excerpts[unit.id] = unit.ru_text
             fr.critic_initial = response
             fr.critic_unresolved = response
             if response.verdict == "blocked":

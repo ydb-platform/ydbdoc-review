@@ -96,7 +96,8 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         sha = push.call_args.kwargs["source_sha"]
         target = kwargs["file_path"].replace("/ru/", "/en/")
         blob = subprocess.check_output(["git", "-C", git_repo, "cat-file", "blob", f"{sha}:{target}"])
-        assert kwargs["translated_text"].encode() == blob
+        assert kwargs["units"].en.text.encode() == blob
+        assert kwargs["units"].candidate.commit_sha == sha
         reviewed.append((sha, target, blob))
         events.append("critic:" + target)
         if scenario == "drift" and len(reviewed) == 1:
@@ -131,7 +132,7 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         stub("apply_orphan_toc_page_checks", side_effect=orphan_check)
         stack.enter_context(patch("ydbdoc_review.harness.steps.translate_segments", side_effect=translate))
         stack.enter_context(patch("ydbdoc_review.harness.steps.run_critic_pass", side_effect=critic))
-        stack.enter_context(patch("ydbdoc_review.translation.critic.run_critic", side_effect=critic))
+        stack.enter_context(patch("ydbdoc_review.translation.critic.run_readonly_semantic_critic", side_effect=critic))
         for target in ("ydbdoc_review.harness.steps.FinalizeEnStep.run",
                        "ydbdoc_review.harness.steps._render_translated_from_source",
                        "ydbdoc_review.github.workflow.write_text",
