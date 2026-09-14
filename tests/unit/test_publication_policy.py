@@ -1120,7 +1120,12 @@ def test_skipped_pair_keeps_outbound_fragment_as_unsafe_veto(publication_repo: s
     assert job.pr_result.publication_failure == "no_publishable_artifact"
     assert job.blocked is True
     assert job.translation_pr_number is None
-    assert run.file_result.heuristic_blocking == early
+    # The skipped candidate is not written over the committed "Hello." text.
+    assert run.file_result.heuristic_blocking == [
+        *early,
+        "report_checkout_mismatch: final QA text differs from authoritative "
+        "candidate `ydb/docs/en/a.md`",
+    ]
     prepare.assert_not_called()
     commit.assert_not_called()
     push.assert_not_called()
