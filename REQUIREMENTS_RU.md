@@ -30,8 +30,14 @@
 Плохой вердикт не отменяет PR. Прежние ограничения `WITHHOLD_UNSAFE` и
 `WITHHOLD_INCOMPLETE` не являются разрешением скрывать результат из-за QA.
 Создание PR и готовность перевода к merge — разные факты; отчёт показывает оба.
-Draft или обычный PR, а также поведение при невозможности получить перевод
-или выполнить GitHub-операцию этими решениями отдельно не согласованы.
+Тип PR определён в D-008. Поведение при невозможности получить перевод
+или выполнить GitHub-операцию этими решениями отдельно не согласовано.
+
+### D-008. Тип переводного PR
+
+Владельцу продукта подходит и обычный PR, и draft; выбираем простой вариант —
+обычный PR (`draft=false`). Вердикт QA сам по себе не переключает PR в draft.
+Замечания и готовность к merge отражаются в отчёте; тип PR не означает GREEN.
 
 ### D-004. Финальный кандидат
 
@@ -423,8 +429,7 @@ evidence, несовпавший slot или неразрешимый target о�
   critic. Exact candidate `K` остаётся неизменным; critic публикует итоговый
   вердикт и советы, но не сохраняет исправления в ветке. RED означает
   незавершённую проверку или независимый blocker, а не отсутствие PR. Создание
-  PR не доказывает готовность к merge. Выбор draft/обычного состояния отдельно
-  не согласован.
+  PR не доказывает готовность к merge. Используется обычный PR без переключения типа по QA (D-008).
 - **R-GL-14** — `doc_verify` может автоматически восстановить потерянную Markdown-обёртку ссылки только по immutable frozen-B evidence. H0 и H/R должны содержать byte-identical source paragraph; B должен содержать ровно одну ссылку с английским label, а K должен содержать этот label ровно один раз как plain complete-word text в соответствующем неизменённом source-owned paragraph. В K вставляется только обёртка `[label](B-href)` без изменения label, href, fragment и остальных байтов. B target обязан безопасно оставаться внутри настроенного `docs_root/en/core` как при raw component walk, так и после canonical resolve; leave-and-return traversal, cross-locale/encoded traversal, ambiguous occurrence, code/comment/existing-link/image/include/title context, missing final target или fragment блокируют proposal. Граница слова учитывает alphanumeric, `_` и Unicode combining categories Mn/Mc/Me. При единственном proposal обычный result writer первой verify-фазы не запускается; repair проходит существующий lease, создаёт ровно один K→K2 commit/push и требует fresh recursive verify K2. K2 no-proposal apply обязан быть пустым no-op без writer, touched paths и второго push. Typed `validation_issues` и `link_contract_issues` всегда видны в отчёте и блокируют merge до успешного repair/verify.
 - **R-GL-15** — после собственного подтверждённого inline push K→K2 recursive `doc_verify` обязан ограниченно дождаться видимости K2 в свежем GitHub REST PR context. Разрешено не более шести REST-чтений и ожидания 1, 2, 4, 8 и 15 секунд, суммарно не более 30 intentional seconds. Только точный предыдущий owned K считается transient и допускает retry. K2 принимается лишь при неизменных destination ref и local checkout, равных K2 до и после REST-read; полный доказанный K2 context передаётся во внутреннюю рекурсию без нового непроверенного чтения. Любой третий SHA, ref/repository/state drift, lease/checkout drift или исчерпание stale K завершается fail-closed. Основной инвариант `remote E == PR head == checkout C` не ослабляется. Подмена или исчезновение authority body/evidence сохраняет контракт `ValueError`; структурный drift публикации сохраняет `RuntimeError`.
 - **R-GL-16:** orphan gate должен признавать Markdown-фрагмент достижимым по транзитивной цепочке структурных YFM include от обычной TOC-reachable страницы. Доказательство использует только frozen B с pending output при translate либо проверяемый K с pending output при verify; exact pending key, включая пустой текст, перекрывает baseline. Missing/deleted/errored output не восстанавливается из HEAD, RU или worktree. Допустимы только существующие targets той же локали без выхода за её границу на любом шаге raw path traversal; циклы ограничиваются visited set. Include определяется только токеном `yfm_include` существующего Markdown tokenizer: обычные ссылки, code, comments и front matter доказательством не являются; fallback к line scan при ошибке запрещён. QA verdict не отменяет существование материализованных candidate bytes. Освобождение от orphan не снимает другие blockers, не изменяет href stripping и не создаёт blanket exemption для `_assets`.
@@ -486,7 +491,7 @@ verdict.
 - На него устанавливается `ok-to-test`.
 - Готовность означает зелёный `build-docs` и зелёный отчёт `doc_verify` на одном и том же SHA переводной ветки.
 - Workflow не ждёт бесконечно: при отсутствии зелёного `build-docs` в пределах обычного CI-ожидания job оставляет жёлтое или красное состояние с указанием проверить checks, при этом факт создания PR и итог качества сообщаются раздельно (D-001). Отсутствие зелёного `build-docs` из-за очереди CI само по себе не откатывает уже созданный PR.
-- Workflow не имеет права завершаться с `success`, если блокирующая ошибка привела к пропуску commit, push или создания pull request. `success` после создания draft/RED означает только успешную публикацию artifact для запуска downstream CI и не означает merge readiness.
+- Workflow не имеет права завершаться с `success`, если блокирующая ошибка привела к пропуску commit, push или создания pull request. `success` после создания PR с RED означает только успешную публикацию artifact для запуска downstream CI и не означает merge readiness.
 
 ## 11.1 Навигация и redirects
 
