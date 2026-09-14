@@ -353,17 +353,20 @@ def test_explicit_length_singleton_falls_back_without_primary_retry():
 
 def test_explicit_length_batch_recursively_splits_without_payload_retry():
     segments = [_segment(f"s{i}", f"Текст {i}") for i in range(1, 5)]
-    requested_ids: list[tuple[str, ...]] = []
+    calls: list[tuple[str, tuple[str, ...]]] = []
 
     def chat(messages, *, model, role):
-        assert model == "primary"
         assert role == "translate"
         user = messages[-1]["content"]
         payload = user.split("```json\n", 1)[1].split("\n```", 1)[0]
         requested = json.loads(payload)["segments"]
         ids = tuple(item["id"] for item in requested)
-        requested_ids.append(ids)
+        calls.append((model, ids))
         if len(ids) > 1:
+            return SimpleNamespace(
+                content='{"segments":[', finish_reason="length"
+            )
+        if ids == ("s2",) and model == "primary":
             return SimpleNamespace(
                 content='{"segments":[', finish_reason="length"
             )
@@ -373,7 +376,7 @@ def test_explicit_length_batch_recursively_splits_without_payload_retry():
         )
 
     client = MagicMock(spec=YandexLLMClient)
-    client.model_chain_for_role.return_value = ["primary"]
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
     client.chat.side_effect = chat
 
     out = translate_batch(
@@ -384,16 +387,17 @@ def test_explicit_length_batch_recursively_splits_without_payload_retry():
     )
 
     assert out == {f"s{i}": f"Text {i}" for i in range(1, 5)}
-    assert requested_ids == [
-        ("s1", "s2", "s3", "s4"),
-        ("s1", "s2"),
-        ("s1",),
-        ("s2",),
-        ("s3", "s4"),
-        ("s3",),
-        ("s4",),
+    assert calls == [
+        ("primary", ("s1", "s2", "s3", "s4")),
+        ("primary", ("s1", "s2")),
+        ("primary", ("s1",)),
+        ("primary", ("s2",)),
+        ("fallback", ("s2",)),
+        ("primary", ("s3", "s4")),
+        ("primary", ("s3",)),
+        ("primary", ("s4",)),
     ]
-    assert len(requested_ids) == len(set(requested_ids))
+    assert len(calls) == len(set(calls))
 
 
 def test_invalid_json_with_stop_finish_reason_keeps_primary_retry_contract():
@@ -481,15 +485,15 @@ def _auth_config_s0052_batch() -> tuple[Segment, Batch]:
     return seg, batches[0]
 
 
-def test_auth_config_s0052_empty_primary_immediately_uses_fallback():
-    """Catches removal of the length/empty parse-error fallback branch."""
+def test_auth_config_s0052_explicit_length_immediately_uses_fallback():
+    """Catches retrying a known truncated auth-config response."""
     seg, batch = _auth_config_s0052_batch()
     good = _json_response([{"id": "s0052", "text": _ascii_candidate(seg.text)}])
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary", "fallback"]
     client.chat.side_effect = [
-        SimpleNamespace(content=""),
-        SimpleNamespace(content=good),
+        SimpleNamespace(content='{"segments":[', finish_reason="length"),
+        SimpleNamespace(content=good, finish_reason="stop"),
     ]
     actions: list[ManualAction] = []
 
@@ -527,11 +531,14 @@ def test_translate_segments_auth_config_preserves_all_ids_after_s0052_fallback()
         if ids == ("s0052",) and model == "primary":
             primary_s0052_attempts += 1
             if primary_s0052_attempts == 1:
-                return SimpleNamespace(content="")
+                return SimpleNamespace(
+                    content='{"segments":[', finish_reason="length"
+                )
         return SimpleNamespace(
             content=_json_response(
                 [{"id": item["id"], "text": expected[item["id"]]} for item in requested]
-            )
+            ),
+            finish_reason="stop",
         )
 
     client = MagicMock(spec=YandexLLMClient)
@@ -560,12 +567,40 @@ def test_translate_segments_auth_config_preserves_all_ids_after_s0052_fallback()
     ]
 
 
+def test_authentication_s0090_explicit_length_immediately_uses_fallback():
+    seg = next(seg for seg in _auth_config_segments() if seg.id == "s0090")
+    assert len(seg.text) == 837
+    assert len(seg.placeholders) == 8
+    good = _json_response([{"id": seg.id, "text": _ascii_candidate(seg.text)}])
+    client = MagicMock(spec=YandexLLMClient)
+    client.model_chain_for_role.return_value = ["primary", "fallback"]
+    client.chat.side_effect = [
+        SimpleNamespace(content='{"segments":[', finish_reason="length"),
+        SimpleNamespace(content=good, finish_reason="stop"),
+    ]
+
+    out = translate_batch(
+        client,
+        Batch(index=0, segments=[seg]),
+        load_glossary(),
+        file_path="ydb/docs/ru/core/reference/configuration/auth_config.md",
+    )
+
+    assert out == {seg.id: _ascii_candidate(seg.text)}
+    assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "fallback",
+    ]
+
+
 def test_empty_length_failure_advances_through_three_model_chain():
     """Catches advancing only one fallback, or retrying a fallback three times."""
     seg = _segment("s1", "Привет")
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary", "fallback1", "fallback2"]
     client.chat.side_effect = [
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
         SimpleNamespace(content=""),
         SimpleNamespace(content=""),
         SimpleNamespace(content=_json_response([{"id": "s1", "text": "Hello"}])),
@@ -578,17 +613,22 @@ def test_empty_length_failure_advances_through_three_model_chain():
     assert out == {"s1": "Hello"}
     assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
         "primary",
+        "primary",
+        "primary",
         "fallback1",
         "fallback2",
     ]
 
 
-def test_empty_length_failure_exhaustion_is_blocking_after_fallback_chain():
+@pytest.mark.parametrize("finish_reason", [None, "stop"])
+def test_empty_non_length_failure_uses_bounded_retries_then_blocks(finish_reason):
     """Catches false success or unbounded retries after every model is empty."""
     seg = _segment("s1", "Привет")
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary", "fallback"]
-    client.chat.return_value = SimpleNamespace(content="")
+    client.chat.return_value = SimpleNamespace(
+        content="", finish_reason=finish_reason
+    )
     actions: list[ManualAction] = []
 
     with pytest.raises(TranslationValidationError, match="safe translate output budget"):
@@ -601,6 +641,8 @@ def test_empty_length_failure_exhaustion_is_blocking_after_fallback_chain():
         )
 
     assert [call.kwargs["model"] for call in client.chat.call_args_list] == [
+        "primary",
+        "primary",
         "primary",
         "fallback",
     ]
@@ -624,7 +666,7 @@ def test_empty_length_failure_without_fallback_keeps_irreducible_monolith_blocke
             manual_actions=actions,
         )
 
-    assert client.chat.call_count == 1
+    assert client.chat.call_count == 3
     assert [action.segment_id for action in actions] == ["s1"]
 
 
@@ -663,6 +705,8 @@ def test_empty_length_fallback_rejects_unsafe_translation(source, unsafe, error)
     client.model_chain_for_role.return_value = ["primary", "fallback"]
     client.chat.side_effect = [
         SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
+        SimpleNamespace(content=""),
         SimpleNamespace(content=unsafe_response),
         SimpleNamespace(content=unsafe_response),
         SimpleNamespace(content=unsafe_response),
@@ -675,7 +719,9 @@ def test_empty_length_fallback_rejects_unsafe_translation(source, unsafe, error)
             client, Batch(index=0, segments=[seg]), load_glossary(), file_path="docs/ru/x.md"
         )
 
-    assert [call.kwargs["model"] for call in client.chat.call_args_list][:2] == [
+    assert [call.kwargs["model"] for call in client.chat.call_args_list][:4] == [
+        "primary",
+        "primary",
         "primary",
         "fallback",
     ]

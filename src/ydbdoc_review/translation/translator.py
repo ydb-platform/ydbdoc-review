@@ -236,6 +236,7 @@ def _translate_batch_with_model(
     last_attempt: dict[str, str] | None = None,
     allow_resplit: bool = True,
     last_raw_content: list[str] | None = None,
+    fallback_reasons: list[str] | None = None,
 ) -> dict[str, str]:
     last_exc: LLMParseError | TranslationValidationError | None = None
     last_content = ""
@@ -277,10 +278,12 @@ def _translate_batch_with_model(
                     finish_reason=last_finish_reason,
                 )
             )
+            explicit_length = last_finish_reason == "length"
             if (
                 allow_resplit
                 and length_failure
                 and len(batch.segments) > 1
+                and (explicit_length or attempt == max_attempts)
             ):
                 mid = max(1, len(batch.segments) // 2)
                 split_batches = [
@@ -296,7 +299,7 @@ def _translate_batch_with_model(
                 merged: dict[str, str] = {}
                 for half in split_batches:
                     merged.update(
-                        _translate_batch_with_model(
+                        _translate_batch_once(
                             client,
                             half,
                             glossary,
@@ -304,18 +307,16 @@ def _translate_batch_with_model(
                             source_lang=source_lang,
                             target_lang=target_lang,
                             prompt_version=prompt_version,
-                            model=model,
-                            max_attempts=max_attempts,
                             last_attempt=last_attempt,
                             allow_resplit=True,
                             last_raw_content=last_raw_content,
+                            fallback_reasons=fallback_reasons,
                         )
                     )
                 return merged
-            if length_failure:
+            if explicit_length:
                 if (
-                    last_finish_reason == "length"
-                    and "finish_reason=length" not in str(exc)
+                    "finish_reason=length" not in str(exc)
                 ):
                     raise LLMParseError(f"{exc}; finish_reason=length") from exc
                 raise
@@ -366,6 +367,7 @@ def _translate_batch_once(
                 last_attempt=last_attempt,
                 allow_resplit=allow_resplit,
                 last_raw_content=raw_holder,
+                fallback_reasons=fallback_reasons,
             )
         except LLMRetryExhaustedError as exc:
             last_infra_exc = exc
