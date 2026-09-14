@@ -6365,6 +6365,33 @@ their patches remained identical. `git patch-id --stable` proves every pair:
 
 These are test results stated in the PR bodies, not a GitHub check-rollup claim.
 
+### §6.273 Explicit translate length exhaustion advances without an identical retry (PR #51079, 2026-09-14)
+
+**Problem:** Production run `34805529876` showed that an output-length failure is
+not reliably predicted by source size. Translate batch `3` for
+`reference/configuration/auth_config.md` was already a singleton (`s0052`, 1213
+source characters, 18 placeholders, 8705 request characters), and batch `7` for
+`security/authentication.md` was also a singleton (`s0090`, 837 source characters,
+8 placeholders, 8287 request characters). DeepSeek returned no usable content with
+explicit `finish_reason=length` after consuming all 8000 completion tokens. Repeating
+the same model and payload wastes minutes without adding information.
+
+**Decision:** Preserve provider `finish_reason=length` as an explicit translation
+recovery signal. Never repeat the same `model + payload` after that signal.
+Recursively bisect a multi-segment batch only at segment boundaries, preserving an
+ordered, non-overlapping, complete partition. A singleton advances immediately to
+the next configured fallback model. If no model remains, emit the existing blocking
+manual action instead of soft-keeping source or stale target text. The routing uses
+only provider metadata, batch cardinality and the configured model chain. It adds no
+deterministic language, conjunction, negation, punctuation or domain heuristic.
+
+**Acceptance:** Regression tests freeze both exact #51079 singleton shapes, prove
+one primary length call followed by one fallback call, prove recursive batch
+partition coverage without duplicate or missing segment IDs, and prove exhaustion
+remains blocking. The production translation objective for #51079 is 15 minutes.
+If it is exceeded, stop and diagnose timed batch identities instead of continuing
+identical retries. Full-suite execution remains the final aggregate check.
+
 A proposed deterministic English AND/OR/conjunction guard was rejected and is not
 runtime behavior. The preferred future semantic safety check is a reviewer-model pass
 over the finalized whole sentence or block, but that check is analyzed only and has
