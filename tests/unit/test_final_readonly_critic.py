@@ -126,3 +126,39 @@ def test_glossary_overhead_does_not_consume_unit_budget():
         glossary=load_glossary(), file_path=EN_PATH, max_chars=1500)
     assert response.verdict == "ok"
     assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("split", [False, True], ids=["primary-batches", "refusal-split-children"])
+def test_completed_warning_survives_sibling_execution_failure(split):
+    plan = plan_for("# Один {#one}\n\n# Два {#two}\n", "# One {#one}\n\n# Two {#two}\n")
+    def answer(messages):
+        units = json.loads(messages[-1]["content"])["units"]
+        if len(units) == 2:
+            assert split
+            return "I cannot discuss this"
+        if units[0]["id"] == plan.units[0].id:
+            return json.dumps({"verdict": "warnings", "issues": [{
+                "segment_id": units[0]["id"], "severity": "warning", "category": "meaning",
+                "comment": "First heading has a meaning difference", "suggested_text": "Advice only"}]})
+        raise LLMRequestError("second unit unavailable")
+    client = Reviewer(answer)
+    response = run(plan, client, max_chars=12000 if split else 1000)
+    assert response.verdict == "blocked" and response._review_incomplete
+    assert [(i.segment_id, i.category) for i in response.issues] == [
+        (plan.units[0].id, "translation_quality"), (None, "critic_execution_failed")]
+    assert response.issues[0].suggested_text == "Advice only"
+    diagnostic = response.issues[1].comment
+    assert EN_PATH in diagnostic and plan.units[1].id in diagnostic
+    assert ("split 2/2" if split else "batch 2/2") in diagnostic
+    assert len(client.calls) == (3 if split else 2)
+
+
+@pytest.mark.parametrize("answer", ["", "not json", f"not json File: {EN_PATH};"])
+def test_invalid_and_empty_diagnostics_identify_trusted_file_batch_and_unit(answer):
+    plan = plan_for()
+    response = run(plan, Reviewer(answer))
+    assert response.verdict == "blocked"
+    comment = response.issues[0].comment
+    assert EN_PATH in comment
+    assert "batch 1/1" in comment
+    assert plan.units[0].id in comment

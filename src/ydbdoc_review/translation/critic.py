@@ -503,6 +503,23 @@ def _run_critic_batches(
     batch_count = len(batches)
     model_chain = client.model_chain_for_role("critic")
 
+    def fetch_response(messages: list, **kwargs) -> _CriticFetchResult:
+        try:
+            fetched = _fetch_critic_response(client, messages, **kwargs)
+        except LLMError as exc:
+            # Legacy critic/verify retain their existing exception contract.
+            if message_builder is None:
+                raise
+            fetched = _CriticFetchResult(response=_fallback_critic_response(reason=str(exc)))
+        if message_builder is not None:
+            context = (f" File: {file_path}; {kwargs['pass_label']}; units: "
+                       + ", ".join(kwargs["segment_ids"]) + ".")
+            for issue in fetched.response.issues:
+                if issue.category == "critic_execution_failed":
+                    issue.comment += context
+                    fetched.response._review_incomplete = True
+        return fetched
+
     def review_batch(batch: Batch, *, label: str, depth: int) -> CriticResponse:
         if message_builder is not None:
             messages = message_builder(batch)
@@ -536,8 +553,7 @@ def _run_critic_batches(
                 target_atom_maps=target_atom_maps,
             )
         segment_ids = tuple(segment.id for segment in batch.segments)
-        fetched = _fetch_critic_response(
-            client,
+        fetched = fetch_response(
             messages,
             pass_label=label,
             max_tokens=max_tokens,
@@ -588,8 +604,7 @@ def _run_critic_batches(
                     label,
                     ", ".join(alternate_chain),
                 )
-                return _fetch_critic_response(
-                    client,
+                return fetch_response(
                     messages,
                     pass_label=f"{label} alternate",
                     max_tokens=max_tokens,
