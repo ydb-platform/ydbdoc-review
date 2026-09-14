@@ -39,6 +39,9 @@ from ydbdoc_review.validation.href_parity import (
     retarget_source_owned_redirect_hrefs,
 )
 from ydbdoc_review.validation.link_contract import LinkContractResult
+from ydbdoc_review.validation.link_label_padding import (
+    repair_markdown_link_label_padding,
+)
 from ydbdoc_review.validation.link_locale import (
     localize_links_in_document,
     localize_links_in_text,
@@ -285,7 +288,7 @@ def finalize_en_target_result(
                 target_lang=target_lang,
                 out_stripped=stripped,
             )
-        except Exception as exc:  # noqa: BLE001 — never abort translate on strip
+        except Exception as exc:  # Never abort translate on strip.
             logger.warning(
                 "strip_unreachable_links failed for %s: %s",
                 file_path or "(unknown)",
@@ -303,6 +306,7 @@ def finalize_en_target_result(
                     f"strip_unreachable_links: removed {len(stripped)} internal "
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
+    text = repair_markdown_link_label_padding(protected, text)
     return LinkContractResult(text, incoming_issues + link_result.issues)
 
 
