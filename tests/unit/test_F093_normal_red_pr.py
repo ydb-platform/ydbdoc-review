@@ -48,7 +48,7 @@ def test_F093_red_summary() -> None:
     assert "Кириллица в EN-тексте" in summary
     assert "Таблица не переведена автоматически" in summary
     assert "missing target page" in summary
-    assert "Следующее действие" in summary
+    assert "**Действие:**" in summary
     gh = SimpleNamespace(convert_pull_to_draft=Mock())
     workflow._convert_translation_pr_to_draft_if_allowed(
         gh,
