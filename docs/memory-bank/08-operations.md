@@ -1,7 +1,7 @@
 # Memory Bank — Operations
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -57,18 +57,25 @@ fallback hook when registry pulls fail.
 - Stale fallback is acceptable for emergency use; run publish after major releases
   or if builds keep failing on runners
 
-**Typical bugfix loop (no GHCR):**
+**Typical production deployment (no GHCR):**
 
 ```bash
-# ydbdoc-review repo — move tag when ready to ship to ydb CI
+# after review and the full non-LLM suite, publish one exact commit to main and tag
 git tag -f v0.1.0 HEAD && git push -f origin v0.1.0
 # ydb: delete ydbdoc-review/pr-{N} branch, re-add doc_translate on source PR
 ```
 
-As of 2026-07-14, **`v0.1.0` → `203956a`** — §22 planner + step-3 scope fix,
-harness import, Eliza hardening, glossary MD037 postprocess, report UX (§6.96),
-text-fence JSON (§6.97). WIP (not yet tagged): §6.98–§6.100 (429 fallback, TLS split, shutdown).
-First rollout incident and re-run playbook: **09-navigation-scope** §22.8, §22.10–§22.11.
+The deployment checkpoint is `main == v0.1.0 == reviewed commit`. Publication
+acceptance is separate: embedded QA (`doc_verify` equivalent) and the documentation
+build must both be green on the same translation PR SHA. Do not add `doc_verify`
+merely because `doc_translate` has finished its translation phase; wait for its
+embedded critic. Re-run verify only after manual candidate changes or for an explicit
+verify-only retry.
+
+Historical rollout details for the 2026-07-14 tag position and the first re-run
+playbook remain in **09-navigation-scope** §22.8 and §22.10–§22.11. They are not
+the current tag state. At this documentation checkpoint `v0.1.0` points to
+`66e8533ed3fb97cd7dbd1e512200746d387074fa` (PR #173).
 
 ydb workflow checks out the action at `@v0.1.0` (or `@v0.2.0` for schedulers);
 the runner builds a fresh image from that tag's `Dockerfile`.

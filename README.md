@@ -2,8 +2,9 @@
 
 GitHub Action и CLI для автоматического перевода документации YDB (**RU ↔ EN**) с QA-критиком.
 
-Релиз: **`v0.1.0`** (backwards-compatible тег для CI в `ydb`) — AST-пайплайн:
-parse → segment → translate (`doc_translate`) → critic (`doc_verify`) → render.
+Продакшен-ссылка **`v0.1.0`** для CI в `ydb` указывает на текущий
+задеплоенный commit. Пайплайн: parse → segment → translate →
+embedded QA critic → render → final-tree gates → publication.
 
 Дополнительно: **`v0.2.0`** — вводит переключаемый LLM-провайдер
 `YDBDOC_MODEL_PROVIDER` (`yandex_cloud` по умолчанию, `eliza` для внутренней Eliza)
@@ -33,14 +34,25 @@ parse → segment → translate (`doc_translate`) → critic (`doc_verify`) → 
 1. Находит изменённые пары `ydb/docs/ru/…` ↔ `ydb/docs/en/…` (включая locale `_includes/*.md`).
 2. Переводит `.md` через Yandex AI Studio; мержит изменённые `toc*.yaml` / redirect YAML.
 3. Дочищает остатки кириллицы в EN prose, inline `` `…` `` и комментарии ``//`` / ``#`` / ``--`` в fenced code.
-4. Пушит ветку `ydbdoc-review/pr-<N>` в **upstream**, открывает **translation PR**.
+4. До prepare/push запускает embedded QA, эквивалентную `doc_verify`,
+   и final-tree publication gates.
+5. Только безопасный publishable result подготавливает commit, пушит
+   `ydbdoc-review/pr-<N>` в **upstream** и открывает **translation PR**.
 
 ### `doc_verify` (inline + лейбл на translation PR)
 
 Critic + эвристики + nav validation + вердикт; на translation PR — правки критика вторым коммитом в той же ветке (§6.75); на author/fork PR — fixup PR (§6.64).
 
-- **Авто:** inline в том же job, что `doc_translate` (§6.73) — без правок workflow в ydb.
-- **Повтор:** лейбл **`doc_verify`** → `ydbdoc-verify.yml`.
+- **Авто:** inline в том же job, что `doc_translate` (§6.73). После завершения
+  `doc_translate` не надо перевешивать `doc_verify` только ради QA: дождитесь
+  embedded critic и его отчёта.
+- **Повтор после ручных правок или отдельный verify:** лейбл **`doc_verify`** →
+  `ydbdoc-verify.yml`.
+
+Все единицы, переведённые LLM, включая full-coverage fallback, проходят
+независимый critic. Для refusal critic использует ограниченное деление
+пакета по границам сегментов и настроенную независимую fallback-модель.
+Исчерпание refusal-веток остаётся RED/небезопасным и не может дать GREEN.
 
 Исходная ветка PR **не меняется**. Мерж translation PR — за человеком.
 
@@ -125,7 +137,6 @@ export YDBDOC_MODEL_TRANSLATE="deepseek-v4-flash"
 export YDBDOC_MODEL_CHECK="gpt-oss-120b"
 ```
 
-## CLI
 ## CLI
 
 | Команда | Назначение |

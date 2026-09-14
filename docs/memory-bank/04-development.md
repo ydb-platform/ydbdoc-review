@@ -1,7 +1,7 @@
 # Memory Bank — Development guide
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -11,7 +11,7 @@
 
 ```
 tests/
-├── unit/                                  fast, no I/O, no LLM (~500 tests)
+├── unit/                                  fast, no I/O, no LLM
 │   ├── test_parser_round_trip.py          plain markdown
 │   ├── test_yfm_*.py                      YFM plugins (variables, notes, tabs, …)
 │   ├── test_front_matter.py               YAML title/description (B.4)
@@ -63,16 +63,20 @@ tests/
     └── en/...
 ```
 
-Default run (`pytest`): **~568 tests** (unit + fixture integration, no LLM smoke).
+Current release evidence: the full non-LLM suite after PR #172 reported
+**2730 passed, 2 skipped**. PR #173 subsequently reported a full-suite exit 0;
+its PR body did not publish a new numeric count. These are release checkpoints,
+not a permanently fixed collection size.
 
 Future:
 - `tests/integration/test_end_to_end.py` — full pipeline on a real file pair.
 - Front matter fixture: add a committed `.md` with YAML `---` block (optional).
 
-### 7.2. Counters (post Phase I)
+### 7.2. Historical counters and current release checkpoints
 
-- **Default CI/local run**: unit + fixture integration (no LLM smoke); **568 tests**
-  (May 2026).
+- **Historical May 2026 default run:** 568 tests. This is not the current count.
+- **PR #172 release checkpoint:** 2730 passed, 2 skipped.
+- **PR #173 release checkpoint:** full pytest suite exit 0; no exact count claimed.
 - **Integration (LLM smoke)**: 3 tests in `test_llm_smoke.py`, **local only** —
   not in default `pytest` run (see §7.3).
 - **Coverage (overall package)**: **91%** line coverage on `ydbdoc_review`

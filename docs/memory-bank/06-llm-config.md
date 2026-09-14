@@ -1,7 +1,7 @@
 # Memory Bank — LLM, config & prompts
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -63,16 +63,17 @@ Both `yandexgpt-5.1` and `deepseek-v32` were tested with:
 - ⚠️ `top_p` — may be ignored.
 - ✅ `temperature`, `max_tokens`, `messages`, `model`, `stream` — supported.
 
-### 12.7. Model selection (v2 MVP)
+### 12.7. Current Yandex Cloud model selection
 
 | Role | Primary | Fallbacks | Rationale |
 |---|---|---|---|
 | **Pre-analyze** | `yandexgpt-5-lite` | `yandexgpt-5.1` | Lightweight binary classification |
-| **Translator** | `yandexgpt-5.1` | `yandexgpt-5-pro` | Familiar baseline; switch to DeepSeek 4 in prod when available |
-| **Critic** | `qwen3.6-35b-a3b` | `qwen3-235b-a22b-fp8` | Different family from translator; large context for whole-file view |
+| **Translator** | `deepseek-v32` | `yandexgpt-5-pro` | Configured translation chain |
+| **Critic** | `yandexgpt-5.1` | `yandexgpt-5-lite`, `qwen3.6-35b-a3b` | Deduplicated independent-family refusal recovery |
 
-When DeepSeek V4 is available in AI Studio: switch translator primary to
-`deepseek-v4` (slug TBD); keep YandexGPT as fallback.
+These values mirror `src/ydbdoc_review/config/default.yaml`. Critic refusal
+recovery splits batches only at segment boundaries within its bound, then advances
+across the configured deduplicated family chain. Exhaustion remains blocked.
 
 ---
 
@@ -111,11 +112,11 @@ llm:
       primary: yandexgpt-5-lite
       fallbacks: [yandexgpt-5.1]
     translate:
-      primary: yandexgpt-5.1
+      primary: deepseek-v32
       fallbacks: [yandexgpt-5-pro]
     critic:
-      primary: qwen3.6-35b-a3b
-      fallbacks: [qwen3-235b-a22b-fp8]
+      primary: yandexgpt-5.1
+      fallbacks: [yandexgpt-5-lite, qwen3.6-35b-a3b]
 
 translation:
   segments_per_batch_chars: 4000
@@ -326,7 +327,7 @@ cross-role overlaps; equal primaries raise ``LLMConfigError``.
 | Role | Default primary | Default fallbacks |
 |------|-----------------|-------------------|
 | translate | `deepseek-v32` | `yandexgpt-5-pro` |
-| critic | `yandexgpt-5.1` | `yandexgpt-5-lite` |
+| critic | `yandexgpt-5.1` | `yandexgpt-5-lite`, `qwen3.6-35b-a3b` |
 
 Env (Nirvana / local):
 

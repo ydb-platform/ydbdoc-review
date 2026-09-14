@@ -1,6 +1,6 @@
 # Contributing to ydbdoc-review
 
-Спасибо за интерес к проекту. v2 разрабатывается в ветке **`doc-translate-ng`**.
+Спасибо за интерес к проекту. Актуальная разработка ведётся от `main`.
 
 ## Перед началом
 
@@ -26,12 +26,12 @@ pytest tests/unit/ tests/integration/test_real_files_round_trip.py
 1. Код + unit-тесты (mock LLM где нужно).
 2. Coverage ~90% на затронутых пакетах.
 3. Обновление Memory Bank (`docs/memory-bank/`, индекс `MEMORY_BANK.md`).
-4. Коммит с префиксом `ng:` на `doc-translate-ng`.
+4. Один scoped commit с понятным conventional-заголовком, например `fix:` или `docs:`.
 
 Пример сообщения коммита:
 
 ```
-ng: add navigation path detection (Phase I glue)
+docs: describe navigation path detection
 
 Detect toc*.yaml and redirect paths in PR scope for merge helpers.
 ```
@@ -74,14 +74,17 @@ Design doc разбит на части в `docs/memory-bank/`. При изме�
 
 ## Pull requests
 
-1. Ветка от `doc-translate-ng` (до merge v2 в `main`).
+1. Ветка от актуального `main` или от явно зафиксированной release-base.
 2. Описание: что меняется и зачем; test plan.
 3. Без секретов в diff; `.env` в gitignore.
 
 ## Release / тег
 
-Тег **`v0.1.0`** используется workflow в `ydb-platform/ydb`. Перенос тега на merge-commit v2 —
-отдельное решение maintainers (не bump на `v0.2.0` без явного согласования).
+Подвижный тег **`v0.1.0`** служит продакшен-ссылкой для workflow в
+`ydb-platform/ydb`. Его перемещают только после полного набора тестов и
+независимого review. Публикация считается проверенной, когда тег и
+`main` указывают на один commit; результативные `doc_verify` и docs build должны
+относиться к одному SHA translation PR.
 
 ## Вопросы
 

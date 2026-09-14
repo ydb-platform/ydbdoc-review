@@ -1,7 +1,7 @@
 # Memory Bank — Overview & architecture
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -38,13 +38,12 @@
 └── README.md                  # user-oriented overview (v2)
 ```
 
-Important branch: **`main`** carries v2 (`doc-translate-ng` merged). Tag `v0.1.0`
-is used by the `ydb` repo CI and is moved forward with bug fixes (to avoid frequent
-CI config edits). A separate tag (`v0.2.0`) can be used by external schedulers
-Reactor/Nirvana during provider migration (§13.6).
-
-As of 2026-07-14, §22 navigation planner is on `main` but tags may still point at
-pre-§22 commits until deliberately bumped — see **09-navigation-scope** §22.8.
+**`main`** carries v2. At the 2026-09-14 deployment checkpoint, `main` and the
+production tag `v0.1.0` both point to
+`66e8533ed3fb97cd7dbd1e512200746d387074fa` (PR #173). The `ydb` repository pins
+that movable production tag. A separate `v0.2.0` tag remains available for external
+Reactor/Nirvana schedulers during provider migration (§13.6). Older tag positions
+described later in the Memory Bank are historical rollout records.
 
 ---
 

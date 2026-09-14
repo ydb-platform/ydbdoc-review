@@ -9,6 +9,10 @@
 ## 2. Запуск
 
 - `doc_translate` запускает создание нового перевода и переводной pull request.
+- После перевода `doc_translate` в том же job запускает embedded QA,
+  функционально эквивалентную `doc_verify`. Завершение translation-фазы
+  не требует повторного лейбла `doc_verify`: оператор дожидается embedded
+  critic и его отчёта.
 - `doc_verify` проверяет уже существующий английский текст без повторного перевода.
 - `doc_continue` продолжает только job, у которой в артефактах состояния явно сохранён флаг продолжаемости и незавершённый этап после успешной фиксации SHA. Иные остановки требуют нового `doc_translate`.
 - Повторная проверка не должна запускать новый перевод, если английский текст менять не требуется.
@@ -140,6 +144,19 @@ model realignment.
 
 ## 7. Модель и повторные попытки
 
+**R-GL-19 (доставлено в PR #169–#170):** любая единица, полученная
+от LLM-переводчика, обязана пройти critic. Это включает full-coverage
+fallback и units-mode `translate_required`. Trusted reuse не тратит model calls.
+Исчерпанный refusal означает незавершённый semantic review,
+блокирует safe GREEN и публикацию.
+
+**R-GL-20 (доставлено в PR #171):** при deterministic refusal critic может
+рекурсивно делить batch только по границе сегментов и только в
+заданном пределе. Затем он переходит по настроенной,
+дедуплицированной и независимо доступной цепочке fallback-моделей.
+Одинаковые model+payload refusal не повторяются; каждый leaf должен
+получить parseable semantic verdict, иначе RED/WITHHOLD_UNSAFE.
+
 - При технической ошибке ответа разрешена повторная попытка.
 - При недоступности выбранной модели разрешено переключение на другую настроенную модель.
 - Технический повтор не превращается в повторную сборку английского файла из старых частей.
@@ -192,21 +209,27 @@ skipped/identical segments или при отказе модели. Только
 без полного документа (`translated_text=None`) используют исходные атомы как
 консервативный compatibility default; явно переданный пустой target авторитетен.
 
-**R-GL-5a**: `critic_model_refusal` означает незавершённую проверку языка и стиля.
+**R-GL-5a (исторический, заменён R-GL-19 / PR #170):**
+`critic_model_refusal` всегда означает незавершённую проверку. Описанная
+ниже классификация YELLOW была промежуточным контрактом PR #168
+и больше не является нормативной. После ограниченного recovery исчерпание
+refusal остаётся **blocked, RED, `WITHHOLD_UNSAFE`** и не публикуется.
 
 Когда LLM-критик возвращает safety/content-policy отказ (§6.235, `is_model_refusal_text`), а детерминированные эвристики файла **не** содержат blocking-сообщений:
 
-1. Файловый `verdict` равен **`warnings`**. Независимой полной проверки языка и стиля нет, поэтому чистая проза не является исключением.
-2. PR-level рекомендация merge (`_merge_recommendation`) **🟡**, если нет других blocking findings, completeness gaps и nav blockers.
-3. Отказ остаётся warning issue в `critic_unresolved` и в списке «Что исправить». Требуется ручная проверка языка и стиля перед merge.
+1. Исторически файловый `verdict` был **`warnings`**; теперь refusal exhaustion даёт `blocked`.
+2. Историческая PR-level рекомендация 🟡 заменена на 🔴 и запрет публикации.
+3. Отказ остаётся issue в `critic_unresolved` и в списке «Что исправить»;
+   текущая severity после исчерпания recovery равна `blocked`.
 4. Отказ в любом batch сохраняет все замечания остальных batches, включая blocked `protected_atom_language`. Первый отказ завершает цикл без спекулятивного model repair. Отказ на любом последующем проходе, включая третий verify, сохраняет весь текущий объединённый результат и накопленные неприменённые замечания предыдущих проходов. Успешное исправление удаляет прежний диагноз из ожидающих исправления по сегменту, категории и точному комментарию; подтверждённый после исправления блокер остаётся нерешённым. История `critic_skipped` и `critic_applied` сохраняется; исправленные замечания не возвращаются в нерешённые или skipped-раздел отчёта, дубли атомных findings не добавляются. Непочиненные blockers сохраняют красный отчёт и запрет публикации, даже если присутствуют в списке skipped.
-5. `warnings` с пустым списком issues в compatibility response не превращается в `ok`; `blocked` не понижается. ASCII-документы без сегментов проходят детерминированные проверки без запроса к критику.
+5. Исторический compatibility `warnings` с пустым issues не превращается
+   в `ok`; `blocked` не понижается. ASCII-документы без сегментов проходят
+   детерминированные проверки без запроса к критику.
 
-**R-GL-5a.1**: Классификация finalize-warning `critic_model_refusal:` в `_classify_heuristic`: bucket **`warnings`**.
+**R-GL-5a.1–5a.3 и R-GL-5c исторические:** warning/YELLOW отчётный
+контракт заменён current R-GL-19. Видимость диагностики сохраняется,
+но исчерпанный refusal блокирует result.
 
-**R-GL-5a.2**: `humanize_heuristic("critic_model_refusal: …")` и `format_critic_reviewer_detail(category="critic_model_refusal", …)` сообщают, что проверка языка и стиля не завершена и требуется ручная проверка. Чистые эвристики не дают разрешения merge.
-
-**R-GL-5a.3**: Отчёт выводит refusal как предупреждение с humanized RU текстом. После pair-level repair и пересчёта QA warning issue остаётся в `critic_unresolved` и сохраняет жёлтую рекомендацию.
 
 Замечание, присутствующее одновременно в unresolved и skipped, выводится ровно
 один раз как unresolved независимо от `include_skipped_critic` (по умолчанию,
@@ -229,10 +252,24 @@ matter, HTML-комментарии, fenced/indented code и назначени�
 а отчёт предлагает убрать краевые пробелы или использовать `ldaps scheme`.
 Контент автоматически не переписывается. Обе находки дают `warnings` и жёлтый
 verdict даже при `critic=ok`; это не полная проверка английской грамматики или
-стиля. `critic_model_refusal` остаётся самостоятельным warning и не исчезает при
-чистом результате этих двух проверок.
+стиля. `critic_model_refusal` остаётся самостоятельной диагностикой и не исчезает при
+чистом результате этих двух проверок; при исчерпании recovery она блокирует
+результат по R-GL-19.
 
 ## 8. Ссылки и якоря
+
+**R-GL-21 (доставлено в PR #172):** finalization может убрать только
+пробелы по краям label обычной inline Markdown-ссылки. Пара с
+исходной ссылкой доказывается уникальным destination/title identity.
+Дубли, multiline labels, images, reference links, autolinks, code/fences, malformed
+ссылки, destination/title и intentional source padding не меняются.
+
+**R-GL-22 (доставлено в PR #173):** stale path при одинаковом fragment
+исправляется только когда четыре immutable snapshot доказывают один
+и тот же parser-derived AST link slot, fragment не меняется, а destination
+и владелец anchor однозначны в final tree. Неоднозначность, missing
+evidence, несовпавший slot или неразрешимый target остаются blocker/no-op.
+Точный production-shaped PR #51079 E2E обязателен.
 
 - Внутренние пути и фрагменты ссылок должны сохраняться без потери.
 - Если русский якорь состоит из ASCII-символов, английский якорь должен совпадать с ним байт в байт.
@@ -333,11 +370,13 @@ verdict.
   перевода или готовности к публикации. Неподтверждённая связь остаётся явно
   неизвестной.
 
-**R-GL-5c**: При единственном замечании `critic_model_refusal` и чистых детерминированных эвристиках:
+**R-GL-5c (исторический, заменён R-GL-19):** PR #168 показывал
+единственный `critic_model_refusal` как YELLOW. Текущий контракт после
+исчерпания recovery:
 
-- Файл в списке **«Что исправить»** (🟡).
-- Рекомендация требует ручной проверки перед merge, без «можно мержить».
-- Отказ виден как предупреждение о незавершённой проверке языка и стиля.
+- файл виден в «Что исправить» с диагностикой refusal;
+- вердикт 🔴, merge и unsafe publication запрещены;
+- требуется новый полный semantic verdict, а не ручное понижение до YELLOW.
 
 ## 13. Запрещённая инфраструктура
 
@@ -393,7 +432,13 @@ verdict.
   Markdown-путях scope #51079. Generic assignment/code, больший code-атом,
   fenced code и HTML comment сохраняются без fuzzy-переписывания.
 - **R-GL-4:** modified diff page с pre-existing href к missing tip fragment не ставит owner в `doc_from_main`; new page с href к fragment уже на tip EN не ставит owner; new href на diff page к missing tip fragment ставит owner; translate batches все ≤ `batch_max_output_chars` estimate; oversized paragraph split на `\n\n`; нет overlapping batches; `finish_reason=length` на 2-segment batch → один resplit → success; irreducible monolith → `ManualAction`, не soft-keep.
-- **R-GL-5:** настоящий harness с отказом модели на чистой прозе и трёх incident phrases даёт `warnings`, `_file_has_open_issues` = `True`, отчёт 🟡 с ручной проверкой. Mixed batches и Task 5 atom blockers остаются 🔴; повторный отказ и pair post-repair QA сохраняют предупреждение; `critic_execution_failed` остаётся 🔴; ASCII без сегментов не вызывает критика. Compatibility `warnings` с пустыми issues сохраняет жёлтый статус.
+- **R-GL-5 / R-GL-19:** исторический harness PR #168 фиксировал
+  clean-prose refusal как `warnings`/🟡; это доказательство сохранено только
+  как история и заменено PR #170. Текущая приёмка требует bounded
+  segment-split и configured independent-family fallback; продолжение допустимо
+  только после complete semantic review каждого leaf. Исчерпанный refusal даёт
+  `blocked`/🔴/`WITHHOLD_UNSAFE`, запрещает merge и publication. `critic_execution_failed`
+  остаётся отдельным 🔴; ASCII без сегментов не вызывает critic.
 - **R-GL-6:** merged #40385 fixture — 6 пар (5 diff + `_includes/connect.md`); pre-existing `connect.md#tls` на modified `authentication.md` → `doc_from_main` содержит `_includes/connect.md`, `auth_config` — нет; после translate+declare `apply_en_link_target_checks` == `[]` на `authentication.md`; `test_pr_40385_real_tip_without_queued_translation_stays_blocked` остаётся блокирующим при bypass owner pair; declare fallback: synthetic aligned include → append `{#frag}`; real-tip misaligned без translate → fallback `None`.
 - **R-GL-7/R-GL-8:** production/fixture #52077 при `candidate == en_baseline` разрешает доказанный legacy-translit `#vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov`→`#enabling-the-node-authentication-and-authorization-mode` и блокирует ровно две подмены критика: `#certificate-auth-config`→`#iam-auth-config` и `#tls`→`#activated-profile`. Explicit, missing-target и ambiguous варианты остаются blocking; duplicate occurrences дают отдельные blockers; same-path ambient extra при наличии точного href не создаёт false positive; path-only redirect с тем же ASCII fragment проходит; URL-encoded кириллический fragment и dictionary localization проходят.
 - **R-GL-9:** fragment-repair fixture сохраняет `#security-auth`/`#certificate-auth-config`/`#tls`, даже если baseline указывает на существующий другой explicit anchor; доказанный implicit heading slug по-прежнему может использовать локализованный baseline. Delete+add same-fragment и duplicate historical fragment не получают final path restore и остаются blocking.
@@ -404,7 +449,18 @@ verdict.
 - **R-GL-15:** real-Git workflow воспроизводит stale PR head K после успешного push K2 и доказывает успех при двух и пяти stale reads, bounded failure после шести stale reads, точные waits `1,2,4,8,15`, отсутствие повторного push и model/apply/comment work до согласования. Отдельные controls немедленно блокируют третий SHA во время REST-read, изменение ref после handshake и удаление recursive equality gate. Неизменённые A05 evidence-drop/foreign-identity tests обязаны по-прежнему получать `ValueError`. Production acceptance требует final `doc_verify`, docs build и PR-check success на одном K2; локальные тесты или перемещение release tag этого не заменяют.
 - **R-GL-16:** fixture #51079 с восемью Markdown и `security/toc_p.yaml` освобождает оба include-only `_assets/user-token*.md` до записи pending файлов на диск. Controls сохраняют orphan для include из недостижимого referrer, ordinary link, fenced/code/comment/front-matter example, missing/deleted/errored target, cross-locale и raw leave-and-return пути. Обязательны отдельные RED→GREEN tests с настоящим TAB-indented example и YAML block scalar. Проверяются nested includes, завершение циклов, пустой существующий fragment, authoritative empty/replaced pending text и отсутствие fallback к dirty worktree. Existing include-target blocker и независимые QA/publication blockers сохраняются. Production acceptance требует нового translation PR, независимой проверки содержания, зелёных `doc_verify` и build на одном SHA.
 
-## 15. Работа команды
+## 15. Планируемые, но не доставленные требования
+
+- Human-readable QA report с файлом, строкой, коротким фрагментом,
+  обычным объяснением и ожидаемым исправлением реализован только
+  в локальном unpublished commit `e56be3d`; в `main`/`v0.1.0` его нет.
+- Reviewer-model должен сравнивать authoritative source с финальным
+  переводом после всех repairs в контексте целого предложения или блока.
+  Это требование проанализировано, но не реализовано.
+- Детерминированный языковой guard для AND/OR/союзов отклонён и не
+  является доставленным или плановым поведением.
+
+## 16. Работа команды
 
 - Для каждой новой задачи создаются свежие аналитик, внешний reviewer, разработчик и тестер.
 - Аналитик формулирует одно конкретное решение и не оставляет разработчику архитектурных выборов.

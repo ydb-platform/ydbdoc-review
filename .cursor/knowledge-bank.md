@@ -7,7 +7,11 @@
 - Production path: GitHub label `doc_translate` → реальный ydb CI (workflow pin `ydbdoc-review@v0.1.0`).
 - Доработка translation PR: comment `/ydbdoc continue …` + label `doc_continue` (не ручной EN и не полный re-translate, если цель — проверить continue).
 - Eliza / local `job --mode translate` — только если явно попросили; не подменять ими отладку label-пайплайна.
-- Цель: `doc_translate` / `doc_continue` → critic 🟢 **без** ручных правок EN.
+- `doc_translate` снача выполняет `run_pr_translation`, затем embedded QA,
+  эквивалентную `doc_verify`, и final-tree gates. Только после этого
+  разрешены prepare/push/open translation PR.
+- Не перевешивать `doc_verify` только потому, что translation-фаза
+  `doc_translate` завершилась. Дождаться embedded critic и отчёта.
 
 ## Merged source PRs
 
@@ -38,7 +42,16 @@
 - **§6.232:** critic_only noop не restage-ит на новый tip (stale verify не затирает ручной href-fix).
 - **§6.233:** tip-resolvable EN hrefs win over inverted tip→merge RU mirror delta (не затирать configuration-v1).
 - **§6.234:** critic empty-JSON → resplit batch halves; batch_chars 2500.
-- **§6.235:** YandexGPT safety refusal («не могу обсуждать») → heuristics-only verify, не `critic_execution_failed`.
+- **§6.235 исторический:** safety refusal не смешивается с
+  `critic_execution_failed`, но его исчерпание больше не publishable YELLOW.
+- **PR #169–#171:** every LLM-translated unit проходит critic; full-coverage
+  fallback не может выбрать translation-only profile. Refusal recovery делит
+  batch по segment boundaries в пределе и переходит по configured independent
+  model families; exhaustion всегда RED/`WITHHOLD_UNSAFE`.
+- **PR #172:** чинится только edge padding ordinary inline link label при
+  unique destination/title identity; ambiguity остаётся byte-identical.
+- **PR #173:** same-fragment stale route чинится только по одному AST slot
+  в четырёх immutable snapshots и при unique final anchor owner; ambiguity fail closed.
 - **§6.236:** href-parity: RU translit + declared EN slug OK когда `fragment_repair` мапит пару (без exact baseline slot).
 - **§6.237:** verify href-parity: merge-base EN baseline + rebuild extra после grandfather (#51761).
 - **§6.238:** critic failure/refusal → человекочитаемый RU текст в отчёте + raw_preview ≤200 (#51199).
@@ -49,6 +62,16 @@
 
 - `GITHUB_TOKEN` в env часто 403 на `gh`; unset → keyring. Запись в ydb: `YDB_GH_TOKEN`.
 - Consumer: `ydbdoc-review@v0.1.0` (force-move с логическими фиксами).
+
+## Current remediation loop
+
+- Substantive defect: analyst → developer + tests → independent review → full suite →
+  `main == v0.1.0 == reviewed commit` → delete bad translation artifact → retry
+  `doc_translate` → embedded QA and docs build green on the same translation PR SHA.
+- Cosmetic whitespace is nonblocking/manual unless it matches PR #172's narrow safe repair.
+- Human-readable QA report commit `e56be3d` is local and unpublished.
+- Whole-sentence/whole-block post-finalization reviewer-model check is analyzed but unimplemented.
+- Deterministic AND/OR/conjunction guard was rejected and is not shipped or planned behavior.
 
 ## 2026-09-01 04:10 UTC
 <!-- d8e0fc1cdab0a168 -->

@@ -1,7 +1,7 @@
 # Memory Bank — Pipeline & reporting
 
 > Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Authoritative design doc for the current **ydbdoc-review v2** on `main`.
 
 ---
 
@@ -651,7 +651,11 @@ deduplication and identical-prose/spurious-placeholder filters preserve these
 findings. Refusal aggregation follows §6.264. The independent final-byte language barrier
 and publication allowlist are unchanged.
 
-### §6.264 Critic refusal means incomplete review
+### §6.264 Historical PR #168 refusal policy, superseded by PR #170
+
+This section records the intermediate PR #168 behavior. Its YELLOW/publishable
+outcome is not current. R-GL-19 and PR #170 require bounded recovery followed by
+`blocked`, RED and `WITHHOLD_UNSAFE` when refusals are exhausted.
 
 For prose-bearing documents, safety/content-policy refusal produces
 `CriticResponse(verdict="warnings")` with a warning `critic_model_refusal` issue.
@@ -678,15 +682,11 @@ the critic refusal is displayed, the report suppresses only that coded mirror,
 not unrelated diagnostics with similar prose. Machine heuristics stay unchanged;
 without a displayed critic refusal the heuristic remains available to report.
 
-All refusal paths add a warning that language/style review is incomplete and
-manual review is required. Pair post-repair QA retains the critic response when
-recomputing heuristics, so refusal remains yellow. `compute_critic_verdict` also
-respects compatibility warnings with empty issues and never lowers a current
-blocked response. Report readiness respects explicit critic warnings and presents
-refusal under open warnings, without green merge advice. R-GL-5a/5c replace the
-older §6.245 info/green contract; technical `critic_execution_failed` remains
-blocked and separate under R-GL-5b. Protected-only ASCII files still make no model
-request.
+Historically refusal stayed yellow after pair post-repair QA. Current code keeps
+the diagnostic evidence but treats exhausted refusal as blocked and withholds unsafe
+publication. `compute_critic_verdict` never lowers a blocked response. Technical
+`critic_execution_failed` remains a separate blocked category under R-GL-5b.
+Protected-only ASCII files still make no model request.
 
 ### §6.265 Narrow visible-prose editorial warnings
 
@@ -702,8 +702,8 @@ do not.
 
 Both codes are warnings, retain the original line and context, and produce a
 concrete report correction without rewriting Markdown. They are deliberately not
-a general English grammar/style checker. A critic refusal therefore remains its
-own warning even when neither narrow detector fires.
+a general English grammar/style checker. A critic refusal remains separately visible
+even when neither detector fires, but exhausted recovery is blocked under R-GL-19.
 
 ### §6.267 Exact offline historical #51079 acceptance
 
@@ -749,5 +749,36 @@ sockets remain disabled. No production workflow runs inside this fixture.
 This historical R-GL-18 acceptance is separate from the synthetic eight-Markdown
 R-GL-16 case. A production retry and independent content review plus green
 `doc_verify`/build on one production SHA remain deferred until final approval.
+
+## 17. Current operator lifecycle (2026-09-14)
+
+`doc_translate` performs translation and then runs embedded QA equivalent to
+`doc_verify` in the same job. A completed translation phase is therefore not a reason
+to add or re-add `doc_verify`: wait for the embedded critic and its final report.
+Use a standalone `doc_verify` rerun after manual translation-branch edits or when an
+explicit verify-only retry is required.
+
+Every LLM-produced unit reaches the critic, including full-coverage fallback and
+units-mode required translations. Critic refusal recovery is bounded: split only at
+segment boundaries, then advance through the configured independent critic-model
+chain. If any leaf exhausts recovery without a parseable semantic verdict, the result
+is RED and unsafe publication is withheld. The former clean-prose YELLOW harness
+case is historical PR #168 evidence, not current acceptance behavior.
+
+When the report identifies a substantive defect, the remediation loop is:
+
+1. analyze the exact source/candidate evidence and reduce the defect to a scoped requirement;
+2. implement it with focused and regression tests;
+3. obtain independent review;
+4. run the full non-LLM suite;
+5. deploy by moving `main` and the production `v0.1.0` tag to the reviewed commit;
+6. delete the bad translation branch/PR artifact as appropriate and retry `doc_translate`;
+7. accept publication only when embedded QA and docs build are green on the same translation PR SHA.
+
+Cosmetic whitespace alone is nonblocking and may be repaired manually. The shipped
+PR #172 auto-repair is intentionally limited to safely paired ordinary inline link
+labels. The local human-readable QA report commit `e56be3d` is not published. A
+post-finalization reviewer-model check over a whole sentence/block is analyzed but
+not implemented; no deterministic AND/OR guard is part of the pipeline.
 
 [← Memory Bank index](../../MEMORY_BANK.md)
