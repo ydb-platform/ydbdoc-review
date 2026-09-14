@@ -319,7 +319,7 @@ def test_r_gl_4_translate_resplit_on_length():
     client = MagicMock(spec=YandexLLMClient)
     client.model_chain_for_role.return_value = ["primary"]
     client.chat.side_effect = [
-        SimpleNamespace(content=""),
+        SimpleNamespace(content="", finish_reason="length"),
         SimpleNamespace(content=good_s1),
         SimpleNamespace(content=good_s2),
     ]
