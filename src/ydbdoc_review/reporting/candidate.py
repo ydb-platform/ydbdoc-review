@@ -1,5 +1,6 @@
 """One read-only, validated projection of Task 3 evidence onto immutable K."""
 from dataclasses import dataclass, replace
+from hashlib import sha256
 import re
 import subprocess
 
@@ -14,6 +15,10 @@ class CandidateReport:
     candidate_sha: str
     status: str
     items: tuple[str, ...]
+    evidence_key: str = ""
+    validated_refs: tuple[str, ...] = ()
+    independent_status: str = "GREEN"
+    github_repo: str = "ydb-platform/ydb"
 
     def render(self, *, summary: bool = False) -> str:
         header = f"{self.status}. Candidate K: `{self.candidate_sha}`\n\n"
@@ -36,7 +41,8 @@ def legacy_without_final(result: PRTranslationResult) -> PRTranslationResult:
                          critic_applied=[], critic_skipped=[], final_review_plan=None,
                          final_review_response=None, verdict="ok")
         runs.append(replace(run, file_result=fr))
-    return replace(result, pair_results=runs, final_candidate=None, candidate_repo_path=None)
+    return replace(result, pair_results=runs, final_candidate=None, candidate_repo_path=None,
+                   final_candidate_report=None)
 
 
 def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkContext | None = None,
@@ -52,10 +58,33 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
     sha = candidate.commit_sha if candidate else next(
         (r.file_result.final_review_plan.candidate.commit_sha for r in files
          if r.file_result.final_review_plan is not None), "недоступен")
+    cached = result.final_candidate_report
+    supplied_refs = tuple(dict.fromkeys(ref for ref in (
+        sha,
+        *(cached.validated_refs if cached else ()),
+        cached.candidate_sha if cached else None,
+        *refs, link.ref if link else None, result.publication_candidate_sha,
+    ) if ref is not None))
+    if cached is not None:
+        rank = {"GREEN": 0, "YELLOW": 1, "RED": 2}
+        independent_status = max((independent_status, cached.independent_status), key=rank.__getitem__)
+    repo = link.github_repo if link and link.github_repo else cached.github_repo if cached else "ydb-platform/ydb"
+    # Revalidate changed evidence without dropping reference conflicts observed by
+    # another surface. Mutable worktree/final_text fields are not evidence inputs.
+    evidence_key = sha256(repr((candidate, result.candidate_repo_path, repo, tuple(
+        (r.plan.target_path, r.skipped, r.deleted, r.error,
+         r.file_result.final_review_plan,
+         r.file_result.final_review_response.model_dump() if r.file_result.final_review_response else None,
+         r.file_result.final_review_response._review_incomplete if r.file_result.final_review_response else None,
+         r.file_result.segment_lines, r.file_result.segment_excerpts)
+        for r in files))).encode()).hexdigest()
+    if (cached is not None and cached.evidence_key == evidence_key
+            and cached.validated_refs == supplied_refs
+            and cached.independent_status == independent_status):
+        return cached
     items = []
     integrity = False
     warning = False
-    repo = link.github_repo if link and link.github_repo else "ydb-platform/ydb"
 
     def fail(path, reason, problem=""):
         nonlocal integrity
@@ -65,14 +94,21 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
                      f"Недоступное evidence: {reason}.\n"
                      "Ожидаемое исправление: получить полное semantic evidence для exact K и повторить отчёт.")
 
-    supplied_refs = (*refs, link.ref if link else None, result.publication_candidate_sha)
     global_error = None
     if candidate is None or not result.candidate_repo_path:
         global_error = "missing immutable candidate reader"
     elif not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) or any(ref is not None and ref != sha for ref in supplied_refs):
         global_error = "SHA mismatch: report references must equal full K"
-    if not files:
-        fail(", ".join(candidate.en_paths) if candidate else "EN path unavailable", global_error or "missing completed semantic review")
+    represented_paths = {r.plan.target_path for r in files
+                         if not r.skipped and not r.deleted and not r.error}
+    if candidate is not None:
+        # Deleted paths are deliberately absent from en_paths. A present empty
+        # file still needs its explicit completed empty ReviewPlan below.
+        for path in candidate.en_paths:
+            if path not in represented_paths:
+                fail(path, global_error or "missing completed file result or semantic review")
+    if not files and global_error and not (candidate and candidate.en_paths):
+        fail("EN path unavailable", global_error)
     for run in files:
         fr = run.file_result
         plan, response = fr.final_review_plan, fr.final_review_response
@@ -138,4 +174,7 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
             except (ValueError, KeyError, IndexError) as exc:
                 fail(path, str(exc), issue.comment)
     status = "RED" if integrity or independent_status == "RED" else "YELLOW" if warning or independent_status == "YELLOW" else "GREEN"
-    return CandidateReport(sha, status, tuple(items))
+    projection = CandidateReport(sha, status, tuple(items), evidence_key,
+                                 supplied_refs, independent_status, repo)
+    result.final_candidate_report = projection
+    return projection

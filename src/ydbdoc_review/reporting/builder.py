@@ -916,13 +916,19 @@ def build_commit_message(
     return "\n".join(lines)
 
 
-def _final_report_projection(result, *, link=None, refs=()):
+def _final_report_projection(result, *, link=None, refs=(), verify_result=None):
     from ydbdoc_review.reporting.candidate import legacy_without_final, project_candidate_report
     legacy = legacy_without_final(result)
     label = _qa_status(legacy)[1]
     independent = "RED" if "RED" in label else "YELLOW" if "YELLOW" in label else "GREEN"
     if result_has_blocking_findings(legacy):
         independent = "RED"
+    if verify_result is not None:
+        verify_label = _qa_status(verify_result)[1]
+        if result_has_blocking_findings(verify_result) or "RED" in verify_label:
+            independent = "RED"
+        elif independent == "GREEN" and "YELLOW" in verify_label:
+            independent = "YELLOW"
     return project_candidate_report(result, link=link, refs=refs, independent_status=independent), legacy
 
 
@@ -1178,7 +1184,8 @@ def build_source_pr_comment(
     committed: bool | None = None,
 ) -> str:
     """Short summary comment for the source PR after ``doc_translate``."""
-    projection, legacy = _final_report_projection(result, refs=(meta.checkout_ref,))
+    projection, legacy = _final_report_projection(result, refs=(meta.checkout_ref,),
+                                                 verify_result=verify_result)
     if projection is not None:
         body = build_source_pr_comment(legacy, translation_pr_number=translation_pr_number,
             meta=meta, config=config, usage=usage, verify_result=verify_result, committed=committed)

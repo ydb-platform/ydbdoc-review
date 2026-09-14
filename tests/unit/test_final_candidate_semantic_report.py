@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.config.loader import RuAuthorityMode
+from ydbdoc_review.github.provenance import RuAuthority, TranslationArtifactProvenance
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.final_candidate import FinalCandidate
@@ -156,3 +158,93 @@ def test_completed_clean_is_green_but_legacy_input_stays_legacy(monkeypatch):
     fr.final_review_response = None
     legacy = body(result)
     assert legacy.startswith("Auto-generated translation") and "QA K:" in legacy
+
+
+@pytest.mark.parametrize("missing_kind", ["no_run", "no_file_result", "no_plan", "skipped", "error"])
+def test_required_candidate_sibling_cannot_disappear_from_clean_report(monkeypatch, missing_kind):
+    result, fr = sample(monkeypatch)
+    sibling = "ydb/docs/en/core/missing.md"
+    candidate = replace(result.final_candidate, en_paths=(PATH, sibling))
+    result.final_candidate = candidate
+    fr.final_review_plan = replace(fr.final_review_plan, candidate=candidate)
+    fr.final_review_response = CriticResponse(verdict="ok")
+    original = result.pair_results[0]
+    if missing_kind != "no_run":
+        sibling_result = replace(original, plan=replace(original.plan, target_path=sibling),
+                                 file_result=None)
+        if missing_kind == "no_plan":
+            sibling_result.file_result = FileTranslationResult(sibling, "", 0, "ok", "v1")
+        if missing_kind == "skipped": sibling_result.skipped = True
+        if missing_kind == "error": sibling_result.error = "review failed"
+        result.pair_results.append(sibling_result)
+    from ydbdoc_review.pipeline import final_candidate
+    raw = fr.final_review_plan.en.text.encode()
+    def read(repo, actual, path):
+        assert actual == candidate and path == PATH
+        return raw
+    monkeypatch.setattr(final_candidate, "read_candidate_bytes", read)
+    rendered = body(result)
+    assert rendered.startswith("RED") and sibling in rendered
+    assert "невозможно подтвердить evidence отчёта" in rendered
+    assert "EN-строка недоступна" in rendered
+
+
+def test_deleted_only_candidate_does_not_invent_missing_review(monkeypatch):
+    result, _ = sample(monkeypatch)
+    result.final_candidate = replace(result.final_candidate, en_paths=(), deleted_paths=(PATH,))
+    result.pair_results.clear()
+    rendered = body(result)
+    assert rendered.startswith("GREEN")
+    assert "невозможно подтвердить evidence отчёта" not in rendered
+
+
+def test_completed_empty_candidate_file_remains_clean(monkeypatch):
+    result, fr = sample(monkeypatch)
+    candidate = result.final_candidate
+    fr.final_review_plan = prepare_review_document(candidate, AuthoritativeDocument(
+        "ydb/docs/ru/a.md", "source", b""), PATH, b"")
+    fr.final_review_response = CriticResponse(verdict="ok")
+    from ydbdoc_review.pipeline import final_candidate
+    monkeypatch.setattr(final_candidate, "read_candidate_bytes", lambda *args: b"")
+    assert body(result).startswith("GREEN")
+
+
+def test_provenance_conflict_persists_across_all_report_surfaces(monkeypatch):
+    result, _ = sample(monkeypatch)
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    meta = builder.ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1, checkout_ref=K)
+    provenance = TranslationArtifactProvenance(RuAuthority(
+        source_repo="ydb-platform/ydb", source_pr=53007,
+        source_base_sha="a" * 40, source_head_sha="b" * 40,
+        baseline_sha="d" * 40, ru_sha="b" * 40, mode=RuAuthorityMode.SOURCE_PRESERVING),
+        candidate_sha="c" * 40)
+    # A previously cached valid projection must also absorb a later conflicting ref.
+    assert body(result).startswith("YELLOW")
+    bad_body = body(result, provenance=provenance)
+    invalid_projection = result.final_candidate_report
+    full = builder.build_full_report(result, meta=meta, config=cfg,
+        link=ReportLinkContext("ydb-platform/ydb", K))
+    handoff = builder.build_source_pr_comment(result, translation_pr_number=42,
+        meta=meta, config=cfg)
+    for rendered in (bad_body, full, handoff, body(result)):
+        assert rendered.startswith("RED") and K in rendered
+    for rendered in (bad_body, full, body(result)):
+        assert "SHA mismatch" in rendered and "#L104" not in rendered
+    assert result.final_candidate_report is invalid_projection
+
+
+@pytest.mark.parametrize("semantic_warning", [False, True])
+def test_verify_red_is_never_replaced_by_semantic_projection(monkeypatch, semantic_warning):
+    result, fr = sample(monkeypatch)
+    if not semantic_warning:
+        fr.final_review_response = CriticResponse(verdict="ok")
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    meta = builder.ReportMeta(mode="doc_translate", report_number=1, elapsed_s=1, checkout_ref=K)
+    verify = PRTranslationResult(completeness_gaps=["ydb/docs/en/missing-verify.md"])
+    assert body(result).startswith("YELLOW" if semantic_warning else "GREEN")
+    handoff = builder.build_source_pr_comment(result, translation_pr_number=42,
+        meta=meta, config=cfg, verify_result=verify)
+    assert handoff.startswith("RED") and "Статус QA (K) | RED" in handoff
+    assert body(result).startswith("RED")
+    assert builder.build_full_report(result, meta=meta, config=cfg).startswith("RED")
+    assert result.publication_impact.value == "PUBLISH_NORMAL"
