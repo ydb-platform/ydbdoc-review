@@ -3782,6 +3782,7 @@ def run_doc_translate(
         not committed
         and reused_existing_artifact_pr is None
         and not awaiting_existing_continue_pr
+        and pr_result.publication_failure is None
     ):
         pr_result.publication_failure = "no_publishable_artifact"
         refresh_publication_impact(pr_result)
