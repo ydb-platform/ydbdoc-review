@@ -805,8 +805,11 @@ def test_safe_final_link_blocker_publishes_open_red(publication_repo: str):
         meta=ReportMeta(mode="doc_verify", report_number=1, elapsed_s=1),
         config=load_config(env=_env()),
     )
-    assert "Статус QA (K): 🔴 RED" in full_report
+    candidate = job.pr_result.final_candidate
+    assert candidate is not None
+    assert full_report.startswith(f"RED. Candidate K: `{candidate.commit_sha}`")
     assert "missing.md" in full_report
+    assert "Candidate опубликован для ручного исправления." in full_report
     assert finish.call_args.kwargs["status"] == "published_red"
     assert job_requires_nonzero_exit(job) is False
 
