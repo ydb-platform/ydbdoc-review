@@ -325,3 +325,5 @@ Cross-reference cheat sheet: `§6.*` → 03-design-decisions · `§13.*` → 06-
 **End of Memory Bank index.**
 
 Уточнение 2026-09-15: простой RU/EN critic, отдельный бюджет, YAML-result и optional suggested_text — см. 11-final-candidate-qa.md.
+
+- 2026-09-15: [сохранение корневого C после critic repair](docs/memory-bank/11-final-candidate-qa.md#27-provenance-после-автоматического-исправления--2026-09-15); K2/K3 проходят проверку происхождения до push.
