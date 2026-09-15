@@ -61,7 +61,7 @@ trap cleanup EXIT
 docker_env=()
 for var in \
   GITHUB_TOKEN GITHUB_PUSH_TOKEN YDBDOC_PUSH_PAT YDBDOC_REPO_PATH \
-  GITHUB_ACTOR \
+  GITHUB_ACTOR GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_SHA \
   YANDEX_CLOUD_FOLDER_DOC_REVIEW YANDEX_CLOUD_API_KEY_DOC_REVIEW \
   YDBDOC_YC_FOLDER_ID YDBDOC_YC_API_KEY \
   YDBDOC_REVIEW_ENABLED YDBDOC_MODEL_CHECK YDBDOC_MODEL_TRANSLATE \
@@ -85,11 +85,23 @@ if [[ -n "${YDBDOC_YDB_SA_KEY_FILE:-}" && -f "${YDBDOC_YDB_SA_KEY_FILE}" ]]; the
 fi
 
 set -e
-exec docker run --rm \
+CONTAINER_NAME="ydbdoc-review-${GITHUB_RUN_ID:-local}-$$"
+stop_container() {
+  docker stop --time 20 "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  if [[ -n "${docker_pid:-}" ]]; then
+    wait "${docker_pid}" 2>/dev/null || true
+  fi
+  exit 143
+}
+trap stop_container TERM INT
+# Keep the shell alive to stop the daemon-owned container when Actions cancels.
+docker run --rm --init --name "${CONTAINER_NAME}" \
   "${docker_mounts[@]}" \
   -w /github/workspace \
   -e "GITHUB_WORKSPACE=/github/workspace" \
   -e "GITHUB_ACTION_REF=${GITHUB_ACTION_REF:-}" \
   -e "YDBDOC_GIT_SHA=${BUILD_SHA}" \
   "${docker_env[@]}" \
-  "${IMAGE}"
+  "${IMAGE}" &
+docker_pid=$!
+wait "${docker_pid}"

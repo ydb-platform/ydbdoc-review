@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import unquote
@@ -430,13 +431,33 @@ def _restart_owned_translation_pr(
     branch: str,
     base: str,
     explicit: bool,
-) -> None:
+) -> bool:
     """Retire the active service artifact before an explicit fresh translate."""
     if not explicit:
-        return
+        return False
     found = gh.find_open_pull_by_head(owner, repo, head_branch=branch, base=base)
     if not isinstance(found, tuple) or len(found) != 2:
-        return
+        # A cancelled first publication may have pushed the branch before
+        # creating its PR. Require the exact service commit, not just a prefix.
+        branch_sha = gh.get_branch_sha(owner, repo, branch)
+        if branch_sha is None:
+            return False
+        data = gh._request("GET", f"https://api.github.com/repos/{owner}/{repo}/commits/{branch_sha}")
+        commit = data.get("commit", {})
+        author = commit.get("author", {})
+        if (author.get("name") != _GITHUB_ACTOR_NAME
+                or author.get("email") != _GITHUB_ACTOR_EMAIL
+                or commit.get("message", "").split("\n", 1)[0] not in {
+                    f"Auto-translate docs from PR #{source_pr}",
+                    f"Fix translation critic findings for PR #{source_pr} (attempt 1)",
+                    f"Fix translation critic findings for PR #{source_pr} (attempt 2)",
+                }):
+            raise RuntimeError("cannot prove ownership of translation branch without an open PR")
+        if gh.get_branch_sha(owner, repo, branch) != branch_sha:
+            raise RuntimeError("translation branch changed during restart")
+        if not gh.delete_branch(owner, repo, branch):
+            raise RuntimeError(f"translation restart could not delete service branch {branch}")
+        return True
     _url, translation_pr = found
     pull = gh.get_pull(owner, repo, translation_pr)
     head = pull.get("head") or {}
@@ -451,7 +472,7 @@ def _restart_owned_translation_pr(
         or str(user.get("login") or "")
         not in {"github-actions[bot]", "ydbdoc-review[bot]"}
     ):
-        return
+        raise RuntimeError("translation restart cannot replace a non-service PR branch")
     previous_body = str(pull.get("body") or "").rstrip()
     message = (
         "\n\n> This service translation PR was closed because `doc_translate` "
@@ -462,11 +483,13 @@ def _restart_owned_translation_pr(
     if branch_sha is None:
         # The linked service PR is still retired, but there is no remote ref to
         # delete. Never infer ownership from another branch with the same prefix.
-        return
+        return False
     if not gh.delete_branch(owner, repo, branch):
         raise RuntimeError(
             f"explicit translation restart could not delete service branch {branch}"
         )
+
+    return True
 
 
 def _await_inline_fixup_pr_context(
@@ -1226,6 +1249,8 @@ def _docs_text_reader(
     )
     root = docs_root.strip("/")
 
+    read_frozen = lru_cache(maxsize=1024)(read_text_at_commit)
+
     def _read(path: str) -> str | None:
         normalized = path.replace("\\", "/")
         selected = content_sha
@@ -1234,7 +1259,7 @@ def _docs_text_reader(
                 selected = baseline_sha
             elif normalized.startswith(f"{root}/ru/"):
                 selected = ru_sha
-        return read_text_at_commit(repo_path, selected, normalized)
+        return read_frozen(repo_path, selected, normalized)
 
     return _read
 
@@ -1256,6 +1281,8 @@ def _final_tree_reader(
     overlays = {p.replace("\\", "/") for p in overlay_paths}
     tombstones = {p.replace("\\", "/") for p in deleted_paths}
 
+    read_frozen = lru_cache(maxsize=1024)(read_text_at_commit)
+
     def _read(path: str) -> str | None:
         norm = path.replace("\\", "/")
         if norm in tombstones:
@@ -1270,7 +1297,7 @@ def _final_tree_reader(
                 raise RuntimeError(f"could not read declared overlay: {norm}") from exc
             except UnicodeDecodeError as exc:
                 raise RuntimeError(f"declared overlay is not valid UTF-8: {norm}") from exc
-        return read_text_at_commit(repo_path, base_sha, norm)
+        return read_frozen(repo_path, base_sha, norm)
 
     return _read
 
@@ -1317,9 +1344,7 @@ def _outbound_fragment_identity(
 
 def _isolated_markdown_link(text: str, start: int, end: int) -> str:
     """Keep one link and line offsets while masking every other character."""
-    chars = ["\n" if char == "\n" else "x" for char in text]
-    chars[start:end] = text[start:end]
-    return "".join(chars)
+    return "\n" * text.count("\n", 0, start) + "x" + text[start:end]
 
 
 def _proven_outbound_fragment_occurrences(
@@ -1350,6 +1375,8 @@ def _proven_outbound_fragment_occurrences(
     proven: list[_OutboundFragmentOccurrence] = []
     masked = _mask_yfm_include_directives(text)
     for match in _MD_LINK.finditer(masked):
+        if not canonical_remaining or not final_gate_remaining:
+            break
         href = match.group(2).strip()
         identity = _outbound_fragment_identity(page_path, href)
         if identity is None:
@@ -1409,6 +1436,7 @@ def _defer_proven_outbound_fragments(
             or not run.plan.target_path.endswith(".md")
             or run.target_text is None
             or file_result is None
+            or not file_result.heuristic_blocking
         ):
             continue
         page_path = run.plan.target_path.replace("\\", "/")
@@ -2184,7 +2212,7 @@ def _verify_coverage_semantically(
         source_lang="ru",
         target_lang="en",
         prompt_version=config.prompts.version,
-        max_chars=config.translation.segments_per_batch_chars,
+        max_chars=config.translation.critic_batch_chars,
     )
     return response.verdict == "ok" and not response.issues
 
@@ -2242,7 +2270,10 @@ def _review_translation_candidate(
     """Attach one semantic result and trusted whole-block evidence from frozen K."""
     from ydbdoc_review.translation.critic import run_readonly_semantic_critic
     from ydbdoc_review.translation.errors import TranslationError
-    from ydbdoc_review.translation.review_blocks import AuthoritativeDocument, prepare_review_document
+    from ydbdoc_review.translation.review_blocks import (
+        AuthoritativeDocument,
+        prepare_review_document,
+    )
 
     for run in result.pair_results:
         if run.deleted or run.skipped or run.plan.target_path not in candidate.en_paths:
@@ -2262,7 +2293,7 @@ def _review_translation_candidate(
                 client, units=plan, glossary=glossary,
                 file_path=run.plan.target_path, source_lang=run.plan.source_lang,
                 target_lang=run.plan.target_lang, prompt_version=config.prompts.version,
-                max_chars=config.translation.segments_per_batch_chars,
+                max_chars=config.translation.critic_batch_chars,
             )
             for unit in plan.units:
                 blocks = [b for b in plan.en.blocks if b.id in unit.en_block_ids]
@@ -2270,6 +2301,11 @@ def _review_translation_candidate(
                 fr.segment_lines[unit.id] = (min(b.line_start for b in blocks), max(b.line_end for b in blocks))
                 fr.segment_excerpts[unit.id] = unit.en_text
                 fr.segment_source_excerpts[unit.id] = unit.ru_text
+            fr.verdict = (
+                "blocked" if fr.heuristic_blocking or fr.segment_alignment_error
+                or fr.link_contract_issues or run.validation_issues
+                else "warnings" if fr.heuristic_warnings or fr.manual_actions else "ok"
+            )
             fr.critic_initial = response
             fr.critic_unresolved = response
             fr.final_review_response = response
@@ -2762,6 +2798,10 @@ def run_doc_translate(
     _ops_ctx: OpsContext | None = None,
 ) -> DocJobResult:
     """Full ``doc_translate`` workflow for a source PR."""
+    fresh_label_run = ops_mode == "translate" and bool(
+        os.environ.get("GITHUB_RUN_ID") or os.environ.get("GITHUB_EVENT_ID")
+        or os.environ.get("GITHUB_SHA")
+    )
     started = time.monotonic()
     cfg = config or load_config()
     api_token, push_token = _github_tokens(cfg)
@@ -2870,7 +2910,6 @@ def run_doc_translate(
     )
     authority = authority_selection.authority
     branch = f"{cfg.paths.translation_branch_prefix}{pr_number}"
-    destination_lease = _snapshot_destination_lease(gh, owner, repo, branch)
     upstream_url = repo_https_clone_url(owner, repo)
     branch_remote_url, branch_start_ref = translation_branch_base(ctx)
     translation_prepare_parent_sha = authority_selection.prepare_parent_sha
@@ -2972,6 +3011,9 @@ def run_doc_translate(
     # An empty supported scope is terminal before preflight. Preflight is a
     # document check and must not turn an unsupported/excluded file into a
     # model or publication failure.
+    if fresh_label_run and not dry_run and not no_commit and os.environ.get("GITHUB_RUN_ID"):
+        from ydbdoc_review.github.restart import stop_previous_runs
+        stop_previous_runs(gh, owner, repo, pr_number, int(os.environ["GITHUB_RUN_ID"]))
     if not pairs and not nav_pairs:
         logger.info("No supported files or mechanical operations in PR #%s", pr_number)
         if bilingual_skip:
@@ -3021,6 +3063,18 @@ def run_doc_translate(
                 cost_rub=0.0,
             )
         return job
+    deleted_previous_branch = False
+    if fresh_label_run and not dry_run and not no_commit:
+        if branch == ctx.head_ref and ctx.head_repo_full_name == github_repo:
+            raise RuntimeError("translation restart must not delete the source branch")
+        deleted_previous_branch = _restart_owned_translation_pr(
+            gh, owner, repo, source_pr=pr_number, branch=branch,
+            base=translation_pr_base(ctx), explicit=True,
+        )
+
+    destination_lease = _snapshot_destination_lease(gh, owner, repo, branch)
+    if deleted_previous_branch and destination_lease.expected_sha is not None:
+        raise RuntimeError("translation branch recreated by another writer after restart")
     preflight = preflight_translation(
         preflight_plan,
         read_ru=read_ru,
@@ -3101,7 +3155,7 @@ def run_doc_translate(
     requested_resume_parent = parent_run_id or (
         getattr(ops_ctx, "parent_run_id", None) if ops_ctx is not None else None
     )
-    resume_parent_run_id = _resolve_translation_resume_parent(
+    resume_parent_run_id = None if fresh_label_run else _resolve_translation_resume_parent(
         ops_ctx=ops_ctx,
         checkpoint=active_checkpoint,
         explicit_parent_run_id=requested_resume_parent,
@@ -3174,7 +3228,8 @@ def run_doc_translate(
                 )
             analyzed_noop = None
             if (
-                isinstance(ops_ctx, OpsContext)
+                ops_mode != "translate"
+                and isinstance(ops_ctx, OpsContext)
                 and bool(ctx.head_sha)
                 and bool(ctx.base_sha)
                 and ctx.head_sha != ctx.base_sha
@@ -3193,23 +3248,6 @@ def run_doc_translate(
             if analyzed_noop is not None:
                 pr_result = analyzed_noop
             else:
-                if (
-                    ops_mode == "translate"
-                    and bool(
-                        os.environ.get("GITHUB_EVENT_ID") or os.environ.get("GITHUB_SHA")
-                    )
-                    and not dry_run
-                    and not no_commit
-                ):
-                    _restart_owned_translation_pr(
-                        gh,
-                        owner,
-                        repo,
-                        source_pr=pr_number,
-                        branch=f"{cfg.paths.translation_branch_prefix}{pr_number}",
-                        base=translation_pr_base(ctx),
-                        explicit=True,
-                    )
                 # Analyze is only an all-pairs no-op gate. Any non-aligned,
                 # missing, malformed, or unsupported result keeps the existing
                 # deterministic full-render path (#45949 / #51696).
@@ -3233,21 +3271,6 @@ def run_doc_translate(
                     prepare_only=True,
                 )
         else:
-            if (
-                ops_mode == "translate"
-                and bool(os.environ.get("GITHUB_EVENT_ID") or os.environ.get("GITHUB_SHA"))
-                and not dry_run
-                and not no_commit
-            ):
-                _restart_owned_translation_pr(
-                    gh,
-                    owner,
-                    repo,
-                    source_pr=pr_number,
-                    branch=f"{cfg.paths.translation_branch_prefix}{pr_number}",
-                    base=translation_pr_base(ctx),
-                    explicit=True,
-                )
             pr_result = PRTranslationResult()
 
         _merge_yellow_warnings(pr_result, scope_plan.link_dep_warnings)
@@ -3794,6 +3817,7 @@ def run_doc_translate(
             github_repo,
             publication_result=pr_result,
             publication_plan=publication_plan(ctx),
+            review_pending=True,
         )
         expected_artifact_sha = (
             reused_existing_artifact_pr.bound_sha
@@ -3894,16 +3918,112 @@ def run_doc_translate(
                                if not run.deleted and run.target_text is not None),
                 deleted_paths=tuple(touched.deleted),
             )
-        review_receipt = review_final_candidate(
-            final_candidate,
-            lambda candidate: _review_translation_candidate(
-                repo_path, candidate, pr_result, client, glossary, cfg,
-            ),
-        )
-        require_reviewed_candidate(final_candidate, review_receipt)
-        pr_result.final_candidate = final_candidate
-        pr_result.candidate_repo_path = repo_path
-        _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
+        # D-001/D-004: the PR exists for K1; every repair creates a new K.
+        from ydbdoc_review.pipeline.candidate_repair import repair_candidate_files
+
+        job.translation_pr_url = tr_pr_url
+        job.translation_pr_number = tr_pr_number
+        for review_index in range(3):
+            _require_remote_sha(gh, owner, repo, branch, final_candidate.commit_sha,
+                                context="before candidate review")
+            review_receipt = review_final_candidate(
+                final_candidate,
+                lambda candidate, result=pr_result: _review_translation_candidate(
+                    repo_path, candidate, result, client, glossary, cfg,
+                ),
+            )
+            require_reviewed_candidate(final_candidate, review_receipt)
+            pr_result.final_candidate = final_candidate
+            pr_result.candidate_repo_path = repo_path
+            _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
+            if review_index == 2:
+                break
+            # Stage proposed repairs separately: a failed/no-op repair keeps
+            # the findings and bytes of the last actually reviewed candidate.
+            from copy import deepcopy
+            proposed = deepcopy(pr_result)
+            repaired_paths = repair_candidate_files(
+                repo_path, final_candidate, proposed, client, glossary, cfg,
+                en_toc_reachable=en_toc_reachable,
+                docs_text_reader=_docs_text_reader(
+                    repo_path, merge_base_with, authority=authority, docs_root=docs_root,
+                ),
+            )
+            if not repaired_paths:
+                pr_result = proposed
+                job.pr_result = verify_result = pr_result
+                _refresh_translation_qa_impact(pr_result, candidate=final_candidate)
+                break
+            if _freeze_candidate_sha(repo_path) != final_candidate.commit_sha:
+                raise RuntimeError("local candidate changed during review; repair not committed")
+            _require_remote_sha(gh, owner, repo, branch, final_candidate.commit_sha,
+                                context="before candidate repair")
+            repair_touched = _apply_results_to_disk(
+                repo_path, proposed, dry_run=False, docs_root=docs_root,
+                changed_paths=direct_changed_paths,
+            )
+            extra_paths = _declare_exact_ascii_fragment_targets_after_apply(
+                repo_path, repair_touched.written, dry_run=False,
+                merge_base_with=merge_base_with, ru_content_ref=ru_ref,
+                budget=late_budget, docs_root=docs_root, result=proposed,
+            )
+            extra_paths += _repair_en_fragments_after_apply(
+                repo_path, repair_touched.written, dry_run=False,
+                merge_base_with=merge_base_with, ru_content_ref=ru_ref,
+                docs_root=docs_root, result=proposed,
+            )
+            extra_paths += _reconcile_final_en_same_fragment_paths_after_apply(
+                repo_path, contents, proposed, repair_touched.written, dry_run=False,
+                merge_base_with=merge_base_with, ru_content_ref=ru_ref,
+                deleted_paths=repair_touched.deleted,
+            )
+            repair_touched = TouchedPaths(
+                list(dict.fromkeys([*repair_touched.written, *extra_paths])), repair_touched.deleted,
+            )
+            apply_en_link_target_checks(
+                proposed, repo_path=repo_path, en_md_paths=en_written,
+                baseline_read=lambda p: read_text_at_commit(repo_path, merge_base_with, p),
+                docs_read=lambda p: read_text(repo_path, p),
+            )
+            apply_final_en_language_gate(proposed, en_paths=language_paths,
+                                         read_text=lambda p: read_text(repo_path, p))
+            if not git_commit_paths(
+                repo_path, repair_touched.written,
+                f"Fix translation critic findings for PR #{pr_number} (attempt {review_index + 1})",
+                _GITHUB_ACTOR_NAME, _GITHUB_ACTOR_EMAIL,
+                deleted_paths=repair_touched.deleted,
+            ):
+                break
+            repaired_sha = _freeze_candidate_sha(repo_path)
+            push_receipt = push_branch(
+                repo_path, "ydbdoc-review-push", branch, push_token, upstream_url,
+                force=True, guard_remote_ref=True,
+                expected_remote_sha=final_candidate.commit_sha, source_sha=repaired_sha,
+            )
+            expected_artifact_sha = pushed_candidate_sha = repaired_sha
+            final_candidate = bind_final_candidate(
+                repo_path, candidate_sha=repaired_sha,
+                en_paths=tuple(set(final_candidate.en_paths) | set(repair_touched.written)),
+                deleted_paths=final_candidate.deleted_paths,
+            )
+            artifact_provenance = bind_translation_artifact(
+                repo_path, authority_selection, repaired_sha,
+            )
+            if active_checkpoint is not None:
+                coverage_evidence = _persist_candidate_coverage_evidence(
+                    repo_path=repo_path, candidate_sha=repaired_sha, authority=authority,
+                    contents=contents, pair_results=proposed.pair_results,
+                    store=active_checkpoint.store, run_id=active_checkpoint.run_id,
+                )
+                artifact_provenance = replace(
+                    artifact_provenance, coverage_version=coverage_evidence.version,
+                    coverage_run_id=active_checkpoint.run_id,
+                    coverage_digest=coverage_evidence.digest,
+                )
+            pr_result = proposed
+            job.pr_result = verify_result = pr_result
+        _require_remote_sha(gh, owner, repo, branch, expected_artifact_sha,
+                            context="before final candidate report")
         body = build_translation_pr_body(
             pr_number,
             github_repo,

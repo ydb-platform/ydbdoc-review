@@ -9,6 +9,7 @@ description = "AST-based translation pipeline for YDB documentation"
 requires-python = ">=3.11"
 dependencies = [
     "markdown-it-py>=3.0.0",
+    "Pygments>=2.18.0",
     "mdit-py-plugins>=0.4.0",
     "pydantic>=2.5.0",
     "typer>=0.12.0",
@@ -46,7 +47,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra -q --strict-markers -m 'not integration' --ignore=tests/integration/test_llm_smoke.py --ignore=tests/unit/test_llm_eliza_internal.py --ignore=tests/unit/test_F016_provider_model_chains.py --timeout=15 --timeout-method=signal --disable-socket --allow-unix-socket"
+addopts = "-ra -q --strict-markers -m 'not integration' --ignore=tests/integration/test_llm_smoke.py --ignore=tests/unit/test_llm_eliza_internal.py --ignore=tests/unit/test_F016_provider_model_chains.py --timeout=10 --timeout-method=signal --disable-socket --allow-unix-socket"
 timeout_method = "signal"
 markers = [
     "integration: integration tests (require network/API)",

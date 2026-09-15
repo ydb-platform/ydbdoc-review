@@ -130,6 +130,7 @@ def collect_en_toc_reachable_md(
     extra_md_paths: set[str] | frozenset[str] = frozenset(),
     extra_toc_paths: set[str] | frozenset[str] = frozenset(),
     seed_extra_md: bool = True,
+    path_exists: Callable[[str], bool] | None = None,
 ) -> frozenset[str]:
     """Collect EN ``.md`` paths reachable from the **EN-only** sidebar toc graph.
 
@@ -137,6 +138,7 @@ def collect_en_toc_reachable_md(
     are treated as already reachable. When False (orphan-page QA), only pages
     actually listed via toc ``href`` (and existing / pending on disk) count.
     """
+    exists = path_exists if path_exists is not None else lambda path: read_text(path) is not None
     pending_tocs = frozenset(normalize_repo_path(p) for p in extra_toc_paths)
     pending_md = frozenset(normalize_repo_path(p) for p in extra_md_paths)
     reachable: set[str] = set(pending_md) if seed_extra_md else set()
@@ -177,7 +179,7 @@ def collect_en_toc_reachable_md(
             if kind == "href" and resolved.endswith(".md"):
                 # Diplodoc YFM003: href must exist on disk in EN checkout
                 # (or be a pending translate target for this PR).
-                if read_text(resolved) is not None or resolved in pending_md:
+                if resolved in pending_md or exists(resolved):
                     reachable.add(resolved)
             elif kind == "include" and resolved not in seen_tocs:
                 toc_queue.append(resolved)

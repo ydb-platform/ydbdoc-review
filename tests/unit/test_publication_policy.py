@@ -2381,6 +2381,10 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_open_red(
     )
 
     with ExitStack() as stack:
+        stack.enter_context(patch(
+            "ydbdoc_review.translation.critic.run_readonly_semantic_critic",
+            return_value=CriticResponse(verdict="ok", issues=[]),
+        ))
         stack.enter_context(
             patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh)
         )
@@ -2466,7 +2470,8 @@ def test_structurally_safe_real_translation_publishes_broken_target_as_open_red(
     push.assert_called_once()
     assert gh.create_pull.call_args.kwargs["draft"] is False
     assert "Артефакт: опубликован" in gh.create_pull.call_args.kwargs["body"]
-    assert "QA K: 🔴 RED" in gh.create_pull.call_args.kwargs["body"]
+    assert "проверка выполняется" in gh.create_pull.call_args.kwargs["body"]
+    assert gh.update_pull_body.call_args.args[-1].startswith("RED. Candidate K:")
     assert job_requires_nonzero_exit(job) is False
 
 
@@ -2660,6 +2665,8 @@ def test_real_git_commit_preserves_impact_blocker_through_inline_verify(
 
     ops_ctx = SimpleNamespace(recorder=None, continue_feedback=None)
     with (
+        patch("ydbdoc_review.translation.critic.run_readonly_semantic_critic",
+              return_value=CriticResponse(verdict="ok", issues=[])),
         patch("ydbdoc_review.github.workflow.GitHubClient", return_value=gh),
         patch(
             "ydbdoc_review.github.workflow.begin_ops_job",
@@ -4268,10 +4275,10 @@ def test_normal_publication_uses_exact_remote_lease_for_existing_and_new_branch(
     )
 
     assert job.pr_result.publication_impact == "PUBLISH_NORMAL"
+    # Initial lease, metadata, immutable review, then final report.
     assert gh.get_branch_sha.call_args_list == [
         (("o", "r", "ydbdoc-review/pr-7"), {}),
-        (("o", "r", "ydbdoc-review/pr-7"), {}),
-    ]
+    ] * 4
     assert push.call_args.kwargs["guard_remote_ref"] is True
     assert push.call_args.kwargs["expected_remote_sha"] == remote_sha
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from ydbdoc_review.parsing.inline_locations import exact_source_offset
 from ydbdoc_review.parsing.markdown_parser import parse_markdown_located
@@ -29,15 +30,19 @@ def _message(code: str, *, offset: int, text: str) -> str:
 
 
 def check_en_editorial(text: str, *, target_lang: str = "en") -> list[str]:
+    if target_lang.lower() not in {"en", "english"}:
+        return []
+    return list(_check_en_editorial_cached(text))
+
+
+@lru_cache(maxsize=32)
+def _check_en_editorial_cached(text: str) -> tuple[str, ...]:
     """Flag two exact incident forms in visible English Markdown content.
 
     This is intentionally not a general grammar or style checker. It never
     rewrites the document. Findings without an exact parser-owned source
     location are skipped rather than being attributed to the start of a block.
     """
-    if target_lang.lower() not in {"en", "english"}:
-        return []
-
     located = parse_markdown_located(text)
     messages: list[str] = []
 
@@ -75,4 +80,4 @@ def check_en_editorial(text: str, *, target_lang: str = "en") -> list[str]:
             )
         )
 
-    return messages
+    return tuple(messages)

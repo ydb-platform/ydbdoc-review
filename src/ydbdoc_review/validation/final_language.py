@@ -1,4 +1,4 @@
-"""Independent language check of final candidate text, without parser exemptions."""
+"""Final language gate; Markdown code literals are reported as warnings elsewhere."""
 
 from __future__ import annotations
 
@@ -13,14 +13,23 @@ from ydbdoc_review.pipeline.types import (
 )
 
 
-def check_final_en_language(text: str, *, target_lang: str = "en") -> list[str]:
-    """Inspect the original string, including protected syntax and its payload."""
+def check_final_en_language(text: str, *, target_lang: str = "en", markdown: bool = True) -> list[str]:
+    """Inspect final prose and assets; exclude Markdown code blocks (D-003)."""
     if target_lang.casefold() not in {"en", "english"}:
         return []
+    cyrillic = {char for char in set(text) if unicodedata.name(char, "").startswith("CYRILLIC")}
+    if not cyrillic:
+        return []
+    from markdown_it import MarkdownIt
+    code_lines = set()
+    for token in MarkdownIt("commonmark").disable("inline").parse(text) if markdown else ():
+        if token.type in {"fence", "code_block"} and token.map is not None:
+            code_lines.update(range(token.map[0] + 1, token.map[1] + 1))
     lines = [
         (number, line)
         for number, line in enumerate(text.splitlines(), 1)
-        if any(unicodedata.name(char, "").startswith("CYRILLIC") for char in line)
+        if number not in code_lines
+        and any(char in cyrillic for char in line)
     ]
     messages = [f"en_language: line {number}: {line[:120]}" for number, line in lines[:12]]
     if len(lines) > 12:
@@ -50,7 +59,7 @@ def apply_final_en_language_gate(
             for blocker in result.final_tree_blockers
             if blocker.code != "en_language" or blocker.path != path
         ]
-        messages = check_final_en_language(text)
+        messages = check_final_en_language(text, markdown=path.endswith(".md"))
         if messages:
             found.append(path)
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()

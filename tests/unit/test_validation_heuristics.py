@@ -127,7 +127,7 @@ def test_unrestored_placeholder_blocks_glossary_v2():
     assert any(m.startswith("unrestored_placeholder:") for m in classified.blocking)
 
 
-def test_cyrillic_in_yaml_fence_blocks():
+def test_cyrillic_in_yaml_fence_warns():
     """§6.164 / #48595: RU angle-brackets in yaml examples must block."""
     text = dedent(
         """
@@ -156,8 +156,8 @@ def test_cyrillic_in_yaml_fence_blocks():
         source_lang="ru",
         target_lang="en",
     )
-    assert any(m.startswith("cyrillic_in_code_fence:") for m in classified.blocking)
-    assert not any(m.startswith("cyrillic_in_code_fence:") for m in classified.warnings)
+    assert any(m.startswith("cyrillic_in_code_fence:") for m in classified.warnings)
+    assert not any(m.startswith("cyrillic_in_code_fence:") for m in classified.blocking)
 
 
 def test_md_link_parity_ignores_self_basename_link():
@@ -230,7 +230,7 @@ def test_cyrillic_in_en_ignores_fenced_code():
     assert check_cyrillic_in_en(text, target_lang="en") == []
 
 
-def test_cyrillic_in_en_fence_comments_blocks_on_line_comments():
+def test_cyrillic_in_en_fence_comments_warns_on_line_comments():
     """§6.164: residual Cyrillic in fences is blocking, not a soft warning."""
     text = "Intro\n\n```go\n// настраиваем провайдер\n```\n"
     classified = run_file_heuristics_classified(
@@ -242,11 +242,11 @@ def test_cyrillic_in_en_fence_comments_blocks_on_line_comments():
     )
     assert any(
         w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
-        for w in classified.blocking
+        for w in classified.warnings
     )
     assert not any(
         w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
-        for w in classified.warnings
+        for w in classified.blocking
     )
 
 

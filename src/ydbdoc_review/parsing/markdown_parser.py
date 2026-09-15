@@ -6,6 +6,7 @@ Wraps markdown-it-py and converts its flat token stream into our IR tree.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Literal, cast
 
 from markdown_it import MarkdownIt
@@ -127,11 +128,34 @@ class _TokenStream:
 
 
 def parse_markdown(text: str) -> Document:
-    """Parse markdown text into a Document IR tree."""
+    """Return an independent tree; repeated validation reuses parsing only."""
+    return Document.model_validate_json(_parse_markdown_cached(text))
+
+
+@lru_cache(maxsize=64)
+def _parse_markdown_cached(text: str) -> str:
     md = create_parser()
     tokens = md.parse(text)
     stream = _TokenStream(tokens)
-    return _parse_document(stream)
+    return _parse_document(stream).model_dump_json()
+
+
+def parse_headings(text: str) -> list[Heading]:
+    """Parse heading inline content with the same block grammar as full Markdown."""
+    md = create_parser()
+    md.disable("inline")
+    env = {}
+    tokens = md.parse(text, env)
+    md.enable("inline")
+    md.disable("yfm_var_substitute")
+    headings = []
+    for index, token in enumerate(tokens):
+        if token.type != "heading_open":
+            continue
+        inline = tokens[index + 1]
+        inline.children = md.parseInline(inline.content, env)[0].children
+        headings.append(_parse_heading(_TokenStream(tokens[index:index + 3])))
+    return headings
 
 
 def parse_markdown_located(text: str) -> LocatedDocument:

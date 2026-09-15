@@ -940,8 +940,9 @@ def build_translation_pr_body(
     provenance: TranslationArtifactProvenance | None = None,
     publication_plan: PublicationPlan | None = None,
     link: ReportLinkContext | None = None,
+    review_pending: bool = False,
 ) -> str:
-    if publication_result is not None:
+    if publication_result is not None and not review_pending:
         projection, legacy = _final_report_projection(
             publication_result, link=link or ReportLinkContext(github_repo=source_repo),
             refs=(provenance.candidate_sha if provenance else None,),
@@ -952,6 +953,8 @@ def build_translation_pr_body(
             body = re.sub(r"^QA K: [^\n]*", f"QA K: {projection.status}", body, flags=re.MULTILINE)
             return projection.render() + body
     qa_status = _qa_status(publication_result) if publication_result else ("⚪", "не определён")
+    if review_pending:
+        qa_status = ("⚪", "проверка выполняется")
     red = bool(publication_result and result_has_blocking_findings(publication_result))
     banner = ""
     blockers = ""
@@ -1214,10 +1217,9 @@ def build_source_pr_comment(
     )
     if result.publication_failure == "no_supported_files":
         return (
-            "🤖 **ydbdoc-review** — `no_supported_files`\n\n"
-            "В поддерживаемой области нет файлов для обработки. "
+            "🤖 **ydbdoc-review** — Нет файлов для перевода.\n\n"
             f"Причина: {result.scope_reason or 'область пуста'}. "
-            "Analyze, переводчик, QA и Translation PR не запускались.\n\n"
+            "Переводная ветка и PR не создавались; модели не запускались.\n\n"
             f"| Translation PR | — |\n"
             f"| Время | {_format_duration(meta.elapsed_s)} |\n"
             "| Стоимость моделей | ₽0.00 |\n"

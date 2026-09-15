@@ -861,7 +861,7 @@ class FinalizeEnStep:
             finalize_en_target(
                 state.translated_text,
                 fence_ref,
-                client=ctx.client if state.segments else None,
+                client=ctx.client,
                 glossary=ctx.glossary,
                 file_path=state.file_path,
                 source_lang=ctx.source_lang,
@@ -1035,22 +1035,32 @@ class ReportArtifactsStep:
     name = "report_artifacts"
 
     def run(self, state: FileRunState, ctx: HarnessContext) -> None:
-        del ctx
         if state.stopped_early:
             return
+        # Final candidate review supplies its own exact ranges. During
+        # preparation only manual actions need legacy segment excerpts.
+        selected = state.segments
+        placeholders = state.render_base_segments
+        if not ctx.enable_critic:
+            wanted = {action.segment_id for action in state.manual_actions}
+            pairs = [(seg, ph) for seg, ph in zip(state.segments,
+                     state.render_base_segments or state.segments, strict=False)
+                     if seg.id in wanted]
+            selected = [seg for seg, _ in pairs]
+            placeholders = [ph for _, ph in pairs]
         state.segment_lines = build_segment_line_map(
             state.translated_text,
-            state.segments,
+            selected,
             state.translations,
-            placeholder_segments=state.render_base_segments,
+            placeholder_segments=placeholders,
         )
         state.segment_excerpts = build_segment_excerpts(
             state.translated_text,
-            state.segments,
+            selected,
             state.translations,
             state.segment_lines,
-            placeholder_segments=state.render_base_segments,
+            placeholder_segments=placeholders,
         )
         state.segment_source_excerpts = build_segment_source_excerpts(
-            state.segments,
+            selected,
         )

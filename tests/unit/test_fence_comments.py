@@ -10,14 +10,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
 from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.errors import LLMParseError
 from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.pipeline.translate_file import translate_file
 from ydbdoc_review.segmentation.extractor import extract_segments
 from ydbdoc_review.translation.glossary import load_glossary
-from ydbdoc_review.translation.errors import TranslationValidationError
-from ydbdoc_review.pipeline.translate_file import translate_file
-from ydbdoc_review.harness.render import finalize_en_target, render_with_translations
 from ydbdoc_review.validation.fence_comments import (
+    _parse_comment_translate_response,
     check_cyrillic_in_en_fence_comments,
     check_cyrillic_in_en_text_fences,
     collect_cyrillic_fence_comment_lines,
@@ -27,14 +28,11 @@ from ydbdoc_review.validation.fence_comments import (
     translate_cyrillic_text_fences,
     translate_cyrillic_text_fences_with_client,
 )
-from ydbdoc_review.llm.errors import LLMParseError
-from ydbdoc_review.validation.fence_comments import _parse_comment_translate_response
 from ydbdoc_review.validation.fence_integrity import check_fence_body_copy
 from ydbdoc_review.validation.heuristics import (
     _classify_heuristic,
     run_file_heuristics_classified,
 )
-
 
 YQL_SAMPLE = dedent("""
     Data enrichment example with enough English prose for length heuristics here.
@@ -236,7 +234,7 @@ def test_check_cyrillic_in_en_fence_comments_warns():
     warnings = check_cyrillic_in_en_fence_comments(GO_SAMPLE, target_lang="en")
     assert warnings
     assert warnings[0].startswith("cyrillic_in_fence:")
-    assert _classify_heuristic(warnings[0]) == "blocking"
+    assert _classify_heuristic(warnings[0]) == "warnings"
 
 
 def test_check_cyrillic_in_en_fence_comments_skips_prose_outside_fence():
@@ -379,7 +377,7 @@ def test_fence_comment_retries_mostly_english_cyrillic_suffix_and_preserves_byte
     assert client.chat.call_count == 2
 
 
-def test_fence_comment_all_validation_attempts_fail_closed():
+def test_fence_comment_exhaustion_preserves_code_and_warns():
     ids = ["b1-l3", "b1-l4"]
     client = MagicMock()
     client.model_chain_for_role.return_value = ["primary", "fallback"]
@@ -389,10 +387,13 @@ def test_fence_comment_all_validation_attempts_fail_closed():
         )
     )
 
-    with pytest.raises(TranslationValidationError, match="Cyrillic remains"):
-        translate_cyrillic_fence_comments_with_client(
-            GO_SAMPLE, client, load_glossary()
-        )
+    warnings = []
+    out = translate_cyrillic_fence_comments_with_client(
+        GO_SAMPLE, client, load_glossary(), out_warnings=warnings
+    )
+    assert out == GO_SAMPLE
+    assert warnings
+    assert all(_classify_heuristic(w) == "warnings" for w in warnings)
 
     assert client.chat.call_count == 6
 
@@ -451,15 +452,15 @@ def test_fence_comment_translate_skip_surfaces_rate_limit_warning():
         target_lang="en",
     )
     for warning in warnings:
-        classified.blocking.append(warning)
-    assert any("rate-limit" in w for w in classified.blocking)
+        classified.warnings.append(warning)
+    assert any("rate-limit" in w for w in classified.warnings)
     assert any(
         w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
-        for w in classified.blocking
+        for w in classified.warnings
     )
 
 
-def test_run_file_heuristics_classified_fence_comment_is_blocking():
+def test_run_file_heuristics_classified_fence_comment_is_warning():
     classified = run_file_heuristics_classified(
         GO_SAMPLE,
         GO_SAMPLE,
@@ -469,9 +470,9 @@ def test_run_file_heuristics_classified_fence_comment_is_blocking():
     )
     assert any(
         w.startswith("cyrillic_in_fence:") or w.startswith("cyrillic_in_code_fence:")
-        for w in classified.blocking
+        for w in classified.warnings
     )
-    assert not any(w.startswith("cyrillic_in_fence:") for w in classified.warnings)
+    assert not any(w.startswith("cyrillic_in_fence:") for w in classified.blocking)
 
 
 def _completion(content: str):

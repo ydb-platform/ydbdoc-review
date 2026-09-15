@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import PurePosixPath
 from urllib.parse import unquote
 
@@ -234,6 +235,7 @@ def _heading_declares_frag(heading: Heading, frag: str) -> bool:
     return False
 
 
+@lru_cache(maxsize=512)
 def _page_declares_fragment(md: str, frag: str) -> bool:
     if not md or not frag:
         return False

@@ -27,8 +27,11 @@ from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 @pytest.mark.parametrize("scenario", [
     "publish", "dry_run", "no_commit", "drift", "mismatch",
     "early_incomplete", "early_unsafe", "late_unsafe",
+    "repair_one", "repair_two", "repair_exhausted", "restart", "restart_denied",
 ])
 def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
+    repairing = scenario.startswith("repair_")
+    repair_limit = {"repair_one": 1, "repair_two": 2, "repair_exhausted": 3}.get(scenario, 0)
     nonpublishing = scenario if scenario in {"dry_run", "no_commit"} else None
     import subprocess
     root = Path(git_repo)
@@ -58,14 +61,14 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
     candidate_a = "Hello мир.\r\n" if scenario == "late_unsafe" else "Hello final.\r\n"
 
     def translate(segments, *_args, **kwargs):
-        assert not reviewed, "translator called after final critic"
+        assert repairing or not reviewed, "translator called after final critic"
         events.append("translate:" + kwargs["file_path"])
         client.usage_tracker.add(LLMUsage("yandexgpt-5.1", 10, 5, 0, 0, True, "translate"))
-        return {segment.id: "Hello." for segment in segments}
+        return {segment.id: f"Hello repaired {len(reviewed) // 2}." if repairing else "Hello." for segment in segments}
 
     original_late = workflow._repair_en_fragments_after_apply
     def late(*args, **kwargs):
-        assert not reviewed, "late repair after critic"
+        assert repairing or not reviewed, "late repair after critic"
         result = original_late(*args, **kwargs)
         events.append("late_repair")
         if not kwargs["dry_run"]:
@@ -91,8 +94,8 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
 
     def critic(*_args, **kwargs):
         assert published["exists"], "critic ran before candidate PR exists"
-        assert events.count("late_repair") == 1
-        assert sum(e.startswith("translate:") for e in events) == 2
+        assert events.count("late_repair") == (len(reviewed) // 2 + 1 if repairing else 1)
+        assert sum(e.startswith("translate:") for e in events) == (2 * (len(reviewed) // 2 + 1) if repairing else 2)
         sha = push.call_args.kwargs["source_sha"]
         target = kwargs["file_path"].replace("/ru/", "/en/")
         blob = subprocess.check_output(["git", "-C", git_repo, "cat-file", "blob", f"{sha}:{target}"])
@@ -103,11 +106,15 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         if scenario == "drift" and len(reviewed) == 1:
             subprocess.run(["git", "commit", "--allow-empty", "-m", "unrelated HEAD drift"],
                            cwd=root, check=True, capture_output=True)
+        if repairing and (len(reviewed) - 1) // 2 >= repair_limit:
+            return CriticResponse(verdict="ok", issues=[])
         return CriticResponse(verdict="warnings", issues=[CriticIssueOut(
-            segment_id="s0001", severity="warning", category="meaning",
+            segment_id=kwargs["units"].units[0].id if repairing else "s0001", severity="warning", category="meaning",
             comment="Review wording", suggested_text="Do not apply this suggestion.")])
 
     def create(*_args, **_kwargs):
+        assert "проверка выполняется" in _kwargs["body"]
+        assert "QA K: 🟢" not in _kwargs["body"]
         events.append("create_pr")
         published["exists"] = True
         return "https://github.com/o/r/pull/99", 99, True
@@ -124,6 +131,20 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         gh.post_issue_comment.return_value = "url"
         stub("begin_ops_job", return_value=(None, GateResult(ok=True), None))
         stub("create_llm_client", return_value=client)
+        if scenario in {"restart", "restart_denied"}:
+            import os
+            stack.enter_context(patch.dict(os.environ, {"GITHUB_RUN_ID": "123"}))
+            def stop(*args, **kwargs):
+                events.append("stop_old")
+                if scenario == "restart_denied":
+                    raise RuntimeError("stop not confirmed")
+            stack.enter_context(patch("ydbdoc_review.github.restart.stop_previous_runs", side_effect=stop))
+            original_restart = workflow._restart_owned_translation_pr
+            def retire(*args, **kwargs):
+                assert events == ["stop_old"]
+                events.append("retire_branch")
+                return original_restart(*args, **kwargs)
+            stub("_restart_owned_translation_pr", side_effect=retire)
         stub("prepare_translation_branch_on_base", side_effect=lambda *a, **k: events.append("prepare"))
         stub("list_pr_file_changes_git", return_value=changes)
         stub("list_pr_file_changes_api", return_value=changes)
@@ -144,7 +165,7 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
             else:
                 original = getattr(import_module(module), attr)
             def guarded(*args, _original=original, **kwargs):
-                assert not reviewed, "content mutation after critic"
+                assert repairing or not reviewed, "content mutation after critic"
                 return _original(*args, **kwargs)
             stack.enter_context(patch(target, autospec=True, side_effect=guarded))
         if scenario == "mismatch":
@@ -152,11 +173,24 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
             def mismatched(*args, **kwargs):
                 return replace(original_review(*args, **kwargs), candidate_tree_sha="0" * 40)
             stub("review_final_candidate", side_effect=mismatched)
-        with pytest.raises(ValueError, match="candidate_review_mismatch") if scenario == "mismatch" else nullcontext():
+        expected_error = (
+            pytest.raises(RuntimeError, match="stop not confirmed") if scenario == "restart_denied"
+            else pytest.raises(ValueError, match="candidate_review_mismatch") if scenario == "mismatch"
+            else nullcontext()
+        )
+        with expected_error:
             result = workflow.run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=7,
                 merge_base_with=baseline_sha, config=load_config(env=_env()),
                 **({nonpublishing: True} if nonpublishing else {}))
 
+    if scenario == "restart_denied":
+        assert events == ["stop_old"]
+        assert not published["exists"]
+        assert not reviewed
+        push.assert_not_called()
+        return
+    if scenario == "restart":
+        assert events[:2] == ["stop_old", "retire_branch"]
     if scenario == "mismatch":
         assert published["exists"]
         assert gh.update_pull_body.call_count == 0
@@ -168,6 +202,20 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         assert not published["exists"]
         assert _head_sha(git_repo) == source_sha
     else:
+        if repairing:
+            expected_rounds = min(repair_limit + 1, 3)
+            assert len(reviewed) == expected_rounds * 2
+            shas = [entry[0] for entry in reviewed[::2]]
+            assert len(set(shas)) == expected_rounds
+            assert push.call_count == expected_rounds
+            assert gh.create_pull.call_count == 1
+            assert result.pr_result.final_candidate.commit_sha == shas[-1]
+            assert result.translation_pr_number == 99
+            for run in result.pr_result.pair_results:
+                assert run.file_result.final_review_plan.candidate.commit_sha == shas[-1]
+                assert bool(run.file_result.final_review_response.issues) == (scenario == "repair_exhausted")
+            assert shas[-1] in gh.update_pull_body.call_args.args[-1]
+            return
         assert len(reviewed) == 2
         assert result.translation_pr_number == 99
         sha = reviewed[0][0]

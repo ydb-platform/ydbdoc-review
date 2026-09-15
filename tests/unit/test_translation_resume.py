@@ -684,7 +684,10 @@ def test_workflow_rejects_external_checkpoint_with_stale_full_identity(
         )
 
 
-def test_workflow_propagates_selected_resume_parent(tmp_path: Path) -> None:
+@pytest.mark.parametrize("fresh_label", [False, True])
+def test_workflow_propagates_selected_resume_parent(tmp_path: Path, monkeypatch, fresh_label) -> None:
+    if fresh_label:
+        monkeypatch.setenv("GITHUB_RUN_ID", "12345")
     git_repo = _workflow_repo(tmp_path)
     sha = subprocess.check_output(
         ["git", "-C", git_repo, "rev-parse", "HEAD"],
@@ -791,7 +794,7 @@ def test_workflow_propagates_selected_resume_parent(tmp_path: Path) -> None:
             checkpoint=current,
         )
 
-    assert translate.call_args.kwargs["resume_parent_run_id"] == "parent"
+    assert translate.call_args.kwargs["resume_parent_run_id"] == (None if fresh_label else "parent")
 
 
 def test_parent_discovery_never_combines_multiple_runs() -> None:

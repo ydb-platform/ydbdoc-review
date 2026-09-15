@@ -122,15 +122,16 @@ def redirect_public_path_to_repo_md(
     return f"{root}/{locale}/core{p}"
 
 
+@lru_cache(maxsize=16)
 def _redirect_rows_for_locale(
     redirects_yaml: str,
     *,
     locale: str,
-) -> list[tuple[str, str]]:
+) -> tuple[tuple[str, str], ...]:
     """Return common plus selected-locale rows without collapsing conflicts."""
     text = (redirects_yaml or "").strip()
     if not text:
-        return []
+        return ()
     data = _load_redirect_yaml(text)
     rows: list[tuple[str, str]] = []
     if isinstance(data, dict):
@@ -144,7 +145,7 @@ def _redirect_rows_for_locale(
                             str(row.get("to") or "").strip(),
                         )
                     )
-        return rows
+        return tuple(rows)
     if isinstance(data, list):
         for row in data:
             if isinstance(row, dict) and row.get("from") is not None:
@@ -154,11 +155,11 @@ def _redirect_rows_for_locale(
                         str(row.get("to") or "").strip(),
                     )
                 )
-        return rows
-    return [
+        return tuple(rows)
+    return tuple(
         (entry["from_path"], entry["to_path"])
         for entry in parse_redirect_entries(text)
-    ]
+    )
 
 
 def _safe_literal_prefix(value: str) -> bool:
@@ -258,6 +259,18 @@ def prefix_redirect_repo_md_path(
     return result
 
 
+@lru_cache(maxsize=16)
+def _literal_redirect_sources(redirects_yaml: str, locale: str, docs_root: str) -> frozenset[str]:
+    literal_paths = {
+        redirect_public_path_to_repo_md(public, locale=locale, docs_root=docs_root)
+        for public in iter_redirect_from_paths(redirects_yaml)
+        if public.startswith("/")
+        and _PREFIX_FROM.fullmatch(public) is None
+        and _safe_md_suffix(public.removeprefix("/"))
+    }
+    return frozenset(literal_paths)
+
+
 def redirect_source_repo_md_paths(
     redirects_yaml: str,
     *,
@@ -271,13 +284,7 @@ def redirect_source_repo_md_paths(
     RU tombstones often remain on disk for content history while EN never had
     a mirror; translating them creates ``orphan_toc_page`` EN files (#45949).
     """
-    literal_paths = {
-        redirect_public_path_to_repo_md(public, locale=locale, docs_root=docs_root)
-        for public in iter_redirect_from_paths(redirects_yaml)
-        if public.startswith("/")
-        and _PREFIX_FROM.fullmatch(public) is None
-        and _safe_md_suffix(public.removeprefix("/"))
-    }
+    literal_paths = set(_literal_redirect_sources(redirects_yaml, locale, docs_root))
     for candidate in candidate_repo_paths:
         normalized = candidate.replace("\\", "/")
         identity = _repo_md_locale_public(normalized, docs_root=docs_root)

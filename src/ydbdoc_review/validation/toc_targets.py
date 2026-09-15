@@ -6,8 +6,11 @@ Also flag translated EN pages that are not reachable from any sidebar toc (§6.1
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 from collections import deque
 from collections.abc import Callable
+from functools import cache
 from pathlib import Path, PurePosixPath
 
 from ydbdoc_review.github.git_ops import read_text
@@ -113,10 +116,14 @@ def _collect_reachable_include_dependencies(
     toc_reachable: set[str] | frozenset[str],
     docs_root: str,
     locale: str,
+    required_paths: set[str] | None = None,
 ) -> frozenset[str]:
     """Close real YFM Markdown includes from TOC-reachable pages only."""
+    if required_paths is not None and required_paths <= toc_reachable:
+        return frozenset()
     locale_root = f"{docs_root.strip('/')}/{locale}/"
     parser = create_parser()
+    parser.disable("inline")
     queue = deque(
         sorted(
             normalize_repo_path(path)
@@ -124,6 +131,8 @@ def _collect_reachable_include_dependencies(
             if normalize_repo_path(path).startswith(locale_root)
         )
     )
+    if required_paths is not None:
+        queue = deque(sorted(queue, key=lambda path: path not in required_paths))
     seen: set[str] = set()
     reachable: set[str] = set()
 
@@ -136,6 +145,10 @@ def _collect_reachable_include_dependencies(
         if text is None:
             continue
         reachable.add(path)
+        if required_paths is not None and required_paths <= (toc_reachable | reachable):
+            return frozenset(reachable)
+        if "include" not in text or "{%" not in text:
+            continue
         for token in parser.parse(text):
             if token.type != "yfm_include":
                 continue
@@ -159,7 +172,7 @@ def _collect_reachable_include_dependencies(
                 continue
             if read_text(resolved) is None:
                 continue
-            queue.append(resolved)
+            queue.appendleft(resolved)
     return frozenset(reachable)
 
 
@@ -290,6 +303,7 @@ def check_orphan_pages_for_locale(
     if not pending_md:
         return {}
 
+    @cache
     def _read(path: str) -> str | None:
         key = normalize_repo_path(path)
         if key in pending_texts:
@@ -304,6 +318,22 @@ def check_orphan_pages_for_locale(
         if head is not None:
             return head
         return read_text(repo_path, key)
+
+    # Existence checks need the immutable tree listing, not thousands of blob reads.
+    path_exists = None
+    if baseline_ref and re.fullmatch(r"[0-9a-fA-F]{40}", baseline_ref):
+        tree = subprocess.run(
+            ["git", "-C", repo_path, "ls-tree", "-r", "--name-only", "-z",
+             baseline_ref, "--", f"{docs_root.strip('/')}/{loc}/"],
+            capture_output=True, timeout=10,
+        )
+        if tree.returncode == 0:
+            names = set(tree.stdout.decode("utf-8").split("\0"))
+            def path_exists(path: str) -> bool:
+                key = normalize_repo_path(path)
+                if key in pending_texts:
+                    return True
+                return key not in unavailable and key in names
 
     root_toc = f"{docs_root.strip('/')}/{loc}/core/toc_p.yaml"
     extra = {
@@ -322,12 +352,14 @@ def check_orphan_pages_for_locale(
         ),
         extra_toc_paths=extra,
         seed_extra_md=False,
+        path_exists=path_exists,
     )
     include_reachable = _collect_reachable_include_dependencies(
         _read,
         toc_reachable=toc_reachable,
         docs_root=docs_root,
         locale=loc,
+        required_paths=pending_md,
     )
     reachable = toc_reachable | include_reachable
 

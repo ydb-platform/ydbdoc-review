@@ -337,7 +337,7 @@ def _humanize_heuristic_problem(message: str) -> str:
         detail = message.split(":", 1)[1].strip()
         return (
             f"В fenced-блоке EN осталась кириллица: {detail}. "
-            "Переведите плейсхолдеры/комментарии внутри примера на английский."
+            "Техписателю: проверьте эту строку; содержимое кода сохранено."
         )
     if message.startswith("cyrillic_in_text_fence:"):
         detail = message.split(":", 1)[1].strip()

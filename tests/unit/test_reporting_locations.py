@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ydbdoc_review.parsing.ast_types import InlineCode
 from ydbdoc_review.pipeline.types import ManualAction
 from ydbdoc_review.reporting.locations import (
     ReportLinkContext,
@@ -14,7 +15,6 @@ from ydbdoc_review.reporting.locations import (
     manual_action_segment_ids,
 )
 from ydbdoc_review.segmentation.types import ProtectedInline, Segment, SegmentKind
-from ydbdoc_review.parsing.ast_types import InlineCode
 from ydbdoc_review.translation.schemas import CriticIssueOut
 
 
@@ -137,3 +137,24 @@ def test_build_segment_line_map_with_placeholders_and_duplicate_cli_tokens():
     assert lines["s2"] == (5, 5)
     excerpts = build_segment_excerpts(final, [seg_intro, seg_tip], translations, lines)
     assert "connect metrics and tracing" in excerpts["s2"]
+
+
+def test_multiline_excerpt_preserves_original_lines_after_min_line():
+    from ydbdoc_review.reporting.locations import line_range_for_needle
+    text = 'Intro\r\n\r\nFirst part\r\n    second part\r\n\r\nLast\r\n'
+    assert line_range_for_needle(text, 'First part second part', min_line=3) == (3, 4)
+    assert line_range_for_needle(text, 'First part second part', min_line=4) is None
+
+
+def test_normalized_duplicate_excerpt_respects_start_line():
+    from ydbdoc_review.reporting.locations import line_range_for_needle
+    text = 'Same\n paragraph\n\nSame\n paragraph\n'
+    assert line_range_for_needle(text, 'Same paragraph', min_line=4) == (4, 5)
+
+
+def test_cached_parse_returns_independent_mutable_trees():
+    from ydbdoc_review.parsing.markdown_parser import parse_markdown
+    first = parse_markdown('# Cache isolation\n\nParagraph.\n')
+    expected = first.model_dump()
+    first.children.clear()
+    assert parse_markdown('# Cache isolation\n\nParagraph.\n').model_dump() == expected

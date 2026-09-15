@@ -212,10 +212,6 @@ def _align_blocks(candidate: FinalCandidate, ru: BlockInventory,
                     tuple(b.id for b in en.blocks), tuple(b.id for b in ru.blocks)),)
     paths = _heading_paths(ru.blocks)
     target_paths = _heading_paths(en.blocks)
-    sibling_counts = Counter((paths[i], b.heading_level) for i, b in enumerate(ru.blocks) if b.heading_level)
-    source_shapes, target_shapes = _section_shapes(ru.blocks), _section_shapes(en.blocks)
-    sibling_shapes = Counter((paths[i], shape) for i, shape in source_shapes.items())
-    target_sibling_shapes = Counter((target_paths[i], shape) for i, shape in target_shapes.items())
     source_anchors = Counter(b.anchor for b in ru.blocks if b.anchor)
     target_anchors = Counter(b.anchor for b in en.blocks if b.anchor)
     headings: dict[int, bool] = {}
@@ -223,11 +219,9 @@ def _align_blocks(candidate: FinalCandidate, ru: BlockInventory,
         if rb.heading_level:
             anchor_proof = (rb.anchor == eb.anchor and rb.anchor is not None
                             and source_anchors[rb.anchor] == target_anchors[eb.anchor] == 1)
-            distinct_section = (source_shapes[i] == target_shapes.get(i)
-                                and sibling_shapes[(paths[i], source_shapes[i])] == 1
-                                and target_sibling_shapes[(target_paths[i], source_shapes[i])] == 1)
-            unique_child = (rb.anchor is None and eb.anchor is None
-                            and (sibling_counts[(paths[i], rb.heading_level)] == 1 or distinct_section))
+            # Chunk correspondence follows document order. Repeated section
+            # shapes are normal; the model judges their meaning.
+            unique_child = rb.anchor is None and eb.anchor is None
             headings[i] = (paths[i] == target_paths[i] and rb.structure == eb.structure
                            and all(headings.get(parent, False) for parent in paths[i])
                            and (anchor_proof or unique_child
@@ -251,7 +245,7 @@ def _align_blocks(candidate: FinalCandidate, ru: BlockInventory,
         else:
             proven = (rb.structure == eb.structure and paths[i] == target_paths[i]
                       and (ru.text == en.text or len(ru.blocks) == 1
-                           or parent_proven or root_proven
+                           or parent_proven or root_proven or not paths[i]
                            or (rb.kind == "front_matter" and i == 0)))
         if not proven:
             issues.append(ReviewIssue(candidate.commit_sha, en.path, eb.span,

@@ -11,6 +11,7 @@ import posixpath
 import re
 from collections import Counter
 from collections.abc import Callable, Iterable
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit, urlunsplit
 
@@ -47,6 +48,7 @@ def _canonical_href_for_parity(href: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, query, fragment))
 
 
+@lru_cache(maxsize=128)
 def _mask_link_protected_ranges(text: str) -> str:
     chars = list(text)
 
@@ -1246,6 +1248,11 @@ def collect_internal_hrefs(text: str) -> list[str]:
     """Internal docs hrefs in document order (autotitle + ``[]()``)."""
     if isinstance(text, LinkContractResult):
         text = text.text
+    return list(_internal_hrefs_cached(text or ""))
+
+
+@lru_cache(maxsize=128)
+def _internal_hrefs_cached(text: str) -> tuple[str, ...]:
     found: list[str] = []
     for href in _AUTO_LINK.findall(_mask_link_protected_ranges(text or "")):
         if _is_internal_href(href):
@@ -1256,7 +1263,7 @@ def collect_internal_hrefs(text: str) -> list[str]:
             continue  # already counted via _AUTO_LINK
         if _is_internal_href(href):
             found.append(href)
-    return found
+    return tuple(found)
 
 
 def _localized_en_fragment_pairs_ru_remap(
@@ -1945,10 +1952,6 @@ def check_inbound_fragments(
     """
     if not en_page_path or not en_text:
         return []
-    if en_paths is None:
-        if not repo_path:
-            return []
-        en_paths = iter_en_markdown_paths(repo_path, docs_root=docs_root)
 
     declared = set(collect_explicit_anchors(en_text))
     ru_declared = set(collect_explicit_anchors(ru_text)) if ru_text is not None else None
@@ -1956,8 +1959,19 @@ def check_inbound_fragments(
         set(collect_explicit_anchors(en_baseline_text)) if en_baseline_text is not None else None
     )
     removed_from_baseline = baseline_declared - declared if baseline_declared is not None else None
+    # With translation baselines, only these explicit anchors can be actionable.
+    # If all survive, scanning every other EN page cannot produce a finding.
+    if ru_declared is not None or removed_from_baseline is not None:
+        relevant = (ru_declared or set()) | (removed_from_baseline or set())
+        if relevant <= declared:
+            return []
     # Also treat Diplodoc auto-slugs as declared via fragment_repair helper.
     from ydbdoc_review.validation.fragment_repair import fragment_declared_in_markdown
+
+    if en_paths is None:
+        if not repo_path:
+            return []
+        en_paths = iter_en_markdown_paths(repo_path, docs_root=docs_root)
 
     issues: list[str] = []
     seen: set[str] = set()

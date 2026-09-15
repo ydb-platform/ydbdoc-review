@@ -11,6 +11,7 @@ from ydbdoc_review.harness import (
     FileRunState,
     HarnessContext,
 )
+from ydbdoc_review.harness.context import DocsTextReader
 from ydbdoc_review.harness.critic_verdict import compute_critic_verdict
 from ydbdoc_review.harness.render import (
     finalize_en_target,
@@ -45,6 +46,9 @@ def translate_file(
     enable_translate: bool = True,
     existing_target_text: str | None = None,
     base_source_text: str | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
+    docs_text_reader: DocsTextReader | None = None,
+    docs_repo_path: str | None = None,
 ) -> FileTranslationResult:
     """Run the per-file harness.
 
@@ -66,6 +70,9 @@ def translate_file(
         cache=cache,
         max_parallel_batches=max_parallel_batches,
         enable_critic=critic_on,
+        en_toc_reachable=en_toc_reachable,
+        docs_text_reader=docs_text_reader,
+        docs_repo_path=docs_repo_path,
         # The single-file critic-only API is diagnostic and must not silently
         # turn an alignment failure into an unrequested translation LLM call.
         # PR doc_verify explicitly keeps realignment enabled via PRHarness.

@@ -30,7 +30,7 @@ class _GitHub:
 
     def get_branch_sha(self, *_args, **_kwargs):
         self.events.append("confirm")
-        return "a" * 40
+        return "a" * 40 if self.found else None
 
     def delete_branch(self, *_args, **_kwargs):
         self.events.append("delete")
@@ -86,4 +86,4 @@ def test_F092_ownership_history() -> None:
             base="main",
             explicit=explicit,
         )
-        assert gh.events == ["find"] if explicit else gh.events == []
+        assert gh.events == ["find", "confirm"] if explicit else gh.events == []

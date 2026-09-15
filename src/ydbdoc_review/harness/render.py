@@ -24,6 +24,7 @@ from ydbdoc_review.validation.fence_comments import (
 from ydbdoc_review.validation.fence_integrity import (
     enforce_source_fenced_blocks,
     fence_structure_is_round_trip_stable,
+    preserve_finalized_code,
 )
 from ydbdoc_review.validation.glossary_toc_links import (
     en_mirror_path,
@@ -223,6 +224,7 @@ def finalize_en_target_result(
         text = text.text
     if fence_structure_is_round_trip_stable(normalized_source_text, lang=source_lang):
         text = enforce_source_fenced_blocks(text, normalized_source_text)
+    comment_safe_text = text
     if client is not None and glossary is not None:
         text = translate_cyrillic_fence_comments_with_client(
             text,
@@ -234,6 +236,7 @@ def finalize_en_target_result(
             prompt_version=prompt_version,
             out_warnings=out_warnings,
         )
+        comment_safe_text = text
         text = translate_cyrillic_text_fences_with_client(
             text,
             client,
@@ -307,6 +310,7 @@ def finalize_en_target_result(
                     f"href(s) outside EN toc graph: {names}{extra}"
                 )
     text = repair_markdown_link_label_padding(protected, text)
+    text = preserve_finalized_code(text, comment_safe_text)
     return LinkContractResult(text, incoming_issues + link_result.issues)
 
 

@@ -16,7 +16,7 @@ def test_candidate_adapter_uses_whole_units_and_trusted_locations():
     plan = plan_for("\n" * 105 + "Источник.\n", "\n" * 103 + "Source.\n")
     fr = FileTranslationResult(file_path=EN_PATH,
         segments_count=1, verdict="ok", prompt_version="v1", final_text=plan.en.text)
-    run = SimpleNamespace(deleted=False, skipped=False, file_result=fr,
+    run = SimpleNamespace(deleted=False, skipped=False, file_result=fr, validation_issues=[],
         source_text=plan.ru.text, plan=SimpleNamespace(target_path=EN_PATH,
             source_path=plan.ru.path, source_lang="ru", target_lang="en"))
     def answer(messages):
@@ -42,7 +42,7 @@ def test_candidate_adapter_uses_whole_units_and_trusted_locations():
 
 
 @pytest.mark.parametrize("severity", ["warning", "blocked"])
-def test_pr53007_actual_candidate_published_once_and_reviewed_readonly(git_repo, severity):
+def test_pr53007_actual_candidate_is_repaired_then_reviewed_readonly(git_repo, severity):
     """Real translation/render/commit/review; only external services are scripted."""
     import json
     import subprocess
@@ -100,30 +100,36 @@ def test_pr53007_actual_candidate_published_once_and_reviewed_readonly(git_repo,
     events, reviewed = [], []
     suggestion = en.replace("`bind_dn` or `bind_password`", "`bind_dn` and `bind_password`")
 
+    repaired_expected = expected.replace(en, suggestion)
+    repaired_segments = [s.text for s in extract_segments(parse_markdown(repaired_expected))]
+
     def chat(messages, *, role, **kwargs):
         client.usage_tracker.add(LLMUsage(kwargs["model"], 10, 5, 0, 0, True, role))
         if role == "translate":
-            assert not reviewed, "translator reentered after critic"
+            if reviewed:
+                assert "Automatic correction of critic findings" in messages[0]["content"]
             events.append("translate")
             payload = json.loads(messages[-1]["content"].split("```json\n", 1)[1].split("```", 1)[0])
             assert len(payload["segments"]) == len(translated)
             return SimpleNamespace(content=json.dumps({"segments": [
-                {"id": s["id"], "text": text} for s, text in zip(payload["segments"], translated, strict=True)]}))
+                {"id": s["id"], "text": text} for s, text in zip(payload["segments"], repaired_segments if reviewed else translated, strict=True)]}))
         assert role == "critic"
         assert "create_pr" in events
-        assert not reviewed, "second semantic pass"
+        assert len(reviewed) < 2, "unexpected third semantic pass"
         candidate_sha = push.call_args.kwargs["source_sha"]
         blob = subprocess.check_output(["git", "cat-file", "blob", f"{candidate_sha}:{EN_PATH}"], cwd=root)
-        assert blob == expected.encode()
+        assert blob == (repaired_expected if reviewed else expected).encode()
         units = json.loads(messages[-1]["content"])["units"]
-        unit = next(unit for unit in units if unit["en_text"] == en)
+        unit = next(unit for unit in units if unit["en_text"] == (suggestion if reviewed else en))
         assert unit["ru_text"] == ru
         assert unit["candidate_sha"] == candidate_sha
         source_blob = subprocess.check_output(["git", "cat-file", "blob", f"{source_sha}:{source_path}"], cwd=root)
         assert source_blob.decode().splitlines()[105] == ru.strip()
-        assert blob.decode().splitlines()[103] == en.strip()
+        assert blob.decode().splitlines()[103] == (suggestion if reviewed else en).strip()
         reviewed.append((candidate_sha, blob, unit["id"]))
         events.append("critic")
+        if len(reviewed) == 2:
+            return SimpleNamespace(content=json.dumps({"verdict": "ok", "issues": []}))
         return SimpleNamespace(content=json.dumps({"verdict": "blocked", "issues": [{
             "segment_id": unit["id"], "severity": severity, "category": "meaning",
             "comment": "RU requires both credentials; EN incorrectly makes them alternatives.",
@@ -162,20 +168,20 @@ def test_pr53007_actual_candidate_published_once_and_reviewed_readonly(git_repo,
         result = workflow.run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=7,
             merge_base_with=baseline_sha, config=config)
 
-    assert len(reviewed) == 1 and push.call_count == 1
-    sha, blob, unit_id = reviewed[0]
+    assert len(reviewed) == 2 and push.call_count == 2
+    assert reviewed[0][0] != reviewed[1][0]
+    sha, blob, unit_id = reviewed[-1]
     assert sha == _head_sha(git_repo) and sha != source_sha
-    assert (root / EN_PATH).read_bytes() == blob == expected.encode()
-    assert events == ["translate", "create_pr", "critic"]
+    assert (root / EN_PATH).read_bytes() == blob == repaired_expected.encode()
+    assert events == ["translate", "create_pr", "critic", "translate", "critic"]
     assert result.pr_result.publication_impact == PublicationImpact.PUBLISH_NORMAL
     run = next(run for run in result.pr_result.pair_results if run.plan.target_path == EN_PATH)
     fr = run.file_result
-    assert fr.verdict == "warnings" and fr.critic_unresolved.verdict == "warnings"
-    assert [(i.severity, i.category) for i in fr.critic_unresolved.issues] == [("warning", "translation_quality")]
+    assert fr.verdict == "ok" and fr.critic_unresolved.verdict == "ok"
+    assert fr.critic_unresolved.issues == []
     assert fr.segment_lines[unit_id] == (104, 104)
     assert fr.segment_locations[unit_id] == EN_PATH
-    assert fr.segment_excerpts[unit_id] == en
+    assert fr.segment_excerpts[unit_id] == suggestion
     assert fr.segment_source_excerpts[unit_id] == ru
-    assert fr.critic_unresolved.issues[0].suggested_text == suggestion
     assert not fr.critic_applied and not fr.critic_skipped
     assert fr.final_text.encode() == run.target_text.encode() == blob

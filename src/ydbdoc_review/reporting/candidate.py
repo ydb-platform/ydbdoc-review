@@ -1,8 +1,8 @@
 """One read-only, validated projection of Task 3 evidence onto immutable K."""
-from dataclasses import dataclass, replace
-from hashlib import sha256
 import re
 import subprocess
+from dataclasses import dataclass, replace
+from hashlib import sha256
 
 from ydbdoc_review.pipeline import final_candidate
 from ydbdoc_review.pipeline.types import PRTranslationResult
@@ -76,7 +76,7 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
     repo = link.github_repo if link and link.github_repo else cached.github_repo if cached else "ydb-platform/ydb"
     # Revalidate changed evidence without dropping reference conflicts observed by
     # another surface. Mutable worktree/final_text fields are not evidence inputs.
-    evidence_key = sha256(repr((candidate, result.candidate_repo_path, repo, tuple(
+    evidence_key = sha256(repr((candidate, result.candidate_repo_path, repo, tuple((n.en_path, n.target_text, n.error, n.verdict) for n in result.navigation_results), tuple(
         (r.plan.target_path, r.skipped, r.deleted, r.error,
          r.file_result.final_review_plan,
          r.file_result.final_review_response.model_dump() if r.file_result.final_review_response else None,
@@ -106,6 +106,23 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
         global_error = "SHA mismatch: report references must equal full K"
     represented_paths = {r.plan.target_path for r in files
                          if not r.skipped and not r.deleted and not r.error}
+    if candidate is not None:
+        for nav in result.navigation_results:
+            if nav.en_path not in candidate.en_paths:
+                continue
+            represented_paths.add(nav.en_path)
+            try:
+                if global_error or nav.error or nav.target_text is None:
+                    raise ValueError(global_error or nav.error or "missing navigation result")
+                raw_nav = final_candidate.read_candidate_bytes(result.candidate_repo_path, candidate, nav.en_path)
+                if raw_nav != nav.target_text.encode("utf-8"):
+                    raise ValueError("navigation bytes differ from candidate")
+                if nav.verdict == "blocked":
+                    fail(nav.en_path, "navigation validation failed")
+                elif nav.verdict == "warnings":
+                    warning = True
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                fail(nav.en_path, str(exc))
     if candidate is not None:
         # Deleted paths are deliberately absent from en_paths. A present empty
         # file still needs its explicit completed empty ReviewPlan below.
@@ -139,13 +156,15 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
                 fail(path, str(exc), issue.comment if issue else "")
             continue
         if response._review_incomplete or (response.verdict != "ok" and not response.issues):
-            fail(path, "semantic review did not complete")
+            diagnosis = "; ".join(i.comment for i in active if i.comment)
+            fail(path, "semantic review did not complete", diagnosis)
+            continue
         units = {u.id: u for u in plan.units}
         blocks = {b.id: b for b in plan.en.blocks}
         text = raw.decode("utf-8")
         for issue in active:
             try:
-                if not issue.comment.strip() or not (issue.suggested_text or "").strip():
+                if not issue.comment.strip():
                     raise ValueError("missing problem explanation or expected correction")
                 unit = units.get(issue.segment_id)
                 if unit is None:
@@ -175,7 +194,7 @@ def project_candidate_report(result: PRTranslationResult, *, link: ReportLinkCon
                 warning = True
                 items.append(f"YELLOW. `{path}`, [{label}](https://github.com/{repo}/blob/{sha}/{path}{anchor}), K `{sha}`\n"
                              f"EN: «{quote}»\nПроблема: {issue.comment}\n"
-                             f"Ожидаемое исправление: {issue.suggested_text}")
+                             f"Ожидаемое исправление: {issue.suggested_text or issue.comment}")
             except (ValueError, KeyError, IndexError) as exc:
                 fail(path, str(exc), issue.comment)
     status = "RED" if integrity or independent_status == "RED" else "YELLOW" if warning or independent_status == "YELLOW" else "GREEN"

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import pytest
+
 from ydbdoc_review.github import workflow
 
 
@@ -45,9 +47,10 @@ def test_F146_ownership() -> None:
     assert owned.events == ["find", "get", "close", "confirm", "delete"]
 
     human = _GitHub(user="alice")
-    workflow._restart_owned_translation_pr(
-        human, "o", "r", source_pr=42, branch="ydbdoc-review/pr-42", base="main", explicit=True
-    )
+    with pytest.raises(RuntimeError, match="non-service"):
+        workflow._restart_owned_translation_pr(
+            human, "o", "r", source_pr=42, branch="ydbdoc-review/pr-42", base="main", explicit=True
+        )
     assert human.events == ["find", "get"]
 
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
+from functools import lru_cache
 
-from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut
 
 _SEGMENT_PATH_PART = re.compile(
@@ -106,29 +108,50 @@ def _offset_for_line(haystack: str, line: int) -> int:
     return pos
 
 
+@lru_cache(maxsize=8)
+def _line_starts(text: str) -> tuple[int, ...]:
+    return (0, *(m.end() for m in re.finditer("\\n", text)))
+
+
+@lru_cache(maxsize=8)
+def _normalized_search(text: str) -> tuple[str, tuple[int, ...]]:
+    """Whitespace-normalized text with offsets back into the unchanged input."""
+    chunks = []
+    offsets = []
+    for match in re.finditer(r"\S+|\s+", text):
+        value = match.group()
+        if value.isspace():
+            chunks.append(" ")
+            offsets.append(match.start())
+        else:
+            chunks.append(value)
+            offsets.extend(range(match.start(), match.end()))
+    return "".join(chunks), tuple(offsets)
+
+
 def line_range_for_needle(
-    haystack: str,
-    needle: str,
-    *,
-    min_line: int = 1,
+    haystack: str, needle: str, *, min_line: int = 1,
 ) -> tuple[int, int] | None:
-    """Return 1-based inclusive line range for an occurrence of ``needle``."""
+    """Find an excerpt, retaining original line coordinates across whitespace."""
     if not needle:
         return None
-    start_at = _offset_for_line(haystack, min_line)
+    starts = _line_starts(haystack)
+    if min_line > len(starts):
+        return None
+    start_at = starts[max(0, min_line - 1)]
     idx = haystack.find(needle, start_at)
+    end = idx + len(needle)
     if idx < 0:
-        collapsed_hay = re.sub(r"\s+", " ", haystack)
-        collapsed_needle = re.sub(r"\s+", " ", needle).strip()
-        collapsed_start = _offset_for_line(collapsed_hay, min_line)
-        idx = collapsed_hay.find(collapsed_needle, collapsed_start)
-        if idx < 0:
+        normalized, offsets = _normalized_search(haystack)
+        query = re.sub(r"\s+", " ", needle).strip()
+        if not query:
             return None
-        haystack = collapsed_hay
-        needle = collapsed_needle
-    start = haystack.count("\n", 0, idx) + 1
-    end = haystack.count("\n", 0, idx + len(needle)) + 1
-    return start, max(start, end)
+        found = normalized.find(query, bisect_left(offsets, start_at))
+        if found < 0:
+            return None
+        idx, end = offsets[found], offsets[found + len(query) - 1] + 1
+    first = bisect_right(starts, idx)
+    return first, max(first, bisect_right(starts, end))
 
 
 def _truncate_excerpt(text: str, *, max_len: int = 100) -> str:
@@ -136,6 +159,11 @@ def _truncate_excerpt(text: str, *, max_len: int = 100) -> str:
     if len(one_line) <= max_len:
         return one_line
     return one_line[: max_len - 1] + "…"
+
+
+@lru_cache(maxsize=8)
+def _split_lines(text: str) -> tuple[str, ...]:
+    return tuple(text.splitlines())
 
 
 def segment_display_excerpt(
@@ -149,7 +177,7 @@ def segment_display_excerpt(
 ) -> str | None:
     """Short EN/RU snippet reviewers can search for in the file."""
     if line_range and final_text:
-        lines = final_text.splitlines()
+        lines = _split_lines(final_text)
         start, end = line_range
         if 1 <= start <= len(lines):
             chunk = " ".join(lines[start - 1 : end]).strip()
@@ -172,7 +200,7 @@ def excerpt_found_in_file(excerpt: str, final_text: str) -> bool:
         return True
     if excerpt in final_text:
         return True
-    collapsed_hay = re.sub(r"\s+", " ", final_text)
+    collapsed_hay = _normalized_search(final_text)[0]
     collapsed_excerpt = re.sub(r"\s+", " ", excerpt).strip()
     if collapsed_excerpt and collapsed_excerpt in collapsed_hay:
         return True

@@ -11,9 +11,10 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import PurePosixPath
 
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
+from ydbdoc_review.parsing.markdown_parser import parse_headings, parse_markdown
 from ydbdoc_review.rendering.markdown_renderer import _render_inline
 from ydbdoc_review.validation.fragment_repair import (
     fragment_declared_in_markdown,
@@ -58,16 +59,21 @@ def list_declared_fragments(md: str) -> list[str]:
 
 
 def _duplicate_explicit_fragments(md: str) -> list[str]:
+    return list(_duplicate_explicit_fragments_cached(md))
+
+
+@lru_cache(maxsize=128)
+def _duplicate_explicit_fragments_cached(md: str) -> tuple[str, ...]:
     """Return explicit IDs declared more than once in one final page."""
     explicit: list[str] = []
-    for heading in _iter_headings(parse_markdown(md).children):
+    for heading in parse_headings(md):
         _title, inline_anchor = split_heading_anchor_suffix(
             _render_inline(heading.children).strip()
         )
         anchor = heading.anchor or inline_anchor
         if anchor:
             explicit.append(anchor)
-    return sorted(anchor for anchor, count in Counter(explicit).items() if count > 1)
+    return tuple(sorted(anchor for anchor, count in Counter(explicit).items() if count > 1))
 
 
 def _line_number(text: str, offset: int) -> int:
@@ -116,6 +122,10 @@ def check_en_page_link_targets(
     """
     if not en_page_path or not en_text:
         return []
+    # Readers describe one fixed validation snapshot; reuse repeated href reads.
+    read_text = lru_cache(maxsize=None)(read_text)
+    if baseline_read_text is not None:
+        baseline_read_text = lru_cache(maxsize=None)(baseline_read_text)
     issues: list[str] = []
     page = en_page_path.replace("\\", "/")
     docs_root = None
