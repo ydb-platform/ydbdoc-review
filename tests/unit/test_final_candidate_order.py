@@ -216,7 +216,9 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario, merged):
             for run in result.pr_result.pair_results:
                 assert run.file_result.final_review_plan.candidate.commit_sha == shas[-1]
                 assert bool(run.file_result.final_review_response.issues) == (scenario == "repair_exhausted")
-            assert shas[-1] in gh.update_pull_body.call_args.args[-1]
+            body = gh.update_pull_body.call_args.args[-1]
+            assert body.startswith("YELLOW" if scenario == "repair_exhausted" else "GREEN"), body
+            assert shas[-1] in body
             provenance = parse_authority_evidence(gh.update_pull_body.call_args.args[-1])
             assert provenance.candidate_sha == shas[0]
             validate_authority_evidence(

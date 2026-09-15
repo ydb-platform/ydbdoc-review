@@ -9,10 +9,12 @@ import base64
 import binascii
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ydbdoc_review.config.loader import Config
+from ydbdoc_review.github.git_ops import commit_is_ancestor
 from ydbdoc_review.github.pr import PublicationPlan
 from ydbdoc_review.github.provenance import (
     TranslationArtifactProvenance,
@@ -943,9 +945,21 @@ def build_translation_pr_body(
     review_pending: bool = False,
 ) -> str:
     if publication_result is not None and not review_pending:
+        root_ref = provenance.candidate_sha if provenance else None
+        candidate = publication_result.final_candidate
+        if root_ref and candidate and publication_result.candidate_repo_path:
+            try:
+                # Provenance names root C, while the report describes reviewed K.
+                # Repairs may advance K without changing the authority's root.
+                if commit_is_ancestor(publication_result.candidate_repo_path,
+                                      root_ref, candidate.commit_sha):
+                    root_ref = None
+            except (RuntimeError, OSError, subprocess.SubprocessError):
+                # Unproved roots remain conflicting refs and render RED below.
+                pass
         projection, legacy = _final_report_projection(
             publication_result, link=link or ReportLinkContext(github_repo=source_repo),
-            refs=(provenance.candidate_sha if provenance else None,),
+            refs=(root_ref,),
         )
         if projection is not None:
             body = build_translation_pr_body(source_pr, source_repo, publication_result=legacy,
