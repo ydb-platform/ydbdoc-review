@@ -329,3 +329,5 @@ Cross-reference cheat sheet: `§6.*` → 03-design-decisions · `§13.*` → 06-
 - 2026-09-15: [сохранение корневого C после critic repair](docs/memory-bank/11-final-candidate-qa.md#27-provenance-после-автоматического-исправления--2026-09-15); K2/K3 проходят проверку происхождения до push.
 
 - 2026-09-15: [итоговый статус после исправления](docs/memory-bank/11-final-candidate-qa.md#28-итоговый-статус-после-исправления--2026-09-15): проверка ancestry C → K и точных CRLF-байтов.
+
+- 2026-09-15: [D-002: admission новых label-events на одном SHA](docs/memory-bank/10-product-decisions.md#приёмка-d-002-два-события-на-одном-sha--2026-09-15).

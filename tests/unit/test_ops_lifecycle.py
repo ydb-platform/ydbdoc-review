@@ -1,5 +1,7 @@
 """Lifecycle begin/finish with in-memory backends."""
 
+import pytest
+
 from ydbdoc_review.ops.lifecycle import (
     begin_ops_job,
     compose_continue_feedback,
@@ -8,6 +10,34 @@ from ydbdoc_review.ops.lifecycle import (
 )
 from ydbdoc_review.ops.runs import InMemoryRunsLedger, RunRecord
 from ydbdoc_review.ops.transcripts import InMemoryTranscriptStore
+
+
+@pytest.mark.parametrize("skip_gates", [False, True])
+def test_new_label_run_on_same_sha_is_not_a_duplicate(skip_gates):
+    ledger = InMemoryRunsLedger()
+    store = InMemoryTranscriptStore()
+    env = {
+        "GITHUB_ACTOR": "sintjuri", "YDBDOC_ALLOWED_ACTORS": "sintjuri",
+        "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "35007028090",
+        "YDBDOC_TRANSCRIPT_BACKEND": "memory",
+        "YDBDOC_SKIP_OPS_GATES": "1" if skip_gates else "0",
+    }
+
+    def start():
+        return begin_ops_job(mode="translate", repo="o/r", source_pr=51079,
+                             env=env, ledger=ledger, store=store)
+
+    first, gate, _ = start()
+    assert gate.ok and first is not None
+    # The former invocation may have been interrupted before finishing.
+    env["GITHUB_RUN_ID"] = "35007028091"
+    second, gate, _ = start()
+    assert gate.ok and second is not None
+    assert second.run_id != first.run_id
+    # A retry/delivery of the same event must still be deduplicated.
+    env["GITHUB_RUN_ATTEMPT"] = "2"
+    repeated, gate, comment = start()
+    assert repeated is None and gate.status == "duplicate_event" and comment is None
 
 
 def test_begin_acl_deny():

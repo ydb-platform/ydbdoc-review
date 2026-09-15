@@ -2818,6 +2818,7 @@ def run_doc_translate(
             parent_run_id=parent_run_id,
         )
         if not gate.ok:
+            logger.warning("doc_%s not started: %s (%s)", ops_mode, gate.status, gate.reason)
             if deny_body and not dry_run and not no_commit:
                 _safe_post_issue_comment(gh, owner, repo, pr_number, deny_body, label="ops deny")
             return DocJobResult(

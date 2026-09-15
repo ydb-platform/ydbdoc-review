@@ -333,7 +333,10 @@ def begin_ops_job(
     budget = float(env_map.get("YDBDOC_DAILY_BUDGET_RUB") or "5000")
     allowed = parse_allowed_actors(env_map.get("YDBDOC_ALLOWED_ACTORS"))
     run_day = msk_today()
-    event_key = idempotency_key or env_map.get("GITHUB_EVENT_ID") or env_map.get("GITHUB_SHA")
+    # Separate label events can share source bytes. Actions keeps RUN_ID stable
+    # across retries, while a new label event receives a new RUN_ID (D-002).
+    event_key = (idempotency_key or env_map.get("GITHUB_EVENT_ID")
+                 or env_map.get("GITHUB_RUN_ID") or env_map.get("GITHUB_SHA"))
     scoped_event_key = (
         f"{repo}:{source_pr}:{mode}:{event_key}" if event_key else None
     )
