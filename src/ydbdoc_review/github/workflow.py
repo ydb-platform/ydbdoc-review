@@ -3980,13 +3980,17 @@ def run_doc_translate(
             repair_touched = TouchedPaths(
                 list(dict.fromkeys([*repair_touched.written, *extra_paths])), repair_touched.deleted,
             )
+            read_repaired_candidate = _final_tree_reader(
+                repo_path, final_candidate.commit_sha, set(repair_touched.written),
+                deleted_paths=set(repair_touched.deleted),
+            )
             apply_en_link_target_checks(
                 proposed, repo_path=repo_path, en_md_paths=en_written,
                 baseline_read=lambda p: read_text_at_commit(repo_path, merge_base_with, p),
-                docs_read=lambda p: read_text(repo_path, p),
+                docs_read=read_repaired_candidate,
             )
             apply_final_en_language_gate(proposed, en_paths=language_paths,
-                                         read_text=lambda p: read_text(repo_path, p))
+                                         read_text=read_repaired_candidate)
             if not git_commit_paths(
                 repo_path, repair_touched.written,
                 f"Fix translation critic findings for PR #{pr_number} (attempt {review_index + 1})",
