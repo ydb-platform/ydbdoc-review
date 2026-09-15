@@ -103,7 +103,7 @@ def test_F145_restart_report_is_not_alignment_claim():
         meta=ReportMeta(mode="doc_translate", report_number=1, elapsed_s=0),
         config=load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"}),
     )
-    assert "no_supported_files" in body
-    assert "поддерживаемой области нет файлов для обработки" in body
+    assert "Нет файлов для перевода" in body
+    assert "модели не запускались" in body
     assert "всё уже согласовано" not in body
     assert "₽0.00" in body

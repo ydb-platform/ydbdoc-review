@@ -89,14 +89,14 @@ def test_omissions_duplicates_mutation_and_other_snapshot_fail(api):
 
 def test_same_kind_reordering_and_repeated_text_keep_document_context(api):
     plan = prepare(api, "# A\n\nSame.\n\n# B\n\nSame.\n", "# B\n\nSame.\n\n# A\n\nSame.\n")
-    assert not plan.complete
+    assert plan.complete
     assert len({b.id for b in plan.en.blocks}) == 4
-    assert plan.issues[0].reason == "ambiguous whole-block correspondence"
+    assert "# A" in plan.units[0].ru_text and "# B" in plan.units[0].en_text
 
 
-def test_unanchored_translated_multiblock_alignment_is_red(api):
+def test_unanchored_translated_multiblock_is_delivered_to_critic(api):
     plan = prepare(api, "First source.\n\nSecond source.\n", "First target.\n\nSecond target.\n")
-    assert not plan.complete
+    assert plan.complete
     assert len(plan.en.blocks) == 2
 
 

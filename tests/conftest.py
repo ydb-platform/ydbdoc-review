@@ -14,3 +14,10 @@ def _default_yandex_model_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("YDBDOC_ELIZA_CRITIC_FALLBACKS", raising=False)
     monkeypatch.delenv("YDBDOC_MODEL_TRANSLATE", raising=False)
     monkeypatch.delenv("YDBDOC_MODEL_CHECK", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_actions_event_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit workflows must not inherit the hosting CI run as a product event."""
+    for name in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_ID", "GITHUB_SHA"):
+        monkeypatch.delenv(name, raising=False)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 # Slit RU typo copied into EN when fences are preserved: --config-dir/opt
 _CONFIG_DIR_GLUED_OPT = re.compile(r"--config-dir/opt")
@@ -193,9 +194,19 @@ def detect_ru_source_bugs(text: str) -> list[str]:
     return issues
 
 
+@lru_cache(maxsize=32)
 def normalize_ru_source_for_translation(text: str) -> str:
     """Apply safe deterministic fixes to RU text in the workdir before translate."""
-    text = _CONFIG_DIR_GLUED_OPT.sub("--config-dir /opt", text)
+    from markdown_it import MarkdownIt
+
+    protected_lines = set()
+    for token in MarkdownIt("commonmark").parse(text):
+        if token.type in {"fence", "code_block"} and token.map is not None:
+            protected_lines.update(range(*token.map))
+    text = "".join(
+        line if index in protected_lines else _CONFIG_DIR_GLUED_OPT.sub("--config-dir /opt", line)
+        for index, line in enumerate(text.splitlines(keepends=True))
+    )
     return normalize_legacy_markdown_structure(text)
 
 

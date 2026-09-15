@@ -60,6 +60,7 @@ translation:
   # Default: translate the current landed RU tree. Use source-preserving only
   # for an explicit historical-cleanup run; open PRs always use their frozen head.
   ru_authority_mode: current
+  critic_batch_chars: 16000
   segments_per_batch_chars: 2500
   batch_max_output_chars: 6000
   batch_output_expansion_ratio: 1.35

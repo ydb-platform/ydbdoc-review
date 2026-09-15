@@ -174,7 +174,7 @@ def test_mermaid_offsets_are_original_character_spans_and_nested_paths_reinsert(
     assert "a->>a: Request" in actual
 
 
-def test_unsupported_mermaid_grammar_remains_protected_and_blocks_russian():
+def test_unsupported_mermaid_grammar_remains_protected_and_warns_on_russian():
     from ydbdoc_review.harness import TRANSLATE_PROFILE, FileHarness, FileRunState, HarnessContext
 
     source = "```mermaid\nclassDiagram\nclass Пользователь\n```\n"
@@ -185,7 +185,7 @@ def test_unsupported_mermaid_grammar_remains_protected_and_blocks_russian():
         FileRunState(mode="translate", file_path="asset.md", raw_source_text=source,
                      source_text=source), HarnessContext.from_options(client),
     )
-    assert result.verdict == "blocked"
+    assert result.verdict == "warnings"
     assert result.final_text == source
 
 

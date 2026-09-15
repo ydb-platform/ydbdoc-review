@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from ydbdoc_review.parsing.ast_types import (
     BlockNode,
@@ -51,6 +52,7 @@ def code_blocks_from_text(text: str) -> list[FencedCode | IndentedCode]:
     return collect_code_blocks(parse_markdown(text))
 
 
+@lru_cache(maxsize=32)
 def fence_structure_is_round_trip_stable(text: str, *, lang: str = "ru") -> bool:
     """Whether our renderer preserves the source's fenced-block count."""
     raw = len(code_blocks_from_text(text))
@@ -261,26 +263,12 @@ def fence_content_matches_source(
         return source_content == target_content or _fence_diff_is_mermaid_label_translation(
             source_content, target_content
         )
-    if _normalize_fence_content_for_compare(source_content) == _normalize_fence_content_for_compare(
-        target_content
-    ):
-        return True
-    if _fence_diff_is_whitespace_only(source_content, target_content):
-        return True
-    if _fence_lang(fence_info) == "text" and _fence_diff_is_text_diagram_label_translation(
-        source_content, target_content
-    ):
-        return True
-    if _fence_diff_is_comment_translation_only(source_content, target_content):
-        return True
-    if _fence_diff_is_angle_placeholder_translation(source_content, target_content):
-        return True
-    # Comments + angle placeholders in one fence (YAML examples, #47164).
-    collapsed = _collapse_translated_angle_placeholders(source_content, target_content)
-    if collapsed is None:
-        return False
-    src_n, tgt_n = collapsed
-    return _fence_diff_is_comment_translation_only(src_n, tgt_n)
+    if _fence_lang(fence_info) == "text":
+        return source_content == target_content or _fence_diff_is_text_diagram_label_translation(
+            source_content, target_content
+        )
+    from ydbdoc_review.validation.code_comments import comment_skeleton
+    return comment_skeleton(source_content, fence_info) == comment_skeleton(target_content, fence_info)
 
 
 def _source_text_for_fence_compare(source_text: str, *, source_lang: str) -> str:
@@ -378,3 +366,20 @@ def check_absolute_paths_in_fences(source_text: str, target_text: str) -> list[s
                     f"RU has absolute cert path, EN shortened to relative"
                 )
     return warnings
+
+
+def preserve_finalized_code(target_text: str, reference_text: str) -> str:
+    """Undo prose postprocessing inside code without undoing repaired fence layout."""
+    doc = parse_markdown(target_text)
+    targets = collect_code_blocks(doc)
+    references = code_blocks_from_text(reference_text)
+    if len(targets) != len(references):
+        return target_text
+    changed = False
+    for source, target in zip(references, targets, strict=True):
+        if type(source) is not type(target) or not _copy_fence_body_from_source(source, target):
+            continue
+        if source.content != target.content:
+            target.content = source.content
+            changed = True
+    return render_markdown(doc) if changed else target_text

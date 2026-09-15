@@ -11,14 +11,14 @@ from ydbdoc_review.validation.fence_integrity import (
 from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_translation
 
 
-def test_fence_content_allows_whitespace_only_diff():
+def test_fence_content_rejects_whitespace_only_diff():
     """§6.61 #43860: extra blank line inside yql fence is not corruption."""
     src = "DECLARE $customer_id AS Uint64;\nSELECT *\nFROM orders\n"
     tgt = "DECLARE $customer_id AS Uint64;\n\nSELECT *\nFROM orders\n"
-    assert fence_content_matches_source(src, tgt)
-    assert not check_fence_body_copy(f"```yql\n{src}```\n", f"```yql\n{tgt}```\n")
+    assert not fence_content_matches_source(src, tgt)
+    assert check_fence_body_copy(f"```yql\n{src}```\n", f"```yql\n{tgt}```\n")
 
-    assert fence_content_matches_source(
+    assert not fence_content_matches_source(
         "bootstrap --uuid <строка>\n",
         "bootstrap --uuid <string>\n",
     )
@@ -96,22 +96,23 @@ def test_malformed_legacy_source_is_normalized_before_body_validation():
 def test_normalize_ru_config_dir_before_translate():
     ru = "```bash\ninit --config-dir/opt/ydb/cfg\n```\n"
     norm = normalize_ru_source_for_translation(ru)
-    assert "--config-dir /opt" in norm
-    assert "--config-dir/opt" not in norm
+    assert "--config-dir /opt" not in norm
+    assert "--config-dir/opt" in norm
 
 
 def test_fence_content_allows_homoglyph_vm():
     assert fence_content_matches_source(
         "    - host: x #FQDN ВМ\n",
         "    - host: x #FQDN VM\n",
+        fence_info="yaml",
     )
 
 
-def test_check_fence_body_copy_ignores_normalize_fix():
+def test_check_fence_body_copy_rejects_code_normalize_fix():
     """EN may differ from raw RU when pipeline fixed --config-dir/opt in fences."""
     raw_ru = "```bash\ninit --config-dir/opt/ydb/cfg\n```\n"
     en = "```bash\ninit --config-dir /opt/ydb/cfg\n```\n"
-    assert not check_fence_body_copy(raw_ru, en, source_lang="ru")
+    assert check_fence_body_copy(raw_ru, en, source_lang="ru")
 
 
 def test_check_fence_body_copy_ignores_homoglyph_only_diff():
@@ -144,14 +145,14 @@ def test_fence_content_allows_cyrillic_comment_translation_only():
         "    // ... use db ...\n"
         "}\n"
     )
-    assert fence_content_matches_source(ru, en)
+    assert fence_content_matches_source(ru, en, fence_info="go")
     assert not check_fence_body_copy(f"```go\n{ru}```", f"```go\n{en}```")
 
 
 def test_fence_content_allows_trailing_slash_comment_translation():
     ru = "    panic(err) // аварийный выход при ошибке\n"
     en = "    panic(err) // Abort on connection error\n"
-    assert fence_content_matches_source(ru, en)
+    assert fence_content_matches_source(ru, en, fence_info="go")
     assert not check_fence_body_copy(f"```go\n{ru}```", f"```go\n{en}```")
 
 
@@ -159,11 +160,11 @@ def test_fence_content_allows_trailing_hash_yaml_comment_translation():
     """Regression #47164: YAML ``#`` trailing comments may be translated."""
     ru = "    disk_scope: <disk_scope>  # необязательный атрибут\n"
     en = "    disk_scope: <disk_scope>  # optional attribute\n"
-    assert fence_content_matches_source(ru, en)
+    assert fence_content_matches_source(ru, en, fence_info="yaml")
     assert not check_fence_body_copy(f"```yaml\n{ru}```", f"```yaml\n{en}```")
 
 
-def test_fence_content_allows_angle_placeholder_translation():
+def test_fence_content_rejects_angle_placeholder_translation():
     """Regression #47164: RU ``<имя домена>`` vs EN ``<domain name>`` in fences."""
     ru = (
         "domains:\n"
@@ -177,14 +178,14 @@ def test_fence_content_allows_angle_placeholder_translation():
         "  storage_pool_types:\n"
         "  - kind: <type of physical devices used>\n"
     )
-    assert fence_content_matches_source(ru, en)
-    assert not check_fence_body_copy(f"```yaml\n{ru}```", f"```yaml\n{en}```")
+    assert not fence_content_matches_source(ru, en)
+    assert check_fence_body_copy(f"```yaml\n{ru}```", f"```yaml\n{en}```")
 
 
-def test_fence_content_allows_angle_placeholder_plus_hash_comment():
+def test_fence_content_rejects_angle_placeholder_plus_hash_comment():
     ru = "    disk_scope: <имя>  # необязательный атрибут\n"
     en = "    disk_scope: <name>  # optional attribute\n"
-    assert fence_content_matches_source(ru, en)
+    assert not fence_content_matches_source(ru, en)
 
 
 def test_fence_content_rejects_code_line_change_beside_comments():
@@ -328,14 +329,14 @@ def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
         "   ```\n"
     )
     final = _finalize_en_target(en_rendered, norm)
-    assert "#FQDN VM" in final
-    assert "ВМ" not in final
-    assert "<string>" in final
-    assert "<строка>" not in final
+    assert "#FQDN ВМ" in final  # noqa: RUF001 - literal code must remain byte-identical
+    assert "ВМ" in final
+    assert "<строка>" in final
+    assert "<string>" not in final
 
 
-def test_fence_body_allows_comment_translation_with_trailing_blank_line():
+def test_fence_body_rejects_dropped_trailing_blank_line():
     """§6.156: RU fence often keeps a trailing blank line EN drops."""
     ru = "```yql\nSELECT\n   x,  -- ОК: колонка\nFROM t\n\n```\n"
     en = "```yql\nSELECT\n   x,  -- OK: column\nFROM t\n```\n"
-    assert check_fence_body_copy(ru, en, source_lang="ru") == []
+    assert check_fence_body_copy(ru, en, source_lang="ru")

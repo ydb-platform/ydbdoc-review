@@ -78,8 +78,9 @@ def _result(text="Hello.\n", *, file_result=True):
     ],
 )
 def test_final_language_gate_scans_every_final_representation(text):
-    assert check_final_en_language(text, target_lang="en")
-    assert check_final_en_language(text, target_lang="English")
+    is_code = text.startswith(("```", "    "))
+    assert bool(check_final_en_language(text, target_lang="en")) is not is_code
+    assert bool(check_final_en_language(text, target_lang="English")) is not is_code
     assert check_final_en_language(text, target_lang="ru") == []
 
 
@@ -97,8 +98,8 @@ def test_real_harness_final_gate(profile):
     from tests.unit.test_pr51079_protected_validation import _run_protected
 
     result, _ = _run_protected(profile, "```yaml\nkey: Русское\n```\n")
-    assert result.verdict == "blocked"
-    assert any(message.startswith("en_language:") for message in result.heuristic_blocking)
+    assert result.verdict == "warnings"
+    assert not any(message.startswith("en_language:") for message in result.heuristic_blocking)
 
 
 @pytest.mark.parametrize("shortcut", ["preserved", "href_only"])

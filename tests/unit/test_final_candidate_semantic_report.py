@@ -4,18 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from ydbdoc_review.config.loader import load_config
-from ydbdoc_review.config.loader import RuAuthorityMode
+from ydbdoc_review.config.loader import RuAuthorityMode, load_config
 from ydbdoc_review.github.provenance import RuAuthority, TranslationArtifactProvenance
+from ydbdoc_review.parsing.inline_locations import SourceSpan
 from ydbdoc_review.pipeline.analyze import PairPlan
-from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.final_candidate import FinalCandidate
+from ydbdoc_review.pipeline.pairs import DocPair
 from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult, PRTranslationResult
 from ydbdoc_review.reporting import builder
 from ydbdoc_review.reporting.locations import ReportLinkContext
 from ydbdoc_review.translation.review_blocks import AuthoritativeDocument, prepare_review_document
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
-from ydbdoc_review.parsing.inline_locations import SourceSpan
 
 K = "432f16a5749cc40dc9233545b66d8e98f5288efc"
 PATH = "ydb/docs/en/core/security/authentication.md"
@@ -85,6 +84,10 @@ def test_unproved_evidence_is_explicit_red(monkeypatch, damage):
     if damage == "missing": result.final_candidate = None
     if damage == "incomplete": fr.final_review_response._review_incomplete = True
     rendered = body(result)
+    if damage == "correction":
+        assert rendered.startswith("YELLOW")
+        assert PROBLEM in rendered
+        return
     assert rendered.startswith("RED")
     assert "невозможно подтвердить evidence отчёта" in rendered
     assert K in rendered and PATH in rendered
@@ -319,3 +322,32 @@ def test_same_candidate_copy_retains_provenance_conflict(monkeypatch, copy_resul
     rendered = body(result)
     assert rendered.startswith("RED") and "SHA mismatch" in rendered
     assert result.final_candidate_report is projection
+
+
+def test_optional_suggestion_keeps_actionable_warning(monkeypatch):
+    from ydbdoc_review.reporting.candidate import project_candidate_report
+    result, fr = sample(monkeypatch)
+    issue = fr.final_review_response.issues[0]
+    issue.suggested_text = None
+    report = project_candidate_report(result)
+    assert report.status == 'YELLOW'
+    assert PROBLEM in report.render()
+    assert 'missing problem explanation' not in report.render()
+
+
+def test_navigation_uses_exact_bytes_and_navigation_result(monkeypatch):
+    from ydbdoc_review.pipeline import final_candidate
+    from ydbdoc_review.pipeline.types import NavigationRunResult
+    from ydbdoc_review.reporting.candidate import project_candidate_report
+    result, fr = sample(monkeypatch)
+    raw = fr.final_review_plan.en.text
+    fr.final_review_response = CriticResponse(verdict='ok', issues=[])
+    nav_path = 'ydb/docs/en/core/security/toc_p.yaml'
+    nav_text = 'items:\n- name: Security\n  href: authentication.md\n'
+    result.final_candidate = replace(result.final_candidate, en_paths=(PATH, nav_path))
+    fr.final_review_plan = replace(fr.final_review_plan, candidate=result.final_candidate)
+    result.navigation_results = [NavigationRunResult('ru/toc_p.yaml', nav_path, 'toc', target_text=nav_text)]
+    monkeypatch.setattr(final_candidate, 'read_candidate_bytes', lambda repo, candidate, path: nav_text.encode() if path == nav_path else raw.encode())
+    assert project_candidate_report(result).status == 'GREEN'
+    result.navigation_results[0].target_text += '# not committed\n'
+    assert project_candidate_report(result).status == 'RED'

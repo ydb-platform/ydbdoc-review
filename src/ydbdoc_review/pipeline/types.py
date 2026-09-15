@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Literal
 from ydbdoc_review.llm.usage import UsageTracker
 from ydbdoc_review.pipeline.analyze import PairPlan
 from ydbdoc_review.pipeline.final_candidate import FinalCandidate
-from ydbdoc_review.translation.review_blocks import ReviewPlan
 from ydbdoc_review.translation.manual import ManualAction
 from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
 from ydbdoc_review.validation.link_contract import LinkContractIssue
 
 if TYPE_CHECKING:
     from ydbdoc_review.reporting.candidate import CandidateReport
+    from ydbdoc_review.translation.review_blocks import ReviewPlan
 
 FileVerdict = Literal["ok", "warnings", "blocked"]
 

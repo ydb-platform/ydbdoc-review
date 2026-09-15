@@ -101,6 +101,7 @@ class TranslationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_lang: str = "ru"
     target_lang: str = "en"
+    critic_batch_chars: int = Field(default=16000, gt=0)
     segments_per_batch_chars: int = 4000
     batch_max_output_chars: int = 6000
     batch_output_expansion_ratio: float = 1.35

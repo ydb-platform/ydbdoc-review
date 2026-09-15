@@ -16,6 +16,7 @@ from ydbdoc_review.rendering.markdown_renderer import render_markdown
 from ydbdoc_review.translation.errors import TranslationValidationError
 from ydbdoc_review.translation.glossary import Glossary
 from ydbdoc_review.translation.prompts import DEFAULT_PROMPT_VERSION
+from ydbdoc_review.validation.code_comments import comment_spans, replace_comments
 from ydbdoc_review.validation.fence_integrity import collect_code_blocks
 from ydbdoc_review.validation.finalize_skips import finalize_translate_skip_warning
 
@@ -43,6 +44,9 @@ class FenceCommentLine:
     line_index: int
     line: str
     body: str
+    start: int = 0
+    end: int = 0
+    occurrence: int = 0
 
 
 def _trailing_comment_match(line: str) -> re.Match[str] | None:
@@ -100,52 +104,44 @@ def _replace_comment_body(line: str, new_body: str, *, old_body: str | None = No
 
 
 def collect_cyrillic_fence_comment_lines(text: str) -> list[FenceCommentLine]:
-    """Ordered ``//`` / ``#`` / ``--`` comment lines with Cyrillic inside fenced blocks."""
-    blocks = collect_code_blocks(parse_markdown(text))
     found: list[FenceCommentLine] = []
-    for block_index, block in enumerate(blocks, start=1):
-        for line_index, line in enumerate(block.content.splitlines()):
-            body = _comment_body_if_cyrillic(line)
-            if body is not None:
-                found.append(
-                    FenceCommentLine(
-                        block_index=block_index,
-                        line_index=line_index,
-                        line=line,
-                        body=body,
-                    )
-                )
+    for block_index, block in enumerate(collect_code_blocks(parse_markdown(text)), start=1):
+        info = getattr(block, "info", "")
+        counts: dict[int, int] = {}
+        for span in comment_spans(block.content, info):
+            body = block.content[span.start:span.end]
+            if not _CYRILLIC.search(body):
+                continue
+            line_index = block.content[:span.start].count("\n")
+            occurrence = counts.get(line_index, 0)
+            counts[line_index] = occurrence + 1
+            found.append(FenceCommentLine(block_index, line_index,
+                block.content.splitlines()[line_index], body, span.start, span.end, occurrence))
     return found
 
 
-def translate_cyrillic_fence_comments(
-    text: str,
-    translate_fn: Callable[[str], str],
-) -> str:
-    """Replace Cyrillic bodies of ``//`` / ``#`` / ``--`` comment lines inside fences."""
+def _comment_id(item: FenceCommentLine) -> str:
+    suffix = f"-c{item.occurrence}" if item.occurrence else ""
+    return f"b{item.block_index}-l{item.line_index}{suffix}"
+
+
+def _apply_comment_mapping(text: str, items: list[FenceCommentLine], mapping: dict[str, str]) -> str:
     doc = parse_markdown(text)
     blocks = collect_code_blocks(doc)
-    if not blocks:
-        return text
     changed = False
-    for block in blocks:
-        lines = block.content.splitlines()
-        block_changed = False
-        for line_index, line in enumerate(lines):
-            body = _comment_body_if_cyrillic(line)
-            if body is None:
-                continue
-            translated = translate_fn(body.strip()).strip()
-            if not translated or translated == body.strip():
-                continue
-            new_line = _replace_comment_body(line, translated, old_body=body)
-            if new_line != line:
-                lines[line_index] = new_line
-                block_changed = True
-        if block_changed:
-            block.content = "\n".join(lines)
-            changed = True
+    for index, block in enumerate(blocks, start=1):
+        replacements = {(item.start, item.end): mapping[_comment_id(item)]
+                        for item in items if item.block_index == index and _comment_id(item) in mapping}
+        content = replace_comments(block.content, getattr(block, "info", ""), replacements)
+        changed |= content != block.content
+        block.content = content
     return render_markdown(doc) if changed else text
+
+
+def translate_cyrillic_fence_comments(text: str, translate_fn: Callable[[str], str]) -> str:
+    items = collect_cyrillic_fence_comment_lines(text)
+    mapping = {_comment_id(item): translate_fn(item.body).strip() for item in items}
+    return _apply_comment_mapping(text, items, {k: v for k, v in mapping.items() if v})
 
 
 def _iter_fence_comment_lines_in_text(text: str):
@@ -288,7 +284,7 @@ def translate_cyrillic_fence_comments_with_client(
     payload = {
         "comments": [
             {
-                "id": f"b{item.block_index}-l{item.line_index}",
+                "id": _comment_id(item),
                 "text": item.body.strip(),
             }
             for item in items
@@ -309,7 +305,6 @@ def translate_cyrillic_fence_comments_with_client(
     )
     model_chain = client.model_chain_for_role("translate")
     last_exc: Exception | None = None
-    last_validation_exc: LLMParseError | TranslationValidationError | None = None
     mapping: dict[str, str] | None = None
     for model in model_chain:
         for attempt in range(1, 4):
@@ -328,7 +323,7 @@ def translate_cyrillic_fence_comments_with_client(
                 )
                 break
             except (LLMParseError, TranslationValidationError) as exc:
-                last_exc = last_validation_exc = exc
+                last_exc = exc
                 logger.warning(
                     "Fence comment translate validation failed "
                     "(model=%s, attempt=%s/3): %s",
@@ -349,12 +344,6 @@ def translate_cyrillic_fence_comments_with_client(
         if mapping is not None:
             break
     else:
-        if last_validation_exc is not None:
-            if isinstance(last_validation_exc, TranslationValidationError):
-                raise last_validation_exc
-            raise TranslationValidationError(
-                str(last_validation_exc)
-            ) from last_validation_exc
         warning = finalize_translate_skip_warning(
             "fence_comment", last_exc or RuntimeError("unknown")
         )
@@ -363,27 +352,13 @@ def translate_cyrillic_fence_comments_with_client(
             out_warnings.append(warning)
         return text
 
-    def _lookup(body: str, item: FenceCommentLine) -> str:
-        key = f"b{item.block_index}-l{item.line_index}"
-        return mapping.get(key, body.strip())
-
-    doc = parse_markdown(text)
-    blocks = collect_code_blocks(doc)
-    changed = False
-    for item in items:
-        block = blocks[item.block_index - 1]
-        lines = block.content.splitlines()
-        if item.line_index >= len(lines):
-            continue
-        translated = _lookup(item.body, item)
-        new_line = _replace_comment_body(
-            lines[item.line_index], translated, old_body=item.body
-        )
-        if new_line != lines[item.line_index]:
-            lines[item.line_index] = new_line
-            block.content = "\n".join(lines)
-            changed = True
-    return render_markdown(doc) if changed else text
+    try:
+        return _apply_comment_mapping(text, items, mapping)
+    except ValueError as exc:
+        warning = finalize_translate_skip_warning("fence_comment", exc)
+        if out_warnings is not None:
+            out_warnings.append(warning)
+        return text
 
 
 def _text_fence_lang(info: str) -> str:
@@ -491,7 +466,7 @@ def translate_cyrillic_text_fences_with_client(
     payload = {
         "lines": [
             {
-                "id": f"b{item.block_index}-l{item.line_index}",
+                "id": _comment_id(item),
                 "text": item.body,
             }
             for item in items
@@ -547,7 +522,7 @@ def translate_cyrillic_text_fences_with_client(
     def _lookup(body: str) -> str:
         for item in items:
             if item.body.strip() == body.strip():
-                key = f"b{item.block_index}-l{item.line_index}"
+                key = _comment_id(item)
                 return mapping.get(key, body.strip())
         return body.strip()
 

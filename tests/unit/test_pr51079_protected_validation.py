@@ -89,15 +89,15 @@ def _run_protected(profile, source: str, *, target: str | None = None):
 
 
 @pytest.mark.parametrize("profile", PROFILES)
-def test_protected_only_residual_cyrillic_is_blocked(profile):
+def test_protected_only_residual_cyrillic_is_warning(profile):
     text = "```yaml\nkey: Русский\n```\n"
     result, client = _run_protected(profile, text)
 
-    assert result.verdict == "blocked"
-    assert result.heuristic_blocking
+    assert result.verdict == "warnings"
+    assert result.heuristic_warnings
     assert any(
         finding.startswith("cyrillic_in_code_fence:")
-        for finding in result.heuristic_blocking
+        for finding in result.heuristic_warnings
     )
     assert client._client.chat.completions.create.call_count == 0
 

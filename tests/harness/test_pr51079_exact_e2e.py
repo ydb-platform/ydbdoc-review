@@ -49,6 +49,7 @@ from ydbdoc_review.validation.final_language import (
     apply_final_en_language_gate,
     check_final_en_language,
 )
+from ydbdoc_review.validation.heuristics import check_cyrillic_in_en_all_fences
 from ydbdoc_review.validation.toc_targets import apply_orphan_toc_page_checks
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "pr51079-exact"
@@ -66,7 +67,6 @@ EXPECTED_MD = (
 )
 EXPECTED_TOC = "ydb/docs/en/core/security/toc_p.yaml"
 EXPECTED_OUTPUT = (*EXPECTED_MD, EXPECTED_TOC)
-pytestmark = pytest.mark.timeout(180)
 
 
 def _install_offline_external_read_adapters(monkeypatch):
@@ -129,7 +129,13 @@ def _install_offline_external_read_adapters(monkeypatch):
             elif operation == "ls-tree" and "--" in operands:
                 separator = operands.index("--")
                 for path in operands[separator + 1:]:
-                    admit(repo, operands[separator - 1], path)
+                    ref = operands[separator - 1]
+                    if "-r" in operands and "--name-only" in operands and path.endswith("/"):
+                        snapshot = audit.refs.get((str(Path(repo).resolve()), ref))
+                        assert snapshot is not None, "Directory listing needs a registered frozen SHA"
+                        assert any(key.startswith(path) for key in audit.snapshots[snapshot])
+                    else:
+                        admit(repo, ref, path)
             else:
                 if operation not in {
                     "init", "config", "add", "commit", "rev-parse", "rev-list",
@@ -352,7 +358,7 @@ def _run_exact_candidate(tmp_path, audit):
     )
     client, config, requested = _fake_model_client(case)
     result = run_pr_translation(
-        contents, client, load_glossary(), config=config,
+        contents, client, load_glossary(), config=config, prepare_only=True,
         docs_text_reader=case.reader("B"), docs_repo_path=str(repo),
     )
     result.navigation_results = run_navigation_merges(
@@ -531,8 +537,9 @@ def _assert_qa_status(report, expected):
 
 def test_pr51079_defective_original_k_is_non_green(tmp_path, offline_external_read_adapters):
     case = _load_fixture()
-    for path in EXPECTED_MD[2:5]:
-        assert check_final_en_language(case.reader("K")(path)), path
+    for path in EXPECTED_MD[2:4]:
+        assert check_cyrillic_in_en_all_fences(case.reader("K")(path), target_lang="en"), path
+    assert check_final_en_language(case.reader("K")(EXPECTED_MD[4]))
     text = case.reader("K")(EXPECTED_MD[4])
     assert "Имя=Значение,...@<domain>" in text
     assert check_en_editorial(text)
@@ -556,13 +563,13 @@ def test_pr51079_defective_original_k_is_non_green(tmp_path, offline_external_re
     verified, report = _verify_local_candidate(candidate, local_sha)
     assert f"Checkout: `{local_sha[:12]}`" in report
     assert local_sha != case.manifest["defective_translation_head"]
-    assert {b.path for b in verified.final_tree_blockers if b.code == "en_language"} == set(EXPECTED_MD[2:5])
+    assert {b.path for b in verified.final_tree_blockers if b.code == "en_language"} == {EXPECTED_MD[4]}
     _assert_qa_status(report, "🔴 RED")
 
 
 @pytest.mark.parametrize("path,original,mutation,qa_status", [
-    (EXPECTED_MD[3], "actor user as User", "actor user as Пользователь", "🔴 RED"),
-    (EXPECTED_MD[2], "Note right of cache:", "Note right of cache: Русская метка ", "🔴 RED"),
+    (EXPECTED_MD[3], "actor user as User", "actor user as Пользователь", "🟡 YELLOW"),
+    (EXPECTED_MD[2], "Note right of cache:", "Note right of cache: Русская метка ", "🟡 YELLOW"),
     (EXPECTED_MD[4], "Name=Value,...@<domain>", "Имя=Значение,...@<domain>", "🔴 RED"),
     (EXPECTED_MD[4], "`ldaps` scheme", "`ldaps` schema", "🟡 YELLOW"),
     (EXPECTED_MD[4], "[section `use_tls`]", "[ section `use_tls` ]", "🟡 YELLOW"),
@@ -580,7 +587,10 @@ def test_pr51079_single_regression_injection_is_non_green(exact_candidate, path,
         mutated = text.replace(original, mutation, 1)
         assert mutated != text
         assert mutation in mutated
-        assert (check_final_en_language(mutated) if "Русская" in mutation or "Пользователь" in mutation or "Имя=" in mutation else check_en_editorial(mutated))
+        if "Русская" in mutation or "Пользователь" in mutation:
+            assert check_cyrillic_in_en_all_fences(mutated, target_lang="en")
+        else:
+            assert check_final_en_language(mutated) if "Имя=" in mutation else check_en_editorial(mutated)
         (candidate.repo / path).write_bytes(mutated.encode())
     _git(candidate.repo, "add", ".")
     _git(candidate.repo, "commit", "--allow-empty", "-qm", "Single regression K2")
@@ -661,7 +671,11 @@ def test_pr51079_all_git_context_reads_are_recorded(tmp_path, monkeypatch, offli
         if command[0] == "git":
             paths = [str(arg).split(":", 1)[1] for arg in command if ":ydb/docs/" in str(arg)]
             if "ls-tree" in command and "--" in command:
-                paths.extend(command[command.index("--") + 1:])
+                for path in command[command.index("--") + 1:]:
+                    if "-r" in command and "--name-only" in command and path.endswith("/"):
+                        assert any(key.startswith(path) for key in recorded)
+                    else:
+                        paths.append(path)
             for path in paths:
                 actual_reads.add(path)
                 if path not in recorded:

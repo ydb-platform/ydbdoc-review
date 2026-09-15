@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -110,6 +111,9 @@ def repair_markdown_link_label_padding(source_text: str, target_text: str) -> st
     code-fence cases stay byte-identical so the existing heuristic remains a
     non-green signal when a safe repair cannot be proved.
     """
+    # Without boundary padding no supported repair can change the target.
+    if not re.search(r"\[[ \t]|[ \t]\]\(", target_text):
+        return target_text
     source_links = _ordinary_inline_links(source_text)
     target_links = _ordinary_inline_links(target_text)
     if source_links is None or target_links is None or len(source_links) != len(target_links):

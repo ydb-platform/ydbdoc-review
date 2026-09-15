@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github.workflow import (
-    job_requires_nonzero_exit,
     run_doc_continue,
     run_doc_translate,
 )
@@ -217,8 +216,8 @@ def _workflow_patches(
     return translator, heavy_qa, prepare, commit, push
 
 
-def test_F097_early_exit(tmp_path: Path) -> None:
-    """Analyze-proven alignment preserves evidence without translation artifacts."""
+def test_F097_new_translation_ignores_analyze_alignment(tmp_path: Path) -> None:
+    """D-002: a new run performs translation instead of an Analyze-proven no-op."""
     repo, base_sha, head_sha = _repo(tmp_path)
     client = _client(_analyze_response())
     ops = _ops_context(mode="translate")
@@ -229,7 +228,7 @@ def test_F097_early_exit(tmp_path: Path) -> None:
     before = (head_sha, _git(repo, "branch", "--format=%(refname:short)"))
 
     with ExitStack() as stack:
-        translator, heavy_qa, prepare, commit, push = _workflow_patches(
+        translator, heavy_qa, _prepare, _commit, push = _workflow_patches(
             stack, github=github, client=client
         )
         job = run_doc_translate(
@@ -241,39 +240,18 @@ def test_F097_early_exit(tmp_path: Path) -> None:
             _ops_ctx=ops,
         )
 
-    assert [record.role for record in client.usage_tracker.records] == ["analyze"]
-    translator.assert_not_called()
-    heavy_qa.assert_not_called()
-    prepare.assert_not_called()
-    commit.assert_not_called()
-    push.assert_not_called()
-    github.create_pull.assert_not_called()
+    assert not job.analyzed_noop
+    assert [record.role for record in client.usage_tracker.records] == []
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()
+    # The mocked translator returns no bytes: this is not a successful no-op.
     assert job.translation_pr_number is None
-    assert job.committed is False
-    assert job.pushed is False
-    assert job_requires_nonzero_exit(job) is False
+    github.create_pull.assert_not_called()
+    push.assert_not_called()
     assert before == (
         _git(repo, "rev-parse", "HEAD"),
         _git(repo, "branch", "--format=%(refname:short)"),
     )
-    assert Path(repo, ".ydbdoc-state", f"pr-{SOURCE_PR}.json").is_file()
-
-    assert len(ops.ledger.records) == 1
-    run = ops.ledger.records[0]
-    assert run.status == "ok"
-    assert run.input_tokens == 17
-    assert run.output_tokens == 9
-    assert run.cost_rub > 0
-    assert {
-        "job/continuability.json",
-        "llm/001-analyze-req.json",
-        "llm/001-analyze-resp.json",
-        "manifest.json",
-        "report.md",
-    } <= set(ops.store.list_keys(ops.run_id))
-    response = ops.store.get(ops.run_id, "llm/001-analyze-resp.json")
-    assert response is not None
-    assert ALIGNMENT_REASON in response.decode()
 
 
 def test_F097_continue_instruction_reenters_translation_scope(tmp_path: Path) -> None:
@@ -367,8 +345,8 @@ def test_F097_unsupported_pair_cannot_publish_aligned_noop(tmp_path: Path) -> No
     github.post_issue_comment.assert_not_called()
 
 
-def test_F097_complete_evidence_allows_aligned_noop(tmp_path: Path) -> None:
-    """F-137: complete Analyze evidence may authorize an aligned no-op."""
+def test_F097_complete_evidence_cannot_skip_new_translation(tmp_path: Path) -> None:
+    """D-002: a new translation bypasses Analyze even with complete old evidence."""
     repo, base_sha, _head_sha = _repo(tmp_path)
     long_prefix = "X" * 8_100
     Path(repo, RU_PATH).write_text(f"{long_prefix} RU differs\n", encoding="utf-8")
@@ -399,9 +377,9 @@ def test_F097_complete_evidence_allows_aligned_noop(tmp_path: Path) -> None:
             _ops_ctx=ops,
         )
 
-    translator.assert_not_called()
-    heavy_qa.assert_not_called()
-    assert [record.role for record in client.usage_tracker.records] == ["analyze"]
+    translator.assert_called_once()
+    heavy_qa.assert_called_once()
+    assert [record.role for record in client.usage_tracker.records] == []
 
 
 def test_F097_mixed_source_range_cannot_publish_aligned_noop(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
@@ -220,42 +221,20 @@ def check_glossary_term_violations(
 
 
 def check_cyrillic_in_en_all_fences(target_text: str, *, target_lang: str) -> list[str]:
-    """Cyrillic inside **any** fenced code block in EN (yaml/yql/go/text/…).
-
-    Prose Cyrillic is covered by ``check_cyrillic_in_en`` (fences stripped).
-    Comment-only / ``text``-fence helpers still auto-translate, but residual
-    Cyrillic in YAML angle-brackets (``<SID по умолчанию>``, #48595) was
-    invisible to those helpers — this check is the hard merge gate (§6.164).
-    """
+    """Warn on Cyrillic in code using real document line numbers (D-003)."""
     if target_lang.lower() not in {"en", "english"}:
         return []
-    from ydbdoc_review.parsing.ast_types import FencedCode
-    from ydbdoc_review.parsing.markdown_parser import parse_markdown
-    from ydbdoc_review.validation.fence_integrity import collect_code_blocks
+    from markdown_it import MarkdownIt
 
-    found: list[str] = []
-    blocks = collect_code_blocks(parse_markdown(target_text))
-    for block_index, block in enumerate(blocks, start=1):
-        if not isinstance(block, FencedCode):
+    found = []
+    for token in MarkdownIt("commonmark").parse(target_text):
+        if token.type not in {"fence", "code_block"} or token.map is None:
             continue
-        lang = (block.info or "").strip().split()[0].lower() if block.info else ""
-        for line_index, line in enumerate(block.content.splitlines()):
-            if not _CYRILLIC.search(line):
-                continue
-            preview = line.strip().replace("\n", " ")[:120]
-            lang_hint = f" `{lang}`" if lang else ""
-            found.append(
-                "cyrillic_in_code_fence: "
-                f"block {block_index}{lang_hint} line {line_index}: «{preview}»"
-            )
-    if not found:
-        return []
-    out = found[:12]
-    if len(found) > 12:
-        out.append(
-            f"cyrillic_in_code_fence: … и ещё {len(found) - 12} строк с кириллицей в code fence"
-        )
-    return out
+        first_line = token.map[0] + (2 if token.type == "fence" else 1)
+        for offset, line in enumerate(token.content.splitlines()):
+            if _CYRILLIC.search(line):
+                found.append(f"cyrillic_in_code_fence: line {first_line + offset}: «{line.strip()[:120]}»")
+    return found
 
 
 def _md_link_basenames(text: str) -> set[str]:
@@ -317,6 +296,7 @@ def count_fence_markers(text: str) -> int:
     return len(_FENCE_OPEN.findall(text))
 
 
+@lru_cache(maxsize=32)
 def _count_fenced_code_blocks(text: str) -> int:
     """Fenced code blocks in a full markdown file (AST), not ``` lines inside blocks."""
     doc = parse_markdown(text)
@@ -373,6 +353,7 @@ def check_heading_parity(source_text: str, target_text: str) -> list[str]:
     return [f"heading_parity: source {src} headings vs target {tgt}"]
 
 
+@lru_cache(maxsize=32)
 def _count_headings_ast(text: str) -> int:
     from ydbdoc_review.parsing.ast_types import Heading, YfmIf
 
@@ -453,17 +434,17 @@ def _classify_heuristic(message: str) -> Literal["blocking", "warnings", "info"]
         return "warnings"
     if message.startswith("fence_body_copy:"):
         return "warnings"
-    # Residual Cyrillic / unrestored protect markers must never green-merge (§6.164).
+    # D-003: code Cyrillic is advisory; prose and leaked protection markers still block.
     if message.startswith("cyrillic_in_fence:"):
-        return "blocking"
+        return "warnings"
     if message.startswith("cyrillic_in_text_fence:"):
         return "blocking"
     if message.startswith("cyrillic_in_code_fence:"):
-        return "blocking"
+        return "warnings"
     if message.startswith("Кириллица в EN-тексте"):
         return "blocking"
     if message.startswith("fence_comment_translate_skipped:"):
-        return "blocking"
+        return "warnings"
     if message.startswith("text_fence_translate_skipped:"):
         return "blocking"
     if message.startswith("prose_cyrillic_translate_skipped:"):
