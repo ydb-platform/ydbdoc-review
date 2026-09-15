@@ -3995,6 +3995,13 @@ def run_doc_translate(
             ):
                 break
             repaired_sha = _freeze_candidate_sha(repo_path)
+            # C remains the original translation root. K2/K3 descend from C,
+            # not directly from the frozen prepare parent P.
+            artifact_provenance = validate_authority_evidence(
+                repo_path, artifact_provenance,
+                expected_repo=github_repo, expected_source_pr=pr_number,
+                current_candidate_sha=repaired_sha,
+            )
             push_receipt = push_branch(
                 repo_path, "ydbdoc-review-push", branch, push_token, upstream_url,
                 force=True, guard_remote_ref=True,
@@ -4005,9 +4012,6 @@ def run_doc_translate(
                 repo_path, candidate_sha=repaired_sha,
                 en_paths=tuple(set(final_candidate.en_paths) | set(repair_touched.written)),
                 deleted_paths=final_candidate.deleted_paths,
-            )
-            artifact_provenance = bind_translation_artifact(
-                repo_path, authority_selection, repaired_sha,
             )
             if active_checkpoint is not None:
                 coverage_evidence = _persist_candidate_coverage_evidence(

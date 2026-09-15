@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.unit.test_github_workflow import (
-    _bind_fixture_artifact,
     _env,
     _head_sha,
     _wire_translation_publication,
@@ -18,6 +17,7 @@ from tests.unit.test_github_workflow import (
 )
 from ydbdoc_review.config.loader import load_config
 from ydbdoc_review.github import workflow
+from ydbdoc_review.github.provenance import parse_authority_evidence, validate_authority_evidence
 from ydbdoc_review.llm.usage import LLMUsage, UsageTracker
 from ydbdoc_review.ops.gates import GateResult
 from ydbdoc_review.pipeline.types import PublicationImpact
@@ -29,7 +29,8 @@ from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse
     "early_incomplete", "early_unsafe", "late_unsafe",
     "repair_one", "repair_two", "repair_exhausted", "restart", "restart_denied",
 ])
-def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
+@pytest.mark.parametrize("merged", [False, True])
+def test_all_files_and_late_repairs_precede_critic(git_repo, scenario, merged):
     repairing = scenario.startswith("repair_")
     repair_limit = {"repair_one": 1, "repair_two": 2, "repair_exhausted": 3}.get(scenario, 0)
     nonpublishing = scenario if scenario in {"dry_run", "no_commit"} else None
@@ -52,6 +53,8 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
     pull = {"title": "docs", "head": {"ref": "feature/docs", "sha": source_sha,
         "repo": {"clone_url": "https://github.com/o/r.git", "full_name": "o/r"}},
         "base": {"ref": "main", "sha": baseline_sha}}
+    if merged:
+        pull.update(merged=True, merge_commit_sha=source_sha, state="closed")
     changes = [("ydb/docs/ru/a.md", "modified"), ("ydb/docs/ru/b.md", "modified")]
     events = []
     reviewed = []
@@ -148,7 +151,6 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         stub("prepare_translation_branch_on_base", side_effect=lambda *a, **k: events.append("prepare"))
         stub("list_pr_file_changes_git", return_value=changes)
         stub("list_pr_file_changes_api", return_value=changes)
-        stub("bind_translation_artifact", side_effect=_bind_fixture_artifact)
         stub("_repair_en_fragments_after_apply", side_effect=late)
         stub("apply_orphan_toc_page_checks", side_effect=orphan_check)
         stack.enter_context(patch("ydbdoc_review.harness.steps.translate_segments", side_effect=translate))
@@ -180,7 +182,7 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
         )
         with expected_error:
             result = workflow.run_doc_translate(repo_path=git_repo, github_repo="o/r", pr_number=7,
-                merge_base_with=baseline_sha, config=load_config(env=_env()),
+                merge_base_with=source_sha if merged else baseline_sha, config=load_config(env=_env()),
                 **({nonpublishing: True} if nonpublishing else {}))
 
     if scenario == "restart_denied":
@@ -215,6 +217,12 @@ def test_all_files_and_late_repairs_precede_critic(git_repo, scenario):
                 assert run.file_result.final_review_plan.candidate.commit_sha == shas[-1]
                 assert bool(run.file_result.final_review_response.issues) == (scenario == "repair_exhausted")
             assert shas[-1] in gh.update_pull_body.call_args.args[-1]
+            provenance = parse_authority_evidence(gh.update_pull_body.call_args.args[-1])
+            assert provenance.candidate_sha == shas[0]
+            validate_authority_evidence(
+                git_repo, provenance, expected_repo="o/r", expected_source_pr=7,
+                current_candidate_sha=shas[-1],
+            )
             return
         assert len(reviewed) == 2
         assert result.translation_pr_number == 99
