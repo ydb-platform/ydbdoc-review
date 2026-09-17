@@ -69,14 +69,13 @@ def parse_front_matter_with_spans(
         if not isinstance(key, str):
             continue
 
+        if key in TRANSLATABLE_FRONT_MATTER_KEYS:
+            if key in selected_seen:
+                selected_dupes.add(key)
+            selected_seen.add(key)
+
         if isinstance(value_node, ScalarNode):
             semantic = _scalar_semantic(value_node)
-            # Duplicate selected keys: keep last semantic like safe_load, but
-            # mark both as non-translatable (fail closed for surgery).
-            if key in TRANSLATABLE_FRONT_MATTER_KEYS and key in selected_seen:
-                selected_dupes.add(key)
-            if key in TRANSLATABLE_FRONT_MATTER_KEYS:
-                selected_seen.add(key)
             fields[key] = semantic
 
             if (
@@ -84,6 +83,7 @@ def parse_front_matter_with_spans(
                 and isinstance(semantic, str)
                 and semantic.strip()
                 and _value_owned_by_key(key_node, value_node)
+                and not raw[value_node.start_mark.index:value_node.end_mark.index].startswith(("&", "!"))
             ):
                 records.append(
                     _record_from_scalar(raw, key, value_node, line_starts)
@@ -174,6 +174,22 @@ def apply_front_matter_updates(raw: str, updates: dict[str, str]) -> str:
         result = result[:start] + encoded + result[end:]
 
     new_fields, new_records = parse_front_matter_with_spans(result)
+    # A semantic dict comparison alone loses duplicate keys and new fields.
+    # Compare the exact complement of updated scalar interiors as well.
+    def protected_bytes(body: str, records: tuple[FrontMatterValueRecord, ...]) -> list[str]:
+        pieces = []
+        cursor = 0
+        for record in sorted(records, key=lambda r: r.start):
+            if record.key not in allowed:
+                continue
+            start, end = _replaceable_span(record)
+            pieces.append(body[cursor:start])
+            cursor = end
+        pieces.append(body[cursor:])
+        return pieces
+
+    if protected_bytes(raw, source_records) != protected_bytes(result, new_records):
+        raise FrontMatterError("front_matter_protected_bytes_changed")
     _assert_update_integrity(
         source_fields=source_fields,
         source_records=source_records,
@@ -377,3 +393,49 @@ def _assert_update_integrity(
         raise FrontMatterError(
             f"front_matter_translation_requires_style_change:{key}"
         )
+
+
+def quoted_scalar_escapes(
+    raw: str, record: FrontMatterValueRecord,
+) -> tuple[tuple[int, int, str], ...]:
+    """Source-owned escape spans and their text, never escapes invented by a model."""
+    if record.style not in {"'", '"'}:
+        return ()
+    pattern = r"''" if record.style == "'" else r'\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[^\r\n])'
+    start = record.start + 1
+    result = []
+    for match in re.finditer(pattern, raw[start:record.end - 1]):
+        decoded = yaml.safe_load(record.style + match.group() + record.style)
+        result.append((start + match.start(), start + match.end(), decoded))
+    return tuple(result)
+
+
+def encode_decoded_scalar(raw: str, record: FrontMatterValueRecord, value: str) -> str:
+    """Serialize a decoded value in its owned span; untouched spans stay exact.
+
+    Keep the original style when it represents the value exactly; otherwise
+    use safe double quoting. No document-wide YAML dump is involved.
+    """
+    if value == record.value:
+        return raw[record.start:record.end]
+    try:
+        updated = apply_front_matter_updates(raw, {record.key: value})
+    except FrontMatterError:
+        pass  # A scalar style change is serialization, not a model retry.
+    else:
+        suffix_length = len(raw) - record.end
+        return updated[record.start:len(updated) - suffix_length if suffix_length else None]
+    encoded = json.dumps(value, ensure_ascii=False)
+    for char in set(re.findall(r"[\x7f-\x9f\u2028\u2029\ud800-\udfff\ufffe\uffff]", encoded)):
+        encoded = encoded.replace(char, f"\\u{ord(char):04x}")
+    if record.block_header_end is not None:
+        header = raw[record.start:record.block_header_end]
+        comment = header.find("#")
+        if comment >= 0:
+            encoded += " " + header[comment:].rstrip("\r\n")
+        # A block scalar owns its final physical line ending as well.
+        if raw[:record.end].endswith("\n"):
+            encoded += record.newline or "\n"
+    if yaml.safe_load(encoded) != value:
+        raise FrontMatterError(f"front_matter_scalar_encoding_failed:{record.key}")
+    return encoded

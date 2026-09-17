@@ -883,3 +883,25 @@ def exact_source_offset(
     if span is None:
         return None
     return span.trailing_offset if trailing else span.leading_offset
+
+
+def prose_source_spans(tokens: list[Token]) -> tuple[SourceSpan, ...]:
+    """Raw spans of ordinary prose, excluding code, variables and autolinks.
+
+    Use with ``create_parser(source_locations=True)``. Entity/escape tokens are
+    deliberately left source-owned; this does not render or normalize Markdown.
+    """
+    spans: list[SourceSpan] = []
+    autolink = False
+    for token in tokens:
+        if token.type == "link_open":
+            autolink = token.markup == "autolink"
+        elif token.type == "link_close":
+            autolink = False
+        elif token.type == "text" and not autolink:
+            projection = _projection(token)
+            if projection is not None:
+                spans.extend(span for span in projection.spans if span is not None)
+        if token.children:
+            spans.extend(prose_source_spans(token.children))
+    return tuple(spans)
