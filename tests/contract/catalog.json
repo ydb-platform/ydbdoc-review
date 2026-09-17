@@ -9,7 +9,12 @@
     ],
     "status": "pending",
     "owner": "T03",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan.py::test_snapshot_chooses_open_head_or_current_base",
+      "tests/contract/test_plan.py::test_exact_snapshot_survives_branch_and_worktree_movement",
+      "tests/contract/test_plan.py::test_merged_plan_reads_current_base_not_historical_head"
+    ],
+    "tested_scope": "T03: snapshot and plan operations only, exact Git reads and API errors; end-to-end runner/model/publication/report integration pending."
   },
   {
     "id": "R02",
@@ -21,7 +26,11 @@
     ],
     "status": "pending",
     "owner": "T03",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan.py::test_bilingual_early_skip_and_mixed_plan",
+      "tests/contract/test_plan.py::test_old_target_not_read_or_used_as_source"
+    ],
+    "tested_scope": "T03: snapshot and plan operations only, exact Git reads and API errors; end-to-end runner/model/publication/report integration pending."
   },
   {
     "id": "R03",
@@ -32,7 +41,11 @@
     ],
     "status": "pending",
     "owner": "T03",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan.py::test_api_rename_metadata_and_errors",
+      "tests/contract/test_plan.py::test_partial_api_failure_does_not_return_partial_plan"
+    ],
+    "tested_scope": "T03: snapshot and plan operations only, exact Git reads and API errors; end-to-end runner/model/publication/report integration pending."
   },
   {
     "id": "R04",
@@ -44,7 +57,12 @@
     ],
     "status": "pending",
     "owner": "T03",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan.py::test_mirror_operations_both_directions",
+      "tests/contract/test_plan.py::test_bilingual_early_skip_and_mixed_plan",
+      "tests/contract/test_plan.py::test_different_renames_are_not_bilingual_equivalent"
+    ],
+    "tested_scope": "T03: snapshot and plan operations only, exact Git reads and API errors; end-to-end runner/model/publication/report integration pending."
   },
   {
     "id": "R05",
@@ -54,7 +72,13 @@
     ],
     "status": "pending",
     "owner": "T04",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan.py::test_missing_or_unreadable_source_fails_with_path_and_reason",
+      "tests/contract/test_plan.py::test_exact_reader_distinguishes_empty_missing_bad_utf8_and_bad_commit",
+      "tests/contract/test_plan_closure.py::test_dependency_read_failure_has_path_reason_and_no_partial_result",
+      "tests/contract/test_plan_closure.py::test_unreadable_target_is_not_treated_as_absent"
+    ],
+    "tested_scope": "T04: complete immutable-SHA closure and Settings-based dependency/raw-character preflight only. Full runner RED and absence of model/branch/PR effects remain pending T15."
   },
   {
     "id": "R06",
@@ -66,7 +90,13 @@
     ],
     "status": "pending",
     "owner": "T04",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan_closure.py::test_chain_cycle_diamond_and_pr_sources_not_extras",
+      "tests/contract/test_plan_closure.py::test_existing_empty_target_and_skipped_bilingual_pairs",
+      "tests/contract/test_plan_closure.py::test_parser_links_references_titles_containers_and_exclusions",
+      "tests/contract/test_plan_closure.py::test_dependency_snapshot_is_immutable_even_after_branch_moves"
+    ],
+    "tested_scope": "T04: complete immutable-SHA closure and Settings-based dependency/raw-character preflight only. Full runner RED and absence of model/branch/PR effects remain pending T15."
   },
   {
     "id": "R07",
@@ -85,9 +115,12 @@
       "tests/contract/test_settings.py::test_integer_limits_reject_invalid_without_echo",
       "tests/contract/test_settings.py::test_actions_examples_supply_exact_variables",
       "tests/contract/test_settings.py::test_docker_passes_variables_and_secret_by_name",
-      "tests/contract/test_settings.py::test_entrypoint_preserves_variables"
+      "tests/contract/test_settings.py::test_entrypoint_preserves_variables",
+      "tests/contract/test_plan_closure.py::test_global_limit_both_languages_and_complete_discovery",
+      "tests/contract/test_plan_closure.py::test_limits_refusal_retains_both_totals_and_original_plan_unchanged"
     ],
-    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending."
+    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending.",
+    "tested_scope": "T04: complete immutable-SHA closure and Settings-based dependency/raw-character preflight only. Full runner RED and absence of model/branch/PR effects remain pending T15."
   },
   {
     "id": "R08",
@@ -104,9 +137,12 @@
       "tests/contract/test_settings.py::test_integer_limits_reject_invalid_without_echo",
       "tests/contract/test_settings.py::test_actions_examples_supply_exact_variables",
       "tests/contract/test_settings.py::test_docker_passes_variables_and_secret_by_name",
-      "tests/contract/test_settings.py::test_entrypoint_preserves_variables"
+      "tests/contract/test_settings.py::test_entrypoint_preserves_variables",
+      "tests/contract/test_plan_closure.py::test_exact_raw_character_boundary_including_dependency",
+      "tests/contract/test_plan_closure.py::test_translation_total_excludes_mechanical_and_skipped_sources"
     ],
-    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending."
+    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending.",
+    "tested_scope": "T04: complete immutable-SHA closure and Settings-based dependency/raw-character preflight only. Full runner RED and absence of model/branch/PR effects remain pending T15."
   },
   {
     "id": "R09",
@@ -205,7 +241,10 @@
     ],
     "status": "pending",
     "owner": "T10",
-    "tests": []
+    "tests": [
+      "tests/contract/test_plan.py::test_snapshot_chooses_open_head_or_current_base"
+    ],
+    "tested_scope": "T03: snapshot and plan operations only, exact Git reads and API errors; end-to-end runner/model/publication/report integration pending."
   },
   {
     "id": "R17",

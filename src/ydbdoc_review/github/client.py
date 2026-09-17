@@ -73,7 +73,9 @@ class GitHubClient:
             batch = self._request(
                 "GET", url, params={"per_page": 100, "page": page}
             )
-            if not isinstance(batch, list) or not batch:
+            if not isinstance(batch, list):
+                raise GitHubAPIError("Malformed PR files response")
+            if not batch:
                 return
             yield from batch
             if len(batch) < 100:
