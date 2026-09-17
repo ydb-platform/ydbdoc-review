@@ -97,7 +97,7 @@ class RunCancelled(Exception):
 
 
 def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = None) -> RunResult:
-    """Finalize metadata only; callbacks run once, save before report.
+    """Finalize metadata only; save before report, reconcile changed outcome once.
 
     Every boundary can turn a published GREEN into RED. Reconcile draft before
     handing off that result and after each callback, including interruptions.
@@ -132,12 +132,23 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
                 failed('draft', exc)
 
     reconcile()
+    saved_result = None
     for name, callback in (('storage', hooks.save), ('report', hooks.report)):
         if callback:
             try:
+                if name == 'storage':
+                    saved_result = result
                 callback(result)
             except (Exception, KeyboardInterrupt) as exc:
                 failed(name, exc)
+            reconcile()
+    # A late report/cancellation/draft failure must not leave a stored GREEN.
+    # One bounded reconciliation write, no second report or quality/model call.
+    if hooks.save and saved_result is not result:
+        try:
+            hooks.save(result)
+        except (Exception, KeyboardInterrupt) as exc:
+            failed('storage final outcome', exc)
             reconcile()
     return result
 
