@@ -191,11 +191,11 @@ def test_parser_links_references_titles_containers_and_exclusions():
 <!-- [hidden](comment.md) -->
 [external](https://host/a.md) [cross](../../en/core/no.md)
 [escape](../../../../evil.md) [anchor](#here)
-[abs](/ydb/docs/ru/core/abs.md) [public](/pub.md)
+[abs](/ru/core/abs.md) [public](/pub.md)
 [encoded](with%20space.md)
 """
     assert set(markdown_dependencies(page("ru", "a"), text)) == {
-        page("ru", name) for name in ["refs", "a(b)", "auto", "note", "abs", "pub", "with space"]
+        page("ru", name) for name in ["refs", "a(b)", "auto", "note", "abs", "with space"]
     }
 
 

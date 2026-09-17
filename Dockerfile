@@ -1,7 +1,13 @@
 # AWS ECR Public mirrors Docker Hub library images; more reliable from GitHub runners.
 # Override at build time: --build-arg BASE_IMAGE=python:3.12-slim (Hub direct).
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim
+FROM public.ecr.aws/docker/library/node:24-bookworm-slim AS docs-builder
+RUN npm install --global @diplodoc/cli@5.61.0
+
 FROM ${BASE_IMAGE}
+COPY --from=docs-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=docs-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/@diplodoc/cli/build/index.js /usr/local/bin/yfm
 
 ARG YDBDOC_GIT_SHA=dev
 ENV YDBDOC_GIT_SHA=${YDBDOC_GIT_SHA}

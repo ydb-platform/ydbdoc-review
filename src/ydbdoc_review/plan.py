@@ -271,45 +271,26 @@ def markdown_dependencies(path: str, text: str, *, docs_root: str = "ydb/docs") 
     Code, images, includes and TOC are not article-link scope expansion rules.
     URL queries/fragments do not change the identity of a source article.
     """
-    import posixpath
-    from urllib.parse import unquote, urlsplit
+    from urllib.parse import urlsplit
 
-    from ydbdoc_review.parsing.markdown_parser import create_parser
+    from ydbdoc_review.links import references, resolve
 
     source_page = page_key(path, docs_root)
     if source_page is None:
         return []
-    language = source_page[0]
-    root = docs_root.rstrip("/")
     found: dict[str, None] = {}
-    pending = list(reversed(create_parser().parse(text)))
-    while pending:
-        token = pending.pop()
-        if token.type == "image":
+    for ref in references(text):
+        if ref.kind != "link":
             continue
-        pending.extend(reversed(token.children or []))
-        if token.type != "link_open":
-            continue
-        href = token.attrGet("href") or ""
         try:
-            url = urlsplit(href)
+            target = resolve(path, ref.href, docs_root=docs_root)
         except ValueError:
-            continue  # malformed href belongs to final link validation
-        if url.scheme or url.netloc or not url.path:
+            continue  # final candidate validation reports malformed URLs
+        if target is None or not urlsplit(ref.href).path:
             continue
-        target = unquote(url.path)
-        if target.startswith(f"/{root}/"):
-            target = target.lstrip("/")
-        elif target.startswith(("/ru/", "/en/")):
-            target = root + target
-        elif target.startswith("/"):
-            target = f"{root}/{language}/core{target}"
-        else:
-            target = posixpath.join(posixpath.dirname(path), target)
-        target = posixpath.normpath(target)
-        target_page = page_key(target, root)
-        if target_page is not None and target_page[0] == language:
-            found[target] = None
+        target_page = page_key(target.path, docs_root)
+        if target_page is not None and target_page[0] == source_page[0]:
+            found[target.path] = None
     return list(found)
 
 

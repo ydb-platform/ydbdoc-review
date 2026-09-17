@@ -11,6 +11,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global @diplodoc/cli@5.61.0
       - run: python -m pip install -e '.[dev]'
       - name: Offline contract fixtures (product E2E still pending)
         run: timeout 900s python -m pytest -vv tests/contract tests/unit/test_yfm_variables.py
