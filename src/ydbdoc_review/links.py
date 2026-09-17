@@ -17,6 +17,7 @@ from types import MappingProxyType
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
+from ydbdoc_review.parsing.front_matter import translatable_front_matter_fields
 from ydbdoc_review.parsing.markdown_parser import create_parser
 from ydbdoc_review.quality import Issue, Location
 
@@ -79,7 +80,7 @@ def _git(repo: Path, *args: str) -> bytes:
 @dataclass(frozen=True)
 class Reference:
     href: str
-    kind: str  # link, asset, include
+    kind: str  # link, html_link, asset, include
     location: Location | None = None
 
 
@@ -111,6 +112,14 @@ def references(text: str) -> tuple[Reference, ...]:
             quote = ''.join(lines[start:end])
             if quote.strip():
                 location = Location(start + 1, end, quote)
+        if token.type == 'front_matter' and token.map:
+            start, end = token.map
+            raw = ''.join(lines[start + 1:end - 1])
+            for value in translatable_front_matter_fields(raw).values():
+                # YAML decoding can fold lines and expand escapes. Locations in
+                # the decoded Markdown are not coordinates in the source YAML.
+                result.extend(Reference(ref.href, ref.kind) for ref in references(value))
+            continue
         if token.type == 'image':
             result.append(Reference(token.attrGet('src') or '', 'asset', location))
             continue
@@ -252,22 +261,23 @@ def check_links(candidate: Candidate, *, paths: Iterable[str] | None = None,
         for ref in refs:
             try:
                 target = resolve(path, ref.href, docs_root=docs_root)
+                if ref.kind in {'link', 'html_link'}:
+                    try:
+                        english = confirmed_english_url(
+                            candidate, path, ref.href, docs_root=docs_root, build=build,
+                            rendered_page=rendered_page)
+                    except ValueError as error:
+                        raise ValueError(f'English page links to Russian page: {ref.href}; {error}') from error
+                    if english != ref.href:
+                        raise ValueError(f'English page links to Russian page: {ref.href}; '
+                                         f'replace with {english}')
                 if target is None:
-                    if (ref.kind in {'link', 'html_link'} and locale(rendered_page, docs_root) == 'en'
-                            and _russian_url(ref.href)):
-                        raise ValueError(f'Unconfirmed English target for Russian URL: {ref.href}; specify a replacement')
                     continue
                 data = candidate.read(target.path)
                 if data is None:
                     raise ValueError(f'Missing {ref.kind} target: {ref.href} -> {target.path}')
                 if not data:
                     raise ValueError(f'Empty {ref.kind} target: {ref.href} -> {target.path}')
-                if (ref.kind in {'link', 'html_link'} and target.path.endswith(('.md', '.yaml', '.yml'))
-                        and locale(rendered_page, docs_root) == 'en' and locale(target.path, docs_root) == 'ru'):
-                    en_path = mirror(target.path, docs_root)
-                    confirmed = candidate.read(en_path) is not None
-                    raise ValueError(f'English page links to Russian page: {ref.href}; '
-                                     f'English target {en_path} is {"present; replace the URL" if confirmed else "missing; specify a replacement"}')
                 if target.fragment:
                     if build is None or not build.ok_for(candidate.sha):
                         complete = False
@@ -354,18 +364,23 @@ def prepare_assets(snapshot: Candidate, pairs: Mapping[str, str], *,
 
 
 def confirmed_english_url(candidate: Candidate, path: str, href: str, *,
-                          docs_root: str = 'ydb/docs', build=None) -> str:
+                          docs_root: str = 'ydb/docs', build=None,
+                          rendered_page: str | None = None) -> str:
     """Propose a URL only after confirming its EN page and unchanged fragment.
 
     Does not edit prose, includes, source documents or anchors. A subsequent
     committed candidate must be checked/built again after applying a proposal.
+    Includes resolve relative to their file but inherit the rendered page locale.
     """
+    page = rendered_page or path
     target = resolve(path, href, docs_root=docs_root)
     if target is None:
-        if locale(path, docs_root) == 'en' and _russian_url(href):
+        if locale(page, docs_root) == 'en' and _russian_url(href):
             raise ValueError(f'Unconfirmed English target for {href}; specify a replacement')
         return href
-    if locale(path, docs_root) != 'en' or locale(target.path, docs_root) != 'ru':
+    if not urlsplit(href).path:
+        return href
+    if locale(page, docs_root) != 'en' or locale(target.path, docs_root) != 'ru':
         return href
     english = mirror(target.path, docs_root)
     data = candidate.read(english)
