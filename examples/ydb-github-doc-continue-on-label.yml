@@ -60,9 +60,10 @@ jobs:
           YDBDOC_REPO_PATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_ACTOR: ${{ github.event.sender.login }}
+          YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE: ${{ vars.YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE }}
+          YDBDOC_MAX_SOURCE_CHARACTERS: ${{ vars.YDBDOC_MAX_SOURCE_CHARACTERS }}
           YDBDOC_ALLOWED_ACTORS: ${{ vars.YDBDOC_ALLOWED_ACTORS }}
           YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
-          YDBDOC_TRANSCRIPT_BACKEND: ydb
           # Must be forwarded into Docker by action-docker.sh (§6.143).
           YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
           YDBDOC_YDB_SA_KEY_FILE: ${{ env.YDBDOC_YDB_SA_KEY_FILE }}

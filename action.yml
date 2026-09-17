@@ -35,6 +35,10 @@ runs:
       shell: bash
       run: bash "${{ github.action_path }}/action-docker.sh"
       env:
+        YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE: ${{ vars.YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE }}
+        YDBDOC_MAX_SOURCE_CHARACTERS: ${{ vars.YDBDOC_MAX_SOURCE_CHARACTERS }}
+        YDBDOC_ALLOWED_ACTORS: ${{ vars.YDBDOC_ALLOWED_ACTORS }}
+        YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_PR: ${{ inputs.pr }}
         INPUT_REPO_PATH: ${{ inputs.repo_path }}

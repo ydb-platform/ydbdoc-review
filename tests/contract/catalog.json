@@ -79,7 +79,15 @@
     ],
     "status": "pending",
     "owner": "T04",
-    "tests": []
+    "tests": [
+      "tests/contract/test_settings.py::test_variable_values_whitespace_and_ydb",
+      "tests/contract/test_settings.py::test_missing_values_fail_closed",
+      "tests/contract/test_settings.py::test_integer_limits_reject_invalid_without_echo",
+      "tests/contract/test_settings.py::test_actions_examples_supply_exact_variables",
+      "tests/contract/test_settings.py::test_docker_passes_variables_and_secret_by_name",
+      "tests/contract/test_settings.py::test_entrypoint_preserves_variables"
+    ],
+    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending."
   },
   {
     "id": "R08",
@@ -91,7 +99,14 @@
     ],
     "status": "pending",
     "owner": "T04",
-    "tests": []
+    "tests": [
+      "tests/contract/test_settings.py::test_variable_values_whitespace_and_ydb",
+      "tests/contract/test_settings.py::test_integer_limits_reject_invalid_without_echo",
+      "tests/contract/test_settings.py::test_actions_examples_supply_exact_variables",
+      "tests/contract/test_settings.py::test_docker_passes_variables_and_secret_by_name",
+      "tests/contract/test_settings.py::test_entrypoint_preserves_variables"
+    ],
+    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending."
   },
   {
     "id": "R09",
@@ -103,7 +118,13 @@
     ],
     "status": "pending",
     "owner": "T02",
-    "tests": []
+    "tests": [
+      "tests/contract/test_settings.py::test_variable_values_whitespace_and_ydb",
+      "tests/contract/test_settings.py::test_every_cli_mode_denies_before_workflow",
+      "tests/contract/test_settings.py::test_acl_cannot_be_skipped",
+      "tests/contract/test_settings.py::test_allowed_actor_dispatches_even_with_zero_budget"
+    ],
+    "verified_scope": "T02: whitespace/case-insensitive ACL, denied CLI run/verify/continue and doc_* aliases stop before workflow; allowed actors dispatch. Workflow is a boundary spy here, not an E2E implementation. Final runner integration pending T15."
   },
   {
     "id": "R10",
@@ -409,7 +430,11 @@
     ],
     "status": "pending",
     "owner": "T12",
-    "tests": []
+    "tests": [
+      "tests/contract/test_settings.py::test_budget_rejects_invalid_without_echo",
+      "tests/contract/test_settings.py::test_allowed_actor_dispatches_even_with_zero_budget"
+    ],
+    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending."
   },
   {
     "id": "R36",
@@ -421,7 +446,13 @@
     ],
     "status": "pending",
     "owner": "T12",
-    "tests": []
+    "tests": [
+      "tests/contract/test_settings.py::test_variable_values_whitespace_and_ydb",
+      "tests/contract/test_settings.py::test_ydb_overrides",
+      "tests/contract/test_settings.py::test_invalid_ydb_settings",
+      "tests/contract/test_settings.py::test_docker_passes_variables_and_secret_by_name"
+    ],
+    "verified_scope": "T02: strict Actions settings parsing and shell forwarding only; production preflight/budget/storage remain pending."
   },
   {
     "id": "R37",

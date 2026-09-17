@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -14,7 +15,9 @@ from openai import OpenAI
 from rich.console import Console
 from rich.table import Table
 
-from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.config.loader import (
+    AccessDenied, SettingsError, load_config, load_settings, require_actor,
+)
 from ydbdoc_review.github.errors import GitHubConfigError, GitHubError
 from ydbdoc_review.github.workflow import (
     job_requires_nonzero_exit,
@@ -195,6 +198,12 @@ def job(
     instruction: str | None = None,
 ) -> None:
     """Unified entry point for external schedulers (Reactor/Nirvana)."""
+    try:
+        settings = load_settings()
+        require_actor(settings, os.environ.get("GITHUB_ACTOR"))
+    except (SettingsError, AccessDenied) as exc:
+        console.print(str(exc), markup=False)
+        raise typer.Exit(code=1) from exc
     path = _resolve_repo_path(repo_path)
     m = mode.strip().lower()
     try:

@@ -8,7 +8,6 @@ SCRIPT = (ROOT / "action-docker.sh").read_text(encoding="utf-8")
 
 def test_action_docker_forwards_ydb_sa_key():
     assert "YDB_SA_KEY" in SCRIPT
-    assert "YDBDOC_TRANSCRIPT_BACKEND" in SCRIPT
     assert "YDBDOC_ALLOWED_ACTORS" in SCRIPT
     assert "GITHUB_ACTOR" in SCRIPT
 
