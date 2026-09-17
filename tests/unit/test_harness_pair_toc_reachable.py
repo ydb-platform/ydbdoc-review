@@ -1,4 +1,4 @@
-"""Regression: en_toc_reachable must reach finalize_en_target (§6.112 / #46846)."""
+"""Regression: en_toc_reachable must reach finalize_en_target (legacy (non-normative) / #46846)."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def test_run_pair_plan_forwards_en_toc_reachable_to_harness():
 
 
 def test_run_pair_plan_keeps_existing_en_on_translate_llm_failure():
-    """§6.184: glossary timeout must not leave a completeness gap for the whole PR."""
+    """legacy (non-normative): glossary timeout must not leave a completeness gap for the whole PR."""
     from ydbdoc_review.llm.errors import LLMError
 
     pair = DocPair(
@@ -496,7 +496,7 @@ def test_href_parity_preserve_does_not_publish_old_en_on_translate():
 
 
 def test_run_pair_plan_restores_missing_heading_anchor_after_translate():
-    """§6.191 / #49957: pair post-pass copies RU {#id} onto EN H1."""
+    """legacy (non-normative) / #49957: pair post-pass copies RU {#id} onto EN H1."""
     pair = DocPair(
         ru_path="ydb/docs/ru/core/dev/example-app/_includes/example-dotnet.md",
         en_path="ydb/docs/en/core/dev/example-app/_includes/example-dotnet.md",

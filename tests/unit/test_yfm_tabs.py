@@ -80,7 +80,7 @@ def test_tabs_accordion_variant():
 
 
 def test_tabs_group_lang_variant_roundtrip():
-    """§6.194: ``group=lang`` must parse as YfmTabs (#37673 health-check / topic)."""
+    """legacy (non-normative): ``group=lang`` must parse as YfmTabs (#37673 health-check / topic)."""
     text = (
         "{% list tabs group=lang %}\n"
         "\n"

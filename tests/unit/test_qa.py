@@ -92,7 +92,7 @@ def test_align_raises_on_mismatch():
 
 
 def test_align_rejects_kind_mismatch_same_count():
-    """§6.163: equal length but heading vs paragraph must not zip."""
+    """legacy (non-normative): equal length but heading vs paragraph must not zip."""
     ru = "# Title\n\nIntro.\n\n## Syntax\n\nBody.\n"
     en = "# Title\n\nIntro EN.\n\nSubject paragraph EN.\n\nBody EN.\n"
     ru_segs = extract_segments(parse_markdown(ru))

@@ -1,4 +1,4 @@
-"""Tests for translate/critic disjoint model chains (§6.127)."""
+"""Tests for translate/critic disjoint model chains (legacy (non-normative))."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Tests for missing EN toc target checks (§6.83) and orphan pages (§6.117)."""
+"""Tests for missing EN toc target checks (legacy (non-normative)) and orphan pages (legacy (non-normative))."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def test_collect_toc_link_targets_reads_include_on_href_item():
 
 
 def test_collect_toc_link_targets_odd_nested_indent():
-    """Diplodoc sometimes nests with odd indent (5 spaces); orphans must still see href (§6.147)."""
+    """Diplodoc sometimes nests with odd indent (5 spaces); orphans must still see href (legacy (non-normative))."""
     toc = dedent("""
         items:
         - name: Hive
@@ -263,7 +263,7 @@ def test_check_orphan_translated_pages_ok_when_linked_via_pending_parent(tmp_pat
 def test_check_orphan_translated_pages_ignores_disconnected_pending_child_toc(
     tmp_path: Path,
 ):
-    """Child toc pending but parent not wired → page still orphan (§6.116/§6.117)."""
+    """Child toc pending but parent not wired → page still orphan (legacy (non-normative)/legacy (non-normative))."""
     repo = _init_repo(tmp_path)
     root = "ydb/docs/en/core/toc_p.yaml"
     _write(
@@ -304,7 +304,7 @@ def test_check_orphan_translated_pages_ignores_disconnected_pending_child_toc(
 
 
 def test_check_orphan_uses_head_not_stale_worktree(tmp_path: Path):
-    """§6.133: committed EN toc on HEAD wins over a main-like dirty worktree."""
+    """legacy (non-normative): committed EN toc on HEAD wins over a main-like dirty worktree."""
     repo = _init_repo(tmp_path)
     root = "ydb/docs/en/core/toc_p.yaml"
     concepts = "ydb/docs/en/core/concepts/toc_i.yaml"
@@ -386,7 +386,7 @@ def test_apply_orphan_toc_page_checks_blocks_file_verdict(tmp_path: Path):
 
 
 def test_apply_orphan_toc_page_checks_exempts_redirect_tombstone(tmp_path: Path):
-    """#45949 / §6.224: redirect from-paths are not orphan_toc_page blockers."""
+    """#45949 / legacy (non-normative): redirect from-paths are not orphan_toc_page blockers."""
     repo = _init_repo(tmp_path)
     _write(repo, "ydb/docs/en/core/toc_p.yaml", "items: []\n")
     en_path = "ydb/docs/en/core/maintenance/manual/dynamic-config.md"

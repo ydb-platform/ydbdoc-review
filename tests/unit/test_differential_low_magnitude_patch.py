@@ -1,4 +1,4 @@
-"""§6.184: low-magnitude EN patch for tiny RU glossary-style additions."""
+"""legacy (non-normative): low-magnitude EN patch for tiny RU glossary-style additions."""
 
 from __future__ import annotations
 

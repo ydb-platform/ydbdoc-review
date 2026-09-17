@@ -1,4 +1,4 @@
-"""§6.165: bilingual-skipped docs must not drive toc menu-label retranslation."""
+"""legacy (non-normative): bilingual-skipped docs must not drive toc menu-label retranslation."""
 
 from __future__ import annotations
 

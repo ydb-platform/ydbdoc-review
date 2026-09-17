@@ -1,4 +1,4 @@
-"""§6.232: critic_only no-op must not stage disk overlays."""
+"""legacy (non-normative): critic_only no-op must not stage disk overlays."""
 
 from __future__ import annotations
 

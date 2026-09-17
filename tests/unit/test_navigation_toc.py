@@ -59,7 +59,7 @@ def test_toc_translate_scope_detects_new_and_renamed():
 
 
 def test_toc_reordered_shared_hrefs_detects_move():
-    """§6.150: shared subsequence order change is detected; adds alone are not."""
+    """legacy (non-normative): shared subsequence order change is detected; adds alone are not."""
     base = dedent("""
         items:
         - { name: A, href: a.md }
@@ -85,7 +85,7 @@ def test_toc_reordered_shared_hrefs_detects_move():
 
 
 def test_merge_mirrors_ru_shared_href_reorder():
-    """§6.150: EN blocks stay, but land in RU order."""
+    """legacy (non-normative): EN blocks stay, but land in RU order."""
     ru_pr = dedent("""
         items:
         - { name: FROM SELECT, href: from_select.md }
@@ -136,7 +136,7 @@ def test_merge_keeps_unchanged_en_labels():
 
 
 def test_merge_adds_ru_base_href_missing_from_en_main():
-    """§6.59 #43365: pre-existing RU toc entry missing from EN main is added."""
+    """legacy (non-normative) #43365: pre-existing RU toc entry missing from EN main is added."""
     en_main = dedent("""
         items:
         - name: Troubleshooting
@@ -353,7 +353,7 @@ def test_validate_toc_merge_accepts_legacy_href_alias_supplement():
         en_main_yaml=en_main,
     )
     kinds = {i.kind for i in issues}
-    # Scoped only_ru must not flag hive_config/kafka aliases (§6.124); EN-only
+    # Scoped only_ru must not flag hive_config/kafka aliases (legacy (non-normative)); EN-only
     # basename aliases remain soft toc_en_only_legacy.
     assert "toc_structure_parity" not in kinds
     assert "scope_not_applied" not in kinds
@@ -499,7 +499,7 @@ def test_merge_inline_toc_matches_alter_table_en_main_style():
 
 
 def test_pr_48409_mixed_nested_column_shell_stays_valid_yaml():
-    """#48409 / §6.160: scoped ``columns.md`` must not emit empty nested ``items:``.
+    """#48409 / legacy (non-normative): scoped ``columns.md`` must not emit empty nested ``items:``.
 
     Source #44466 promoted COLUMN to a section with FAMILY/NOT NULL children.
     When ``columns.md`` is also in translate scope (page was translated), the
@@ -1039,7 +1039,7 @@ def test_merge_en_toc_preserves_en_only_local_and_external_topics():
 
 
 def test_merge_en_toc_keep_en_hrefs_overrides_ru_base_drop():
-    """§6.112: keep EN href when target page still exists on main."""
+    """legacy (non-normative): keep EN href when target page still exists on main."""
     en_main = dedent("""
         items:
         - name: Local and external topics
@@ -1178,7 +1178,7 @@ def test_merge_direct_toc_edit_does_not_gap_fill_ru_base_includes():
 
 
 def test_merge_applies_scoped_include_when_section_href_differs_from_en_flat():
-    """§6.155 / #46446: RU section href+include vs EN legacy flat href."""
+    """legacy (non-normative) / #46446: RU section href+include vs EN legacy flat href."""
     en_main = dedent("""
         items:
         - name: Glossary

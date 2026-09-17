@@ -52,7 +52,7 @@ def test_filter_translation_pr_verify_scope_keeps_en_diff_only():
 
 
 def test_filter_drops_tip_ambient_outside_source_pr_scope():
-    """§6.240 / #40385→#52055: ambient EN in tip must not enter verify critic."""
+    """legacy (non-normative) / #40385→#52055: ambient EN in tip must not enter verify critic."""
     pairs = [
         DocPair(
             ru_path="ydb/docs/ru/core/reference/configuration/tls.md",
@@ -150,7 +150,7 @@ def test_translation_pr_scope_gaps_ignore_bilingual_source_navigation():
 
 
 def test_translation_pr_scope_gaps_redirect_tombstone_already_satisfied():
-    """#45949 / §6.224: skipped redirect from-path must not be a scope gap."""
+    """#45949 / legacy (non-normative): skipped redirect from-path must not be a scope gap."""
     expected_pairs = [
         DocPair(
             ru_path="ydb/docs/ru/core/devops/concepts/node-authorization.md",

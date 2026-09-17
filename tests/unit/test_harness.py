@@ -89,9 +89,9 @@ def test_profiles_translate_only_verify_has_qa():
 
 
 def test_verify_profile_translates_yql_trailing_cyrillic_comments():
-    """doc_verify must fix RU ``--`` comments even with Fixed segments: 0 (§6.136).
+    """doc_verify must fix RU ``--`` comments even with Fixed segments: 0 (legacy (non-normative)).
 
-    Verdict uses post-finalize text (§6.138): incoming Cyrillic is auto-fixed,
+    Verdict uses post-finalize text (legacy (non-normative)): incoming Cyrillic is auto-fixed,
     so the report is 🟢 when ``final_text`` is clean English.
     """
     from textwrap import dedent

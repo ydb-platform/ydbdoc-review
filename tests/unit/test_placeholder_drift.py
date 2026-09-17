@@ -127,7 +127,7 @@ def test_identical_non_cyrillic_segment_drops_critic_hallucination():
 
 
 def test_cross_lang_reorder_issue_dropped():
-    """§6.56: same atom multiset, reorder comment — spurious after align."""
+    """legacy (non-normative): same atom multiset, reorder comment — spurious after align."""
     ru = "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧"
     en = "column ⟦C2⟧ with type ⟦C3⟧ to ⟦C1⟧ table"
     assert cross_lang_placeholder_drift_only(ru, en)
@@ -161,7 +161,7 @@ def test_cross_lang_real_mismatch_not_dropped():
 
 
 def test_atom_map_marker_id_noise_dropped():
-    """§6.57: multiset matches with reorder — atom_map marker-id noise dropped."""
+    """legacy (non-normative): multiset matches with reorder — atom_map marker-id noise dropped."""
     ru = "Use ⟦C1⟧ then ⟦C2⟧ size"
     en = "Use ⟦C2⟧ size then ⟦C1⟧"
     seg = _segment("s0002", ru)
@@ -177,7 +177,7 @@ def test_atom_map_marker_id_noise_dropped():
 
 
 def test_identical_placeholder_sequence_mapping_not_dropped():
-    """§6.59 #43365: same marker ids, wrong prose roles — keep for critic apply."""
+    """legacy (non-normative) #43365: same marker ids, wrong prose roles — keep for critic apply."""
     ru = "register in ⟦C1⟧ both ⟦C2⟧ and ⟦C3⟧"
     en = "register both ⟦C1⟧ and ⟦C2⟧ in ⟦C3⟧"
     seg = _segment("s0109", ru)
@@ -337,7 +337,7 @@ def test_filter_critic_response_excludes_skipped():
 
 
 def test_plain_text_index_name_wrapping_dropped():
-    """§6.61 #43860: RU plain Index12, EN inline code — not placeholder corruption."""
+    """legacy (non-normative) #43860: RU plain Index12, EN inline code — not placeholder corruption."""
     ru = (
         "⟦C1⟧ — должен быть выбран Index12, так как при его выборе "
         "в получающемся диапазоне ⟦C2⟧ получится длина точечного префикса — 2."
@@ -362,7 +362,7 @@ def test_plain_text_index_name_wrapping_dropped():
 
 
 def test_phantom_marker_swap_dropped_when_sequences_match():
-    """§6.61 #43860: critic claims U1→U2 but EN still has ⟦U1⟧."""
+    """legacy (non-normative) #43860: critic claims U1→U2 but EN still has ⟦U1⟧."""
     ru = (
         "use [распределенных транзакций](⟦U1⟧) even for single partition"
     )
@@ -428,7 +428,7 @@ def test_plain_text_wrapping_not_dropped_when_identifier_missing():
 
 
 def test_drop_intentionally_stripped_link_critic_issues():
-    """Critic must not block when EN omitted links outside toc reachability (§6.114)."""
+    """Critic must not block when EN omitted links outside toc reachability (legacy (non-normative))."""
     ru = "See [watermarks](watermarks.md) for details."
     en = "See watermarks for details."
     seg = _segment("s0001", ru)

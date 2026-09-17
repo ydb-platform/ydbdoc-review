@@ -56,7 +56,7 @@ def _kinds(issues) -> set[str]:
 
 
 def test_pr_42884_collapsed_toc_when_en_shrunk_to_half():
-    """#42884 / §6.44 / §6.63: fork EN collapsed to a handful of entries."""
+    """#42884 / legacy (non-normative) / legacy (non-normative): fork EN collapsed to a handful of entries."""
     en_main = dedent("""
         items:
         - name: A
@@ -120,7 +120,7 @@ def test_pr_44872_unexpected_href_not_in_ru_or_en_main():
 
 
 def test_pr_43753_toc_structure_parity_ru_en_menus_must_match():
-    """§6.121 / §6.126: EN-only legacy is soft; only_ru blocks when in scope."""
+    """legacy (non-normative) / legacy (non-normative): EN-only legacy is soft; only_ru blocks when in scope."""
     en_main = dedent("""
         items:
         - name: Overview
@@ -216,7 +216,7 @@ def test_pr_47108_spring_toc_parity_ignores_unscoped_sql_translation_drift():
 
     RU integrations toc has ``sql-translation/``; EN main still has legacy
     ``sql-dialect-converter.md``. Scoped merge only adds Spring — only_ru for
-    sql-translation is outside translate scope (§6.124).
+    sql-translation is outside translate scope (legacy (non-normative)).
     """
     en_main = dedent("""
         items:
@@ -285,7 +285,7 @@ def test_pr_47108_spring_toc_parity_ignores_unscoped_sql_translation_drift():
 
 
 def test_pr_42725_empty_toc_when_parse_yields_no_items():
-    """#42725 / §6.33: broken inline toc parsed as empty → empty_toc."""
+    """#42725 / legacy (non-normative): broken inline toc parsed as empty → empty_toc."""
     en_main = "items:\n"
     en_merged = "items:\n"
     ru = dedent("""
@@ -300,7 +300,7 @@ def test_pr_42725_empty_toc_when_parse_yields_no_items():
 
 
 def test_pr_42726_inconsistent_indent_mixed_inline_prefixes():
-    """#42726 / §6.34: mixed ``- {`` indent prefixes → inconsistent_indent."""
+    """#42726 / legacy (non-normative): mixed ``- {`` indent prefixes → inconsistent_indent."""
     en_main = dedent("""
         items:
           - { name: A, href: a.md }
@@ -320,7 +320,7 @@ def test_pr_42726_inconsistent_indent_mixed_inline_prefixes():
 
 
 def test_pr_44942_scope_not_applied_when_href_missing_from_en():
-    """#44942 / §6.74: scoped href never landed in EN toc."""
+    """#44942 / legacy (non-normative): scoped href never landed in EN toc."""
     en_main = dedent("""
         items:
         - name: Hive
@@ -345,7 +345,7 @@ def test_pr_44942_scope_not_applied_when_href_missing_from_en():
 
 
 def test_pr_47100_scope_not_applied_false_positive_href_plus_include():
-    """#47100 / §6.118: Spring href+include must satisfy include.path scope."""
+    """#47100 / legacy (non-normative): Spring href+include must satisfy include.path scope."""
     en = dedent("""
         items:
         - name: Spring
@@ -456,7 +456,7 @@ def test_pr_47100_merge_preserves_href_and_include_on_spring_section():
 
 
 def test_pr_46349_absent_en_toc_full_mirror_from_ru():
-    """#46349 / §6.85: empty EN sidebar → full RU mirror for that toc."""
+    """#46349 / legacy (non-normative): empty EN sidebar → full RU mirror for that toc."""
     ru = dedent("""
         items:
         - name: Overview
@@ -478,7 +478,7 @@ def test_pr_46349_absent_en_toc_full_mirror_from_ru():
 
 
 def test_pr_44916_supplement_only_does_not_gap_fill_unrelated_ru_base():
-    """#44916 / §6.72: parent queued from main must not pull hive/kafka."""
+    """#44916 / legacy (non-normative): parent queued from main must not pull hive/kafka."""
     en_main = dedent("""
         items:
         - name: Topic
@@ -516,7 +516,7 @@ def test_pr_44916_supplement_only_does_not_gap_fill_unrelated_ru_base():
 
 
 def test_pr_44889_md_only_queues_parent_toc_when_en_missing_href():
-    """#44889 / §6.71: page added under section; EN parent toc lacks the href."""
+    """#44889 / legacy (non-normative): page added under section; EN parent toc lacks the href."""
     files = {
         "ydb/docs/ru/core/recipes/toc_p.yaml": dedent("""
             items:
@@ -716,7 +716,7 @@ def test_pr_43010_spring_queues_integrations_parent_and_child_toc():
 
 
 def test_pr_46338_queues_child_toc_via_parent_include_path():
-    """#46338 / §6.84: parent already lists page; child toc still queued via include."""
+    """#46338 / legacy (non-normative): parent already lists page; child toc still queued via include."""
     files = {
         "ydb/docs/ru/core/reference/toc_p.yaml": dedent("""
             items:
@@ -768,7 +768,7 @@ def test_pr_46338_queues_child_toc_via_parent_include_path():
 
 
 def test_pr_include_closure_queues_locale_include_not_in_diff():
-    """§22.4 step 4 / §6.90: ``{% include %}`` pulled even when not in PR list."""
+    """§22.4 step 4 / legacy (non-normative): ``{% include %}`` pulled even when not in PR list."""
     files = {
         "ydb/docs/ru/core/integrations/spring/index.md": (
             "# Spring\n\n"
@@ -895,7 +895,7 @@ def test_pr_46878_supplement_only_does_not_add_all_missing_ru_hrefs():
 
 
 def test_pr_46338_missing_toc_target_for_absent_include_yaml(tmp_path: Path):
-    """#46338 / §6.83: EN toc include.path → missing child yaml on disk."""
+    """#46338 / legacy (non-normative): EN toc include.path → missing child yaml on disk."""
     repo = _repo(tmp_path)
     en_toc = "ydb/docs/en/core/integrations/toc_i.yaml"
     toc = dedent("""
@@ -912,7 +912,7 @@ def test_pr_46338_missing_toc_target_for_absent_include_yaml(tmp_path: Path):
 
 
 def test_pr_46569_orphan_page_when_parent_not_wired(tmp_path: Path):
-    """#46569 / §6.117: child toc pending but disconnected from root → orphan."""
+    """#46569 / legacy (non-normative): child toc pending but disconnected from root → orphan."""
     repo = _repo(tmp_path)
     _write(
         repo,
@@ -936,7 +936,7 @@ def test_pr_46569_orphan_page_when_parent_not_wired(tmp_path: Path):
         },
     )
 def test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base():
-    """#48018 / §6.140: EN baseline for ``_nav_needed`` is origin/main tip.
+    """#48018 / legacy (non-normative): EN baseline for ``_nav_needed`` is origin/main tip.
 
     Merged source PR checkout → merge-base(HEAD, main) == HEAD where EN still
     listed ``with.md``. Today's main tip does not → must queue ``select/toc_i``.
@@ -1020,7 +1020,7 @@ def test_pr_48018_scope_readers_use_upstream_en_tip_not_stale_merge_base():
 
 
 def test_orphan_check_uses_baseline_ref_not_stale_head(tmp_path: Path):
-    """#48018 / §6.140: orphan BFS must follow translation-branch tip tocs."""
+    """#48018 / legacy (non-normative): orphan BFS must follow translation-branch tip tocs."""
     repo = _repo(tmp_path)
     # HEAD (stale): WITH present — would false-green orphans.
     _write(
@@ -1077,7 +1077,7 @@ def test_orphan_check_uses_baseline_ref_not_stale_head(tmp_path: Path):
 
 
 def test_pr_48009_mixed_inline_block_toc_parses_with_md():
-    """#48009 / §6.139: inline ``- { }`` toc must not hide block ``WITH`` / ``with.md``."""
+    """#48009 / legacy (non-normative): inline ``- { }`` toc must not hide block ``WITH`` / ``with.md``."""
     ru = dedent("""
         items:
         - { name: GROUP BY,             href: group-by.md                                            }

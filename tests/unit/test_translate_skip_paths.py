@@ -1,4 +1,4 @@
-"""§6.167: skip translating public-materials/*."""
+"""legacy (non-normative): skip translating public-materials/*."""
 
 from __future__ import annotations
 

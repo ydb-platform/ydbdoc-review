@@ -1,4 +1,4 @@
-"""§6.174: RU↔EN href / anchor parity and inbound fragment checks."""
+"""legacy (non-normative): RU↔EN href / anchor parity and inbound fragment checks."""
 
 from __future__ import annotations
 

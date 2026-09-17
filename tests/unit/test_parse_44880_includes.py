@@ -1,4 +1,4 @@
-"""Parser tests for PR #44880 locale include fragments (§6.80.2)."""
+"""Parser tests for PR #44880 locale include fragments (legacy (non-normative).2)."""
 
 from __future__ import annotations
 

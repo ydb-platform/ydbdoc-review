@@ -1,4 +1,4 @@
-"""Tests for §6.132 differential translation analyzer and seed."""
+"""Tests for legacy (non-normative) differential translation analyzer and seed."""
 
 from __future__ import annotations
 
@@ -222,7 +222,7 @@ def test_prepare_seed_reuses_unchanged() -> None:
 
 
 def test_prepare_seed_falls_back_full_on_kind_mismatch() -> None:
-    """§6.163 / #48595: same segment count, drifted kinds → full, not wrong seed."""
+    """legacy (non-normative) / #48595: same segment count, drifted kinds → full, not wrong seed."""
     # RU / base: heading, para, heading, para
     base = "# Title\n\nIntro.\n\n## Syntax\n\nBody.\n"
     pr = base

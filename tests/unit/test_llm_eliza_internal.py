@@ -467,7 +467,7 @@ def test_eliza_429_overloaded_switches_to_next_model_in_chain(monkeypatch):
 
 def test_eliza_translate_chain_env_primary_and_fallbacks(monkeypatch):
     monkeypatch.setenv("YDBDOC_MODEL_TRANSLATE", "deepseek-v4-flash")
-    # Fallbacks must not reuse critic primary (§6.127)
+    # Fallbacks must not reuse critic primary (legacy (non-normative))
     monkeypatch.setenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", "other-translate-fallback")
     monkeypatch.setenv("YDBDOC_MODEL_CHECK", "gpt-oss-120b")
     monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)

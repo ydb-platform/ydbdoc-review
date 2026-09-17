@@ -1,4 +1,4 @@
-"""Tests for the post-apply EN link/fragment gate (§6.226)."""
+"""Tests for the post-apply EN link/fragment gate (legacy (non-normative))."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def test_pr_51711_en_link_target_blocks_ru_translit_fragment():
 
 
 def test_en_link_target_ignores_yfm_include_directives():
-    """§6.230 / #37673: `{% include [overlay](…md) %}` is not a Markdown link."""
+    """legacy (non-normative) / #37673: `{% include [overlay](…md) %}` is not a Markdown link."""
     page = "ydb/docs/en/core/recipes/ydb-sdk/debug-logs.md"
     en = (
         "Go:\n\n"
@@ -64,7 +64,7 @@ def test_en_link_target_empty_file_is_present_not_missing():
 
 
 def test_en_link_target_suppresses_ambient_baseline_debt():
-    """§6.228: tip-main link debt does not block; newly introduced debt does."""
+    """legacy (non-normative): tip-main link debt does not block; newly introduced debt does."""
     page = "ydb/docs/en/core/security/authentication.md"
     auth = "ydb/docs/en/core/reference/configuration/auth_config.md"
     mon = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
@@ -227,7 +227,7 @@ def test_apply_suppresses_ambient_tip_link_debt(tmp_path):
 
 
 def test_apply_en_link_target_checks_prefers_post_repair_disk_text(tmp_path):
-    """§6.227: late disk repair wins over stale PairRunResult target_text."""
+    """legacy (non-normative): late disk repair wins over stale PairRunResult target_text."""
     repo = tmp_path / "repo"
     page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     target = "ydb/docs/en/core/devops/concepts/node-authorization.md"

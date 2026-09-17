@@ -1,4 +1,4 @@
-"""Guard: Docker action must forward ops secrets into the container (§6.143)."""
+"""Guard: Docker action must forward ops secrets into the container (legacy (non-normative))."""
 
 from pathlib import Path
 

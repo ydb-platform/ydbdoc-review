@@ -1,4 +1,4 @@
-"""§6.157: RU→EN locale binary asset copy."""
+"""legacy (non-normative): RU→EN locale binary asset copy."""
 
 from __future__ import annotations
 

@@ -235,7 +235,7 @@ def test_translate_with_link_placeholder():
 
 
 def test_translate_image_bang_space_and_encoded_placeholder():
-    """LLM ``! [alt](⟦S1⟧)`` / percent-encoded ⟦S⟧ must restore real image src (§6.114)."""
+    """LLM ``! [alt](⟦S1⟧)`` / percent-encoded ⟦S⟧ must restore real image src (legacy (non-normative))."""
     from urllib.parse import quote
 
     text = "Diagram: ![topic-design](_images/topic.svg).\n"

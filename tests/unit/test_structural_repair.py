@@ -1,4 +1,4 @@
-"""Tests for §6.191 structural EN repairs (#49957)."""
+"""Tests for legacy (non-normative) structural EN repairs (#49957)."""
 
 from __future__ import annotations
 

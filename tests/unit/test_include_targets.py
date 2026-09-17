@@ -1,4 +1,4 @@
-"""Tests for missing EN include target checks (§6.80)."""
+"""Tests for missing EN include target checks (legacy (non-normative))."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def test_include_parity_detects_missing_career_include(tmp_path: Path):
 def test_apply_include_parity_repair_uses_pair_source_text_not_checkout(
     tmp_path: Path,
 ):
-    """§6.154: do not demand post-merge includes from checkout main."""
+    """legacy (non-normative): do not demand post-merge includes from checkout main."""
     repo = _init_repo(tmp_path)
     ru_path = "ydb/docs/ru/core/cli/import-s3.md"
     en_path = "ydb/docs/en/core/cli/import-s3.md"

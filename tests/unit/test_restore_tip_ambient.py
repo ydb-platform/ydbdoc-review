@@ -1,4 +1,4 @@
-"""§6.240: tip-ambient EN outside source scope restores to merge-base."""
+"""legacy (non-normative): tip-ambient EN outside source scope restores to merge-base."""
 
 from __future__ import annotations
 

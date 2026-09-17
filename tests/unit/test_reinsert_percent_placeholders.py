@@ -34,7 +34,7 @@ def test_decode_percent_encoded_protect_markers():
 
 
 def test_substitute_expands_glued_marker_inside_inline_code():
-    """§6.192: glued tails on code atoms must restore (#37673)."""
+    """legacy (non-normative): glued tails on code atoms must restore (#37673)."""
     from ydbdoc_review.parsing.ast_types import InlineCode
     from ydbdoc_review.segmentation.reinsert import _substitute_placeholders
 

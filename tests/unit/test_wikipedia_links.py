@@ -1,4 +1,4 @@
-"""Tests for Wikipedia langlink resolution (§6.130)."""
+"""Tests for Wikipedia langlink resolution (legacy (non-normative))."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def test_fetch_langlink_sends_user_agent(monkeypatch):
 
 
 def test_resolve_wikipedia_href_unresolved_returns_none():
-    """§6.130: full miss → None (not the original RU href)."""
+    """legacy (non-normative): full miss → None (not the original RU href)."""
     resolver = MagicMock(spec=WikipediaResolver)
     resolver.resolve_title.return_value = None
     href = "https://ru.wikipedia.org/wiki/Несуществующая_статья_xyz"

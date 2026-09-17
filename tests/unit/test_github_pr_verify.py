@@ -55,7 +55,7 @@ def test_source_pr_content_ref_merged_uses_landed_result():
 
 
 def test_translate_ru_content_ref_merged_uses_merge_commit():
-    """§6.120: doc_translate RU from merge commit, not stale feature head."""
+    """legacy (non-normative): doc_translate RU from merge commit, not stale feature head."""
     ctx = PullRequestContext(
         owner="ydb-platform",
         repo="ydb",
@@ -305,7 +305,7 @@ def test_pick_verify_ru_text_merged_tie_breaks_to_local_when_fence_counts_equal(
 
 
 def test_pick_verify_ru_text_merged_prefers_merge_over_main_when_fence_equal():
-    """§6.154: post-merge includes on main must not win over merge-commit RU."""
+    """legacy (non-normative): post-merge includes on main must not win over merge-commit RU."""
     ru_merge = "# Import\n\nBody.\n\n{% include [workflow](server-import-workflow.md) %}\n"
     ru_local = (
         "# Import\n\nBody.\n\n"

@@ -237,7 +237,7 @@ def test_r_gl_6_tip_satisfied_include_not_queued():
 
 
 def test_r_gl_2_tip_redirect_retargets_fragment_owner_to_concepts():
-    """#40385 / §6.242: merge-era manual owner → tip concepts via redirects."""
+    """#40385 / legacy (non-normative): merge-era manual owner → tip concepts via redirects."""
     auth = "ydb/docs/ru/core/security/authentication.md"
     manual = "ydb/docs/ru/core/devops/deployment-options/manual/node-authorization.md"
     concepts = "ydb/docs/ru/core/devops/concepts/node-authorization.md"
@@ -669,7 +669,7 @@ def test_planner_doc_and_nav_disjoint_kinds(case_id: str):
 
 
 def test_scope_closes_empty_locale_include_missing_on_en():
-    """§6.154: size-0 RU ``{% include %}`` target must enter doc_from_main."""
+    """legacy (non-normative): size-0 RU ``{% include %}`` target must enter doc_from_main."""
     ru_page = "ydb/docs/ru/core/cli/export-import/_includes/index.md"
     ru_empty = "ydb/docs/ru/core/cli/export-import/_includes/options_overlay.md"
     files = {
@@ -691,7 +691,7 @@ def test_scope_closes_empty_locale_include_missing_on_en():
 
 
 def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
-    """§6.155: watermarks-only PR must also translate sibling pages listed in
+    """legacy (non-normative): watermarks-only PR must also translate sibling pages listed in
     the absent EN ``streaming-query/toc_i`` full mirror (and section index)."""
     files = {
         "ydb/docs/ru/core/concepts/toc_i.yaml": (
@@ -741,7 +741,7 @@ def test_pr_46446_absent_en_streaming_toc_queues_sibling_pages():
 
 
 def test_pr_37673_queues_en_absent_toc_sibling_debug_md():
-    """§6.192: debug-logs in diff must also queue EN-absent debug.md overview."""
+    """legacy (non-normative): debug-logs in diff must also queue EN-absent debug.md overview."""
     ru_toc = (
         "items:\n"
         "- name: Overview\n"
@@ -781,7 +781,7 @@ def test_pr_37673_queues_en_absent_toc_sibling_debug_md():
 
 
 def test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists():
-    """§6.194: orphan EN debug.md on disk still queues when EN toc dropped it."""
+    """legacy (non-normative): orphan EN debug.md on disk still queues when EN toc dropped it."""
     ru_toc = (
         "items:\n"
         "- name: Overview\n"
@@ -801,7 +801,7 @@ def test_pr_37673_queues_toc_missing_sibling_even_if_en_file_exists():
         "ydb/docs/ru/core/recipes/ydb-sdk/debug-logs.md": "# Logs\n",
         "ydb/docs/ru/core/recipes/ydb-sdk/index.md": "# Index\n",
         "ydb/docs/en/core/recipes/ydb-sdk/index.md": "# Index\n",
-        # Orphan EN page still on main — §6.192 file-absent check would skip.
+        # Orphan EN page still on main — legacy (non-normative) file-absent check would skip.
         "ydb/docs/en/core/recipes/ydb-sdk/debug.md": "# Diagnostics\n",
     }
 

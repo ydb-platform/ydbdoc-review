@@ -58,7 +58,7 @@ def test_localize_links_fixes_broken_en_wikipedia_slug(monkeypatch):
 @pytest.mark.parametrize(
     ("href", "expected"),
     [
-        # Unresolved Wikipedia stays on RU host (§6.130) — no naive host swap.
+        # Unresolved Wikipedia stays on RU host (legacy (non-normative)) — no naive host swap.
         ("https://ru.wikipedia.org/wiki/Foo", "https://ru.wikipedia.org/wiki/Foo"),
         ("https://ydb.tech/docs/ru/concepts/topic", "https://ydb.tech/docs/en/concepts/topic"),
         ("https://yandex.cloud/ru/docs/foo", "https://yandex.cloud/en/docs/foo"),

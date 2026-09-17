@@ -1,4 +1,4 @@
-"""§6.168–§6.171: partial differential seed when full EN↔RU align fails."""
+"""legacy (non-normative)–legacy (non-normative): partial differential seed when full EN↔RU align fails."""
 
 from __future__ import annotations
 

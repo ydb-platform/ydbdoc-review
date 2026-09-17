@@ -1,4 +1,4 @@
-"""Partial verify realign on large files (#49957 / §6.191)."""
+"""Partial verify realign on large files (#49957 / legacy (non-normative))."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def test_round_trip_verify_restores_missing_heading_anchor_without_llm(monkeypat
 
 
 def test_partial_verify_realign_skips_when_too_many_pending(monkeypatch):
-    """Gap set > 80: do not LLM-translate; leave alignment blocker (§6.185)."""
+    """Gap set > 80: do not LLM-translate; leave alignment blocker (legacy (non-normative))."""
     ru_parts = [f"## H{i} {{#h{i}}}\n\nPara {i}.\n" for i in range(90)]
     ru = "# Title\n\n" + "\n".join(ru_parts)
     en = "# Title\n\nDifferent structure only.\n"

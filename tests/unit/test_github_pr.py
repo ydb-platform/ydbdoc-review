@@ -255,7 +255,7 @@ def test_load_pair_contents_merged_pr_uses_pre_merge_ru_base(git_repo: str):
 
 
 def test_load_pair_contents_merged_pr_prefers_tip_en_over_stale_checkout(git_repo: str):
-    """§6.228 / #40385: merged checkout EN is stale; tip EN wins."""
+    """legacy (non-normative) / #40385: merged checkout EN is stale; tip EN wins."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     en_page = en / "a.md"

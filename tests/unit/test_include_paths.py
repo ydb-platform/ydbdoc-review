@@ -74,7 +74,7 @@ def test_collect_yfm_includes_from_markdown():
 
 
 def test_collect_yfm_includes_on_bare_bullet_list_fragment():
-    """Include-only fragments must not require full markdown parse (§6.80)."""
+    """Include-only fragments must not require full markdown parse (legacy (non-normative))."""
     text = (
         "- `--description STRING`: desc.\n"
         "    - `zstd` — level default.\n"

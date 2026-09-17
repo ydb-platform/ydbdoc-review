@@ -1,4 +1,4 @@
-"""§6.172: placeholder-only segments must not grow prose (#48785)."""
+"""legacy (non-normative): placeholder-only segments must not grow prose (#48785)."""
 
 from __future__ import annotations
 

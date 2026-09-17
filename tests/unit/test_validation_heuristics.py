@@ -36,7 +36,7 @@ def test_cyrillic_in_en_detects_prose():
 
 
 def test_unrestored_placeholder_blocks():
-    """§6.163: leftover protect markers in final EN are blocking."""
+    """legacy (non-normative): leftover protect markers in final EN are blocking."""
     text = "The ⟦V1⟧ cluster uses [SIDs](%E2%9F%A6U1%E2%9F%A7) and ⟦C1⟧ code.\n"
     msgs = check_unrestored_placeholders(text, target_lang="en")
     assert len(msgs) == 1
@@ -54,7 +54,7 @@ def test_unrestored_placeholder_blocks():
 
 
 def test_unrestored_yfmvar_blocks():
-    """§6.173 / #48812: leaked link_with_variable stand-ins must block merge."""
+    """legacy (non-normative) / #48812: leaked link_with_variable stand-ins must block merge."""
     text = (
         "Global indexes, [sync](yfmvar-0-yfmvarend#sync) or "
         "[async](yfmvar-1-yfmvarend#async), are hidden tables.\n"
@@ -74,7 +74,7 @@ def test_unrestored_yfmvar_blocks():
 
 
 def test_broken_inline_code_markup_blocks():
-    """§6.176 / #49040: mangled `.pub` bold+backtick and empty ( extension)."""
+    """legacy (non-normative) / #49040: mangled `.pub` bold+backtick and empty ( extension)."""
     text = (
         "Select the file with the public key ( extension) from those created, "
         "for example **/home/user/.ssh/id_ed25519`.pub`**.\n"
@@ -95,7 +95,7 @@ def test_broken_inline_code_markup_blocks():
 
 
 def test_broken_inline_code_allows_bold_wrapping_code():
-    """§6.177 / #49059: ``**Box `workflow`**`` is valid, not a merge blocker."""
+    """legacy (non-normative) / #49059: ``**Box `workflow`**`` is valid, not a merge blocker."""
     text = (
         "* **Box `workflow`**\n"
         '* Three others: "repo", "admin:public_key" and "read:org".\n'
@@ -113,7 +113,7 @@ def test_broken_inline_code_allows_bold_wrapping_code():
 
 
 def test_unrestored_placeholder_blocks_glossary_v2():
-    """§6.164 / #48595: glossary leftover ``⟦V2⟧`` must block merge."""
+    """legacy (non-normative) / #48595: glossary leftover ``⟦V2⟧`` must block merge."""
     text = "A **client certificate** confirms identity when interacting with ⟦V2⟧.\n"
     msgs = check_unrestored_placeholders(text, target_lang="en")
     assert any("⟦V2⟧" in m for m in msgs)
@@ -128,7 +128,7 @@ def test_unrestored_placeholder_blocks_glossary_v2():
 
 
 def test_cyrillic_in_yaml_fence_warns():
-    """§6.164 / #48595: RU angle-brackets in yaml examples must block."""
+    """legacy (non-normative) / #48595: RU angle-brackets in yaml examples must block."""
     text = dedent(
         """
         Intro paragraph with enough English words for length checks here.
@@ -161,7 +161,7 @@ def test_cyrillic_in_yaml_fence_warns():
 
 
 def test_md_link_parity_ignores_self_basename_link():
-    """RU self-link to the same file basename is not an EN gap (§6.147)."""
+    """RU self-link to the same file basename is not an EN gap (legacy (non-normative))."""
     ru = "See [this page](hive_config.md) and [Hive](../../contributor/hive.md).\n"
     en = "See [Hive](../../contributor/hive.md).\n"
     warnings = check_md_link_parity(
@@ -184,7 +184,7 @@ def test_verify_realign_message_is_info_not_blocking():
 
 
 def test_strip_unreachable_links_message_is_info_not_blocking():
-    """§6.152 / #48123: Variant A strip is intentional repair, not a red QA."""
+    """legacy (non-normative) / #48123: Variant A strip is intentional repair, not a red QA."""
     from ydbdoc_review.validation.heuristics import _classify_heuristic
 
     assert (
@@ -206,7 +206,7 @@ def test_md_link_parity_flags_missing_en_link():
 
 
 def test_md_link_parity_ignores_links_outside_en_toc_reachable():
-    """Strip (§6.107) drops unreachable EN links; parity must not fail QA (§6.114)."""
+    """Strip (legacy (non-normative)) drops unreachable EN links; parity must not fail QA (legacy (non-normative))."""
     ru = "See [watermarks](watermarks.md) and [patterns](patterns.md).\n"
     en = "See watermarks and [patterns](patterns.md).\n"
     reachable = frozenset(
@@ -231,7 +231,7 @@ def test_cyrillic_in_en_ignores_fenced_code():
 
 
 def test_cyrillic_in_en_fence_comments_warns_on_line_comments():
-    """§6.164: residual Cyrillic in fences is blocking, not a soft warning."""
+    """legacy (non-normative): residual Cyrillic in fences is blocking, not a soft warning."""
     text = "Intro\n\n```go\n// настраиваем провайдер\n```\n"
     classified = run_file_heuristics_classified(
         text,
@@ -448,14 +448,14 @@ def test_validate_navigation_merge_warnings_redirect():
 
 
 def test_heading_parity_counts_indented_headings_inside_yfm_if():
-    """§6.156: RU headings indented in ``{% if %}`` must still count."""
+    """legacy (non-normative): RU headings indented in ``{% if %}`` must still count."""
     ru = "{% if feature_group_by_rollup_cube %}\n  ## ROLLUP {#rollup}\n{% endif %}\n## Other\n"
     en = "{% if feature_group_by_rollup_cube %}\n## ROLLUP {#rollup}\n{% endif %}\n## Other\n"
     assert check_heading_parity(ru, en) == []
 
 
 def test_md_link_parity_ignores_stripped_basenames():
-    """§6.156: intentional strip must not re-block via md_link_parity."""
+    """legacy (non-normative): intentional strip must not re-block via md_link_parity."""
     ru = "See [t](table.md) and [c](create-resource-pool-classifier.md).\n"
     en = "See t and c.\n"
     assert (

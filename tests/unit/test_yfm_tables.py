@@ -1,4 +1,4 @@
-"""YFM ``#|`` / ``|#`` tables parse as GFM-equivalent Table IR (§6.147)."""
+"""YFM ``#|`` / ``|#`` tables parse as GFM-equivalent Table IR (legacy (non-normative))."""
 
 from __future__ import annotations
 

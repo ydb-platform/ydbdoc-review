@@ -1,4 +1,4 @@
-"""Tests for additive TOC merge models (§6.131)."""
+"""Tests for additive TOC merge models (legacy (non-normative))."""
 
 from __future__ import annotations
 

@@ -256,7 +256,7 @@ TRAILING_SLASH_GO_SAMPLE = dedent("""
 
 
 def test_collect_code_blocks_inside_yfm_if():
-    """§6.139 / #48009: fences under ``{% if %}`` live in ``YfmIf.branches``."""
+    """legacy (non-normative) / #48009: fences under ``{% if %}`` live in ``YfmIf.branches``."""
     from ydbdoc_review.parsing.markdown_parser import parse_markdown
     from ydbdoc_review.validation.fence_integrity import collect_code_blocks
 
@@ -565,7 +565,7 @@ def test_fenced_code_excluded_from_segments_only_prose_translated():
 
 
 def test_translate_pipeline_prose_then_multiple_fence_comments():
-    """§6.39: translate prose → copy fenced code from RU → batch-translate comments."""
+    """legacy (non-normative): translate prose → copy fenced code from RU → batch-translate comments."""
     doc = parse_markdown(MULTI_COMMENT_GO_SOURCE)
     segments = extract_segments(doc)
     seg_id = segments[0].id

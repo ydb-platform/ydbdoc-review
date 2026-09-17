@@ -178,7 +178,7 @@ def test_expired_continue():
 
 
 def test_continue_store_unavailable_is_not_ttl_message():
-    """Missing YDB_SA_KEY must not claim 14-day TTL deletion (§6.143)."""
+    """Missing YDB_SA_KEY must not claim 14-day TTL deletion (legacy (non-normative))."""
     ledger = InMemoryRunsLedger()
     ctx, gate, comment = begin_ops_job(
         mode="continue",

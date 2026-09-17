@@ -1,4 +1,4 @@
-"""Tests for EN fragment repair (§6.142 / #48047)."""
+"""Tests for EN fragment repair (legacy (non-normative) / #48047)."""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def test_pr_48047_sessions_uses_ru_overlay_path_when_en_declares():
 
 
 def test_pr_48047_ldap_does_not_remap_to_en_only_fragment():
-    """§6.174: keep RU ``#ldap``; do not invent ``#ldap-auth-provider``."""
+    """legacy (non-normative): keep RU ``#ldap``; do not invent ``#ldap-auth-provider``."""
     en_page = "ydb/docs/en/core/yql/reference/syntax/create-resource-pool-classifier.md"
     en_text = "For more information, see [{#T}](../../../security/authentication.md#ldap).\n"
     files = {
@@ -242,7 +242,7 @@ def test_pr_40385_legacy_translit_declare_writes_exact_ascii_and_clears_gate(tmp
 
 
 def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
-    """§6.227: redirect from-path EN pairs with RU at to-path."""
+    """legacy (non-normative): redirect from-path EN pairs with RU at to-path."""
     en_page = "ydb/docs/en/core/reference/configuration/client_certificate_authorization.md"
     fragment = "vklyuchenie-rezhima-autentifikacii-i-avtorizacii-uzlov"
     manual_href = f"../../devops/deployment-options/manual/node-authorization.md#{fragment}"
@@ -279,7 +279,7 @@ def test_pr_40385_redirect_from_path_uses_live_ru_twin_and_existing_en_target():
 
 
 def test_pr_40385_system_views_users_fragment():
-    """§6.221: RU autogen slug in link → EN explicit ``{#users}``."""
+    """legacy (non-normative): RU autogen slug in link → EN explicit ``{#users}``."""
     en_page = "ydb/docs/en/core/security/authentication.md"
     en_bad = "See the [system view](../dev/system-views.md#информация-о-пользователях-users).\n"
     files = {
@@ -382,7 +382,7 @@ def test_pr_50976_ascii_explicit_fragment_is_not_localized():
 
 
 def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
-    """§6.158 / #48223: existing table.md / classifier.md must not become
+    """legacy (non-normative) / #48223: existing table.md / classifier.md must not become
     unreachable ``topic.md`` / ``create-resource-pool.md`` under ``en/core/dev/``.
     """
     en_page = "ydb/docs/en/core/dev/system-views.md"
@@ -426,7 +426,7 @@ def test_pr_48223_does_not_mangle_existing_targets_to_bare_basenames():
     assert "](topic.md#" not in fixed
     # Classifier keeps path; Parameters auto-slug counts as declared.
     assert "create-resource-pool-classifier.md#parameters" in fixed
-    # §6.174: do not invent EN-only ``#partitioning_row_table`` — keep RU frag.
+    # legacy (non-normative): do not invent EN-only ``#partitioning_row_table`` — keep RU frag.
     assert "table.md#partitioning)" in fixed or "table.md#partitioning\n" in fixed
     assert "partitioning_row_table" not in fixed
 
@@ -436,7 +436,7 @@ def test_fragment_declared_accepts_diplodoc_auto_slug():
 
 
 def test_pr_48012_sessions_finds_sibling_when_ru_and_en_baseline_stale():
-    """§6.153 / #48012: both RU and EN still say index.md#sessions — use toc sibling."""
+    """legacy (non-normative) / #48012: both RU and EN still say index.md#sessions — use toc sibling."""
     en_page = "ydb/docs/en/core/concepts/glossary.md"
     stale = "Sessions are described in [{#T}](query_execution/index.md#sessions).\n"
     files = {

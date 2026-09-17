@@ -261,7 +261,7 @@ def test_apply_critic_fixes_skips_unknown_segment_id():
 
 
 def test_apply_critic_fixes_strict_order_allows_same_set_reorder():
-    """After §6.55 align, same ⟦C⟧ ids are the same atoms — reorder is safe (§6.133)."""
+    """After legacy (non-normative) align, same ⟦C⟧ ids are the same atoms — reorder is safe (legacy (non-normative))."""
     seg = _segment("s1", "к таблице ⟦C1⟧ колонку ⟦C2⟧ с типом ⟦C3⟧")
     current = "column named ⟦C1⟧ with data type ⟦C2⟧ to the ⟦C3⟧ table"
     suggested = "column named ⟦C2⟧ with data type ⟦C3⟧ to the ⟦C1⟧ table"

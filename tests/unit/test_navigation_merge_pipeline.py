@@ -202,7 +202,7 @@ STREAMING_EN_AT_MERGE_BASE_STALE = dedent("""
 
 
 def test_read_navigation_baselines_prefers_upstream_en_main():
-    """§6.111 / #46845: EN baseline is current main, not stale PR merge-base."""
+    """legacy (non-normative) / #46845: EN baseline is current main, not stale PR merge-base."""
     from ydbdoc_review.pipeline.navigation_merge import _read_navigation_baselines
 
     def fake_read(_repo: str, ref: str, path: str) -> str | None:
@@ -277,7 +277,7 @@ def test_merge_preserves_en_only_href_present_on_current_main():
             extra_toc_hrefs={"enrichment.md"},
         )
 
-    assert result.verdict in {"ok", "warnings"}  # toc_en_only_legacy soft drift (§6.121)
+    assert result.verdict in {"ok", "warnings"}  # toc_en_only_legacy soft drift (legacy (non-normative))
     assert result.target_text is not None
     assert "local-and-external-topics.md" in result.target_text
     assert "patterns.md" in result.target_text
@@ -327,7 +327,7 @@ def test_merge_fork_pr_toc_uses_upstream_en_main_fallback():
             extra_toc_hrefs=md_basenames,
         )
 
-    assert result.verdict in {"ok", "warnings"}  # toc_en_only_legacy soft drift (§6.121)
+    assert result.verdict in {"ok", "warnings"}  # toc_en_only_legacy soft drift (legacy (non-normative))
     assert result.target_text is not None
     assert "patterns.md" in result.target_text
     assert "checkpoints.md" in result.target_text
@@ -533,7 +533,7 @@ def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
     """#41271 / #47104: EN toc reorder must not skip merge that adds json-indexes.
 
     Source PR touched both RU and EN ``dev/toc_p.yaml`` (Hybrid search move) but
-    only RU gained ``json-indexes.md``. §6.76 used to skip nav merge when
+    only RU gained ``json-indexes.md``. legacy (non-normative) used to skip nav merge when
     ``en_changed``, leaving the translated page as ``orphan_toc_page``.
     """
     ru_base = dedent("""
@@ -620,7 +620,7 @@ def test_pr_41271_nav_merge_runs_when_both_ru_and_en_toc_changed():
 
 
 def test_pr_47856_ru_only_toc_reorder_is_nav_noop():
-    """§6.141 / #47856: reorder RU-only href (no EN page/toc) → EN unchanged."""
+    """legacy (non-normative) / #47856: reorder RU-only href (no EN page/toc) → EN unchanged."""
     ru_base = dedent("""
         items:
         - { name: FROM SELECT, href: from_select.md }
@@ -681,7 +681,7 @@ def test_pr_47856_ru_only_toc_reorder_is_nav_noop():
 
 
 def test_pr_47856_shared_toc_reorder_mirrors_en_order():
-    """§6.150 / #47856: RU reshuffle of href already on EN toc → EN order updates."""
+    """legacy (non-normative) / #47856: RU reshuffle of href already on EN toc → EN order updates."""
     ru_base = dedent("""
         items:
         - { name: FROM SELECT, href: from_select.md }
@@ -747,7 +747,7 @@ def test_pr_47856_shared_toc_reorder_mirrors_en_order():
 
 
 def test_pr_47856_reorder_adds_en_page_missing_from_toc():
-    """§6.150: RU reorder + EN page on disk but absent from EN toc → insert at RU pos."""
+    """legacy (non-normative): RU reorder + EN page on disk but absent from EN toc → insert at RU pos."""
     ru_base = dedent("""
         items:
         - { name: FROM SELECT, href: from_select.md }

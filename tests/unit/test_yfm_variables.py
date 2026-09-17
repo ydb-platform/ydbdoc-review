@@ -108,21 +108,6 @@ def test_variable_in_link_url_in_real_context():
     assert "{{ link-glossary }}" in out
     assert_stable(text)
 
-def test_variable_in_image_src():
-    doc = parse_markdown("![alt]({{ image-path }})\n")
-    from ydbdoc_review.parsing.ast_types import InlineImage
-    para = doc.children[0]
-    img = para.children[0]
-    assert isinstance(img, InlineImage)
-    assert img.src == "{{ image-path }}"
-
-
-def test_variable_in_link_url_in_real_context():
-    text = "See [glossary]({{ link-glossary }}) for terms.\n"
-    out = round_trip(text)
-    assert "{{ link-glossary }}" in out
-    assert_stable(text)
-
 
 def test_variable_in_link_text():
     doc = parse_markdown("[See {{ name }} docs](http://x)\n")

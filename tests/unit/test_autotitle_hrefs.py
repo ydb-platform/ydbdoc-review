@@ -72,7 +72,7 @@ def test_restore_force_exact_fragment_when_link_counts_differ():
 
 
 def test_overlay_autotitle_fragment_hrefs_prefers_main_sessions_target():
-    """§6.128: merge-commit RU still has index.md#sessions; main moved it."""
+    """legacy (non-normative): merge-commit RU still has index.md#sessions; main moved it."""
     merge_ru = (
         "Сессии описаны в [{#T}](query_execution/index.md#sessions).\n"
     )

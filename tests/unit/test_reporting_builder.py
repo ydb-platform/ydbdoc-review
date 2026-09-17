@@ -143,12 +143,11 @@ def test_build_source_pr_comment_bilingual_skip():
         config=cfg,
     )
     assert "перевод не требуется" in body
-    assert "§6.76" in body
     assert "Translation PR не создаётся" in body
 
 
 def test_build_source_pr_comment_noop_no_commit():
-    """§6.141: empty commit / no translation PR must not say «перевод готов»."""
+    """legacy (non-normative): empty commit / no translation PR must not say «перевод готов»."""
     from ydbdoc_review.pipeline.types import NavigationRunResult
 
     cfg = _cfg()
@@ -170,7 +169,6 @@ def test_build_source_pr_comment_noop_no_commit():
         committed=False,
     )
     assert "перевод не требуется" in body
-    assert "§6.141" in body
     assert "перевод готов" not in body
     assert "Translation PR | — |" in body
 
@@ -515,7 +513,7 @@ def test_merge_recommendation_red_when_navigation_blocked():
 
 
 def test_merge_recommendation_green_for_nav_only_ok():
-    """§6.151 / #47856: toc-only translate must not report ⚪ «нет обработанных файлов»."""
+    """legacy (non-normative) / #47856: toc-only translate must not report ⚪ «нет обработанных файлов»."""
     cfg = _cfg()
     nav = NavigationRunResult(
         ru_path="ydb/docs/ru/a/toc_i.yaml",

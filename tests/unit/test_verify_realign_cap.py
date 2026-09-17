@@ -1,4 +1,4 @@
-"""§6.185: skip full verify realign on large files (glossary hang)."""
+"""legacy (non-normative): skip full verify realign on large files (glossary hang)."""
 
 from __future__ import annotations
 

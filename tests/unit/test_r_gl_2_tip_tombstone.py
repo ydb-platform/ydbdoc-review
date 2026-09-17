@@ -1,4 +1,4 @@
-"""R-GL-2 / §6.242: merged PR tip redirects vs merge-era tombstone paths."""
+"""R-GL-2 / legacy (non-normative): merged PR tip redirects vs merge-era tombstone paths."""
 
 from __future__ import annotations
 

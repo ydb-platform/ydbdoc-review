@@ -2346,7 +2346,7 @@ def test_run_doc_verify_does_not_delete_fixup_branch_without_publication(
 
 
 def test_run_doc_verify_translation_pr_pushes_fixes_inline(git_repo: str):
-    """Translation PR: critic fixes commit on ydbdoc-review/pr-N, no fixup PR (§6.75)."""
+    """Translation PR: critic fixes commit on ydbdoc-review/pr-N, no fixup PR (legacy (non-normative))."""
     en = Path(git_repo) / "ydb" / "docs" / "en"
     en.mkdir(parents=True)
     (en / "a.md").write_text("Hello.\n", encoding="utf-8")
@@ -2625,7 +2625,7 @@ def test_run_doc_verify_bilingual_source_pr_no_completeness_gaps(git_repo: str):
 
 
 def test_run_doc_verify_skips_glossary_disk_write(git_repo: str):
-    """Verify must not commit hybridized glossary EN (#49578 / §6.189)."""
+    """Verify must not commit hybridized glossary EN (#49578 / legacy (non-normative))."""
     en = Path(git_repo) / "ydb" / "docs" / "en" / "core" / "concepts"
     en.mkdir(parents=True)
     glossary = en / "glossary.md"

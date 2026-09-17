@@ -1,4 +1,4 @@
-"""§6.186: glossary verify skips structural alignment gate."""
+"""legacy (non-normative): glossary verify skips structural alignment gate."""
 
 from __future__ import annotations
 

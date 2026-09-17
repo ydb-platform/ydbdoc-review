@@ -93,7 +93,7 @@ def test_completeness_ok_when_navigation_merged():
 
 
 def test_completeness_ok_when_navigation_noop():
-    """§6.144 / #47091: EN toc unchanged after merge must not block push."""
+    """legacy (non-normative) / #47091: EN toc unchanged after merge must not block push."""
     changes = [
         ("ydb/docs/ru/core/yql/toc_i.yaml", "modified"),
         ("ydb/docs/ru/core/yql/reference/syntax/select/topics.md", "modified"),
@@ -189,7 +189,7 @@ def test_completeness_ok_when_existing_en_pair_is_skipped():
 
 
 def test_completeness_gaps_redirect_tombstone_skip_satisfies():
-    """#45949 / §6.224: skipped redirect tombstone still closes the EN mirror gap."""
+    """#45949 / legacy (non-normative): skipped redirect tombstone still closes the EN mirror gap."""
     changes = [
         ("ydb/docs/ru/core/maintenance/manual/dynamic-config.md", "modified"),
     ]

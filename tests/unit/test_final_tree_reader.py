@@ -1,4 +1,4 @@
-"""§6.229: tip+overlay docs reader for merged-PR late repair / link gate."""
+"""legacy (non-normative): tip+overlay docs reader for merged-PR late repair / link gate."""
 
 from __future__ import annotations
 

@@ -12,7 +12,7 @@ from ydbdoc_review.validation.ru_source_bugs import normalize_ru_source_for_tran
 
 
 def test_fence_content_rejects_whitespace_only_diff():
-    """§6.61 #43860: extra blank line inside yql fence is not corruption."""
+    """legacy (non-normative) #43860: extra blank line inside yql fence is not corruption."""
     src = "DECLARE $customer_id AS Uint64;\nSELECT *\nFROM orders\n"
     tgt = "DECLARE $customer_id AS Uint64;\n\nSELECT *\nFROM orders\n"
     assert not fence_content_matches_source(src, tgt)
@@ -122,7 +122,7 @@ def test_check_fence_body_copy_ignores_homoglyph_only_diff():
 
 
 def test_enforce_source_fenced_blocks_preserves_text_fence_body():
-    """§6.59: `` ```text `` diagrams keep EN translation, not RU copy."""
+    """legacy (non-normative): `` ```text `` diagrams keep EN translation, not RU copy."""
     ru = "```text\n├─ попытка: ERROR\n```\n"
     en = "```text\n├─ attempt: ERROR\n```\n"
     out = enforce_source_fenced_blocks(en, ru)
@@ -270,7 +270,7 @@ def test_fence_content_rejects_mermaid_note_owner_translation():
 
 
 def test_fence_content_allows_text_diagram_label_translation():
-    """Regression #44103: `` ```text `` span tree labels may be translated (§6.59)."""
+    """Regression #44103: `` ```text `` span tree labels may be translated (legacy (non-normative))."""
     ru = (
         "ydb.RunWithRetry  (Internal)\n"
         "├─ ydb.Try        (Internal)   ← 1-я попытка: ERROR\n"
@@ -336,7 +336,7 @@ def test_finalize_en_after_enforce_fixes_stroka_and_vm_in_indented_fence():
 
 
 def test_fence_body_rejects_dropped_trailing_blank_line():
-    """§6.156: RU fence often keeps a trailing blank line EN drops."""
+    """legacy (non-normative): RU fence often keeps a trailing blank line EN drops."""
     ru = "```yql\nSELECT\n   x,  -- ОК: колонка\nFROM t\n\n```\n"
     en = "```yql\nSELECT\n   x,  -- OK: column\nFROM t\n```\n"
     assert check_fence_body_copy(ru, en, source_lang="ru")

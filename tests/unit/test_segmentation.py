@@ -232,7 +232,7 @@ def test_extract_inside_tabs_with_whitelist():
 
 
 def test_extract_cyrillic_cpp_tab_title_whitelisted():
-    """Cyrillic ``С++`` must whitelist like Latin ``c++`` (§6.79, #45053)."""
+    """Cyrillic ``С++`` must whitelist like Latin ``c++`` (legacy (non-normative), #45053)."""
     doc = parse_markdown(
         "{% list tabs %}\n"
         "\n"

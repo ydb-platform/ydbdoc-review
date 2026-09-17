@@ -87,7 +87,7 @@ def test_inline_code_with_backticks_inside():
 
 
 def test_table_cell_backtick_inline_code_round_trip():
-    """§6.60 #43746: `` ` `` in a table cell must not render as five backticks."""
+    """legacy (non-normative) #43746: `` ` `` in a table cell must not render as five backticks."""
     text = (
         "| a | b | c |\n"
         "| --- | --- | --- |\n"
@@ -101,7 +101,7 @@ def test_table_cell_backtick_inline_code_round_trip():
 
 
 def test_critic_fix_survives_table_cell_render_round_trip():
-    """§6.60: apply_critic_fixes + render + gate_round_trip keeps placeholders."""
+    """legacy (non-normative): apply_critic_fixes + render + gate_round_trip keeps placeholders."""
     from ydbdoc_review.pipeline.qa import gate_round_trip
     from ydbdoc_review.pipeline.translate_file import _render_with_translations
     from ydbdoc_review.segmentation.extractor import extract_segments

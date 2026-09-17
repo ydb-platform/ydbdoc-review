@@ -286,7 +286,7 @@ def test_translate_batch_rate_limit_tries_fallback_model():
 
 
 def test_translate_batch_timeout_tries_fallback_model():
-    """§6.230 / #40385: monitoring_config timed out on deepseek-only chain."""
+    """legacy (non-normative) / #40385: monitoring_config timed out on deepseek-only chain."""
     seg = _segment("s1", "Привет")
     batch = Batch(index=0, segments=[seg])
     good = _json_response([{"id": "s1", "text": "Hello"}])
