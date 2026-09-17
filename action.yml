@@ -1,0 +1,44 @@
+# https://docs.github.com/en/actions/sharing-automations/creating-actions/metadata-syntax-for-github-actions
+name: "ydbdoc-review"
+description: "AST-based RU/EN YDB docs translation with critic QA (Yandex AI Studio)."
+branding:
+  icon: "book-open"
+  color: "blue"
+
+inputs:
+  repo:
+    description: "Repository where the pull request is opened (owner/name)."
+    required: true
+  pr:
+    description: "Pull request number."
+    required: true
+  repo_path:
+    description: "Local git checkout path used by the job."
+    required: true
+  merge_base_with:
+    description: "Second ref for git merge-base when using a local checkout (e.g. origin/main)."
+    default: "origin/main"
+  dry_run:
+    description: 'If "true", pass --dry-run (no writes, no commit, no push, no PR comment).'
+    default: "false"
+  no_commit:
+    description: 'If "true", pass --no-commit (run: no translation commit; verify: no repair commit/push).'
+    default: "false"
+  mode:
+    description: '"run" — doc_translate. "verify" — doc_verify. "continue" — doc_continue.'
+    default: "run"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run ydbdoc-review
+      shell: bash
+      run: bash "${{ github.action_path }}/action-docker.sh"
+      env:
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_PR: ${{ inputs.pr }}
+        INPUT_REPO_PATH: ${{ inputs.repo_path }}
+        INPUT_MERGE_BASE_WITH: ${{ inputs.merge_base_with }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_NO_COMMIT: ${{ inputs.no_commit }}
+        INPUT_MODE: ${{ inputs.mode }}

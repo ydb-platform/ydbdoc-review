@@ -1,0 +1,1040 @@
+"""Per-file critic: review, apply fixes, verify pass."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+
+from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.llm.errors import LLMError, LLMParseError
+from ydbdoc_review.llm.structured import parse_json_content
+from ydbdoc_review.segmentation.chunker import Batch, chunk_segments
+from ydbdoc_review.segmentation.types import Segment
+from ydbdoc_review.translation.critic_atoms import (
+    protected_atom_language_issues,
+    target_atom_maps,
+)
+from ydbdoc_review.translation.errors import TranslationValidationError
+from ydbdoc_review.translation.glossary import Glossary
+from ydbdoc_review.translation.prompts import (
+    DEFAULT_PROMPT_VERSION,
+    build_critic_batch_messages,
+    build_verify_batch_messages,
+)
+from ydbdoc_review.translation.review_blocks import ReviewPlan
+from ydbdoc_review.translation.schemas import CriticIssueOut, CriticResponse, CriticVerdict
+from ydbdoc_review.translation.translator import validate_segment_translation
+from ydbdoc_review.validation.markers import extract_placeholders
+
+logger = logging.getLogger(__name__)
+
+_MISSING_CONTENT_ISSUE = re.compile(
+    r"missing|omit|omits|drops?\s+the|не\s+перевед|пропущ",
+    re.IGNORECASE,
+)
+_TRUNCATED_SUGGESTION = re.compile(r"(?:…|\.\.\.)$")
+
+_MAX_CRITIC_SPLIT_DEPTH = 12
+_VERDICT_RANK: dict[CriticVerdict, int] = {"ok": 0, "warnings": 1, "blocked": 2}
+
+# Safety refusals leave language/style review incomplete (§6.264).
+_MODEL_REFUSAL_MARKERS: tuple[str, ...] = (
+    "я не могу обсуждать",
+    "не могу обсуждать эту тему",
+    "не могу помочь с этой темой",
+    "i can't discuss",
+    "i cannot discuss",
+    "unable to discuss this",
+    "content policy",
+)
+
+
+def is_model_refusal_text(text: str) -> bool:
+    """True when the model declined the request instead of returning critic JSON."""
+    normalized = (text or "").strip().casefold()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _MODEL_REFUSAL_MARKERS)
+
+# LLMs sometimes invent verdict strings; map to the schema literals before validate.
+_VERDICT_ALIASES: dict[str, CriticVerdict] = {
+    "ok": "ok",
+    "pass": "ok",
+    "success": "ok",
+    "clean": "ok",
+    "warnings": "warnings",
+    "warning": "warnings",
+    "needs_fix": "warnings",
+    "need_fix": "warnings",
+    "issues": "warnings",
+    "issues_found": "warnings",
+    "issue_found": "warnings",
+    "fail": "warnings",
+    "failed": "warnings",
+    "error": "warnings",
+    "blocked": "blocked",
+    "block": "blocked",
+    "reject": "blocked",
+    "rejected": "blocked",
+}
+
+
+def normalize_critic_verdict_value(raw: str) -> CriticVerdict | None:
+    """Map a free-form LLM verdict string to ``ok`` | ``warnings`` | ``blocked``."""
+    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    return _VERDICT_ALIASES.get(key)
+
+
+def merge_verdicts(*verdicts: CriticVerdict) -> CriticVerdict:
+    """Pick the strictest verdict across critic batches."""
+    return max(verdicts, key=lambda v: _VERDICT_RANK[v])
+
+
+def merge_critic_responses(responses: list[CriticResponse]) -> CriticResponse:
+    """Combine batch-level critic/verify responses into one file-level result."""
+    if not responses:
+        return CriticResponse(verdict="ok", issues=[])
+    issues: list[CriticIssueOut] = []
+    verdict: CriticVerdict = "ok"
+    for response in responses:
+        issues.extend(response.issues)
+        verdict = merge_verdicts(verdict, response.verdict)
+    if any(issue.severity == "blocked" for issue in issues):
+        verdict = "blocked"
+    elif issues and verdict == "ok":
+        verdict = "warnings"
+    merged = CriticResponse(verdict=verdict, issues=issues)
+    # A sibling issue must not mask a batch that supplied no semantic verdict.
+    # Carry the evidence through subsequent merges (split batches, atom checks).
+    merged._review_incomplete = any(
+        response._review_incomplete or (response.verdict != "ok" and not response.issues)
+        for response in responses
+    )
+    return merged
+
+
+def _fallback_critic_response(*, reason: str, preview: str = "") -> CriticResponse:
+    """Fail closed when critic JSON cannot be parsed after retries."""
+    comment = f"Critic execution failed: {reason}"
+    safe = (preview or "").replace("\n", " ").strip()[:200]
+    if safe:
+        comment = f"{comment} | raw_preview={safe!r}"
+    logger.error("Critic failed (%s); blocking verification", reason)
+    return CriticResponse(
+        verdict="blocked",
+        issues=[
+            CriticIssueOut(
+                severity="blocked",
+                category="critic_execution_failed",
+                comment=comment,
+            )
+        ],
+    )
+
+
+def _heuristic_only_critic_response(
+    *,
+    preview: str,
+    file_path: str = "",
+    batch_label: str = "",
+    segment_ids: tuple[str, ...] = (),
+) -> CriticResponse:
+    """Fail closed when every critic attempt refused semantic review."""
+    safe = (preview or "").replace("\n", " ").strip()[:200]
+    logger.warning(
+        "Critic model refusal; manual review required (preview=%r)",
+        safe[:120],
+    )
+    context = (
+        f" File: {file_path or '<file>'}; batch: {batch_label or '<batch>'}; "
+        f"segments: {', '.join(segment_ids) or '<unknown>'}."
+    )
+    comment = (
+        "Model refused critic review; language/style review incomplete; manual review required. "
+        f"Preview: {safe[:160]}.{context}"
+    )
+    response = CriticResponse(
+        verdict="blocked",
+        issues=[
+            CriticIssueOut(
+                severity="blocked",
+                category="critic_model_refusal",
+                comment=comment,
+            )
+        ],
+    )
+    response._review_incomplete = True
+    return response
+
+
+@dataclass(frozen=True)
+class _CriticFetchResult:
+    response: CriticResponse
+    refused: bool = False
+    refusal_model: str | None = None
+    refusal_preview: str = ""
+
+
+def _model_policy_family(model: str) -> str:
+    """Return a stable provider-policy family from a configured model slug."""
+    slug = model.rsplit("/", 1)[-1].casefold()
+    match = re.match(r"[a-z]+", slug)
+    return match.group(0) if match else slug
+
+
+def _dedupe_models(models: list[str]) -> list[str]:
+    return list(dict.fromkeys(model for model in models if model))
+
+
+def _messages_sha256(messages: list) -> str:
+    serialized = json.dumps(
+        messages,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _fetch_critic_response(
+    client: YandexLLMClient,
+    messages: list,
+    *,
+    pass_label: str,
+    max_tokens: int | None = None,
+    model_chain: list[str] | None = None,
+    stop_on_refusal: bool = True,
+    file_path: str = "",
+    batch_label: str = "",
+    segment_ids: tuple[str, ...] = (),
+    response_parser=None,
+) -> _CriticFetchResult:
+    """Call configured critic models, separating JSON repair from refusals."""
+    last_exc: LLMParseError | None = None
+    original_messages = list(messages)
+    models = _dedupe_models(model_chain or client.model_chain_for_role("critic"))
+    last_content = ""
+    last_refusal = ""
+    refused_families: set[str] = set()
+    attempt = 0
+    for model in models:
+        family = _model_policy_family(model)
+        if family in refused_families:
+            continue
+        attempt += 1
+        content = ""
+        request_messages = original_messages
+        request_hash = _messages_sha256(request_messages)
+        try:
+            result = client.chat(
+                request_messages,
+                role="critic",
+                model=model,
+                max_tokens=max_tokens,
+            )
+            content = (result.content or "").strip()
+            last_content = content
+            if not content:
+                raise LLMParseError("Empty LLM response")
+            if is_model_refusal_text(content):
+                last_refusal = content
+                last_exc = LLMParseError("Critic model refusal")
+                refused_families.add(family)
+                logger.warning(
+                    "%s refused semantic review; file=%s batch=%s leaf_ids=%s "
+                    "attempt=%s model=%s messages_sha256=%s outcome=refusal",
+                    pass_label,
+                    file_path or "<file>",
+                    batch_label or "<batch>",
+                    ",".join(segment_ids),
+                    attempt,
+                    model,
+                    request_hash,
+                )
+                if stop_on_refusal:
+                    return _CriticFetchResult(
+                        response=_heuristic_only_critic_response(
+                            preview=content,
+                            file_path=file_path,
+                            batch_label=batch_label,
+                            segment_ids=segment_ids,
+                        ),
+                        refused=True,
+                        refusal_model=model,
+                        refusal_preview=content,
+                    )
+                continue
+            parsed = (response_parser or parse_critic_response)(content)
+            logger.info(
+                "%s semantic review complete; file=%s batch=%s leaf_ids=%s "
+                "attempt=%s model=%s messages_sha256=%s outcome=parsed",
+                pass_label,
+                file_path or "<file>",
+                batch_label or "<batch>",
+                ",".join(segment_ids),
+                attempt,
+                model,
+                request_hash,
+            )
+            return _CriticFetchResult(response=parsed)
+        except LLMParseError as exc:
+            last_exc = exc
+            preview = content[:200]
+            logger.warning(
+                "%s parse failed: %s; file=%s batch=%s leaf_ids=%s attempt=%s "
+                "model=%s messages_sha256=%s response_chars=%s response_preview=%r",
+                pass_label,
+                exc,
+                file_path or "<file>",
+                batch_label or "<batch>",
+                ",".join(segment_ids),
+                attempt,
+                model,
+                request_hash,
+                len(content),
+                preview,
+            )
+            if not content:
+                continue
+            repair_messages = [
+                *original_messages,
+                {"role": "assistant", "content": content},
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous response was not valid JSON. Return the same "
+                        "critic result as one valid JSON object matching the requested "
+                        "schema. Return JSON only, without Markdown fences or prose."
+                    ),
+                },
+            ]
+            repair_hash = _messages_sha256(repair_messages)
+            repair_content = ""
+            try:
+                repair = client.chat(
+                    repair_messages,
+                    role="critic",
+                    model=model,
+                    max_tokens=max_tokens,
+                )
+                repair_content = (repair.content or "").strip()
+                last_content = repair_content
+                if not repair_content:
+                    raise LLMParseError("Empty LLM response")
+                if is_model_refusal_text(repair_content):
+                    last_refusal = repair_content
+                    last_exc = LLMParseError("Critic model refusal")
+                    refused_families.add(family)
+                    if stop_on_refusal:
+                        return _CriticFetchResult(
+                            response=_heuristic_only_critic_response(
+                                preview=repair_content,
+                                file_path=file_path,
+                                batch_label=batch_label,
+                                segment_ids=segment_ids,
+                            ),
+                            refused=True,
+                            refusal_model=model,
+                            refusal_preview=repair_content,
+                        )
+                    continue
+                parsed = (response_parser or parse_critic_response)(repair_content)
+                logger.info(
+                    "%s JSON repair complete; file=%s batch=%s leaf_ids=%s "
+                    "attempt=%s model=%s messages_sha256=%s outcome=parsed",
+                    pass_label,
+                    file_path or "<file>",
+                    batch_label or "<batch>",
+                    ",".join(segment_ids),
+                    attempt,
+                    model,
+                    repair_hash,
+                )
+                return _CriticFetchResult(response=parsed)
+            except LLMParseError as repair_exc:
+                last_exc = repair_exc
+                logger.warning(
+                    "%s JSON repair failed; file=%s batch=%s leaf_ids=%s "
+                    "attempt=%s model=%s messages_sha256=%s outcome=parse_failure",
+                    pass_label,
+                    file_path or "<file>",
+                    batch_label or "<batch>",
+                    ",".join(segment_ids),
+                    attempt,
+                    model,
+                    repair_hash,
+                )
+    if last_refusal:
+        return _CriticFetchResult(
+            response=_heuristic_only_critic_response(
+                preview=last_refusal,
+                file_path=file_path,
+                batch_label=batch_label,
+                segment_ids=segment_ids,
+            ),
+            refused=True,
+            refusal_preview=last_refusal,
+        )
+    return _CriticFetchResult(
+        response=_fallback_critic_response(
+            reason=str(last_exc or "unknown parse error"),
+            preview=last_content,
+        )
+    )
+
+
+def parse_critic_response(raw: str) -> CriticResponse:
+    """Parse and validate critic / verify JSON (with verdict alias normalization)."""
+    data = parse_json_content(raw)
+    if isinstance(data, dict):
+        verdict_raw = data.get("verdict")
+        normalized_verdict: CriticVerdict | None = None
+        if isinstance(verdict_raw, str):
+            normalized_verdict = normalize_critic_verdict_value(verdict_raw)
+            if normalized_verdict is not None:
+                data = {**data, "verdict": normalized_verdict}
+        issues = data.get("issues")
+        if isinstance(issues, list):
+            default_severity = (
+                "blocked" if normalized_verdict == "blocked" else "warning"
+            )
+            normalized_issues: list[object] = []
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    normalized_issues.append(issue)
+                    continue
+                # Some critic models emit a bare rewrite with no diagnosis.
+                # It is not an actionable issue and often repeats the current
+                # translation verbatim, so treating it as blocked creates a
+                # false failure and an endless fixup loop.
+                if (
+                    issue.get("suggested_text")
+                    and not issue.get("severity")
+                    and not issue.get("category")
+                    and not issue.get("comment")
+                    and not issue.get("description")
+                ):
+                    continue
+                normalized_issue = dict(issue)
+                normalized_issue.setdefault("severity", default_severity)
+                normalized_issue.setdefault("category", "translation_quality")
+                if not normalized_issue.get("comment"):
+                    normalized_issue["comment"] = (
+                        normalized_issue.get("description")
+                        or normalized_issue.get("suggested_text")
+                        or "Critic reported a translation issue."
+                    )
+                normalized_issues.append(normalized_issue)
+            data = {**data, "issues": normalized_issues}
+            if issues and not normalized_issues:
+                data["verdict"] = "ok"
+    try:
+        return CriticResponse.model_validate(data)
+    except Exception as exc:
+        raise LLMParseError(f"JSON schema validation failed: {exc}") from exc
+
+
+def _segments_by_id(segments: list[Segment]) -> dict[str, Segment]:
+    return {seg.id: seg for seg in segments}
+
+
+def _critic_batches(
+    segments: list[Segment],
+    *,
+    max_chars: int,
+) -> list[Batch]:
+    return chunk_segments(segments, max_chars=max_chars)
+
+
+def _batch_segment_ids(batch: Batch) -> set[str]:
+    return {seg.id for seg in batch.segments}
+
+
+def _prior_issues_for_batch(
+    prior_issues: list[CriticIssueOut],
+    batch: Batch,
+    *,
+    include_global: bool,
+) -> list[dict[str, object]]:
+    """Filter prior issues to those relevant to a verify batch."""
+    ids = _batch_segment_ids(batch)
+    out: list[dict[str, object]] = []
+    for issue in prior_issues:
+        if issue.segment_id is None:
+            if include_global:
+                out.append(issue.model_dump())
+            continue
+        if issue.segment_id in ids:
+            out.append(issue.model_dump())
+    return out
+
+
+def _is_empty_critic_failure(response: CriticResponse) -> bool:
+    """True when the batch failed solely because the LLM returned empty JSON."""
+    if not response.issues:
+        return False
+    return all(
+        issue.category == "critic_execution_failed"
+        and "empty" in (issue.comment or "").casefold()
+        for issue in response.issues
+    )
+
+
+def _run_critic_batches(
+    client: YandexLLMClient,
+    *,
+    batches: list[Batch],
+    translations: dict[str, str],
+    glossary: Glossary,
+    file_path: str,
+    source_lang: str,
+    target_lang: str,
+    prompt_version: str,
+    max_tokens: int | None,
+    pass_label: str,
+    prior_issues: list[CriticIssueOut] | None = None,
+    target_atom_maps: dict[str, dict[str, str]] | None = None,
+    message_builder=None,
+    response_parser=None,
+) -> CriticResponse:
+    batch_count = len(batches)
+    model_chain = client.model_chain_for_role("critic")
+
+    def fetch_response(messages: list, **kwargs) -> _CriticFetchResult:
+        try:
+            fetched = _fetch_critic_response(client, messages, **kwargs)
+        except LLMError as exc:
+            # Legacy critic/verify retain their existing exception contract.
+            if message_builder is None:
+                raise
+            fetched = _CriticFetchResult(response=_fallback_critic_response(reason=str(exc)))
+        if message_builder is not None:
+            context = (f" File: {file_path}; {kwargs['pass_label']}; units: "
+                       + ", ".join(kwargs["segment_ids"]) + ".")
+            for issue in fetched.response.issues:
+                if issue.category == "critic_execution_failed":
+                    issue.comment += context
+                    fetched.response._review_incomplete = True
+        return fetched
+
+    def review_batch(batch: Batch, *, label: str, depth: int) -> CriticResponse:
+        if message_builder is not None:
+            messages = message_builder(batch)
+        elif prior_issues is None:
+            messages = build_critic_batch_messages(
+                batch,
+                translations,
+                glossary,
+                file_path=file_path,
+                batch_count=batch_count,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                version=prompt_version,
+                target_atom_maps=target_atom_maps,
+            )
+        else:
+            messages = build_verify_batch_messages(
+                batch,
+                translations,
+                _prior_issues_for_batch(
+                    prior_issues,
+                    batch,
+                    include_global=batch.index == 0,
+                ),
+                glossary,
+                file_path=file_path,
+                batch_count=batch_count,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                version=prompt_version,
+                target_atom_maps=target_atom_maps,
+            )
+        segment_ids = tuple(segment.id for segment in batch.segments)
+        fetched = fetch_response(
+            messages,
+            pass_label=label,
+            max_tokens=max_tokens,
+            model_chain=model_chain,
+            stop_on_refusal=True,
+            file_path=file_path,
+            batch_label=f"{batch.index + 1}/{batch_count}",
+            segment_ids=segment_ids,
+            response_parser=(lambda raw: response_parser(raw, batch)) if response_parser else None,
+        )
+
+        should_split = (
+            len(batch.segments) > 1
+            and depth < _MAX_CRITIC_SPLIT_DEPTH
+            and (fetched.refused or _is_empty_critic_failure(fetched.response))
+        )
+        if should_split:
+            mid = max(1, len(batch.segments) // 2)
+            split_batches = [
+                Batch(index=batch.index, segments=batch.segments[:mid]),
+                Batch(index=batch.index, segments=batch.segments[mid:]),
+            ]
+            logger.warning(
+                "%s incomplete semantic review; splitting at segment boundary as %s + %s",
+                label,
+                mid,
+                len(batch.segments) - mid,
+            )
+            return merge_critic_responses([
+                review_batch(
+                    half,
+                    label=f"{label} split {half_i}/2",
+                    depth=depth + 1,
+                )
+                for half_i, half in enumerate(split_batches, start=1)
+            ])
+
+        if fetched.refused and fetched.refusal_model is not None:
+            refused_family = _model_policy_family(fetched.refusal_model)
+            alternate_chain = [
+                model
+                for model in model_chain
+                if _model_policy_family(model) != refused_family
+            ]
+            if alternate_chain:
+                logger.warning(
+                    "%s leaf refusal; trying configured independent critic families: %s",
+                    label,
+                    ", ".join(alternate_chain),
+                )
+                return fetch_response(
+                    messages,
+                    pass_label=f"{label} alternate",
+                    max_tokens=max_tokens,
+                    model_chain=alternate_chain,
+                    stop_on_refusal=False,
+                    file_path=file_path,
+                    batch_label=f"{batch.index + 1}/{batch_count}",
+                    segment_ids=segment_ids,
+                    response_parser=(lambda raw: response_parser(raw, batch)) if response_parser else None,
+                ).response
+        return fetched.response
+
+    responses: list[CriticResponse] = []
+    for batch in batches:
+        responses.append(
+            review_batch(
+                batch,
+                label=f"{pass_label} batch {batch.index + 1}/{batch_count}",
+                depth=0,
+            )
+        )
+    return merge_critic_responses(responses)
+
+
+def run_readonly_semantic_critic(
+    client: YandexLLMClient, *, units: ReviewPlan, glossary: Glossary, file_path: str,
+    source_lang: str = "ru", target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION, max_chars: int = 12000,
+    max_tokens: int | None = None,
+) -> CriticResponse:
+    """Review one immutable ReviewPlan, returning advice without any content writes."""
+    from ydbdoc_review.segmentation.types import SegmentKind
+    from ydbdoc_review.translation.prompts import build_final_readonly_messages
+    from ydbdoc_review.translation.review_blocks import batch_review_units
+
+    plan = units
+    def failed(reason):
+        response = _fallback_critic_response(reason=f"{file_path}: {reason}")
+        response._review_incomplete = True
+        return response
+
+    # The request budget covers the actual serialized units and static instructions.
+    overhead = sum(len(m["content"].encode()) for m in build_final_readonly_messages(
+        (), glossary, file_path=file_path, source_lang=source_lang,
+        target_lang=target_lang, version=prompt_version))
+    # max_chars budgets content, not the glossary. UTF-8 takes at most four
+    # bytes per character; include static request overhead in both limits.
+    manifest = batch_review_units(plan, budget_bytes=max_chars + overhead,
+                                  hard_limit_bytes=4 * max_chars + overhead,
+                                  overhead_bytes=overhead)
+    if not manifest.complete or file_path != plan.en.path:
+        return failed("incomplete review input: " + "; ".join(i.reason for i in manifest.issues))
+    if not plan.units:
+        return CriticResponse(verdict="ok", issues=[])
+    by_id = {unit.id: unit for unit in plan.units}
+    batches = [Batch(index=index, segments=[Segment(
+        id=unit.id, kind=SegmentKind.PARAGRAPH, path=[unit.en_path],
+        text=unit.ru_text, placeholders=[], ast_path=[],
+    ) for unit in batch]) for index, batch in enumerate(manifest.batches)]
+
+    def messages(batch):
+        return build_final_readonly_messages(tuple(by_id[s.id] for s in batch.segments),
+            glossary, file_path=file_path, source_lang=source_lang,
+            target_lang=target_lang, version=prompt_version)
+
+    def parse(raw, batch):
+        # Do not use legacy rewrite/default-diagnosis coercion for final evidence.
+        try:
+            data = parse_json_content(raw)
+            if not isinstance(data, dict) or "issues" not in data:
+                raise ValueError("missing explicit issues")
+            response = CriticResponse.model_validate(data)
+            ids = {segment.id for segment in batch.segments}
+            if response.verdict != "ok" and not response.issues:
+                raise ValueError("non-ok response without actionable issues")
+            for issue in response.issues:
+                if issue.segment_id not in ids or not issue.comment.strip():
+                    raise ValueError("unknown unit or missing diagnosis")
+            return CriticResponse(verdict="warnings" if response.issues else "ok",
+                issues=[issue.model_copy(update={"severity": "warning", "category": "translation_quality"})
+                        for issue in response.issues])
+        except (ValueError, TypeError) as exc:
+            raise LLMParseError(f"incomplete semantic response: {exc}") from exc
+
+    try:
+        response = _run_critic_batches(client, batches=batches,
+            translations={u.id: u.en_text for u in plan.units}, glossary=glossary,
+            file_path=file_path, source_lang=source_lang, target_lang=target_lang,
+            prompt_version=prompt_version, max_tokens=max_tokens, pass_label="Final read-only critic",
+            message_builder=messages, response_parser=parse)
+    except LLMError as exc:
+        return failed(str(exc))
+    if response.verdict == "blocked" or response._review_incomplete:
+        response._review_incomplete = True
+        response.verdict = "blocked"
+    return response
+
+
+def _critic_fix_would_regress(
+    current: str,
+    suggested: str,
+    issue: CriticIssueOut,
+) -> str | None:
+    """Return a skip reason when auto-apply would likely remove good translation."""
+    if not current.strip() or not suggested.strip():
+        return None
+    haystack = f"{issue.category} {issue.comment}"
+    if _MISSING_CONTENT_ISSUE.search(haystack) and len(suggested) < len(current):
+        return "missing-content fix is shorter than current translation"
+    if _TRUNCATED_SUGGESTION.search(suggested.rstrip()):
+        return "truncated suggested_text"
+    return None
+
+
+_CODE_ONLY_LINK = re.compile(r"\[(⟦C\d+⟧)\]\((⟦U\d+⟧)\)")
+
+
+def _drop_impossible_code_link_issues(
+    response: CriticResponse,
+    translations: dict[str, str],
+    segments: list[Segment],
+) -> CriticResponse:
+    """Ignore link advice that contradicts a source-preserved code-only label."""
+    kept: list[CriticIssueOut] = []
+    source_by_id = _segments_by_id(segments)
+    for issue in response.issues:
+        current = translations.get(issue.segment_id or "", "")
+        source = source_by_id.get(issue.segment_id or "")
+        suggested = issue.suggested_text or ""
+        link_matches = list(
+            _CODE_ONLY_LINK.finditer(source.text if source is not None else "")
+        )
+        haystack = f"{issue.category} {issue.comment}"
+        impossible = re.search(r"link|anchor", haystack, re.IGNORECASE) and any(
+            re.search(
+                rf"\[[^\]]*{re.escape(match.group(1))}[^\]]*\]"
+                rf"\({re.escape(match.group(2))}\)",
+                current,
+            )
+            and match.group(2) in suggested
+            and match.group(1) not in suggested
+            for match in link_matches
+        )
+        if impossible:
+            logger.warning(
+                "Ignoring critic issue for %s: suggestion removes a source-preserved "
+                "code-only link label",
+                issue.segment_id,
+            )
+            continue
+        kept.append(issue)
+    if len(kept) == len(response.issues):
+        return response
+    return CriticResponse(verdict="ok" if not kept else response.verdict, issues=kept)
+
+
+def apply_critic_fixes(
+    translations: dict[str, str],
+    segments: list[Segment],
+    issues: list[CriticIssueOut],
+    *,
+    strict_placeholder_order: bool = False,
+) -> tuple[dict[str, str], list[CriticIssueOut], list[CriticIssueOut]]:
+    """Apply ``suggested_text`` fixes that pass structural validation.
+
+    When ``strict_placeholder_order`` is True, reject suggestions whose
+    placeholder **set** differs from the current translation (renumber / add /
+    drop). Same ids in a different order are allowed after §6.55 align (§6.133).
+
+    Returns ``(updated_translations, applied_issues, skipped_issues)``.
+    """
+    by_id = _segments_by_id(segments)
+    updated = dict(translations)
+    applied: list[CriticIssueOut] = []
+    skipped: list[CriticIssueOut] = []
+
+    for issue in issues:
+        if issue.suggested_text is None or issue.category in {
+            "protected_atom_language", "protected_atom_alignment",
+        }:
+            skipped.append(issue)
+            continue
+        if issue.segment_id is None:
+            logger.warning("Critic issue without segment_id cannot be applied: %s", issue.comment)
+            skipped.append(issue)
+            continue
+        seg = by_id.get(issue.segment_id)
+        if seg is None:
+            logger.warning("Unknown segment_id %r in critic issue", issue.segment_id)
+            skipped.append(issue)
+            continue
+        current = updated.get(issue.segment_id, seg.text)
+        regress = _critic_fix_would_regress(current, issue.suggested_text, issue)
+        if regress:
+            logger.warning(
+                "Skipping critic fix for %s: %s (%s)",
+                issue.segment_id,
+                regress,
+                issue.comment[:120],
+            )
+            skipped.append(issue)
+            continue
+        if strict_placeholder_order:
+            current_ph = extract_placeholders(current)
+            suggested_ph = extract_placeholders(issue.suggested_text)
+            # Same placeholder ids, different order is safe after §6.55 align
+            # (ids name the same atoms). Reject only renumber / add / drop (§6.133).
+            if sorted(current_ph) != sorted(suggested_ph):
+                logger.warning(
+                    "Skipping critic fix for %s: placeholder set change in doc_verify "
+                    "(current=%s, suggested=%s) would mis-render EN atoms",
+                    issue.segment_id,
+                    current_ph,
+                    suggested_ph,
+                )
+                skipped.append(issue)
+                continue
+            # same multiset, possibly reordered — apply
+        try:
+            validate_segment_translation(seg, issue.suggested_text)
+        except TranslationValidationError as exc:
+            logger.warning("Skipping critic fix for %s: %s", issue.segment_id, exc)
+            skipped.append(issue)
+            continue
+        from ydbdoc_review.validation.heuristics import check_cyrillic_in_en
+
+        if check_cyrillic_in_en(issue.suggested_text, target_lang="en"):
+            logger.warning(
+                "Skipping critic fix for %s: suggested_text introduces Cyrillic in EN",
+                issue.segment_id,
+            )
+            skipped.append(issue)
+            continue
+        updated[issue.segment_id] = issue.suggested_text
+        applied.append(issue)
+
+    return updated, applied, skipped
+
+
+def _target_atom_evidence(
+    segments: list[Segment], translated_text: str | None, *, target_lang: str,
+) -> tuple[dict[str, dict[str, str]] | None, list[CriticIssueOut]]:
+    try:
+        atoms = None if translated_text is None else target_atom_maps(segments, translated_text)
+    except ValueError as exc:
+        return {}, [CriticIssueOut(
+            severity="blocked", category="protected_atom_alignment", comment=str(exc),
+            suggested_text=None,
+        )]
+    return atoms, protected_atom_language_issues(
+        segments, target_atoms=atoms, target_lang=target_lang,
+    )
+
+
+def _merge_atom_evidence(
+    response: CriticResponse, issues: list[CriticIssueOut],
+) -> CriticResponse:
+    """Opaque atom findings cannot authorize a suggested replacement of their markers."""
+    for issue in response.issues:
+        if issue.category in {"protected_atom_language", "protected_atom_alignment"}:
+            issue.suggested_text = None
+            issue.severity = "blocked"
+    if not issues and not any(
+        issue.category in {"protected_atom_language", "protected_atom_alignment"}
+        for issue in response.issues
+    ):
+        return response
+    return merge_critic_responses([
+        response, CriticResponse(verdict="blocked" if issues else "ok", issues=issues),
+    ])
+
+
+def run_critic(
+    client: YandexLLMClient,
+    *,
+    segments: list[Segment],
+    translations: dict[str, str],
+    glossary: Glossary,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+    max_chars: int = 2500,
+    max_tokens: int | None = None,
+    source_text: str = "",
+    translated_text: str | None = None,
+) -> CriticResponse:
+    """First-pass batched critic review over segment pairs."""
+    del source_text  # kept for call-site compatibility
+    atoms, atom_issues = _target_atom_evidence(segments, translated_text, target_lang=target_lang)
+    if any(i.category == "protected_atom_alignment" for i in atom_issues):
+        return CriticResponse(verdict="blocked", issues=atom_issues)
+    if not segments:
+        return CriticResponse(verdict="ok", issues=[])
+    batches = _critic_batches(segments, max_chars=max_chars)
+    logger.info(
+        "Critic %s: %s segments in %s batch(es), max_chars=%s",
+        file_path or "<file>",
+        len(segments),
+        len(batches),
+        max_chars,
+    )
+    response = _run_critic_batches(
+        client,
+        batches=batches,
+        translations=translations,
+        glossary=glossary,
+        file_path=file_path,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        prompt_version=prompt_version,
+        max_tokens=max_tokens,
+        pass_label="Critic",
+        target_atom_maps=atoms,
+    )
+    return _merge_atom_evidence(response, atom_issues)
+
+
+def run_verify(
+    client: YandexLLMClient,
+    *,
+    segments: list[Segment],
+    translations: dict[str, str],
+    prior_issues: list[CriticIssueOut],
+    glossary: Glossary,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+    max_chars: int = 2500,
+    max_tokens: int | None = None,
+    source_text: str = "",
+    translated_text: str | None = None,
+) -> CriticResponse:
+    """Second-pass batched verify after fixes were applied."""
+    del source_text
+    atoms, atom_issues = _target_atom_evidence(segments, translated_text, target_lang=target_lang)
+    if any(i.category == "protected_atom_alignment" for i in atom_issues):
+        return CriticResponse(verdict="blocked", issues=atom_issues)
+    if not segments:
+        return CriticResponse(verdict="ok", issues=[])
+    batches = _critic_batches(segments, max_chars=max_chars)
+    response = _run_critic_batches(
+        client,
+        batches=batches,
+        translations=translations,
+        glossary=glossary,
+        file_path=file_path,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        prompt_version=prompt_version,
+        max_tokens=max_tokens,
+        pass_label="Verify",
+        prior_issues=prior_issues,
+        target_atom_maps=atoms,
+    )
+    return _merge_atom_evidence(response, atom_issues)
+
+
+@dataclass
+class CriticReviewResult:
+    """Outcome of critic → apply → verify."""
+
+    initial: CriticResponse
+    translations: dict[str, str]
+    applied: list[CriticIssueOut] = field(default_factory=list)
+    skipped: list[CriticIssueOut] = field(default_factory=list)
+    unresolved: CriticResponse | None = None
+
+
+def review_with_critic(
+    client: YandexLLMClient,
+    *,
+    source_text: str,
+    translated_text: str | None,
+    segments: list[Segment],
+    translations: dict[str, str],
+    glossary: Glossary,
+    file_path: str,
+    source_lang: str = "ru",
+    target_lang: str = "en",
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+    max_chars: int = 2500,
+    max_tokens: int | None = None,
+    run_second_pass: bool = True,
+    translated_text_after_fixes: str | None = None,
+) -> CriticReviewResult:
+    """Run critic, apply safe fixes, optionally re-verify unresolved issues."""
+    del source_text
+    initial = run_critic(
+        client,
+        segments=segments,
+        translations=translations,
+        glossary=glossary,
+        file_path=file_path,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        prompt_version=prompt_version,
+        max_chars=max_chars,
+        max_tokens=max_tokens,
+        translated_text=translated_text,
+    )
+    initial = _drop_impossible_code_link_issues(initial, translations, segments)
+    fixed, applied, skipped = apply_critic_fixes(translations, segments, initial.issues)
+
+    unresolved: CriticResponse | None = None
+    if run_second_pass and initial.issues:
+        unresolved = run_verify(
+            client,
+            segments=segments,
+            translations=fixed,
+            prior_issues=initial.issues,
+            glossary=glossary,
+            file_path=file_path,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            prompt_version=prompt_version,
+            max_chars=max_chars,
+            max_tokens=max_tokens,
+            translated_text=(
+                translated_text if translated_text_after_fixes is None
+                else translated_text_after_fixes
+            ),
+        )
+        unresolved = _drop_impossible_code_link_issues(unresolved, fixed, segments)
+
+    return CriticReviewResult(
+        initial=initial,
+        translations=fixed,
+        applied=applied,
+        skipped=skipped,
+        unresolved=unresolved,
+    )

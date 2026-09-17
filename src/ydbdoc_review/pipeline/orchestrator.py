@@ -1,0 +1,52 @@
+"""PR-level translation orchestrator — delegates to ``harness`` PR profiles."""
+
+from __future__ import annotations
+
+from ydbdoc_review.config.loader import Config
+from ydbdoc_review.harness.context import DocsTextReader
+from ydbdoc_review.harness.pr_context import PRHarnessContext
+from ydbdoc_review.harness.pr_profiles import TRANSLATE_PR_PROFILE
+from ydbdoc_review.harness.pr_runner import PRHarness
+from ydbdoc_review.harness.pr_state import PRRunState
+from ydbdoc_review.llm.client import YandexLLMClient
+from ydbdoc_review.ops.translation_checkpoint import CheckpointWriter
+from ydbdoc_review.pipeline.analyze import PairContent
+from ydbdoc_review.pipeline.types import PRTranslationResult
+from ydbdoc_review.translation.glossary import Glossary
+
+
+def run_pr_translation(
+    contents: list[PairContent],
+    client: YandexLLMClient,
+    glossary: Glossary | None = None,
+    *,
+    config: Config | None = None,
+    use_analyze_llm: bool = False,
+    per_pr_cache: dict[str, str] | None = None,
+    en_toc_reachable: frozenset[str] | None = None,
+    redirect_source_en_paths: frozenset[str] | None = None,
+    docs_text_reader: DocsTextReader | None = None,
+    docs_repo_path: str | None = None,
+    checkpoint: CheckpointWriter | None = None,
+    resume_parent_run_id: str | None = None,
+    prepare_only: bool = False,
+) -> PRTranslationResult:
+    """Plan and execute translation for all pairs (sequential, one shared cache)."""
+    state = PRRunState(
+        contents=contents,
+        cache=per_pr_cache if per_pr_cache is not None else {},
+    )
+    ctx = PRHarnessContext.from_options(
+        client,
+        glossary=glossary,
+        config=config,
+        use_analyze_llm=use_analyze_llm,
+        en_toc_reachable=en_toc_reachable,
+        redirect_source_en_paths=redirect_source_en_paths,
+        docs_text_reader=docs_text_reader,
+        docs_repo_path=docs_repo_path,
+        checkpoint=checkpoint,
+        resume_parent_run_id=resume_parent_run_id,
+        prepare_only=prepare_only,
+    )
+    return PRHarness(TRANSLATE_PR_PROFILE).run(state, ctx)

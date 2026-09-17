@@ -1,0 +1,1793 @@
+{
+  "segments": [
+    {
+      "file_path": "ydb/docs/ru/core/concepts/glossary.md",
+      "source": "Токен пользователя",
+      "english": "User token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/concepts/glossary.md",
+      "source": "**Токен пользователя** — внутренний результат проверки ⟦L1⟧аутентификационного токена⟦L1⟧. Он содержит ⟦L2⟧SID⟦L2⟧ пользователя и групп и используется при ⟦L3⟧авторизации⟦L3⟧. Токен пользователя используется и хранится только на создавшем его ⟦L4⟧узле⟦L4⟧ и не передаётся клиенту. Подробнее см. в статье ⟦L5⟧{#T}⟦L5⟧.",
+      "english": "**User token** is an internal result of ⟦L1⟧authentication token⟦L1⟧ verification. It contains the ⟦L2⟧SID⟦L2⟧ of the user and groups and is used for ⟦L3⟧authorization⟦L3⟧. The user token is used and stored only on the ⟦L4⟧node⟦L4⟧ that created it and is not passed to the client. For more information, see the article ⟦L5⟧{#T}⟦L5⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "auth_config",
+      "english": "auth_config"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ позволяет использовать различные способы аутентификации пользователей в системе. Настройки аутентификации и провайдеров аутентификации задаются в секции ⟦C1⟧ файла конфигурации ⟦V2⟧.",
+      "english": "⟦V1⟧ allows using various user authentication methods in the system. Authentication and authentication provider settings are specified in the ⟦C1⟧ section of the ⟦V2⟧ configuration file."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация аутентификации локальных пользователей ⟦V1⟧",
+      "english": "Local user authentication configuration ⟦V1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Подробнее об аутентификации ⟦L1⟧локальных пользователей⟦L1⟧ см. в разделе про ⟦L2⟧аутентификацию по логину и паролю⟦L2⟧. Для настройки аутентификации локальных пользователей по логину и паролю необходимо указать следующие параметры в секции ⟦C1⟧:",
+      "english": "For more information about authentication of ⟦L1⟧local users⟦L1⟧, see the section on ⟦L2⟧login and password authentication⟦L2⟧. To configure authentication of local users by login and password, specify the following parameters in the ⟦C1⟧ section:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Флаг разрешает аутентификацию локальных пользователей по auth-токенам, полученным в результате входа по логину и паролю. Процедура входа в ⟦V1⟧ — это обмен логина и пароля на аутентификационный токен.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| Flag enables authentication of local users using auth tokens obtained as a result of login with login and password. The login procedure in ⟦V1⟧ is the exchange of login and password for an authentication token."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Возможные значения:",
+      "english": "Possible values:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — разрешает аутентификацию локальных пользователей по аутентификационным токенам;",
+      "english": "⟦C1⟧ — enables authentication of local users using authentication tokens"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — запрещает аутентификацию локальных пользователей по аутентификационным токенам.",
+      "english": "⟦C1⟧ — disables authentication of local users using authentication tokens."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧",
+      "english": "Default value: ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Для возможности создания и аутентификации локальных пользователей параметры ⟦C1⟧ и ⟦C2⟧ должны иметь значение ⟦C3⟧. В противном случае локальные пользователи не смогут аутентифицироваться в ⟦V1⟧.",
+      "english": "For the ability to create and authenticate local users, the ⟦C1⟧ and ⟦C2⟧ parameters must be set to ⟦C3⟧. Otherwise, local users will not be able to authenticate in ⟦V1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "|| ⟦C1⟧\n| Флаг разрешает создание локальных пользователей и получение для них аутентификационного токена в обмен на логин и пароль.",
+      "english": "|| ⟦C1⟧\n| Flag enables creation of local users and obtaining an authentication token for them in exchange for login and password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — разрешает создание локальных пользователей и получение для них аутентификационного токена;",
+      "english": "⟦C1⟧ — enables creation of local users and obtaining an authentication token for them"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — запрещает создание локальных пользователей и получение для них аутентификационного токена.",
+      "english": "⟦C1⟧ — disables creation of local users and obtaining an authentication token for them."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Флаг определяет границы прав доступа локальных пользователей в кластере ⟦V1⟧.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Flag defines the access rights boundaries of local users in the ⟦V1⟧ cluster."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — локальные пользователи ⟦V1⟧ существуют на уровне кластера и им могут назначаться права на доступ к множеству ⟦L1⟧баз данных⟦L1⟧.",
+      "english": "⟦C1⟧ — local users ⟦V1⟧ exist at the cluster level and can be granted access rights to multiple ⟦L1⟧databases⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — локальные пользователи могут существовать как на уровне кластера, так и на уровне каждой отдельной базы данных. Границы прав доступа локальных пользователей, созданных на уровне базы данных, ограничиваются базой данных, в которой они созданы.",
+      "english": "⟦C1⟧ — local users can exist both at the cluster level and at the level of each individual database. The access rights boundaries of local users created at the database level are limited to the database in which they were created."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Время жизни аутентификационного токена, созданного в обмен на логин и пароль локального пользователя.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Lifetime of the authentication token created in exchange for the local user's login and password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|#",
+      "english": "Default value: ⟦C1⟧\n||\n|#"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация блокировки пользователя при неправильно введённом пароле",
+      "english": "User lockout configuration on incorrect password entry"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ позволяет запретить пользователю аутентифицироваться, если он совершил несколько неудачных попыток ввода пароля. Для настройки условий блокировки пользователя необходимо заполнить секцию ⟦C1⟧.",
+      "english": "⟦V1⟧ allows you to prevent a user from authenticating if they have made several unsuccessful password entry attempts. To configure user lockout conditions, fill in the ⟦C1⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Пример секции ⟦C1⟧:",
+      "english": "Example of the ⟦C1⟧ section:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Количество неверных попыток ввода пароля, после которых учётная запись пользователя временно блокируется. Если пользователь ввёл неправильный пароль указанное количество раз подряд, ему запрещается аутентифицироваться на время, заданное в параметре ⟦C2⟧.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| Number of incorrect password attempts after which the user account is temporarily blocked. If the user enters the wrong password the specified number of times in a row, they are prohibited from authenticating for the time specified in the ⟦C2⟧ parameter."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Если параметр имеет значение ⟦C1⟧, число попыток ввода неправильного пароля не ограничено. После успешной аутентификации (ввода правильных имени пользователя и пароля), счетчик неуспешных попыток сбрасывается в значение 0.",
+      "english": "If the parameter is set to ⟦C1⟧, the number of incorrect password attempts is unlimited. After successful authentication (entering the correct username and password), the counter of failed attempts is reset to 0."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период времени, в течение которого пользователь считается заблокированным. В течение этого периода пользователь не сможет аутентифицироваться в системе даже если введёт правильные имя пользователя и пароль. Период блокировки начинается с момента последней неверной попытки ввода пароля.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The period of time during which the user is considered blocked. During this period, the user will not be able to authenticate to the system even if they enter the correct username and password. The blocking period starts from the moment of the last incorrect password attempt."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Если указано нулевое значение (⟦C1⟧ — запись, эквивалентная 0 секунд), пользователь будет заблокирован на неограниченное время. В этом случае снять блокировку можно при помощи команды ⟦L1⟧ALTER USER ...  LOGIN⟦L1⟧.",
+      "english": "If a zero value is specified (⟦C1⟧ — an entry equivalent to 0 seconds), the user will be blocked for an unlimited time. In this case, the block can be removed using the ⟦L1⟧ALTER USER ...  LOGIN⟦L1⟧ command."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Минимальный интервал времени блокировки 1 секунда.",
+      "english": "The minimum blocking time interval is 1 second."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Поддерживаемые единицы измерения:",
+      "english": "Supported units of measurement:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Секунды. ⟦C1⟧",
+      "english": "Seconds. ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Минуты. ⟦C1⟧",
+      "english": "Minutes. ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Часы. ⟦C1⟧",
+      "english": "Hours. ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Дни. ⟦C1⟧",
+      "english": "Days. ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Не допускается комбинировать единицы измерения в одной строке. Например такая запись некорректна: ⟦C1⟧. Такую запись нужно заменить на эквивалентную, например ⟦C2⟧.",
+      "english": "Combining units of measurement in a single line is not allowed. For example, the following entry is incorrect: ⟦C1⟧. Such an entry should be replaced with an equivalent one, for example ⟦C2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация требований к сложности пароля",
+      "english": "Configuring password complexity requirements"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ позволяет аутентифицировать пользователей по логину и паролю. Подробнее см. в разделе ⟦L1⟧аутентификация по логину и паролю⟦L1⟧. Для повышения безопасности в ⟦V2⟧ предусмотрена возможность настройки сложности используемых паролей ⟦L2⟧локальных пользователей⟦L2⟧. Для конфигурирования требований к паролю необходимо описать секцию ⟦C1⟧.",
+      "english": "⟦V1⟧ allows authenticating users by login and password. For more details, see the section ⟦L1⟧login and password authentication⟦L1⟧. To enhance security, ⟦V2⟧ provides the ability to configure the complexity of passwords used by ⟦L2⟧local users⟦L2⟧. To configure password requirements, you need to describe the ⟦C1⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Минимальная длина пароля.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| Minimum password length."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (не ограничено)\n||\n|| ⟦C2⟧\n| Минимальное количество строчных букв в пароле.",
+      "english": "Default value: ⟦C1⟧ (unlimited)\n||\n|| ⟦C2⟧\n| Minimum number of lowercase letters in the password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (не ограничено)\n||\n|| ⟦C2⟧\n| Минимальное количество прописных букв в пароле.",
+      "english": "Default value: ⟦C1⟧ (unlimited)\n||\n|| ⟦C2⟧\n| Minimum number of uppercase letters in the password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (не ограничено)\n||\n|| ⟦C2⟧\n| Минимальное количество цифр в пароле.",
+      "english": "Default value: ⟦C1⟧ (unlimited)\n||\n|| ⟦C2⟧\n| Minimum number of digits in the password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (не ограничено)\n||\n|| ⟦C2⟧\n| Минимальное количество специальных символов в пароле из указанных в параметре ⟦C3⟧.",
+      "english": "Default value: ⟦C1⟧ (unlimited)\n||\n|| ⟦C2⟧\n| Minimum number of special characters in the password from those specified in the ⟦C3⟧ parameter."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (не ограничено)\n||\n|| ⟦C2⟧\n| Перечень специальных символов, допустимых при задании пароля.",
+      "english": "Default value: ⟦C1⟧ (unlimited)\n||\n|| ⟦C2⟧\n| List of special characters allowed when setting a password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Валидные значения: ⟦C1⟧",
+      "english": "Valid values: ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: пустая строка (допускает использование всех валидных специальных символов)\n||\n|| ⟦C1⟧\n| Флаг определяет допустимость включения имени пользователя в пароль.",
+      "english": "Default value: empty string (allows all valid special characters)\n||\n|| ⟦C1⟧\n| The flag determines whether the username can be included in the password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Любые изменения политики паролей не затрагивают уже действующие пароли пользователей, поэтому изменять существующие пароли не требуется, они будут приниматься в текущем виде.",
+      "english": "Any changes to the password policy do not affect existing user passwords, so you do not need to change them; they will be accepted as is."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация LDAP аутентификации",
+      "english": "LDAP authentication configuration"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Одним из способов аутентификации пользователей в ⟦V1⟧ является использование ⟦L1⟧LDAP⟦L1⟧-каталога. Подробнее о таком виде аутентификации написано в разделе про ⟦L2⟧использование LDAP-каталога⟦L2⟧. Для конфигурирования LDAP-аутентификации необходимо описать секцию ⟦C1⟧.",
+      "english": "One way to authenticate users in ⟦V1⟧ is to use an ⟦L1⟧LDAP⟦L1⟧ directory. More about this type of authentication is described in the section on ⟦L2⟧using an LDAP directory⟦L2⟧. To configure LDAP authentication, you need to specify the ⟦C1⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Список имен хостов, на котором работает LDAP-сервер\n||\n|| ⟦C2⟧\n| Порт для подключения к LDAP-серверу\n||\n|| ⟦C3⟧\n| Корень поддерева в LDAP-каталоге, начиная с которого будет производиться поиск записи пользователя\n||\n|| ⟦C4⟧\n| Отличительное имя (Distinguished Name, DN) сервисного аккаунта, от имени которого выполняется поиск записи пользователя\n||\n|| ⟦C5⟧\n| Пароль сервисного аккаунта, от имени которого выполняется поиск записи пользователя. Не задаётся при ⟦C6⟧\n||\n|| ⟦C7⟧\n| Фильтр для поиска записи пользователя в LDAP-каталоге. В строке фильтра может встречаться последовательность символов *$username*, которая будет заменена на имя пользователя, запрошенное для аутентификации в базе данных\n||\n|| ⟦C8⟧\n| Настройки для конфигурирования TLS-соединения между ⟦V1⟧ и LDAP-сервером\n||\n|| ⟦C9⟧\n| Определяет, будет ли произведена попытка установить TLS-соединение с ⟦L1⟧использованием запроса ⟦C10⟧⟦L1⟧. При установке значения этого параметра в ⟦C11⟧, необходимо отключить использование схемы соединения ⟦C12⟧, присвоив параметру ⟦C13⟧ значение ⟦C14⟧\n||\n|| ⟦C15⟧\n| Путь до файла сертификата удостоверяющего центра\n||\n|| ⟦C16⟧\n| Уровень требований к сертификату LDAP-сервера.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| List of host names on which the LDAP server runs\n||\n|| ⟦C2⟧\n| Port for connecting to the LDAP server\n||\n|| ⟦C3⟧\n| Root of the subtree in the LDAP directory from which the user record search will start\n||\n|| ⟦C4⟧\n| Distinguished Name (DN) of the service account on whose behalf the user record search is performed\n||\n|| ⟦C5⟧\n| Password of the service account on whose behalf the user record search is performed. Not set when ⟦C6⟧\n||\n|| ⟦C7⟧\n| Filter for searching a user record in the LDAP directory. The filter string may contain the character sequence *$username*, which will be replaced with the username requested for authentication in the database\n||\n|| ⟦C8⟧\n| Settings for configuring the TLS connection between ⟦V1⟧ and the LDAP server\n||\n|| ⟦C9⟧\n| Determines whether an attempt will be made to establish a TLS connection with ⟦L1⟧using the ⟦C10⟧ request⟦L1⟧. When this parameter is set to ⟦C11⟧, you must disable the ⟦C12⟧ connection scheme by setting the ⟦C13⟧ parameter to ⟦C14⟧\n||\n|| ⟦C15⟧\n| Path to the certificate authority file\n||\n|| ⟦C16⟧\n| Level of requirements for the LDAP server certificate.\n||"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ - ⟦V1⟧ не запрашивает сертификат или проверку проходит любой сертификат.",
+      "english": "⟦C1⟧ - ⟦V1⟧ does not request a certificate, or any certificate passes verification."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ - ⟦V1⟧ требует, что бы LDAP-сервер предоставил сертификат. Если предоставленному сертификату нельзя доверять, TLS-сессия все равно установится.",
+      "english": "⟦C1⟧ - ⟦V1⟧ requires the LDAP server to provide a certificate. If the provided certificate cannot be trusted, the TLS session will still be established."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ - ⟦V1⟧ требует, что бы LDAP-сервер предоставил сертификат. Если предоставленному сертификату нельзя доверять, установление TLS-соединения прекращается.",
+      "english": "⟦C1⟧ - ⟦V1⟧ requires the LDAP server to provide a certificate. If the provided certificate cannot be trusted, the TLS connection establishment is aborted."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ и ⟦C2⟧ — Эти требования эквивалентны параметру ⟦C3⟧.",
+      "english": "⟦C1⟧ and ⟦C2⟧ — These requirements are equivalent to the ⟦C3⟧ parameter."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Путь до файла клиентского сертификата. Используется в качестве аутентификационной информации для ⟦L1⟧сервисного аккаунта⟦L1⟧.\n||\n|| ⟦C3⟧\n| Путь до файла ключа клиентского сертификата\n||\n|| ⟦C4⟧\n| Схема соединения с LDAP-сервером.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Path to the client certificate file. Used as authentication information for the ⟦L1⟧service account⟦L1⟧.\n||\n|| ⟦C3⟧\n| Path to the client certificate key file\n||\n|| ⟦C4⟧\n| LDAP server connection scheme."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — ⟦V1⟧ будет выполнять соединение с LDAP-сервером без какого-либо шифрования. Пароли будут отправляться на LDAP-сервер в открытом виде.",
+      "english": "⟦C1⟧ — ⟦V1⟧ will connect to the LDAP server without any encryption. Passwords will be sent to the LDAP server in plain text."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — ⟦V1⟧ будет выполнять зашифрованное соединение с LDAP-сервером по протоколу TLS с самого первого запроса. Для успешного установления соединения по схеме ⟦C2⟧ необходимо отключить использование ⟦L1⟧запроса ⟦C3⟧⟦L1⟧ в секции ⟦C4⟧ и заполнить информацию о сертификате ⟦C5⟧ и уровне требования сертификата ⟦C6⟧.",
+      "english": "⟦C1⟧ — ⟦V1⟧ will establish an encrypted connection with the LDAP server over TLS from the very first request. To successfully establish a connection using the ⟦C2⟧ scheme, you need to disable the use of ⟦L1⟧query ⟦C3⟧⟦L1⟧ in the ⟦C4⟧ section and fill in the certificate information ⟦C5⟧ and the certificate requirement level ⟦C6⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "При использовании любого другого значения будет браться значение по умолчанию - ⟦C1⟧.",
+      "english": "If any other value is used, the default value ⟦C1⟧ is taken."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Атрибут обратного членства в группе. По умолчанию ⟦C3⟧\n||\n|| ⟦C4⟧\n| Флаг определяет, будет ли выполнятся запрос для получения всего дерева групп, в которые входят непосредственные группы пользователя.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Group reverse membership attribute. Default: ⟦C3⟧\n||\n|| ⟦C4⟧\n| Flag determines whether a query will be executed to retrieve the entire tree of groups that include the user's immediate groups."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — ⟦V1⟧ запрашивает информацию о всех группах, в которые входят непосредственные группы пользователя. Запросы о всех родительских группах могут занимать много времени.",
+      "english": "⟦C1⟧ — ⟦V1⟧ requests information about all groups that include the user's immediate groups. Queries about all parent groups can take a long time."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ — ⟦V1⟧ запрашивает плоский список групп пользователя. Такой запрос не получает информацию о возможных вложенных родительских группах.",
+      "english": "⟦C1⟧ — ⟦V1⟧ requests a flat list of the user's groups. Such a query does not retrieve information about possible nested parent groups."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Флаг определяет, будет ли выполняться ⟦L1⟧аутентификация сервисного аккаунта⟦L1⟧ по протоколу SASL с механизмом EXTERNAL.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Flag determines whether ⟦L1⟧service account authentication⟦L1⟧ will be performed using the SASL protocol with the EXTERNAL mechanism."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ - Для аутентификации сервисного аккаунта будет задействован протокол SASL с механизмом EXTERNAL (аутентификация по клиентскому TLS‑сертификату в рамках mTLS). В качестве аутентификационной информации используется клиентский сертификат, указанный в параметрах ⟦C2⟧, и ⟦C3⟧. Параметры ⟦C4⟧ и ⟦C5⟧ в таком случае не задаются.",
+      "english": "⟦C1⟧ - For service account authentication, the SASL protocol with the EXTERNAL mechanism will be used (authentication via client TLS certificate within mTLS). The client certificate specified in parameters ⟦C2⟧ and ⟦C3⟧ is used as authentication information. Parameters ⟦C4⟧ and ⟦C5⟧ are not set in this case."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦C1⟧ - Для аутентификации сервисного аккаунта будет использоваться метод simple bind. Требуется указать параметры ⟦C2⟧ и ⟦C3⟧.",
+      "english": "⟦C1⟧ - The simple bind method will be used for service account authentication. Parameters ⟦C2⟧ and ⟦C3⟧ must be specified."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Имя хоста, на котором работает LDAP-сервер. Это устаревший параметр, вместо него должен использоваться параметр ⟦C3⟧\n||\n|| ⟦C4⟧\n| Суффикс имени пользователя, позволяющий отличать пользователей из LDAP-каталога от пользователей аутентифицируемых с помощью других провайдеров.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Host name where the LDAP server runs. This is a deprecated parameter; use parameter ⟦C3⟧ instead.\n||\n|| ⟦C4⟧\n| User name suffix that distinguishes users from the LDAP directory from users authenticated by other providers."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация аутентификации по клиентскому сертификату",
+      "english": "Client certificate authentication configuration"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ поддерживает ⟦L1⟧аутентификацию по клиентскому сертификату⟦L1⟧. Правила проверки сертификатов задаются в секции ⟦L2⟧client_certificate_authorization⟦L2⟧. Дополнительно в секции ⟦C1⟧ может указываться суффикс имён пользователей, аутентифицированных по сертификату:",
+      "english": "⟦V1⟧ supports ⟦L1⟧client certificate authentication⟦L1⟧. Certificate verification rules are set in the ⟦L2⟧client_certificate_authorization⟦L2⟧ section. Additionally, in the ⟦C1⟧ section, a suffix for user names authenticated by certificate can be specified:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Суффикс имени пользователя, позволяющий отличать пользователей, аутентифицированных по клиентскому сертификату, от пользователей, аутентифицируемых другими способами.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| User name suffix that distinguishes users authenticated by client certificate from users authenticated by other methods."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (то есть суффикс SID по умолчанию — ⟦C2⟧)\n||\n|#",
+      "english": "Default value: ⟦C1⟧ (that is, the default SID suffix is ⟦C2⟧)\n||\n|#"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация аутентификации с использованием внешнего IdP",
+      "english": "External IdP authentication configuration"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ поддерживает ⟦L1⟧аутентификацию по JWT-токенам внешнего провайдера идентификации с использованием OpenID Connect⟦L1⟧. Для включения аутентификации необходимо добавить секцию ⟦C1⟧ в ⟦C2⟧.",
+      "english": "⟦V1⟧ supports ⟦L1⟧authentication via JWT tokens of an external identity provider using OpenID Connect⟦L1⟧. To enable authentication, add the ⟦C1⟧ section to ⟦C2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Пример конфигурации:",
+      "english": "Configuration example:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Ожидаемое значение поля ⟦C2⟧ (issuer), которое идентифицирует издателя JWT-токена, и базовый URL для OIDC Discovery. Обязательный параметр; должен начинаться с ⟦C3⟧ и не должен заканчиваться символом ⟦C4⟧. Значения ⟦C5⟧ в Discovery-документе и ⟦C6⟧ в JWT должны в точности совпадать с указанным значением.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| The expected value of the ⟦C2⟧ field (issuer), which identifies the issuer of the JWT token, and the base URL for OIDC Discovery. Required parameter; must start with ⟦C3⟧ and must not end with the character ⟦C4⟧. The values of ⟦C5⟧ in the Discovery document and ⟦C6⟧ in the JWT must exactly match the specified value."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: пустая строка\n||\n|| ⟦C1⟧\n| Ожидаемое значение поля ⟦C2⟧ (audience), которое идентифицирует получателя JWT-токена. Если параметр не задан, получатель токена не проверяется.",
+      "english": "Default value: empty string\n||\n|| ⟦C1⟧\n| The expected value of the ⟦C2⟧ field (audience), which identifies the recipient of the JWT token. If the parameter is not specified, the token recipient is not checked."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: пустая строка\n||\n|| ⟦C1⟧\n| Допустимое расхождение часов при проверке полей JWT, связанных со временем: ⟦C2⟧ задаёт время истечения срока действия токена, ⟦C3⟧ — время начала его действия, ⟦C4⟧ — время выпуска.",
+      "english": "Default value: empty string\n||\n|| ⟦C1⟧\n| Allowed clock skew when checking JWT time-related fields: ⟦C2⟧ sets the token expiration time, ⟦C3⟧ the token start time, and ⟦C4⟧ the issue time."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Имя строкового поля JWT, из которого формируется SID пользователя. Если поле отсутствует или имеет другой тип, используется поле ⟦C3⟧.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The name of the JWT string field from which the user SID is formed. If the field is missing or has a different type, the ⟦C3⟧ field is used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Имя поля JWT с массивом групп пользователя. Из массива извлекаются только строковые элементы.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The name of the JWT field with an array of user groups. Only string elements are extracted from the array."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период обновления Discovery-документа после успешного запроса.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The period for updating the Discovery document after a successful request."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Минимальный интервал перед повторным запросом Discovery-документа после ошибки.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The minimum interval before re-requesting the Discovery document after an error."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Максимальный интервал перед повторным запросом Discovery-документа после ошибки.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Maximum interval before re-requesting the Discovery document after an error."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Тайм-аут запроса Discovery-документа.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Timeout for the Discovery document request."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период обновления JWKS после успешного запроса.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| JWKS refresh period after a successful request."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Минимальный интервал перед повторным запросом JWKS после ошибки.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Minimum interval before re-requesting JWKS after an error."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Максимальный интервал перед повторным запросом JWKS после ошибки.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Maximum interval before re-requesting JWKS after an error."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Тайм-аут запроса JWKS.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Timeout for the JWKS request."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Максимальный возраст кеша JWKS. Если обновить JWKS не удалось, после истечения этого периода ключи удаляются.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Maximum age of the JWKS cache. If JWKS cannot be updated, the keys are removed after this period expires."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Суффикс имени пользователя, позволяющий отличать пользователей внешнего IdP от пользователей, аутентифицируемых с помощью других провайдеров. Такой же суффикс добавляется к именам групп, полученным из JWT-токена.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Username suffix that distinguishes external IdP users from users authenticated by other providers. The same suffix is added to group names obtained from the JWT token."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Сторонний IAM-провайдер и внешний IdP по протоколу OIDC используют токены типа ⟦C1⟧. Если параметр ⟦C2⟧ включён, IAM-провайдер имеет приоритет и перехватывает все такие токены. Поэтому одновременное использование аутентификации через IAM-провайдер и внешний IdP по протоколу OIDC не поддерживается.",
+      "english": "Third-party IAM provider and external IdP using the OIDC protocol use tokens of type ⟦C1⟧. If the ⟦C2⟧ parameter is enabled, the IAM provider takes priority and intercepts all such tokens. Therefore, simultaneous use of authentication via an IAM provider and an external IdP using the OIDC protocol is not supported."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация аутентификации с использованием стороннего IAM-провайдера",
+      "english": "Configuring authentication using a third-party IAM provider"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ поддерживает аутентификацию пользователей с использованием сервиса ⟦L1⟧Yandex Identity and Access Management (IAM)⟦L1⟧, который используется в Yandex Cloud, или другого сервиса, совместимого с ним по API. Для конфигурирования IAM-аутентификации необходимо определить следующие параметры:",
+      "english": "⟦V1⟧ supports user authentication using the ⟦L1⟧Yandex Identity and Access Management (IAM)⟦L1⟧ service, which is used in Yandex Cloud, or another service compatible with it via API. To configure IAM authentication, you need to define the following parameters:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Флаг разрешает аутентификацию пользователей в Yandex Cloud через IAM с использованием AccessService.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| Flag enables user authentication in Yandex Cloud via IAM using AccessService."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Адрес, по которому отправляются запросы в AccessService (IAM).",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Address to which requests are sent to AccessService (IAM)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Флаг включает использование TLS-соединений между ⟦V1⟧ и AccessService.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Flag enables the use of TLS connections between ⟦V1⟧ and AccessService."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Суффикс «источника пользователя» в ⟦L1⟧SID⟦L1⟧ для пользователей, приходящих в ⟦V1⟧ из Yandex Cloud IAM.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Suffix of the 'user source' in ⟦L1⟧SID⟦L1⟧ for users coming to ⟦V1⟧ from Yandex Cloud IAM."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧ (\"access service\")\n||\n|| ⟦C2⟧\n| Путь до файла сертификата удостоверяющего центра, используемого для взаимодействия с AccessService.",
+      "english": "Default value: ⟦C1⟧ (\"access service\")\n||\n|| ⟦C2⟧\n| Path to the certificate authority file used for interaction with AccessService."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период времени, в миллисекундах, по истечении которого ⟦V1⟧ посылает keepalive ping IAM-серверу, чтобы сохранить соединение.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Time period, in milliseconds, after which ⟦V1⟧ sends a keepalive ping to the IAM server to keep the connection alive."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период времени ожидания ответа от IAM-сервера на keepalive ping, в миллисекундах. Если по истечении срока ожидания ответ от IAM-сервера не приходит, ⟦V1⟧ закрывает соединение.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Time period to wait for a response from the IAM server to a keepalive ping, in milliseconds. If no response is received from the IAM server within the timeout, ⟦V1⟧ closes the connection."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Флаг разрешает использование API-ключей IAM. API-ключ — это секретный ключ, выписываемый в Yandex Cloud IAM для упрощённой авторизации сервисных аккаунтов в API Yandex Cloud. Его применяют, если нет возможности автоматически запрашивать IAM-токен.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Flag enables the use of IAM API keys. An API key is a secret key issued in Yandex Cloud IAM for simplified authorization of service accounts in the Yandex Cloud API. It is used when it is not possible to automatically request an IAM token."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Настройки кеширования результатов аутентификации",
+      "english": "Authentication result caching settings"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Для сокращения количества ⟦L1⟧проверок аутентификационных токенов⟦L1⟧ каждый узел ⟦V1⟧ кеширует результаты проверки в ⟦L2⟧токенах пользователей⟦L2⟧. Подробнее см. в статье ⟦L3⟧{#T}⟦L3⟧.",
+      "english": "To reduce the number of ⟦L1⟧authentication token checks⟦L1⟧, each ⟦V1⟧ node caches the check results in ⟦L2⟧user tokens⟦L2⟧. For more details, see the article ⟦L3⟧{#T}⟦L3⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Время жизни и другие аспекты работы токена пользователя настраиваются с помощью следующих параметров. Значения временных параметров задаются числом с суффиксом единицы измерения: ⟦C1⟧ — миллисекунды, ⟦C2⟧ — секунды, ⟦C3⟧ — минуты, ⟦C4⟧ — часы, ⟦C5⟧ — дни. Например, ⟦C6⟧, ⟦C7⟧, ⟦C8⟧, ⟦C9⟧ или ⟦C10⟧.",
+      "english": "The lifetime and other aspects of the user token's operation are configured using the following parameters. Time parameter values are specified as a number with a unit suffix: ⟦C1⟧ — milliseconds, ⟦C2⟧ — seconds, ⟦C3⟧ — minutes, ⟦C4⟧ — hours, ⟦C5⟧ — days. For example, ⟦C6⟧, ⟦C7⟧, ⟦C8⟧, ⟦C9⟧, or ⟦C10⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| ⟦C1⟧\n| Определяет как часто узел ⟦V1⟧ сканирует токены пользователей в кэше на достижение временных лимитов, указанных в параметрах ⟦C2⟧, ⟦C3⟧ и ⟦C4⟧, после которых требуется обновление или удаление токена. Чем короче указанный интервал проверки токенов пользователей, тем выше нагрузка на CPU.",
+      "english": "#|\n|| ⟦C1⟧\n| Defines how often the ⟦V1⟧ node scans user tokens in the cache for reaching the time limits specified in the ⟦C2⟧, ⟦C3⟧, and ⟦C4⟧ parameters, after which the token must be refreshed or deleted. The shorter the specified user token check interval, the higher the CPU load."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Максимальный интервал между успешным обновлением токена пользователя и следующей попыткой обновления. Конкретное время обновления выбирается в диапазоне от ⟦C3⟧ до ⟦C4⟧.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The maximum interval between a successful user token refresh and the next refresh attempt. The specific refresh time is chosen in the range from ⟦C3⟧ to ⟦C4⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Например, после первого запроса с корректным аутентификационным токеном узел создаёт токен пользователя. Через интервал, выбранный случайно в диапазоне от ⟦C1⟧ до ⟦C2⟧, узел снова проверяет аутентификационный токен. После успешной проверки цикл повторяется. При ретрабельной ошибке узел повторяет проверку с учётом параметров ⟦C3⟧ и ⟦C4⟧, а при постоянной ошибке перестаёт использовать ранее созданный токен пользователя.",
+      "english": "For example, after the first request with a valid authentication token, the node creates a user token. After an interval randomly chosen in the range from ⟦C1⟧ to ⟦C2⟧, the node checks the authentication token again. After a successful check, the cycle repeats. On a retryable error, the node repeats the check taking into account the ⟦C3⟧ and ⟦C4⟧ parameters, and on a permanent error it stops using the previously created user token."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Параметр применяется к обновляемым аутентификационным токенам, например к токенам входа по логину и паролю и токенам внешнего провайдера идентификации.",
+      "english": "The parameter applies to refreshable authentication tokens, for example, to login and password tokens and tokens of an external identity provider."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период хранения токена пользователя в кэше узла ⟦V1⟧ с момента его последнего использования. Если запросы от пользователя, для которого создан токен, не приходили на узел ⟦V2⟧ в течение указанного периода, узел удаляет этот токен пользователя из своего кэша.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The period of storing a user token in the ⟦V1⟧ node cache since its last use. If requests from the user for whom the token was created have not arrived at the ⟦V2⟧ node within the specified period, the node removes this user token from its cache."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период действия результата успешной проверки для большинства типов аутентификационных токенов. После успешного обновления отсчёт начинается заново. По истечении периода запись удаляется из кеша независимо от ⟦C3⟧.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The validity period of a successful check result for most types of authentication tokens. After a successful refresh, the countdown restarts. When the period expires, the entry is removed from the cache regardless of ⟦C3⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Для токенов входа по логину и паролю и токенов внешнего провайдера идентификации используется срок действия самого аутентификационного токена. Для запросов с подписью ключом доступа применяется отдельный параметр ⟦C1⟧.",
+      "english": "For login and password tokens and tokens of an external identity provider, the expiration time of the authentication token itself is used. For requests signed with an access key, a separate parameter ⟦C1⟧ is used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Период действия результата проверки запроса, аутентифицированного с помощью подписи ключом доступа.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The validity period of the check result for a request authenticated with an access key signature."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Начальный интервал между повторными проверками после ретрабельной ошибки обновления токена пользователя.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| The initial interval between repeated checks after a retryable error in refreshing a user token."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "После ретрабельной ошибки первая повторная проверка выполняется немедленно. Если она также завершается ретрабельной ошибкой, задержка перед следующей проверкой выбирается случайным образом в диапазоне от ⟦C1⟧ до ⟦C2⟧. После каждой следующей ретрабельной ошибки текущий интервал удваивается, но не превышает разность ⟦C3⟧. Для каждого текущего интервала ⟦C4⟧ фактическая задержка выбирается случайным образом в диапазоне от ⟦C5⟧ до ⟦C6⟧.",
+      "english": "After a retryable error, the first retry is performed immediately. If it also ends with a retryable error, the delay before the next retry is chosen randomly in the range from ⟦C1⟧ to ⟦C2⟧. After each subsequent retryable error, the current interval doubles, but does not exceed the difference ⟦C3⟧. For each current interval ⟦C4⟧, the actual delay is chosen randomly in the range from ⟦C5⟧ to ⟦C6⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Не рекомендуется выставлять значение параметра в ⟦C1⟧, так как немедленные повторы создают избыточную нагрузку.",
+      "english": "It is not recommended to set the parameter value to ⟦C1⟧, as immediate retries create excessive load."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Значение по умолчанию: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Ограничивает увеличение интервала между повторными проверками после ретрабельных ошибок обновления токена пользователя. Не ограничивает общую продолжительность повторных проверок.",
+      "english": "Default value: ⟦C1⟧\n||\n|| ⟦C2⟧\n| Limits the increase of the interval between retries after retryable errors of user token refresh. Does not limit the total duration of retries."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Пример для аутентификации по логину и паролю:",
+      "english": "Example for login and password authentication:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "После создания токена пользователя следующая плановая проверка выполняется через интервал, случайно выбранный в диапазоне от ⟦C1⟧ до ⟦C2⟧ (⟦C3⟧). Выполнение этого условия проверяется раз в ⟦C4⟧ (⟦C5⟧). После успешной проверки интервал выбирается заново. При возникновении ретрабельной ошибки первая повторная проверка выполняется немедленно. Если она также завершается ретрабельной ошибкой, следующая проверка выполняется через интервал, случайно выбранный в диапазоне от ⟦C6⟧ до ⟦C7⟧ (⟦C8⟧). Затем текущий интервал удваивается, но не превышает ⟦C9⟧ (⟦C10⟧). Фактическая задержка каждый раз выбирается случайным образом в диапазоне от половины до полного текущего интервала.",
+      "english": "After a user token is created, the next scheduled check is performed after an interval randomly selected in the range from ⟦C1⟧ to ⟦C2⟧ (⟦C3⟧). This condition is checked once every ⟦C4⟧ (⟦C5⟧). After a successful check, the interval is selected again. If a retryable error occurs, the first retry is performed immediately. If it also ends with a retryable error, the next check is performed after an interval randomly selected in the range from ⟦C6⟧ to ⟦C7⟧ (⟦C8⟧). Then the current interval is doubled, but does not exceed ⟦C9⟧ (⟦C10⟧). The actual delay is randomly selected each time in the range from half to the full current interval."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Для аутентификационного токена, полученного по логину и паролю, параметр ⟦C1⟧ не применяется: срок действия такого токена задаётся ⟦C2⟧, поэтому он перестаёт быть действительным через ⟦C3⟧. Кешированная запись перестаёт использоваться при ближайшей проверке после этого условия, но может быть удалена раньше из-за отсутствия запросов в течение ⟦C4⟧ (⟦C5⟧) или постоянной ошибки.",
+      "english": "For an authentication token obtained by login and password, the ⟦C1⟧ parameter does not apply: the validity period of such a token is set by ⟦C2⟧, so it becomes invalid after ⟦C3⟧. The cached entry stops being used at the nearest check after this condition, but may be deleted earlier due to lack of queries for ⟦C4⟧ (⟦C5⟧) or a persistent error."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Пример для запросов с подписью ключом доступа:",
+      "english": "Example for queries signed with an access key:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Токен пользователя для запроса с подписью ключом доступа не обновляется планово. Запись считается действительной ⟦C1⟧ (⟦C2⟧) с момента успешной проверки и удаляется при ближайшей проверке кеша. При указанных значениях она будет удалена не позднее чем через ⟦C3⟧ (⟦C4⟧). Запись может быть удалена раньше из-за отсутствия запросов в течение ⟦C5⟧ (⟦C6⟧).",
+      "english": "The user token for a query signed with an access key is not updated on a schedule. The entry is considered valid for ⟦C1⟧ (⟦C2⟧) from the moment of successful verification and is deleted at the nearest cache check. With the specified values, it will be deleted no later than after ⟦C3⟧ (⟦C4⟧). The entry may be deleted earlier due to lack of queries for ⟦C5⟧ (⟦C6⟧)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Конфигурация токена регистрации узлов",
+      "english": "Node registration token configuration"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "⟦V1⟧ позволяет настраивать тип аутентификации узлов баз данных при их регистрации в кластере. Настройка этого типа осуществляется через параметр ⟦C1⟧ секции ⟦C2⟧.",
+      "english": "⟦V1⟧ allows you to configure the authentication type of database nodes when they are registered in the cluster. This type is configured via the ⟦C1⟧ parameter of the ⟦C2⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "#|\n|| Параметр | Описание ||\n|| ⟦C1⟧\n| Определяет тип аутентификации узлов баз данных при их регистрации в кластере ⟦V1⟧.",
+      "english": "#|\n|| Parameter | Description ||\n|| ⟦C1⟧\n| Defines the authentication type of database nodes when they are registered in the ⟦V1⟧ cluster."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Пустая строка (⟦C1⟧) — используется режим аутентификации узлов через сертификаты TLS. В этом случае узлы должны использовать сертификаты для аутентификации при регистрации в кластере. Подробнее о настройке аутентификации узлов через сертификаты см. в разделе ⟦L1⟧Аутентификация и авторизация узлов баз данных⟦L1⟧.",
+      "english": "Empty string (⟦C1⟧) — the authentication mode for nodes via TLS certificates is used. In this case, nodes must use certificates for authentication when registering in the cluster. For more information about configuring node authentication via certificates, see the section ⟦L1⟧Authentication and authorization of database nodes⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "\"root@builtin\" — режим аутентификации через особый отладочный токен. Данный режим планируется к исключению в будущих релизах и не рекомендуется к использованию: для обеспечения безопасности кластера рекомендуется использовать режим аутентификации узлов через сертификаты TLS, установив пустое значение параметра.",
+      "english": "\"root@builtin\" — the authentication mode via a special debug token. This mode is planned to be removed in future releases and is not recommended for use: to ensure cluster security, it is recommended to use the node authentication mode via TLS certificates by setting the parameter to an empty value."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "||\n|#",
+      "english": "||\n|#"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/reference/configuration/auth_config.md",
+      "source": "Пример секции ⟦C1⟧ с настройкой регистрации узлов по сертификату:",
+      "english": "Example of the ⟦C1⟧ section with node registration by certificate:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Пользователь",
+      "english": "User"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Узел YDB",
+      "english": "YDB node"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Кеш узла",
+      "english": "Node cache"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Подсистема аутентификации",
+      "english": "Authentication subsystem"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Запрос с теми же данными",
+      "english": "Request with the same data"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Найти запись",
+      "english": "Find the entry"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Запись найдена",
+      "english": "Entry found"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Отсчёт life_time начинается заново",
+      "english": "The life_time countdown restarts"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Наступило время обновления",
+      "english": "Refresh time has arrived"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Повторно проверить аутентификационный токен",
+      "english": "Revalidate the authentication token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Успешная проверка",
+      "english": "Validation succeeded"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Результат проверки",
+      "english": "Validation result"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Создать новый токен пользователя",
+      "english": "Create a new user token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Обновить запись",
+      "english": "Update the entry"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Ретрабельная ошибка",
+      "english": "Retryable error"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Ошибка",
+      "english": "Error"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Запланировать повторную попытку",
+      "english": "Schedule a retry"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Постоянная ошибка",
+      "english": "Permanent error"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Перестать использовать токен пользователя",
+      "english": "Stop using the user token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Запись не использовалась в течение life_time или истёк срок действия",
+      "english": "Entry was unused for life_time or has expired"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token-lifecycle.md",
+      "source": "Удалить запись",
+      "english": "Delete the entry"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Пользователь",
+      "english": "User"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Узел YDB",
+      "english": "YDB node"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Кеш узла",
+      "english": "Node cache"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Подсистема аутентификации",
+      "english": "Authentication subsystem"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Первый запрос с аутентификационным токеном",
+      "english": "First request with an authentication token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Найти запись по ключу",
+      "english": "Find the entry by key"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Запись отсутствует",
+      "english": "Entry not found"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Проверить аутентификационный токен",
+      "english": "Validate the authentication token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Результат проверки",
+      "english": "Validation result"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Создать токен пользователя",
+      "english": "Create a user token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Сохранить токен пользователя",
+      "english": "Save the user token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Обработать запрос",
+      "english": "Process the request"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Следующий запрос с тем же ключом",
+      "english": "Next request with the same key"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/_assets/user-token.md",
+      "source": "Токен пользователя",
+      "english": "User token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация",
+      "english": "Authentication"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "После успешной установки сетевого соединения сервер принимает к обработке запросы от клиента. Аутентификационная информация передаётся в виде ⟦L1⟧аутентификационного токена⟦L1⟧ или ⟦L2⟧клиентского сертификата⟦L2⟧. На её основании сервер определяет ⟦L3⟧SID⟦L3⟧ клиента и проверяет его доступы на выполнение запроса.",
+      "english": "After a network connection is successfully established, the server accepts requests from the client for processing. Authentication information is transmitted as an ⟦L1⟧authentication token⟦L1⟧ or a ⟦L2⟧client certificate⟦L2⟧. Based on it, the server determines the client's ⟦L3⟧SID⟦L3⟧ and checks its permissions to execute the request."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Под клиентом аутентификации понимается пользователь, проходящий процедуру проверки подлинности при доступе к ⟦V1⟧. Примерами клиентов являются приложения, использующие ⟦L1⟧SDK⟦L1⟧ или ⟦L2⟧CLI⟦L2⟧.",
+      "english": "An authentication client is a user who undergoes the authentication procedure when accessing ⟦V1⟧. Examples of clients include applications using ⟦L1⟧SDK⟦L1⟧ or ⟦L2⟧CLI⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Поддерживаются следующие виды аутентификации:",
+      "english": "The following authentication types are supported:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦L1⟧Анонимная⟦L1⟧ аутентификация.",
+      "english": "⟦L1⟧Anonymous⟦L1⟧ authentication."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация по ⟦L1⟧логину и паролю⟦L1⟧.",
+      "english": "Authentication by ⟦L1⟧login and password⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация с использованием ⟦L1⟧LDAP-каталога⟦L1⟧.",
+      "english": "Authentication using an ⟦L1⟧LDAP directory⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация с использованием ⟦L1⟧внешнего провайдера идентификации по протоколу OpenID Connect⟦L1⟧.",
+      "english": "Authentication using an ⟦L1⟧external identity provider via the OpenID Connect protocol⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация по ⟦L1⟧клиентскому сертификату⟦L1⟧.",
+      "english": "Authentication using a ⟦L1⟧client certificate⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦L1⟧Аутентификация с использованием стороннего IAM-провайдера⟦L1⟧, например ⟦L2⟧Yandex Identity and Access Management⟦L2⟧.",
+      "english": "⟦L1⟧Authentication using a third-party IAM provider⟦L1⟧, for example ⟦L2⟧Yandex Identity and Access Management⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Анонимная аутентификация",
+      "english": "Anonymous authentication"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "По умолчанию, ⟦V1⟧ допускает выполнение запросов без указания аутентификационных данных, таких как имя пользователя или ⟦L1⟧токен⟦L1⟧. Проверка прав доступа (⟦L2⟧авторизация⟦L2⟧) при этом также не проводится.",
+      "english": "By default, ⟦V1⟧ allows requests to be executed without specifying authentication data, such as a username or ⟦L1⟧token⟦L1⟧. Access rights checking (⟦L2⟧authorization⟦L2⟧) is also not performed in this case."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Использовать анонимную аутентификацию следует только в ознакомительных целях для локальных баз данных, не имеющих доступа по сети.",
+      "english": "Anonymous authentication should only be used for evaluation purposes for local databases that have no network access."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "За выключение режима анонимной аутентификации отвечает флаг ⟦C1⟧ в ⟦L1⟧настройках режима аутентификации⟦L1⟧ ⟦V1⟧.",
+      "english": "The ⟦C1⟧ flag in the ⟦L1⟧authentication mode settings⟦L1⟧ of ⟦V1⟧ is responsible for disabling anonymous authentication."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В зависимости от настроек режима аутентификации, реальная аутентификация может быть не анонимной:",
+      "english": "Depending on the authentication mode settings, the actual authentication may not be anonymous:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Отсутствующий в запросах токен может подменяться на токен по умолчанию",
+      "english": "A token missing from requests may be replaced with the default token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Явно указанный в запросах токен может проверяться по надлежащим правилам",
+      "english": "A token explicitly specified in requests may be checked according to the appropriate rules"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Тогда запросы будут выполняться не анонимно, и будет также выполняться проверка прав.",
+      "english": "Then requests will be executed non-anonymously, and access rights checking will also be performed."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В зависимости от ⟦L1⟧настроек уровней доступа⟦L1⟧, анонимные запросы могут в том числе выполнять в системе действия, требующие административного уровня доступа.",
+      "english": "Depending on the ⟦L1⟧access level settings⟦L1⟧, anonymous requests may also perform actions in the system that require administrative access level."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация по логину и паролю",
+      "english": "Login and password authentication"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация по логину и паролю через сервер ⟦V1⟧ доступна только для ⟦L1⟧локальных пользователей⟦L1⟧. В аутентификации внешних пользователей участвуют сервера внешних систем.",
+      "english": "Login and password authentication via the ⟦V1⟧ server is available only for ⟦L1⟧local users⟦L1⟧. External user authentication involves servers of external systems."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Данный вид доступа подразумевает наличие у каждого пользователя базы данных логина и пароля.\nЛогин пользователя может содержать только строчные буквы латинского алфавита, цифры и символ ⟦C1⟧.\nДопускается установление различных ⟦L1⟧критериев⟦L1⟧ на сложность пароля.",
+      "english": "This type of access implies that each database user has a login and password.\nA user login may contain only lowercase Latin letters, digits, and the ⟦C1⟧ character.\nVarious ⟦L1⟧criteria⟦L1⟧ for password complexity may be set."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Логин пользователя и хеш пароля хранятся в таблице внутри компонента аутентификации. Пароль хеширован методом ⟦L1⟧Argon2⟦L1⟧. Доступ к этой таблице имеет только администратор системы.",
+      "english": "User login and password hash are stored in a table inside the authentication component. The password is hashed using the ⟦L1⟧Argon2⟦L1⟧ method. Only the system administrator has access to this table."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В ответ на логин и пароль возвращается ⟦L1⟧аутентификационный токен⟦L1⟧. Время жизни токена по умолчанию составляет 12 часов. Для ротации токенов клиент, например, ⟦L2⟧SDK⟦L2⟧, самостоятельно обращается к сервису аутентификации. Использование токена ускоряет процесс аутентификации и повышает безопасность.",
+      "english": "In response to the login and password, an ⟦L1⟧authentication token⟦L1⟧ is returned. The default token lifetime is 12 hours. To rotate tokens, the client, for example, the ⟦L2⟧SDK⟦L2⟧, independently contacts the authentication service. Using a token speeds up the authentication process and improves security."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Процесс аутентификации по логину и паролю включает следующие шаги:",
+      "english": "The authentication process using a login and password includes the following steps:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Клиент обращается к базе данных и передаёт логин и пароль пользователя сервису аутентификации ⟦V1⟧.",
+      "english": "The client accesses the database and passes the user's login and password to the authentication service ⟦V1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Сервис проверяет аутентификационные данные, при успешном сопоставлении создаёт токен и возвращает его клиенту.",
+      "english": "The service verifies the authentication data; upon successful matching, it creates a token and returns it to the client."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Клиент обращается к БД, передавая в качестве аутентификационной информации токен.",
+      "english": "The client accesses the database, passing the token as authentication information."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Для включения аутентификации по логину и паролю, необходимо убедиться, что параметры ⟦C1⟧ и ⟦C2⟧ выставлены в значение по умолчанию ⟦C3⟧ в ⟦L1⟧конфигурации⟦L1⟧. Кроме того, чтобы отключить анонимную аутентификацию, необходимо выставить значение параметра ⟦L2⟧⟦C4⟧ в ⟦C5⟧⟦L2⟧.",
+      "english": "To enable login and password authentication, you need to ensure that the parameters ⟦C1⟧ and ⟦C2⟧ are set to the default value ⟦C3⟧ in the ⟦L1⟧configuration⟦L1⟧. Additionally, to disable anonymous authentication, you need to set the value of the parameter ⟦L2⟧⟦C4⟧ to ⟦C5⟧⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Об управлении ролями и пользователями читайте в ⟦L1⟧{#T}⟦L1⟧.",
+      "english": "For information about managing roles and users, see ⟦L1⟧{#T}⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Сложность пароля",
+      "english": "Password complexity"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦V1⟧ позволяет настраивать требования к сложности паролей. Если пароль, предоставляемый через команды ⟦C1⟧ или ⟦C2⟧, не соответствует критериям сложности, выполнение команды завершится ошибкой.\nПо умолчанию на пароли не накладываются никакие ограничения: принимается пароль любой длины, включая пустую строку; в пароле могут присутствовать произвольное количество цифр и букв в любом регистре, а также специальные символы из списка ⟦C3⟧. Чтобы задать ограничения на сложность пароля, необходимо заполнить секцию ⟦C4⟧ в ⟦L1⟧конфигурации⟦L1⟧.",
+      "english": "⟦V1⟧ allows you to configure password complexity requirements. If a password provided via the ⟦C1⟧ or ⟦C2⟧ commands does not meet the complexity criteria, the command execution will fail with an error.\nBy default, no restrictions are imposed on passwords: a password of any length is accepted, including an empty string; the password may contain any number of digits and letters in any case, as well as special characters from the list ⟦C3⟧. To set password complexity restrictions, you need to fill in the ⟦C4⟧ section in the ⟦L1⟧configuration⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Принудительная блокировка/разблокировка пользователя",
+      "english": "Forced user lock/unlock"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Существует ещё один способ запретить пользователю выполнять аутентификацию — принудительная блокировка администратором кластера или базы данных. Администраторы могут снимать блокировку как с пользователей, заблокированных принудительно, так и с пользователей, оказавшихся заблокированными из-за превышения лимита на количество попыток ввода неправильного пароля. Подробную информацию о принудительной блокировке и разблокировке пользователей можно найти в описании команды ⟦L1⟧⟦C1⟧⟦L1⟧.",
+      "english": "There is another way to prevent a user from authenticating: forced blocking by a cluster or database administrator. Administrators can unblock both users who were forcibly blocked and users who were blocked due to exceeding the limit on the number of incorrect password attempts. Detailed information about forced blocking and unblocking of users can be found in the description of the ⟦L1⟧⟦C1⟧⟦L1⟧ command."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Защита от перебора пароля",
+      "english": "Password brute-force protection"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦V1⟧ предоставляет защиту от перебора пароля пользователем. Пользователь будет считаться заблокированным, если превысит число попыток ввода неправильного пароля. По истечении указанного времени он снова получит возможность аутентифицироваться.",
+      "english": "⟦V1⟧ provides protection against password brute force by a user. A user will be considered blocked if they exceed the number of incorrect password attempts. After the specified time expires, they will be able to authenticate again."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Данный механизм применим только для пользователей, которые обслуживаются самой ⟦V1⟧, для, так называемых, встроенных пользователей. Пользователи, обслуживаемые внешними источниками аутентификации, такими как LDAP серверы, не подпадают под действие механизма защиты от перебора пароля.",
+      "english": "This mechanism applies only to users served by ⟦V1⟧ itself, the so-called built-in users. Users served by external authentication sources, such as LDAP servers, are not subject to the password brute-force protection mechanism."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "По умолчанию пользователю даётся 4 попытки ввести правильный пароль. В противном случае аутентификация для него будет запрещена в течение одного часа. Настроить критерии блокировки пользователя можно в ⟦L1⟧конфигурации⟦L1⟧.",
+      "english": "By default, the user is given 4 attempts to enter the correct password. Otherwise, authentication will be blocked for them for one hour. You can configure user blocking criteria in the ⟦L1⟧configuration⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При необходимости администратор кластера или базы данных может досрочно ⟦L1⟧разблокировать⟦L1⟧ пользователя.",
+      "english": "If necessary, the cluster or database administrator can ⟦L1⟧unlock⟦L1⟧ the user ahead of time."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Информацию о статусе блокировки пользователя и количества попыток неправильного ввода пароля можно узнать из ⟦L1⟧системного представления⟦L1⟧ пользователя.",
+      "english": "Information about the user's lock status and the number of incorrect password attempts can be obtained from the user's ⟦L1⟧system view⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация с использованием LDAP-каталога",
+      "english": "Authentication using an LDAP directory"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В ⟦V1⟧ интегрировано взаимодействие с ⟦L1⟧LDAP каталогом⟦L1⟧. LDAP каталог является внешним по отношению к ⟦V2⟧ сервисом и используется для аутентификации и авторизации пользователей базы данных. Прежде чем воспользоваться данным способом аутентификации и авторизации необходимо иметь развернутый LDAP сервис и настроенный сетевой доступ между ним и серверами ⟦V3⟧.",
+      "english": "Interaction with the ⟦L1⟧LDAP directory⟦L1⟧ is integrated into ⟦V1⟧. The LDAP directory is an external service relative to ⟦V2⟧ and is used for authentication and authorization of database users. Before using this authentication and authorization method, you must have a deployed LDAP service and configured network access between it and the ⟦V3⟧ servers."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Примеры поддерживаемых реализаций LDAP каталогов: ⟦L1⟧OpenLdap⟦L1⟧, ⟦L2⟧Active Directory⟦L2⟧.",
+      "english": "Examples of supported LDAP directory implementations: ⟦L1⟧OpenLdap⟦L1⟧, ⟦L2⟧Active Directory⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация с помощью LDAP протокола похожа на процесс аутентификации по логину и паролю. Отличие заключается лишь в том, что роль компонента аутентификации играет LDAP каталог. LDAP каталог используется для проверки пары логин/пароль и для определения групп, к которым принадлежит пользователь.",
+      "english": "Authentication using the LDAP protocol is similar to the authentication process by login and password. The only difference is that the LDAP directory plays the role of the authentication component. The LDAP directory is used to verify the login/password pair and to determine the groups to which the user belongs."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Так как LDAP каталог является внешним независимым сервисом, ⟦V1⟧ не имеет возможности управлять учетными записями пользователей в каталоге. Для успешной аутентификации пользователь уже должен быть создан в LDAP каталоге. Использование команд ⟦C1⟧, ⟦C2⟧, ⟦C3⟧, ⟦C4⟧, ⟦C5⟧, ⟦C6⟧ не окажет влияния на список пользователей и групп в каталоге. Информацию об управлении учетными записями необходимо искать в документации используемого LDAP каталога.",
+      "english": "Since the LDAP directory is an external independent service, ⟦V1⟧ cannot manage user accounts in the directory. For successful authentication, the user must already exist in the LDAP directory. Using the ⟦C1⟧, ⟦C2⟧, ⟦C3⟧, ⟦C4⟧, ⟦C5⟧, ⟦C6⟧ commands will not affect the list of users and groups in the directory. Information on managing accounts should be looked up in the documentation of the LDAP directory being used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "На данный момент ⟦V1⟧ поддерживает только один способ LDAP-аутентификации пользователей — *search+bind*: после получения логина и пароля выполняется служебный *bind* от имени ⟦L1⟧сервисного аккаунта⟦L1⟧ (логин и пароль в ⟦C1⟧ / ⟦C2⟧ либо сертификат и SASL EXTERNAL — см. ⟦L2⟧конфигурацию⟦L2⟧), затем поиск записи пользователя и второй *bind* уже от его имени.",
+      "english": "Currently, ⟦V1⟧ supports only one method of LDAP user authentication — *search+bind*: after the login and password are received, a service *bind* is performed on behalf of the ⟦L1⟧service account⟦L1⟧ (login and password in ⟦C1⟧ / ⟦C2⟧, or a certificate and SASL EXTERNAL — see ⟦L2⟧configuration⟦L2⟧), followed by a search for the user record and a second *bind* on behalf of the user."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Под сервисным аккаунтом понимается отдельная учётная запись в каталоге LDAP, которую используют приложения/сервисы для подключения к LDAP и выполнения нужных операций.",
+      "english": "A service account is a separate account in the LDAP directory that applications or services use to connect to LDAP and perform the required operations."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Учетные данные сервисного аккаунта для подключения к LDAP указываются в настройках конфигурации: используйте параметры ⟦C1⟧ и ⟦C2⟧, либо настройте ⟦L1⟧mTLS⟦L1⟧ (подробнее см. в разделе ⟦L2⟧Аутентификация сервисного аккаунта⟦L2⟧).",
+      "english": "The service account credentials for connecting to LDAP are specified in the configuration settings: use the ⟦C1⟧ and ⟦C2⟧ parameters, or configure ⟦L1⟧mTLS⟦L1⟧ (see the ⟦L2⟧Service account authentication⟦L2⟧ section for details)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Далее процесс аутентификации проходит по следующей схеме:",
+      "english": "The authentication process then proceeds as follows:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦V1⟧ подключается к LDAP от имени сервисного аккаунта.",
+      "english": "⟦V1⟧ connects to LDAP on behalf of the service account."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "После успешного подключения выполняется поиск пользователя, который пытается пройти аутентификацию. Поиск идет по всему поддереву, указанному в параметре конфигурации ⟦C1⟧, и по фильтру, заданному в параметре ⟦C2⟧.",
+      "english": "After a successful connection, a search is performed for the user attempting to authenticate. The search is performed across the entire subtree specified in the ⟦C1⟧ configuration parameter and according to the filter defined in the ⟦C2⟧ parameter."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Если пользователь найден, ⟦V1⟧ выполняет повторную операцию bind — уже от имени найденного пользователя, с использованием его пароля.",
+      "english": "If the user is found, ⟦V1⟧ performs a repeated bind operation — this time on behalf of the found user, using their password."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Итоговый результат — успешная или неуспешная аутентификация — определяется результатом второго bind (от лица пользователя).",
+      "english": "The final result — successful or unsuccessful authentication — is determined by the result of the second bind (on behalf of the user)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Таким образом, ⟦V1⟧ не хранит пароли пользователей и полностью полагается на механизм аутентификации LDAP.",
+      "english": "Thus, ⟦V1⟧ does not store user passwords and fully relies on the LDAP authentication mechanism."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В результате успешной проверки логина и пароля пользователя в LDAP каталоге возвращается ⟦L1⟧аутентификационный токен⟦L1⟧ ⟦V1⟧. Далее этот токен используется вместо логина и пароля. Оперирование токеном ускоряет процесс аутентификации и повышает безопасность.",
+      "english": "After a successful verification of the user's login and password in the LDAP directory, ⟦V1⟧ returns an ⟦L1⟧authentication token⟦L1⟧. This token is then used instead of the login and password. Using a token speeds up the authentication process and improves security."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При использовании LDAP-аутентификации, никакие пароли пользователей в ⟦V1⟧ не хранятся.",
+      "english": "When LDAP authentication is used, no user passwords are stored in ⟦V1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация сервисного аккаунта",
+      "english": "Service account authentication"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Сервисный аккаунт можно аутентифицировать двумя основными способами:",
+      "english": "A service account can be authenticated in two main ways:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "С помощью логина и пароля.\nВ этом случае в конфигурации нужно указать логин (⟦C1⟧) и пароль (⟦C2⟧). Эти параметры будут использоваться для подключения к LDAP-серверу от имени сервисного аккаунта.",
+      "english": "Using a login and password.\nIn this case, you need to specify the login (⟦C1⟧) and password (⟦C2⟧) in the configuration. These parameters will be used to connect to the LDAP server on behalf of the service account."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "С помощью mTLS (mutual TLS) через механизм SASL EXTERNAL.\nВ этом варианте вместо логина и пароля для аутентификации используются сертификаты. Это позволяет не хранить пароль сервисного аккаунта в конфигурации — достаточно указать файлы сертификата (⟦C1⟧) и закрытого ключа (⟦C2⟧), а также включить специальный флаг (⟦C3⟧). Подробную информацию по настройке см. в разделе ⟦L1⟧ldap_authentication⟦L1⟧.",
+      "english": "Using mTLS (mutual TLS) through the SASL EXTERNAL mechanism.\nIn this option, certificates are used for authentication instead of a login and password. This allows you to avoid storing the service account password in the configuration — just specify the certificate file (⟦C1⟧) and private key file (⟦C2⟧), and enable the special flag (⟦C3⟧). For detailed setup information, see the ⟦L1⟧ldap_authentication⟦L1⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Проверка токена",
+      "english": "Token verification"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "После аутентификации пользователя формируется ⟦L1⟧аутентификационный токен⟦L1⟧, который передаётся с запросами к ⟦V1⟧. При проверке токена узел определяет пользователя, от имени которого выполняется запрос, и группы, в которые он входит. В зависимости от способа аутентификации может выполняться криптографическая проверка токена на стороне ⟦V2⟧ или обращение к внешней системе аутентификации. Например, для пользователя из LDAP-каталога токен не содержит информацию о группах, поэтому узел выполняет ещё один запрос к LDAP-серверу для получения списка групп пользователя. Сетевые обращения увеличивают время проверки аутентификационного токена и обработки запроса, а также нагрузку на внешнюю систему. Поэтому узлы ⟦V3⟧ ⟦L2⟧кешируют результаты проверки⟦L2⟧.",
+      "english": "After user authentication, an ⟦L1⟧authentication token⟦L1⟧ is generated, which is passed with requests to ⟦V1⟧. When verifying the token, the node determines the user on whose behalf the request is made and the groups they belong to. Depending on the authentication method, the token may be cryptographically verified on the ⟦V2⟧ side or an external authentication system may be contacted. For example, for a user from an LDAP directory, the token does not contain group information, so the node makes an additional request to the LDAP server to obtain the user's group list. Network calls increase the time to verify the authentication token and process the request, as well as the load on the external system. Therefore, ⟦V3⟧ nodes ⟦L2⟧cache the verification results⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Группы, как и сам пользователь, являются субъектами выполнения операций над объектами схемы базы данных. Для разграничения доступа к различным ресурсам базы данных субъектам могут назначаться права доступа. И в соответствии со списком назначенных прав субъекты будут авторизованы на выполнение тех или иных операций.",
+      "english": "Groups, like the user themselves, are subjects that perform operations on database schema objects. To differentiate access to various database resources, subjects can be assigned access rights. And according to the list of assigned rights, subjects will be authorized to perform certain operations."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Процесс получения списка групп пользователя из LDAP каталога похож на те действия, которые выполняются при аутентификации. Сначала выполняется операция *bind* для сервисного пользователя, учетные данные которого записаны в параметрах ⟦C1⟧ и ⟦C2⟧ секции ⟦L1⟧ldap_authentication⟦L1⟧ файла конфигурации. После успешной аутентификации выполняется поиск записи пользователя, для которого был ранее сформирован токен. Поиск также выполняется в соответствии с параметром ⟦C3⟧. Если пользователь всё ещё существует, то в качестве возвращаемого результата операции *search* будет список значений атрибута, записанного в параметре ⟦C4⟧. В случае, если этот параметр пуст, то аттрибутом обратного членства в группе будет являться ⟦C5⟧. Атрибут ⟦C6⟧ хранит уникальные имена (Distinguished Name, DN) групп, в которых состоит пользователь.",
+      "english": "The process of obtaining a user's group list from an LDAP directory is similar to the actions performed during authentication. First, a *bind* operation is performed for a service user whose credentials are recorded in the ⟦C1⟧ and ⟦C2⟧ parameters of the ⟦L1⟧ldap_authentication⟦L1⟧ section of the configuration file. After successful authentication, a search is performed for the user record for which the token was previously generated. The search is also performed according to the ⟦C3⟧ parameter. If the user still exists, the result of the *search* operation will be a list of values of the attribute recorded in the ⟦C4⟧ parameter. If this parameter is empty, the attribute of reverse group membership will be ⟦C5⟧. The ⟦C6⟧ attribute stores the distinguished names (DN) of the groups the user belongs to."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Получение групп",
+      "english": "Getting groups"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "По умолчанию ⟦V1⟧ выполняет поиск только тех групп, в которых пользователь состоит непосредственно. С помощью включения флага ⟦C1⟧ секции ⟦L1⟧ldap_authentication⟦L1⟧ ⟦V2⟧ будет пытаться получить группы на всех уровнях вложенности, а не только те, в которые пользователь входит напрямую. Если ⟦V3⟧ настроен для работы с Active Directory, для поиска всех вложенных групп будет использовано специфичное для Active Directory правило соответствия ⟦L2⟧LDAP_MATCHING_RULE_IN_CHAIN⟦L2⟧. Это правило позволяет получить все вложенные группы одним запросом. Для LDAP-серверов на основе OpenLDAP поиск групп будет выполнен рекурсивным обходом графа, что в общем случае требует выполнения нескольких запросов. Как для Active Directory, так и для OpenLDAP поиск групп будет выполнен только для поддерева, корень которого берётся из параметра конфигурации ⟦C2⟧.",
+      "english": "By default, ⟦V1⟧ searches only for groups in which the user is a direct member. By enabling the ⟦C1⟧ flag in the ⟦L1⟧ldap_authentication⟦L1⟧ section, ⟦V2⟧ will attempt to retrieve groups at all nesting levels, not just those the user belongs to directly. If ⟦V3⟧ is configured to work with Active Directory, the Active Directory-specific matching rule ⟦L2⟧LDAP_MATCHING_RULE_IN_CHAIN⟦L2⟧ will be used to search for all nested groups. This rule allows retrieving all nested groups with a single query. For LDAP servers based on OpenLDAP, group search will be performed by recursively traversing the graph, which generally requires multiple queries. For both Active Directory and OpenLDAP, group search will be performed only for the subtree whose root is taken from the configuration parameter ⟦C2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В текущей реализации имена групп, которыми будет оперировать ⟦V1⟧, совпадают с теми значениями, которые записаны в атрибуте ⟦C1⟧. Они могут иметь большую длину и быть сложночитаемыми.",
+      "english": "In the current implementation, the group names that ⟦V1⟧ will operate with match the values written in the ⟦C1⟧ attribute. They can be long and difficult to read."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Пример:",
+      "english": "Example:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Частота обновления информации о пользователе и его группах задаётся параметром ⟦L1⟧⟦C1⟧⟦L1⟧. Подробнее см. в статье о ⟦L2⟧кешировании результатов аутентификации⟦L2⟧.",
+      "english": "The frequency of updating information about a user and their groups is set by the parameter ⟦L1⟧⟦C1⟧⟦L1⟧. For more details, see the article on ⟦L2⟧caching authentication results⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Нужно заметить, что на данный момент ⟦V1⟧ не имеет возможности отслеживать переименования групп, сделанные на стороне LDAP сервера. Тем самым, группа с новым именем не будет обладать теми же правами, которые были у группы с прежним именем.",
+      "english": "Note that currently ⟦V1⟧ cannot track group renames made on the LDAP server side. As a result, a group with a new name will not have the same permissions as the group with the old name."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "LDAP-пользователи и LDAP-группы в ⟦V1⟧",
+      "english": "LDAP users and LDAP groups in ⟦V1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Так как ⟦V1⟧ позволяет использовать разные способы аутентификации пользователя, то, оперируя именами пользователей и групп, часто бывает полезно различать, где именно аутентифицировался пользователь. Для всех видов аутентификации, кроме аутентификации по логину и паролю, имена групп и пользователей дополняются суффиксом вида ⟦C1⟧.",
+      "english": "Since ⟦V1⟧ allows using different user authentication methods, when working with user and group names it is often useful to distinguish where exactly the user was authenticated. For all authentication types except login and password authentication, group and user names are appended with a suffix of the form ⟦C1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Для LDAP пользователей *auth-domain* задается в ⟦L1⟧параметре конфигурации⟦L1⟧ ⟦C1⟧. По умолчанию имеет значение ⟦C2⟧, поэтому все имена пользователей, аутентифицированных с помощью LDAP каталога, и имена групп, в которых они состоят, в ⟦V1⟧ будут иметь следующий вид:",
+      "english": "For LDAP users, *auth-domain* is set in the ⟦L1⟧configuration parameter⟦L1⟧ ⟦C1⟧. By default, it has the value ⟦C2⟧, so all names of users authenticated via the LDAP directory and the names of groups they belong to will have the following form in ⟦V1⟧:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦C1⟧",
+      "english": "⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Чтобы различать, что введенный логин должен быть логином пользователя из LDAP каталога, а не логином локального пользователя ⟦V1⟧, к нему нужно добавлять суффикс ⟦C1⟧.",
+      "english": "To distinguish that the entered login must be a login of a user from the LDAP directory rather than a login of a local ⟦V1⟧ user, you need to add the suffix ⟦C1⟧ to it."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Ниже приведены примеры аутентификации пользователя ⟦C1⟧ используя ⟦L1⟧⟦V1⟧ CLI⟦L1⟧:",
+      "english": "Below are examples of authenticating user ⟦C1⟧ using the ⟦L1⟧⟦V1⟧ CLI⟦L1⟧:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация пользователя из LDAP каталога: ⟦C1⟧",
+      "english": "Authenticating a user from the LDAP directory: ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация пользователя внутренним механизмом ⟦V1⟧: ⟦C1⟧",
+      "english": "Authenticating a user using the internal ⟦V1⟧ mechanism: ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "TLS соединение",
+      "english": "TLS connection"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В зависимости от указанных параметров конфигурации ⟦V1⟧ может устанавливать либо зашифрованное либо незашифрованное соединение. Зашифрованное соединение с LDAP сервером устанавливается с использованием протокола TLS. Такой способ рекомендуется использовать для production кластеров. Существует два способа включить TLS соединение:",
+      "english": "Depending on the specified configuration parameters, ⟦V1⟧ can establish either an encrypted or an unencrypted connection. An encrypted connection to the LDAP server is established using the TLS protocol. This method is recommended for production clusters. There are two ways to enable a TLS connection:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Автоматически. Используется схема соединения ⟦L1⟧⟦C1⟧⟦L1⟧",
+      "english": "Automatically. The connection scheme ⟦L1⟧⟦C1⟧⟦L1⟧ is used"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Использование расширения LDAP протокола ⟦L1⟧⟦C1⟧⟦L1⟧",
+      "english": "Using the LDAP protocol extension ⟦L1⟧⟦C1⟧⟦L1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При использовании незашифрованного соединения, все данные, которые передаются в запросах к LDAP серверу, будут передаваться в открытом виде, в том числе и пароли. Таким способом соединения проще начать пользоваться, он больше подходит для экспериментов или тестирования.",
+      "english": "When using an unencrypted connection, all data transmitted in requests to the LDAP server is sent in plain text, including passwords. This connection method is easier to start using and is better suited for experiments or testing."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "LDAPS",
+      "english": "LDAPS"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Для того чтобы ⟦V1⟧ автоматически установила зашифрованное соединение с LDAP-сервером, необходимо в ⟦L1⟧параметре конфигурации⟦L1⟧ **scheme** установить значение ⟦C1⟧. TLS-диалог будет инициирован на порту, указанном в конфигурации. Если порт не указан, для схемы ⟦C2⟧ будет применён порт по умолчанию 636. LDAP-сервер должен быть настроен на приём TLS-соединений на указанных портах.",
+      "english": "For ⟦V1⟧ to automatically establish an encrypted connection to the LDAP server, set the **scheme** value to ⟦C1⟧ in the ⟦L1⟧configuration parameter⟦L1⟧. The TLS handshake will be initiated on the port specified in the configuration. If no port is specified, the default port 636 will be used for the ⟦C2⟧ scheme. The LDAP server must be configured to accept TLS connections on the specified ports."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Расширение LDAP протокола ⟦C1⟧",
+      "english": "LDAP protocol extension ⟦C1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦C1⟧ — это расширение протокола LDAP, используемое для шифрования сообщений по протоколу TLS. Оно позволяет передавать в рамках одного соединения с LDAP-сервером одни сообщения в зашифрованном виде, а другие — открыто. Сообщение с этим расширением отправляется от ⟦V1⟧ к LDAP-серверу для инициирования TLS-соединения. В случае ⟦V2⟧ не предусмотрено включение и выключение TLS-соединения в рамках одного соединения. Поэтому при использовании расширения ⟦C2⟧ после установления зашифрованного соединения ⟦V3⟧ будет отправлять все дальнейшие сообщения к LDAP-серверу в зашифрованном виде. Одним из преимуществ использования данного расширения вместо схемы ⟦C3⟧ (при соответствующей настройке LDAP-сервера) является возможность установить TLS-соединение на нешифрованном порту. Расширение включается в ⟦L1⟧секции ⟦C4⟧⟦L1⟧ файла конфигурации.",
+      "english": "⟦C1⟧ is an extension of the LDAP protocol used to encrypt messages over TLS. It allows some messages to be transmitted in encrypted form and others in plain text within a single connection to an LDAP server. A message with this extension is sent from ⟦V1⟧ to the LDAP server to initiate a TLS connection. In the case of ⟦V2⟧, enabling and disabling a TLS connection within a single connection is not supported. Therefore, when using the ⟦C2⟧ extension, after establishing an encrypted connection, ⟦V3⟧ will send all subsequent messages to the LDAP server in encrypted form. One of the advantages of using this extension instead of the ⟦C3⟧ scheme (with appropriate LDAP server configuration) is the ability to establish a TLS connection on an unencrypted port. The extension is enabled in the ⟦L1⟧section ⟦C4⟧⟦L1⟧ of the configuration file."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация с использованием внешнего IdP по протоколу OpenID Connect",
+      "english": "Authentication using an external IdP via the OpenID Connect protocol"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦V1⟧ может аутентифицировать пользователей по ⟦L1⟧JWT-токенам⟦L1⟧, выпущенным внешним ⟦L2⟧провайдером идентификации⟦L2⟧ (Identity Provider, IdP), который поддерживает протокол ⟦L3⟧OpenID Connect⟦L3⟧ (OIDC). Провайдер отвечает за аутентификацию пользователя и выдачу токена, а ⟦V2⟧ проверяет подпись и утверждения (claims) о субъекте и условиях действия токена и формирует SID пользователя и его групп.",
+      "english": "⟦V1⟧ can authenticate users using ⟦L1⟧JWT tokens⟦L1⟧ issued by an external ⟦L2⟧identity provider⟦L2⟧ (Identity Provider, IdP) that supports the ⟦L3⟧OpenID Connect⟦L3⟧ (OIDC) protocol. The provider is responsible for authenticating the user and issuing the token, while ⟦V2⟧ verifies the signature and claims about the subject and token validity conditions and forms the user's SID and their groups."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Получение и обновление JWT-токена выполняются на стороне клиента и IdP. ⟦V1⟧ не перенаправляет пользователя на страницу входа IdP и не обменивает ⟦C1⟧ на токены. Клиент передаёт уже полученный JWT-токен как Bearer-токен при каждом запросе.",
+      "english": "The JWT token is obtained and refreshed on the client and IdP side. ⟦V1⟧ does not redirect the user to the IdP login page and does not exchange ⟦C1⟧ for tokens. The client passes the already obtained JWT token as a Bearer token with each request."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Принцип работы",
+      "english": "How it works"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Клиент проходит аутентификацию во внешнем IdP и получает подписанный JWT-токен.",
+      "english": "The client authenticates with the external IdP and receives a signed JWT token."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Клиент передаёт токен в запросе к ⟦V1⟧ с типом ⟦C1⟧.",
+      "english": "The client passes the token in a request to ⟦V1⟧ with the ⟦C1⟧ type."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Узел ⟦V1⟧ запрашивает OIDC Discovery-документ по адресу ⟦C1⟧, где ⟦C2⟧ — настроенный URL провайдера и идентификатор издателя токенов. Например, для ⟦C3⟧ запрос отправляется по адресу ⟦C4⟧. Значение поля ⟦C5⟧ в документе должно в точности совпадать с настроенным адресом провайдера.",
+      "english": "The ⟦V1⟧ node requests the OIDC Discovery document at ⟦C1⟧, where ⟦C2⟧ is the configured provider URL and token issuer identifier. For example, for ⟦C3⟧ the request is sent to ⟦C4⟧. The value of the ⟦C5⟧ field in the document must exactly match the configured provider address."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Из поля ⟦C1⟧ Discovery-документа извлекается URL, по которому ⟦V1⟧ периодически получает набор открытых ключей ⟦L1⟧JWKS⟦L1⟧.",
+      "english": "From the ⟦C1⟧ field of the Discovery document, a URL is extracted, from which ⟦V1⟧ periodically obtains a set of public keys ⟦L1⟧JWKS⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "По полям ⟦C1⟧ (algorithm, алгоритм подписи) и ⟦C2⟧ (key ID, идентификатор ключа) заголовка JWT выбирается открытый ключ. ⟦V1⟧ проверяет подпись токена, издателя, получателя и сроки действия.",
+      "english": "The public key is selected by the ⟦C1⟧ (algorithm, signing algorithm) and ⟦C2⟧ (key ID, key identifier) fields of the JWT header. ⟦V1⟧ verifies the token signature, issuer, audience, and expiration times."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Из полей токена извлекаются идентификатор пользователя и список групп. К ним добавляется настроенный суффикс домена аутентификации, после чего полученные SID используются для ⟦L1⟧авторизации⟦L1⟧.",
+      "english": "The user ID and group list are extracted from the token fields. A configured authentication domain suffix is added to them, after which the resulting SIDs are used for ⟦L1⟧authorization⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Discovery URL, ⟦C1⟧ и ⟦C2⟧ должны использовать схему ⟦C3⟧. Если Discovery-документ или JWKS временно недоступны, ⟦V1⟧ повторяет запросы с увеличивающимся интервалом. Полученные ключи кешируются и периодически обновляются для поддержки ротации ключей на стороне IdP. После истечения времени жизни кеша устаревшие ключи удаляются; до успешного обновления JWKS новые проверки токенов завершаются временной ошибкой.",
+      "english": "Discovery URL, ⟦C1⟧, and ⟦C2⟧ must use the ⟦C3⟧ scheme. If the Discovery document or JWKS are temporarily unavailable, ⟦V1⟧ retries requests with an increasing interval. The obtained keys are cached and periodically refreshed to support key rotation on the IdP side. After the cache lifetime expires, outdated keys are removed; until JWKS is successfully updated, new token verifications fail with a temporary error."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Требования к токену и ключам",
+      "english": "Token and key requirements"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "JWT-токен должен иметь корректный компактный формат сериализации и содержать в заголовке поля ⟦C1⟧ и ⟦C2⟧. Поддерживаются только асимметричные алгоритмы подписи:",
+      "english": "The JWT token must have a valid compact serialization format and contain the ⟦C1⟧ and ⟦C2⟧ fields in the header. Only asymmetric signing algorithms are supported:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "RSA PKCS#1: ⟦C1⟧, ⟦C2⟧, ⟦C3⟧;",
+      "english": "RSA PKCS#1: ⟦C1⟧, ⟦C2⟧, ⟦C3⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "RSA-PSS: ⟦C1⟧, ⟦C2⟧, ⟦C3⟧;",
+      "english": "RSA-PSS: ⟦C1⟧, ⟦C2⟧, ⟦C3⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "ECDSA: ⟦C1⟧, ⟦C2⟧, ⟦C3⟧.",
+      "english": "ECDSA: ⟦C1⟧, ⟦C2⟧, ⟦C3⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Симметричные алгоритмы семейства ⟦C1⟧ не поддерживаются. Открытый ключ в JWKS должен иметь совпадающие ⟦C2⟧ (key type, тип ключа) и ⟦C3⟧ и содержать ⟦C4⟧ (X.509 certificate chain, цепочку сертификатов X.509). Открытый ключ извлекается из первого сертификата ⟦C5⟧; JWK, содержащие только параметры RSA или EC без ⟦C6⟧, пропускаются.",
+      "english": "Symmetric algorithms of the ⟦C1⟧ family are not supported. The public key in JWKS must have matching ⟦C2⟧ (key type) and ⟦C3⟧ and contain ⟦C4⟧ (X.509 certificate chain). The public key is extracted from the first certificate ⟦C5⟧; JWKs containing only RSA or EC parameters without ⟦C6⟧ are skipped."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Для успешной аутентификации обязательны следующие поля:",
+      "english": "The following fields are required for successful authentication:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦C1⟧ и ⟦C2⟧ в заголовке JWT;",
+      "english": "⟦C1⟧ and ⟦C2⟧ in the JWT header."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "утверждение ⟦C1⟧ (issuer, издатель токена), совпадающее со значением ⟦C2⟧ в конфигурации;",
+      "english": "The ⟦C1⟧ claim (issuer) matching the ⟦C2⟧ value in the configuration."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "непустой строковый идентификатор пользователя. Для его получения используется утверждение, заданное параметром ⟦C1⟧. Если это утверждение отсутствует или имеет другой тип, используется стандартное утверждение ⟦C2⟧ (subject, идентификатор субъекта).",
+      "english": "A non-empty string user identifier. To obtain it, the claim specified by the ⟦C1⟧ parameter is used. If this claim is missing or has a different type, the standard ⟦C2⟧ claim (subject) is used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Остальные проверяемые поля необязательны:",
+      "english": "The other checked fields are optional:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "утверждение ⟦C1⟧ (audience, получатель токена) проверяется, если в конфигурации задан параметр ⟦C2⟧; рекомендуется всегда задавать ожидаемую audience, чтобы токены, выпущенные для других сервисов, не принимались;",
+      "english": "The ⟦C1⟧ claim (audience) is checked if the ⟦C2⟧ parameter is set in the configuration. It is recommended to always set the expected audience so that tokens issued for other services are not accepted."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "при проверке утверждений, связанных со временем, таких как ⟦C1⟧ (expiration time, время истечения срока действия), ⟦C2⟧ (not before, время начала действия) и ⟦C3⟧ (issued at, время выпуска), учитывается допустимое расхождение часов, заданное ⟦L1⟧параметром ⟦C4⟧⟦L1⟧. Если ⟦C5⟧ отсутствует, ⟦V1⟧ устанавливает для результата аутентификации срок действия 10 минут;",
+      "english": "When checking time-related claims such as ⟦C1⟧ (expiration time), ⟦C2⟧ (not before), and ⟦C3⟧ (issued at), the allowed clock skew specified by the ⟦L1⟧parameter ⟦C4⟧⟦L1⟧ is taken into account. If ⟦C5⟧ is missing, ⟦V1⟧ sets the authentication result validity to 10 minutes."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "утверждение, заданное параметром ⟦C1⟧, содержит список групп пользователя. Оно должно быть массивом; из массива извлекаются только строковые элементы. Если утверждение отсутствует или имеет другой тип, список групп считается пустым.",
+      "english": "The claim specified by the ⟦C1⟧ parameter contains a list of user groups. It must be an array; only string elements are extracted from the array. If the claim is missing or has a different type, the group list is considered empty."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Формирование SID",
+      "english": "SID generation"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "К идентификатору пользователя и каждой группе из JWT добавляется суффикс ⟦C1⟧. Значение ⟦C2⟧ задаётся параметром ⟦C3⟧; по умолчанию используется значение ⟦C4⟧.",
+      "english": "The suffix ⟦C1⟧ is added to the user identifier and each group from the JWT. The value of ⟦C2⟧ is set by the ⟦C3⟧ parameter; by default, the value ⟦C4⟧ is used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Например, при ⟦C1⟧, ⟦C2⟧ и домене по умолчанию будут сформированы следующие SID:",
+      "english": "For example, with ⟦C1⟧, ⟦C2⟧, and the default domain, the following SIDs will be formed:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "пользователь ⟦C1⟧;",
+      "english": "user ⟦C1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "группы ⟦C1⟧ и ⟦C2⟧.",
+      "english": "groups ⟦C1⟧ and ⟦C2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦V1⟧ использует список групп из токена без дополнительного обращения к IdP и без раскрытия вложенных групп. Управлять пользователями и группами внешнего IdP с помощью команд ⟦C1⟧, ⟦C2⟧, ⟦C3⟧ и ⟦C4⟧ нельзя. Права назначаются сформированным SID средствами, описанными в разделе ⟦L1⟧{#T}⟦L1⟧.",
+      "english": "⟦V1⟧ uses the group list from the token without additional calls to the IdP and without expanding nested groups. Users and groups of an external IdP cannot be managed using the ⟦C1⟧, ⟦C2⟧, ⟦C3⟧, and ⟦C4⟧ commands. Rights are assigned to the formed SIDs using the methods described in the ⟦L1⟧{#T}⟦L1⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Настройка сервера",
+      "english": "Server configuration"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация через внешний IdP включается в ⟦L1⟧конфигурации аутентификации⟦L1⟧ при наличии секции ⟦C1⟧.",
+      "english": "Authentication via an external IdP is enabled in the ⟦L1⟧authentication configuration⟦L1⟧ if the ⟦C1⟧ section is present."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация клиентов по сертификату",
+      "english": "Client certificate authentication"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "⟦V1⟧ может аутентифицировать клиента по данным клиентского сертификата, полученного при установлении TLS-соединения. Проверка выполняется на уровне протокола приложения (gRPC и др.), когда сервер уже принимает запросы по открытому соединению.",
+      "english": "⟦V1⟧ can authenticate a client using the client certificate data obtained during the TLS connection establishment. The verification is performed at the application protocol level (gRPC and others), when the server already accepts requests over an open connection."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Такой способ подходит, например, в корпоративных сценариях с централизованной выдачей сертификатов.",
+      "english": "This method is suitable, for example, in corporate scenarios with centralized certificate issuance."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Клиент устанавливает TLS-соединение с сервером ⟦V1⟧, передавая клиентский сертификат (и цепочку доверия).",
+      "english": "The client establishes a TLS connection with the ⟦V1⟧ server, passing the client certificate (and the trust chain)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При обработке запроса сервер извлекает сертификат из TLS-контекста.",
+      "english": "When processing a request, the server extracts the certificate from the TLS context."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Сервер использует сертификат для аутентификации и проверяет его по правилам секции ⟦L1⟧client_certificate_authorization⟦L1⟧.",
+      "english": "The server uses the certificate for authentication and checks it against the rules of the ⟦L1⟧client_certificate_authorization⟦L1⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "В результате успешной проверки сертификата клиенту назначается идентификатор защиты ⟦L1⟧SID⟦L1⟧, который обладает всеми ⟦L2⟧правами⟦L2⟧, назначенными соответствующему идентификатору.",
+      "english": "As a result of successful certificate verification, the client is assigned a security identifier ⟦L1⟧SID⟦L1⟧, which has all the ⟦L2⟧rights⟦L2⟧ assigned to the corresponding identifier."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация по сертификату применяется только для запросов без ⟦L1⟧аутентификационного токена⟦L1⟧. Если клиент передаёт аутентификационный токен — например, в заголовке ⟦C1⟧ для HTTP или через механизмы SDK/CLI для IAM, логина и пароля, — приоритет имеет токен. В этом случае сертификат передаётся на уровне TLS, но не используется для аутентификации.",
+      "english": "Certificate-based authentication is applied only to requests without an ⟦L1⟧authentication token⟦L1⟧. If the client passes an authentication token — for example, in the ⟦C1⟧ header for HTTP or through SDK/CLI mechanisms for IAM, login, and password — the token takes precedence. In this case, the certificate is passed at the TLS level but is not used for authentication."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Проверка клиентского сертификата при ⟦L1⟧аутентификации устройств⟦L1⟧ и аутентификации пользователя по клиентскому сертификату — разные механизмы. Аутентификация устройств ограничивает сетевой периметр без формирования SID; аутентификация пользователя по клиентскому сертификату формирует SID и группы для ⟦L2⟧авторизации⟦L2⟧.",
+      "english": "Client certificate verification for ⟦L1⟧device authentication⟦L1⟧ and user authentication by client certificate are different mechanisms. Device authentication restricts the network perimeter without generating an SID. User authentication by client certificate generates an SID and groups for ⟦L2⟧authorization⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Успешная аутентификация по сертификату создаёт SID пользователя с суффиксом ⟦C1⟧, где ⟦C2⟧ — ⟦L1⟧значение параметра⟦L1⟧ ⟦C3⟧ в секции ⟦C4⟧ (по умолчанию: ⟦C5⟧). Имя формируется из всех атрибутов поля Subject сертификата в нотации ⟦C6⟧. Порядок атрибутов соответствует порядку полей в сертификате. Пример:",
+      "english": "Successful certificate authentication creates a user SID with the suffix ⟦C1⟧, where ⟦C2⟧ is the ⟦L1⟧parameter value⟦L1⟧ ⟦C3⟧ in the ⟦C4⟧ section (default: ⟦C5⟧). The name is formed from all attributes of the certificate's Subject field in ⟦C6⟧ notation. The attribute order corresponds to the field order in the certificate. Example:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Если в секции ⟦L1⟧client_certificate_authorization⟦L1⟧ заданы блоки ⟦C1⟧, сертификат принимается при соответствии хотя бы одному из них. Для каждого подходящего блока клиент включается в группы из ⟦C2⟧. Если ⟦C3⟧ не указан, используется группа по умолчанию — ⟦C4⟧ (значение по умолчанию: ⟦C5⟧).",
+      "english": "If the ⟦L1⟧client_certificate_authorization⟦L1⟧ section specifies ⟦C1⟧ blocks, the certificate is accepted if it matches at least one of them. For each matching block, the client is included in the groups from ⟦C2⟧. If ⟦C3⟧ is not specified, the default group is used — ⟦C4⟧ (default value: ⟦C5⟧)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Правила проверки сертификатов и назначения групп задаются в секции ⟦L1⟧client_certificate_authorization⟦L1⟧ статической конфигурации кластера. Для включения запросов клиентского сертификата при TLS-handshake по gRPCs задайте параметр ⟦C1⟧.",
+      "english": "Certificate verification and group assignment rules are set in the ⟦L1⟧client_certificate_authorization⟦L1⟧ section of the cluster's static configuration. To enable client certificate requests during the TLS handshake over gRPC, set the ⟦C1⟧ parameter."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Настройка клиента",
+      "english": "Client configuration"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Подробнее о настройке ⟦L1⟧⟦V1⟧ CLI⟦L1⟧ — в разделе ⟦L2⟧Параметры TLS-соединения⟦L2⟧.",
+      "english": "For more details on configuring ⟦L1⟧⟦V1⟧ CLI⟦L1⟧, see the ⟦L2⟧TLS connection parameters⟦L2⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация устройств по сертификату",
+      "english": "Device authentication by certificate"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация устройств — проверка ⟦L1⟧клиентского сертификата⟦L1⟧ при установлении TLS-соединения; ⟦L2⟧SID⟦L2⟧ при этом не формируется. Если сертификат предъявлен, проверяется цепочка доверия к CA; недоверенный сертификат приводит к отклонению соединения до обработки прикладных запросов. Обязательность предъявления сертификата зависит от интерфейса (см. раздел ⟦L3⟧Использование в ⟦V1⟧⟦L3⟧).",
+      "english": "Device authentication is the verification of ⟦L1⟧client certificate⟦L1⟧ when establishing a TLS connection; ⟦L2⟧SID⟦L2⟧ is not generated in this case. If a certificate is presented, the trust chain to the CA is checked; an untrusted certificate causes the connection to be rejected before application requests are processed. Whether a certificate must be presented depends on the interface (see the section ⟦L3⟧Usage in ⟦V1⟧⟦L3⟧)."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Зачем нужна аутентификация устройств",
+      "english": "Why device authentication is needed"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация устройств решает следующие задачи в ⟦V1⟧:",
+      "english": "Device authentication solves the following tasks in ⟦V1⟧:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Изоляция кластера — ограничить круг хостов и приложений, которые могут установить TLS-соединение с узлами ⟦V1⟧.",
+      "english": "Cluster isolation — restrict the set of hosts and applications that can establish a TLS connection with ⟦V1⟧ nodes."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Защита от ошибок конфигурации — не допустить подключения к чужим кластерам ⟦V1⟧, например, при неверном параметре ⟦L1⟧node-broker⟦L1⟧ динамический узел не подключится к чужому кластеру, тогда как при обычном TLS такое соединение могло бы установиться.",
+      "english": "Protection against configuration errors — prevent connections to foreign ⟦V1⟧ clusters; for example, if the ⟦L1⟧node-broker⟦L1⟧ parameter is incorrect, a dynamic node will not connect to a foreign cluster, whereas with regular TLS such a connection could be established."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Усложнение атак на прикладной уровень — процесс на постороннем хосте без подходящего сертификата не получает доступ к API кластера, даже если сетевой маршрут до порта существует.",
+      "english": "Complicating attacks on the application layer — a process on a foreign host without an appropriate certificate does not get access to the cluster API, even if a network route to the port exists."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "После прохождения аутентификации устройств для доступа к данным может требоваться ⟦L1⟧аутентификация⟦L1⟧ пользователя или приложения. Она может осуществляться не только по проверенному клиентскому сертификату, но и с помощью других способов аутентификации в ⟦V1⟧, например, по ⟦L2⟧логину и паролю⟦L2⟧.",
+      "english": "After device authentication, ⟦L1⟧authentication⟦L1⟧ of a user or application may be required to access data. It can be performed not only using a verified client certificate, but also using other authentication methods in ⟦V1⟧, for example, by ⟦L2⟧login and password⟦L2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Клиент устанавливает TLS-соединение с сервером ⟦V1⟧ и, если интерфейс соединения требует, предъявляет клиентский сертификат.",
+      "english": "The client establishes a TLS connection with the ⟦V1⟧ server and, if the connection interface requires it, presents a client certificate."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Если сертификат предъявлен, сервер проверяет его на уровне TLS: цепочку доверия к настроенному центру сертификации (CA), срок действия и т. п. Дополнительные правила сопоставления полей сертификата (например, ⟦C1⟧, Subject и SAN) применяются при ⟦L1⟧аутентификации клиентов по сертификату⟦L1⟧.",
+      "english": "If a certificate is presented, the server verifies it at the TLS level: the trust chain to the configured certificate authority (CA), expiration date, and so on. Additional rules for matching certificate fields (for example, ⟦C1⟧, Subject, and SAN) are applied during ⟦L1⟧client certificate authentication⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При успешной проверке соединение открывается; при неуспешной — отклоняется.",
+      "english": "If verification succeeds, the connection is opened; if it fails, it is rejected."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Использование в ⟦V1⟧",
+      "english": "Usage in ⟦V1⟧"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация устройств опциональна и настраивается независимо: механизм может быть включен на одних портах и отключен на других.",
+      "english": "Device authentication is optional and configured independently: the mechanism can be enabled on some ports and disabled on others."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Interconnect** — при включении TLS в секции ⟦L1⟧interconnect_config⟦L1⟧ ⟦L2⟧Interconnect⟦L2⟧ требует клиентский сертификат.",
+      "english": "**Interconnect** — when TLS is enabled in the ⟦L1⟧interconnect_config⟦L1⟧ section, ⟦L2⟧Interconnect⟦L2⟧ requires a client certificate."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Kafka API** — при включении mTLS требует клиентский сертификат; проверяется только цепочка доверия к CA, соединение без сертификата или с недоверенным сертификатом не устанавливается. Настройка сервера описана в секции ⟦L1⟧kafka_proxy_config⟦L1⟧, а подключение клиента — в разделе ⟦L2⟧Аутентификация устройств по mTLS⟦L2⟧.",
+      "english": "**Kafka API** — when mTLS is enabled, it requires a client certificate; only the trust chain to the CA is checked, and a connection without a certificate or with an untrusted certificate is not established. Server configuration is described in the ⟦L1⟧kafka_proxy_config⟦L1⟧ section, and client connection in the ⟦L2⟧Device authentication by mTLS⟦L2⟧ section."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**gRPC** и **YDB Monitoring** — можно включить запрос сертификата клиента для аутентификации устройств, а также отдельно включить его обязательную проверку (недоверенный сертификат отклоняется всегда). Настройка gRPC описана в секциях ⟦L1⟧grpc_config⟦L1⟧ и ⟦L2⟧client_certificate_authorization⟦L2⟧, а подключение клиента — в разделе ⟦L3⟧Параметры TLS-соединения⟦L3⟧; настройка мониторинга YDB Monitoring описана в секции ⟦L4⟧monitoring_config⟦L4⟧.",
+      "english": "**gRPC** and **YDB Monitoring**: you can enable client certificate request for device authentication, and also separately enable its mandatory verification (an untrusted certificate is always rejected). The gRPC configuration is described in sections ⟦L1⟧grpc_config⟦L1⟧ and ⟦L2⟧client_certificate_authorization⟦L2⟧, and client connection — in section ⟦L3⟧TLS connection parameters⟦L3⟧; YDB Monitoring configuration is described in section ⟦L4⟧monitoring_config⟦L4⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Аутентификация с использованием стороннего IAM-провайдера",
+      "english": "Authentication using a third-party IAM provider"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Access Token** — параметром для клиента (SDK или CLI) задается фиксированный токен, который передается в запросы.",
+      "english": "**Access Token**: a fixed token is set as a parameter for the client (SDK or CLI) and is passed in requests."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Refresh Token** — параметром для клиента (SDK или CLI) задается ⟦L1⟧OAuth токен⟦L1⟧ персональной учетной записи, на основании которого клиент периодически в фоновом режиме обращается к IAM API для ротации (получения следующего) токена, передаваемого в запросы.",
+      "english": "**Refresh Token**: an ⟦L1⟧OAuth token⟦L1⟧ of a personal account is set as a parameter for the client (SDK or CLI), based on which the client periodically accesses the IAM API in the background to rotate (obtain the next) token passed in requests."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Service Account Key** — параметром для клиента (SDK или CLI) задаются атрибуты сервисной учетной записи и ключ для подписи, на основании которых клиент периодически в фоновом режиме обращается к IAM API для ротации (получения следующего) токена, передаваемого в запросы.",
+      "english": "**Service Account Key**: the attributes of a service account and a signing key are set as parameters for the client (SDK or CLI), based on which the client periodically accesses the IAM API in the background to rotate (obtain the next) token passed in requests."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Metadata** — клиент (SDK или CLI) периодически обращается к локальному сервису для ротации (получения следующего) токена, передаваемого в запросы.",
+      "english": "**Metadata**: the client (SDK or CLI) periodically accesses a local service to rotate (obtain the next) token passed in requests."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**OAuth 2.0 token exchange** - клиент (SDK или CLI) обменивает токен другого типа на access token по ⟦L1⟧протоколу обмена токенов OAuth 2.0⟦L1⟧, который затем передаётся в запросы ⟦V1⟧ API.",
+      "english": "**OAuth 2.0 token exchange**: the client (SDK or CLI) exchanges a token of another type for an access token using the ⟦L1⟧OAuth 2.0 token exchange protocol⟦L1⟧, which is then passed in requests to the ⟦V1⟧ API."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Любой обладатель валидного токена может получить доступ на выполнение операций, поэтому главная задача системы безопасности — обеспечение секретности токена и предотвращение его компрометации.",
+      "english": "Any holder of a valid token can gain access to perform operations, so the main task of the security system is to ensure token secrecy and prevent its compromise."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Режимы аутентификации с ротацией токена **Refresh Token** и **Service Account Key** обеспечивают больший уровень безопасности по сравнению с режимом с фиксированным токеном **Access Token**, так как на сервер ⟦V1⟧ по сети передаются только короткоживущие секреты.",
+      "english": "Authentication modes with token rotation, **Refresh Token** and **Service Account Key**, provide a higher level of security compared to the mode with a fixed token, **Access Token**, because only short-lived secrets are transmitted over the network to the ⟦V1⟧ server."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Максимальная безопасность и производительность обеспечивается при использовании режима **Metadata**, так как он исключает необходимость работы с секретами при развертывании приложения, а также позволяет обратиться к IAM и закешировать токен заранее, до запуска приложения.",
+      "english": "Maximum security and performance are achieved when using the **Metadata** mode, as it eliminates the need to work with secrets when deploying an application and also allows you to contact IAM and cache the token in advance, before starting the application."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При выборе режима аутентификации среди поддерживаемых сервером и окружением, следует руководствоваться следующими рекомендациями:",
+      "english": "When choosing an authentication mode among those supported by the server and environment, follow these recommendations:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Anonymous** обычно применяется на самостоятельно разворачиваемых локальных кластерах ⟦V1⟧, недоступных по сети.",
+      "english": "**Anonymous** is usually used on self-deployed local clusters ⟦V1⟧ that are not accessible over the network."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Access Token** применяется при отсутствии поддержки других режимов на стороне сервера или в настроечных/отладочных целях. Он не требует взаимодействий клиента с IAM. Однако, если IAM поддерживает API для ротации токенов, то обычно выдаваемые таким IAM фиксированные токены имеют короткий срок жизни, что вынуждает регулярно обновлять их в IAM вручную заново.",
+      "english": "**Access Token** is used when other modes are not supported on the server side or for configuration/debugging purposes. It does not require client interactions with IAM. However, if IAM supports an API for token rotation, the fixed tokens issued by such IAM typically have a short lifetime, which forces you to manually renew them in IAM on a regular basis."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Refresh Token** может применяться при выполнении разовых ручных операций под персональной учетной записью, например, связанных с обслуживанием данных в БД, выполнением ad-hoc операций в CLI, или запусками приложений с рабочей станции. Такой токен можно получить вручную в IAM один раз на долгий срок и сохранить в переменной окружения на личной рабочей станции для автоматического применения при запуске CLI без дополнительных параметров аутентификации.",
+      "english": "**Refresh Token** can be used for one-off manual operations under a personal account, for example, those related to database data maintenance, ad-hoc CLI operations, or launching applications from a workstation. You can obtain such a token manually in IAM once for a long period and store it in an environment variable on your personal workstation so that it is applied automatically when you run the CLI without additional authentication parameters."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Service Account Key** применяется в первую очередь для приложений, рассчитанных на эксплуатацию в окружениях, где поддерживается режим **Metadata**, при их тестировании вне таких окружений (например, на рабочей станции). Также он может применяться для приложений вне таких окружений, работая как аналог **Refresh Token** для сервисных учетных записей. В отличие от персональной учетной записи, объекты доступа и роли сервисной учетной записи могут быть ограничены.",
+      "english": "**Service Account Key** is primarily used for applications designed to run in environments that support the **Metadata** mode, when testing them outside such environments (for example, on a workstation). It can also be used for applications outside such environments, acting as an analog of **Refresh Token** for service accounts. Unlike a personal account, the access objects and roles of a service account can be limited."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "**Metadata** применяется при разворачивании приложений в облаках. В настоящее время этот режим поддерживается на виртуальных машинах и в ⟦V1⟧ ⟦V2⟧.",
+      "english": "**Metadata** is used when deploying applications in clouds. Currently, this mode is supported on virtual machines and in ⟦V1⟧ ⟦V2⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Токен для указания в параметрах может быть получен в системе IAM, с которой связана конкретная установка ⟦V1⟧. В частности, для сервиса ⟦V2⟧ в ⟦V3⟧ применяется Yandex.Passport OAuth и сервисные аккаунты ⟦V4⟧. При использовании ⟦V5⟧ в корпоративных контекстах могут применяться стандартные для данной организации системы централизованной аутентификации.",
+      "english": "The token to specify in the parameters can be obtained from the IAM system associated with a particular ⟦V1⟧ installation. In particular, Yandex.Passport OAuth and service accounts ⟦V3⟧ are used for the ⟦V2⟧ service in ⟦V4⟧. When using ⟦V5⟧ in corporate contexts, centralized authentication systems standard for the organization may be used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "При использовании режимов, предусматривающих обращение клиента ⟦V1⟧ к IAM, дополнительно может быть задан URL IAM, предоставляющий API выдачи токенов. По умолчанию в существующих SDK и CLI производится попытка обращения к API IAM ⟦V2⟧, размещенному на ⟦C1⟧.",
+      "english": "When using modes that involve the ⟦V1⟧ client accessing IAM, you can additionally specify the IAM URL that provides the token issuance API. By default, existing SDKs and CLIs attempt to access the IAM API ⟦V2⟧ hosted on ⟦C1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Кеширование результатов аутентификации",
+      "english": "Caching authentication results"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "В процессе аутентификации пользовательская сессия получает ⟦L1⟧аутентификационный токен⟦L1⟧, который передаётся с каждым запросом к кластеру ⟦V1⟧. Поскольку ⟦V2⟧ — распределённая система, запросы обрабатываются на разных ⟦L2⟧узлах⟦L2⟧. Получив запрос, каждый узел независимо ⟦L3⟧проверяет аутентификационный токен⟦L3⟧ и при успешной проверке создаёт ⟦L4⟧токен пользователя⟦L4⟧.",
+      "english": "During authentication, a user session receives an ⟦L1⟧authentication token⟦L1⟧, which is passed with each request to the ⟦V1⟧ cluster. Since ⟦V2⟧ is a distributed system, requests are processed on different ⟦L2⟧nodes⟦L2⟧. Upon receiving a request, each node independently ⟦L3⟧checks the authentication token⟦L3⟧ and, if the check succeeds, creates a ⟦L4⟧user token⟦L4⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Аутентификационный токен и токен пользователя — разные сущности. Аутентификационный токен передаётся клиентом. Токен пользователя создаётся внутри узла по результатам проверки, содержит ⟦L1⟧SID⟦L1⟧ пользователя и групп и используется при ⟦L2⟧авторизации⟦L2⟧. Он хранится только на конкретном узле и не передаётся клиенту.",
+      "english": "The authentication token and the user token are different entities. The authentication token is passed by the client. The user token is created inside the node based on the check results, contains the ⟦L1⟧SID⟦L1⟧ of the user and groups, and is used for ⟦L2⟧authorization⟦L2⟧. It is stored only on a specific node and is not passed to the client."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Узел сохраняет токен пользователя в кеше. Ключ записи включает аутентификационный токен и контекст проверки, например базу данных, атрибуты и запрошенные ⟦L1⟧права доступа⟦L1⟧. Последующий запрос использует кешированную запись только при совпадении ключа.",
+      "english": "The node stores the user token in the cache. The record key includes the authentication token and the verification context, such as the database, attributes, and requested ⟦L1⟧access rights⟦L1⟧. A subsequent request uses the cached record only if the key matches."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Время жизни токена пользователя и другие аспекты кеширования настраиваются в ⟦L1⟧секции ⟦C1⟧ конфигурации ⟦V1⟧⟦L1⟧.",
+      "english": "The user token lifetime and other caching aspects are configured in the ⟦L1⟧section ⟦C1⟧ of the ⟦V1⟧ configuration⟦L1⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Время жизни записи в кеше",
+      "english": "Cache record lifetime"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Запись с токеном пользователя удаляется из кеша, если выполняется одно из условий:",
+      "english": "A record with a user token is removed from the cache if one of the following conditions is met:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Запись не использовалась в течение ⟦C1⟧. Время последнего использования записи обновляет только запрос, совпадающий по ключу кеша (аутентификационному токену и контексту проверки).",
+      "english": "The record has not been used for ⟦C1⟧. Only a request that matches the cache key (the authentication token and verification context) updates the record's last use time."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Истёк срок действия записи. Для токенов входа по логину и паролю и токенов внешнего провайдера идентификации срок записи определяется сроком действия аутентификационного токена. Для запросов с подписью ключом доступа используется ⟦C1⟧, для остальных типов — ⟦C2⟧.",
+      "english": "The record has expired. For login and password entry tokens and external identity provider tokens, the record lifetime is determined by the authentication token's expiration. For requests signed with an access key, ⟦C1⟧ is used; for other types, ⟦C2⟧ is used."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Ретрабельной считается ошибка, после которой проверку можно повторить без изменения запроса. Тип ошибки определяет соответствующая подсистема аутентификации.",
+      "english": "An error is considered retryable if the check can be repeated without changing the request. The type of error is determined by the corresponding authentication subsystem."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "При ретрабельной ошибке обновления узел продолжает использовать сохранённый токен пользователя. Поэтому удаление аккаунта или изменение принадлежности пользователя к ⟦L1⟧группам⟦L1⟧ может примениться на конкретном узле только после успешного обновления либо удаления записи из кеша.",
+      "english": "On a retryable update error, the node continues to use the stored user token. Therefore, account deletion or a change in the user's membership in ⟦L1⟧groups⟦L1⟧ may take effect on a specific node only after a successful update or removal of the record from the cache."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "⟦L1⟧ACL⟦L1⟧ не кешируются в токене пользователя, поэтому изменения ACL применяются при следующей проверке прав.",
+      "english": "⟦L1⟧ACL⟦L1⟧ are not cached in the user token, so ACL changes are applied at the next permission check."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Обновление токенов пользователя",
+      "english": "Updating user tokens"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Для обновляемых аутентификационных токенов узел периодически повторяет проверку и заменяет токен пользователя в кеше. В зависимости от способа аутентификации проверка выполняется локально или требует обращения к внешней системе. После успешной проверки обновляются SID пользователя и групп.",
+      "english": "For refreshable authentication tokens, the node periodically re-validates and replaces the user's token in the cache. Depending on the authentication method, validation is performed locally or requires contacting an external system. After successful validation, the user's SID and group SIDs are updated."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Параметр ⟦C1⟧ задаёт максимальный интервал до следующей проверки. Конкретный момент выбирается в диапазоне от ⟦C2⟧ до ⟦C3⟧.",
+      "english": "The ⟦C1⟧ parameter sets the maximum interval before the next validation. The exact moment is chosen in the range from ⟦C2⟧ to ⟦C3⟧."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "После ретрабельной ошибки повторные попытки продолжаются до успешного обновления, постоянной ошибки или удаления записи из кеша. Интервалы между попытками задаются параметрами ⟦C1⟧ и ⟦C2⟧. Для токенов входа по логину и паролю и токенов внешнего провайдера идентификации попытки также прекращаются после истечения срока действия аутентификационного токена.",
+      "english": "After a retryable error, retries continue until a successful update, a permanent error, or removal of the entry from the cache. The intervals between attempts are set by the ⟦C1⟧ and ⟦C2⟧ parameters. For login/password tokens and external identity provider tokens, attempts also stop after the authentication token expires."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Возможные причины ошибок при проверке и обновлении кешированных результатов включают, но не ограничиваются следующими:",
+      "english": "Possible causes of errors when validating and updating cached results include, but are not limited to:"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "сетевые ошибки и тайм-ауты при обращении к внешней системе аутентификации;",
+      "english": "Network errors and timeouts when contacting the external authentication system."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "недоступность или перегрузка внешней системы аутентификации;",
+      "english": "Unavailability or overload of the external authentication system."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "недоступность локального состояния безопасности, необходимого для проверки;",
+      "english": "Unavailability of the local security state required for validation."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "перегрузка узла ⟦V1⟧ или истечение времени обработки запроса.",
+      "english": "Overload of the ⟦V1⟧ node or request processing timeout."
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/authentication.md",
+      "source": "Имя=Значение,...@<domain>",
+      "english": "Name=Value,...@<domain>"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Создание",
+      "english": "Creating"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "и",
+      "english": "and"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "использование",
+      "english": "using"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "токена",
+      "english": "a user"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "пользователя",
+      "english": "token"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "Жизненный",
+      "english": "Life"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "цикл",
+      "english": "cycle"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "записи",
+      "english": "of a record"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "в",
+      "english": "in the"
+    },
+    {
+      "file_path": "ydb/docs/ru/core/security/caching-authentication-results.md",
+      "source": "кеше",
+      "english": "cache"
+    }
+  ],
+  "menu_labels": {
+    "Аутентификация": "Authentication",
+    "Кеширование результатов аутентификации": "Caching authentication results"
+  }
+}

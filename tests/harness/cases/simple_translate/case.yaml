@@ -1,0 +1,14 @@
+id: simple_translate
+description: Minimal translate profile — one prose segment, critic off.
+profile: translate
+file_path: docs/ru/hello.md
+source: source.ru.md
+enable_critic: false
+llm:
+  responses:
+    - |
+      {"segments":[{"id":"s0001","text":"Hello.\n"}]}
+expect:
+  verdict: ok
+  final_text_contains:
+    - "Hello."

@@ -1,0 +1,966 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from ydbdoc_review.config.loader import load_config
+from ydbdoc_review.github.git_ops import read_text_at_ref
+from ydbdoc_review.github.pr import (
+    PullRequestContext,
+    load_pair_contents,
+    source_pr_scope_changes,
+)
+from ydbdoc_review.github.workflow import (
+    TouchedPaths,
+    _apply_results_to_disk,
+    _declare_exact_ascii_fragment_targets_after_apply,
+    _final_tree_reader,
+    _reconcile_final_en_same_fragment_paths_after_apply,
+    _repair_en_fragments_after_apply,
+    run_doc_translate,
+)
+from ydbdoc_review.navigation.scope_planner import (
+    doc_pairs_from_plan,
+    make_repo_scope_readers,
+    plan_translation_scope,
+)
+from ydbdoc_review.ops.gates import GateResult
+from ydbdoc_review.pipeline.analyze import PairContent, PairPlan
+from ydbdoc_review.pipeline.orchestrator import run_pr_translation
+from ydbdoc_review.pipeline.pairs import DocPair
+from ydbdoc_review.pipeline.types import FileTranslationResult, PairRunResult, PRTranslationResult
+from ydbdoc_review.translation.glossary import load_glossary
+from ydbdoc_review.validation.en_link_targets import (
+    apply_en_link_target_checks,
+    check_en_page_link_targets,
+)
+from ydbdoc_review.validation.href_parity import (
+    check_outbound_fragments,
+    collect_internal_hrefs,
+    reconcile_final_en_same_fragment_paths,
+)
+
+AUTH_RU = "ydb/docs/ru/core/security/authentication.md"
+AUTH_EN = AUTH_RU.replace("/ru/", "/en/")
+OWNER_RU = "ydb/docs/ru/core/reference/ydb-cli/_includes/connect.md"
+OWNER_EN = OWNER_RU.replace("/ru/", "/en/")
+HREF = "../reference/ydb-cli/connect.md#tls"
+MERGE_SHA = "d9fc9f993eb7fbade94da40c7c666178abb93170"
+API_CHANGES = [
+    ("ydb/docs/ru/core/reference/configuration/client_certificate_authorization.md", "modified"),
+    ("ydb/docs/ru/core/reference/configuration/monitoring_config.md", "modified"),
+    ("ydb/docs/ru/core/reference/configuration/tls.md", "modified"),
+    (AUTH_RU, "modified"),
+    ("ydb/docs/ru/core/security/index.md", "modified"),
+]
+
+
+def _put(root: Path, rel: str, text: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+
+
+def _git_output(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _repo(tmp_path: Path, *, commit_merge: bool = False) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    _put(repo, AUTH_RU, f"# Authentication\n\n[TLS one]({HREF})\n[TLS two]({HREF})\n")
+    _put(repo, AUTH_EN, "# Authentication\n")
+    include = "{% include [connect](_includes/connect.md) %}\n"
+    for locale in ("ru", "en"):
+        _put(repo, f"ydb/docs/{locale}/core/reference/ydb-cli/connect.md", include)
+    _put(
+        repo,
+        OWNER_RU,
+        "### Параметры аутентификации {#authentication}\n"
+        "{% include [auth/options.md](auth/options.md) %}\n"
+        "### Параметры TLS-соединения {#tls}\n"
+        "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+        "{% include [env.md](auth/env.md) %}\n",
+    )
+    _put(
+        repo,
+        OWNER_EN,
+        "### Authentication parameters {#authentication}\n"
+        "{% include [auth/options.md](auth/options.md) %}\n"
+        "### TLS connection parameters\n"
+        "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+        "{% include [env.md](auth/env.md) %}\n",
+    )
+    for path, _kind in API_CHANGES:
+        if path != AUTH_RU:
+            _put(repo, path, f"# {Path(path).stem}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "baseline")
+    _put(
+        repo,
+        AUTH_RU,
+        f"# Authentication\n\nUpdated surrounding content.\n\n"
+        f"[TLS one]({HREF})\n[TLS two]({HREF})\n",
+    )
+    for path, _kind in API_CHANGES:
+        if path != AUTH_RU:
+            _put(repo, path, f"# {Path(path).stem}\n\nUpdated.\n")
+    if commit_merge:
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "merged PR 40385 fixture")
+    return repo
+
+
+def _fake_file_result(_harness, state, _ctx) -> FileTranslationResult:
+    final = (
+        "### Authentication parameters {#authentication}\n"
+        "{% include [auth/options.md](auth/options.md) %}\n"
+        "### TLS connection parameters\n"
+        "{% include [auth/options_client_cert.md](auth/options_client_cert.md) %}\n"
+        "{% include [env.md](auth/env.md) %}\n"
+        if state.file_path == OWNER_RU
+        else f"# Authentication\n\n[TLS]({HREF})\n"
+    )
+    return FileTranslationResult(
+        file_path=state.file_path, final_text=final, segments_count=1,
+        verdict="ok", prompt_version="test",
+    )
+
+
+def _plan_and_load(repo: Path):
+    read_ru, read_en, read_ru_base = make_repo_scope_readers(str(repo), "HEAD")
+    plan = plan_translation_scope(
+        [(AUTH_RU, "modified")], read_ru=read_ru,
+        read_en_base=read_en, read_ru_base=read_ru_base,
+    )
+    pairs = doc_pairs_from_plan(plan)
+    return plan, pairs, load_pair_contents(str(repo), pairs, merge_base_with="HEAD")
+
+
+def _translate(contents):
+    client = MagicMock()
+    client.usage_tracker.records = []
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    with patch("ydbdoc_review.harness.pair.FileHarness.run", _fake_file_result):
+        return run_pr_translation(contents, client, load_glossary(), config=cfg)
+
+
+def test_pr_40385_queued_connect_include_translates_then_declares_tls(tmp_path: Path):
+    repo = _repo(tmp_path)
+    plan, pairs, contents = _plan_and_load(repo)
+    assert OWNER_RU in plan.doc_from_main
+    owner_pair = next(pair for pair in pairs if pair.ru_path == OWNER_RU)
+    assert any(content.pair == owner_pair and content.ru_text for content in contents)
+
+    result = _translate(contents)
+    owner_run = next(run for run in result.pair_results if run.plan.target_path == OWNER_EN)
+    assert owner_run.file_result is not None
+    assert "TLS connection parameters" in (owner_run.target_text or "")
+    touched = _apply_results_to_disk(str(repo), result, dry_run=False)
+    declared = _declare_exact_ascii_fragment_targets_after_apply(
+        str(repo), touched.written, dry_run=False
+    )
+    touched = TouchedPaths(list(dict.fromkeys([*touched.written, *declared])), touched.deleted)
+    en_written = {p for p in touched.written if "/docs/en/" in p and p.endswith(".md")}
+    assert apply_en_link_target_checks(result, repo_path=str(repo), en_md_paths=en_written) == []
+    assert OWNER_EN in touched.written  # branch preparation and commit path input
+    assert "### TLS connection parameters {#tls}" in (repo / OWNER_EN).read_text()
+    assert HREF in (repo / AUTH_EN).read_text()
+
+
+def test_pr_40385_merged_five_api_paths_load_six_pairs_before_translation(tmp_path: Path):
+    repo = _repo(tmp_path, commit_merge=True)
+    merge_sha = _git_output(repo, "rev-parse", "HEAD")
+    parent_sha = _git_output(repo, "rev-parse", "HEAD^")
+    _put(repo, AUTH_EN, "# Authentication\n\nCurrent upstream-tip EN.\n")
+    _git(repo, "add", AUTH_EN)
+    _git(repo, "commit", "-qm", "distinct upstream main tip")
+    upstream_main_ref = _git_output(repo, "rev-parse", "HEAD")
+    assert len({merge_sha, parent_sha, upstream_main_ref}) == 3
+    ctx = PullRequestContext(
+        owner="ydb-platform", repo="ydb", number=40385, title="docs",
+        head_ref="docs/source", head_sha="source-head",
+        head_repo_full_name="ydb-platform/ydb",
+        head_repo_https_url="https://github.com/ydb-platform/ydb.git",
+        base_ref="main", merged=True, merge_commit_sha=MERGE_SHA,
+    )
+    noisy_git_changes = [("ydb/docs/ru/core/noisy-local-only.md", "modified")]
+    changes = source_pr_scope_changes(ctx, noisy_git_changes, API_CHANGES)
+    assert changes == API_CHANGES
+    assert noisy_git_changes[0] not in changes
+
+    read_ru, read_en_base, read_ru_base = make_repo_scope_readers(
+        str(repo), upstream_main_ref, ru_content_ref=merge_sha, ru_base_ref=f"{merge_sha}^",
+    )
+    assert (read_ru(AUTH_RU) or "").count(HREF) == 2
+    assert (read_ru_base(AUTH_RU) or "").count(HREF) == 2
+    plan = plan_translation_scope(
+        changes, read_ru=read_ru, read_en_base=read_en_base, read_ru_base=read_ru_base,
+    )
+    expected_diff = frozenset(path for path, _kind in API_CHANGES)
+    assert plan.doc_ru_paths == expected_diff | {OWNER_RU}
+    assert plan.doc_from_diff == expected_diff
+    assert plan.doc_from_main == frozenset({OWNER_RU})
+    assert plan.nav_ru_paths == frozenset()
+    assert plan.nav_from_diff == frozenset()
+    assert plan.nav_from_main == frozenset()
+
+    pairs = doc_pairs_from_plan(plan)
+    assert len(pairs) == 6
+    contents = load_pair_contents(
+        str(repo), pairs, merge_base_with=upstream_main_ref,
+        ru_content_ref=merge_sha, ru_base_ref=f"{merge_sha}^",
+    )
+    assert len(contents) == 6
+    owner_content = next(content for content in contents if content.pair.ru_path == OWNER_RU)
+    assert owner_content.pair.en_path == OWNER_EN
+    assert "{#tls}" in (owner_content.ru_text or "")
+    assert "{#tls}" not in (owner_content.en_text or "")
+
+    with patch("ydbdoc_review.pipeline.orchestrator.run_pr_translation") as translate:
+        translate(contents, MagicMock(), load_glossary())
+    loaded = translate.call_args.args[0]
+    assert len(loaded) == 6
+    assert any(item.pair.ru_path == OWNER_RU and item.pair.en_path == OWNER_EN for item in loaded)
+
+
+def test_pr_40385_real_tip_without_queued_translation_stays_blocked(tmp_path: Path):
+    repo = _repo(tmp_path)
+    plan, pairs, contents = _plan_and_load(repo)
+    assert OWNER_RU in plan.doc_from_main
+    assert any(pair.ru_path == OWNER_RU for pair in pairs)
+    auth_content = next(content for content in contents if content.pair.ru_path == AUTH_RU)
+    result = _translate([auth_content])  # deliberately bypass queued owner pair
+    touched = _apply_results_to_disk(str(repo), result, dry_run=False)
+    before = (repo / OWNER_EN).read_text()
+    assert _declare_exact_ascii_fragment_targets_after_apply(
+        str(repo), touched.written, dry_run=False
+    ) == []
+    assert (repo / OWNER_EN).read_text() == before
+    broken = apply_en_link_target_checks(result, repo_path=str(repo), en_md_paths={AUTH_EN})
+    assert broken == [AUTH_EN]
+    messages = result.pair_results[0].file_result.heuristic_blocking
+    assert any("missing fragment: tls" in message for message in messages)
+    if broken:
+        touched = TouchedPaths([], [])
+    assert not touched  # production lifecycle cannot prepare, commit, or push
+
+
+def test_pr_40385_full_post_translate_link_contract_clears_auth_failures(tmp_path: Path):
+    """R-GL-11: exercise the production post-translate lifecycle, not helpers alone."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+
+    auth_ru_base = (
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
+    )
+    auth_ru_current = auth_ru_base + "[Monitoring](../reference/configuration/monitoring_config.md#tls)\n"
+    auth_en_tip = (
+        "[Security](../reference/configuration/security_config.md#security-auth)\n"
+        "[Certificate](../reference/configuration/auth_config.md#certificate-auth-config)\n"
+    )
+    auth_config_ru = (
+        "# auth_config\n\n"
+        "## Настройка аутентификации по сертификату {#certificate-auth-config}\n"
+    )
+    auth_config_en = "# auth_config\n\n## Certificate authentication configuration\n"
+    security_config_en = "# security_config\n\n## Authentication {#security-auth}\n"
+    for rel, text in (
+        (AUTH_RU, auth_ru_base),
+        (AUTH_EN, auth_en_tip),
+        ("ydb/docs/ru/core/reference/configuration/auth_config.md", auth_config_ru),
+        ("ydb/docs/en/core/reference/configuration/auth_config.md", auth_config_en),
+        ("ydb/docs/en/core/reference/configuration/security_config.md", security_config_en),
+        ("ydb/docs/en/core/reference/configuration/monitoring_config.md", "# Monitoring {#tls}\n"),
+    ):
+        _put(repo, rel, text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "RU baseline")
+    source_base_ref = _git_output(repo, "rev-parse", "HEAD")
+    _put(repo, AUTH_RU, auth_ru_current)
+    _git(repo, "add", AUTH_RU)
+    _git(repo, "commit", "-qm", "RU source current adds monitoring link")
+    source_ref = _git_output(repo, "rev-parse", "HEAD")
+    _put(
+        repo,
+        "ydb/docs/en/core/reference/configuration/security_config.md",
+        security_config_en + "\nTip EN context.\n",
+    )
+    _git(repo, "add", "ydb/docs/en/core/reference/configuration/security_config.md")
+    _git(repo, "commit", "-qm", "EN tip context")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", source_ref)
+
+    auth_pair = DocPair(ru_path=AUTH_RU, en_path=AUTH_EN, ru_changed=True)
+    owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    owner_en = owner_ru.replace("/ru/", "/en/")
+    owner_pair = DocPair(ru_path=owner_ru, en_path=owner_en, ru_changed=True)
+    contents = load_pair_contents(
+        str(repo), [owner_pair, auth_pair], merge_base_with=tip_ref,
+        ru_content_ref=source_ref, ru_base_ref=source_base_ref,
+    )
+    assert source_base_ref != source_ref != tip_ref
+    assert _git_output(repo, "rev-parse", "HEAD") == source_ref
+    auth_content = next(content for content in contents if content.pair == auth_pair)
+    assert len(auth_content.ru_base_text and auth_content.ru_base_text.splitlines()) == 2
+    assert len(auth_content.ru_text and auth_content.ru_text.splitlines()) == 3
+    assert len(auth_content.en_text and auth_content.en_text.splitlines()) == 2
+
+    def fake_result(_harness, state, _ctx):
+        final = auth_ru_current if state.file_path == AUTH_RU else auth_config_en
+        return FileTranslationResult(
+            file_path=state.file_path, final_text=final, segments_count=1,
+            verdict="ok", prompt_version="test",
+        )
+
+    client = MagicMock()
+    client.usage_tracker.records = []
+    cfg = load_config(env={"YDBDOC_YC_FOLDER_ID": "b1", "YDBDOC_YC_API_KEY": "k"})
+    with patch("ydbdoc_review.harness.pair.FileHarness.run", fake_result):
+        result = run_pr_translation(
+            contents, client, load_glossary(), config=cfg,
+            docs_text_reader=_final_tree_reader(str(repo), tip_ref, set()),
+        )
+    assert [run.plan.target_path for run in result.pair_results] == [owner_en, AUTH_EN]
+    auth_run = next(run for run in result.pair_results if run.plan.target_path == AUTH_EN)
+    assert auth_run.target_text is not None
+    assert "auth_config.md#security-auth" in auth_run.target_text
+    assert "security_config.md#security-auth" in (repo / AUTH_EN).read_text(encoding="utf-8")
+    touched = _apply_results_to_disk(str(repo), result, dry_run=False)
+    declared = _declare_exact_ascii_fragment_targets_after_apply(
+        str(repo), touched.written, dry_run=False,
+        merge_base_with=tip_ref, ru_content_ref=source_ref,
+    )
+    en_written = set(touched.written) | set(declared)
+    _repair_en_fragments_after_apply(
+        str(repo), list(en_written), dry_run=False, merge_base_with=tip_ref,
+    )
+    # With the final reconciliation disabled, the existing final-tree gate is
+    # intentionally still blocking. It must not be weakened to hide the bug.
+    assert apply_en_link_target_checks(
+        result,
+        repo_path=str(repo),
+        en_md_paths=en_written,
+        baseline_read=lambda p: read_text_at_ref(str(repo), tip_ref, p),
+        docs_read=_final_tree_reader(str(repo), tip_ref, en_written),
+    ) == [AUTH_EN]
+    assert _reconcile_final_en_same_fragment_paths_after_apply(
+        str(repo), contents, result, list(en_written), dry_run=False,
+        merge_base_with=tip_ref, ru_content_ref=source_ref,
+    ) == [AUTH_EN]
+
+    auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
+    owner_after = (repo / owner_en).read_text(encoding="utf-8")
+    assert auth_run.target_text == auth_after
+    assert auth_run.file_result is not None
+    assert auth_run.file_result.final_text == auth_after
+    assert "security_config.md#security-auth" in auth_after
+    assert "auth_config.md#certificate-auth-config" in auth_after
+    assert "{#certificate-auth-config}" in owner_after
+    assert "{#security-auth}" not in owner_after
+    assert apply_en_link_target_checks(
+        result,
+        repo_path=str(repo),
+        en_md_paths=en_written,
+        baseline_read=lambda p: read_text_at_ref(str(repo), tip_ref, p),
+        docs_read=_final_tree_reader(str(repo), tip_ref, en_written),
+    ) == []
+
+
+@pytest.mark.skip(
+    reason="workflow integration scenario belongs outside the bounded unit suite"
+)
+def test_pr_51079_translate_workflow_reconciles_internal_70_75_67_75_topology(
+    tmp_path: Path,
+):
+    """The real post-translation stage must run paragraph-local reconciliation."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+
+    filler_href = "../reference/configuration/filler.md"
+    ru_prefix = "".join(
+        f"[RU before {index}]({filler_href})\n" for index in range(12)
+    )
+    ru_current_prefix = "".join(
+        f"[RU current before {index}]({filler_href})\n" for index in range(13)
+    )
+    ru_suffix = "".join(
+        f"[RU after {index}]({filler_href})\n" for index in range(55)
+    )
+    ru_current_suffix = "".join(
+        f"[RU current after {index}]({filler_href})\n" for index in range(58)
+    )
+    tip_prefix = "".join(
+        f"[EN tip before {index}]({filler_href})\n" for index in range(12)
+    )
+    tip_suffix = "".join(
+        f"[EN tip after {index}]({filler_href})\n" for index in range(52)
+    )
+    candidate_prefix = "".join(
+        f"[EN candidate before {index}]({filler_href})\n" for index in range(13)
+    )
+    candidate_suffix = "".join(
+        f"[EN candidate after {index}]({filler_href})\n" for index in range(58)
+    )
+    auth_ru_base = (
+        f"{ru_prefix}\n"
+        "[Режим аутентификации]"
+        "(../reference/configuration/auth_config.md#security-auth)\n\n"
+        "[Сертификат]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/connect.md#tls)\n"
+        f"{ru_suffix}"
+    )
+    auth_ru_current = (
+        f"{ru_current_prefix}\n"
+        "[Режим аутентификации]"
+        "(../reference/configuration/auth_config.md#security-auth)\n\n"
+        "[Сертификат]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/connect.md#tls)\n"
+        + "[Мониторинг](../reference/configuration/monitoring_config.md#tls)\n"
+        + ru_current_suffix
+    )
+    auth_en_tip = (
+        f"{tip_prefix}\n"
+        "[Authentication mode]"
+        "(../reference/configuration/security_config.md#security-auth)\n\n"
+        "[Certificate]"
+        "(../reference/configuration/certificate_legacy.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/_includes/connect_legacy.md#tls)\n"
+        f"{tip_suffix}"
+    )
+    auth_en_candidate = (
+        f"{candidate_prefix}\n"
+        "[Authentication mode]"
+        "(../reference/configuration/auth_config.md#security-auth)\n\n"
+        "[Certificate]"
+        "(../reference/configuration/auth_config.md#certificate-auth-config)\n"
+        "[TLS]"
+        "(../reference/ydb-cli/connect.md#tls)\n"
+        "[Monitoring](../reference/configuration/monitoring_config.md#tls)\n"
+        f"{candidate_suffix}"
+    )
+    assert [
+        len(collect_internal_hrefs(text))
+        for text in (auth_ru_base, auth_ru_current, auth_en_tip, auth_en_candidate)
+    ] == [70, 75, 67, 75]
+
+    owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    owner_en = owner_ru.replace("/ru/", "/en/")
+    security_en = "ydb/docs/en/core/reference/configuration/security_config.md"
+    certificate_legacy_en = (
+        "ydb/docs/en/core/reference/configuration/certificate_legacy.md"
+    )
+    connect_ru = "ydb/docs/ru/core/reference/ydb-cli/connect.md"
+    connect_en = connect_ru.replace("/ru/", "/en/")
+    connect_include_ru = connect_ru.replace("connect.md", "_includes/connect.md")
+    connect_include_en = connect_include_ru.replace("/ru/", "/en/")
+    connect_legacy_en = "ydb/docs/en/core/reference/ydb-cli/_includes/connect_legacy.md"
+    monitoring_ru = "ydb/docs/ru/core/reference/configuration/monitoring_config.md"
+    monitoring_en = "ydb/docs/en/core/reference/configuration/monitoring_config.md"
+    filler_ru = "ydb/docs/ru/core/reference/configuration/filler.md"
+    filler_en = filler_ru.replace("/ru/", "/en/")
+    for rel, text in (
+        (AUTH_RU, auth_ru_base),
+        (AUTH_EN, auth_en_tip),
+        (owner_ru, "## Сертификат {#certificate-auth-config}\n"),
+        (owner_en, "## Certificate authentication\n"),
+        (security_en, "## Authentication {#security-auth}\n"),
+        (certificate_legacy_en, "## Certificate {#certificate-auth-config}\n"),
+        (connect_ru, "{% include [connect](_includes/connect.md) %}\n"),
+        (connect_en, "{% include [connect](_includes/connect.md) %}\n"),
+        (connect_include_ru, "## TLS {#tls}\n"),
+        (connect_include_en, "## TLS connection\n"),
+        (connect_legacy_en, "## TLS {#tls}\n"),
+        (monitoring_ru, "## Мониторинг {#tls}\n"),
+        (monitoring_en, "## Monitoring\n"),
+        (filler_ru, "# Filler\n"),
+        (filler_en, "# Filler\n"),
+        (
+            "ydb/docs/en/core/toc_p.yaml",
+            "items:\n"
+            "- name: Authentication\n"
+            "  href: security/authentication.md\n"
+            "- name: Auth config\n"
+            "  href: reference/configuration/auth_config.md\n"
+            "- name: Security config\n"
+            "  href: reference/configuration/security_config.md\n"
+            "- name: Monitoring config\n"
+            "  href: reference/configuration/monitoring_config.md\n",
+        ),
+    ):
+        _put(repo, rel, text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "source base and EN baseline")
+    source_base_ref = _git_output(repo, "rev-parse", "HEAD")
+
+    _put(repo, AUTH_RU, auth_ru_current)
+    _git(repo, "add", AUTH_RU)
+    _git(repo, "commit", "-qm", "merged source adds the 75th link")
+    source_ref = _git_output(repo, "rev-parse", "HEAD")
+
+    _put(repo, security_en, "## Authentication {#security-auth}\n\nTip context.\n")
+    _git(repo, "add", security_en)
+    _git(repo, "commit", "-qm", "distinct upstream EN tip")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", source_ref)
+
+    pull = {
+        "title": "docs",
+        "merged": True,
+        "state": "closed",
+        "merge_commit_sha": source_ref,
+        "head": {
+            "ref": "docs/source",
+            "sha": source_ref,
+            "repo": {
+                "clone_url": "https://github.com/ydb-platform/ydb.git",
+                "full_name": "ydb-platform/ydb",
+            },
+        },
+        "base": {"ref": "main"},
+    }
+
+    def translated_result(contents, *_args, **_kwargs):
+        auth_content = next(content for content in contents if content.pair.ru_path == AUTH_RU)
+        assert auth_content.ru_base_text == auth_ru_base
+        assert auth_content.ru_text == auth_ru_current
+        assert auth_content.en_text == auth_en_tip
+        pair_results = []
+        for content in contents:
+            target_text = (
+                auth_en_candidate
+                if content.pair.ru_path == AUTH_RU
+                else content.en_text
+            )
+            assert target_text is not None
+            plan = PairPlan(
+                pair=content.pair,
+                action="translate_to_en",
+                source_path=content.pair.ru_path,
+                target_path=content.pair.en_path,
+                source_lang="ru",
+                target_lang="en",
+            )
+            file_result = FileTranslationResult(
+                file_path=content.pair.en_path,
+                final_text=target_text,
+                segments_count=1,
+                verdict="ok",
+                prompt_version="test",
+            )
+            if content.pair.ru_path == AUTH_RU:
+                # This is the real early pair-level validator.  Before the
+                # owner overlay is applied, its stale checkout target lacks
+                # `security-auth`; the final four-snapshot reconciliation
+                # later restores the tip-proven `security_config.md` owner.
+                early = check_outbound_fragments(
+                    AUTH_EN,
+                    auth_en_candidate,
+                    read_text=lambda path: (
+                        (repo / path).read_text(encoding="utf-8")
+                        if (repo / path).is_file()
+                        else None
+                    ),
+                    en_baseline_text=auth_en_tip,
+                )
+                assert early == [
+                    "outbound_fragment: "
+                    "`../reference/configuration/auth_config.md#security-auth` "
+                    "points to missing EN anchor `auth_config.md#security-auth`",
+                    "outbound_fragment: "
+                    "`../reference/configuration/auth_config.md#certificate-auth-config` "
+                    "points to missing EN anchor "
+                    "`auth_config.md#certificate-auth-config`",
+                    "outbound_fragment: "
+                    "`../reference/ydb-cli/connect.md#tls` "
+                    "points to missing EN anchor `connect.md#tls`",
+                    "outbound_fragment: "
+                    "`../reference/configuration/monitoring_config.md#tls` "
+                    "points to missing EN anchor `monitoring_config.md#tls`"
+                ]
+                file_result.heuristic_blocking.extend(early)
+            pair_results.append(
+                PairRunResult(
+                    plan=plan,
+                    target_text=target_text,
+                    file_result=file_result,
+                    source_text=content.ru_text,
+                )
+            )
+        return PRTranslationResult(pair_results=pair_results)
+
+    cfg = load_config(
+        env={
+            "YDBDOC_MODEL_PROVIDER": "yandex_cloud",
+            "YDBDOC_YC_FOLDER_ID": "b1",
+            "YDBDOC_YC_API_KEY": "k",
+            "GITHUB_TOKEN": "gh",
+            "GITHUB_PUSH_TOKEN": "ghp",
+            "YDBDOC_SKIP_OPS_GATES": "1",
+            # This historical regression intentionally exercises the
+            # explicit source-preserving exception, not A05's new default.
+            "YDBDOC_TRANSLATION_RU_AUTHORITY_MODE": "source-preserving",
+        }
+    )
+    import ydbdoc_review.github.workflow as workflow
+
+    # This is a workflow integration regression, but its outcome must not
+    # depend on live ops/LLM clients. The namespace exposes only the usage and
+    # model-chain contracts which this no-commit path may consume.
+    def model_chain_for_role(role: str) -> list[str]:
+        assert role == "translate"
+        return ["pr51797-fixture-translate"]
+
+    client = SimpleNamespace(
+        usage_tracker=SimpleNamespace(
+            records=[],
+            estimate_cost_rub=lambda: 0.0,
+        ),
+        model_chain_for_role=model_chain_for_role,
+    )
+    with patch("ydbdoc_review.github.workflow.GitHubClient") as gh_cls, patch(
+        "ydbdoc_review.github.workflow.begin_ops_job",
+        return_value=(None, GateResult(ok=True), None),
+    ) as begin_ops, patch(
+        "ydbdoc_review.github.workflow.finish_ops_job",
+    ) as finish_ops, patch(
+        "ydbdoc_review.github.workflow.create_llm_client",
+        return_value=client,
+    ) as create_client, patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_git", return_value=[]
+    ), patch(
+        "ydbdoc_review.github.workflow.list_pr_file_changes_api",
+        return_value=[(AUTH_RU, "modified")],
+    ), patch(
+        "ydbdoc_review.github.workflow.run_pr_translation",
+        side_effect=translated_result,
+    ) as translate:
+        with patch(
+            "ydbdoc_review.github.workflow._apply_results_to_disk",
+            wraps=workflow._apply_results_to_disk,
+        ) as apply, patch(
+            "ydbdoc_review.github.workflow._declare_exact_ascii_fragment_targets_after_apply",
+            wraps=workflow._declare_exact_ascii_fragment_targets_after_apply,
+        ) as declare, patch(
+            "ydbdoc_review.github.workflow._reconcile_final_en_same_fragment_paths_after_apply",
+            wraps=workflow._reconcile_final_en_same_fragment_paths_after_apply,
+        ) as reconcile, patch(
+            "ydbdoc_review.github.workflow.apply_en_link_target_checks",
+            wraps=workflow.apply_en_link_target_checks,
+        ) as final_links:
+            gh_cls.return_value.get_pull.return_value = pull
+            result = run_doc_translate(
+                repo_path=str(repo),
+                github_repo="ydb-platform/ydb",
+                pr_number=40385,
+                merge_base_with=tip_ref,
+                no_commit=True,
+                config=cfg,
+            )
+
+    # A stale early pair finding must not skip the full candidate lifecycle.
+    apply.assert_called_once()
+    declare.assert_called_once()
+    reconcile.assert_called_once()
+    final_links.assert_called_once()
+
+    begin_ops.assert_called_once()
+    create_client.assert_called_once_with(cfg)
+    finish_ops.assert_not_called()
+    translate.assert_called_once()
+    assert _git_output(repo, "rev-parse", f"{source_ref}^") == source_base_ref
+    assert _git_output(repo, "rev-parse", "HEAD") == source_ref
+    auth_after = (repo / AUTH_EN).read_text(encoding="utf-8")
+    owner_after = (repo / owner_en).read_text(encoding="utf-8")
+    connect_include_after = (repo / connect_include_en).read_text(encoding="utf-8")
+    monitoring_after = (repo / monitoring_en).read_text(encoding="utf-8")
+    assert "security_config.md#security-auth" in auth_after
+    assert "auth_config.md#security-auth" not in auth_after
+    assert "auth_config.md#certificate-auth-config" in auth_after
+    assert "{#certificate-auth-config}" in owner_after
+    assert "{#security-auth}" not in owner_after
+    assert "{#tls}" in connect_include_after
+    assert "{#tls}" in monitoring_after
+    assert result.pr_result.final_tree_blockers == []
+    assert not any(
+        message.startswith("outbound_fragment:")
+        for run in result.pr_result.pair_results
+        for message in (run.file_result.heuristic_blocking if run.file_result else [])
+    )
+    assert apply_en_link_target_checks(
+        result.pr_result,
+        repo_path=str(repo),
+        en_md_paths={AUTH_EN, owner_en, connect_en, connect_include_en, monitoring_en},
+        baseline_read=lambda path: read_text_at_ref(str(repo), tip_ref, path),
+        docs_read=_final_tree_reader(
+            str(repo),
+            tip_ref,
+            {AUTH_EN, owner_en, connect_en, connect_include_en, monitoring_en},
+        ),
+    ) == []
+
+
+def test_pr_40385_final_tree_reader_keeps_touched_deletion_as_tombstone(tmp_path: Path):
+    """R-GL-11: final target checks must see same-job EN deletions."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    target = "ydb/docs/en/core/reference/configuration/security_config.md"
+    _put(repo, target, "## Security {#security-auth}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "tip target")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    (repo / target).unlink()
+    touched = TouchedPaths(written=[], deleted=[target])
+
+    read = _final_tree_reader(
+        str(repo),
+        tip_ref,
+        set(touched.written),
+        deleted_paths=set(touched.deleted),
+    )
+
+    assert read(target) is None
+
+
+def test_pr_40385_final_tree_reader_rejects_missing_dry_run_overlay(tmp_path: Path):
+    """A declared overlay without bytes is an integrity error, including dry runs."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    target = "ydb/docs/en/core/reference/configuration/security_config.md"
+    tip_text = "## Security {#security-auth}\n"
+    _put(repo, target, tip_text)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "tip target")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    (repo / target).unlink()
+    dry_run_touched = TouchedPaths(written=[target], deleted=[])
+
+    read = _final_tree_reader(
+        str(repo),
+        tip_ref,
+        set(dry_run_touched.written),
+        deleted_paths=set(dry_run_touched.deleted),
+    )
+
+    with pytest.raises(RuntimeError, match="declared overlay is missing"):
+        read(target)
+
+
+def test_pr_40385_final_reconciliation_fails_closed_without_tip_en_snapshot(tmp_path: Path):
+    """R-GL-11: a historical checkout body cannot stand in for missing tip EN."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    owner_ru = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    owner_en = owner_ru.replace("/ru/", "/en/")
+    security_en = "ydb/docs/en/core/reference/configuration/security_config.md"
+    tip_href = "../reference/configuration/security_config.md#security-auth"
+    broken_href = "../reference/configuration/auth_config.md#security-auth"
+    _put(repo, AUTH_RU, f"[Security]({broken_href})\n")
+    _put(repo, AUTH_EN, f"[Security]({tip_href})\n")
+    _put(repo, owner_ru, "## Certificate {#certificate-auth-config}\n")
+    _put(repo, owner_en, "## Certificate\n")
+    _put(repo, security_en, "## Security {#security-auth}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "RU base with historical EN")
+    base_ref = _git_output(repo, "rev-parse", "HEAD")
+    _put(repo, AUTH_RU, f"Updated.\n\n[Security]({broken_href})\n")
+    _git(repo, "add", AUTH_RU)
+    _git(repo, "commit", "-qm", "RU current")
+    source_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "rm", "-q", AUTH_EN)
+    _git(repo, "commit", "-qm", "tip deletes EN referrer")
+    tip_ref = _git_output(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", source_ref)
+
+    pair = DocPair(ru_path=AUTH_RU, en_path=AUTH_EN, ru_changed=True)
+    content = PairContent(
+        pair=pair,
+        ru_text=read_text_at_ref(str(repo), source_ref, AUTH_RU),
+        ru_base_text=read_text_at_ref(str(repo), base_ref, AUTH_RU),
+        # Simulates a caller retaining checkout EN when tip has no snapshot.
+        en_text=f"[Security]({tip_href})\n",
+    )
+    candidate = f"[Security]({broken_href})\n"
+    _put(repo, AUTH_EN, candidate)
+    plan = PairPlan(
+        pair=pair,
+        action="translate_to_en",
+        source_path=AUTH_RU,
+        target_path=AUTH_EN,
+        source_lang="ru",
+        target_lang="en",
+    )
+    result = PRTranslationResult(pair_results=[PairRunResult(plan=plan, target_text=candidate)])
+
+    assert _reconcile_final_en_same_fragment_paths_after_apply(
+        str(repo), [content], result, [AUTH_EN], dry_run=False,
+        merge_base_with=tip_ref, ru_content_ref=source_ref,
+    ) == []
+    assert (repo / AUTH_EN).read_text(encoding="utf-8") == candidate
+
+
+def test_pr_40385_final_reconciliation_rejects_ambiguous_or_source_valid_lineage():
+    """R-GL-9/10: fail closed when four-snapshot path lineage is not proven."""
+    ru_owner = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    en_owner = ru_owner.replace("/ru/", "/en/")
+    en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
+
+    def assert_blocking_noop(
+        ru_base: str,
+        ru_current: str,
+        en_tip: str,
+        candidate: str,
+        *,
+        ru_owner_text: str = "## auth config\n",
+        security_text: str = "# security {#security-auth}\n",
+    ) -> None:
+        source_pages = {AUTH_RU: ru_current, ru_owner: ru_owner_text}
+        final_pages = {AUTH_EN: candidate, en_owner: "## auth config\n", en_security: security_text}
+        fixed = reconcile_final_en_same_fragment_paths(
+            ru_base,
+            ru_current,
+            en_tip,
+            candidate,
+            ru_page_path=AUTH_RU,
+            en_page_path=AUTH_EN,
+            read_source_ru=source_pages.get,
+            read_final_en=final_pages.get,
+        )
+        assert fixed == candidate
+        assert check_en_page_link_targets(AUTH_EN, fixed, read_text=final_pages.get)
+
+    # A source delete+add with the same short label/fragment is a different
+    # occurrence, not historical evidence for restoring the old EN owner.
+    assert_blocking_noop(
+        "[TLS](../reference/configuration/old_owner.md#tls)\n",
+        "[TLS](../reference/configuration/auth_config.md#tls)\n",
+        "[TLS](../reference/configuration/security_config.md#tls)\n",
+        "[TLS](../reference/configuration/auth_config.md#tls)\n",
+        security_text="# security {#tls}\n",
+    )
+
+    # Repeated historical fragments make the slot identity ambiguous.
+    assert_blocking_noop(
+        "[First](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Second](../reference/configuration/other.md#security-auth)\n",
+        "[First](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Second](../reference/configuration/other.md#security-auth)\n",
+        "[First](../reference/configuration/security_config.md#security-auth)\n"
+        "[Second](../reference/configuration/security_config.md#security-auth)\n",
+        "[First](../reference/configuration/auth_config.md#security-auth)\n"
+        "[Second](../reference/configuration/other.md#security-auth)\n",
+    )
+
+    # A current RU target that declares the fragment is source authority.
+    assert_blocking_noop(
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/security_config.md#security-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        ru_owner_text="## auth config {#security-auth}\n",
+    )
+
+    # The historical fragment must be identical, not merely resolvable.
+    assert_blocking_noop(
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        "[Security](../reference/configuration/security_config.md#different-auth)\n",
+        "[Security](../reference/configuration/auth_config.md#security-auth)\n",
+        security_text="# security {#different-auth}\n",
+    )
+
+
+def test_pr_40385_final_reconciliation_changes_only_raw_href_path():
+    """R-GL-11: retain link label, surrounding whitespace, and encoded fragment bytes."""
+    ru = "[Security](../reference/configuration/auth_config.md#security-auth)\n"
+    tip = "[Security](../reference/configuration/security_config.md#security-auth)\n"
+    candidate = (
+        "[ Security (../reference/configuration/auth_config.md#security%2Dauth)]"
+        "(  ../reference/configuration/auth_config.md#security%2Dauth  )\n"
+    )
+    expected = (
+        "[ Security (../reference/configuration/auth_config.md#security%2Dauth)]"
+        "(  ../reference/configuration/security_config.md#security%2Dauth  )\n"
+    )
+    ru_owner = "ydb/docs/ru/core/reference/configuration/auth_config.md"
+    en_owner = ru_owner.replace("/ru/", "/en/")
+    en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
+    source_pages = {AUTH_RU: ru, ru_owner: "## Certificate {#certificate-auth-config}\n"}
+    final_pages = {
+        AUTH_EN: candidate,
+        en_owner: "## Certificate\n",
+        en_security: "## Security {#security-auth}\n",
+    }
+
+    assert reconcile_final_en_same_fragment_paths(
+        ru,
+        ru,
+        tip,
+        candidate,
+        ru_page_path=AUTH_RU,
+        en_page_path=AUTH_EN,
+        read_source_ru=source_pages.get,
+        read_final_en=final_pages.get,
+    ) == expected
+
+
+def test_pr_40385_final_reconciliation_inserts_empty_href_path_after_whitespace():
+    """R-GL-11: an in-page candidate retains its href-group spacing when retargeted."""
+    ru = "[Security](#security-auth)\n"
+    tip = "[Security](../reference/configuration/security_config.md#security-auth)\n"
+    candidate = "[ Security ](  #security-auth  )\n"
+    expected = "[ Security ](  ../reference/configuration/security_config.md#security-auth  )\n"
+    en_security = "ydb/docs/en/core/reference/configuration/security_config.md"
+    source_pages = {AUTH_RU: ru}
+    final_pages = {
+        AUTH_EN: candidate,
+        en_security: "## Security {#security-auth}\n",
+    }
+
+    fixed = reconcile_final_en_same_fragment_paths(
+        ru,
+        ru,
+        tip,
+        candidate,
+        ru_page_path=AUTH_RU,
+        en_page_path=AUTH_EN,
+        read_source_ru=source_pages.get,
+        read_final_en=final_pages.get,
+    )
+
+    assert fixed == expected
+    assert check_en_page_link_targets(AUTH_EN, fixed, read_text=final_pages.get) == []
