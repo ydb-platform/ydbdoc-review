@@ -5,7 +5,7 @@ Wraps markdown-it-py and converts its flat token stream into our IR tree.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from functools import lru_cache
 from typing import Literal, cast
 
@@ -169,6 +169,31 @@ def parse_markdown_located(text: str) -> LocatedDocument:
 
 
 @dataclass(frozen=True)
+class StructureCounts:
+    headings: int = 0
+    paragraphs: int = 0
+    list_items: int = 0
+    tables: int = 0
+    rows: int = 0
+    code: int = 0
+    yfm: int = 0
+
+    def __add__(self, other: StructureCounts) -> StructureCounts:
+        return StructureCounts(**{f.name: getattr(self, f.name) + getattr(other, f.name)
+                                  for f in fields(self)})
+
+
+def _review_counts(tokens: list[Token]) -> StructureCounts:
+    kinds = [token.type for token in tokens]
+    return StructureCounts(
+        headings=kinds.count("heading_open"), paragraphs=kinds.count("paragraph_open"),
+        list_items=kinds.count("list_item_open"), tables=kinds.count("table_open"),
+        rows=kinds.count("tr_open"), code=kinds.count("fence") + kinds.count("code_block"),
+        yfm=sum(kind.startswith("yfm_") and kind.endswith("_open") for kind in kinds),
+    )
+
+
+@dataclass(frozen=True)
 class LocatedReviewBlock:
     """An indivisible root container, including every nested source character."""
 
@@ -180,6 +205,7 @@ class LocatedReviewBlock:
     structure: tuple[str, ...]
     heading_level: int = 0
     anchor: str | None = None
+    counts: StructureCounts = StructureCounts()
 
 
 def parse_review_blocks(text: str) -> tuple[LocatedReviewBlock, ...]:
@@ -223,6 +249,7 @@ def parse_review_blocks(text: str) -> tuple[LocatedReviewBlock, ...]:
             SourceSpan(offsets[start], offsets[end]), start + 1, end,
             structure, int(token.tag[1:]) if token.type == "heading_open" else 0,
             anchor.group(1) if anchor else None,
+            _review_counts(tokens[index:end_index]),
         ))
     return tuple(blocks)
 
