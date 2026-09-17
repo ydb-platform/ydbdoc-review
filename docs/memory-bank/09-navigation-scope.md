@@ -1,7 +1,7 @@
 # Memory Bank — Navigation scope redesign (TOC)
 
-> Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Historical, non-normative reference. The current contract is
+> [`REQUIREMENTS_RU.md`](../../REQUIREMENTS_RU.md).
 
 ---
 
@@ -79,7 +79,7 @@ Merge phase (unchanged location: `navigation_merge.py`):
   only at **merge** time for nav yaml already in plan (not scope expansion §6.104)
 - `planned_toc_extras_for_pair` replaces `extra_toc_hrefs_from_md_targets` axis
 
-### 22.5. Operational rules (authoritative)
+### 22.5. Historical operational rules
 
 | EN `main` state | Pages | Navigation merge |
 |-----------------|-------|------------------|

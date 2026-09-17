@@ -1,7 +1,7 @@
 # Memory Bank — Development guide
 
-> Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Historical, non-normative reference. The current contract is
+> [`REQUIREMENTS_RU.md`](../../REQUIREMENTS_RU.md).
 
 ---
 

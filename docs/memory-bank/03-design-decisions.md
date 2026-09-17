@@ -1,7 +1,7 @@
 # Memory Bank — Design decisions
 
-> Part of the [Memory Bank index](../../MEMORY_BANK.md).  
-> Authoritative design doc for **ydbdoc-review v2** (`doc-translate-ng`).
+> Historical, non-normative reference. The current contract is
+> [`REQUIREMENTS_RU.md`](../../REQUIREMENTS_RU.md).
 
 ---
 
@@ -1938,7 +1938,7 @@ Two gaps in §6.83:
 scope** (``ru_base == ru_pr``) and ``restrict_gap_fill_to_scope=True`` → merge
 emitted no entries.
 
-**Operational rule (authoritative):**
+**Historical operational rule:**
 
 | EN ``main`` state | Merge behaviour |
 |-------------------|-----------------|

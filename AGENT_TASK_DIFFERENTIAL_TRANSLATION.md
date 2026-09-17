@@ -1,5 +1,7 @@
 # Задание: Differential Translation System (Incremental instead of Full Rewrite)
 
+> Архив отменённого задания. Differential translation запрещён действующим контрактом. Не реализовывать. Действующий контракт: [`REQUIREMENTS_RU.md`](REQUIREMENTS_RU.md).
+
 ## Контекст и Проблема
 
 **Текущая система:** Каждый раз полностью переводим EN документ с нуля
