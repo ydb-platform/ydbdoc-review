@@ -10,6 +10,7 @@ import pytest
 import requests
 import ydb
 
+from tests.context_records import context_with_records
 from ydbdoc_review import store as module
 from ydbdoc_review.model import AttemptRecord, Endpoint, ModelChoice, RequestRecord, Usage
 from ydbdoc_review.runner import RunResult, finalize
@@ -181,7 +182,7 @@ def test_callbacks_save_failed_cancel_and_exact_cost(db, mode):
     run.record_attempt(a)
     result = RunResult(mode=mode, status='RED', cancelled=True, errors=('cancel',), attempts=(a,))
     assert finalize(result, run.hooks()).errors == ('cancel',)
-    context = store.context(run.run_id)
+    context = context_with_records(store, run.run_id)
     assert context['result']['cancelled']
     assert context['result']['errors'] == ['cancel']
     assert context['continuation_count'] == 2
@@ -232,7 +233,7 @@ def test_unknown_cost_pending_and_failed_keeps_records(db):
     assert store.daily_cost() is None
     run.record_attempt(a)
     run.save(RunResult(attempts=(a,)))
-    context = store.context(run.run_id)
+    context = context_with_records(store, run.run_id)
     assert context['cost_breakdown'] == {'translation': None, 'critic': Decimal(0),
                                          'repair': Decimal(0), 'total': None}
     with pytest.raises(BudgetUnknown):
@@ -251,7 +252,7 @@ def test_write_failure_visible_and_final_reconciles_attempt(db):
     assert any('storage' in error for error in result.errors)
     boundary.fail = lambda q, p: False
     run.save(result)
-    context = store.context(run.run_id)
+    context = context_with_records(store, run.run_id)
     assert context['attempts'][0]['usage']['cost_rub'] == 9
     assert context['requests'][0]['id'] == a.request.id
 
@@ -277,7 +278,7 @@ def test_factory_request_attempt_real_transport_fallback(db, monkeypatch):
     assert response.content == 'translated'
     run.save(RunResult(attempts=tuple(client.attempts)))
     client.close()
-    context = store.context(run.run_id)
+    context = context_with_records(store, run.run_id)
     assert len(context['requests']) == len(context['attempts']) == 2
     assert context['cost_breakdown']['total'] == 5
     assert context['attempts'][0]['error']
@@ -303,7 +304,7 @@ def test_no_work_save_does_not_query_budget(db):
     boundary.fail = lambda q, p: 'FROM runs' in q
     result = finalize(RunResult(status='NO_WORK'), run.hooks())
     assert result.status == 'NO_WORK'
-    assert store.context(run.run_id)['cost_breakdown']['total'] == 0
+    assert context_with_records(store, run.run_id)['cost_breakdown']['total'] == 0
 
 
 def test_production_factory_never_null(monkeypatch):
@@ -328,7 +329,7 @@ def test_pending_outcome_cannot_be_reported_as_zero(db):
     run = adapter(store)
     run.record_request(request())
     run.save(RunResult(cancelled=True))
-    assert store.context(run.run_id)['cost_breakdown']['total'] is None
+    assert context_with_records(store, run.run_id)['cost_breakdown']['total'] is None
 
 
 def test_budget_error_is_cached_and_not_expiry(db):
@@ -366,7 +367,7 @@ def test_factory_inflight_interrupt_retains_unknown_attempt(db, monkeypatch, err
     assert client.cost_breakdown()['total'] is None
     run.save(RunResult(cancelled=True, attempts=tuple(client.attempts),
                        cost_breakdown=client.cost_breakdown()))
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['attempts'][0]['error'] == f'{error.__name__}: outcome unavailable'
     assert data['attempts'][0]['response_text'] is None
     assert data['result']['cost_breakdown']['total'] is None
@@ -404,5 +405,5 @@ def test_interrupt_and_attempt_storage_failure_retains_cancel_and_unknown(db, mo
     assert client.cost_breakdown()['total'] is None
     boundary.fail = lambda q, p: False
     run.save(RunResult(cancelled=True, attempts=tuple(client.attempts)))
-    assert store.context(run.run_id)['cost_breakdown']['total'] is None
+    assert context_with_records(store, run.run_id)['cost_breakdown']['total'] is None
     client.close()

@@ -20,6 +20,7 @@ import requests
 import ydb
 from ydb import convert
 
+from tests.context_records import context_with_records
 from tests.contract.test_t12_independent import SDKBoundary, attempt, chat, run_store, transport
 from ydbdoc_review.runner import RunResult
 from ydbdoc_review.store import BudgetExceeded, StorageError, YDBStore
@@ -159,7 +160,7 @@ def test_real_sql_paid_fallback_failed_repair_restart_and_calendar(persistent, m
     for record in reversed(records):
         restarted.record_request(record.request)
     assert store.daily_cost() == Decimal('21.75')
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['cost_breakdown'] == dict(translation=Decimal('14.50'), critic=0,
                                           repair=Decimal('7.25'), total=Decimal('21.75'))
     assert [r['status_code'] for r in data['attempts']] == [500, 200, 400]
@@ -205,7 +206,7 @@ def test_sdk_parameter_types_and_pending_failure_before_http(persistent, monkeyp
     assert pending_wire['$cost_rub'].value.HasField('null_flag_value')
     sdk.fail = lambda sql, p: False
     run.save(RunResult(errors=(str(exc.value),)))
-    context = store.context(run.run_id)
+    context = context_with_records(store, run.run_id)
     assert context['result']['errors'] == [str(exc.value)]
     assert len(context['requests']) == 1 and context['attempts'] == []
     assert context['cost_breakdown']['total'] == store.daily_cost() == 0
@@ -258,7 +259,7 @@ def test_actual_runner_without_commits_or_budget_dependency(persistent, monkeypa
         admit=lambda: run.admit(Decimal(0)), translation_choice=choice, critic_choice=choice,
         repair_choice=choice, budget=RequestBudget(10000, 1000, lambda m: len(str(m))),
         hooks=run.hooks(), build=partial(build_candidate, executable='/nonexistent/t12-yfm'))
-    context = store.context(run.run_id)
+    context = context_with_records(store, run.run_id)
     assert context['cost_breakdown']['total'] == 0
     assert not any('SELECT run_id, entry_id, cost_rub' in q for q, _ in sdk.calls)
     if mechanical:

@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 import ydb
 
+from ydbdoc_review.document import file_result_to_dict
 from ydbdoc_review.model import (
     OPERATIONS,
     AttemptRecord,
@@ -508,7 +509,7 @@ class RunStore:
         return _RecordedClient(self, **kwargs)
 
     def file_progress(self, result):
-        self.store.put(self.run_id, f'file/{result.path}', encode(result))
+        self.store.put(self.run_id, f'file/{result.path}', encode(file_result_to_dict(result)))
 
     def candidate_progress(self, candidate):
         self.store.put(self.run_id, 'candidate', encode({'sha': candidate.sha}))
@@ -545,17 +546,51 @@ class RunStore:
                          if original.entries.get(path) != result.candidate.entries.get(path))
         final_files = ({path: result.candidate.read(path) for path in sorted(paths)}
                        if result.candidate else {})
+        # Only explicitly selected durable state crosses the storage boundary.
+        # Never recurse through RunResult, Candidate, or quality round traces.
+        known = {}
+        for file in (known_files if known_files is not None else result.selected_files):
+            if isinstance(file, Mapping):
+                known[file['path']] = {name: file.get(name) for name in
+                                      ('path', 'source', 'target_lang', 'instruction', 'glossary', 'initial')}
+            else:
+                known[file.path] = {
+                    'path': file.path, 'source': file.source, 'target_lang': file.target_lang,
+                    'instruction': file.instruction, 'glossary': file.glossary,
+                    'initial': file_result_to_dict(file.initial) if file.initial else None}
+        for file in result.selected_files:
+            known[file.path] = {
+                'path': file.path, 'source': file.source, 'target_lang': file.target_lang,
+                'instruction': file.instruction, 'glossary': file.glossary,
+                'initial': file_result_to_dict(file.initial) if file.initial else
+                           known.get(file.path, {}).get('initial')}
+        for file in result.files:
+            if file.path in known:
+                known[file.path]['initial'] = file_result_to_dict(file)
+        # Continue may select only one previously known file. Keep exact final
+        # bytes for the other known files too, without capturing repository data.
+        if result.candidate:
+            final_files.update({path: result.candidate.read(path) for path in known})
+        summary = {name: getattr(result, name) for name in
+                   ('mode', 'status', 'message', 'checked_sha', 'issues',
+                    'unfinished_files', 'errors', 'cancelled')}
+        summary['publication'] = ({name: getattr(result.publication, name) for name in
+                                  ('repository', 'branch', 'base', 'pushed_sha', 'pr_number',
+                                   'url', 'draft', 'head_confirmed')}
+                                 if result.publication else None)
+        summary['cost_breakdown'] = costs
         self.store.put(self.run_id, 'context', encode({
+            'schema_version': 1,
             'run_id': self.run_id, 'source_pr': self.source_pr,
             'continuation_count': self.continuation_count,
             'source_sha': (result.result_sha if result.publication and result.result_sha
                            and self.source_pr == f'{result.publication.repository}/{result.publication.pr_number}'
                            else result.snapshot.source_sha if result.snapshot else None),
-            'known_files': tuple(known_files) if known_files is not None else result.selected_files,
+            'known_files': tuple(known.values()),
             'result_sha': result.result_sha, 'candidate_sha': result.candidate_sha,
-            'result': result, 'final_files': final_files, 'cost_breakdown': costs,
-            'requests': tuple(self._requests.values()),
-            'attempts': tuple(self._attempts.values())}))
+            'result': summary, 'final_files': final_files, 'cost_breakdown': costs,
+            'requests': tuple(f'request/{key}' for key in self._requests),
+            'attempts': tuple(f'attempt/{key}' for key in self._attempts)}))
 
     def hooks(self, *, report=None, cancelled=None, secrets=()):
         from ydbdoc_review.runner import RunHooks

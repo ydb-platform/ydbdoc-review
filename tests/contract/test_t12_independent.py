@@ -17,6 +17,7 @@ import requests
 import ydb
 from ydb import _session_impl
 
+from tests.context_records import context_with_records
 from ydbdoc_review.document import FileResult
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.model import (
@@ -227,7 +228,7 @@ def test_attempt_and_final_save_idempotency_all_modes(db, mode):
     for _ in range(2):
         finalize(result, run.hooks())
     assert store.daily_cost() == Decimal('6.375')
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['cost_breakdown'] == dict(translation=Decimal('1.125'), critic=Decimal('2.125'),
                                          repair=Decimal('3.125'), total=Decimal('6.375'))
     assert len(sdk.ledger) == 4
@@ -287,7 +288,7 @@ def test_admission_failure_cached_and_persisted_without_paid_attempt(db, failure
             run.admit(Decimal(1))
     assert sum('FROM runs' in q for q, _ in sdk.calls) == 1
     result = finalize(RunResult(errors=(str(caught.value),)), run.hooks())
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['result']['errors'] == list(result.errors)
     assert data['cost_breakdown']['total'] == 0 and not data['attempts']
 
@@ -298,7 +299,7 @@ def test_unpaid_finalize_never_queries_budget(db, status):
     sdk.fail = lambda q, p: 'FROM runs' in q
     run = run_store(store)
     assert finalize(RunResult(status=status), run.hooks()).status == status
-    assert store.context(run.run_id)['cost_breakdown']['total'] == 0
+    assert context_with_records(store, run.run_id)['cost_breakdown']['total'] == 0
 
 
 @pytest.mark.parametrize('phase', ['request_chunk', 'pending_ledger'])
@@ -314,7 +315,7 @@ def test_before_request_storage_failure_no_http_no_phantom_paid_attempt(db, monk
     assert calls == [] and client.attempts == []
     sdk.fail = lambda q, p: False
     finalize(RunResult(errors=(str(caught.value),)), run.hooks())
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['cost_breakdown']['total'] == 0
     assert data['result']['errors'] and data['requests']
     assert store.daily_cost() == 0
@@ -338,7 +339,7 @@ def test_paid_call_storage_failure_reconciles_with_exact_response(db, monkeypatc
         assert store.daily_cost() == Decimal('1.23456789')
     sdk.fail = lambda q, p: False
     finalize(RunResult(attempts=tuple(client.attempts), errors=(str(caught.value),)), run.hooks())
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['attempts'][0]['response_text'] == client.attempts[0].response_text
     assert data['result']['errors'] and data['cost_breakdown']['total'] == Decimal('1.23456789')
     assert store.daily_cost() == Decimal('1.23456789')
@@ -354,7 +355,7 @@ def test_paid_fallback_and_failed_calls_are_all_counted(db, monkeypatch):
     with pytest.raises(ModelError):
         chat(client, 'repair')
     run.save(RunResult(attempts=tuple(client.attempts), errors=('HTTP 400',)))
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert len(calls) == len(data['requests']) == len(data['attempts']) == 3
     assert data['cost_breakdown'] == dict(translation=Decimal('.750'), critic=Decimal(0),
                                          repair=Decimal('.375'), total=Decimal('1.125'))
@@ -374,7 +375,7 @@ def test_unknown_price_usage_and_explicit_zero_are_distinct(db, monkeypatch, kin
     client = run.model_factory(cost_resolver=resolver)
     chat(client)
     run.save(RunResult(attempts=tuple(client.attempts)))
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['cost_breakdown']['total'] == (Decimal(0) if kind == 'zero' else None)
     assert (data['attempts'][0]['usage']['raw'] is None) == (kind == 'usage_missing')
     if kind != 'zero':
@@ -401,12 +402,12 @@ def test_complete_context_reads_real_git_candidate_without_creating_commit(db):
                        issues=(Issue(path, 'problem', 'repair suggestion'),),
                        unfinished_files=(path,), attempts=(a,), cancelled=True)
     run.save(result)
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['source_sha'] == data['result_sha'] == data['candidate_sha'] == sha
     assert data['final_files'][path] == candidate.read(path)
-    assert data['result']['selected_files'][0]['source'] == 'full original'
-    assert data['result']['selected_files'][0]['instruction'] == 'instruction'
-    assert data['result']['selected_files'][0]['glossary'] == [['one', 'two']]
+    assert data['known_files'][0]['source'] == 'full original'
+    assert data['known_files'][0]['instruction'] == 'instruction'
+    assert data['known_files'][0]['glossary'] == [['one', 'two']]
     assert data['result']['issues'][0]['problem'] == 'problem'
     assert data['result']['unfinished_files'] == [path]
     assert data['requests'][0]['payload'] == a.request.payload
@@ -429,7 +430,7 @@ def test_primary_paid_alternative_request_failure_preserves_primary(db, monkeypa
     assert len(calls) == len(client.attempts) == 1
     sdk.fail = lambda q, p: False
     run.save(RunResult(attempts=tuple(client.attempts), errors=(str(caught.value),)))
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert len(data['requests']) == 2 and len(data['attempts']) == 1
     assert data['attempts'][0]['status_code'] == 500
     assert data['result']['errors']
@@ -450,7 +451,7 @@ def test_interrupted_inflight_request_is_unknown_and_kept(db, monkeypatch, error
     result = RunResult(cancelled=error is KeyboardInterrupt, attempts=tuple(client.attempts),
                        errors=('transport interrupted',))
     run.save(result)
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert len(data['attempts']) == 1
     assert data['attempts'][0]['response_text'] is None
     assert data['attempts'][0]['error']
@@ -494,4 +495,4 @@ def test_actual_runner_no_work_bypasses_broken_budget(db, monkeypatch):
     assert result.status == 'NO_WORK', result.errors
     assert len(calls) == 2
     assert not any('FROM runs' in q for q, _ in sdk.calls)
-    assert store.context(run.run_id)['cost_breakdown']['total'] == 0
+    assert context_with_records(store, run.run_id)['cost_breakdown']['total'] == 0

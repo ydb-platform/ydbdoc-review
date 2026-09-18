@@ -28,7 +28,7 @@ def test_merged_base_moves_after_fetch_without_replacing_snapshot(process):
     assert result.returncode == 0, result.stdout + result.stderr
     context, _ = assert_saved(p, 'doc_translate', 'GREEN')
     assert context['source_sha'] == source_sha
-    assert context['result']['snapshot']['source_sha'] == source_sha
+    assert context['source_sha'] == source_sha
     assert p.read()['pulls']['2']['base'] == 'main'
     assert context['result']['checked_sha'] == context['result_sha']
     assert json.loads((p.root / 'snapshot_reads.json').read_text()) == {'base_reads': 1}

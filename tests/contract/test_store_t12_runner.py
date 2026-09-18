@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from tests.context_records import context_with_records
 from tests.contract.test_translate_t10 import ROOT, system  # noqa: F401
 from tests.unit.test_store_t12 import adapter, db, paid  # noqa: F401
 
@@ -38,7 +39,7 @@ def test_runner_ydb_context_boundary(system, db, case):
         return client
     result = run(model_factory=factory, admit=lambda: persisted.admit(Decimal(100)),
                  hooks=persisted.hooks(cancelled=lambda: state['cancelled']))
-    context = store.context(persisted.run_id)
+    context = context_with_records(store, persisted.run_id)
     assert context['source_sha'] == state['sha']
     assert context['result']['errors'] == list(result.errors)
     assert context['result']['status'] == result.status
@@ -48,15 +49,15 @@ def test_runner_ydb_context_boundary(system, db, case):
         assert result.status == 'GREEN', result.errors
         assert context['result_sha'] == result.result_sha == result.checked_sha
         assert context['final_files'][ROOT+'en/a.md'] == result.candidate.read(ROOT+'en/a.md')
-        assert context['result']['selected_files'][0]['source']
-        assert context['result']['files'][0]['text']
+        assert context['known_files'][0]['source']
+        assert context['known_files'][0]['initial']['text']
         assert context['cost_breakdown']['total'] == Decimal('.50')
         assert len(context['attempts']) == 2
     elif case == 'cancel':
         assert result.cancelled
         assert context['cost_breakdown']['total'] == Decimal('.25')
         assert context['attempts'][0]['response_text']
-        assert context['result']['files']
+        assert context['known_files'][0]['initial']
     elif case == 'budget':
         assert result.status == 'RED'
         assert not state['calls']
@@ -96,12 +97,12 @@ def test_final_bytes_assets_issues_and_source_result_sha(git_repo, db, confirmed
     store, _, _ = db
     run = adapter(store)
     run.save(result)
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['source_sha'] == source_sha
     assert data['result_sha'] == (candidate.sha if confirmed else None)
     assert data['candidate_sha'] == data['result']['checked_sha'] == candidate.sha
     assert data['final_files'] == {'en/a.md': b'Final repaired\r\n', 'en/asset.png': b'\x00\xffPNG'}
-    assert data['result']['files'][0]['text'] == 'Initial wrong text'
-    assert data['result']['selected_files'][0]['instruction'] == 'Fix it'
+    assert data['known_files'][0]['initial']['text'] == 'Initial wrong text'
+    assert data['known_files'][0]['instruction'] == 'Fix it'
     assert data['result']['issues'][0]['problem'] == 'Missing paragraph'
     assert data['result']['unfinished_files'] == ['en/a.md']

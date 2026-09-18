@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ydbdoc_review.build import build_candidate
 from ydbdoc_review.config.loader import Settings, require_actor
-from ydbdoc_review.document import RequestBudget
+from ydbdoc_review.document import RequestBudget, file_result_from_dict
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.model import ModelChoice, ModelClient
@@ -31,7 +31,7 @@ CHANGED = ('После предыдущего запуска появились 
 def select_files(context: dict, instruction: str) -> tuple[SelectedFile, ...]:
     """Unambiguous known names/paths plus saved errors/unfinished."""
     previous = context['result']
-    known = {f['path']: f for f in context.get('known_files', previous['selected_files'])}
+    known = {f['path']: f for f in context.get('known_files', previous.get('selected_files', ()))}
     aliases: dict[str, set[str]] = {}
     for path, file in known.items():
         lang = file['target_lang']
@@ -81,6 +81,8 @@ def select_files(context: dict, instruction: str) -> tuple[SelectedFile, ...]:
                                    relevant, 'continue_instruction'))
         selected.append(SelectedFile(path, file['source'], file['target_lang'], relevant,
                                      tuple(tuple(pair) for pair in file['glossary']),
+                                     initial=(file_result_from_dict(file['initial'])
+                                              if file.get('initial') else None),
                                      requested_findings=tuple(requested)))
     return tuple(selected)
 
@@ -184,7 +186,7 @@ def run_continue(*, repo: str | Path, github: GitHubClient, owner: str, reposito
             if tree.read(path) != data:
                 raise StorageError(f'Saved bytes differ from exact result SHA: {path}')
         selected = select_files(context, instruction)
-        known = context.get('known_files', context['result']['selected_files'])
+        known = context.get('known_files', context['result'].get('selected_files', ()))
         check_cancel()
         adapter.admit(settings.daily_budget_rub)
         adapter.continuation_count = store.claim_continuation(context['original_pr'], adapter.run_id)

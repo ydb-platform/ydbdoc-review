@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import pytest
 
+from tests.context_records import context_with_records
 from tests.contract.test_translate_t10 import GOOD, ROOT, system  # noqa: F401
 from tests.unit.test_store_t12 import adapter, db  # noqa: F401
 
@@ -84,7 +85,7 @@ def test_repaired_published_context_overrun_and_next_gate(system, db, cancel_aft
         assert result.checked_sha == result.result_sha
         assert result.quality.rounds[-1].build.ok_for(result.checked_sha)
 
-    context = store.context(persisted.run_id)
+    context = context_with_records(store, persisted.run_id)
     expected_bytes = source.replace('/ru/b.md', '/en/b.md').encode()
     assert result.files[0].text.encode() != expected_bytes
     assert context['final_files'][ROOT + 'en/a.md'] == expected_bytes
@@ -132,7 +133,7 @@ def test_repaired_published_context_overrun_and_next_gate(system, db, cancel_aft
         persisted.record_request(request.request)
     persisted.save(result)
     assert store.daily_cost() == expected_cost['total']
-    assert store.context(persisted.run_id) == context
+    assert context_with_records(store, persisted.run_id) == context
 
 
 def test_mechanical_rename_green_with_unreadable_budget_and_exact_context(system, db):
@@ -156,7 +157,7 @@ def test_mechanical_rename_green_with_unreadable_budget_and_exact_context(system
     assert not [q for q, _ in boundary.calls if 'FROM runs' in q]
     assert result.checked_sha == result.result_sha == remote_sha('translation')
     assert not result.publication.draft
-    context = store.context(persisted.run_id)
+    context = context_with_records(store, persisted.run_id)
     assert context['final_files'] == {ROOT + 'en/a.md': None, ROOT + 'en/b.md': text.encode()}
     assert git('show', result.result_sha + ':' + ROOT + 'en/b.md') == text.encode()
     assert result.candidate.read(ROOT + 'en/a.md') is None

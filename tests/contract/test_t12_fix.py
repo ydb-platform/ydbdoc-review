@@ -16,6 +16,7 @@ from decimal import Decimal
 import pytest
 import ydb
 
+from tests.context_records import context_with_records
 from tests.contract.test_t12_independent import SDKBoundary, attempt, chat, run_store, transport
 from ydbdoc_review.runner import RunResult
 from ydbdoc_review.store import StorageError, YDBStore
@@ -158,7 +159,7 @@ def test_paid_primary_and_fallback_replays_keep_both_attempts_without_double_cos
             restarted.record_attempt(a)
             restarted.record_request(a.request)
         restarted.save(RunResult(attempts=records))
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert data['cost_breakdown']['total'] == store.daily_cost() == Decimal('14.50')
     assert len(data['requests']) == len(data['attempts']) == 2
     assert [a['status_code'] for a in data['attempts']] == [500, 200]
@@ -178,7 +179,7 @@ def test_failed_pending_callback_stops_http_and_does_not_invent_paid_outcome(db,
     assert calls == [] and client.attempts == [] and sdk.ledger == {}
     sdk.fail = lambda sql, p: False
     run.save(RunResult(errors=(str(caught.value),)))
-    data = store.context(run.run_id)
+    data = context_with_records(store, run.run_id)
     assert len(data['requests']) == 1 and data['attempts'] == []
     assert data['result']['errors'] == ['YDB: injected SDK failure']
     assert data['cost_breakdown']['total'] == store.daily_cost() == 0
