@@ -4,7 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ydbdoc_review.plan import ChangedFile, PlanError, build_plan, freeze_snapshot, list_changes, read_at_sha
+from ydbdoc_review.plan import (
+    ChangedFile,
+    PlanError,
+    build_plan,
+    freeze_snapshot,
+    list_changes,
+    read_at_sha,
+)
 
 OLD = 'ydb/docs/en/old.md'
 NEW = 'ydb/docs/en/new.md'

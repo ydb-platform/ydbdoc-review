@@ -4,7 +4,13 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from ydbdoc_review.document import RequestBudget, protect, restore, translate_document, translation_messages
+from ydbdoc_review.document import (
+    RequestBudget,
+    protect,
+    restore,
+    translate_document,
+    translation_messages,
+)
 from ydbdoc_review.model import Endpoint, ModelChoice
 
 
@@ -38,7 +44,8 @@ def test_decoded_edit_preserves_every_unselected_byte(newline, value):
 def test_failed_middle_scalar_chunk_preserves_raw_and_stays_incomplete(failure):
     source = ('---\ndescription: |-\n  ' + ' '.join(f'Текст number {i}.' for i in range(60))
               + '\nconfig: safe\n---\nBody.\n')
-    count = lambda ms: sum(len(m['content']) + 11 for m in ms) + 3
+    def count(ms):
+        return sum(len(m['content']) + 11 for m in ms) + 3
     overhead = count(translation_messages('', source_lang='ru', target_lang='en', path='p.md'))
     responses, snapshots, inputs = [], [], []
 

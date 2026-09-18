@@ -4,8 +4,6 @@ import subprocess
 
 import pytest
 
-from .adapters import FakeBuild, FakeGitHub, FakeStore
-
 
 @pytest.fixture(autouse=True)
 def offline_environment(monkeypatch, socket_disabled):
@@ -17,26 +15,6 @@ def offline_environment(monkeypatch, socket_disabled):
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
-
-
-@pytest.fixture
-def trace():
-    return []
-
-
-@pytest.fixture
-def github(trace):
-    return FakeGitHub(trace)
-
-
-@pytest.fixture
-def store(trace):
-    return FakeStore(trace)
-
-
-@pytest.fixture
-def build(trace):
-    return FakeBuild(trace)
 
 
 @pytest.fixture

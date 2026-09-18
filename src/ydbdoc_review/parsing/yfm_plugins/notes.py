@@ -7,7 +7,6 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
-
 # Opening: {% note TYPE %} or {% note TYPE "Title" %}
 _NOTE_OPEN_RE = re.compile(
     r"^\{%\s*note\s+(\w+)(?:\s+\"([^\"]*)\")?\s*%\}\s*$"

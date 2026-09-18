@@ -15,7 +15,6 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_core import StateCore
 
-
 # Marker the image URL will end with after preprocess: unique, URL-safe.
 # Format: yfmimgsize-{index}- — alphanumeric + dash, accepted by markdown-it as URL.
 _PLACEHOLDER_PREFIX = "yfmimgsize-"

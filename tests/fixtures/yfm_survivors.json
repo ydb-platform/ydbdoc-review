@@ -1,0 +1,466 @@
+[
+  {
+    "id": "test_yfm_image_size::test_image_with_full_size_ast:0",
+    "source": "![alt](image.png =100x200)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_image_with_width_only:0",
+    "source": "![alt](image.png =100x)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_image_with_height_only:0",
+    "source": "![alt](image.png =x200)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_image_without_size:0",
+    "source": "![alt](image.png)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_round_trip_images:0",
+    "source": "![alt](image.png)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_round_trip_images:1",
+    "source": "![alt](image.png =100x200)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_round_trip_images:2",
+    "source": "![alt](image.png =100x)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_round_trip_images:3",
+    "source": "![alt](image.png =x200)\n"
+  },
+  {
+    "id": "test_yfm_image_size::test_round_trip_images:4",
+    "source": "![alt](image.png =100x200 \"Title\")\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_if_basic_ast:0",
+    "source": "{% if oss %}\n\nOSS only.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_if_with_complex_condition:0",
+    "source": "{% if audience == \"enterprise\" %}\n\nEnterprise text.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_if_else:0",
+    "source": "{% if oss %}\n\nOSS.\n\n{% else %}\n\nEnterprise.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_if_elsif_else:0",
+    "source": "{% if mode == \"a\" %}\n\nA text.\n\n{% elsif mode == \"b\" %}\n\nB text.\n\n{% else %}\n\nOther.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_nested_ifs:0",
+    "source": "{% if outer %}\n\nOuter text.\n\n{% if inner %}\n\nInner text.\n\n{% endif %}\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_if_with_variable_inside:0",
+    "source": "{% if oss %}\n\nUse {{ ydb-short-name }} community edition.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_unclosed_if_falls_back:0",
+    "source": "{% if oss %}\n\nSome content.\n\nNo endif.\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_ifs:0",
+    "source": "{% if oss %}\n\nOSS only.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_ifs:1",
+    "source": "{% if audience == \"enterprise\" %}\n\nEnt.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_ifs:2",
+    "source": "{% if oss %}\n\nOSS.\n\n{% else %}\n\nEnt.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_ifs:3",
+    "source": "{% if mode == \"a\" %}\n\nA.\n\n{% elsif mode == \"b\" %}\n\nB.\n\n{% else %}\n\nOther.\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_ifs:4",
+    "source": "Before.\n\n{% if oss %}\n\nOSS section with {{ ydb-short-name }}.\n\n{% endif %}\n\nAfter.\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_nested_ifs:0",
+    "source": "{% if outer %}\n\nOuter.\n\n{% if inner %}\n\nInner.\n\n{% endif %}\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_if_with_code:0",
+    "source": "{% if oss %}\n\n```bash\necho hi\n```\n\n{% endif %}\n"
+  },
+  {
+    "id": "test_yfm_conditionals::test_round_trip_if_inside_note:0",
+    "source": "{% note info %}\n\n{% if oss %}\n\nOSS-only note.\n\n{% endif %}\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_basic_ast:0",
+    "source": "{% include [my fragment](../_includes/foo.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_notitle:0",
+    "source": "{% include notitle [text](path/to/x.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_with_absolute_path:0",
+    "source": "{% include [doc](/ydb/docs/_includes/auth.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_with_empty_text:0",
+    "source": "{% include [](path.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_in_context:0",
+    "source": "Intro paragraph.\n\n{% include [frag](../inc.md) %}\n\nAfter paragraph.\n"
+  },
+  {
+    "id": "test_yfm_includes::test_round_trip_includes:0",
+    "source": "{% include [text](path.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_round_trip_includes:1",
+    "source": "{% include notitle [text](path.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_round_trip_includes:2",
+    "source": "{% include [my fragment](../_includes/foo.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_round_trip_includes:3",
+    "source": "{% include notitle [doc](/abs/path/to/file.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_round_trip_includes:4",
+    "source": "{% include [](empty-text.md) %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_round_trip_includes:5",
+    "source": "Before.\n\n{% include [a](one.md) %}\n\nMiddle.\n\n{% include notitle [b](two.md) %}\n\nAfter.\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_inside_note:0",
+    "source": "{% note info %}\n\n{% include [frag](../inc.md) %}\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_inside_tab:0",
+    "source": "{% list tabs %}\n\n- Python\n\n  {% include [py](../py.md) %}\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_with_trailing_spaces_in_directive:0",
+    "source": "{% include  [text](path.md)  %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_not_an_include_missing_brackets:0",
+    "source": "{% include something %}\n"
+  },
+  {
+    "id": "test_yfm_includes::test_include_not_in_inline_code:0",
+    "source": "Use `{% include [x](y.md) %}` in your code.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_is_separate_node:0",
+    "source": "Hello {{ name }} world.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_name_extracted:0",
+    "source": "Use {{ ydb-short-name }} CLI.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_with_no_spaces:0",
+    "source": "{{name}}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_with_extra_spaces:0",
+    "source": "{{  name  }}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_with_dots_and_dashes:0",
+    "source": "{{ ydb-version.major }}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_heading:0",
+    "source": "## Run {{ ydb-short-name }} CLI\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_link_url:0",
+    "source": "[glossary]({{ link-glossary }})\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_link_url_round_trip:0",
+    "source": "[glossary]({{ link-glossary }})\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_image_src:0",
+    "source": "![alt]({{ image-path }})\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_link_url_in_real_context:0",
+    "source": "See [glossary]({{ link-glossary }}) for terms.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_link_text:0",
+    "source": "[See {{ name }} docs](http://x)\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_inline_code_is_text:0",
+    "source": "Use `{{ name }}` literally.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_variable_in_fenced_code_is_text:0",
+    "source": "```\n{{ name }}\n```\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:0",
+    "source": "{{ name }}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:1",
+    "source": "{{name}}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:2",
+    "source": "Hello {{ name }} world.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:3",
+    "source": "## Title with {{ var }}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:4",
+    "source": "Use {{ ydb-short-name }} CLI to run.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:5",
+    "source": "Multiple {{ a }} and {{ b }} and {{ c }} here.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:6",
+    "source": "[Link]({{ url-var }})\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:7",
+    "source": "[Link text {{ var }}](http://x)\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:8",
+    "source": "- list with {{ var }} item\n- another {{ x }}\n"
+  },
+  {
+    "id": "test_yfm_variables::test_round_trip_variables:9",
+    "source": "| col | val |\n| --- | --- |\n| {{ a }} | {{ b }} |\n"
+  },
+  {
+    "id": "test_yfm_variables::test_not_a_variable_single_brace:0",
+    "source": "This is { not a var }.\n"
+  },
+  {
+    "id": "test_yfm_variables::test_not_a_variable_just_braces:0",
+    "source": "{{ }}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_note_basic_ast:0",
+    "source": "{% note info %}\n\nHello.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_note_with_title:0",
+    "source": "{% note warning \"Be Careful\" %}\n\nDanger.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_note_with_heading_inside:0",
+    "source": "{% note info %}\n\n## Sub-heading\n\nSome text.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_note_with_code_inside:0",
+    "source": "{% note warning %}\n\nRun this:\n\n```bash\necho hi\n```\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_nested_notes:0",
+    "source": "{% note info %}\n\nOuter text.\n\n{% note warning %}\n\nInner warning.\n\n{% endnote %}\n\nOuter continued.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_note_with_variable_inside:0",
+    "source": "{% note tip %}\n\nUse {{ ydb-short-name }} CLI.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_unclosed_note_falls_back_to_paragraphs:0",
+    "source": "{% note info %}\n\nSome text.\n\nNo closing tag.\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:0",
+    "source": "{% note info %}\n\nHello.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:1",
+    "source": "{% note warning %}\n\nDanger.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:2",
+    "source": "{% note tip %}\n\nUse `--yaml` for output.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:3",
+    "source": "{% note info \"Title here\" %}\n\nText.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:4",
+    "source": "Intro paragraph.\n\n{% note warning %}\n\nWarning text.\n\n{% endnote %}\n\nAfter paragraph.\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:5",
+    "source": "{% note info %}\n\nFirst para.\n\nSecond para.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_notes:6",
+    "source": "{% note tip %}\n\nUse {{ ydb-short-name }} for queries.\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_nested_notes:0",
+    "source": "{% note info %}\n\nOuter.\n\n{% note warning %}\n\nInner.\n\n{% endnote %}\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_note_with_code:0",
+    "source": "{% note warning %}\n\nRun:\n\n```bash\nydb scheme ls\n```\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_notes::test_round_trip_note_with_list:0",
+    "source": "{% note info %}\n\nItems:\n\n- one\n- two\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_cut_basic_ast:0",
+    "source": "{% cut \"Click me\" %}\n\nHidden text.\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_cut_with_empty_title:0",
+    "source": "{% cut \"\" %}\n\nText.\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_cut_with_code_inside:0",
+    "source": "{% cut \"Show example\" %}\n\n```bash\necho hi\n```\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_nested_cuts:0",
+    "source": "{% cut \"Outer\" %}\n\nOuter text.\n\n{% cut \"Inner\" %}\n\nInner text.\n\n{% endcut %}\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_cut_inside_note:0",
+    "source": "{% note info %}\n\n{% cut \"Details\" %}\n\nHidden.\n\n{% endcut %}\n\n{% endnote %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_cut_with_variable_in_body:0",
+    "source": "{% cut \"Use CLI\" %}\n\nRun {{ ydb-short-name }} CLI to begin.\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_unclosed_cut_falls_back:0",
+    "source": "{% cut \"title\" %}\n\nText.\n\nNo endcut.\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_round_trip_cuts:0",
+    "source": "{% cut \"Show\" %}\n\nHidden.\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_round_trip_cuts:1",
+    "source": "{% cut \"Detailed example\" %}\n\nFirst.\n\nSecond.\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_round_trip_cuts:2",
+    "source": "Before.\n\n{% cut \"Title\" %}\n\nInside cut.\n\n{% endcut %}\n\nAfter.\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_round_trip_cuts:3",
+    "source": "{% cut \"Run this\" %}\n\n```bash\nydb scheme ls\n```\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_round_trip_nested_cuts:0",
+    "source": "{% cut \"Outer\" %}\n\nOuter.\n\n{% cut \"Inner\" %}\n\nInner.\n\n{% endcut %}\n\n{% endcut %}\n"
+  },
+  {
+    "id": "test_yfm_cuts::test_round_trip_cut_inside_tabs:0",
+    "source": "{% list tabs %}\n\n- Python\n\n  {% cut \"Show example\" %}\n\n  Inside.\n\n  {% endcut %}\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_terms::test_term_definition_basic_ast:0",
+    "source": "[*cluster]: A set of nodes.\n"
+  },
+  {
+    "id": "test_yfm_terms::test_term_ref_inline_ast:0",
+    "source": "See [*cluster] for details.\n"
+  },
+  {
+    "id": "test_yfm_terms::test_term_ref_and_definition_together:0",
+    "source": "A YDB [*cluster] consists of nodes.\n\n[*cluster]: A cluster is a set of nodes.\n"
+  },
+  {
+    "id": "test_yfm_terms::test_not_a_term_ref_regular_link:0",
+    "source": "See [docs](http://x).\n"
+  },
+  {
+    "id": "test_yfm_terms::test_round_trip_terms:0",
+    "source": "[*cluster]: A set of nodes.\n"
+  },
+  {
+    "id": "test_yfm_terms::test_round_trip_terms:1",
+    "source": "[*tablet]: A unit of distribution.\n"
+  },
+  {
+    "id": "test_yfm_terms::test_round_trip_terms:2",
+    "source": "See [*cluster] for details.\n"
+  },
+  {
+    "id": "test_yfm_terms::test_round_trip_terms:3",
+    "source": "A [*cluster] is made of [*tablet]s.\n\n[*cluster]: Cluster definition.\n\n[*tablet]: Tablet definition.\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_basic_ast:0",
+    "source": "{% list tabs %}\n\n- Python\n\n  Python text.\n\n- Go\n\n  Go text.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_accordion_variant:0",
+    "source": "{% list tabs accordion %}\n\n- One\n\n  Content one.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_group_lang_variant_roundtrip:0",
+    "source": "{% list tabs group=lang %}\n\n- Go\n\n  Go body.\n\n- Python\n\n  Python body.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_group_hyphenated_value:0",
+    "source": "{% list tabs group=manual-systemd %}\n\n- Unit\n\n  Body.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_with_code_inside:0",
+    "source": "{% list tabs %}\n\n- Bash\n\n  ```bash\n  echo hi\n  ```\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_with_variable_in_title:0",
+    "source": "{% list tabs %}\n\n- {{ engine-name }}\n\n  Content.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_unclosed_falls_back:0",
+    "source": "{% list tabs %}\n\n- Python\n\n  Content.\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_round_trip_tabs:0",
+    "source": "{% list tabs %}\n\n- Python\n\n  Python text.\n\n- Go\n\n  Go text.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_round_trip_tabs:1",
+    "source": "{% list tabs %}\n\n- Bash\n\n  Run this command:\n\n  ```bash\n  ydb scheme ls\n  ```\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_round_trip_tabs:2",
+    "source": "{% list tabs accordion %}\n\n- Section 1\n\n  Content.\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_round_trip_tabs:3",
+    "source": "Before tabs.\n\n{% list tabs %}\n\n- A\n\n  Text A.\n\n- B\n\n  Text B with `code`.\n\n{% endlist %}\n\nAfter tabs.\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_round_trip_tabs_with_note_inside:0",
+    "source": "{% list tabs %}\n\n- Python\n\n  {% note warning %}\n\n  Be careful.\n\n  {% endnote %}\n\n{% endlist %}\n"
+  },
+  {
+    "id": "test_yfm_tabs::test_tabs_preserve_content_outside_bullet_list_without_empty_tab_marker:0",
+    "source": "{% list tabs group=lang %}\n\nContext shared by every tab.\n\n- Python\n\n  Python body.\n\n{% endlist %}\n"
+  }
+]

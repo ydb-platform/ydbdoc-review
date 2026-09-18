@@ -1,0 +1,116 @@
+[
+  {
+    "id": "simple_paragraph",
+    "source": "Hello world.\n",
+    "old": "Hello world.",
+    "new": "Привет мир."
+  },
+  {
+    "id": "with_inline_code",
+    "source": "Use `--yaml` flag.\n",
+    "old": "Use",
+    "new": "Используйте"
+  },
+  {
+    "id": "with_link",
+    "source": "See [docs](http://x).\n",
+    "old": "docs",
+    "new": "документация"
+  },
+  {
+    "id": "with_variable",
+    "source": "Use {{ ydb-short-name }} CLI.\n",
+    "old": "Use",
+    "new": "Используйте"
+  },
+  {
+    "id": "heading",
+    "source": "# Title with `code`\n\nText.\n",
+    "old": "Title",
+    "new": "Заголовок"
+  },
+  {
+    "id": "heading_with_anchor",
+    "source": "## Section {#section-id}\n\nText.\n",
+    "old": "Section",
+    "new": "Раздел"
+  },
+  {
+    "id": "list",
+    "source": "- one with `code`\n- two with [link](http://x)\n",
+    "old": "one",
+    "new": "первый"
+  },
+  {
+    "id": "ordered_list",
+    "source": "1. first\n2. second\n3. third\n",
+    "old": "first",
+    "new": "первый"
+  },
+  {
+    "id": "table",
+    "source": "| Flag | Description |\n| --- | --- |\n| `--yaml` | YAML output |\n| `--json` | JSON output |\n",
+    "old": "YAML output",
+    "new": "Вывод YAML"
+  },
+  {
+    "id": "blockquote",
+    "source": "> A quoted line with `code`.\n",
+    "old": "quoted line",
+    "new": "цитируемая строка"
+  },
+  {
+    "id": "note",
+    "source": "{% note warning %}\n\nBe careful with `--force`.\n\n{% endnote %}\n",
+    "old": "Be careful",
+    "new": "Осторожно"
+  },
+  {
+    "id": "tabs",
+    "source": "{% list tabs %}\n\n- Python\n\n  Use the {{ py-sdk }} library.\n\n- Go\n\n  Use the Go SDK.\n\n{% endlist %}\n",
+    "old": "Use the",
+    "new": "Используйте"
+  },
+  {
+    "id": "cut",
+    "source": "{% cut \"Show example\" %}\n\nHidden text with `code`.\n\n{% endcut %}\n",
+    "old": "Show example",
+    "new": "Пример"
+  },
+  {
+    "id": "if",
+    "source": "{% if oss %}\n\nOSS text with {{ var }}.\n\n{% endif %}\n",
+    "old": "OSS text",
+    "new": "Текст OSS"
+  },
+  {
+    "id": "include",
+    "source": "{% include [text](path.md) %}\n",
+    "old": null,
+    "new": null
+  },
+  {
+    "id": "code_block",
+    "source": "Intro.\n\n```bash\necho hi\n```\n\nOutro.\n",
+    "old": "Intro.",
+    "new": "Введение."
+  },
+  {
+    "id": "term_definition_and_ref",
+    "source": "A YDB [*cluster] is a system.\n\n[*cluster]: A set of nodes.\n",
+    "old": "A set of nodes.",
+    "new": "Набор узлов."
+  },
+  {
+    "id": "image_with_size",
+    "source": "![alt](image.png =100x200)\n",
+    "old": "alt",
+    "new": "подпись"
+  },
+  {
+    "id": "complex_mixed",
+    "source": "# Title {#title}\n\nIntro with `code` and [link](http://x).\n\n## Section\n\n- item with {{ var }}\n- item with **bold**\n\n{% note tip %}\n\nUse `--yaml` for [output]({{ url-var }}).\n\n{% endnote %}\n\n```python\nprint('hello')\n```\n\nFinal.\n",
+    "old": "Final.",
+    "new": "Итог."
+  }
+]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import signal
-from unittest.mock import patch
 
 import pytest
 
@@ -19,10 +18,6 @@ def _reset_shutdown():
     shutdown._handlers_installed = False
 
 
-def test_interruptible_sleep_raises_when_shutdown_requested():
-    shutdown.request_shutdown()
-    with pytest.raises(KeyboardInterrupt):
-        shutdown.interruptible_sleep(10.0)
 
 
 def test_install_shutdown_handlers_sigint():

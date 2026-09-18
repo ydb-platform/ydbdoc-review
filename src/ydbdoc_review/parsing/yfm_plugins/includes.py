@@ -7,7 +7,6 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
-
 # Match a full include directive on a single line.
 # Examples:
 #   {% include [text](path) %}

@@ -1,7 +1,9 @@
 """Independent acceptance after T06 scalar boundary fix."""
 from types import SimpleNamespace
+
 import pytest
 import yaml
+
 from ydbdoc_review.document import RequestBudget, protect, restore, translate_document
 from ydbdoc_review.model import Endpoint, ModelChoice
 
@@ -68,7 +70,8 @@ def test_new_control_and_yaml_sensitive_values_never_clean_corrupt(style, replac
 def test_long_front_matter_uses_sentence_chunks_with_real_budget():
     from ydbdoc_review.document import translation_messages
     source = '---\ndescription: |-\n  ' + ' '.join(f'Текст sentence {i}.' for i in range(80)) + '\nconfig: safe\n---\nBody.\n'
-    count = lambda ms: sum(len(m['content']) + 13 for m in ms) + 7
+    def count(ms):
+        return sum(len(m['content']) + 13 for m in ms) + 7
     overhead = count(translation_messages('', source_lang='ru', target_lang='en', path='p.md'))
     capacity = 180
     seen = []

@@ -1,7 +1,6 @@
 """Round-trip tests on real YDB documentation files.
 
-These tests show our current YFM coverage. Failures here are expected
-until all YFM plugins are implemented.
+Real inputs must parse and survive production protection/restoration byte-for-byte.
 """
 
 from __future__ import annotations
@@ -10,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.rendering.markdown_renderer import render_markdown
+from tests.roundtrip import roundtrip
+from ydbdoc_review.parsing.markdown_parser import create_parser
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "markdown_files"
 
@@ -27,24 +26,25 @@ def _file_id(path: Path) -> str:
 
 
 REAL_FILES = _collect_files()
+assert REAL_FILES, "Real-document corpus must not be empty"
 
 
 @pytest.mark.parametrize("path", REAL_FILES, ids=[_file_id(p) for p in REAL_FILES])
 def test_parse_does_not_crash(path: Path) -> None:
-    """Parser must not crash on any real file (may produce imperfect AST)."""
+    """Production grammar must parse every real file."""
     text = path.read_text(encoding="utf-8")
     try:
-        parse_markdown(text)
+        create_parser(source_locations=True).parse(text)
     except ValueError as e:
         pytest.fail(f"Parse failed: {e}\nFirst 200 chars:\n{text[:200]}")
 
 
 @pytest.mark.parametrize("path", REAL_FILES, ids=[_file_id(p) for p in REAL_FILES])
 def test_round_trip_stable(path: Path) -> None:
-    """parse→render→parse→render must be stable (idempotent after first pass)."""
+    """Protection/restoration must preserve the source exactly on every pass."""
     text = path.read_text(encoding="utf-8")
-    first = render_markdown(parse_markdown(text))
-    second = render_markdown(parse_markdown(first))
+    first = roundtrip(text)
+    second = roundtrip(first)
     if first != second:
         # Show a diff snippet for debugging.
         from difflib import unified_diff

@@ -1,69 +1,31 @@
-# doc_continue — follow-up с инструкцией `/ydbdoc continue …`.
-# Вешать на:
-#   • translation PR (ydbdoc-review/pr-N);
-#   • critic-fixup PR (ydbdoc-review/verify-N) после bilingual doc_verify (§6.146).
-# Перед лейблом добавьте комментарий с командой, затем повесьте doc_continue.
-
-name: ydbdoc-review (doc_continue label)
-
+name: doc_continue
 on:
   pull_request_target:
     types: [labeled]
-    paths:
-      - "ydb/docs/**"
-
 permissions:
   contents: write
   pull-requests: write
-  issues: write
-
 jobs:
-  ydbdoc-continue:
+  document:
     if: github.event.label.name == 'doc_continue'
     runs-on: ubuntu-latest
-    concurrency:
-      group: ydbdoc-continue-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     steps:
-      - name: Checkout PR head
-        uses: actions/checkout@v5
+      # Read the trusted base config; never execute the contributor checkout.
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          # Fork PRs + pull_request_target: required after 2026-07-20 checkout guard.
-          allow-unsafe-pr-checkout: true
-
-      - name: Fetch merge base ref
-        run: |
-          git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
-
-      # Optional: write SA key to a file (action mounts it into Docker). Prefer
-      # also passing YDB_SA_KEY below — the JSON env is the reliable path.
-      - name: Write YDB SA key
-        env:
-          YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
-        run: |
-          umask 077
-          printf '%s' "$YDB_SA_KEY" > "$RUNNER_TEMP/ydb-sa.json"
-          echo "YDBDOC_YDB_SA_KEY_FILE=$RUNNER_TEMP/ydb-sa.json" >> "$GITHUB_ENV"
-
-      - name: Continue translation with operator feedback
-        uses: ydb-platform/ydbdoc-review@v0.1.0
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ydb-platform/ydbdoc-review@main
         with:
-          mode: continue
+          mode: doc_continue
           repo: ${{ github.repository }}
           pr: ${{ github.event.pull_request.number }}
-          merge_base_with: origin/${{ github.event.pull_request.base.ref }}
+          config: ${{ github.workspace }}/.github/ydbdoc-models.json
         env:
-          YANDEX_CLOUD_FOLDER_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_FOLDER_DOC_REVIEW }}
-          YANDEX_CLOUD_API_KEY_DOC_REVIEW: ${{ secrets.YANDEX_CLOUD_API_KEY_DOC_REVIEW }}
-          YDBDOC_REPO_PATH: ${{ github.workspace }}
-          GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_ACTOR: ${{ github.event.sender.login }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
+          MODEL_TOKEN: ${{ secrets.MODEL_TOKEN }}
           YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE: ${{ vars.YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE }}
           YDBDOC_MAX_SOURCE_CHARACTERS: ${{ vars.YDBDOC_MAX_SOURCE_CHARACTERS }}
           YDBDOC_ALLOWED_ACTORS: ${{ vars.YDBDOC_ALLOWED_ACTORS }}
           YDBDOC_DAILY_BUDGET_RUB: ${{ vars.YDBDOC_DAILY_BUDGET_RUB }}
-          # Must be forwarded into Docker by action-docker.sh (§6.143).
-          YDB_SA_KEY: ${{ secrets.YDB_SA_KEY }}
-          YDBDOC_YDB_SA_KEY_FILE: ${{ env.YDBDOC_YDB_SA_KEY_FILE }}

@@ -7,7 +7,6 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
-
 # Opening: {% if EXPR %}
 _IF_OPEN_RE = re.compile(r"^\{%\s*if\s+(.+?)\s*%\}\s*$")
 # Branch: {% elsif EXPR %}

@@ -1,11 +1,11 @@
-"""Round-trip tests: parse → render → parse → render must be stable."""
+"""Round-trip tests: production protect/restore must preserve exact source."""
 
 from __future__ import annotations
 
 import pytest
 
-from ydbdoc_review.parsing.markdown_parser import parse_markdown
-from ydbdoc_review.rendering.markdown_renderer import render_markdown
+from tests.roundtrip import roundtrip
+
 
 def test_table_cell_with_escaped_pipe():
     """A literal '|' inside a cell (written as '\\|') must round-trip."""
@@ -45,7 +45,7 @@ def test_table_cell_with_backslash():
 
 def round_trip(text: str) -> str:
     """Parse then render once."""
-    return render_markdown(parse_markdown(text))
+    return roundtrip(text)
 
 
 def assert_stable(text: str) -> None:

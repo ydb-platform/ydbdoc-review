@@ -181,8 +181,14 @@ class YDBStore:
         self.clock = clock
 
     def close(self):
-        self.pool.stop()
-        self.driver.stop()
+        errors = []
+        for name, resource in (('pool', self.pool), ('driver', self.driver)):
+            try:
+                resource.stop()
+            except (Exception, KeyboardInterrupt) as exc:
+                errors.append(f'{name}: {type(exc).__name__}: {exc}')
+        if errors:
+            raise StorageError('YDB close: ' + '; '.join(errors))
 
     def create_schema(self, database: str):
         """Provision NEW tables explicitly. Existing legacy schema needs T15 deployment work."""
@@ -537,11 +543,11 @@ class RunStore:
             'requests': tuple(self._requests.values()),
             'attempts': tuple(self._attempts.values())}))
 
-    def hooks(self, *, report=None, cancelled=None):
+    def hooks(self, *, report=None, cancelled=None, secrets=()):
         from ydbdoc_review.runner import RunHooks
         return RunHooks(file_progress=self.file_progress,
                         candidate_progress=self.candidate_progress, save=self.save,
-                        report=report, cancelled=cancelled)
+                        report=report, cancelled=cancelled, secrets=secrets)
 
 
 def create_store(**driver_options) -> YDBStore:

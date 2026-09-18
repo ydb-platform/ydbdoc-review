@@ -5,10 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ydbdoc_review.ops.gates import check_acl
-
 CONTINUE_PREFIX = "/ydbdoc continue"
-MAX_CONTINUES_PER_PR = 3
 
 
 def parse_continue_instruction(comment_body: str) -> str | None:
@@ -64,7 +61,7 @@ def find_latest_continue_instruction(
             author_type = str(user.get("type") or "")
             if author_type.casefold() == "bot" or author.casefold().endswith("[bot]"):
                 continue
-            if not check_acl(author, allowed_actors).ok:
+            if author.strip().casefold() not in {a.casefold() for a in allowed_actors}:
                 continue
         body = str(comment.get("body") or "")
         instr = parse_continue_instruction(body)

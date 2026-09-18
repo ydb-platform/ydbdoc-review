@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001 -- Russian diagnostics and test text are intentional.
 """Independent T07 acceptance tests; mocks only, no production edits or T06 FM fixtures."""
 import json
 from dataclasses import FrozenInstanceError
@@ -9,7 +10,11 @@ from ydbdoc_review.document import RequestBudget
 from ydbdoc_review.model import ModelError
 from ydbdoc_review.parsing.markdown_parser import create_parser
 from ydbdoc_review.quality import (
-    Location, ReviewPart, check, parse_critic_response, structure_counts,
+    Location,
+    ReviewPart,
+    check,
+    parse_critic_response,
+    structure_counts,
 )
 
 GOOD = {'complete': True, 'verdict': 'correct', 'issues': []}

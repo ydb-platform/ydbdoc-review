@@ -10,7 +10,6 @@ COPY --from=docs-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/@diplodoc/cli/build/index.js /usr/local/bin/yfm
 
 ARG YDBDOC_GIT_SHA=dev
-ENV YDBDOC_GIT_SHA=${YDBDOC_GIT_SHA}
 LABEL org.opencontainers.image.source="https://github.com/ydb-platform/ydbdoc-review" \
       org.opencontainers.image.revision="${YDBDOC_GIT_SHA}"
 

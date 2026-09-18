@@ -56,17 +56,19 @@ def test_callbacks_observe_current_status_without_replay(rig, monkeypatch, bound
     retained(result, state, remote_sha, candidates)
     assert result.publication.draft and state['pulls'][0][1]['draft']
     assert result.cancelled == (boundary != 'close')
-    assert [name for name, _ in seen] == ['save', 'report']
-    expected = {'close': ['RED', 'RED'], 'save': ['GREEN', 'RED'], 'report': ['GREEN', 'GREEN']}
+    assert [name for name, _ in seen] == (['save', 'report'] if boundary == 'close' else ['save', 'report', 'save'])
+    expected = {'close': ['RED', 'RED'], 'save': ['GREEN', 'RED', 'RED'], 'report': ['GREEN', 'GREEN', 'RED']}
     assert [r.status for _, r in seen] == expected[boundary]
     for _, snapshot in seen:
         assert snapshot.publication.draft == (snapshot.status == 'RED')
         assert snapshot.attempts == result.attempts
         assert snapshot.candidate is result.candidate
-    if boundary != 'report':
+    if boundary != 'save':
         assert seen[-1][1] == result
     else:
-        assert not seen[-1][1].errors  # immutable pre-failure observation
+        assert any('storage final outcome:' in e for e in result.errors)
+    if boundary == 'report':
+        assert not seen[1][1].errors  # immutable pre-failure observation
         assert any('report:' in e for e in result.errors)
 
 
@@ -103,10 +105,11 @@ def test_failed_draft_is_visible_to_next_callback_without_retry(rig, monkeypatch
 
     result = run(hooks=RunHooks(candidate_progress=candidates.append, save=save, report=report))
     retained(result, state, remote_sha, candidates)
-    assert [name for name, _ in seen] == ['save', 'report']
+    assert [name for name, _ in seen] == ['save', 'report', 'save']
     assert seen[0][1].status == 'GREEN' and not seen[0][1].errors
     assert len(conversions) == 1
-    assert len(result.errors) == 3
+    assert len(result.errors) == 4
+    assert any('storage final outcome:' in e for e in result.errors)
     assert any('report:' in e for e in result.errors)
     assert not result.publication.draft
     assert state['pulls'][0][1]['draft'] == (draft_failure == 'readback')
@@ -132,6 +135,6 @@ def test_verify_shared_hooks_keep_existing_pr_and_single_critic(system, boundary
     assert [op for op, _ in state['calls']] == ['critic']
     assert len(result.attempts) == 1 and result.cost_breakdown['total'] == Decimal('.25')
     assert not state['pulls']
-    assert [name for name, _ in seen] == ['save', 'report']
-    assert [r.status for _, r in seen] == (['GREEN', 'RED'] if boundary == 'save'
-                                         else ['GREEN', 'GREEN'])
+    assert [name for name, _ in seen] == ['save', 'report', 'save']
+    assert [r.status for _, r in seen] == (['GREEN', 'RED', 'RED'] if boundary == 'save'
+                                         else ['GREEN', 'GREEN', 'RED'])

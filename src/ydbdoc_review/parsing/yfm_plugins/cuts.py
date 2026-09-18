@@ -7,7 +7,6 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
-
 # Opening: {% cut "Title text" %}
 _CUT_OPEN_RE = re.compile(r"^\{%\s*cut\s+\"([^\"]*)\"\s*%\}\s*$")
 # Closing: {% endcut %}

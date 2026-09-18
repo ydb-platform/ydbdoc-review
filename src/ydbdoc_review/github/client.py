@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote
@@ -82,23 +81,6 @@ class GitHubClient:
                 return
             page += 1
 
-    def get_file_text(
-        self, owner: str, repo: str, path: str, ref: str
-    ) -> str | None:
-        enc_path = quote(path, safe="/")
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{enc_path}"
-        try:
-            data = self._request("GET", url, params={"ref": ref})
-        except GitHubAPIError as exc:
-            if exc.status_code == 404:
-                return None
-            raise
-        if not isinstance(data, dict):
-            return None
-        if data.get("encoding") != "base64" or "content" not in data:
-            return None
-        raw = base64.b64decode(str(data["content"]).replace("\n", ""))
-        return raw.decode("utf-8")
 
     def iter_issue_comments(
         self, owner: str, repo: str, issue_number: int
@@ -161,35 +143,6 @@ class GitHubClient:
             raise GitHubAPIError(f"Branch ref {branch} is missing its object SHA")
         return sha
 
-    def delete_branch(self, owner: str, repo: str, branch: str) -> bool:
-        """Delete ``refs/heads/{branch}``. Return True if removed, False if absent."""
-        enc_branch = quote(branch, safe="")
-        url = (
-            f"https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{enc_branch}"
-        )
-        try:
-            self._request("DELETE", url)
-        except GitHubAPIError as exc:
-            if exc.status_code in (404, 422):
-                return False
-            raise
-        return True
-
-    def add_issue_labels(
-        self,
-        owner: str,
-        repo: str,
-        issue_number: int,
-        labels: list[str],
-    ) -> None:
-        """Add labels to a PR/issue (PRs are issues in the GitHub API)."""
-        if not labels:
-            return
-        url = (
-            f"https://api.github.com/repos/{owner}/{repo}/issues/"
-            f"{issue_number}/labels"
-        )
-        self._request("POST", url, json_body={"labels": labels})
 
     def create_pull(
         self,
@@ -272,13 +225,3 @@ class GitHubClient:
                 "GitHub did not convert pull request to draft", status_code=0
             )
         return True
-
-    def update_pull_body(self, owner: str, repo: str, pr_number: int, body: str) -> None:
-        """Replace the body of an existing pull request."""
-        url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
-        self._request("PATCH", url, json_body={"body": body})
-
-    def close_pull(self, owner: str, repo: str, pr_number: int, body: str) -> None:
-        """Close a pull request while recording why it was superseded."""
-        url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
-        self._request("PATCH", url, json_body={"state": "closed", "body": body})

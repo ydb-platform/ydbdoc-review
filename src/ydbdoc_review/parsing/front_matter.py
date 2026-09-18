@@ -17,7 +17,6 @@ from yaml.nodes import MappingNode, ScalarNode
 
 TRANSLATABLE_FRONT_MATTER_KEYS: tuple[str, ...] = ("title", "description")
 
-_KEY_LINE = re.compile(r"^([A-Za-z_][\w-]*)\s*:", re.MULTILINE)
 _BLOCK_STYLES = frozenset({"|", ">"})
 
 
@@ -103,40 +102,10 @@ def parse_front_matter_with_spans(
     return fields, tuple(records)
 
 
-def parse_front_matter(raw: str) -> dict[str, Any]:
-    """Parse YAML front matter body (without ``---`` delimiters)."""
-    fields, _ = parse_front_matter_with_spans(raw)
-    return fields
 
 
-def front_matter_key_order(raw: str) -> list[str]:
-    """Preserve key order from the original YAML text (legacy dump helper)."""
-    seen: list[str] = []
-    for match in _KEY_LINE.finditer(raw):
-        key = match.group(1)
-        if key not in seen:
-            seen.append(key)
-    return seen
 
 
-def dump_front_matter(fields: dict[str, Any], *, key_order: list[str] | None = None) -> str:
-    """Serialize front matter fields back to YAML (no delimiters).
-
-    Standalone helper for tests/tools. One-pass reinsertion must use
-    :func:`apply_front_matter_updates` instead.
-    """
-    order = list(key_order or [])
-    for key in fields:
-        if key not in order:
-            order.append(key)
-    ordered: dict[str, Any] = {k: fields[k] for k in order if k in fields}
-    body = yaml.dump(
-        ordered,
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    ).strip()
-    return body + "\n" if body else ""
 
 
 def apply_front_matter_updates(raw: str, updates: dict[str, str]) -> str:

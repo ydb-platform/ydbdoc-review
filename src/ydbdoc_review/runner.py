@@ -14,6 +14,7 @@ from types import MappingProxyType
 
 from ydbdoc_review.build import automatic_ok, build_candidate
 from ydbdoc_review.config.loader import Settings, require_actor
+from ydbdoc_review.diagnostics import redact_known
 from ydbdoc_review.document import FileResult, RequestBudget, translate_document
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.links import (
@@ -90,6 +91,7 @@ class RunHooks:
     save: Callable[[RunResult], None] | None = None
     report: Callable[[RunResult], None] | None = None
     cancelled: Callable[[], bool] | None = None
+    secrets: tuple[str, ...] = ()
 
 
 class RunCancelled(Exception):
@@ -103,11 +105,16 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
     handing off that result and after each callback, including interruptions.
     A failed draft conversion is explicit, never a claim of confirmed draft.
     """
+    # Sanitize only public summary/errors; raw requests and responses stay intact.
+    message = redact_known(result.message, hooks.secrets)
+    errors = tuple(redact_known(error, hooks.secrets) for error in result.errors)
+    if message != result.message or errors != result.errors:
+        result = replace(result, message=message, errors=errors)
     draft_attempted = False
 
     def failed(name, exc):
         nonlocal result
-        error = f'{name}: {type(exc).__name__}: {exc}'
+        error = redact_known(f'{name}: {type(exc).__name__}: {exc}', hooks.secrets)
         result = replace(result, status='RED', errors=(*result.errors, error),
                          message='; '.join(filter(None, (result.message, error))),
                          cancelled=result.cancelled or isinstance(exc, (RunCancelled, KeyboardInterrupt)))

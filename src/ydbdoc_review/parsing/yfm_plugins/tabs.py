@@ -7,7 +7,6 @@ import re
 from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 
-
 # Opening: {% list tabs %}, {% list tabs accordion %}, {% list tabs group=lang %}
 # (Diplodoc allows bare tokens or key=value after ``tabs`` — §6.194 / #37673).
 _TABS_OPEN_RE = re.compile(

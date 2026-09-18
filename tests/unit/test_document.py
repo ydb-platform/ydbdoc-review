@@ -179,6 +179,7 @@ def test_comment_injection_reported_no_hidden_repair():
 
 FIXTURES = Path(__file__).parents[1] / 'fixtures'
 CORPUS = sorted(FIXTURES.rglob('*.md'))
+assert CORPUS, 'Real document corpus must not be empty'
 
 
 @pytest.mark.parametrize('path', CORPUS, ids=lambda p: str(p.relative_to(FIXTURES)))

@@ -1,6 +1,6 @@
 """Two small PR reports from one result; no model transcripts or legacy renderer.
 
-Rendering is offline. Sending requires an explicitly authorized production run.
+Rendering is offline. Sending requires an explicitly authorized reporting callback.
 The caller owns GitHub credentials and RunStore lifetime (including create_store).
 """
 from __future__ import annotations
@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from ydbdoc_review.diagnostics import redact_known
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.runner import RunResult
@@ -32,9 +33,7 @@ def _url(pr: str) -> str:
 
 
 def _redact(text: str, secrets: tuple[str, ...]) -> str:
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, '[REDACTED]')
+    text = redact_known(text, secrets)
     text = re.sub(r'(?i)(?:bearer\s+|(?:token|api[_-]?key|password)\s*[=:]\s*)[^\s,;]+',
                   '[REDACTED]', text)
     text = re.sub(r'https?://[^/\s@]+@', 'https://[REDACTED]@', text)
@@ -177,7 +176,8 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
                     authorized: bool = False, secrets: tuple[str, ...] = ()):
     """A RunHooks.report callback. No HTTP on construction; never retries comments.
 
-    authorized must be set by the production entrypoint after run authorization.
+    authorized is internal delivery authorization, including preflight refusals.
+    It never grants admission to the model, document writes or PR creation.
     Tests replace requests' HTTP boundary, not this adapter or GitHubClient.
     """
     _identity(current_pr)
@@ -203,4 +203,4 @@ def report_hooks(adapter, github: GitHubClient, *, current_pr: str,
     return adapter.hooks(report=create_reporter(github, current_pr=current_pr,
                                                source_pr=adapter.source_pr,
                                                authorized=authorized, secrets=secrets),
-                         cancelled=cancelled)
+                         cancelled=cancelled, secrets=secrets)

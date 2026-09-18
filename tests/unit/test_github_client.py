@@ -28,15 +28,6 @@ def test_get_pull(mock_request):
     mock_request.assert_called_once()
 
 
-@patch("ydbdoc_review.github.client.requests.request")
-def test_get_file_text_404(mock_request):
-    mock_request.return_value = MagicMock(
-        status_code=404,
-        text="not found",
-        content=b"",
-    )
-    client = GitHubClient("tok")
-    assert client.get_file_text("o", "r", "a.md", "main") is None
 
 
 @patch("ydbdoc_review.github.client.requests.request")
@@ -157,44 +148,10 @@ def test_convert_ready_pull_to_draft_rejects_unconfirmed_conversion(mock_request
         client.convert_pull_to_draft("o", "r", 9)
 
 
-@patch("ydbdoc_review.github.client.requests.request")
-def test_update_pull_body(mock_request):
-    mock_request.return_value = MagicMock(
-        status_code=200,
-        content=b'{"number": 9}',
-        json=lambda: {"number": 9},
-    )
-    client = GitHubClient("tok")
-
-    client.update_pull_body("o", "r", 9, "QA RED")
-
-    method, url = mock_request.call_args.args[:2]
-    assert method == "PATCH"
-    assert url.endswith("/repos/o/r/pulls/9")
-    assert mock_request.call_args.kwargs["json"] == {"body": "QA RED"}
 
 
-@patch("ydbdoc_review.github.client.requests.request")
-def test_add_issue_labels(mock_request):
-    mock_request.return_value = MagicMock(status_code=200, content=b"[]", json=lambda: [])
-    client = GitHubClient("tok")
-    client.add_issue_labels("o", "r", 9, ["documentation"])
-    assert mock_request.call_args[0][0] == "POST"
-    assert "/issues/9/labels" in mock_request.call_args[0][1]
 
 
-@patch("ydbdoc_review.github.client.requests.request")
-def test_get_file_text_success(mock_request):
-    import base64
-
-    payload = base64.b64encode(b"hello").decode()
-    mock_request.return_value = MagicMock(
-        status_code=200,
-        content=b"{}",
-        json=lambda: {"encoding": "base64", "content": payload + "\n"},
-    )
-    client = GitHubClient("tok")
-    assert client.get_file_text("o", "r", "a.md", "main") == "hello"
 
 
 @patch("ydbdoc_review.github.client.requests.request")
@@ -217,21 +174,8 @@ def test_request_raises_api_error(mock_request):
         client.get_pull("o", "r", 1)
 
 
-@patch("ydbdoc_review.github.client.requests.request")
-def test_delete_branch_success(mock_request):
-    mock_request.return_value = MagicMock(status_code=204, content=b"")
-    client = GitHubClient("tok")
-    assert client.delete_branch("o", "r", "ydbdoc-review/verify-11") is True
-    method, url = mock_request.call_args[0][0], mock_request.call_args[0][1]
-    assert method == "DELETE"
-    assert url.endswith("/git/refs/heads/ydbdoc-review%2Fverify-11")
 
 
-@patch("ydbdoc_review.github.client.requests.request")
-def test_delete_branch_missing(mock_request):
-    mock_request.return_value = MagicMock(status_code=422, text="not found", content=b"")
-    client = GitHubClient("tok")
-    assert client.delete_branch("o", "r", "missing") is False
 
 
 @patch("ydbdoc_review.github.client.requests.request")

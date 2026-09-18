@@ -1,23 +1,35 @@
-"""Shared pytest fixtures."""
-
-from __future__ import annotations
+"""Offline test isolation, including child processes."""
+import os
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _default_yandex_model_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate unit tests from developer shell Eliza/Yandex overrides."""
-    monkeypatch.setenv("YDBDOC_MODEL_PROVIDER", "yandex_cloud")
-    monkeypatch.delenv("YDBDOC_ELIZA_TRANSLATE_FALLBACKS", raising=False)
-    monkeypatch.delenv("YDBDOC_ELIZA_CHECK_FALLBACKS", raising=False)
-    monkeypatch.delenv("YDBDOC_ELIZA_CRITIC_FALLBACKS", raising=False)
-    monkeypatch.delenv("YDBDOC_MODEL_TRANSLATE", raising=False)
-    monkeypatch.delenv("YDBDOC_MODEL_CHECK", raising=False)
+def isolated_credentials(monkeypatch):
+    for name in tuple(os.environ):
+        if any(word in name.upper() for word in ('TOKEN', 'SECRET', 'PASSWORD', 'API_KEY', 'SA_KEY', 'CREDENTIAL')):
+            monkeypatch.delenv(name, raising=False)
 
 
-@pytest.fixture(autouse=True)
-def _isolate_actions_event_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unit workflows must not inherit the hosting CI run as a product event."""
-    for name in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_ID", "GITHUB_SHA"):
-        monkeypatch.delenv(name, raising=False)
+def pytest_addoption(parser):
+    from tests.ci_groups import GROUPS
+    parser.addoption('--ci-group', choices=GROUPS)
+    parser.addoption('--ci-inventory', help='Write complete nodeid/group inventory JSON')
+
+
+def pytest_collection_modifyitems(config, items):
+    import json
+    from pathlib import Path
+
+    from tests.ci_groups import GROUPS, group_for
+    inventory = [{'nodeid': item.nodeid, 'group': group_for(item.nodeid)} for item in items]
+    assert len({row['nodeid'] for row in inventory}) == len(inventory), 'Duplicate nodeids'
+    assert all(row['group'] in GROUPS for row in inventory)
+    if output := config.getoption('--ci-inventory'):
+        Path(output).write_text(json.dumps(inventory, indent=2)+'\n')
+    if group := config.getoption('--ci-group'):
+        selected = [item for item in items if group_for(item.nodeid) == group]
+        rejected = [item for item in items if group_for(item.nodeid) != group]
+        config.hook.pytest_deselected(items=rejected)
+        items[:] = selected
+        assert items, f'Empty required CI group: {group}'

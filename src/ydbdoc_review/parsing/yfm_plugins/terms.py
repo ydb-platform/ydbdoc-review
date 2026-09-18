@@ -12,7 +12,6 @@ from markdown_it import MarkdownIt
 from markdown_it.rules_block import StateBlock
 from markdown_it.rules_inline import StateInline
 
-
 _TERM_ID = r"[A-Za-z][A-Za-z0-9_\-]*"
 _TERM_DEF_RE = re.compile(rf"^\[\*({_TERM_ID})\]:\s*(.*)$")
 _TERM_REF_RE = re.compile(rf"\[\*({_TERM_ID})\]")

@@ -1,5 +1,3 @@
-# Optional GHCR fallback image (see action-docker.sh). Not required for every
-# bugfix — consumer workflows build Dockerfile locally first.
 name: Publish action image
 
 on:
