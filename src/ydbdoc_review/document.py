@@ -7,8 +7,9 @@ and writing UTF-8 with newline translation disabled preserves original bytes.
 """
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from importlib.resources import files
@@ -23,6 +24,7 @@ from ydbdoc_review.parsing.front_matter import (
 )
 from ydbdoc_review.parsing.inline_locations import LocatedText, prose_source_spans
 from ydbdoc_review.parsing.markdown_parser import create_parser
+from ydbdoc_review.prompt_context import glossary_context
 from ydbdoc_review.segmentation.mermaid import mermaid_labels, mermaid_skeleton
 from ydbdoc_review.validation.code_comments import comment_skeleton, comment_spans
 
@@ -401,10 +403,11 @@ def chunk_document(document: ProtectedDocument, fits: Callable[[str], bool]) -> 
 
 
 def translation_messages(text: str, *, source_lang: str, target_lang: str,
-                         path: str) -> list[dict[str, Any]]:
+                         path: str, glossary: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
     template = files("ydbdoc_review.prompts").joinpath("v1/translate_document.md").read_text()
     return [
-        {"role": "system", "content": template},
+        {"role": "system", "content": template + "\nExplicit glossary:\n" +
+         json.dumps(glossary_context(glossary), ensure_ascii=False)},
         {"role": "user", "content": f"Translate {source_lang} to {target_lang}. File: {path}\n\n{text}"},
     ]
 
@@ -517,7 +520,8 @@ def file_result_from_dict(data: dict[str, Any]) -> FileResult:
 
 def translate_document(source: str, *, path: str, source_lang: str, target_lang: str,
                        client: ModelClient, choice: ModelChoice, budget: RequestBudget,
-                       on_progress: Callable[[FileResult], None] | None = None) -> FileResult:
+                       on_progress: Callable[[FileResult], None] | None = None,
+                       glossary: Mapping[str, str] | None = None) -> FileResult:
     """One primary chat per chunk; transport alone owns its permitted fallback.
 
     Callback receives immutable snapshots after every chunk, before later work.
@@ -527,7 +531,8 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
     try:
         document = protect(source, path=path)
         def messages(text: str) -> list[dict[str, Any]]:
-            return translation_messages(text, source_lang=source_lang, target_lang=target_lang, path=path)
+            return translation_messages(text, source_lang=source_lang, target_lang=target_lang, path=path,
+                                        glossary=glossary)
         chunks = chunk_document(document, lambda text: budget.fits(messages(text), expected_output=text))
     except Exception as exc:
         return FileResult(path, None, (DocumentIssue(f"{type(exc).__name__}: {exc}"),), True,

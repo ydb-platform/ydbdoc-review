@@ -264,7 +264,7 @@ def run_translate(*, repo: str | Path, github: GitHubClient, owner: str, reposit
                                           source_lang=op.source_language,
                                           target_lang=op.target_language, client=client,
                                           choice=translation_choice, budget=budget,
-                                          on_progress=progress)
+                                          on_progress=progress, glossary=dict(glossary))
                 progress(file)
         else:
             admitted = True  # mechanical work requires no paid admission
