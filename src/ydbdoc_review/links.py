@@ -187,10 +187,25 @@ def mirror(path: str, docs_root: str = 'ydb/docs') -> str:
 
 
 @dataclass(frozen=True)
+class UncheckedAnchor:
+    """Dependent check detail, not evidence of a broken link.
+
+    Coordinates and paths belong to LinkResult.candidate_sha. The rendered page
+    is retained because one include can be rendered in several page contexts.
+    """
+    path: str
+    href: str
+    target_path: str
+    rendered_page: str
+    location: Location | None = None
+
+
+@dataclass(frozen=True)
 class LinkResult:
     candidate_sha: str
     issues: tuple[Issue, ...]
     complete: bool
+    unchecked_anchors: tuple[UncheckedAnchor, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -220,6 +235,7 @@ def check_links(candidate: Candidate, *, paths: Iterable[str] | None = None,
     candidate XML bytes; both require a successful build of this SHA.
     """
     issues = []
+    unchecked_anchors = []
     complete = True
     pages = list(paths) if paths is not None else [
         p for p in candidate.entries if p.startswith(docs_root.rstrip('/') + '/') and p.endswith('.md')]
@@ -281,11 +297,13 @@ def check_links(candidate: Candidate, *, paths: Iterable[str] | None = None,
                 if target.fragment:
                     if build is None or not build.ok_for(candidate.sha):
                         complete = False
-                        raise ValueError(f'Anchor not verified by a successful build of this SHA: {ref.href}')
-                    anchor_page = (rendered_page if ref.kind == 'include' or
-                                   (target.path == path and not urlsplit(ref.href).path) else target.path)
-                    if target.fragment not in _anchor_ids(anchor_page, data, build):
-                        raise ValueError(f'Missing anchor: {ref.href} in {target.path}')
+                        unchecked_anchors.append(UncheckedAnchor(
+                            path, ref.href, target.path, rendered_page, ref.location))
+                    else:
+                        anchor_page = (rendered_page if ref.kind == 'include' or
+                                       (target.path == path and not urlsplit(ref.href).path) else target.path)
+                        if target.fragment not in _anchor_ids(anchor_page, data, build):
+                            raise ValueError(f'Missing anchor: {ref.href} in {target.path}')
                 if ref.kind == 'include':
                     if target.path in (*ancestors, path):
                         raise ValueError(f'Include cycle: {ref.href} -> {target.path}')
@@ -293,7 +311,15 @@ def check_links(candidate: Candidate, *, paths: Iterable[str] | None = None,
             except (ValueError, RuntimeError, OSError) as error:
                 issues.append(Issue(path, str(error), 'Specify an existing target/anchor or restore the asset.',
                                     'links', target=ref.location))
-    return LinkResult(candidate.sha, tuple(issues), complete)
+    if unchecked_anchors:
+        issues.append(Issue(
+            docs_root.rstrip('/'),
+            f'Anchor verification incomplete: {len(unchecked_anchors)} references were not checked '
+            f'because no successful build is available for candidate SHA {candidate.sha}. '
+            'These are unverified anchors, not confirmed broken links.',
+            'Resolve the primary build failure and rerun checks on the exact candidate SHA.',
+            'anchors_unchecked'))
+    return LinkResult(candidate.sha, tuple(issues), complete, tuple(unchecked_anchors))
 
 
 @dataclass(frozen=True)
