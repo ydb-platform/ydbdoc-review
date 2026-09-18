@@ -1,4 +1,4 @@
-"""Child-process external boundaries only: HTTP, YDB SDK and the YFM executable.
+"""Child-process external boundaries: HTTP, model tokenizer, YDB SDK and YFM.
 
 Loaded explicitly by test_t15_cli.py, never by production. No live sockets allowed.
 """
@@ -155,6 +155,27 @@ def main():
         raise AssertionError((method, path))
 
     requests.Session.send = send
+
+    # The fake Eliza deployment has a deterministic character vocabulary for
+    # these offline boundary tests. This is an explicit test adapter, never a
+    # production estimate or an implicit tokenizer for an unknown real model.
+    # Keep the real configuration validation, budget, runner and model client.
+    from ydbdoc_review.config import runtime as runtime_config
+
+    class FixtureTokenizer:
+        def __call__(self, messages):
+            return sum(1 + len(message['role']) + len(message['content'])
+                       for message in messages)
+
+        def count_output(self, text):
+            return len(text)
+
+    original_load_runtime = runtime_config.load_runtime
+
+    def fixture_runtime(path=None):
+        return original_load_runtime(path, token_counter=FixtureTokenizer())
+
+    runtime_config.load_runtime = fixture_runtime
     from ydbdoc_review.model import ModelClient
 
     original_init = ModelClient.__init__
