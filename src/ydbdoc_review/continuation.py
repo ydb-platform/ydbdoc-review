@@ -229,7 +229,12 @@ def run_continue(*, repo: str | Path, github: GitHubClient, owner: str, reposito
     if candidate is not None:
         try:
             publication = publisher.publish(candidate, publication_snapshot, expected_head=expected_head,
-                                            status=status, checked_sha=checked_sha)
+                                            status=status, checked_sha=checked_sha,
+                                            report_result=replace(result, status=status, candidate=candidate,
+                                                checked_sha=checked_sha, selected_files=selected, quality=loop,
+                                                issues=loop.issues if loop else (),
+                                                unfinished_files=tuple(sorted(unfinished)), errors=tuple(errors),
+                                                cost_breakdown=costs))
         except PublicationError as exc:
             cancelled |= exc.cancelled or isinstance(exc.__cause__, KeyboardInterrupt)
             publication = exc.publication

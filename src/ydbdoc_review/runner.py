@@ -343,7 +343,12 @@ def run_translate(*, repo: str | Path, github: GitHubClient, owner: str, reposit
     if candidate is not None and initial_tree is not None and candidate.sha != initial_tree.sha:
         try:
             publication = publisher.publish(candidate, plan.snapshot, expected_head=expected_head,
-                                            status=status, checked_sha=checked_sha)
+                                            status=status, checked_sha=checked_sha,
+                                            report_result=replace(result, status=status, candidate=candidate,
+                                                checked_sha=checked_sha, files=tuple(files.values()),
+                                                selected_files=selected, issues=tuple(issues), quality=loop,
+                                                unfinished_files=tuple(sorted(unfinished)), errors=tuple(errors),
+                                                cost_breakdown=client.cost_breakdown() if client else result.cost_breakdown))
         except PublicationError as exc:
             cancelled |= exc.cancelled
             publication = exc.publication

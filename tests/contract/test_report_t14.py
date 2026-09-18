@@ -31,6 +31,14 @@ def capture(monkeypatch, *, fail_at=None, after=None):
     old = requests.Session.send
     sent = []
     def send(session, req, **kw):
+        path = urlsplit(req.url).path
+        if ('/git/' in path and req.method == 'POST') or (req.method == 'PATCH' and '/pulls/' in path):
+            r = requests.Response()
+            r.status_code = 201
+            data = json.loads(req.body)
+            payload = {'ref': data['ref'], 'object': {'sha': data['sha']}} if path.endswith('/refs') else {'sha': 'a' * 40}
+            r._content = json.dumps(payload).encode()
+            return r
         if req.method == 'POST' and urlsplit(req.url).path.endswith('/comments'):
             sent.append((req.url, json.loads(req.body)['body']))
             r = requests.Response()

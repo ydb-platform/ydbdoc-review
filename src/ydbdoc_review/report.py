@@ -5,8 +5,10 @@ The caller owns GitHub credentials and RunStore lifetime (including create_store
 """
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, replace
 from urllib.parse import quote
 
 from ydbdoc_review.diagnostics import redact_known
@@ -65,7 +67,7 @@ def _location(location, text, repository, sha, path, label, clean, secrets):
         return f'{label}: место не установлено; цитата не подтверждена снимком.'
     lines = str(location.start) if location.start == location.end else f'{location.start}-{location.end}'
     anchor = f'L{location.start}' + (f'-L{location.end}' if location.end != location.start else '')
-    link = f'https://github.com/{repository}/blob/{sha}/{quote(path, safe="/")}#{anchor}'
+    link = f'https://github.com/{repository}/blob/{sha}/{quote(_redact(path, secrets), safe="/")}#{anchor}'
     # Validate original text first, redact the whole excerpt (also multiline
     # secrets), then let a code fence preserve Markdown and HTML entities.
     excerpt = _redact(location.quote, secrets)
@@ -77,8 +79,96 @@ def _location(location, text, repository, sha, path, label, clean, secrets):
         '> ' + line for line in block.split('\n')) + suffix
 
 
+# Far below GitHub's 65536 character limit; costs and SHA are never sliced away.
+REPORT_BODY_LIMIT = 12000
+
+
+def _short(text, limit):
+    return text if len(text) <= limit else text[:limit] + '… [сокращено; см. артефакт]'
+
+
+def _path_list(paths, clean):
+    paths = list(paths)
+    return ', '.join(_short(clean(p), 160) for p in paths[:5]) + (
+        f'; ещё {len(paths) - 5}' if len(paths) > 5 else '')
+
+
+def _examples(issues):
+    seen = set()
+    for issue in sorted(issues, key=lambda i: i.severity != 'error'):
+        if issue.code not in seen:
+            seen.add(issue.code)
+            yield issue
+            if len(seen) == 3:
+                break
+
+
+def _bounded(parts, costs):
+    # Sections have independent small budgets, including untrusted error text.
+    text = '\n\n'.join(parts) + '\n\n' + costs
+    if len(text) > REPORT_BODY_LIMIT:
+        # Preserve the verdict, SHA and costs even with adversarial paths/quotes.
+        essentials = [p for p in parts if 'SHA' in p]
+        text = _short('\n\n'.join(parts), 7000) + '\n\n' + '\n\n'.join(essentials) + '\n\n' + costs
+    if len(text) > REPORT_BODY_LIMIT:
+        raise ValueError('Report exceeds concise body limit')
+    return text
+
+
+def _needs_artifact(result):
+    return bool(result.issues or result.errors or result.unfinished_files or len(result.message) > 600
+                or (result.plan and len(result.plan.operations) > 5) or len(result.selected_files) > 5 or
+                (result.quality and result.quality.rounds))
+
+
+def render_artifact(result: RunResult, *, secrets=()) -> str:
+    """Explicit diagnostics only: no runtime tree, prompts or model transcripts.
+
+    Keep full path/line/quote records and build logs, with secrets redacted before
+    JSON encoding (also catches multiline secrets and credential-bearing URLs).
+    """
+    payload = dict(status=result.status, source_sha=result.snapshot.source_sha if result.snapshot else None,
+                   source_repository=result.snapshot.source_repo if result.snapshot else None,
+                   published_repository=result.publication.repository if result.publication else None,
+                   source_paths={f.path: (('ydb/docs/ru/' if f.target_lang == 'en' else 'ydb/docs/en/') + f.path.split('/', 3)[3])
+                                 for f in result.selected_files if f.path.startswith('ydb/docs/')},
+                   checked_sha=result.checked_sha,
+                   candidate_sha=result.candidate_sha, published_sha=result.result_sha,
+                   errors=list(result.errors), message=result.message,
+                   unfinished_files=list(result.unfinished_files),
+                   selected_files=[f.path for f in result.selected_files],
+                   operations=[asdict(op) for op in result.plan.operations] if result.plan else [],
+                   dependencies=list(result.plan.dependencies) if result.plan else [],
+                   issues=[asdict(i) for i in result.issues],
+                   costs={k: str(v) if v is not None else None for k, v in result.cost_breakdown.items()},
+                   rounds=[])
+    for r in result.quality.rounds if result.quality else ():
+        payload['rounds'].append(dict(number=r.number, candidate_sha=r.candidate_sha,
+            issues=[asdict(i) for i in r.issues],
+            build=dict(status=r.build.status, returncode=r.build.returncode, log=r.build.log)
+                  if r.build else None,
+            links=asdict(r.links) if r.links else None))
+    def redact(value):
+        if isinstance(value, str):
+            return _redact(value, secrets)
+        if isinstance(value, dict):
+            return {_redact(k, secrets): redact(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [redact(v) for v in value]
+        return value
+    return json.dumps(redact(payload), ensure_ascii=False, indent=2)
+
+
+class ReportDeliveryError(RuntimeError):
+    """All channels were attempted. F11 may persist these small failure records."""
+    def __init__(self, errors):
+        self.errors = tuple(errors)
+        super().__init__('; '.join(f'{channel}: {message}' for channel, message in errors))
+
+
 def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None = None,
-                   secrets: tuple[str, ...] = ()) -> tuple[Comment, ...]:
+                   secrets: tuple[str, ...] = (), artifact_url: str | None = None,
+                   artifact_error: str | None = None) -> tuple[Comment, ...]:
     """Current PR is mandatory even when ACL/metadata preflight produced no snapshot.
 
     Continue's snapshot retains the original source PR. Explicit source_pr supports
@@ -93,15 +183,18 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
               if publication and publication.pr_number else
               current_pr if result.mode != 'doc_translate' else None)
     def clean(text):
-        return _safe(str(text), secrets)
+        return _short(_safe(str(text), secrets), 600)
     if result.status == 'NO_WORK':
         verdict = 'Перевод не требуется'
-    elif result.status == 'GREEN' and result.checked_sha and result.checked_sha == result.candidate_sha:
+    elif (result.status == 'GREEN' and result.checked_sha and result.checked_sha == result.candidate_sha
+          and not result.errors and not result.unfinished_files and not result.cancelled
+          and not any(i.severity == 'error' for i in result.issues)
+          and (not result.quality or result.quality.status == 'GREEN')):
         verdict = 'GREEN — перевод прошёл проверки и готов к слиянию.'
     else:
         verdict = 'RED — мержить нельзя, нужны исправления.'
     common = [verdict]
-    for text in dict.fromkeys(filter(None, (result.message, *result.errors))):
+    for text in list(dict.fromkeys(filter(None, (result.message, *result.errors))))[:3]:
         if text != verdict:
             common.append(clean(text))
     if result.cancelled:
@@ -111,13 +204,32 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
         paths.update(op.target_new_path or op.target_old_path for op in result.plan.operations)
     finished = sorted(paths - set(result.unfinished_files) - {None})
     if finished:
-        common.append('Обработанные файлы: ' + ', '.join(clean(p) for p in finished))
+        common.append('Обработанные файлы: ' + _path_list(finished, clean))
     if result.unfinished_files:
-        common.append('Незавершённые файлы: ' + ', '.join(map(clean, result.unfinished_files)))
+        common.append('Незавершённые файлы: ' + _path_list(result.unfinished_files, clean))
     common.append(f'Результат: [PR]({_url(target)}).' if target else 'Переводной PR не создан.')
+    if result.issues:
+        counts = Counter(issue.code for issue in result.issues)
+        common.append(f'Замечаний: {len(result.issues)} по {len({i.path for i in result.issues})} путям. ' +
+                      '; '.join(f'{clean(code)}: {count}' for code, count in counts.most_common(6)))
+        common.append('Основные причины и действия:\n' + '\n'.join(
+            f'- {clean(i.path)}: {clean(i.problem)} Исправить: {clean(i.expected_fix)}'
+            for i in _examples(result.issues)))
+    if result.quality and result.quality.rounds:
+        last = result.quality.rounds[-1]
+        if last.links and last.links.unchecked_anchors:
+            common.append(f'Якоря не проверены: {len(last.links.unchecked_anchors)}. '
+                          'Сначала завершите сборку, затем повторите проверку ссылок.')
+    if artifact_url:
+        common.append(f'[Полная диагностика и технические логи]({artifact_url})')
+    elif artifact_error:
+        common.append('Артефакт не опубликован: ' + clean(artifact_error) +
+                      '. Повторите публикацию диагностики после устранения ошибки доступа или GitHub.')
+    elif _needs_artifact(result):
+        common.append('Полная диагностика: публикация артефакта ещё не подтверждена.')
     costs = _costs(result)
-    brief = '\n\n'.join([*common, costs])
-    detail = [*common, f'SHA последнего проверенного коммита: {result.checked_sha or "отсутствует"}.']
+    brief = _bounded(common, costs)
+    detail = [*(p for p in common if not p.startswith('Основные причины и действия:')), f'SHA последнего проверенного коммита: {result.checked_sha or "отсутствует"}.']
     if result.candidate_sha != result.checked_sha and result.candidate_sha:
         detail.append(f'Кандидат: {result.candidate_sha} — этот SHA не проверен.')
     published = bool(result.result_sha and result.result_sha == result.candidate_sha)
@@ -129,7 +241,7 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
                                    else 'есть замечания или проверка не завершена.'))
     else:
         detail.append('Критик: завершённая проверка не зафиксирована (возможен запуск без модели).')
-    for issue in result.issues:
+    for issue in _examples(result.issues):
         detail.append(f'{clean(issue.path)} — {issue.severity}: {clean(issue.problem)}\n\n'
                       f'Исправить вручную: {clean(issue.expected_fix)}')
         data = result.candidate.read(issue.path) if result.candidate else None
@@ -164,12 +276,22 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
             else:
                 detail.append('Исходник: путь и строки не установлены; цитата не подтверждена снимком.')
     detail.append(costs)
-    detailed = '\n\n'.join(detail)
+    detailed = _bounded(detail[:-1], costs)
     if target is None:
         return (Comment(source, brief),)
     if source == target:
         return (Comment(target, detailed),)
     return (Comment(source, brief), Comment(target, detailed))
+
+
+def initial_description(result: RunResult, *, secrets=()) -> str:
+    """Creation has full current costs and partial-file state before final delivery."""
+    snapshot = result.snapshot
+    pr = f'{snapshot.owner}/{snapshot.repo}/{snapshot.pr_number}'
+    pending = replace(result, mode='doc_verify')
+    body = render_reports(pending, current_pr=pr, secrets=secrets)[-1].body
+    return body.replace(f'Результат: [PR]({_url(pr)}).',
+                        'Переводной PR создаётся; итоговый отчёт будет обновлён после публикации.')
 
 
 def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | None = None,
@@ -187,9 +309,37 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
     def report(result: RunResult):
         if not authorized:
             raise PermissionError('GitHub report publication requires an authorized production run')
-        for comment in render_reports(result, current_pr=current_pr, source_pr=source_pr, secrets=secrets):
+        failures = []
+        artifact_url = artifact_error = None
+        if _needs_artifact(result):
+            owner, repository, _ = current_pr.split('/')
+            try:
+                artifact_url = github.upload_report_artifact(owner, repository,
+                    render_artifact(result, secrets=secrets))
+            except Exception as exc:
+                artifact_error = _safe(str(exc), secrets)
+                failures.append(('artifact', artifact_error))
+        def rendered():
+            effective = replace(result, status='RED') if failures else result
+            return render_reports(effective, current_pr=current_pr, source_pr=source_pr,
+                                  secrets=secrets, artifact_url=artifact_url,
+                                  artifact_error=artifact_error)
+        destinations = rendered()
+        for index, comment in enumerate(destinations):
             owner, repository, number = comment.pr.split('/')
-            github.post_issue_comment(owner, repository, int(number), comment.body)
+            try:
+                github.post_issue_comment(owner, repository, int(number), rendered()[index].body)
+            except Exception as exc:
+                failures.append((f'comment {comment.pr}', _safe(str(exc), secrets)))
+        if result.publication and result.publication.pr_number:
+            owner, repository = result.publication.repository.split('/')
+            try:
+                github.update_pull_body(owner, repository, result.publication.pr_number,
+                                        rendered()[-1].body)
+            except Exception as exc:
+                failures.append(('description', _safe(str(exc), secrets)))
+        if failures:
+            raise ReportDeliveryError(failures)
     return report
 
 

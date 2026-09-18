@@ -128,12 +128,11 @@ class Publisher:
         return expected
 
     def publish(self, candidate: Candidate, snapshot: Snapshot, *, expected_head: str | None,
-                status: str, checked_sha: str | None) -> Publication:
+                status: str, checked_sha: str | None, report_result=None) -> Publication:
         pr_repository = self.pr_repository or self.repository
         owner, repo = pr_repository.split('/', 1)
         base = self.base or snapshot.publication_base
         green = status == 'GREEN' and checked_sha == candidate.sha
-        verdict = 'GREEN' if green else 'RED'
         publication = None
         try:
             receipt = push_branch(str(candidate.repo), 'ydbdoc-publication', self.branch,
@@ -145,10 +144,15 @@ class Publisher:
             publication = Publication(pr_repository, self.branch, base,
                                       candidate.sha, self.pr_number, draft=False)
             if self.pr_number is None:
+                from ydbdoc_review.report import initial_description
+                from ydbdoc_review.runner import RunResult
+                creation_result = report_result or RunResult(snapshot=snapshot, candidate=candidate,
+                    status=status, checked_sha=checked_sha)
+                description = initial_description(creation_result, secrets=(self.token,))
                 created = self.github.create_pull(
                     owner, repo, title=f'Documentation translation #{snapshot.pr_number}',
                     head=self.branch, base=base,
-                    body=f'{verdict}\nChecked SHA: {checked_sha or "not checked"}', draft=not green)
+                    body=description, draft=not green)
                 if not created:
                     raise RuntimeError('GitHub did not confirm PR creation')
                 url, number, _ = created

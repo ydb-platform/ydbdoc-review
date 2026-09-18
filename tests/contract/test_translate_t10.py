@@ -556,4 +556,5 @@ def test_publisher_never_labels_unchecked_candidate_green(system):
     published = publisher.publish(checked.candidate, checked.snapshot, expected_head=expected,
                                   status='GREEN', checked_sha='0'*40)
     assert published.draft
-    assert state['pulls'][-1][1]['body'].startswith('RED\n')
+    assert state['pulls'][-1][1]['body'].startswith('RED — мержить нельзя')
+    assert 'Итого:' in state['pulls'][-1][1]['body']
