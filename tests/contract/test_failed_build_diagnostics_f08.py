@@ -117,3 +117,25 @@ def test_grouped_dependent_check_keeps_loop_red_on_checked_sha(setup):
     assert len(grouped) == 1 and result.checked_sha in grouped[0].problem
     assert not any('Anchor not verified' in issue.problem for issue in result.issues)
     assert all(trace.links.candidate_sha == trace.candidate_sha for trace in result.rounds)
+
+
+@pytest.mark.parametrize('notice', ['INFO: error reporting enabled', '[WARN] missing optional config',
+                                    'INFO: ERROR reporting enabled'])
+@pytest.mark.parametrize('level', ['ERROR', 'ERR', 'FATAL', '\x1b[31mERROR\x1b[0m'])
+def test_primary_severity_beats_informational_keywords_and_long_prefix(notice, level):
+    primary = f'en/core/source.md:17: {level}: unclosed YFM container'
+    log = notice + '\n' + 'Progress\n' * 400 + 'context ' * 400 + primary + '\nsecondary'
+    result = BuildResult('a' * 40, 'failure', log, 1)
+    issue, = result.issues_for('a' * 40)
+    assert 'en/core/source.md:17:' in issue.problem
+    assert 'unclosed YFM container' in issue.problem
+    assert notice not in issue.problem
+    assert '\x1b' not in issue.problem
+    assert len(issue.problem) < 2500
+    assert result.log == log
+
+
+def test_unstructured_failure_fallback_skips_informational_keywords():
+    log = 'INFO: error reporting enabled\n' + 'Progress\n' * 400 + 'YFM timed out after 600s'
+    issue, = BuildResult('a' * 40, 'failure', log, 1).issues_for('a' * 40)
+    assert 'YFM timed out after 600s' in issue.problem

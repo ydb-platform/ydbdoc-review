@@ -38,19 +38,32 @@ class BuildResult:
     def issues_for(self, candidate_sha: str) -> tuple[Issue, ...]:
         if self.ok_for(candidate_sha):
             return ()
-        # Preserve the first available failure and following context, rather than the
-        # tail of a potentially huge cascade. Full output remains in self.log.
-        failure = re.search(r'^.*\b(?:error|failed|failure|fatal|exception|timed out|missing)\b',
-                            self.log, re.I | re.M)
-        # Leading context must not consume the excerpt before the error line.
-        start = failure.start() if failure else 0
-        excerpt = self.log[start:start + 2000]
+        excerpt = _failure_excerpt(self.log)
         return (Issue('ydb/docs', f'Build {self.status}, SHA {self.candidate_sha}; '
                       f'required candidate SHA {candidate_sha}. {excerpt} '
                       'No baseline comparison was performed; this does not establish that '
                       'the translation introduced the failure.',
                       'Resolve the reported build failure, then complete a successful documentation '
                       'build of the exact candidate SHA. Full output is in the build log.', 'build'),)
+
+
+def _failure_excerpt(log: str) -> str:
+    """Prefer explicit severity; keep the error even after a huge line prefix."""
+    # Strip terminal colour/control sequences only from the displayed excerpt.
+    # The original bytes/text remain available in BuildResult.log.
+    clean = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', log)
+    for pattern in (r'\b(?:ERROR|ERR|FATAL)\b',
+                    r'(?i)\b(?:error|failed|failure|fatal|exception|timed out|missing)\b'):
+        for match in re.finditer(pattern, clean):
+            line_start = clean.rfind('\n', 0, match.start()) + 1
+            prefix = clean[line_start:match.start()]
+            # Mentioning errors inside a progress/warning message is not a
+            # primary failure, even when that message quotes ERROR in capitals.
+            if re.search(r'(?i)\b(?:INFO|WARN|WARNING|DEBUG|TRACE)\s*[:\]]', prefix):
+                continue
+            start = max(line_start, match.start() - 256)
+            return clean[start:start + 2000]
+    return clean[:2000]
 
 
 def automatic_ok(candidate_sha: str, links: LinkResult, build: BuildResult) -> bool:
