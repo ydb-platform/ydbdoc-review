@@ -107,8 +107,12 @@ def _finding_in_part(issue: Issue, path: str, current: str, part: ReviewPart) ->
     if issue.target is None:
         return True
     # Same CR/LF-only convention as the critic's global line coordinates.
-    start_line = 1 + len(re.findall(r"\r\n|\r|\n", current[:part.target_start]))
-    end_line = 1 + len(re.findall(r"\r\n|\r|\n", current[:max(part.target_start, part.target_end - 1)]))
+    # Scan complete text: slicing inside CRLF would count its CR as a standalone
+    # newline and incorrectly attach a next-line finding to this half-open window.
+    newline_ends = [match.end() for match in re.finditer(r"\r\n|\r|\n", current)]
+    start_line = 1 + sum(end <= part.target_start for end in newline_ends)
+    last_offset = max(part.target_start, part.target_end - 1)
+    end_line = 1 + sum(end <= last_offset for end in newline_ends)
     return issue.target.start <= end_line and issue.target.end >= start_line
 
 

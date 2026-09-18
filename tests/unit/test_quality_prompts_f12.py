@@ -116,3 +116,30 @@ def test_repair_findings_are_restricted_to_window():
     window = ReviewPart(0, 5, 5, 9)  # second line only
     assert _finding_in_part(Issue(PATH, 'bad', 'fix', target=Location(2, 2, 'two')), PATH, current, window)
     assert not _finding_in_part(Issue(PATH, 'bad', 'fix', target=Location(3, 3, 'three')), PATH, current, window)
+
+
+@pytest.mark.parametrize('newline', ['\n', '\r', '\r\n'])
+def test_repair_http_payload_excludes_next_line_finding(wire, monkeypatch, newline):
+    """Exercise real repair message serialization with supplied corresponding windows."""
+    import ydbdoc_review.quality_loop as loop
+    client, calls = wire
+    current = newline.join(('aaa', 'bbb', 'ccc'))
+    end1, end2 = 3 + len(newline), 6 + 2 * len(newline)
+    windows = (ReviewPart(0, 5, 0, end1), ReviewPart(5, 10, end1, end2),
+               ReviewPart(10, 13, end2, len(current)))
+    monkeypatch.setattr(loop, 'review_parts', lambda *args, **kwargs: windows)
+
+    class SplitBudget:
+        max_output_tokens = 10000
+
+        def fits(self, messages, **kwargs):
+            return False  # Force the supplied windows instead of the whole document.
+
+    findings = tuple(Issue(PATH, f'line {line}', 'fix', target=Location(line, line, quote))
+                     for line, quote in enumerate(('aaa', 'bbb', 'ccc'), 1))
+    repair_document(SelectedFile(PATH, 'aaa\n\nbbb\n\nccc', 'en'), current, findings,
+                    replacements={}, client=client, choice=CHOICE, budget=SplitBudget())
+    assert len(calls) == 3
+    for line, body in enumerate(calls, 1):
+        data = json.loads(body['messages'][-1]['content'])
+        assert [finding['problem'] for finding in data['findings']] == [f'line {line}']
