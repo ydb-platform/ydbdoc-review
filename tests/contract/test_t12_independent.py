@@ -86,7 +86,8 @@ class SDKBoundary:
             return []
         if 'FROM run_objects' in sql:
             rows = [v for k, v in sorted(self.objects.items())
-                    if k[:3] == (p['run_id'], p['object_key'], p['generation'])]
+                    if k[:3] == (p['run_id'], p['object_key'], p['generation'])
+                    and k[3] >= p['start']][:p['limit']]
         elif 'FROM runs' in sql:
             rows = [v for k, v in sorted(self.ledger.items())
                     if v['day'] == p['day'] and k[1] != 'summary'
@@ -202,9 +203,9 @@ def test_ttl_missing_outage_distinction(db):
     store, sdk, now = db
     with pytest.raises(ContextExpired, match='14'):
         store.context('missing')
-    store.put('r', 'context', encode({'empty': b'', 'deleted': None}))
+    store.put('r', 'context', encode({'schema_version': 1, 'empty': b'', 'deleted': None}))
     now[0] += timedelta(days=14, microseconds=-1)
-    assert store.context('r') == {'empty': b'', 'deleted': None}
+    assert store.context('r') == {'schema_version': 1, 'empty': b'', 'deleted': None}
     now[0] += timedelta(microseconds=1)
     with pytest.raises(ContextExpired):
         store.context('r')

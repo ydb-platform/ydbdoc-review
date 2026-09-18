@@ -35,6 +35,7 @@ from ydbdoc_review.ops.ydb_driver import make_ydb_driver
 
 TTL_SECONDS = 14 * 24 * 3600
 CHUNK_SIZE = 512 * 1024
+OBJECT_PAGE_PARTS = 16  # At most 8 MiB of payload, below the 48 MiB result limit.
 MOSCOW = ZoneInfo('Europe/Moscow')
 
 
@@ -293,26 +294,59 @@ class YDBStore:
               '$part_no': index, '$created_at': int(created.timestamp() * 1_000_000),
               '$payload': payload})
 
-    def _parts(self, run_id, key, generation):
+    def _parts(self, run_id, key, generation, *, start=0, limit=2):
         return self._execute('''
             DECLARE $run_id AS Utf8; DECLARE $object_key AS Utf8; DECLARE $generation AS Utf8;
+            DECLARE $start AS Uint32; DECLARE $limit AS Uint64;
             SELECT part_no, payload FROM run_objects
             WHERE run_id=$run_id AND object_key=$object_key AND generation=$generation
-            ORDER BY part_no;
-        ''', {'$run_id': run_id, '$object_key': key, '$generation': generation})[0].rows
+            AND part_no >= $start
+            ORDER BY part_no LIMIT $limit;
+        ''', {'$run_id': run_id, '$object_key': key, '$generation': generation,
+              '$start': start, '$limit': limit})[0].rows
 
     def get(self, run_id: str, key: str) -> bytes | None:
         rows = self._parts(run_id, key, '')
         if not rows:
             return None
         try:
+            if len(rows) != 1 or rows[0].part_no != 0:
+                raise ValueError('Invalid manifest rows')
             manifest = decode(bytes(rows[0].payload))
-            if utc(self.clock()) >= manifest['created_at'] + timedelta(seconds=TTL_SECONDS):
+            if not isinstance(manifest, dict):
+                raise ValueError('Invalid manifest format')
+            count, size = manifest['count'], manifest['size']
+            if (type(count) is not int or not 1 <= count < 2**32
+                    or type(size) is not int or size < 0
+                    or count != max(1, (size + CHUNK_SIZE - 1) // CHUNK_SIZE)):
+                raise ValueError('Invalid manifest count/size')
+            if (not isinstance(manifest['generation'], str) or not manifest['generation']
+                    or not isinstance(manifest['sha256'], str)
+                    or len(manifest['sha256']) != 64):
+                raise ValueError('Invalid manifest generation/digest')
+            created = utc(manifest['created_at'])
+            if utc(self.clock()) >= created + timedelta(seconds=TTL_SECONDS):
                 return None
-            parts = self._parts(run_id, key, manifest['generation'])
-            if [r.part_no for r in parts] != list(range(manifest['count'])):
-                raise ValueError('Incomplete chunks')
-            data = b''.join(bytes(r.payload) for r in parts)
+            chunks = []
+            start = 0
+            while start < count:
+                # Include one extra row on the last page to detect surplus parts.
+                limit = min(OBJECT_PAGE_PARTS, count - start + 1)
+                parts = self._parts(run_id, key, manifest['generation'], start=start, limit=limit)
+                expected = min(limit, count - start)
+                if [r.part_no for r in parts] != list(range(start, start + expected)):
+                    raise ValueError('Incomplete or unordered chunks')
+                for row in parts:
+                    chunk = bytes(row.payload)
+                    expected_size = min(CHUNK_SIZE, size - row.part_no * CHUNK_SIZE)
+                    if len(chunk) != expected_size:
+                        raise ValueError('Invalid chunk size')
+                    chunks.append(chunk)
+                start += expected
+            if expected == limit and self._parts(
+                    run_id, key, manifest['generation'], start=count, limit=1):
+                raise ValueError('Surplus chunks')
+            data = b''.join(chunks)
             if len(data) != manifest['size'] or hashlib.sha256(data).hexdigest() != manifest['sha256']:
                 raise ValueError('Object digest/size mismatch')
             return data
@@ -327,6 +361,11 @@ class YDBStore:
             raise ContextExpired()
         try:
             context = decode(data)
+            if (not isinstance(context, dict)
+                    or type(context.get('schema_version')) is not int
+                    or context['schema_version'] != 1):
+                raise StorageError('Unsupported context schema; запустите doc_translate '
+                                   'или doc_verify заново. Сохранённые данные не изменены.')
             for name in ('known_files', 'final_files'):
                 ref = context.pop(name + '_ref', None)
                 if ref is not None:

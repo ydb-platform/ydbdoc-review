@@ -66,7 +66,9 @@ class Boundary:
         if 'FROM run_objects' in query:
             rows = [SimpleNamespace(**v) for v in self.objects.values()
                     if all(v[n] == p[n] for n in ('run_id', 'object_key', 'generation'))]
-            return [SimpleNamespace(rows=sorted(rows, key=lambda r: r.part_no))]
+            rows = [r for r in sorted(rows, key=lambda r: r.part_no)
+                    if r.part_no >= p['start']][:p['limit']]
+            return [SimpleNamespace(rows=rows)]
         if 'FROM runs' in query:
             rows = [SimpleNamespace(**v) for v in self.runs.values()
                     if v['day'] == p['day'] and v['entry_id'] != 'summary'
@@ -162,9 +164,9 @@ def test_partial_or_corrupt_chunks_are_storage_errors(db, corruption):
 
 def test_ttl_exact_boundary_and_error_not_expired(db):
     store, boundary, now = db
-    store.put('r', 'context', encode({'empty': b''}))
+    store.put('r', 'context', encode({'schema_version': 1, 'empty': b''}))
     now[0] += timedelta(days=14, microseconds=-1)
-    assert store.context('r') == {'empty': b''}
+    assert store.context('r') == {'schema_version': 1, 'empty': b''}
     now[0] += timedelta(microseconds=1)
     with pytest.raises(ContextExpired, match='14'):
         store.context('r')
