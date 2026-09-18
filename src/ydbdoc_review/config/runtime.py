@@ -39,12 +39,12 @@ def load_runtime(path: Path | None = None) -> Runtime:
         secrets = []
 
         def endpoint(value):
-            if set(value) - {'provider', 'base_url', 'model', 'token_env', 'folder_id'}:
+            if set(value) - {'provider', 'base_url', 'model', 'token_env', 'folder_id', 'reasoning_effort'}:
                 raise ValueError('Unknown endpoint field')
             token = os.environ.get(value['token_env'], '')
             secrets.append(token)
             return Endpoint(value['provider'], value['base_url'], value['model'], token,
-                            value.get('folder_id'))
+                            value.get('folder_id'), value.get('reasoning_effort'))
 
         choices = {}
         if set(data['models']) != {'translation', 'critic', 'repair'}:

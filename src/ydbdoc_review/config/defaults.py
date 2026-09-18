@@ -23,6 +23,8 @@ def default_runtime_data() -> dict:
             result['alternative'] = endpoint(alternative)
         return result
 
+    # No guessed reasoning control: deepseek-v32 deployment support is unresolved.
+    # See docs/model-response-controls.md before changing model or output reserve.
     translation = choice('YDBDOC_MODEL_TRANSLATE', 'deepseek-v32', 'yandexgpt-5-pro')
     critic = choice('YDBDOC_MODEL_CHECK', 'yandexgpt-5.1', 'yandexgpt-5-lite')
     return dict(models={'translation': translation, 'critic': critic, 'repair': translation},

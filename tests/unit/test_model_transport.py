@@ -263,3 +263,73 @@ def test_alternative_cannot_repeat_identical_endpoint(harness):
     _, choice, *_ = harness
     with pytest.raises(ValueError, match="different"):
         ModelChoice(choice.main, choice.main)
+
+
+@pytest.mark.parametrize(
+    ('data', 'kind'),
+    [
+        (completion(None), 'empty'),
+        (completion('  '), 'empty'),
+        ({'choices': [{'message': {'content': None, 'reasoning_content': 'analysis'},
+                       'finish_reason': 'length'}]}, 'length'),
+        (completion({'text': 'not a string'}), 'invalid_format'),
+        ({'choices': {}}, 'invalid_format'),
+        ({'choices': [{'message': {}, 'finish_reason': 'stop'}]}, 'invalid_format'),
+        ({'choices': [{'message': {'content': 'tool'}, 'finish_reason': 'tool_calls'}]},
+         'invalid_format'),
+    ],
+)
+def test_response_diagnoses_are_distinct_and_paid_once(harness, data, kind):
+    client, _, events, sent, outcomes = harness
+    data['usage'] = {'prompt_tokens': 12, 'completion_tokens': 8000,
+                     'completion_tokens_details': {'reasoning_tokens': 8000}}
+    client.cost_resolver = lambda *_: Decimal('6.4')
+    outcomes.append(response(data=data))
+    with pytest.raises(ModelError) as caught:
+        call(harness)
+    assert caught.value.kind == kind
+    assert not caught.value.fallback_allowed
+    assert len(sent) == len(client.attempts) == 1
+    assert sum(type(e).__name__ == 'AttemptRecord' for e in events) == 1
+    assert client.cost_breakdown()['total'] == Decimal('6.4')
+    assert client.attempts[0].usage.output_tokens == 8000
+    assert json.loads(client.attempts[0].response_text) == data
+    if kind == 'length':
+        assert 'reasoning_tokens=8000' in str(caught.value)
+
+
+def test_partial_length_text_is_preserved_and_diagnosed(harness):
+    client, _, _, sent, outcomes = harness
+    data = completion('Useful partial translation', {'completion_tokens': 2048})
+    data['choices'][0]['finish_reason'] = 'length'
+    outcomes.append(response(data=data))
+    result = call(harness)
+    assert result.content == 'Useful partial translation'
+    assert result.finish_reason == result.response_status == 'length'
+    assert 'length limit' in result.attempt.error
+    assert len(sent) == len(client.attempts) == 1
+
+
+def test_explicit_yc_reasoning_control_and_output_reserve(harness):
+    client, _, _, sent, outcomes = harness
+    endpoint = Endpoint('yandex_cloud', 'https://cloud.example/v1', 'approved-model',
+                        'key', 'folder', reasoning_effort='none')
+    outcomes.append(response(data=completion()))
+    result = client.chat([], operation='translation', choice=ModelChoice(endpoint), max_tokens=7000)
+    assert result.response_status == 'complete'
+    payload = json.loads(sent[0][0].body)
+    assert payload['reasoning_effort'] == 'none'
+    assert payload['max_tokens'] == 7000
+    assert payload['model'] == 'gpt://folder/approved-model'
+    assert 'thinking' not in payload
+
+
+@pytest.mark.parametrize('effort', ['disabled', '', 0, False, []])
+def test_invalid_reasoning_control_is_rejected_before_http(effort):
+    with pytest.raises(ValueError, match='reasoning_effort'):
+        Endpoint('yandex_cloud', 'https://cloud.example/v1', 'model', 'key', 'folder', effort)
+
+
+def test_reasoning_control_not_guessed_for_other_provider():
+    with pytest.raises(ValueError, match='reasoning_effort'):
+        Endpoint('eliza', 'https://eliza.example', 'model', 'key', reasoning_effort='none')

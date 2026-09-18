@@ -33,6 +33,8 @@ class Endpoint:
     model: str
     token: str = field(repr=False)
     folder_id: str | None = None
+    # Opt-in only: the operator must verify support for this exact deployment.
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if self.provider not in ("eliza", "yandex_cloud"):
@@ -41,6 +43,12 @@ class Endpoint:
             raise ValueError("Model endpoint, model and token are required")
         if self.provider == "yandex_cloud" and not self.folder_id:
             raise ValueError("Yandex Cloud folder_id is required")
+
+        if self.reasoning_effort is not None and (
+            self.provider != "yandex_cloud"
+            or self.reasoning_effort not in ("none", "minimal", "low", "medium", "high", "xhigh")
+        ):
+            raise ValueError("Unsupported reasoning_effort configuration")
 
     @property
     def url(self) -> str:
@@ -106,17 +114,60 @@ class ModelResult:
     attempt: AttemptRecord
     finish_reason: str | None
 
+    @property
+    def response_status(self) -> Literal["complete", "length"]:
+        # A truncated text remains available to the document/repair layer.
+        return "length" if self.finish_reason == "length" else "complete"
+
 
 class ModelError(Exception):
     """Failed transport or unusable response; callers must mark work unfinished."""
 
-    def __init__(self, message: str, *, fallback_allowed: bool = False) -> None:
+    def __init__(
+        self, message: str, *, fallback_allowed: bool = False,
+        kind: Literal["transport", "empty", "length", "invalid_format"] = "transport",
+    ) -> None:
         super().__init__(message)
         self.fallback_allowed = fallback_allowed
+        self.kind = kind
 
 
 def _token_count(value: Any) -> int | None:
     return value if type(value) is int and value >= 0 else None
+
+
+def _completion_error(data: Any, output_limit: int) -> ModelError | None:
+    """Validate the envelope, never interpret reasoning_content as translation."""
+    try:
+        choices = data["choices"]
+        if not isinstance(choices, list) or len(choices) != 1:
+            raise ValueError
+        first = choices[0]
+        message = first["message"]
+        if not isinstance(message, dict) or not ({"content", "reasoning_content"} & message.keys()):
+            raise ValueError
+        finish = first.get("finish_reason")
+        if finish not in (None, "stop", "length"):
+            raise ValueError
+        content = message.get("content")
+        if finish == "length":
+            usage = data.get("usage") or {}
+            details = usage.get("completion_tokens_details") if isinstance(usage, dict) else None
+            reasoning = _token_count(details.get("reasoning_tokens")) if isinstance(details, dict) else None
+            detail = f"; reasoning_tokens={reasoning}" if reasoning is not None else ""
+            if message.get("reasoning_content"):
+                detail += "; reasoning content present (not a translation)"
+            return ModelError(
+                f"Model output length limit reached (max_tokens={output_limit}{detail})",
+                kind="length",
+            )
+        if content is None or (isinstance(content, str) and not content.strip()):
+            return ModelError("Model returned empty completion content", kind="empty")
+        if not isinstance(content, str):
+            raise ValueError
+    except (KeyError, IndexError, TypeError, ValueError):
+        return ModelError("Model returned invalid response JSON/format", kind="invalid_format")
+    return None
 
 
 def _http_error(status: int, data: Any) -> ModelError:
@@ -203,6 +254,8 @@ class ModelClient:
                 "max_tokens": max_tokens,
                 "temperature": temperature,
             }
+            if endpoint.reasoning_effort is not None:
+                payload["reasoning_effort"] = endpoint.reasoning_effort
             if endpoint.provider == "yandex_cloud":
                 payload["model"] = f"gpt://{endpoint.folder_id}/{endpoint.model}"
             request = RequestRecord(
@@ -258,12 +311,7 @@ class ModelClient:
             if not 200 <= status < 300:
                 error = _http_error(status, data)
             else:
-                try:
-                    content = data["choices"][0]["message"]["content"]
-                    if not isinstance(content, str) or not content.strip():
-                        raise ValueError("empty/non-text completion")
-                except (KeyError, IndexError, TypeError, ValueError):
-                    error = ModelError("Model returned no usable text or invalid response JSON")
+                error = _completion_error(data, request.payload["max_tokens"])
         except requests.exceptions.SSLError:
             error = ModelError("Model TLS verification failed")
         except (
@@ -301,4 +349,10 @@ class ModelClient:
                 record.error,
                 Usage(usage.input_tokens, usage.output_tokens, cost, usage.raw),
             )
+        # Preserve partial text for publication/repair; callers already inspect
+        # finish_reason. The attempt still records the length diagnosis and cost.
+        if error is not None and error.kind == "length":
+            content = data["choices"][0]["message"].get("content")
+            if isinstance(content, str) and content.strip():
+                return record, None
         return record, error
