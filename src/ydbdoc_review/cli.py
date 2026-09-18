@@ -25,6 +25,7 @@ from ydbdoc_review.store import ContextExpired, RunStore, create_store
 from ydbdoc_review.verify import run_verify
 
 MODES = ('doc_translate', 'doc_verify', 'doc_continue')
+MODE_ALIASES = {'run': 'doc_translate', 'verify': 'doc_verify', 'continue': 'doc_continue'}
 
 
 def fetch_snapshot(repo: Path, github: GitHubClient, identity: str, token: str):
@@ -39,7 +40,7 @@ def fetch_snapshot(repo: Path, github: GitHubClient, identity: str, token: str):
     return snapshot
 
 
-def execute(mode: str, repository: str, pr: int, config: Path) -> RunResult:
+def execute(mode: str, repository: str, pr: int, config: Path | None = None) -> RunResult:
     token = os.environ.get('GITHUB_TOKEN', '')
     push_token = os.environ.get('GITHUB_PUSH_TOKEN') or token
     if not token:
@@ -130,14 +131,14 @@ def execute(mode: str, repository: str, pr: int, config: Path) -> RunResult:
 
 def app(argv=None):
     parser = argparse.ArgumentParser(description='YDB documentation translation and verification')
-    parser.add_argument('mode', choices=MODES)
+    parser.add_argument('mode', choices=(*MODES, *MODE_ALIASES), nargs='?', default='doc_translate')
     parser.add_argument('--repo', required=True, help='GitHub owner/name')
     parser.add_argument('--pr', required=True, type=int)
-    parser.add_argument('--config', required=True, type=Path, help='Technical model JSON configuration')
+    parser.add_argument('--config', type=Path, help='Optional trusted technical model JSON configuration')
     args = parser.parse_args(argv)
     install_shutdown_handlers()
     try:
-        result = execute(args.mode, args.repo, args.pr, args.config)
+        result = execute(MODE_ALIASES.get(args.mode, args.mode), args.repo, args.pr, args.config)
     except (Exception, KeyboardInterrupt) as exc:
         print(str(exc))
         raise SystemExit(1) from None

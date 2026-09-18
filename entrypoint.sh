@@ -1,7 +1,13 @@
 #!/bin/sh
 set -eu
-case "${INPUT_MODE:-}" in
-  doc_translate|doc_verify|doc_continue) ;;
-  *) echo 'Unsupported mode: use doc_translate, doc_verify or doc_continue' >&2; exit 2 ;;
+case "${INPUT_MODE:-run}" in
+  run|doc_translate) mode=doc_translate ;;
+  verify|doc_verify) mode=doc_verify ;;
+  continue|doc_continue) mode=doc_continue ;;
+  *) echo 'Unsupported mode: use run, verify, continue or doc_* names' >&2; exit 2 ;;
 esac
-exec ydbdoc-review "$INPUT_MODE" --repo "$INPUT_REPO" --pr "$INPUT_PR" --config "$INPUT_CONFIG"
+set -- "$mode" --repo "$INPUT_REPO" --pr "$INPUT_PR"
+if [ -n "${INPUT_CONFIG:-}" ]; then
+  set -- "$@" --config "$INPUT_CONFIG"
+fi
+exec ydbdoc-review "$@"

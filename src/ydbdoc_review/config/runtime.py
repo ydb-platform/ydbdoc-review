@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+from ydbdoc_review.config.defaults import default_runtime_data
 from ydbdoc_review.config.loader import SettingsError
 from ydbdoc_review.document import RequestBudget
 from ydbdoc_review.model import Endpoint, ModelChoice
@@ -23,7 +24,7 @@ class Runtime:
     secrets: tuple[str, ...]
 
 
-def load_runtime(path: Path) -> Runtime:
+def load_runtime(path: Path | None = None) -> Runtime:
     """Load operator supplied endpoints, capacities and trusted RUB/token rates.
 
     The UTF-8 byte upper bound deliberately overcounts tokens rather than guessing
@@ -31,7 +32,7 @@ def load_runtime(path: Path) -> Runtime:
     No tokenizer download/network side effect is needed for offline preflight.
     """
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text()) if path is not None else default_runtime_data()
         if set(data) - {'models', 'context_tokens', 'max_output_tokens', 'timeout_s',
                         'tariffs_rub_per_million', 'glossary'}:
             raise ValueError('Unknown technical configuration field')
@@ -61,6 +62,7 @@ def load_runtime(path: Path) -> Runtime:
                             for m in messages)
         tariffs = {(row['provider'], row['model']):
                    (Decimal(str(row['input'])), Decimal(str(row['output'])))
+                   + ((Decimal(str(row['cached_input'])),) if 'cached_input' in row else ())
                    for row in data.get('tariffs_rub_per_million', [])}
         timeout = float(data.get('timeout_s', 120))
         if not 0 < timeout <= 600:

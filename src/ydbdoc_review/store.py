@@ -79,14 +79,17 @@ def cost_breakdown(attempts) -> dict[str, Decimal | None]:
 
 
 def rub_resolver(*, extract: Callable | None = None,
-                 tariffs: Mapping[tuple[str, str], tuple[Decimal, Decimal]] | None = None):
+                 tariffs: Mapping[tuple[str, str], tuple[Decimal, Decimal] | tuple[Decimal, Decimal, Decimal]] | None = None):
     """Explicit trusted RUB extractor, or configured RUB per million input/output tokens.
 
+    An optional third rate applies to cached prompt tokens.
     No provider field is implicitly trusted as currency. No default/legacy tariff.
     Missing token counts produce None; zero counts are valid. Extractor errors propagate.
     """
     tariffs = dict(tariffs or {})
     for rates in tariffs.values():
+        if len(rates) not in (2, 3):
+            raise ValueError('Expected input/output and optional cached-input tariff')
         for rate in rates:
             if money(rate) is None:
                 raise ValueError('Tariff cannot be unknown')
@@ -103,8 +106,19 @@ def rub_resolver(*, extract: Callable | None = None,
         counts = usage.get('prompt_tokens'), usage.get('completion_tokens')
         if any(type(n) is not int or n < 0 for n in counts):
             return None
-        return sum((Decimal(n) * rate for n, rate in zip(counts, rates, strict=True)),
-                   Decimal(0)) / Decimal(1_000_000)
+        prompt, completion = counts
+        cached = 0
+        if len(rates) == 3:
+            details = usage.get('prompt_tokens_details') or {}
+            if not isinstance(details, dict):
+                return None
+            cached = details.get('cached_tokens', 0)
+            if type(cached) is not int or not 0 <= cached <= prompt:
+                return None
+        total = Decimal(prompt - cached) * rates[0] + Decimal(completion) * rates[1]
+        if len(rates) == 3:
+            total += Decimal(cached) * rates[2]
+        return total / Decimal(1_000_000)
     return resolve
 
 

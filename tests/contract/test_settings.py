@@ -98,8 +98,9 @@ def test_actions_examples_supply_exact_variables():
     action = yaml.safe_load((ROOT / 'action.yml').read_text())
     steps = action['runs']['steps']
     assert len(steps) == 1
-    for variable in VARIABLES:
-        assert steps[0]['env'][variable] == '${{ vars.' + variable + ' }}'
+    assert '${{ vars.' not in (ROOT / 'action.yml').read_text()
+    assert action['inputs']['mode']['default'] == 'run'
+    assert action['inputs']['config']['required'] is False
     for path in (ROOT / 'examples').glob('*.yml'):
         workflow = yaml.safe_load(path.read_text())
         action_steps = [step for job in workflow['jobs'].values() for step in job['steps']
