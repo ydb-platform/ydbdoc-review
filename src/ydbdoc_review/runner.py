@@ -166,9 +166,12 @@ def run_translate(*, repo: str | Path, github: GitHubClient, owner: str, reposit
                   translation_choice: ModelChoice, critic_choice: ModelChoice,
                   repair_choice: ModelChoice, budget: RequestBudget,
                   hooks: RunHooks | None = None, build=build_candidate,
-                  instruction: str = '', glossary: tuple[tuple[str, str], ...] = ()) -> RunResult:
+                  instruction: str = '', glossary: tuple[tuple[str, str], ...] = (),
+                  snapshot: Snapshot | None = None) -> RunResult:
     """Run against locally available source commit objects (fetch is CLI setup).
 
+    A supplied snapshot is the exact commit already fetched by CLI; direct callers
+    may omit it to freeze once here.
     admit raises on exhausted daily budget/storage error, exactly once before model
     creation. Mechanical/no-work/preflight paths neither admit nor create a client.
     publisher.preflight captures expected head before paid work, never refreshes it.
@@ -223,7 +226,7 @@ def run_translate(*, repo: str | Path, github: GitHubClient, owner: str, reposit
 
     try:
         require_actor(settings, actor)
-        snapshot = freeze_snapshot(github, owner, repository, pr_number)
+        snapshot = snapshot or freeze_snapshot(github, owner, repository, pr_number)
         result = replace(result, snapshot=snapshot)
         changes = list_changes(github, owner, repository, pr_number)
         plan = prepare_translation_plan(snapshot, changes, partial(read_at_sha, str(repo)), settings)

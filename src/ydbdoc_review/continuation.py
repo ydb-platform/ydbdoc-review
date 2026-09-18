@@ -17,7 +17,7 @@ from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.model import ModelChoice, ModelClient
 from ydbdoc_review.ops.continue_cmd import find_latest_continue_instruction
-from ydbdoc_review.plan import PlanError, freeze_snapshot
+from ydbdoc_review.plan import PlanError, Snapshot, freeze_snapshot
 from ydbdoc_review.publication import PublicationError, Publisher, freeze
 from ydbdoc_review.quality import Issue, Location
 from ydbdoc_review.quality_loop import QualityLoopInterrupted, SelectedFile, run_quality_loop
@@ -90,10 +90,14 @@ def run_continue(*, repo: str | Path, github: GitHubClient, owner: str, reposito
                  store: YDBStore, critic_choice: ModelChoice, repair_choice: ModelChoice,
                  budget: RequestBudget, hooks: RunHooks | None = None,
                  model_factory: Callable[[RunStore], ModelClient] | None = None,
-                 model_options: Mapping | None = None, build=build_candidate) -> RunResult:
+                 model_options: Mapping | None = None, build=build_candidate,
+                 source_snapshot: Snapshot | None = None,
+                 target_snapshot: Snapshot | None = None) -> RunResult:
     """Real component entry: lookup → SHA guards → admission → loop → same PR/save.
 
-    Caller fetches commit objects into repo. Default model factory records through
+    Caller fetches commit objects into repo and may pass their frozen snapshots.
+    Without snapshots, direct callers freeze each PR once here.
+    Default model factory records through
     the new adapter; optional factory receives that adapter, never the old run_id.
     hooks add reporting/observability to mandatory persistence, not replace it.
     """
@@ -149,10 +153,10 @@ def run_continue(*, repo: str | Path, github: GitHubClient, owner: str, reposito
         context = store.latest_context(adapter.source_pr)
         adapter.source_pr = context['source_pr']
         source_owner, source_repo, source_number = adapter.source_pr.split('/')
-        source = freeze_snapshot(github, source_owner, source_repo, int(source_number))
+        source = source_snapshot or freeze_snapshot(github, source_owner, source_repo, int(source_number))
         receipt = context['result']['publication']
         target_owner, target_repo = receipt['repository'].split('/')
-        target = freeze_snapshot(github, target_owner, target_repo, receipt['pr_number'])
+        target = target_snapshot or freeze_snapshot(github, target_owner, target_repo, receipt['pr_number'])
         result = replace(result, snapshot=source)
         if source.source_sha != context['source_sha'] or target.head_sha != context['result_sha']:
             raise PlanError(CHANGED)

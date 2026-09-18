@@ -72,9 +72,11 @@ def run_verify(*, repo: str | Path, github: GitHubClient, owner: str, repository
                model_factory: Callable[[], ModelClient], admit: Callable[[], None],
                critic_choice: ModelChoice, repair_choice: ModelChoice, budget: RequestBudget,
                hooks: RunHooks | None = None, build=build_candidate,
-               instruction: str = '', glossary: tuple[tuple[str, str], ...] = ()) -> RunResult:
+               instruction: str = '', glossary: tuple[tuple[str, str], ...] = (),
+               snapshot: Snapshot | None = None) -> RunResult:
     """Check/repair and guarded-publish to this open PR, including a no-op receipt.
 
+    Reuse the CLI-fetched snapshot when supplied; direct callers freeze once here.
     Admission happens once after all preflight checks. The transport records all
     critic/repair requests and costs through model_factory's existing callbacks.
     Result files are read from candidate; files (initial translations) stays empty.
@@ -117,7 +119,7 @@ def run_verify(*, repo: str | Path, github: GitHubClient, owner: str, repository
 
     try:
         require_actor(settings, actor)
-        snapshot = freeze_snapshot(github, owner, repository, pr_number)
+        snapshot = snapshot or freeze_snapshot(github, owner, repository, pr_number)
         result = replace(result, snapshot=snapshot)
         if snapshot.merged:
             raise PlanError('doc_verify currently requires an open PR: same-PR repair publication '

@@ -32,7 +32,7 @@ def fetch_snapshot(repo: Path, github: GitHubClient, identity: str, token: str):
     owner, name, number = identity.split('/')
     snapshot = freeze_snapshot(github, owner, name, int(number))
     url = remote_push_url(f'https://github.com/{snapshot.source_repo}.git', token)
-    proc = subprocess.run(['git', '-C', str(repo), 'fetch', '--no-tags', '--', url,
+    proc = subprocess.run(['git', '-C', str(repo), 'fetch', '--depth=1', '--no-tags', '--', url,
                            snapshot.source_sha], capture_output=True, timeout=120)
     if proc.returncode:
         # stderr may contain remote credentials; do not publish it.
@@ -80,12 +80,19 @@ def execute(mode: str, repository: str, pr: int, config: Path | None = None) -> 
             subprocess.run(['git', 'init', '--bare', str(repo)], check=True,
                            capture_output=True, timeout=30)
             snapshot = fetch_snapshot(repo, github, current, token)
+            snapshots = {current: snapshot}
+
+            def fetched(identity):
+                if identity not in snapshots:
+                    snapshots[identity] = fetch_snapshot(repo, github, identity, token)
+                return snapshots[identity]
+
             target_identity = current
             if mode == 'doc_continue':
-                fetch_snapshot(repo, github, context['source_pr'], token)
+                source_snapshot = fetched(context['source_pr'])
                 receipt = context['result']['publication']
                 target_identity = f"{receipt['repository']}/{receipt['pr_number']}"
-                snapshot = fetch_snapshot(repo, github, target_identity, token)
+                snapshot = fetched(target_identity)
             target_repo, target_number = target_identity.rsplit('/', 1)
             publisher = Publisher(github, snapshot.source_repo,
                                   f'https://github.com/{snapshot.source_repo}.git',
@@ -102,8 +109,9 @@ def execute(mode: str, repository: str, pr: int, config: Path | None = None) -> 
             if mode == 'doc_continue':
                 from ydbdoc_review.continuation import run_continue
                 return run_continue(**options, store=store, model_options=model_options,
+                                    source_snapshot=source_snapshot, target_snapshot=snapshot,
                                     hooks=RunHooks(report=reporter, cancelled=is_shutdown_requested, secrets=secrets))
-            options.update(model_factory=partial(adapter.model_factory, **model_options),
+            options.update(snapshot=snapshot, model_factory=partial(adapter.model_factory, **model_options),
                            admit=partial(adapter.admit, settings.daily_budget_rub),
                            hooks=adapter.hooks(report=reporter, cancelled=is_shutdown_requested, secrets=secrets),
                            glossary=runtime.glossary)
