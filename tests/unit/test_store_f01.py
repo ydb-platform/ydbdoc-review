@@ -41,7 +41,7 @@ def test_context_scale_and_exact_correspondence(db):  # noqa: F811
     persisted.save(result)
     large = store.get(persisted.run_id, 'context')
     assert large == small
-    context = decode(large)
+    context = store.context(persisted.run_id)
     assert len(large) < 20000
     assert not {'candidate', 'quality', 'plan', 'files', 'selected_files'} & context['result'].keys()
     resumed = select_files(context, 'Fix missing parts')
@@ -67,4 +67,8 @@ def test_context_call_references_resolve_to_canonical_objects(db):  # noqa: F811
     assert context['requests'] == ['request/req/0']
     assert context['attempts'] == ['attempt/req/0']
     assert decode(store.get(persisted.run_id, context['requests'][0])) == decode(encode(attempt.request))
-    assert decode(store.get(persisted.run_id, context['attempts'][0])) == decode(encode(attempt))
+    saved = decode(store.get(persisted.run_id, context['attempts'][0]))
+    assert saved.pop('request_ref') == context['requests'][0]
+    expected = decode(encode(attempt))
+    expected.pop('request')
+    assert saved == expected

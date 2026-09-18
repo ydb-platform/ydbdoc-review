@@ -161,6 +161,40 @@ def decode(value: bytes):
     return json.loads(value, object_hook=_restore)
 
 
+def _compact_known(files):
+    """Remove only reconstructible source/chunk strings; preserve stable F06 maps."""
+    compact = decode(encode(files))
+    for file in compact:
+        initial = file.get('initial')
+        protected = initial.get('protected') if initial else None
+        if not protected:
+            continue
+        if protected.get('source') == file.get('source'):
+            protected.pop('source')
+            protected['source_ref'] = 'selected_source'
+        for result in initial.get('chunks', ()):
+            chunk = result['chunk']
+            if chunk.get('text') == protected['text'][chunk['start']:chunk['end']]:
+                chunk.pop('text')
+                chunk['text_ref'] = 'protected_slice'
+    return compact
+
+
+def _expand_known(files):
+    for file in files:
+        initial = file.get('initial')
+        protected = initial.get('protected') if initial else None
+        if not protected:
+            continue
+        if protected.pop('source_ref', None) == 'selected_source':
+            protected['source'] = file['source']
+        for result in initial.get('chunks', ()):
+            chunk = result['chunk']
+            if chunk.pop('text_ref', None) == 'protected_slice':
+                chunk['text'] = protected['text'][chunk['start']:chunk['end']]
+    return files
+
+
 def chunk_payload(data: bytes, size: int = CHUNK_SIZE) -> list[bytes]:
     """Reused byte slicing primitive from ops/transcripts, without legacy imports."""
     if size <= 0:
@@ -227,8 +261,19 @@ class YDBStore:
             raise StorageError(f'YDB: {exc}') from exc
 
     def put(self, run_id: str, key: str, data: bytes):
+        # Stable generations make retries reuse parts, including after an ambiguous
+        # write failure. Compare the small manifest before touching unchanged content.
         # Publish manifest last: failed overwrite leaves previous object readable.
-        generation = uuid4().hex
+        generation = hashlib.sha256(data).hexdigest()
+        rows = self._parts(run_id, key, '')
+        if rows:
+            try:
+                previous = decode(bytes(rows[0].payload))
+                if (previous['sha256'] == generation
+                        and utc(self.clock()) < previous['created_at'] + timedelta(seconds=TTL_SECONDS)):
+                    return
+            except Exception as exc:
+                raise StorageError(f'Invalid YDB manifest {key}: {exc}') from exc
         created = utc(self.clock())
         parts = chunk_payload(data)
         for index, part in enumerate(parts):
@@ -281,7 +326,19 @@ class YDBStore:
         if data is None:
             raise ContextExpired()
         try:
-            return decode(data)
+            context = decode(data)
+            for name in ('known_files', 'final_files'):
+                ref = context.pop(name + '_ref', None)
+                if ref is not None:
+                    content = self.get(run_id, ref)
+                    if content is None:
+                        raise ContextExpired()
+                    context[name] = decode(content)
+                    if name == 'known_files':
+                        context[name] = _expand_known(context[name])
+            return context
+        except (StorageError, ContextExpired):
+            raise
         except Exception as exc:
             raise StorageError(f'Invalid context: {exc}') from exc
 
@@ -460,6 +517,7 @@ class RunStore:
         self._requests = {}
         self._ready = set()
         self._attempts = {}
+        self._context = None
 
     def admit(self, limit: Decimal):
         if self._admission is not None:
@@ -503,7 +561,12 @@ class RunStore:
                           status='failed' if attempt.error else 'completed',
                           operation=attempt.request.operation, cost=attempt.usage.cost_rub,
                           payload=encode(attempt.usage))
-        self.store.put(self.run_id, f'attempt/{key}', encode(attempt))
+        self._requests[key] = attempt.request
+        self.store.put(self.run_id, f'request/{key}', encode(attempt.request))
+        self.store.put(self.run_id, f'attempt/{key}', encode({
+            'request_ref': f'request/{key}',
+            **{field.name: getattr(attempt, field.name) for field in fields(attempt)
+               if field.name != 'request'}}))
 
     def model_factory(self, **kwargs) -> ModelClient:
         return _RecordedClient(self, **kwargs)
@@ -521,16 +584,6 @@ class RunStore:
             self._requests[self._id(attempt.request)] = attempt.request
         for attempt in self._attempts.values():
             self.record_attempt(attempt)
-        unresolved = [AttemptRecord(request, None, None, 'Outcome unknown', Usage())
-                      for key, request in self._requests.items()
-                      if key in self._ready and key not in self._attempts]
-        costs = cost_breakdown((*self._attempts.values(), *unresolved))
-        self.store.ledger(self.run_id, 'summary', created=self.created, mode=self.mode,
-                          status=result.status, cost=costs['total'], payload=encode({
-                              'cost_breakdown': costs, 'cancelled': result.cancelled,
-                              'errors': result.errors, 'source_pr': self.source_pr,
-                              'result_pr': (f'{result.publication.repository}/{result.publication.pr_number}'
-                                            if result.result_sha else None)}))
         for key, request in self._requests.items():
             self.store.put(self.run_id, f'request/{key}', encode(request))
         # Final candidate bytes, not initial FileResult text. Only selected/changed
@@ -571,6 +624,42 @@ class RunStore:
         # bytes for the other known files too, without capturing repository data.
         if result.candidate:
             final_files.update({path: result.candidate.read(path) for path in known})
+        refs = {}
+        for name, value in (('known_files', _compact_known(tuple(known.values()))), ('final_files', final_files)):
+            data = encode(value)
+            key = f'documents/{name}/{hashlib.sha256(data).hexdigest()}'
+            self.store.put(self.run_id, key, data)
+            refs[name + '_ref'] = key
+        self._context = {
+            'schema_version': 1,
+            'run_id': self.run_id, 'source_pr': self.source_pr,
+            'continuation_count': self.continuation_count,
+            'source_sha': (result.result_sha if result.publication and result.result_sha
+                           and self.source_pr == f'{result.publication.repository}/{result.publication.pr_number}'
+                           else result.snapshot.source_sha if result.snapshot else None),
+            **refs,
+            'result_sha': result.result_sha, 'candidate_sha': result.candidate_sha,
+            'requests': tuple(f'request/{key}' for key in self._requests),
+            'attempts': tuple(f'attempt/{key}' for key in self._attempts)}
+        self.save_status(result)
+
+    def save_status(self, result):
+        """Persist report/status metadata only; never traverse or rewrite documents.
+
+        Requires a successfully assembled context from save (or an existing run).
+        Callback/transport reconciliation belongs to save, not report finalization.
+        """
+        if self._context is None:
+            raw = self.store.get(self.run_id, 'context')
+            if raw is None:
+                raise StorageError('No saved context for metadata update')
+            self._context = decode(raw)
+        costs = self._context.get('cost_breakdown')
+        if costs is None:
+            unresolved = [AttemptRecord(request, None, None, 'Outcome unknown', Usage())
+                          for key, request in self._requests.items()
+                          if key in self._ready and key not in self._attempts]
+            costs = cost_breakdown((*self._attempts.values(), *unresolved))
         summary = {name: getattr(result, name) for name in
                    ('mode', 'status', 'message', 'checked_sha', 'issues',
                     'unfinished_files', 'errors', 'cancelled')}
@@ -579,18 +668,15 @@ class RunStore:
                                    'url', 'draft', 'head_confirmed')}
                                  if result.publication else None)
         summary['cost_breakdown'] = costs
-        self.store.put(self.run_id, 'context', encode({
-            'schema_version': 1,
-            'run_id': self.run_id, 'source_pr': self.source_pr,
-            'continuation_count': self.continuation_count,
-            'source_sha': (result.result_sha if result.publication and result.result_sha
-                           and self.source_pr == f'{result.publication.repository}/{result.publication.pr_number}'
-                           else result.snapshot.source_sha if result.snapshot else None),
-            'known_files': tuple(known.values()),
-            'result_sha': result.result_sha, 'candidate_sha': result.candidate_sha,
-            'result': summary, 'final_files': final_files, 'cost_breakdown': costs,
-            'requests': tuple(f'request/{key}' for key in self._requests),
-            'attempts': tuple(f'attempt/{key}' for key in self._attempts)}))
+        self.store.ledger(self.run_id, 'summary', created=self.created, mode=self.mode,
+                          status=result.status, cost=costs['total'], payload=encode({
+                              'cost_breakdown': costs, 'cancelled': result.cancelled,
+                              'errors': result.errors, 'source_pr': self.source_pr,
+                              'result_pr': (f'{result.publication.repository}/{result.publication.pr_number}'
+                                            if result.publication and result.result_sha else None)}))
+        context = {**self._context, 'result': summary, 'cost_breakdown': costs}
+        self.store.put(self.run_id, 'context', encode(context))
+        self._context = context
 
     def hooks(self, *, report=None, cancelled=None, secrets=()):
         from ydbdoc_review.runner import RunHooks
