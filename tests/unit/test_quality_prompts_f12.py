@@ -132,6 +132,9 @@ def test_repair_http_payload_excludes_next_line_finding(wire, monkeypatch, newli
     class SplitBudget:
         max_output_tokens = 10000
 
+        def for_choice(self, choice):
+            return self
+
         def fits(self, messages, **kwargs):
             return False  # Force the supplied windows instead of the whole document.
 
