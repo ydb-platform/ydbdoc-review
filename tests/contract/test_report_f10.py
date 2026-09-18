@@ -2,6 +2,7 @@
 # ruff: noqa: F811 -- pytest fixtures
 import base64
 import json
+import subprocess
 from dataclasses import replace
 from urllib.parse import urlsplit
 
@@ -12,7 +13,7 @@ from tests.contract.test_report_t14 import located  # noqa: F401
 from tests.contract.test_translate_t10 import system as translate_system  # noqa: F401
 from ydbdoc_review.build import BuildResult
 from ydbdoc_review.github.client import GitHubClient
-from ydbdoc_review.links import LinkResult, UncheckedAnchor
+from ydbdoc_review.links import Candidate, LinkResult, UncheckedAnchor
 from ydbdoc_review.quality import Issue, Location
 from ydbdoc_review.quality_loop import LoopResult, RoundTrace
 from ydbdoc_review.report import (
@@ -153,3 +154,37 @@ def test_stale_green_label_cannot_hide_errors_or_partial_files(located):
     for result in (replace(located, status='GREEN'),
                    replace(located, status='GREEN', issues=(), unfinished_files=('a.md',))):
         assert all('GREEN' not in c.body for c in render_reports(result, current_pr='up/docs/1'))
+
+
+@pytest.mark.parametrize('path', ['../../outside.md', '/absolute.md', r'bad\path.md'])
+def test_malformed_issue_path_preserves_all_delivery_channels(located, boundary, path):
+    state, calls = boundary
+    result = replace(located, issues=(replace(located.issues[0], path=path),))
+    create_reporter(GitHubClient('dummy'), current_pr='up/docs/1', authorized=True)(result)
+    bodies = [data['body'] for _, _, data in calls if 'body' in data]
+    assert len(bodies) == 3
+    assert all('RED — мержить нельзя' in body and 'Итого: 3.423456790 ₽' in body for body in bodies)
+    assert 'Текст файла недоступен; строки перевода не установлены' in bodies[-1]
+    assert '/blob/' not in bodies[-1].replace('https://github.com/up/docs/blob/' + 'a' * 40 + '/diagnostics.json', '')
+    assert state['artifact']['issues'][0]['path'] == path
+
+
+@pytest.mark.parametrize('source', [False, True])
+@pytest.mark.parametrize('error', [ValueError('invalid path'), OSError('unreadable snapshot'),
+                                   RuntimeError('git object unavailable'), subprocess.TimeoutExpired('git', 60)])
+def test_unreadable_location_preserves_channels_cost_and_honest_coordinates(
+        located, boundary, monkeypatch, source, error):
+    _, calls = boundary
+    result = replace(located, plan=None) if source else located
+    def fail(*args, **kwargs):
+        raise error
+    if source:
+        monkeypatch.setattr(Candidate, 'open', fail)
+    else:
+        monkeypatch.setattr(Candidate, 'read', fail)
+    create_reporter(GitHubClient('dummy'), current_pr='up/docs/1', authorized=True)(result)
+    bodies = [data['body'] for _, _, data in calls if 'body' in data]
+    assert len(bodies) == 3
+    assert all('Итого: 3.423456790 ₽' in body for body in bodies)
+    assert ('Исходник недоступен' if source else 'Текст файла недоступен') in bodies[-1]
+    assert ('/ru/a.md#' if source else '/en/a.md#') not in bodies[-1]

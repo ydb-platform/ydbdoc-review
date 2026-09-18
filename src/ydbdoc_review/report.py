@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from urllib.parse import quote
 
 from ydbdoc_review.diagnostics import redact_known
 from ydbdoc_review.github.client import GitHubClient
-from ydbdoc_review.links import Candidate
+from ydbdoc_review.links import Candidate, safe_path
 from ydbdoc_review.runner import RunResult
 
 
@@ -62,6 +63,7 @@ def _location(location, text, repository, sha, path, label, clean, secrets):
     if location is None or text is None:
         return f'{label}: место не установлено.'
     try:
+        safe_path(path)
         location.validate(text)
     except ValueError:
         return f'{label}: место не установлено; цитата не подтверждена снимком.'
@@ -244,7 +246,12 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
     for issue in _examples(result.issues):
         detail.append(f'{clean(issue.path)} — {issue.severity}: {clean(issue.problem)}\n\n'
                       f'Исправить вручную: {clean(issue.expected_fix)}')
-        data = result.candidate.read(issue.path) if result.candidate else None
+        read_error = None
+        try:
+            data = result.candidate.read(issue.path) if result.candidate else None
+        except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            data = None
+            read_error = exc
         try:
             text = data.decode('utf-8') if data is not None else None
         except UnicodeDecodeError:
@@ -254,7 +261,9 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
                                     issue.path, 'Перевод / место исправления', clean, secrets))
         else:
             detail.append('Перевод: опубликованное место исправления не установлено.')
-        if data is None and result.candidate:
+        if read_error is not None:
+            detail.append('Текст файла недоступен; строки перевода не установлены: ' + clean(read_error))
+        elif data is None and result.candidate:
             detail.append('Файл отсутствует в кандидате; строки перевода отсутствуют.')
         elif text is None:
             detail.append('Текст файла недоступен; строки перевода не установлены.')
@@ -267,9 +276,12 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
                 if selected and issue.path.startswith(f'ydb/docs/{selected.target_lang}/'):
                     language = 'ru' if selected.target_lang == 'en' else 'en'
                     proposed = f'ydb/docs/{language}/' + issue.path.split('/', 3)[3]
-                    original = Candidate.open(result.candidate.repo, snapshot.source_sha)
-                    if original.text(proposed) == selected.source:
-                        source_path, source_text = proposed, selected.source
+                    try:
+                        original = Candidate.open(result.candidate.repo, snapshot.source_sha)
+                        if original.text(proposed) == selected.source:
+                            source_path, source_text = proposed, selected.source
+                    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                        detail.append('Исходник недоступен; строки не установлены: ' + clean(exc))
             if source_path and snapshot:
                 detail.append(_location(issue.source, source_text, snapshot.source_repo,
                                         snapshot.source_sha, source_path, 'Исходник', clean, secrets))
