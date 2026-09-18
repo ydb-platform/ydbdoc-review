@@ -336,11 +336,36 @@ class YDBStore:
                     context[name] = decode(content)
                     if name == 'known_files':
                         context[name] = _expand_known(context[name])
+                        for file in context[name]:
+                            if file.get('initial'):
+                                self.hydrate_file(run_id, file['initial'])
             return context
         except (StorageError, ContextExpired):
             raise
         except Exception as exc:
             raise StorageError(f'Invalid context: {exc}') from exc
+
+    def hydrate_file(self, run_id, data):
+        """Restore protected answers by explicit durable content references."""
+        for chunk in data.get('chunks', ()):
+            ref = chunk.get('response_content_ref')
+            if ref is None:
+                continue
+            raw = self.get(ref.get('run_id', run_id), ref['key'])
+            if raw is None:
+                raise ContextExpired()
+            stored = decode(raw)
+            try:
+                content = (json.loads(stored['response_text'])['choices'][0]['message']['content']
+                           if ref['key'].startswith('attempt/') else stored)
+                if not isinstance(content, str):
+                    raise ValueError('Non-text response reference')
+                if ref.get('sha256') and hashlib.sha256(encode(content)).hexdigest() != ref['sha256']:
+                    raise ValueError('Response reference digest mismatch')
+                chunk['response'] = content
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                raise StorageError(f'Invalid response reference: {exc}') from exc
+        return data
 
     def ledger(self, run_id, entry_id, *, created, mode, status, operation='', cost=None,
                payload=b''):
@@ -571,8 +596,47 @@ class RunStore:
     def model_factory(self, **kwargs) -> ModelClient:
         return _RecordedClient(self, **kwargs)
 
+    def _externalize_file(self, data):
+        # The raw provider envelope is authoritative. This index is used only
+        # for exact-content deduplication of synthetic/older state without IDs.
+        answers = {}
+        for key, attempt in self._attempts.items():
+            try:
+                content = json.loads(attempt.response_text)['choices'][0]['message']['content']
+            except (TypeError, ValueError, KeyError, IndexError):
+                continue
+            if isinstance(content, str):
+                answers.setdefault(content, []).append('attempt/' + key)
+        for chunk in data.get('chunks', ()):
+            response = chunk.get('response')
+            if response is None:
+                continue
+            digest = hashlib.sha256(encode(response)).hexdigest()
+            previous = chunk.get('response_content_ref')
+            if previous and previous.get('sha256') == digest:
+                chunk.pop('response')
+                continue
+            explicit = chunk.get('response_ref')
+            matches = answers.get(response, [])
+            if explicit in matches:
+                key = explicit
+            elif matches:
+                # A content reference does not assert which call produced an
+                # imported chunk. Identical bytes can share any canonical copy;
+                # only response_ref records actual call provenance.
+                key = sorted(matches)[0]
+            else:
+                # Imported result without a recorded call: never invent call ID.
+                payload = encode(response)
+                key = 'response/' + hashlib.sha256(payload).hexdigest()
+                self.store.put(self.run_id, key, payload)
+            chunk.pop('response')
+            chunk['response_content_ref'] = {'run_id': self.run_id, 'key': key, 'sha256': digest}
+        return data
+
     def file_progress(self, result):
-        self.store.put(self.run_id, f'file/{result.path}', encode(file_result_to_dict(result)))
+        data = self._externalize_file(file_result_to_dict(result))
+        self.store.put(self.run_id, f'file/{result.path}', encode(data))
 
     def candidate_progress(self, candidate):
         self.store.put(self.run_id, 'candidate', encode({'sha': candidate.sha}))
@@ -624,6 +688,10 @@ class RunStore:
         # bytes for the other known files too, without capturing repository data.
         if result.candidate:
             final_files.update({path: result.candidate.read(path) for path in known})
+        for file in known.values():
+            if file.get('initial'):
+                # Mapping inputs may belong to a caller; never mutate their state.
+                file['initial'] = self._externalize_file(decode(encode(file['initial'])))
         refs = {}
         for name, value in (('known_files', _compact_known(tuple(known.values()))), ('final_files', final_files)):
             data = encode(value)

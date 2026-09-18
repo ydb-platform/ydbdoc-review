@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from importlib.resources import files
 from typing import Any
@@ -129,6 +129,10 @@ class ChunkResult:
     issues: tuple[DocumentIssue, ...] = ()
     unfinished: bool = False
     status: str = "complete"
+    # Actual provider attempt that produced this protected answer.
+    response_ref: str | None = None
+    # Storage location survives continuation; not part of document equivalence.
+    response_content_ref: dict[str, str] | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -512,7 +516,8 @@ def file_result_from_dict(data: dict[str, Any]) -> FileResult:
             file_id=raw["file_id"],
         )
     chunks = tuple(ChunkResult(Chunk(**r["chunk"]), r["response"], r["text"],
-                               issue_list(r["issues"]), r["unfinished"], r["status"])
+                               issue_list(r["issues"]), r["unfinished"], r["status"], r.get("response_ref"),
+                               r.get("response_content_ref"))
                    for r in data["chunks"])
     return FileResult(data["path"], data["text"], issue_list(data["issues"]),
                       data["unfinished"], chunks, document, data["file_id"])
@@ -543,6 +548,7 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
                for chunk in chunks]
     issues = list(document.issues)
     for chunk in chunks:
+        response_ref = None
         response = None
         text = None
         errors: tuple[DocumentIssue, ...] = ()
@@ -552,6 +558,9 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
             answer = client.chat(messages(chunk.text), operation="translation", choice=choice,
                                  max_tokens=budget.max_output_tokens)
             response = answer.content
+            attempt = getattr(answer, "attempt", None)
+            if attempt is not None:
+                response_ref = f"attempt/{attempt.request.id}/{attempt.request.attempt}"
             if not response or not response.strip():
                 raise ValueError("No usable translation returned")
             truncated = unfinished = answer.finish_reason == "length"
@@ -569,7 +578,7 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
         status = ("missing" if text is None else "truncated" if truncated
                   else "damaged" if errors else "complete")
         unfinished = unfinished or status != "complete"
-        results[chunk.index] = ChunkResult(chunk, response, text, errors, unfinished, status)
+        results[chunk.index] = ChunkResult(chunk, response, text, errors, unfinished, status, response_ref)
         issues.extend(errors)
         result = assemble_file(path, document, tuple(results), issues=tuple(issues))
         if on_progress:
