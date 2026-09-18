@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from hashlib import sha256
 from importlib.resources import files
 from typing import Any
@@ -156,17 +156,30 @@ class RequestBudget:
     context_tokens: int
     max_output_tokens: int
     count_tokens: Callable[[list[dict[str, Any]]], int]
+    count_output_tokens: Callable[[str], int] | None = None
+
+    def for_choice(self, choice: ModelChoice) -> RequestBudget:
+        """Scope provider counters to this request's primary and alternative."""
+        factory = getattr(self.count_tokens, "for_choice", None)
+        if factory is None:
+            return self  # Explicit injected counter already owns its model binding.
+        counter = factory(choice)
+        return replace(self, count_tokens=counter, count_output_tokens=counter.count_output)
 
     def fits(self, messages: list[dict[str, Any]], *, expected_output: str = "") -> bool:
         if self.max_output_tokens <= 0 or self.context_tokens <= self.max_output_tokens:
             raise CapacityError("Invalid context/output token budget")
         count = self.count_tokens(messages)
-        if count < 0:
-            raise CapacityError("Negative request token count")
+        if type(count) is not int or count < 0:
+            raise CapacityError("Invalid request token count")
         # Source-length output estimate also respects the endpoint's response
         # ceiling. Translation can expand; a length finish remains incomplete.
-        output = (self.count_tokens([{"role": "assistant", "content": expected_output}])
+        output = (self.count_output_tokens(expected_output)
+                  if self.count_output_tokens is not None else
+                  self.count_tokens([{"role": "assistant", "content": expected_output}])
                   - self.count_tokens([{"role": "assistant", "content": ""}]))
+        if type(output) is not int or output < 0:
+            raise CapacityError("Invalid output token count")
         return (count + self.max_output_tokens <= self.context_tokens
                 and output <= self.max_output_tokens)
 
@@ -391,14 +404,27 @@ def chunk_document(document: ProtectedDocument, fits: Callable[[str], bool]) -> 
     start = 0
     while start < len(document.text):
         ends = [end for end in document.boundaries if end > start]
-        # Scan forward; stop at the first over-capacity candidate. Each chosen
-        # chunk is checked in its actual request; no character-size estimate.
+        # Binary search keeps provider-tokenizer calls logarithmic in the usual
+        # case. Each accepted candidate is measured, never inferred from length.
+        # Counts are not strictly monotonic (token merges, dynamic glossary), so
+        # a failed search must inspect remaining boundaries before refusing.
         chosen = None
-        for end in ends:
+        checked = set()
+        low, high = 0, len(ends) - 1
+        while low <= high:
+            middle = (low + high) // 2
+            end = ends[middle]
+            checked.add(end)
             if fits(document.text[start:end]):
                 chosen = end
+                low = middle + 1
             else:
-                break
+                high = middle - 1
+        if chosen is None:
+            for end in reversed(ends):
+                if end not in checked and fits(document.text[start:end]):
+                    chosen = end
+                    break
         if chosen is None:
             raise CapacityError(f"No safe chunk fits at protected offset {start}")
         chunks.append(make_chunk(document, len(chunks), start, chosen))
@@ -534,6 +560,7 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
     """
     document = None
     try:
+        budget = budget.for_choice(choice)
         document = protect(source, path=path)
         def messages(text: str) -> list[dict[str, Any]]:
             return translation_messages(text, source_lang=source_lang, target_lang=target_lang, path=path,

@@ -129,6 +129,7 @@ def repair_document(file: SelectedFile, current: str, findings: tuple[Issue, ...
     responses = []
     fatal = False
     try:
+        budget = budget.for_choice(choice)
         # T08 validates complete destinations; T07 owns their exact parser spans.
         # Apply once before protection so code/config and other URLs stay opaque.
         document = protect(replace_validated_urls(file.source, replacements))

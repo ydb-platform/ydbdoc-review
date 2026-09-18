@@ -18,6 +18,11 @@ CHOICE = ModelChoice(Endpoint('eliza', 'https://example.test', 'test', 'test'))
 SOURCE = ''.join(f'Paragraph {i} with original text.\n\n' for i in range(6))
 
 
+class Budget(SimpleNamespace):
+    def for_choice(self, choice):
+        return self
+
+
 class Client:
     def __init__(self, absent=()):
         self.absent = absent
@@ -34,7 +39,7 @@ class Client:
 
 def translate(absent=(), source=SOURCE):
     snapshots = []
-    budget = SimpleNamespace(max_output_tokens=1000,
+    budget = Budget(max_output_tokens=1000,
                              fits=lambda messages, expected_output='': len(expected_output) <= 42)
     result = translate_document(source, path='en/page.md', source_lang='ru', target_lang='en',
                                 client=Client(absent), choice=CHOICE, budget=budget,
@@ -133,7 +138,7 @@ def test_marker_boundary_cannot_be_split_and_unknown_schema_is_explicit():
 
 def test_code_comment_translation_and_executable_bytes_survive_serialization():
     source = '```python\nx = "original" # original comment\n```\n'
-    budget = SimpleNamespace(max_output_tokens=1000, fits=lambda *args, **kwargs: True)
+    budget = Budget(max_output_tokens=1000, fits=lambda *args, **kwargs: True)
     result = translate_document(source, path='page.md', source_lang='ru', target_lang='en',
                                 client=Client(), choice=CHOICE, budget=budget)
     resumed = state.file_result_from_dict(json.loads(json.dumps(state.file_result_to_dict(result))))
@@ -152,7 +157,7 @@ def test_nonempty_truncation_and_damaged_markers_keep_explicit_status_and_respon
     for reason, status in [('length', 'truncated'), ('stop', 'damaged')]:
         result = translate_document('`code` Original.', path='page.md', source_lang='ru', target_lang='en',
                                     client=Damaged(reason), choice=CHOICE,
-                                    budget=SimpleNamespace(max_output_tokens=1000, fits=lambda *a, **kw: True))
+                                    budget=Budget(max_output_tokens=1000, fits=lambda *a, **kw: True))
         assert result.unfinished and result.chunks[0].status == status
         assert result.chunks[0].response == result.chunks[0].text == 'Partial ⟦broken'
         assert state.file_result_from_dict(json.loads(json.dumps(state.file_result_to_dict(result)))) == result

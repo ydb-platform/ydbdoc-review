@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ydbdoc_review.config.defaults import default_runtime_data
 from ydbdoc_review.config.loader import SettingsError
+from ydbdoc_review.config.tokenization import ProviderTokenCounter
 from ydbdoc_review.document import RequestBudget
 from ydbdoc_review.model import Endpoint, ModelChoice
 from ydbdoc_review.store import rub_resolver
@@ -24,12 +25,12 @@ class Runtime:
     secrets: tuple[str, ...]
 
 
-def load_runtime(path: Path | None = None) -> Runtime:
+def load_runtime(path: Path | None = None, *, token_counter=None) -> Runtime:
     """Load operator supplied endpoints, capacities and trusted RUB/token rates.
 
-    The UTF-8 byte upper bound deliberately overcounts tokens rather than guessing
-    a characters/token ratio. context_tokens must fit BOTH configured endpoints.
-    No tokenizer download/network side effect is needed for offline preflight.
+    Tokenization uses the configured models, including alternatives. Construction
+    performs no requests; capacity checks use the provider tokenizer lazily.
+    context_tokens must fit every configured endpoint.
     """
     try:
         data = json.loads(path.read_text()) if path is not None else default_runtime_data()
@@ -57,9 +58,6 @@ def load_runtime(path: Path | None = None) -> Runtime:
         context, output = data['context_tokens'], data['max_output_tokens']
         if type(context) is not int or type(output) is not int or not 0 < output < context:
             raise ValueError('Invalid model capacity')
-        def count(messages):
-            return 32 + sum(32 + len(json.dumps(m, ensure_ascii=False).encode('utf-8'))
-                            for m in messages)
         tariffs = {(row['provider'], row['model']):
                    (Decimal(str(row['input'])), Decimal(str(row['output'])))
                    + ((Decimal(str(row['cached_input'])),) if 'cached_input' in row else ())
@@ -70,7 +68,13 @@ def load_runtime(path: Path | None = None) -> Runtime:
         glossary = tuple(tuple(pair) for pair in data.get('glossary', []))
         if any(len(p) != 2 or not all(isinstance(x, str) and x for x in p) for p in glossary):
             raise ValueError('Invalid glossary')
-        return Runtime(choices, RequestBudget(context, output, count), rub_resolver(tariffs=tariffs),
+        count = token_counter if token_counter is not None else ProviderTokenCounter(
+            [endpoint for choice in choices.values()
+             for endpoint in (choice.main, choice.alternative) if endpoint is not None],
+            timeout_s=timeout)
+        if not callable(count) or not callable(getattr(count, "count_output", None)):
+            raise ValueError("Model tokenizer must count complete messages and raw output")
+        return Runtime(choices, RequestBudget(context, output, count, count.count_output), rub_resolver(tariffs=tariffs),
                        timeout, glossary, tuple(secrets))
     except (KeyError, TypeError, ValueError, OSError) as exc:
         raise SettingsError('Invalid technical model configuration; check endpoints, credentials, '

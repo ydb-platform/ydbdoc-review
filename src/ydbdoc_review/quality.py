@@ -689,6 +689,7 @@ def check(source: str, target: str, *, path: str, candidate_sha: str, target_lan
         issues.append(Issue(path, problem, "Complete the critic check before merging.", "critic_incomplete"))
 
     try:
+        budget = budget.for_choice(choice)
         parts = review_parts(source, target, fits=lambda p: budget.fits(messages(p)))
     except CapacityError as exc:
         incomplete(str(exc))
