@@ -38,11 +38,12 @@ class BuildResult:
     def issues_for(self, candidate_sha: str) -> tuple[Issue, ...]:
         if self.ok_for(candidate_sha):
             return ()
-        # Preserve the first available failure and its context, rather than the
+        # Preserve the first available failure and following context, rather than the
         # tail of a potentially huge cascade. Full output remains in self.log.
         failure = re.search(r'^.*\b(?:error|failed|failure|fatal|exception|timed out|missing)\b',
                             self.log, re.I | re.M)
-        start = self.log.rfind('\n', 0, max(0, failure.start() - 1)) + 1 if failure else 0
+        # Leading context must not consume the excerpt before the error line.
+        start = failure.start() if failure else 0
         excerpt = self.log[start:start + 2000]
         return (Issue('ydb/docs', f'Build {self.status}, SHA {self.candidate_sha}; '
                       f'required candidate SHA {candidate_sha}. {excerpt} '

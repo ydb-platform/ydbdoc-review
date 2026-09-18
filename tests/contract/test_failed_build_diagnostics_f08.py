@@ -89,9 +89,10 @@ def test_unchecked_include_fragment_does_not_hide_nested_errors(git_repo):
     assert all(detail.rendered_page == ROOT + 'en/a.md' for detail in result.unchecked_anchors)
 
 
-def test_build_diagnostic_preserves_first_failure_place_and_full_log():
+@pytest.mark.parametrize('preceding', ['Progress\n' * 400, 'Progress: ' + 'p' * 2500 + '\n'])
+def test_build_diagnostic_preserves_first_failure_place_and_full_log(preceding):
     primary = 'en/core/a.md:17: ERROR: unclosed YFM container'
-    log = 'Preparing pages\n' + ('Progress\n' * 400) + primary + '\n' + ('Dependent failure\n' * 1000)
+    log = 'Preparing pages\n' + preceding + primary + '\n' + ('Dependent failure\n' * 1000)
     result = BuildResult('a' * 40, 'failure', log, 1)
     issue, = result.issues_for('a' * 40)
     assert issue.code == 'build'
