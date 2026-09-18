@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from hashlib import sha256
 from importlib.resources import files
 from typing import Any
 
@@ -70,6 +71,21 @@ class DecodedScalar:
 
 
 @dataclass(frozen=True)
+class SourceSpan:
+    """Protected offsets mapped to a raw source region.
+
+    Nonlinear regions (atoms and decoded YAML scalars) own their full raw
+    region. Parts inside a decoded scalar therefore have overlapping raw
+    covering bounds; their protected bounds remain exact and disjoint.
+    """
+    start: int
+    end: int
+    source_start: int
+    source_end: int
+    linear: bool = False
+
+
+@dataclass(frozen=True)
 class ProtectedDocument:
     source: str
     text: str
@@ -81,6 +97,8 @@ class ProtectedDocument:
     scalars: tuple[DecodedScalar, ...] = ()
     # Decoded-value separators/URLs have semantic rather than source offsets.
     value_atoms: tuple[tuple[str, str], ...] = ()
+    source_spans: tuple[SourceSpan, ...] = ()
+    file_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,6 +107,10 @@ class Chunk:
     start: int
     end: int
     text: str
+    file_id: str = ""
+    chunk_id: str = ""
+    source_start: int = 0
+    source_end: int = 0
 
 
 @dataclass(frozen=True)
@@ -104,6 +126,7 @@ class ChunkResult:
     text: str | None
     issues: tuple[DocumentIssue, ...] = ()
     unfinished: bool = False
+    status: str = "complete"
 
 
 @dataclass(frozen=True)
@@ -114,6 +137,7 @@ class FileResult:
     unfinished: bool
     chunks: tuple[ChunkResult, ...] = ()
     protected: ProtectedDocument | None = None
+    file_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -141,7 +165,7 @@ class RequestBudget:
                 and output <= self.max_output_tokens)
 
 
-def protect(source: str) -> ProtectedDocument:
+def protect(source: str, *, path: str = "") -> ProtectedDocument:
     """Expose parser-owned prose spans, protect the complement verbatim."""
     tokens = create_parser(source_locations=True).parse(source)
     editable = bytearray(len(source))
@@ -217,6 +241,7 @@ def protect(source: str) -> ProtectedDocument:
             "front_matter", "yfm_note_open", "yfm_cut_open", "yfm_tabs_open",
         }
     }
+    source_spans: list[SourceSpan] = []
     atoms: list[Atom] = []
     parts: list[str] = []
     boundaries: list[int] = []
@@ -260,6 +285,8 @@ def protect(source: str) -> ProtectedDocument:
                 pos = match.end()
             pieces.extend((value[pos:], closing))
             part = "".join(pieces)
+            source_spans.append(SourceSpan(length, length + len(part), cursor,
+                                           region.start + record.end))
             parts.append(part)
             length += len(part)
             boundaries.append(length)
@@ -279,12 +306,14 @@ def protect(source: str) -> ProtectedDocument:
             if (any(cursor < offset <= end for offset in block_ends)
                     or (raw.isspace() and source[max(0, cursor - 1):cursor] in {".", "!", "?"})):
                 boundaries.append(length + len(part))
+        source_spans.append(SourceSpan(length, length + len(part), cursor, end, bool(visible)))
         parts.append(part)
         length += len(part)
         cursor = end
     boundaries.append(length)
     return ProtectedDocument(source, "".join(parts), tuple(atoms), tuple(sorted(set(boundaries))),
-                             tuple(issues), tuple(front_matter), tuple(scalars), tuple(value_atoms))
+                             tuple(issues), tuple(front_matter), tuple(scalars), tuple(value_atoms),
+                             tuple(source_spans), sha256((path + "\0" + source).encode()).hexdigest())
 
 
 def restore(document: ProtectedDocument, text: str, *, expected: str | None = None) -> str:
@@ -320,6 +349,30 @@ def restore(document: ProtectedDocument, text: str, *, expected: str | None = No
     return expand(text)
 
 
+def make_chunk(document: ProtectedDocument, index: int, start: int, end: int) -> Chunk:
+    """Create a persistent correspondence at exact protected text boundaries."""
+    if not 0 <= start <= end <= len(document.text):
+        raise ValueError("Invalid protected chunk bounds")
+    for marker in _MARKER.finditer(document.text):
+        if marker.start() < start < marker.end() or marker.start() < end < marker.end():
+            raise ValueError("Chunk boundary splits a protected marker")
+    spans = [s for s in document.source_spans if s.start < end and s.end > start]
+    if spans:
+        first, last = spans[0], spans[-1]
+        source_start = (first.source_start + max(0, start - first.start)
+                        if first.linear else first.source_start)
+        source_end = (last.source_start + min(last.end, end) - last.start
+                      if last.linear else last.source_end)
+    elif not document.text:
+        source_start = source_end = 0
+    else:
+        raise ValueError("Protected document has no source correspondence")
+    file_id = document.file_id
+    chunk_id = sha256(f"{file_id}:{start}:{end}".encode()).hexdigest()
+    return Chunk(index, start, end, document.text[start:end], file_id, chunk_id,
+                 source_start, source_end)
+
+
 def chunk_document(document: ProtectedDocument, fits: Callable[[str], bool]) -> tuple[Chunk, ...]:
     """Whole file first; otherwise only legal boundaries, never split an atom.
 
@@ -327,7 +380,7 @@ def chunk_document(document: ProtectedDocument, fits: Callable[[str], bool]) -> 
     word/character boundary or silently dropping the tail is not a translation.
     """
     if fits(document.text):
-        return (Chunk(0, 0, len(document.text), document.text),)
+        return (make_chunk(document, 0, 0, len(document.text)),)
     chunks = []
     start = 0
     while start < len(document.text):
@@ -342,7 +395,7 @@ def chunk_document(document: ProtectedDocument, fits: Callable[[str], bool]) -> 
                 break
         if chosen is None:
             raise CapacityError(f"No safe chunk fits at protected offset {start}")
-        chunks.append(Chunk(len(chunks), start, chosen, document.text[start:chosen]))
+        chunks.append(make_chunk(document, len(chunks), start, chosen))
         start = chosen
     return tuple(chunks)
 
@@ -378,6 +431,90 @@ def _code_issues(source: str, target: str) -> tuple[DocumentIssue, ...]:
     return ()
 
 
+def assemble_file(path: str, document: ProtectedDocument, chunks: tuple[ChunkResult, ...],
+                  *, issues: tuple[DocumentIssue, ...] = ()) -> FileResult:
+    """Assemble recorded slots, never infer correspondence from partial text.
+
+    Missing/pending slots remain in the result. Their text is omitted only in
+    the publication view. The source/chunk map is authoritative for review and
+    continuation. Adjacent usable responses are restored together for YAML.
+    """
+    cursor = 0
+    for index, item in enumerate(chunks):
+        expected = make_chunk(document, index, cursor, item.chunk.end)
+        if item.chunk != expected:
+            raise ValueError("Chunk correspondence changed or is out of order")
+        cursor = item.chunk.end
+    if cursor != len(document.text):
+        raise ValueError("Missing chunk slots: correspondence must cover the complete source")
+    problems = list(issues)
+    for item in chunks:
+        problems.extend(i for i in item.issues if i not in problems)
+    runs: list[list[ChunkResult]] = []
+    for item in chunks:
+        if (runs and item.status == "complete" and item.response is not None
+                and runs[-1][-1].status == "complete" and runs[-1][-1].response is not None):
+            runs[-1].append(item)
+        else:
+            runs.append([item])
+    assembled_parts = []
+    assembly_failed = False
+    for run in runs:
+        if run[0].status != "complete" or run[0].response is None:
+            if run[0].text is not None:
+                assembled_parts.append(run[0].text)
+            continue
+        try:
+            assembled_parts.append(restore(
+                document, "".join(r.response for r in run),
+                expected="".join(r.chunk.text for r in run)))
+        except (MarkerError, FrontMatterRestoreError) as exc:
+            assembly_failed = True
+            problems.append(DocumentIssue(f"{type(exc).__name__}: {exc}"))
+            assembled_parts.append(exc.text if isinstance(exc, FrontMatterRestoreError)
+                                   else "".join(r.response for r in run))
+    assembled = "".join(assembled_parts) if assembled_parts else ("" if not document.source else None)
+    unfinished = assembly_failed or any(r.unfinished or r.status != "complete" for r in chunks)
+    return FileResult(path, assembled, tuple(problems), unfinished, chunks, document, document.file_id)
+
+
+def file_result_to_dict(result: FileResult) -> dict[str, Any]:
+    """Explicit versioned document state; contains no runtime/repository objects.
+
+    Storage adapters may externalize repeated strings/responses and hydrate
+    them before decoding. JSON null is an absent result, never an empty chunk.
+    """
+    return {"schema_version": 1, **asdict(result)}
+
+
+def file_result_from_dict(data: dict[str, Any]) -> FileResult:
+    """Hydrate persisted correspondence without re-protecting or re-splitting."""
+    if data.get("schema_version") != 1:
+        raise ValueError("Unsupported document correspondence schema")
+    def issue_list(values):
+        return tuple(DocumentIssue(**value) for value in values)
+    raw = data.get("protected")
+    document = None
+    if raw is not None:
+        document = ProtectedDocument(
+            source=raw["source"], text=raw["text"],
+            atoms=tuple(Atom(**a) for a in raw["atoms"]),
+            boundaries=tuple(raw["boundaries"]), issues=issue_list(raw["issues"]),
+            front_matter=tuple(FrontMatterRegion(r["start"], r["end"], tuple(
+                FrontMatterValueRecord(**v) for v in r["records"])) for r in raw["front_matter"]),
+            scalars=tuple(DecodedScalar(s["raw"], FrontMatterValueRecord(**s["record"]),
+                                       s["opening"], s["closing"]) for s in raw["scalars"]),
+            value_atoms=tuple(tuple(a) for a in raw["value_atoms"]),
+            source_spans=tuple(SourceSpan(**span) for span in raw["source_spans"]),
+            file_id=raw["file_id"],
+        )
+    chunks = tuple(ChunkResult(Chunk(**r["chunk"]), r["response"], r["text"],
+                               issue_list(r["issues"]), r["unfinished"], r["status"])
+                   for r in data["chunks"])
+    return FileResult(data["path"], data["text"], issue_list(data["issues"]),
+                      data["unfinished"], chunks, document, data["file_id"])
+
+
 def translate_document(source: str, *, path: str, source_lang: str, target_lang: str,
                        client: ModelClient, choice: ModelChoice, budget: RequestBudget,
                        on_progress: Callable[[FileResult], None] | None = None) -> FileResult:
@@ -388,29 +525,31 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
     """
     document = None
     try:
-        document = protect(source)
+        document = protect(source, path=path)
         def messages(text: str) -> list[dict[str, Any]]:
             return translation_messages(text, source_lang=source_lang, target_lang=target_lang, path=path)
         chunks = chunk_document(document, lambda text: budget.fits(messages(text), expected_output=text))
     except Exception as exc:
         return FileResult(path, None, (DocumentIssue(f"{type(exc).__name__}: {exc}"),), True,
-                          protected=document)
+                          protected=document, file_id=document.file_id if document else "")
     if not source:
-        return FileResult(path, "", (), False, protected=document)
-    results: list[ChunkResult] = []
+        return FileResult(path, "", (), False, protected=document, file_id=document.file_id)
+    results = [ChunkResult(chunk, None, None, unfinished=True, status="pending")
+               for chunk in chunks]
     issues = list(document.issues)
     for chunk in chunks:
         response = None
         text = None
         errors: tuple[DocumentIssue, ...] = ()
         unfinished = False
+        truncated = False
         try:
             answer = client.chat(messages(chunk.text), operation="translation", choice=choice,
                                  max_tokens=budget.max_output_tokens)
             response = answer.content
             if not response or not response.strip():
                 raise ValueError("No usable translation returned")
-            unfinished = answer.finish_reason == "length"
+            truncated = unfinished = answer.finish_reason == "length"
             text = response  # Retain damaged marker responses for the common repair loop.
             text = restore(document, response, expected=chunk.text)
             if answer.finish_reason == "length":
@@ -422,38 +561,12 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
                 unfinished = True
             unfinished = unfinished or text is None
             errors = (DocumentIssue(f"{type(exc).__name__}: {exc}", chunk.index),)
-        results.append(ChunkResult(chunk, response, text, errors, unfinished))
+        status = ("missing" if text is None else "truncated" if truncated
+                  else "damaged" if errors else "complete")
+        unfinished = unfinished or status != "complete"
+        results[chunk.index] = ChunkResult(chunk, response, text, errors, unfinished, status)
         issues.extend(errors)
-        # Restore contiguous usable runs together. A later failed chunk must
-        # not discard an already assembled scalar in an earlier run.
-        assembled_parts: list[str] = []
-        runs: list[list[ChunkResult]] = []
-        for item in results:
-            if (runs and not item.issues and item.response is not None
-                    and not runs[-1][-1].issues and runs[-1][-1].response is not None):
-                runs[-1].append(item)
-            else:
-                runs.append([item])
-        assembly_failed = False
-        for run in runs:
-            if run[0].issues or run[0].response is None:
-                if run[0].text is not None:
-                    assembled_parts.append(run[0].text)
-                continue
-            try:
-                assembled_parts.append(restore(
-                    document, "".join(r.response for r in run),
-                    expected="".join(r.chunk.text for r in run),
-                ))
-            except (MarkerError, FrontMatterRestoreError) as exc:
-                assembly_failed = True
-                issues.append(DocumentIssue(f"{type(exc).__name__}: {exc}"))
-                assembled_parts.append(exc.text if isinstance(exc, FrontMatterRestoreError)
-                                       else "".join(r.response for r in run))
-        assembled = "".join(assembled_parts) if assembled_parts else None
-        result = FileResult(path, assembled, tuple(issues),
-                            assembly_failed or len(results) < len(chunks)
-                            or any(r.unfinished for r in results), tuple(results), document)
+        result = assemble_file(path, document, tuple(results), issues=tuple(issues))
         if on_progress:
             on_progress(result)
     if result.text is not None and not result.unfinished:
@@ -461,7 +574,8 @@ def translate_document(source: str, *, path: str, source_lang: str, target_lang:
             issues.extend(_code_issues(source, result.text))
         except Exception as exc:
             issues.append(DocumentIssue(f"Document validation failed: {type(exc).__name__}: {exc}"))
-    final = FileResult(path, result.text, tuple(issues), result.unfinished, tuple(results), document)
+    final = FileResult(path, result.text, result.issues + tuple(i for i in issues if i not in result.issues),
+                       result.unfinished, tuple(results), document, document.file_id)
     if on_progress and final != result:
         on_progress(final)
     return final
