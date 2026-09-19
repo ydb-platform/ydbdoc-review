@@ -1,12 +1,1 @@
-{
-  "version": 1,
-  "hooks": {
-    "beforeShellExecution": [
-      {
-        "command": ".cursor/hooks/require-memory-bank-before-commit.py",
-        "matcher": "git\\s+commit",
-        "failClosed": true
-      }
-    ]
-  }
-}
+{"version":1,"hooks":{"beforeShellExecution":[{"command":".cursor/hooks/require-memory-bank-before-commit.py","matcher":"git\\s+commit","failClosed":true},{"command":".cursor/hooks/forbid-worktrees.sh","matcher":"git\\s+worktree","failClosed":true}]}}
