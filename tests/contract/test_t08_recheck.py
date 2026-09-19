@@ -127,7 +127,17 @@ def test_svg_valid_id_still_requires_successful_exact_sha(git_repo, state):
     }
     result = check_links(candidate, build=builds[state])
     assert not result.ok and not result.complete
-    assert 'successful build of this SHA' in result.issues[0].problem
+    assert result.candidate_sha == candidate.sha
+    issue, = result.issues
+    assert issue.code == 'anchors_unchecked'
+    assert candidate.sha in issue.problem
+    unchecked, = result.unchecked_anchors
+    assert unchecked.path == unchecked.rendered_page == ROOT + 'en/a.md'
+    assert unchecked.href == 'icon.svg#ok'
+    assert unchecked.target_path == ROOT + 'en/icon.svg'
+    assert unchecked.location is not None
+    unchecked.location.validate(candidate.text(ROOT + 'en/a.md'))
+    assert not automatic_ok(candidate.sha, result, builds[state])
 
 
 def test_encoded_local_language_links_and_confirmed_proposal(git_repo):

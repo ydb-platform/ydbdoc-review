@@ -124,24 +124,72 @@ def test_original_mermaid_topology_damage(old,new,protected_change):
     assert new in json.dumps(client.calls,ensure_ascii=False)
 
 
-def test_independent_findings_on_same_line_are_not_collapsed(git_repo):
-    from dataclasses import replace
+def test_independent_findings_on_same_line_are_not_collapsed(git_repo, monkeypatch):
+    import base64
+    import re
+    from dataclasses import asdict, replace
+    from urllib.parse import urlsplit
+
+    import requests
 
     from tests.contract.test_report_t14 import located
+    from ydbdoc_review.github.client import GitHubClient
     from ydbdoc_review.quality import Issue, Location
-    from ydbdoc_review.report import render_reports
+    from ydbdoc_review.report import create_reporter
 
     result = located.__wrapped__(git_repo)
     first = Issue('ydb/docs/en/a.md', 'Missing authentication condition', 'Restore condition',
                   target=Location(3,3,'Final excerpt.'))
     second = Issue('ydb/docs/en/a.md', 'Incorrect permissions claim', 'Correct permissions',
                    target=Location(3,3,'Final excerpt.'))
-    report = render_reports(replace(result,issues=(first,second)),current_pr='up/docs/1')[-1].body
-    assert 'Missing authentication condition' in report
-    assert 'Incorrect permissions claim' in report
-    assert 'Restore condition' in report and 'Correct permissions' in report
-    assert '#L3' in report
-    assert report.startswith('RED')
+    objects, refs, comments = {}, {}, {}
+
+    def send(session, request, **kwargs):
+        assert urlsplit(request.url).hostname == 'api.github.com'
+        path = urlsplit(request.url).path
+        data = json.loads(request.body)
+        if '/git/' in path and request.method == 'POST':
+            kind = path.rsplit('/', 1)[-1]
+            if kind == 'refs':
+                assert objects[data['sha']][0] == 'commits'
+                refs[data['ref']] = data['sha']
+                payload = {'ref': data['ref'], 'object': {'sha': data['sha']}}
+            else:
+                assert kind in ('blobs', 'trees', 'commits')
+                sha = f'{len(objects) + 1:040x}'
+                objects[sha] = (kind, data)
+                payload = {'sha': sha}
+        else:
+            assert (request.method == 'POST' and path.endswith('/comments')) or (
+                request.method == 'PATCH' and path.endswith('/pulls/2'))
+            comments[path] = data['body']
+            payload = {'id': len(comments)}
+        response = requests.Response()
+        response.status_code = 201
+        response._content = json.dumps(payload).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, 'send', send)
+    create_reporter(GitHubClient('offline-token'), current_pr='up/docs/1', authorized=True)(
+        replace(result, issues=(first, second)))
+    report = comments['/repos/up/docs/issues/2/comments']
+    assert report.startswith('RED') and '#L3' in report
+    assert 'Missing authentication condition' in report and 'Restore condition' in report
+    # §6.1 permits one inline example per group; every independent finding must
+    # survive actual delivery through the linked, retained GitData artifact.
+    link = re.search(r'https://github.com/up/docs/blob/([0-9a-f]{40})/diagnostics.json', report)
+    assert link and link[1] in refs.values()
+    kind, commit = objects[link[1]]
+    assert kind == 'commits'
+    kind, tree = objects[commit['tree']]
+    assert kind == 'trees'
+    entry, = tree['tree']
+    assert entry['path'] == 'diagnostics.json' and entry['type'] == 'blob'
+    kind, blob = objects[entry['sha']]
+    assert kind == 'blobs' and blob['encoding'] == 'base64'
+    artifact = json.loads(base64.b64decode(blob['content'], validate=True))
+    assert artifact['issues'] == [asdict(first), asdict(second)]
+    assert artifact['checked_sha'] == result.checked_sha
 
 
 def test_same_basename_link_targets_keep_independent_locations(git_repo):
