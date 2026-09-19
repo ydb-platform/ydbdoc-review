@@ -100,8 +100,24 @@ def test_secrets_redacted_before_fencing_and_without_changing_git(evidence, monk
     assert all(value not in sent[-1][1] for value in (secret, 'fixture-secret', 'fixture-bearer', 'ghp_fixture'))
     artifacts = sent.artifacts()
     assert artifacts, 'full diagnostic artifact must be delivered and retained'
-    published = '\n'.join(sent.bodies) + json.dumps(artifacts, ensure_ascii=False)
-    assert all(value not in published for value in (secret, 'fixture-secret', 'fixture-bearer', 'ghp_fixture'))
+    secrets = (secret, 'fixture-secret', 'fixture-bearer', 'ghp_fixture')
+    def assert_redacted(value):
+        if isinstance(value, str):
+            assert all(secret_value not in value for secret_value in secrets)
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                assert_redacted(key)
+                assert_redacted(child)
+        elif isinstance(value, list):
+            for child in value:
+                assert_redacted(child)
+    # Inspect decoded leaves: JSON escaping must not hide a multiline secret.
+    assert_redacted(artifacts)
+    assert_redacted(sent.bodies)
+    for prepared in sent.requests:
+        payload = json.loads(prepared.body)
+        if 'body' in payload:  # actual prepared comment/description requests
+            assert_redacted(payload['body'])
     assert all('[REDACTED]' in artifact['issues'][0]['target']['quote'] for artifact in artifacts)
     assert candidate.text(ROOT+'en/a.md') == excerpt
     assert db[0].context(adapter.run_id)['result']['status'] == final.status
