@@ -19,7 +19,7 @@ import pytest
 from ydbdoc_review.store import YDBStore
 
 ROOT = Path(__file__).resolve().parents[2]
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 @pytest.fixture

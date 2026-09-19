@@ -39,7 +39,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra --strict-markers --timeout=120 --timeout-method=signal --disable-socket --allow-unix-socket"
+addopts = "-ra --strict-markers --timeout=60 --timeout-method=signal --disable-socket --allow-unix-socket"
 timeout_method = "signal"
 markers = [
     "slow: slow tests",

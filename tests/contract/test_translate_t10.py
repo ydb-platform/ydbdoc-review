@@ -22,7 +22,7 @@ from ydbdoc_review.model import Endpoint, ModelChoice, ModelClient
 from ydbdoc_review.publication import Publisher
 from ydbdoc_review.runner import RunHooks, run_translate
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 ROOT = 'ydb/docs/'
 GOOD = json.dumps(dict(complete=True, verdict='correct', issues=[]))

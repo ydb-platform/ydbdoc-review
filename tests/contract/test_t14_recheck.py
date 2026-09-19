@@ -22,7 +22,7 @@ from ydbdoc_review.quality import Issue, Location
 from ydbdoc_review.report import create_reporter, render_reports
 from ydbdoc_review.runner import RunHooks
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 class Rendered(HTMLParser):

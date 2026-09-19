@@ -15,7 +15,7 @@ from ydbdoc_review.quality_loop import QualityLoopInterrupted
 rig = loop_fixtures.rig
 runner_rig = runner_fixtures.rig
 ROOT = 'ydb/docs/'
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 @pytest.mark.parametrize('lang', ['en', 'ru'])

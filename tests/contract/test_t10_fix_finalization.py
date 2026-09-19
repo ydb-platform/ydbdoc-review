@@ -6,7 +6,7 @@ from ydbdoc_review.runner import RunCancelled, RunHooks
 
 from . import test_t10_independent as fixtures
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 rig = fixtures.rig
 ROOT = fixtures.ROOT
 

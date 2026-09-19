@@ -11,7 +11,7 @@ from tests.contract.test_t11_independent import GOOD, ROOT, check_receipt, corre
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.publication import freeze
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 system = independent.system
 
 

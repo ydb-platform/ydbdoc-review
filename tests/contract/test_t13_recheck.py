@@ -25,7 +25,7 @@ from ydbdoc_review.store import RunStore
 
 module = 'ydbdoc_review.continuation' if importlib.util.find_spec('ydbdoc_review.continuation') else 'ydbdoc_review.continue'
 select_files = importlib.import_module(module).select_files
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 def saved(lang='en', names=('a.md', 'data.md', 'stable.md'), issues=(), unfinished=()):

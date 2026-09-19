@@ -10,7 +10,7 @@ from tests.contract.test_t15_cli import ROOT, assert_saved
 pytest_plugins = ['tests.contract.test_t15_cli']
 
 
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(60)
 def test_merged_base_moves_after_fetch_without_replacing_snapshot(process):
     p = process
     (p.repo / 'ydb/docs/en/a.md').unlink()
@@ -34,7 +34,7 @@ def test_merged_base_moves_after_fetch_without_replacing_snapshot(process):
     assert json.loads((p.root / 'snapshot_reads.json').read_text()) == {'base_reads': 1}
 
 
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize('mode', ['doc_verify', 'doc_continue'])
 def test_cli_reuses_snapshot_with_existing_pr_publication(process, mode):
     p = process

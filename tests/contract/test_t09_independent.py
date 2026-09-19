@@ -14,7 +14,7 @@ from ydbdoc_review.quality import Issue, Location
 from ydbdoc_review.quality_loop import SelectedFile, repair_document, run_quality_loop
 
 # Up to three real CLI builds; each subprocess has its own 30s bound.
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 P = 'ydb/docs/en/a.md'
 RU = 'ydb/docs/ru/a.md'

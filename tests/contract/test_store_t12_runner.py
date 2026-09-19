@@ -8,7 +8,7 @@ from tests.context_records import context_with_records
 from tests.contract.test_translate_t10 import ROOT, system  # noqa: F401
 from tests.unit.test_store_t12 import adapter, db, paid  # noqa: F401
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 @pytest.mark.parametrize('case', ['green', 'cancel', 'no_work', 'mechanical', 'budget'])

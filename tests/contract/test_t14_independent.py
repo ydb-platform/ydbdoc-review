@@ -34,7 +34,7 @@ from ydbdoc_review.store import RunStore
 
 ROOT = 'ydb/docs/'
 GOOD = json.dumps(dict(complete=True, verdict='correct', issues=[]))
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 def http_comments(monkeypatch, fail_at=None, after=None):

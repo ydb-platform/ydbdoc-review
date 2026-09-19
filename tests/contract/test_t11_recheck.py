@@ -13,7 +13,7 @@ from ydbdoc_review.publication import freeze
 
 system = original.system
 ROOT = original.ROOT
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 @pytest.mark.parametrize('identity', ['upstream', 'fork'])

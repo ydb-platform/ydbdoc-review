@@ -8,7 +8,7 @@ from . import test_t09_recheck as fixtures
 rig = fixtures.rig
 P, RU = fixtures.P, fixtures.RU
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 OTHER = 'ydb/docs/en/other.md'
 

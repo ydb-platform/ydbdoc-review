@@ -24,7 +24,7 @@ from ydbdoc_review.publication import Publisher
 from ydbdoc_review.runner import RunHooks
 from ydbdoc_review.verify import run_verify
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 ROOT = 'ydb/docs/'
 GOOD = json.dumps(dict(complete=True, verdict='correct', issues=[]))

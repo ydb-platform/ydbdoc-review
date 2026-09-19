@@ -12,7 +12,7 @@ from ydbdoc_review.runner import RunHooks
 from . import test_t10_independent as translate_fixtures
 from . import test_verify_t11 as verify_fixtures
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 rig = translate_fixtures.rig
 system = verify_fixtures.system
 ROOT = translate_fixtures.ROOT

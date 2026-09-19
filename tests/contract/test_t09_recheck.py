@@ -16,7 +16,7 @@ from ydbdoc_review.model import Endpoint, ModelChoice, ModelClient
 from ydbdoc_review.quality import Issue
 from ydbdoc_review.quality_loop import SelectedFile, repair_document, run_quality_loop
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 P = 'ydb/docs/en/a.md'
 RU = 'ydb/docs/ru/a.md'

@@ -31,7 +31,7 @@ from ydbdoc_review.quality import Issue
 from ydbdoc_review.runner import RunHooks
 from ydbdoc_review.store import RunStore, YDBStore, encode
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 class SQLBoundary(PersistentSQL):

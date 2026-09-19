@@ -151,7 +151,7 @@ def test_missing_builder_is_failure(git_repo):
     assert not result.ok_for(tree.sha) and 'missing' in result.log
 
 
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(60)
 def test_real_builder_exact_sha_root_urls_includes_anchors_and_failure(git_repo, tmp_path):
     assert shutil.which('yfm'), 'Install @diplodoc/cli@5.61.0 and put yfm on PATH'
     tree = commit(git_repo, {

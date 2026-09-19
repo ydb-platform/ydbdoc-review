@@ -24,7 +24,7 @@ from ydbdoc_review.report import create_reporter, render_reports, report_hooks
 from ydbdoc_review.runner import RunHooks, RunResult, finalize
 from ydbdoc_review.store import RunStore, decode
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = pytest.mark.timeout(60)
 
 
 def capture(monkeypatch, *, fail_at=None, after=None):
