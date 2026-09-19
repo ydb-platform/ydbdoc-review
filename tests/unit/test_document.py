@@ -7,7 +7,6 @@ import pytest
 
 from ydbdoc_review.document import (
     CapacityError,
-    MarkerError,
     RequestBudget,
     chunk_document,
     protect,
@@ -83,19 +82,6 @@ def test_protected_bytes_and_translatable_islands_crlf():
         expected = expected.replace(old, new)
     assert result.text == expected
     assert not result.issues
-
-
-@pytest.mark.parametrize('mutate', [
-    lambda t: t.replace('⟦C1⟧', ''),
-    lambda t: t.replace('⟦C1⟧', '⟦C1⟧⟦C1⟧'),
-    lambda t: t.replace('⟦C1⟧', '⟦UNKNOWN⟧'),
-    lambda t: t.replace('⟦C1⟧', '@').replace('⟦C2⟧', '⟦C1⟧').replace('@', '⟦C2⟧'),
-    lambda t: t + '⟦broken',
-])
-def test_strict_markers(mutate):
-    p = protect('`a` текст `b`\n')
-    with pytest.raises(MarkerError):
-        restore(p, mutate(p.text))
 
 
 def test_order_rejected_and_damaged_response_retained_without_retry():

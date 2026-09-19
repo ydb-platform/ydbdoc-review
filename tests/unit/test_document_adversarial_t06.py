@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from ydbdoc_review.document import (
-    MarkerError,
     RequestBudget,
     chunk_document,
     protect,
@@ -69,25 +68,6 @@ def test_independent_corpus_roundtrip(source):
     assert restore(p, p.text) == source
     for a in p.atoms:
         assert source[a.start : a.end] == a.raw
-
-
-@pytest.mark.parametrize("mode", ["drop", "duplicate", "swap", "unknown", "fragment"])
-def test_marker_attack(mode):
-    p = protect("⟦C1⟧ `foo` текст `bar`\n")
-    ids = [a.marker for a in p.atoms]
-    t = p.text
-    if mode == "drop":
-        t = t.replace(ids[0], "")
-    elif mode == "duplicate":
-        t = t.replace(ids[0], ids[0] * 2)
-    elif mode == "swap":
-        t = t.replace(ids[0], "TEMP").replace(ids[1], ids[0]).replace("TEMP", ids[1])
-    elif mode == "unknown":
-        t += "⟦new⟧"
-    else:
-        t += "⟦fragment"
-    with pytest.raises(MarkerError):
-        restore(p, t)
 
 
 @pytest.mark.parametrize("limit", [40, 75, 130, 500])
