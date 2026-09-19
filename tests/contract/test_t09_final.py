@@ -60,8 +60,8 @@ def test_actual_loop_nested_unselected_include_no_duplicate_or_extra_repair(rig,
     assert result.status == 'RED', result.issues
     assert result.checked_sha == result.candidate.sha == before.sha
     assert result.candidate.entries == before.entries
-    assert len(result.rounds) == 3
-    assert [op for op, _ in rig.calls] == ['critic'] * 3
+    assert len(result.rounds) == 1  # §5.1: no repair changed this candidate
+    assert [op for op, _ in rig.calls] == ['critic']
     assert 'freeze' not in rig.events
     for trace in result.rounds:
         assert trace.build.ok_for(before.sha), trace.build.log

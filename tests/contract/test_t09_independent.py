@@ -124,9 +124,11 @@ def test_errors_partial_unfinished_are_red_and_bounded(rig, failure):
     rig.answer = answer
     _, result = rig.run(target='Остаток')
     assert result.status == 'RED'
-    assert len(result.rounds) == 3
-    assert len([op for op, _ in rig.calls if op == 'repair']) == 2
-    assert result.rounds[-1].repairs == ()
+    # Invalid critic responses allow one changed repair, then stop on no-op.
+    expected = 2 if failure in {'critic_json', 'critic_partial'} else 1
+    assert len(result.rounds) == expected
+    assert len([op for op, _ in rig.calls if op == 'repair']) == expected
+    assert result.rounds[-1].repairs
     assert result.issues
     if failure.startswith('repair_'):
         assert result.unfinished_files == (P,)
@@ -226,8 +228,8 @@ def test_freeze_source_mutation_rejected(rig):
 def test_saved_finding_triggers_no_initial_translation(rig):
     finding = Issue(P, 'Check requested wording', 'Keep approved wording.')
     _, result = rig.run(requested=(finding,))
-    assert result.status == 'GREEN'
-    assert [op for op, _ in rig.calls] == ['critic', 'repair', 'critic']
+    assert result.status == 'RED'  # §5.1: no-op cannot clear the requested error
+    assert [op for op, _ in rig.calls] == ['critic', 'repair']
     assert 'freeze' not in rig.events
     assert rig.calls[1][1]['findings'][0]['problem'] == finding.problem
 
@@ -259,17 +261,20 @@ def test_long_document_loop_trace_separates_rounds_and_chunk_calls(rig):
     findings = tuple(Issue(P, 'Incorrect fact', 'Restore source fact',
                            source=Location(2*i+1, 2*i+1, f'Section {i} has exact facts and `code{i}`.'))
                      for i in range(60))
-    _, result = rig.run(source=source, target=source, requested=findings,
+    # Keep coverage of multiple review rounds by supplying an actual defect;
+    # identical repaired bytes must now stop after one round (§5.1).
+    current = source.replace('exact facts', 'wrong facts')
+    _, result = rig.run(source=source, target=current, requested=findings,
                         budget=RequestBudget(5000, 800, lambda m: len(str(m))))
     assert result.status == 'GREEN', result.issues
     assert len(result.rounds) == 2
     assert len(result.rounds[0].repairs) == 1
     assert len(result.rounds[0].repairs[0].parts) > 1
     assert result.candidate.text(P) == source
-    assert 'freeze' not in rig.events
+    assert 'freeze' in rig.events
     for trace in result.rounds:
         assert trace.checks[0].ok
         assert ''.join(d['source'] for op, d in rig.calls[
             trace.critic_attempt_start:trace.critic_attempt_end] if op == 'critic') == source
     repairs = [d for op, d in rig.calls if op == 'repair']
-    assert ''.join(d['current_target'] for d in repairs) == source
+    assert ''.join(d['current_target'] for d in repairs) == current

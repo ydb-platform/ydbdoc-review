@@ -65,11 +65,11 @@ def test_shared_include_inherits_english_context_and_physical_resolution(rig, hr
 def test_actual_yfm_full_tree_unselected_red_without_mutation(rig, body):
     initial, result = rig.run(extra={OTHER: body, 'ydb/docs/ru/b.md-extra': 'Page.'})
     assert result.status == 'RED'
-    assert len(result.rounds) == 3
+    assert len(result.rounds) == 1  # §5.1: no repair changed this candidate
     assert all(r.build.ok_for(initial.sha) for r in result.rounds)
     assert all(len(r.links.issues) == 1 for r in result.rounds)
     assert all(not r.repairs for r in result.rounds)
-    assert [op for op, _ in rig.calls] == ['critic'] * 3
+    assert [op for op, _ in rig.calls] == ['critic']
     assert 'freeze' not in rig.events
     assert result.checked_sha == result.candidate.sha == initial.sha
     assert result.candidate.entries == initial.entries

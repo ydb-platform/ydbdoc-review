@@ -298,7 +298,7 @@ def test_full_tree_unselected_broken_link_blocks_green_without_repairing_it(cont
                            publication=replace(c.seeded.publication, pushed_sha=broken.sha)))
     result = c.run()
     assert result.status == 'RED' and result.publication.draft
-    assert len(result.quality.rounds) == 3
+    assert len(result.quality.rounds) == 1  # §5.1: selected repair is a no-op; global error remains
     assert any(i.path == ROOT+'en/unselected.md' for i in result.issues)
     assert result.candidate.read(ROOT+'en/unselected.md') == broken.read(ROOT+'en/unselected.md')
     assert all(data['path'] != ROOT+'en/unselected.md' for _, data in c.state['calls'])

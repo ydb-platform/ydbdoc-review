@@ -485,14 +485,23 @@ def run_quality_loop(candidate: Candidate, files: tuple[SelectedFile, ...], *,
                     maps[file.path] = repaired.file_result
                 if not repaired.complete:
                     unfinished.add(file.path)
-                    if repaired.fatal:
+                    # A partial fatal repair can still have committed useful bytes;
+                    # those bytes require the next check before we report their SHA.
+                    if repaired.fatal and candidate.sha == trace.candidate_sha:
                         return LoopResult(candidate, 'RED', checked_sha,
                                           (*issues, *repaired.issues), tuple(sorted(unfinished)),
                                           tuple(traces), tuple(maps.values()))
                     continue
                 unfinished.discard(file.path)
-            # A global build/link failure may have no safely repairable selected file.
-            # Still perform the next bounded read-only check; never silently GREEN.
+            # No repair, failed preparation, and a successful no-op all leave
+            # the same checked candidate. Repeating its build/critic has no new
+            # basis and cannot turn this RED result into GREEN (§5.1).
+            if candidate.sha == trace.candidate_sha:
+                issues = (*issues, *(issue for repair in repairs for issue in repair.issues),
+                          _issue('ydb/docs', 'Quality loop stopped: candidate unchanged; '
+                                 'no repair changed the checked result. Resolve the reported '
+                                 'problems before checking again.'))
+                break
     except KeyboardInterrupt as exc:
         issues = (*issues, _issue('ydb/docs', f'Loop interrupted: {type(exc).__name__}: {exc}'))
         unfinished.update(file.path for file in files)

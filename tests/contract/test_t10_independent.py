@@ -326,7 +326,7 @@ def test_red_and_interruption_keep_exact_available_text_assets_and_context(rig, 
         assert result.unfinished_files == (ROOT+'en/b.md',)
         assert result.candidate.text(ROOT+'en/a.md') == source
     else:
-        assert len(result.quality.rounds) == 3
+        assert len(result.quality.rounds) == 1  # §5.1: repair returned unchanged text
         assert len([x for x in s['calls'] if x[0] == 'repair']) <= 4
         assert result.checked_sha == result.candidate_sha
 

@@ -124,8 +124,8 @@ def test_two_bare_destinations(system, tmp_path, monkeypatch, identity, scenario
         assert remote_arg('rev-list', '--all', '--count') == initial_count
         assert [op for op, _ in state['calls']] == ['critic']
     if scenario == 'red':
-        assert [op for op, _ in state['calls']] == ['critic', 'repair', 'critic', 'repair', 'critic']
-        assert len(result.quality.rounds) == 3
+        assert [op for op, _ in state['calls']] == ['critic', 'repair', 'critic', 'repair']
+        assert len(result.quality.rounds) == 2  # Changed once, then no-op (§5.1)
 
 
 @pytest.mark.parametrize('boundary', ['second_repair', 'second_build'])

@@ -211,8 +211,8 @@ def test_bounded_persistent_problem(system):
     result = run()
     assert result.status == 'RED'
     check_receipt(result, system)
-    assert [op for op, _ in state['calls']] == ['critic', 'repair', 'critic', 'repair', 'critic']
-    assert len(result.quality.rounds) == 3 and result.publication.draft
+    assert [op for op, _ in state['calls']] == ['critic', 'repair', 'critic', 'repair']
+    assert len(result.quality.rounds) == 2 and result.publication.draft  # Changed once, then no-op (§5.1)
     assert state['reported'][-1].checked_sha == result.result_sha
 
 

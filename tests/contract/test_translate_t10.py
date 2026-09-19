@@ -280,7 +280,7 @@ def test_partial_red_published_and_unfinished_retained(system, failure):
     if failure in {'cancel', 'keyboard'}:
         assert result.cancelled
     if failure == 'structural':
-        assert len(result.quality.rounds) == 3
+        assert len(result.quality.rounds) == 1  # §5.1: repair returned unchanged text
         assert result.checked_sha == result.candidate_sha
     assert state['saved'] == state['reported'] == [result]
 

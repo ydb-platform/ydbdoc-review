@@ -315,12 +315,13 @@ def test_bounded_errors_remain_red_in_same_pr(system, failure):
     assert result.status == 'RED'
     assert_inline(result, state, remote_sha)
     assert result.publication.draft
-    assert len(result.quality.rounds) == 3
-    assert [op for op, _ in state['calls']] == ['critic', 'repair', 'critic', 'repair', 'critic']
+    expected = 1 if failure in {'repair_timeout', 'repair_invalid'} else 2
+    assert len(result.quality.rounds) == expected
+    assert [op for op, _ in state['calls']] == ['critic', 'repair'] * expected
     assert result.checked_sha == result.candidate_sha
     assert result.issues
-    assert result.cost_breakdown['total'] == (None if failure.endswith('timeout') else Decimal('1.25'))
-    assert len(result.attempts) == 5
+    assert result.cost_breakdown['total'] == (None if failure.endswith('timeout') else Decimal('.50') * expected)
+    assert len(result.attempts) == 2 * expected
     if failure.endswith('timeout'):
         assert any(a.error and a.usage.cost_rub is None for a in result.attempts)
     if failure.startswith('repair_'):

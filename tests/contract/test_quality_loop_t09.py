@@ -139,10 +139,11 @@ def test_invalid_outputs_no_extra_loops(setup, kind):
         source = target = 'Hello.'
     _, result = run(source=source, target=target)
     assert result.status == 'RED'
-    assert len(result.rounds) == 3
-    assert [op for op, _ in calls].count('critic') == 3
-    assert [op for op, _ in calls].count('repair') == 2
-    assert len(freezes) <= 2
+    # §5.1: malformed/unchanged repairs do not justify another check.
+    assert len(result.rounds) == 1
+    assert [op for op, _ in calls].count('critic') == 1
+    assert [op for op, _ in calls].count('repair') == 1
+    assert len(freezes) == 0
 
 
 @pytest.mark.parametrize('kind', ['pending', 'wrong_sha', 'exception'])
@@ -267,7 +268,8 @@ def test_saved_instruction_findings_trigger_repair_and_noop_no_commit(setup):
     result = run_quality_loop(candidate, (selected,), client=client, critic_choice=choice,
                               repair_choice=choice, budget=BUDGET, freeze=freeze,
                               build=lambda c: BuildResult(c.sha, 'success', returncode=0))
-    assert result.status == 'GREEN' and result.candidate.sha == candidate.sha
-    assert len(result.rounds) == 2 and freezes == []
-    assert [op for op, _ in calls] == ['critic', 'repair', 'critic']
+    # A no-op is not a new checked candidate and cannot erase requested errors.
+    assert result.status == 'RED' and result.candidate.sha == candidate.sha
+    assert len(result.rounds) == 1 and freezes == []
+    assert [op for op, _ in calls] == ['critic', 'repair']
     assert calls[1][1]['instruction'] == selected.instruction
