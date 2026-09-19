@@ -6,7 +6,7 @@ from ydbdoc_review.document import CapacityError, RequestBudget, chunk_document,
 from ydbdoc_review.model import Endpoint
 
 
-def endpoint(model='example'):
+def endpoint(model='yandexgpt-5-pro'):
     return Endpoint('yandex_cloud', 'https://ai.api.cloud.yandex.net/v1', model, 'secret', 'folder')
 
 
@@ -18,7 +18,7 @@ def test_provider_counts_full_messages_and_raw_output_with_cache(monkeypatch):
             pass
 
         def json(self):
-            return {'tokens': [{'id': '1'}] * (8 if calls[-1][1]['modelUri'].endswith('/other') else 5)}
+            return {'tokens': [{'id': '1'}] * (8 if calls[-1][1]['modelUri'].endswith('/yandexgpt-5.1') else 5)}
 
     def post(url, **kwargs):
         calls.append((url, kwargs['json']))
@@ -26,7 +26,7 @@ def test_provider_counts_full_messages_and_raw_output_with_cache(monkeypatch):
         return Response()
 
     monkeypatch.setattr('ydbdoc_review.config.tokenization.requests.post', post)
-    counter = ProviderTokenCounter([endpoint(), endpoint('other'), endpoint()])
+    counter = ProviderTokenCounter([endpoint(), endpoint('yandexgpt-5.1'), endpoint()])
     messages = [{'role': 'system', 'content': 'YDB glossary: термин → term'},
                 {'role': 'user', 'content': 'Текст. ⟦YDBDOC1⟧'}]
     assert counter(messages) == 8
@@ -129,14 +129,14 @@ def test_choice_scoping_excludes_unrelated_critic_tokenizer(monkeypatch):
 
     def count(self, e, method, payload):
         calls.append(e.model)
-        return {'translation': 5, 'alternative': 7, 'critic': 999}[e.model]
+        return {'yandexgpt-5-pro': 5, 'yandexgpt-5.1': 7, 'yandexgpt-5-lite': 999}[e.model]
 
     monkeypatch.setattr(ProviderTokenCounter, '_count', count)
-    primary, alternative, critic = endpoint('translation'), endpoint('alternative'), endpoint('critic')
+    primary, alternative, critic = endpoint('yandexgpt-5-pro'), endpoint('yandexgpt-5.1'), endpoint('yandexgpt-5-lite')
     counter = ProviderTokenCounter([primary, alternative, critic])
     budget = RequestBudget(100, 20, counter, counter.count_output).for_choice(ModelChoice(primary, alternative))
     assert budget.fits([{'role': 'user', 'content': 'text'}], expected_output='output')
-    assert calls == ['translation', 'alternative', 'translation', 'alternative']
+    assert calls == ['yandexgpt-5-pro', 'yandexgpt-5.1', 'yandexgpt-5-pro', 'yandexgpt-5.1']
 
 
 def test_runtime_explicit_tokenizer_injection(tmp_path, monkeypatch):

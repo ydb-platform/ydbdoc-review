@@ -10,6 +10,11 @@ from ydbdoc_review.document import CapacityError
 from ydbdoc_review.llm.tls import public_ca_bundle
 
 
+# Explicit versions documented for the native YC Tokenizer. Do not infer
+# support from a shared provider URL or silently substitute an alias/model.
+_VERIFIED_MODELS = frozenset({'yandexgpt-5-pro', 'yandexgpt-5.1', 'yandexgpt-5-lite'})
+
+
 class ProviderTokenCounter:
     """Count using each configured YC model's own Tokenizer API.
 
@@ -30,11 +35,19 @@ class ProviderTokenCounter:
         counter._cache = self._cache
         return counter
 
+    def _validate_endpoints(self):
+        if not self.endpoints:
+            raise CapacityError('No configured models for tokenization')
+        # Validate the entire choice before sending any document text: a valid
+        # primary must not hide an unsupported alternative (or vice versa).
+        for endpoint in self.endpoints:
+            if (endpoint.provider != 'yandex_cloud'
+                    or endpoint.base_url.rstrip('/') != 'https://ai.api.cloud.yandex.net/v1'
+                    or endpoint.model not in _VERIFIED_MODELS):
+                raise CapacityError('No verified tokenizer for configured provider/model; '
+                                    'configure model-specific tokenization before generation')
+
     def _count(self, endpoint, method, payload):
-        if (endpoint.provider != 'yandex_cloud'
-                or endpoint.base_url.rstrip('/') != 'https://ai.api.cloud.yandex.net/v1'):
-            raise CapacityError('No verified tokenizer for configured provider/model; '
-                                'configure model-specific tokenization before generation')
         payload = dict(payload, modelUri=f'gpt://{endpoint.folder_id}/{endpoint.model}')
         key = (endpoint, method, hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).digest())
         if key in self._cache:
@@ -60,6 +73,7 @@ class ProviderTokenCounter:
         return count
 
     def __call__(self, messages):
+        self._validate_endpoints()
         if any(set(m) != {'role', 'content'} or not isinstance(m['content'], str)
                for m in messages):
             raise CapacityError('Tokenizer supports text messages only')
@@ -67,6 +81,7 @@ class ProviderTokenCounter:
         return max(self._count(e, 'tokenizeCompletion', payload) for e in self.endpoints)
 
     def count_output(self, text):
+        self._validate_endpoints()
         if not text:
             return 0
         return max(self._count(e, 'tokenize', {'text': text}) for e in self.endpoints)
