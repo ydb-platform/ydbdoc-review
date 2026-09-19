@@ -1,5 +1,6 @@
 """Literal excerpts verified through Git, CommonMark and actual report delivery."""
 # ruff: noqa: F811, RUF001 -- fixture imports and bilingual documents.
+import json
 from dataclasses import replace
 from html.parser import HTMLParser
 
@@ -97,6 +98,11 @@ def test_secrets_redacted_before_fencing_and_without_changing_git(evidence, monk
     assert text == ('[REDACTED]\n[REDACTED]\n[REDACTED]\n[REDACTED]\n'
                     'https://[REDACTED]@example.invalid\n**visible** &amp;\n')
     assert all(value not in sent[-1][1] for value in (secret, 'fixture-secret', 'fixture-bearer', 'ghp_fixture'))
+    artifacts = sent.artifacts()
+    assert artifacts, 'full diagnostic artifact must be delivered and retained'
+    published = '\n'.join(sent.bodies) + json.dumps(artifacts, ensure_ascii=False)
+    assert all(value not in published for value in (secret, 'fixture-secret', 'fixture-bearer', 'ghp_fixture'))
+    assert all('[REDACTED]' in artifact['issues'][0]['target']['quote'] for artifact in artifacts)
     assert candidate.text(ROOT+'en/a.md') == excerpt
     assert db[0].context(adapter.run_id)['result']['status'] == final.status
 

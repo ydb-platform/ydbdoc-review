@@ -4,7 +4,9 @@ Only reusable infrastructure fixtures are imported. No T14 developer test helper
 T15 may relocate these imports, but must preserve the observable assertions.
 """
 # ruff: noqa: F811, F401, RUF001
+import base64
 import json
+import re
 from dataclasses import replace
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -14,9 +16,10 @@ import pytest
 import requests
 from markdown_it import MarkdownIt
 
-from tests.contract.test_continue_t13 import continued
+from tests.contract.test_continue_t13 import continued, request_greeting
 from tests.contract.test_translate_t10 import system as translate_system
 from tests.contract.test_verify_t11 import english_source, system
+from tests.model_clock import model_clock
 from tests.unit.test_store_t12 import db
 from ydbdoc_review.document import FileResult
 from ydbdoc_review.github.client import GitHubClient
@@ -36,22 +39,80 @@ pytestmark = pytest.mark.timeout(120)
 
 def http_comments(monkeypatch, fail_at=None, after=None):
     previous = requests.Session.send
-    captured = []
+    class Captured(list):
+        def __init__(self):
+            super().__init__()
+            self.requests, self.objects, self.refs = [], {}, {}
+            self.bodies, self.full_saves = [], []
+
+        def artifacts(self):
+            decoded = []
+            for body in self.bodies:
+                for sha in re.findall(r'/blob/([0-9a-f]{40})/diagnostics.json', body):
+                    assert sha in self.refs.values()
+                    kind, commit = self.objects[sha]
+                    assert kind == 'commits'
+                    kind, tree = self.objects[commit['tree']]
+                    assert kind == 'trees'
+                    entry, = tree['tree']
+                    assert entry['path'] == 'diagnostics.json' and entry['type'] == 'blob'
+                    kind, blob = self.objects[entry['sha']]
+                    assert kind == 'blobs' and blob['encoding'] == 'base64'
+                    decoded.append(json.loads(base64.b64decode(blob['content'], validate=True)))
+            return decoded
+
+    captured = Captured()
     def send(session, request, **kwargs):
-        if request.method == 'POST' and urlsplit(request.url).path.endswith('/comments'):
-            captured.append((request.url, json.loads(request.body)['body']))
-            response = requests.Response()
-            response.status_code = 503 if len(captured) == fail_at else 201
-            response._content = b'{"html_url":"https://github.com/up/docs/issues/1#issuecomment-99"}'
+        path = urlsplit(request.url).path
+        if urlsplit(request.url).hostname != 'api.github.com':
+            return previous(session, request, **kwargs)
+        data = json.loads(request.body) if request.body else {}
+        response = requests.Response()
+        response.status_code = 201
+        if request.method == 'POST' and path.endswith('/comments'):
+            captured.append((request.url, data['body']))
+            captured.bodies.append(data['body'])
+            payload = {'id': len(captured)}
             if after:
                 after()
-            return response
-        return previous(session, request, **kwargs)
+        elif request.method == 'PATCH' and '/issues/comments/' in path:
+            ident = int(path.rsplit('/', 1)[-1])
+            assert 0 < ident <= len(captured), 'unconfirmed comment ID'
+            captured.bodies.append(data['body'])
+            # Failure cases target final PATCH delivery; progress gets a real ID.
+            if ident == fail_at:
+                response.status_code = 503
+            else:
+                captured[ident - 1] = (captured[ident - 1][0], data['body'])
+            payload = {'id': ident}
+        elif request.method == 'POST' and '/git/' in path:
+            kind = path.rsplit('/', 1)[-1]
+            if kind == 'refs':
+                assert captured.objects[data['sha']][0] == 'commits'
+                captured.refs[data['ref']] = data['sha']
+                payload = {'ref': data['ref'], 'object': {'sha': data['sha']}}
+            else:
+                assert kind in ('blobs', 'trees', 'commits'), request.url
+                sha = f'{len(captured.objects) + 1:040x}'
+                captured.objects[sha] = (kind, data)
+                payload = {'sha': sha}
+        elif request.method == 'PATCH' and '/pulls/' in path:
+            captured.bodies.append(data['body'])
+            payload = {}
+        else:
+            # All non-report endpoints remain governed by the existing strict
+            # runner HTTP boundary; this adapter never invents their success.
+            return previous(session, request, **kwargs)
+        captured.requests.append(request)
+        response._content = json.dumps(payload).encode()
+        return response
     monkeypatch.setattr(requests.Session, 'send', send)
     return captured
 
 
+
 def wire(fixture, db, monkeypatch, **http_options):
+    model_clock(monkeypatch, db[2])
     state, _, _, _, _, _, publisher, _ = fixture
     adapter = RunStore(db[0], mode='doc_verify' if publisher.pr_number else 'doc_translate',
                        source_pr='up/docs/1')
@@ -66,6 +127,10 @@ def wire(fixture, db, monkeypatch, **http_options):
         return client
     hooks = report_hooks(adapter, publisher.github, current_pr='up/docs/1', authorized=True,
                          cancelled=lambda: state['cancelled'])
+    def save_once(result):
+        captured.full_saves.append(result)
+        adapter.save(result)
+    hooks = replace(hooks, save=save_once)
     return adapter, captured, dict(model_factory=factory, admit=lambda: adapter.admit(Decimal(100)), hooks=hooks)
 
 
@@ -93,12 +158,14 @@ def test_real_finalization_cost_and_delivery(translate_system, db, monkeypatch, 
     assert state['made'] == 1 and len(result.attempts) == 2
     assert result.cost_breakdown['total'] == db[0].daily_cost() == Decimal('.250')
     assert len([k for k in db[1].runs if k[1] != 'summary']) == 2
+    assert len(captured_saves := sent.full_saves) == 1
+    assert captured_saves[0].attempts == result.attempts
     assert len(summaries) <= 2
-    assert len(sent) == (1 if case in {'report_first', 'push'} else 2)
+    assert len(sent) == (1 if case == 'push' else 2)
     saved = db[1].runs[adapter.run_id, 'summary']
     if case == 'resave_fails':
         assert result.status == 'RED'
-        assert any('storage final outcome' in error for error in result.errors)
+        assert any('storage status' in error for error in result.errors)
         assert saved['status'] == 'GREEN'  # unavailable resave is honestly reported, not claimed successful
     else:
         context = db[0].context(adapter.run_id)
@@ -175,6 +242,7 @@ def test_verify_repairs_en_only_reports_current_pr(system, db, monkeypatch):
 
 def test_continue_original_source_reports(continued, monkeypatch):
     c = continued
+    request_greeting(c, 'Hello, world.')
     sent = http_comments(monkeypatch)
     result = c.run(hooks=RunHooks(report=create_reporter(c.publisher.github, current_pr='up/docs/1', authorized=True)))
     assert result.status == 'GREEN', result.errors
@@ -227,7 +295,9 @@ def test_render_actual_bytes_and_honesty(evidence, variant):
         assert f'/blob/{result.result_sha}/{ROOT}en/a.md#L3' in detail
         assert '> Final paragraph.' in detail and '> Missing paragraph.' in detail
         assert f'/blob/{result.snapshot.source_sha}/{ROOT}ru/a.md#L3' in detail
-        assert 'Missing paragraph' not in brief
+        assert 'Основные причины и действия:' in brief
+        assert result.issues[0].problem in brief
+        assert '> Final paragraph.' not in brief and '> Missing paragraph.' not in brief
     else:
         assert '/en/a.md#L3' not in detail
         assert 'не установлено' in detail
@@ -381,8 +451,9 @@ def test_verify_finalization_reconciles_real_store_without_extra_paid_attempt(sy
     assert db[0].daily_cost() == result.cost_breakdown['total'] == Decimal('.125')
     assert len([key for key in db[1].runs if key[1] != 'summary']) == 1
     assert len(summaries) == 2
+    assert len(sent.full_saves) == 1
     if failure == 'resave_fails':
-        assert 'storage final outcome' in result.errors[-1]
+        assert any('storage status' in error for error in result.errors)
         assert db[1].runs[adapter.run_id, 'summary']['status'] == 'GREEN'
     else:
         assert db[1].runs[adapter.run_id, 'summary']['status'] == 'RED'
@@ -394,6 +465,7 @@ def test_verify_finalization_reconciles_real_store_without_extra_paid_attempt(sy
 def test_continue_after_fresh_verify_keeps_original_source_identity(continued, monkeypatch):
     from datetime import timedelta
     c = continued
+    request_greeting(c, 'Hello, world.')
     c.now[0] += timedelta(seconds=1)
     adapter = RunStore(c.store, mode='doc_verify', source_pr='up/docs/1')
     verified = c.verify(model_factory=lambda: c.factory(adapter), hooks=adapter.hooks())

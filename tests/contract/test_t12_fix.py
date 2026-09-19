@@ -142,6 +142,8 @@ def test_ledger_only_outcome_survives_restart_replay_and_context_expiry(db):
 
 def test_paid_primary_and_fallback_replays_keep_both_attempts_without_double_cost(db, monkeypatch):
     store, sdk, now = db
+    from tests.model_clock import model_clock
+    model_clock(monkeypatch, now)
     calls = transport(monkeypatch, (500, 200))
     run = run_store(store)
     client = run.model_factory(cost_resolver=lambda endpoint, response: Decimal('7.25'))

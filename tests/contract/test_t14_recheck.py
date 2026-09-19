@@ -7,10 +7,15 @@ from html.parser import HTMLParser
 import pytest
 from markdown_it import MarkdownIt
 
-from tests.contract.test_continue_t13 import continued
+from tests.contract.test_continue_t13 import (
+    assert_changed_greeting,
+    continued,
+    request_greeting,
+)
 from tests.contract.test_t14_independent import ROOT, evidence, http_comments, wire
 from tests.contract.test_translate_t10 import system as translate_system
 from tests.contract.test_verify_t11 import system
+from tests.model_clock import model_clock
 from tests.unit.test_store_t12 import db
 from ydbdoc_review.publication import freeze
 from ydbdoc_review.quality import Issue, Location
@@ -125,6 +130,8 @@ def test_redaction_preserves_nonsecret_literal_and_original_coordinates(evidence
 def test_actual_runner_store_http_final_status_and_dedup(request, db, monkeypatch, mode, fail_at):
     if mode == 'continue':
         c = request.getfixturevalue('continued')
+        request_greeting(c, 'Hello, world.')
+        model_clock(monkeypatch, c.now)
         store, boundary, state = c.store, c.boundary, c.state
         before = store.daily_cost()
         sent = http_comments(monkeypatch, fail_at=fail_at)
@@ -160,13 +167,14 @@ def test_actual_runner_store_http_final_status_and_dedup(request, db, monkeypatc
     result = run()
     if mode == 'continue':
         adapter = c.adapters[-1]
+        assert_changed_greeting(result, c.seeded.candidate_sha, 'Hello, world.')
     status = 'GREEN' if fail_at is None else 'RED'
     assert result.status == status, result.errors
     assert result.publication.draft == (fail_at is not None)
     assert result.checked_sha == result.result_sha == remote_sha()
     assert [op for op, _ in state['calls']] == expected_calls
     assert state['made'] == 1 and len(result.attempts) == len(expected_calls)
-    assert len(sent) == (1 if fail_at == 1 else 2)
+    assert len(sent) == 2  # both independent report destinations are attempted
     assert len(summaries) == (1 if fail_at is None else 2)
     assert [row['status'] for row in summaries] == (['GREEN'] if fail_at is None else ['GREEN', 'RED'])
     context = store.context(adapter.run_id)

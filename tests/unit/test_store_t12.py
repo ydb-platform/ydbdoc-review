@@ -355,7 +355,9 @@ def test_invalid_stored_billing_is_storage_error(db):
 
 @pytest.mark.parametrize('error', [KeyboardInterrupt, RuntimeError])
 def test_factory_inflight_interrupt_retains_unknown_attempt(db, monkeypatch, error):
-    store, _, _ = db
+    from tests.model_clock import model_clock
+    store, _, now = db
+    model_clock(monkeypatch, now)
     run = adapter(store)
     def send(*args, **kwargs):
         raise error('interrupted in HTTP')

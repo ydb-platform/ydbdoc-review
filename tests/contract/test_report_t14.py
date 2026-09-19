@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import pytest
 import requests
 
-from tests.contract.test_continue_t13 import continued  # noqa: F401
+from tests.contract.test_continue_t13 import continued, request_greeting  # noqa: F401
 from tests.contract.test_translate_t10 import ROOT
 from tests.contract.test_translate_t10 import system as translate_system  # noqa: F401
 from tests.contract.test_verify_t11 import GOOD, english_source, system  # noqa: F401
@@ -263,6 +263,7 @@ def test_full_verify_one_identity_report_and_state(system, db, monkeypatch):
 
 def test_full_continue_original_source_two_reports_state_cost(continued, monkeypatch):
     c = continued
+    request_greeting(c, 'Hello, world.')
     sent = capture(monkeypatch)
     result = c.run(hooks=RunHooks(report=create_reporter(c.publisher.github, current_pr='up/docs/1',
                                                        authorized=True)))
@@ -294,6 +295,7 @@ def test_bounded_finalization_persistent_storage_failure():
 def test_full_existing_pr_report_failure_stores_red(system, db, monkeypatch, mode, request):
     if mode == 'doc_continue':
         c = request.getfixturevalue('continued')
+        request_greeting(c, 'Hello, world.')
         sent = capture(monkeypatch, fail_at=2)
         result = c.run(hooks=RunHooks(report=create_reporter(c.publisher.github, current_pr='up/docs/1',
                                                            authorized=True)))
@@ -447,6 +449,7 @@ def test_binary_asset_problem_and_bounded_secret_quote(located):
 def test_continue_after_new_verify_uses_durable_original_identity(continued, monkeypatch):
     from datetime import timedelta
     c = continued
+    request_greeting(c, 'Hello, world.')
     c.now[0] += timedelta(seconds=1)
     renewed = RunStore(c.store, mode='doc_verify', source_pr='up/docs/1')
     verified = c.verify(model_factory=lambda: c.factory(renewed), hooks=renewed.hooks())
