@@ -1,12 +1,11 @@
-
 """Quality loop returns the final durable map for translate/verify/continue."""
 from dataclasses import replace
 
-from tests.contract.test_quality_loop_t09 import PATH
+from tests.contract.test_quality_loop_t09 import PATH, setup  # noqa: F401 -- register imported pytest fixture
 from tests.unit.test_quality_parts_f07 import mapped
 
 
-def test_missing_map_repair_is_frozen_and_returned(setup):
+def test_missing_map_repair_is_frozen_and_returned(setup):  # noqa: F811 -- imported pytest fixture
     run, calls, freezes, _, _, *_ = setup
     source, initial = mapped((0, 1, 3))
     initial = replace(initial, path=PATH)
@@ -20,7 +19,7 @@ def test_missing_map_repair_is_frozen_and_returned(setup):
     assert len(result.rounds[0].checks[0].parts) == 4
 
 
-def test_verify_saves_map_without_initial_translation(setup):
+def test_verify_saves_map_without_initial_translation(setup):  # noqa: F811 -- imported pytest fixture
     run, calls, *_ = setup
     _, result = run()
     assert result.status == 'GREEN'
@@ -29,7 +28,7 @@ def test_verify_saves_map_without_initial_translation(setup):
     assert all(op == 'critic' for op, _ in calls)
 
 
-def test_long_verify_fixes_map_before_first_check_and_keeps_ids(setup, monkeypatch):
+def test_long_verify_fixes_map_before_first_check_and_keeps_ids(setup, monkeypatch):  # noqa: F811 -- imported pytest fixture
     import tests.contract.test_quality_loop_t09 as fixture_module
     import ydbdoc_review.quality_loop as loop_module
     from ydbdoc_review.document import RequestBudget
