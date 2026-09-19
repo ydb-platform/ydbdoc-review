@@ -4,11 +4,10 @@ from functools import lru_cache
 import pytest
 
 import ydbdoc_review.links as links_module
-
-from ydbdoc_review.build import BuildResult, automatic_ok
-from ydbdoc_review.links import check_links
 from tests.contract.test_links_build import ROOT, commit
 from tests.contract.test_quality_loop_t09 import setup  # noqa: F401
+from ydbdoc_review.build import BuildResult, automatic_ok
+from ydbdoc_review.links import check_links
 
 
 def test_thousands_of_unchecked_anchors_are_one_incomplete_check(git_repo, monkeypatch):
@@ -104,7 +103,7 @@ def test_build_diagnostic_preserves_first_failure_place_and_full_log(preceding):
     assert result.log == log
 
 
-def test_grouped_dependent_check_keeps_loop_red_on_checked_sha(setup):
+def test_grouped_dependent_check_keeps_loop_red_on_checked_sha(setup):  # noqa: F811 -- imported pytest fixture
     run, *_ = setup
     _, result = run(
         extra={ROOT + 'en/other.md': '# Heading\n\n[one](#one)\n\n[two](#two)'},

@@ -87,12 +87,13 @@ def credentials(p):
     return values
 
 
-def assert_private(result, state, values, context):
+def assert_private(result, state, values, context, *, diagnostic_exposed=True):
     public = result.stdout + result.stderr + str(state['comments'])
     public += context['result']['message'] + str(context['result']['errors'])
     for value in values:
         assert value not in public
-    assert '[REDACTED]' in result.stdout
+    if diagnostic_exposed:
+        assert '[REDACTED]' in result.stdout
 
 
 @pytest.mark.parametrize('mode', MODES[:2])
@@ -128,9 +129,9 @@ def test_last_report_failure_preserves_result_cost_and_no_retries(independent, m
     assert result.returncode == 1 and result.stdout.startswith('RED:')
     context, attempts = assert_saved(p, mode, 'RED')
     state = p.read()
-    assert_private(result, state, values, context)
-    kind = {'transport': 'ConnectionError', 'http': 'GitHubAPIError', 'interrupt': 'KeyboardInterrupt'}[fault]
-    assert f'report: {kind}' in result.stdout
+    assert_private(result, state, values, context, diagnostic_exposed=fault != 'http')
+    assert 'report progress: ReportDeliveryError' in result.stdout
+    assert 'comment up/docs/' in result.stdout
     if fault == 'http':
         assert 'HTTP 403' in result.stdout
     assert context['result']['cancelled'] == (fault == 'interrupt')
@@ -146,7 +147,7 @@ def test_last_report_failure_preserves_result_cost_and_no_retries(independent, m
     assert context['result']['checked_sha'] == context['result_sha']
 
 
-@pytest.mark.parametrize('phase', ['storage', 'report', 'storage final outcome', 'cancellation'])
+@pytest.mark.parametrize('phase', ['storage', 'report', 'storage status', 'cancellation'])
 @pytest.mark.parametrize('error_type', [RuntimeError, KeyboardInterrupt])
 def test_finalization_redacts_each_error_without_touching_raw_attempts(phase, error_type):
     secrets = ('arbitrary-a+b', 'arbitrary-a+b-long', 'model[credential]')
@@ -155,25 +156,29 @@ def test_finalization_redacts_each_error_without_touching_raw_attempts(phase, er
                             {'prompt': raw}, datetime.now(UTC), 0)
     attempt = AttemptRecord(request, raw, 200, None, Usage(cost_rub=Decimal('.25')))
     original = RunResult(status='GREEN', message='initial ' + raw, errors=(raw,), attempts=(attempt,))
-    saved, reports = [], []
+    saved, statuses, reports = [], [], []
     def save(result):
         saved.append(result)
-        if phase == 'storage' or (phase == 'storage final outcome' and len(saved) == 2):
+        if phase == 'storage':
+            raise error_type(raw)
+    def save_status(result):
+        statuses.append(result)
+        if phase == 'storage status':
             raise error_type(raw)
     def report(result):
         reports.append(result)
-        if phase in ('report', 'storage final outcome'):
+        if phase in ('report', 'storage status'):
             raise error_type(raw)
     def cancelled():
         if phase == 'cancellation':
             raise error_type(raw)
         return False
-    result = finalize(original, RunHooks(save=save, report=report, cancelled=cancelled, secrets=secrets))
+    result = finalize(original, RunHooks(save=save, save_status=save_status, report=report, cancelled=cancelled, secrets=secrets))
     assert result.status == 'RED' and result.cancelled == (error_type is KeyboardInterrupt)
     assert f'{phase}: {error_type.__name__}' in result.message
     assert len(reports) == 1
-    assert len(saved) == (1 if phase == 'cancellation' and error_type is KeyboardInterrupt else 2)
-    for value in [result, *saved, *reports]:
+    assert len(saved) == 1  # late errors update metadata, never replay full context
+    for value in [result, *saved, *statuses, *reports]:
         assert value.attempts == original.attempts  # §4 raw responses are retained.
         for secret in secrets:
             assert secret not in value.message + str(value.errors)

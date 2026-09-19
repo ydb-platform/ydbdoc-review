@@ -76,11 +76,20 @@ def test_parser_counts_and_source_spans_not_renderer_identity(source, expected):
 
 
 @pytest.mark.parametrize('mode', ['translate', 'verify', 'continue'])
-def test_examples_supply_readme_model_credential(mode):
+def test_examples_supply_default_provider_credentials(mode):
     import yaml
+
+    from ydbdoc_review.config.defaults import default_runtime_data
 
     root = Path(__file__).resolve().parents[2]
     path = root / f'examples/ydb-github-doc-{mode}-on-label.yml'
     data = yaml.safe_load(path.read_text())
     step = data['jobs']['document']['steps'][-1]
-    assert 'MODEL_TOKEN' in step['env'], (path.name, step['env'].keys())
+
+    assert not step['with'].get('config')
+    for role in default_runtime_data()['models'].values():
+        for endpoint in role.values():
+            name = endpoint['token_env']
+            assert step['env'][name] == '${{ secrets.' + name + ' }}'
+    folder = 'YANDEX_CLOUD_FOLDER_DOC_REVIEW'
+    assert step['env'][folder] == '${{ secrets.' + folder + ' }}'

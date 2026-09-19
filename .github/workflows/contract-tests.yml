@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [unit-parser, quality-links, translate, verify, continue, store-reports, cli]
+        group: [unit-parser, quality-links, translate, verify, continue, store-reports, cli, scale]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

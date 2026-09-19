@@ -9,7 +9,6 @@ import requests
 from ydbdoc_review.document import CapacityError
 from ydbdoc_review.llm.tls import public_ca_bundle
 
-
 # Explicit versions documented for the native YC Tokenizer. Do not infer
 # support from a shared provider URL or silently substitute an alias/model.
 _VERIFIED_MODELS = frozenset({'yandexgpt-5-pro', 'yandexgpt-5.1', 'yandexgpt-5-lite'})

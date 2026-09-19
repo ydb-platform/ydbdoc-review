@@ -19,16 +19,19 @@ def test_first_source_report_failure_after_model_is_private_and_accounted(indepe
     assert result.returncode == 1 and result.stdout.startswith('RED:')
     context, attempts = assert_saved(p, 'doc_translate', 'RED')
     state = p.read()
-    assert_private(result, state, values, context)
-    assert ('report: GitHubAPIError' if fault == 'http' else 'report: KeyboardInterrupt') in result.stdout
+    assert_private(result, state, values, context, diagnostic_exposed=fault != 'http')
+    assert 'report progress: ReportDeliveryError' in result.stdout
+    assert 'comment up/docs/1' in result.stdout
     if fault == 'http':
         assert 'HTTP 403' in result.stdout
     assert context['result']['cancelled'] == (fault == 'interrupt')
     assert [role for role, _ in state['model']] == ['translation', 'critic']
     assert len(attempts) == len({row['entry_id'] for row in attempts}) == 2
     assert context['result']['cost_breakdown']['total'] == Decimal('.50')
-    assert state['report_attempts'] == 1 and state['comments'] == []
-    assert [path for method, path in state['http'] if method == 'POST' and path.endswith('/comments')] == ['/repos/up/docs/issues/1/comments']
+    assert state['report_attempts'] == 2
+    assert len(state['comments']) == 1 and state['comments'][0][0] == 2
+    assert 'RED' in state['comments'][0][1] and 'Итого:' in state['comments'][0][1]
+    assert [path for method, path in state['http'] if method == 'POST' and path.endswith('/comments')] == ['/repos/up/docs/issues/1/comments', '/repos/up/docs/issues/2/comments']
     assert state['git_pushes'] == 1 and state['pulls']['2']['draft']
     assert state['stops'] == ['pool', 'driver']
     assert context['result']['checked_sha'] == context['result_sha']

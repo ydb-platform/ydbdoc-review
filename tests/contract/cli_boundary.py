@@ -3,8 +3,11 @@
 Loaded explicitly by test_t15_cli.py, never by production. No live sockets allowed.
 """
 
+import base64
+import hashlib
 import json
 import os
+import re
 import runpy
 import signal
 import subprocess
@@ -100,12 +103,47 @@ def main():
                 if role == "translation"
                 else json.loads(text)["source"]
             )
+            # Source contains required protected markers; apply the requested
+            # visible greeting correction without dropping those markers.
+            if role == 'repair' and not state.get('repair_noop'):
+                instruction = json.loads(text)['instruction']
+                greeting = re.search(r'greeting "([^"]+)"', instruction)
+                if greeting:
+                    result = re.sub(r'Hello,? world[.!]', greeting.group(1), result)
             return response(
                 {
                     "choices": [{"message": {"content": result}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 10, "completion_tokens": 5},
                 }
             )
+        data = json.loads(request.body) if request.body else {}
+        if 'body' in data:
+            assert len(data['body'].encode('utf-8')) < 65536
+        if method == 'POST' and '/git/' in path:
+            kind = path.rsplit('/', 1)[-1]
+            if kind == 'blobs':
+                assert data['encoding'] == 'base64'
+                content = base64.b64decode(data['content'], validate=True)
+                artifact = json.loads(content)
+                name = f"diagnostics-{len(state.get('artifact_paths', []))}.json"
+                (root / name).write_text(json.dumps(artifact))
+                state.setdefault('artifact_objects', {})[hashlib.sha1(content).hexdigest()] = dict(kind='blob', file=name)
+                state.setdefault('artifact_paths', []).append(name)
+                state['artifact_uploaded'] = True
+                write(state)
+                return response({'sha': hashlib.sha1(content).hexdigest()}, 201)
+            if kind in {'trees', 'commits'}:
+                oid = hashlib.sha1(request.body).hexdigest()
+                state.setdefault('artifact_objects', {})[oid] = dict(kind=kind, data=data)
+                write(state)
+                return response({'sha': oid}, 201)
+            if kind == 'refs':
+                assert data['ref'].startswith('refs/heads/ydbdoc-reports/')
+                assert len(data['sha']) == 40
+                assert state['artifact_objects'][data['sha']]['kind'] == 'commits'
+                state.setdefault('artifact_refs', {})[data['ref']] = data['sha']
+                write(state)
+                return response({'ref': data['ref'], 'object': {'sha': data['sha']}}, 201)
         if "/git/ref/heads/" in path:
             current = sha(path.split("/heads/")[1])
             return response(

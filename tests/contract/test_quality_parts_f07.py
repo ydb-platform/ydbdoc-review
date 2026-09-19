@@ -1,7 +1,8 @@
+
 """Quality loop returns the final durable map for translate/verify/continue."""
 from dataclasses import replace
 
-from tests.contract.test_quality_loop_t09 import PATH, setup
+from tests.contract.test_quality_loop_t09 import PATH
 from tests.unit.test_quality_parts_f07 import mapped
 
 

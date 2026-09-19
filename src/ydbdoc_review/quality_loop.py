@@ -11,8 +11,15 @@ from dataclasses import asdict, dataclass, replace
 from types import MappingProxyType
 
 from ydbdoc_review.build import BuildResult, automatic_ok, build_candidate
-from ydbdoc_review.document import (ChunkResult, FileResult, RequestBudget, assemble_file,
-                                    make_chunk, protect, restore)
+from ydbdoc_review.document import (
+    ChunkResult,
+    FileResult,
+    RequestBudget,
+    assemble_file,
+    make_chunk,
+    protect,
+    restore,
+)
 from ydbdoc_review.links import (
     Candidate,
     LinkResult,
@@ -29,9 +36,9 @@ from ydbdoc_review.quality import (
     check,
     critic_messages,
     deterministic_checks,
-    structure_counts,
     replace_validated_urls,
     review_parts,
+    structure_counts,
 )
 
 

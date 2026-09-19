@@ -9,7 +9,6 @@ import pytest
 import requests
 
 from tests.unit.test_store_t12 import db  # noqa: F401
-
 from ydbdoc_review.github.client import GitHubClient
 from ydbdoc_review.report import create_reporter
 from ydbdoc_review.runner import RunHooks, RunResult, finalize

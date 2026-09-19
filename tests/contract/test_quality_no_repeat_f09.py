@@ -1,3 +1,4 @@
+# ruff: noqa: F811 -- imported pytest fixture
 """§5.1: retry quality gates only after a changed candidate."""
 import pytest
 
@@ -64,6 +65,7 @@ def test_change_then_noop_checks_new_sha_once_and_keeps_correspondence(setup):
 def test_partial_repair_with_fatal_error_still_checks_changed_candidate(setup, monkeypatch):
     """A later failed part must not leave earlier committed repairs unchecked."""
     from dataclasses import replace
+
     import ydbdoc_review.quality_loop as loop
     original = loop.repair_document
     def repair(*args, **kwargs):

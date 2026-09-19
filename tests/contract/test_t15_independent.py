@@ -1,5 +1,6 @@
 """Fresh acceptance assertions through CLI/Actions → HTTP/SDK/Git/actual YFM."""
 import json
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -267,14 +268,30 @@ def test_twenty_one_dependencies_reports_every_path_before_factory(independent):
     assert not p.read()['model'] and not p.read().get('factories', 0)
     assert len(p.read()['pulls']) == 1
     report = '\n'.join(body for _, body in p.read()['comments'])
-    assert all(path in report for path in paths)
+    assert all(value in report for value in ('21', '20', 'YDBDOC_MAX_DEPENDENCY_FILES_PER_ARTICLE',
+                                             'Сначала переведите', 'увеличьте переменную'))
+    receipt = re.search(r'https://github.com/up/docs/blob/([0-9a-f]{40})/diagnostics.json', report)
+    assert receipt, report
+    state = p.read()
+    commit_sha = receipt.group(1)
+    assert commit_sha in state['artifact_refs'].values()
+    objects = state['artifact_objects']
+    tree = objects[objects[commit_sha]['data']['tree']]['data']['tree']
+    blob = next(entry['sha'] for entry in tree if entry['path'] == 'diagnostics.json')
+    artifact = json.loads((p.root / objects[blob]['file']).read_text())
+    assert all('ydb/docs/ru/' + path in artifact['message'] for path in paths)
+    assert 'ydb/docs/ru/dep20.md' in artifact['message']  # includes over-limit dependency
+
 
 
 def test_only_three_continuations_across_processes(independent):
     p = independent
     source_only(p)
     successful(p.run('doc_translate'))
-    for _ in range(3):
+    for greeting in ('Hello, world.', 'Hello world!', 'Hello, world!'):
+        instructions = p.read()['instructions']
+        instructions[0]['body'] = f'/ydbdoc continue In a.md use greeting "{greeting}"'
+        p.update(instructions=instructions)
         successful(p.run('doc_continue', 2, action=True))
     p.update(model=[], factories=0, comments=[])
     result = p.run('doc_continue', 2, action=True)
@@ -378,8 +395,11 @@ def test_red_common_loop_reports_real_published_coordinates(independent, mode):
     result = p.run(mode, 2 if mode == 'doc_continue' else 1)
     assert result.returncode == 1
     roles = [role for role, _ in p.read()['model']]
-    assert roles == (['translation'] if mode == 'doc_translate' else []) + [
-        'critic', 'repair', 'critic', 'repair', 'critic']
+    # The unchanged repair stops; continue first applies its explicit instruction.
+    rounds = 2 if mode == 'doc_continue' else 1
+    assert roles == (['translation'] if mode == 'doc_translate' else []) + ['critic', 'repair'] * rounds
+    builds = p.read()['actual_builds']
+    assert len(builds) == len({item['sha'] for item in builds}) == rounds
     number = '1' if mode == 'doc_verify' else '2'
     branch = p.read()['pulls'][number]['branch']
     sha = subprocess.check_output(['git', '--git-dir', str(p.remote), 'rev-parse', branch], text=True).strip()

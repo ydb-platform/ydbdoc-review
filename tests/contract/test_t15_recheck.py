@@ -216,7 +216,7 @@ def test_keyboard_interrupt_during_work_preserves_partial_red(independent):  # n
 
 
 @pytest.mark.parametrize('mode', MODES)
-def test_examples_load_readme_runtime_and_exact_product_variables(tmp_path, monkeypatch, mode):
+def test_examples_default_runtime_and_readme_custom_configuration(tmp_path, monkeypatch, mode):
     import yaml
 
     from ydbdoc_review.config.loader import load_settings, require_actor
@@ -231,17 +231,28 @@ def test_examples_load_readme_runtime_and_exact_product_variables(tmp_path, monk
                 'YDBDOC_MAX_SOURCE_CHARACTERS': '250000',
                 'YDBDOC_ALLOWED_ACTORS': 'writer', 'YDBDOC_DAILY_BUDGET_RUB': '100'}
     variables = {name for name, value in step['env'].items() if 'vars.' in value}
-    assert variables == expected.keys()
+    technical = {'YDBDOC_MODEL_TRANSLATE': 'yandexgpt-5-pro',
+                 'YDBDOC_MODEL_CHECK': 'yandexgpt-5.1'}
+    assert variables == expected.keys() | technical.keys()
     for name, value in expected.items():
         assert step['env'][name] == '${{ vars.' + name + ' }}'
         monkeypatch.setenv(name, value)
+    for name, value in technical.items():
+        assert step['env'][name] == '${{ vars.' + name + ' }}'
+        monkeypatch.setenv(name, value)
+    for name in ('YANDEX_CLOUD_FOLDER_DOC_REVIEW', 'YANDEX_CLOUD_API_KEY_DOC_REVIEW'):
+        assert step['env'][name] == '${{ secrets.' + name + ' }}'
+        monkeypatch.setenv(name, 'fixture-value')
     monkeypatch.setenv('YDB_SA_KEY', '{}')
     require_actor(load_settings(), 'writer')
+    default_runtime = load_runtime()
+    assert default_runtime.choices['translation'].main.model == technical['YDBDOC_MODEL_TRANSLATE']
+    assert default_runtime.choices['critic'].main.model == technical['YDBDOC_MODEL_CHECK']
+    # README JSON is an optional custom-provider example, not the default workflow.
     raw = re.search(r'```json\n(.*?)\n```', (root / 'README.md').read_text(), re.S).group(1)
     config = json.loads(raw)
     for role in config['models'].values():
         name = role['main']['token_env']
-        assert step['env'][name] == '${{ secrets.' + name + ' }}'
         monkeypatch.setenv(name, 'runtime-secret-sentinel')
     path = tmp_path / 'readme.json'
     path.write_text(raw)

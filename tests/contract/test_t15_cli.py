@@ -66,7 +66,7 @@ def process(tmp_path, git_repo, monkeypatch):
         builds=[],
         instructions=[
             dict(
-                body="/ydbdoc continue Improve a.md",
+                body='/ydbdoc continue In a.md use greeting "Hello, world."',
                 created_at=datetime.now(UTC).isoformat(),
                 user=dict(login="writer", type="User"),
             )
@@ -205,7 +205,8 @@ def test_all_modes_publication_comments_context_all_costs(process, mode):
     assert attempts and state["model"]
     assert context["source_sha"] and context["result_sha"]
     assert context["result"]["checked_sha"] == context["result_sha"] == state["builds"][-1]
-    assert context["final_files"]["ydb/docs/en/a.md"] == b"# Hello\n\nHello world.\n"
+    expected = b"# Hello\n\nHello, world.\n" if mode == "doc_continue" else b"# Hello\n\nHello world.\n"
+    assert context["final_files"]["ydb/docs/en/a.md"] == expected
     assert len(state["comments"]) == (1 if mode == "doc_verify" else 2)
     for _, body in state["comments"]:
         for label in ("Перевод:", "Критик:", "Исправления:", "Итого:"):
@@ -314,7 +315,10 @@ def test_three_continuations_then_refusal(process):
     p = process
     seed = p.invoke("doc_translate")
     assert seed.returncode == 0, seed.stdout + seed.stderr
-    for _ in range(3):
+    for greeting in ('Hello, world.', 'Hello world!', 'Hello, world!'):
+        instructions = p.read()['instructions']
+        instructions[0]['body'] = f'/ydbdoc continue In a.md use greeting "{greeting}"'
+        p.update(instructions=instructions)
         result = p.invoke("doc_continue", 2)
         assert result.returncode == 0, result.stdout + result.stderr
     p.update(model=[], factories=0)
@@ -367,3 +371,18 @@ def test_unknown_tariff_is_not_zero_and_blocks_next_admission(process):
     result = p.invoke("doc_verify", 2)
     assert result.returncode == 1 and "неизвестна" in result.stdout
     assert not p.read()["model"] and p.read()["factories"] == 0
+
+
+def test_continue_noop_keeps_sha_red_without_duplicate_check(process):
+    p = process
+    seed = p.invoke('doc_translate')
+    assert seed.returncode == 0, seed.stdout + seed.stderr
+    p.update(repair_noop=True, model=[], builds=[])
+    result = p.invoke('doc_continue', 2)
+    assert result.returncode == 1, result.stdout + result.stderr
+    context, attempts = assert_saved(p, 'doc_continue', 'RED')
+    state = p.read()
+    assert [role for role, _ in state['model']] == ['critic', 'repair']
+    assert len(attempts) == 2 and len(state['builds']) == 1
+    assert context['result']['checked_sha'] == context['result_sha'] == state['builds'][0]
+    assert context['final_files']['ydb/docs/en/a.md'] == b'# Hello\n\nHello world.\n'

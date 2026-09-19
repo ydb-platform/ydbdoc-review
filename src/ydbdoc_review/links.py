@@ -9,6 +9,7 @@ from __future__ import annotations
 import posixpath
 import re
 import subprocess
+from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -234,6 +235,26 @@ def check_links(candidate: Candidate, *, paths: Iterable[str] | None = None,
     includes, duplicate headings and YFM auto slugs). SVG IDs come from exact
     candidate XML bytes; both require a successful build of this SHA.
     """
+    # One immutable candidate, one check: retain only bounded small target blobs.
+    # Every reference is validated; no diagnostics or raised I/O exceptions are cached.
+    target_cache = OrderedDict()
+    cached_bytes = 0
+
+    def read_target(path):
+        nonlocal cached_bytes
+        if path in target_cache:
+            return target_cache[path]
+        data = candidate.read(path)
+        size = len(data) if data is not None else 0
+        if size > 64 * 1024:
+            return data
+        while target_cache and (len(target_cache) >= 128 or cached_bytes + size > 1024 * 1024):
+            _, old = target_cache.popitem(last=False)
+            cached_bytes -= len(old) if old is not None else 0
+        target_cache[path] = data
+        cached_bytes += size
+        return data
+
     issues = []
     unchecked_anchors = []
     complete = True
@@ -289,7 +310,7 @@ def check_links(candidate: Candidate, *, paths: Iterable[str] | None = None,
                                          f'replace with {english}')
                 if target is None:
                     continue
-                data = candidate.read(target.path)
+                data = read_target(target.path)
                 if data is None:
                     raise ValueError(f'Missing {ref.kind} target: {ref.href} -> {target.path}')
                 if not data:

@@ -31,9 +31,9 @@ CLI самостоятельно получает metadata GitHub и fetch об�
 
 Существующий workflow продолжает передавать секреты и переменные через `env`. Action по умолчанию запускает перевод (`mode: run`); `verify` и `continue` соответствуют `doc_verify` и `doc_continue`. Имена `doc_*` также принимаются. `config` необязателен.
 
-Без JSON используются прежние модели Yandex Cloud: перевод и исправления — `deepseek-v32` с одной альтернативой `yandexgpt-5-pro`; критик — `yandexgpt-5.1` с альтернативой `yandexgpt-5-lite`. Секреты: `YANDEX_CLOUD_FOLDER_DOC_REVIEW` и `YANDEX_CLOUD_API_KEY_DOC_REVIEW`. Непустые `YDBDOC_MODEL_TRANSLATE` / `YDBDOC_MODEL_CHECK` переопределяют основные модели; пустые значения сохраняют встроенные настройки. Для других провайдеров и моделей можно передать доверенный `--config` / Action input `config`. Четыре продуктовые переменные остаются обязательными, их workflow передаёт из `${{ vars.* }}` через `env`; Action не обращается к контексту `vars`.
+В сохранённых defaults без JSON указаны прежние модели Yandex Cloud: перевод и исправления — `deepseek-v32` с одной альтернативой `yandexgpt-5-pro`; критик — `yandexgpt-5.1` с альтернативой `yandexgpt-5-lite`. Это историческая конфигурация, а не подтверждение готовности к production: [официальные release notes YC от 28.05.2026](https://aistudio.yandex.ru/ru/docs/ai-studio/release-notes/) сообщают о замене V3.2 на V4 Flash и поддержке старого URI только до 28.06.2026. Defaults оставлены до отдельного согласования модели. Секреты: `YANDEX_CLOUD_FOLDER_DOC_REVIEW` и `YANDEX_CLOUD_API_KEY_DOC_REVIEW`. Непустые `YDBDOC_MODEL_TRANSLATE` / `YDBDOC_MODEL_CHECK` переопределяют основные модели; пустые значения сохраняют встроенные настройки. Для других провайдеров и моделей можно передать доверенный `--config` / Action input `config`. Четыре продуктовые переменные остаются обязательными, их workflow передаёт из `${{ vars.* }}` через `env`; Action не обращается к контексту `vars`.
 
-Необязательный технический JSON явно задаёт три роли, primary и не более одной alternative на роль. Пример формы (замените модель, endpoint и реальные ёмкости на согласованные значения; это не тарифная рекомендация):
+Необязательный технический JSON явно задаёт три роли, primary и не более одной alternative на роль. Ниже только пример схемы JSON, а не рабочая конфигурация Eliza: её tokenizer здесь не реализован. Для нового провайдера нужны подтверждённая токенизация и совместимость параметров; подстановка endpoint и имени модели сама по себе их не обеспечивает:
 
 ```json
 {
@@ -49,9 +49,9 @@ CLI самостоятельно получает metadata GitHub и fetch об�
 }
 ```
 
-`provider` — `eliza` или `yandex_cloud`; для Yandex Cloud дополнительно требуется `folder_id`, base URL указывает OpenAI-compatible `/v1`. `alternative` имеет ту же форму, что `main`. Емкость должна подходить всем заданным endpoint. Разбиение использует консервативную верхнюю оценку UTF-8 bytes с запасом на обрамление сообщений; это может создать больше чанков, чем точный tokenizer. Глоссарий — список пар RU/EN.
+`provider` — `eliza` или `yandex_cloud`; для Yandex Cloud дополнительно требуется `folder_id`, base URL указывает OpenAI-compatible `/v1`. `alternative` имеет ту же форму, что `main`. Емкость должна подходить всем заданным endpoint. Вместимость оценивается модельным tokenizer с учётом промпта, глоссария и резерва ответа, сначала для целого файла. UTF-8 байты не считаются токенами. Точный counter сейчас реализован для YandexGPT `yandexgpt-5-pro`, `yandexgpt-5.1`, `yandexgpt-5-lite`. Для других моделей и провайдеров запуск завершается отказом до платного обращения; совместимость DeepSeek и выбор модели ожидают отдельного согласования. В обычных тестах tokenizer и ответы провайдера явно имитируются. Глоссарий — список пар RU/EN.
 
-Для встроенных моделей заданы проверенные синхронные тарифы Yandex AI Studio в рублях за миллион токенов: DeepSeek V3.2 — 500 вход / 800 выход / 130 кешированный вход; YandexGPT 5.1 — 800/800, Pro 5 — 1200/1200, Lite 5 — 200/200. Источники: [официальные тарифы](https://aistudio.yandex.ru/ru/docs/ai-studio/pricing), [официальный справочник DeepSeek](https://github.com/yandex-ai-studio/yandex-ai-studio-cookbook/blob/main/multi_agent/parsed_docs/pricing.md); проверено 18.09.2026. Тарифы технические и требуют обновления при изменении цен провайдера.
+Для сохранённых имён моделей заданы синхронные тарифы Yandex AI Studio в рублях за миллион токенов: DeepSeek V3.2 — 500 вход / 800 выход / 130 кешированный вход; YandexGPT 5.1 — 800/800, Pro 5 — 1200/1200, Lite 5 — 200/200. Источники: [официальные тарифы](https://aistudio.yandex.ru/ru/docs/ai-studio/pricing), [официальный справочник DeepSeek](https://github.com/yandex-ai-studio/yandex-ai-studio-cookbook/blob/main/multi_agent/parsed_docs/pricing.md); проверено 18.09.2026. Это настроенные исторические тарифы, включая DeepSeek V3.2; они не доказывают текущую доступность соответствующей модели и требуют сверки перед новым продуктивным запуском.
 
 В явном JSON цены задаются массивом `tariffs_rub_per_million`, где запись содержит `provider`, `model`, `input`, `output` и необязательный `cached_input` (RUB за миллион токенов, Decimal-строки). Укажите только проверенные тарифы соответствующего провайдера/модели. Без тарифа или usage расходы честно неизвестны; следующий budget admission не сможет подтвердить суточную сумму. Нет USD aliases, пересчёта валют или выдуманных цен.
 
@@ -70,10 +70,10 @@ uv build
 
 `requirements.txt` — экспорт runtime-зависимостей из `uv.lock`. Dockerfile содержит тот же фиксированный YFM и Node 24. Для YDB до первого запуска подготовьте обе таблицы по [scripts/PROVISIONING.md](scripts/PROVISIONING.md). Старая схема несовместима: предусмотрено сохранение финансовой истории и проверка дневных сумм перед переключением; продукт не выполняет DDL.
 
-PR CI выполняет весь offline-набор семью группами, каждая с `timeout 900s`, `pytest -vv`, отдельным timeout тестов и запретом сети. Повторить локально:
+PR CI выполняет весь offline-набор восемью группами, каждая с `timeout 900s`, `pytest -vv`, отдельным timeout тестов и запретом сети. Повторить локально:
 
 ```sh
-for group in unit-parser quality-links translate verify continue store-reports cli; do
+for group in unit-parser quality-links translate verify continue store-reports cli scale; do
   timeout 900s uv run python -m pytest -vv --ci-group "$group" || exit
 done
 ```
