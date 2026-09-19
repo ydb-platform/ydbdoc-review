@@ -163,7 +163,8 @@ def render_artifact(result: RunResult, *, secrets=()) -> str:
 
 class ReportDeliveryError(RuntimeError):
     """All channels were attempted. F11 may persist these small failure records."""
-    def __init__(self, errors):
+    def __init__(self, errors, *, cancelled=False):
+        self.cancelled = cancelled
         self.errors = tuple(errors)
         super().__init__('; '.join(f'{channel}: {message}' for channel, message in errors))
 
@@ -309,10 +310,12 @@ def initial_description(result: RunResult, *, secrets=()) -> str:
 
 
 def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | None = None,
-                    authorized: bool = False, secrets: tuple[str, ...] = ()):
+                    authorized: bool = False, secrets: tuple[str, ...] = (),
+                    refusal_only: bool = False):
     """A RunHooks.report callback. No HTTP on construction; never retries comments.
 
     authorized is internal delivery authorization, including preflight refusals.
+    refusal_only restricts pre-admission delivery to the triggering PR comment.
     It never grants admission to the model, document writes or PR creation.
     Tests replace requests' HTTP boundary, not this adapter or GitHubClient.
     """
@@ -332,7 +335,16 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
     def deliver(result: RunResult, preliminary=False):
         if not authorized:
             raise PermissionError('GitHub report publication requires an authorized production run')
+        if refusal_only:
+            # Before ACL/config admission the sole capability is a refusal
+            # comment in the triggering PR, never GitData or PR mutations.
+            refusal = replace(result, status='RED', publication=None, snapshot=None)
+            comment = render_reports(refusal, current_pr=current_pr, secrets=secrets)[-1]
+            owner, repository, number = current_pr.split('/')
+            github.post_issue_comment(owner, repository, int(number), comment.body)
+            return
         failures = []
+        interrupted = False
         artifact_url = artifact_error = None
         if not preliminary and _needs_artifact(result):
             owner, repository, _ = current_pr.split('/')
@@ -340,11 +352,12 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
                 artifact_url = github.upload_report_artifact(owner, repository,
                     render_artifact(result, secrets=secrets))
             except (Exception, KeyboardInterrupt) as exc:
+                interrupted |= isinstance(exc, KeyboardInterrupt)
                 artifact_error = _safe(str(exc), secrets)
                 failures.append(('artifact', artifact_error))
             artifact_receipt.update(url=artifact_url, error=artifact_error)
         def rendered():
-            effective = replace(result, status='RED') if failures else result
+            effective = replace(result, status='RED', cancelled=result.cancelled or interrupted) if failures else result
             return render_reports(effective, current_pr=current_pr, source_pr=source_pr,
                                   secrets=secrets, artifact_url=artifact_url,
                                   artifact_error=artifact_error)
@@ -362,6 +375,7 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
                 else:
                     github.post_issue_comment(owner, repository, int(number), rendered()[index].body)
             except (Exception, KeyboardInterrupt) as exc:
+                interrupted |= isinstance(exc, KeyboardInterrupt)
                 failures.append((f'comment {comment.pr}', _safe(str(exc), secrets)))
         if result.publication and result.publication.pr_number:
             owner, repository = result.publication.repository.split('/')
@@ -369,14 +383,16 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
                 github.update_pull_body(owner, repository, result.publication.pr_number,
                                         rendered()[-1].body)
             except (Exception, KeyboardInterrupt) as exc:
+                interrupted |= isinstance(exc, KeyboardInterrupt)
                 failures.append(('description', _safe(str(exc), secrets)))
         if failures:
-            raise ReportDeliveryError(failures)
+            raise ReportDeliveryError(failures, cancelled=interrupted)
 
     def reconcile_red(result):
-        if not authorized:
-            return [('report reconciliation', 'GitHub report publication requires an authorized production run')]
+        if not authorized or refusal_only:
+            raise PermissionError('GitHub report reconciliation requires an admitted production run')
         failures = []
+        interrupted = False
         comments = render_reports(replace(result, status='RED'), current_pr=current_pr,
                                   source_pr=source_pr, secrets=secrets,
                                   artifact_url=artifact_receipt.get('url'),
@@ -388,14 +404,17 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
             try:
                 github.update_report_comment(owner, repository, receipts[comment.pr], comment.body)
             except (Exception, KeyboardInterrupt) as exc:
+                interrupted |= isinstance(exc, KeyboardInterrupt)
                 failures.append((f'comment reconciliation {comment.pr}', _safe(str(exc), secrets)))
         if result.publication and result.publication.pr_number:
             owner, repository = result.publication.repository.split('/')
             try:
                 github.update_pull_body(owner, repository, result.publication.pr_number, comments[-1].body)
             except (Exception, KeyboardInterrupt) as exc:
+                interrupted |= isinstance(exc, KeyboardInterrupt)
                 failures.append(('description reconciliation', _safe(str(exc), secrets)))
-        return failures
+        if failures:
+            raise ReportDeliveryError(failures, cancelled=interrupted)
 
     deliver.progress = progress
     deliver.reconcile_red = reconcile_red

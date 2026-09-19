@@ -120,7 +120,8 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
                        'и запустите doc_verify или новый doc_translate.' if name.startswith('storage') else '')
         result = replace(result, status='RED', errors=(*result.errors, error),
                          message='; '.join(filter(None, (explanation, result.message, error))),
-                         cancelled=result.cancelled or isinstance(exc, (RunCancelled, KeyboardInterrupt)))
+                         cancelled=result.cancelled or isinstance(exc, (RunCancelled, KeyboardInterrupt))
+                         or bool(getattr(exc, 'cancelled', False)))
 
     def reconcile():
         nonlocal result, draft_attempted
@@ -174,20 +175,25 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
         except (Exception, KeyboardInterrupt) as exc:
             failed('report', exc)
         reconcile()
-    # Only small metadata may change after report delivery. Never replay save,
-    # model calls, document writes, or paid-attempt reconciliation.
+    def reconcile_report():
+        callback = getattr(hooks.report, 'reconcile_red', None) if progress else None
+        if callback:
+            try:
+                callback(result)
+            except (Exception, KeyboardInterrupt) as exc:
+                failed('report reconciliation', exc)
+
+    if result is not reported_result:
+        reconcile_report()
+    # Only small metadata may change after report delivery. Include cancellation
+    # during reconciliation, without replaying documents or paid attempts.
     if hooks.save_status and result is not reported_result:
         try:
             hooks.save_status(result)
         except (Exception, KeyboardInterrupt) as exc:
             failed('storage status', exc)
             reconcile()
-
-    if result is not reported_result and progress:
-        reconcile_report = getattr(hooks.report, 'reconcile_red', None)
-        if reconcile_report:
-            for channel, error in reconcile_report(result):
-                failed(channel, RuntimeError(error))
+            reconcile_report()
     return result
 
 

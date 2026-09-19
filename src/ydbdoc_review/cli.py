@@ -52,7 +52,8 @@ def execute(mode: str, repository: str, pr: int, config: Path | None = None) -> 
     secrets = (token, push_token, os.environ.get('YDB_SA_KEY', ''))
     # Only refusal delivery is possible before ACL/config admission. Constructing
     # this callback performs no HTTP and grants no model/Git/store capability.
-    reporter = create_reporter(github, current_pr=current, authorized=True, secrets=secrets)
+    reporter = create_reporter(github, current_pr=current, authorized=True, secrets=secrets,
+                               refusal_only=True)
     store = None
     adapter = None
     try:
