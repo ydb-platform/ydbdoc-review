@@ -253,6 +253,7 @@ class ModelClient:
                 "messages": deepcopy(messages),
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "thinking": {"type": "disabled"},
             }
             if endpoint.reasoning_effort is not None:
                 payload["reasoning_effort"] = endpoint.reasoning_effort
