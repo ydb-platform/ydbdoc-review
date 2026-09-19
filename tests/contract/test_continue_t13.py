@@ -2,6 +2,7 @@
 # ruff: noqa: F811, RUF001 -- pytest fixtures and Russian source documents.
 import importlib
 import json
+import re
 from copy import deepcopy
 from dataclasses import replace
 from datetime import timedelta
@@ -127,11 +128,26 @@ def continued(system, monkeypatch):
                            adapters=adapters, verify=verify, factory=factory, commit=commit)
 
 
+def request_greeting(c, greeting):
+    c.state['comments'][0]['body'] = f'/ydbdoc continue In ydb/docs/en/a.md use greeting "{greeting}"'
+    c.state['handler'] = lambda op, data: GOOD if op == 'critic' else re.sub(
+        r'Hello,? world[.!]', greeting, english_source(data))
+
+
+def assert_changed_greeting(result, previous_sha, greeting):
+    assert result.candidate_sha != previous_sha
+    assert result.candidate.text(ROOT+'en/a.md') == f'# Hello\n\n{greeting}\n'
+    assert [r.candidate_sha for r in result.quality.rounds] == [previous_sha, result.checked_sha]
+
+
 def test_real_continue_three_then_four_new_runs_costs_and_known_good(continued):
     c = continued
     before = deepcopy(c.boundary.runs)
-    for n in range(1, 4):
+    for n, greeting in enumerate(('Hello, world.', 'Hello world!', 'Hello, world!'), 1):
+        previous_sha = c.remote_sha('topic')
+        request_greeting(c, greeting)
         result = c.run()
+        assert_changed_greeting(result, previous_sha, greeting)
         assert result.status == 'GREEN', (result.errors, result.issues)
         assert result.mode == 'doc_continue'
         assert result.result_sha == result.checked_sha == c.remote_sha('topic')
@@ -227,18 +243,24 @@ def test_explicit_successful_file_latest_allowed_instruction(continued):
 def test_saved_problem_forces_common_loop_repair_even_when_critic_correct(continued):
     c = continued
     c.initial.save(replace(c.seeded, status='RED', issues=(
-        Issue(ROOT+'en/a.md', 'Saved specific problem', 'Use accurate wording'),)))
+        Issue(ROOT+'en/a.md', 'Saved specific problem: greeting punctuation', 'Use greeting Hello, world.'),)))
+    request_greeting(c, 'Hello, world.')
     c.state['comments'][0]['body'] = '/ydbdoc continue Исправь сохранённые замечания'
     result = c.run()
     assert result.status == 'GREEN', result.errors
     assert [op for op, _ in c.state['calls']] == ['critic', 'repair', 'critic']
-    assert any(f['problem'] == 'Saved specific problem' for f in c.state['calls'][1][1]['findings'])
+    assert_changed_greeting(result, c.seeded.candidate_sha, 'Hello, world.')
+    assert any(f['problem'] == 'Saved specific problem: greeting punctuation' for f in c.state['calls'][1][1]['findings'])
 
 
 def test_new_verify_does_not_reset_source_pr_limit(continued):
     c = continued
-    for _ in range(3):
-        assert c.run().status == 'GREEN'
+    for greeting in ('Hello, world.', 'Hello world!', 'Hello, world!'):
+        previous_sha = c.remote_sha('topic')
+        request_greeting(c, greeting)
+        result = c.run()
+        assert result.status == 'GREEN'
+        assert_changed_greeting(result, previous_sha, greeting)
     c.now[0] += timedelta(seconds=1)
     fresh = RunStore(c.store, mode='doc_verify', source_pr='up/docs/1')
     renewed = c.verify(model_factory=lambda: c.factory(fresh), hooks=fresh.hooks())
@@ -375,6 +397,11 @@ def test_translate_then_continue_actual_components(translate_system, monkeypatch
     boundary = ContinueBoundary()
     monkeypatch.setattr(ydb, 'SessionPool', lambda driver: boundary)
     now = [datetime(2026, 9, 18, 12, tzinfo=UTC)]
+    class ModelClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now[0].astimezone(tz)
+    monkeypatch.setattr('ydbdoc_review.model.datetime', ModelClock)
     store = YDBStore(boundary, clock=lambda: now[0])
     initial = RunStore(store, source_pr='up/docs/1', mode='doc_translate')
     adapters = []
@@ -397,7 +424,7 @@ def test_translate_then_continue_actual_components(translate_system, monkeypatch
             response = requests.Response()
             response.status_code = 200
             response._content = json.dumps([dict(
-                body='/ydbdoc continue Improve ydb/docs/en/a.md',
+                body='/ydbdoc continue In ydb/docs/en/a.md use greeting "Hello, world!"',
                 created_at='2026-09-18T11:00:00Z', user=dict(login='writer', type='User'))]).encode()
             return response
         return transport(session, request, **kwargs)
@@ -412,6 +439,7 @@ def test_translate_then_continue_actual_components(translate_system, monkeypatch
                           budget=RequestBudget(100000, 20000, lambda m: len(str(m))),
                           model_factory=factory, hooks=RunHooks(report=state['reported'].append))
     assert result.status == 'GREEN', (result.errors, result.issues)
+    assert_changed_greeting(result, first.candidate_sha, 'Hello, world!')
     assert result.result_sha == remote_sha('translation') == result.checked_sha != first.result_sha
     assert result.publication.pr_number == 2 and len(state['pulls']) == 1
     assert result.snapshot.source_sha == state['sha']
@@ -429,21 +457,39 @@ def test_same_pr_repairs_save_final_source_sha_for_next_continue(continued):
     c = continued
     c.initial.source_pr = 'up/docs/1'
     c.initial.save(c.seeded)
-    c.state['handler'] = lambda op, data: GOOD if op == 'critic' else english_source(data).replace('Hello world.', 'Hello, world!')
+    request_greeting(c, 'Hello, world!')
     first = c.run()
+    assert_changed_greeting(first, c.seeded.candidate_sha, 'Hello, world!')
     assert first.status == 'GREEN', first.errors
     assert first.result_sha != c.seeded.result_sha
     context = c.store.latest_context('up/docs/1')
     assert context['source_sha'] == context['result_sha'] == first.result_sha
+    request_greeting(c, 'Hello, world.')
     second = c.run()
+    assert_changed_greeting(second, first.candidate_sha, 'Hello, world.')
     assert second.status == 'GREEN', second.errors
     assert c.store.latest_context('up/docs/1')['continuation_count'] == 2
 
 
 def test_actual_store_final_write_failure_is_red_draft_and_consumes_slot(continued):
     c = continued
-    c.boundary.fail = lambda q, p: 'UPSERT INTO run_objects' in q and p.get('object_key') == 'context'
+    request_greeting(c, 'Hello, world.')
+    failed_context_writes = []
+    def fail_final_context(query, params):
+        failed = 'UPSERT INTO run_objects' in query and params.get('object_key') == 'context'
+        if failed:
+            failed_context_writes.append(dict(params))
+        return failed
+    c.boundary.fail = fail_final_context
     result = c.run()
+    assert failed_context_writes
+    assert {p['run_id'] for p in failed_context_writes} == {c.adapters[-1].run_id}
+    assert_changed_greeting(result, c.seeded.candidate_sha, 'Hello, world.')
+    assert [op for op, _ in c.state['calls']] == ['critic', 'repair', 'critic']
+    ledger = [row for (run_id, entry), row in c.boundary.runs.items()
+              if run_id == c.adapters[-1].run_id and entry != 'summary']
+    assert len(ledger) == 3
+    assert sum(Decimal(row['cost_rub']) for row in ledger) == Decimal('.75')
     assert result.status == 'RED' and result.publication.draft
     assert 'storage: StorageError' in result.message
     assert result.checked_sha == result.result_sha == c.remote_sha('topic')

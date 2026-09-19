@@ -6,6 +6,7 @@ this verifies admission callers, not live YDB's concurrency implementation.
 """
 # ruff: noqa: F811, RUF001
 import json
+import re
 import sqlite3
 import subprocess
 import threading
@@ -138,6 +139,18 @@ def env(system, tmp_path, monkeypatch):
     sql.connection.close()
 
 
+def request_greeting(e, greeting):
+    e.comments[0]['body'] = f'/ydbdoc continue In ydb/docs/en/a.md use greeting "{greeting}"'
+    e.state['handler'] = lambda op, data: GOOD if op == 'critic' else re.sub(
+        r'Hello,? world[.!]', greeting, english_source(data))
+
+
+def assert_changed_greeting(result, previous_sha, greeting):
+    assert result.candidate_sha != previous_sha
+    assert result.candidate.text(ROOT+'en/a.md') == f'# Hello\n\n{greeting}\n'
+    assert [r.candidate_sha for r in result.quality.rounds] == [previous_sha, result.checked_sha]
+
+
 @pytest.mark.parametrize('entry_pr', [1, 2])
 def test_lookup_by_pr_new_history_and_minimal_context(env, entry_pr):
     e = env
@@ -145,7 +158,9 @@ def test_lookup_by_pr_new_history_and_minimal_context(env, entry_pr):
     old_prompt = encode({'do_not_forward': 'OLD_TRANSCRIPT_SENTINEL' * 1000})
     context = dict(e.original, requests=[{'content': old_prompt}], attempts=[])
     e.store.put(e.first.run_id, 'context', encode(context))
+    request_greeting(e, 'Hello, world.')
     result = e.run(pr_number=entry_pr)
+    assert_changed_greeting(result, e.seeded.candidate_sha, 'Hello, world.')
     assert result.status == 'GREEN', (result.errors, result.issues)
     assert result.mode == 'doc_continue' and result.files == ()
     assert result.cost_breakdown['translation'] == 0
@@ -190,11 +205,13 @@ def test_ambiguous_basename_refuses_without_guessing(env):
 def test_saved_findings_survive_first_correct_critic(env):
     e = env
     e.first.save(replace(e.seeded, status='RED', issues=(
-        Issue(ROOT+'en/a.md', 'SAVED_FINDING_SENTINEL', 'Preserve the greeting'),)))
+        Issue(ROOT+'en/a.md', 'SAVED_FINDING_SENTINEL', 'Use greeting Hello, world.'),)))
+    request_greeting(e, 'Hello, world.')
     e.comments[0]['body'] = '/ydbdoc continue Resolve saved findings'
     result = e.run()
     assert result.status == 'GREEN', result.message
     assert [op for op, data in e.state['calls']] == ['critic', 'repair', 'critic']
+    assert_changed_greeting(result, e.seeded.candidate_sha, 'Hello, world.')
     assert any(f['problem'] == 'SAVED_FINDING_SENTINEL'
                for f in e.state['calls'][1][1]['findings'])
 
@@ -244,8 +261,11 @@ def test_refusal_before_model_distinguishes_ttl_from_outage(env, reason):
 @pytest.mark.parametrize('mode', ['doc_translate', 'doc_verify'])
 def test_three_admissions_survive_new_run_and_ttl(env, mode):
     e = env
-    for count in range(1, 4):
+    for count, greeting in enumerate(('Hello, world.', 'Hello world!', 'Hello, world!'), 1):
+        previous_sha = e.remote_sha('topic')
+        request_greeting(e, greeting)
         result = e.run()
+        assert_changed_greeting(result, previous_sha, greeting)
         assert result.status == 'GREEN', result.message
         assert e.store.latest_context('up/docs/1')['continuation_count'] == count
     old = e.sql.rows()
@@ -306,12 +326,15 @@ def test_same_pr_repair_then_continue_uses_final_sha(env):
     e = env
     e.first.source_pr = 'up/docs/1'
     e.first.save(e.seeded)
-    e.state['handler'] = lambda op, data: GOOD if op == 'critic' else english_source(data).replace('Hello world.', 'Hello, world!')
+    request_greeting(e, 'Hello, world!')
     first = e.run()
+    assert_changed_greeting(first, e.seeded.candidate_sha, 'Hello, world!')
     assert first.status == 'GREEN' and first.result_sha != e.seeded.result_sha
     context = e.store.latest_context('up/docs/1')
     assert context['source_sha'] == context['result_sha'] == first.result_sha
+    request_greeting(e, 'Hello, world.')
     second = e.run()
+    assert_changed_greeting(second, first.candidate_sha, 'Hello, world.')
     assert second.status == 'GREEN', second.message
     assert first.publication.pr_number == second.publication.pr_number == 1
     assert not e.state['pulls'] and e.remote_sha('topic')

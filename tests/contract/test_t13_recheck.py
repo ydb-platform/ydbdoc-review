@@ -10,7 +10,11 @@ from urllib.parse import urlsplit
 import pytest
 import requests
 
-from tests.contract.test_t13_independent import env  # noqa: F401
+from tests.contract.test_t13_independent import (
+    assert_changed_greeting,
+    env,  # noqa: F401 -- imported pytest fixture
+    request_greeting,
+)
 from tests.contract.test_verify_t11 import GOOD, ROOT, english_source, system  # noqa: F401
 from ydbdoc_review.document import RequestBudget
 from ydbdoc_review.plan import PlanError
@@ -93,8 +97,11 @@ def test_real_new_mode_after_ttl_does_not_reset_original_pr_limit(env, monkeypat
     # Refused preflight followed by actual admissions: refusals do not use slots.
     denied = e.run(actor='outsider')
     assert denied.status == 'RED' and e.sql.counter() is None and not e.adapters
-    for count in range(1, 4):
+    for count, greeting in enumerate(('Hello, world.', 'Hello world!', 'Hello, world!'), 1):
+        previous_sha = e.remote_sha('topic')
+        request_greeting(e, greeting)
         result = e.run()
+        assert_changed_greeting(result, previous_sha, greeting)
         assert result.status == 'GREEN', result.message
         assert e.sql.counter()['status'] == str(count)
     prior_rows = e.sql.rows()
