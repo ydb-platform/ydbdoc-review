@@ -171,3 +171,80 @@ def test_url_repair_final_map_does_not_cascade_in_continue():
     assert second.file_result.file_id == first.file_result.file_id
     assert second.file_result.chunks[0].chunk == first.file_result.chunks[0].chunk
     review_parts(source, second.text, fits=lambda p: True, correspondence=second.file_result)
+
+
+def scalar_map(value='Alpha. Beta. Gamma.', *, translated=False, missing=False):
+    from ydbdoc_review.document import restore
+    source = f'---\ntitle: "{value}"\n---\n\nBody.'
+    doc = protect(source, path=PATH)
+    slots = []
+    start = 0
+    for index, end in enumerate(doc.boundaries):
+        chunk = make_chunk(doc, index, start, end)
+        absent = missing and 'Beta.' in chunk.text
+        response = chunk.text.replace('Beta.', 'Different.') if translated else chunk.text
+        slots.append(ChunkResult(chunk, None if absent else response,
+                                 None if absent else restore(doc, response, expected=chunk.text),
+                                 unfinished=absent, status='missing' if absent else 'complete'))
+        start = end
+    return source, assemble_file(PATH, doc, tuple(slots))
+
+
+@pytest.mark.parametrize('side', ['source', 'target', 'both'])
+def test_scalar_located_quote_repairs_only_its_fragment(side):
+    source, initial = scalar_map(translated=True)
+    locations = {}
+    if side in {'source', 'both'}:
+        locations['source'] = Location(2, 2, 'Beta.')
+    if side in {'target', 'both'}:
+        locations['target'] = Location(2, 2, 'Different.')
+    issue = Issue(PATH, 'Incorrect meaning', 'Fix this fragment only', **locations)
+    client = Client()
+    result = repair_document(SelectedFile(PATH, source, 'en', initial=initial), initial.text, (issue,),
+                             replacements={}, client=client, choice=CHOICE, budget=BUDGET)
+    expected = next(slot for slot in initial.chunks if 'Beta.' in slot.chunk.text)
+    assert result.complete
+    assert [call['chunk_id'] for call in client.calls] == [expected.chunk.chunk_id]
+    assert client.calls[0]['current_target'] == expected.text
+    for old, new in zip(initial.chunks, result.file_result.chunks, strict=True):
+        if old.chunk != expected.chunk:
+            assert new == old
+
+
+@pytest.mark.parametrize('side', ['source', 'target'])
+def test_scalar_ambiguous_quote_does_not_repair_neighbours(side):
+    source, initial = scalar_map('Repeat. Beta. Repeat.')
+    issue = Issue(PATH, 'Ambiguous repeated wording', 'Locate the occurrence',
+                  **{side: Location(2, 2, 'Repeat.')})
+    client = Client()
+    result = repair_document(SelectedFile(PATH, source, 'en', initial=initial), initial.text, (issue,),
+                             replacements={}, client=client, choice=CHOICE, budget=BUDGET)
+    assert not result.complete and not client.calls
+    assert result.file_result == initial
+    assert any('ambiguous' in issue.problem for issue in result.issues)
+
+
+@pytest.mark.parametrize('locations', [
+    {'target': Location(4, 4, 'Beta.')},
+    {'source': Location(2, 2, 'Alpha.'), 'target': Location(2, 2, 'Different.')},
+])
+def test_scalar_wrong_lines_or_conflicting_sides_do_not_choose_a_fragment(locations):
+    source, initial = scalar_map(translated=True)
+    client = Client()
+    result = repair_document(SelectedFile(PATH, source, 'en', initial=initial), initial.text,
+                             (Issue(PATH, 'Uncertain location', 'Locate the fragment', **locations),),
+                             replacements={}, client=client, choice=CHOICE, budget=BUDGET)
+    assert not result.complete and not client.calls
+
+
+def test_missing_scalar_source_quote_selects_only_absent_slot():
+    source, initial = scalar_map(missing=True)
+    client = Client()
+    issue = Issue(PATH, 'Missing Beta', 'Restore Beta', source=Location(2, 2, 'Beta.'))
+    result = repair_document(SelectedFile(PATH, source, 'en', initial=initial), initial.text, (issue,),
+                             replacements={}, client=client, choice=CHOICE, budget=BUDGET)
+    expected = next(slot for slot in initial.chunks if slot.text is None)
+    assert result.complete and result.text == source
+    assert [call['chunk_id'] for call in client.calls] == [expected.chunk.chunk_id]
+    assert client.calls[0]['current_target'] == ''
+    assert client.calls[0]['translation_missing'] is True

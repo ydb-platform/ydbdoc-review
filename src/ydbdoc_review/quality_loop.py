@@ -128,6 +128,68 @@ def _finding_in_part(issue: Issue, path: str, current: str, part: ReviewPart,
 
 
 
+def _localized_slots(issue: Issue, file: SelectedFile, current: str,
+                     windows: tuple[ReviewPart, ...], slots: list[ChunkResult]) -> set[int]:
+    """Resolve a quoted finding to slots, including decoded scalar fragments.
+
+    Raw scalar coordinates identify a group, not each of its fragments. An
+    additional unique quote in that group's recorded fragments is required.
+    Source and target quotes use separate texts; conflicting evidence is not
+    resolved by picking one side or by rewriting the complete group.
+    """
+    if issue.path != file.path:
+        return set()
+    evidence = []
+    source_document = None
+    for side, location, text in (('source', issue.source, file.source),
+                                 ('target', issue.target, current)):
+        if location is None:
+            continue
+        offsets = [0, *(m.end() for m in re.finditer(r"\r\n|\r|\n", text))]
+        if location.start > len(offsets):
+            continue
+        lo = offsets[location.start - 1]
+        hi = offsets[location.end] if location.end < len(offsets) else len(text)
+        position = text.find(location.quote, lo, hi)
+        if position < 0 or text.find(location.quote, position + 1, hi) >= 0:
+            continue  # No unique occurrence in the reported raw lines.
+        end = position + len(location.quote)
+        groups = set()
+        for index, part in enumerate(windows):
+            a, b = ((part.source_start, part.source_end) if side == 'source'
+                    else (part.target_start, part.target_end))
+            if position < b and end > a:
+                groups.add(part.chunk_indexes or (index,))
+        selected = set()
+        unresolved = False
+        for indexes in groups:
+            if len(indexes) == 1:
+                selected.update(indexes)
+                continue
+            if side == 'source':
+                if source_document is None:
+                    source_document = protect(file.source, path=file.path)
+                fragments = [restore(source_document, slots[i].chunk.text,
+                                     expected=slots[i].chunk.text) for i in indexes]
+            else:
+                fragments = [slots[i].text or '' for i in indexes]
+            joined = ''.join(fragments)
+            start = joined.find(location.quote)
+            if start < 0 or joined.find(location.quote, start + 1) >= 0:
+                unresolved = True
+                break
+            finish = start + len(location.quote)
+            cursor = 0
+            for index, fragment in zip(indexes, fragments, strict=True):
+                next_cursor = cursor + len(fragment)
+                if start < next_cursor and finish > cursor:
+                    selected.add(index)
+                cursor = next_cursor
+        if groups and not unresolved:
+            evidence.append(selected)
+    return set.intersection(*evidence) if evidence else set()
+
+
 def repair_document(file: SelectedFile, current: str, findings: tuple[Issue, ...], *,
                     replacements: Mapping[str, str], client: ModelClient,
                     choice: ModelChoice, budget: RequestBudget,
@@ -226,15 +288,22 @@ def repair_document(file: SelectedFile, current: str, findings: tuple[Issue, ...
             result = assemble_file(file.path, document, tuple(slots))
             return RepairResult(file.path, result.text, not result.unfinished, (), (), file_result=result)
 
+        localized = [(issue, _localized_slots(issue, file, current, windows, slots))
+                     for issue in findings if issue.path == file.path]
+        for issue, indexes in localized:
+            if (issue.source is not None or issue.target is not None) and not indexes:
+                problems.append(_issue(file.path, 'Repair location unknown or ambiguous: ' + issue.problem))
         for index, (part, old) in enumerate(zip(windows, slots, strict=True)):
-            relevant = tuple(i for i in findings if _finding_in_part(i, file.path, current, part, file.source))
+            relevant = tuple(issue for issue, indexes in localized if index in indexes)
             missing = old.text is None or old.unfinished or old.status != 'complete'
             url_change = (any(marker in old.chunk.text for marker in changed_markers)
                           or (changed_visible and source_for(old.chunk.text) != old.chunk.text))
-            if not relevant and not missing and not url_change and not (len(windows) == 1 and findings):
+            if not relevant and not missing and not url_change and not (len(windows) == 1 and any(i.path == file.path and i.source is None and i.target is None
+                                                         for i in findings)):
                 continue
             if len(windows) == 1:
-                relevant = tuple(i for i in findings if i.path == file.path)
+                relevant += tuple(i for i in findings if i.path == file.path
+                                  and i.source is None and i.target is None)
             payload = messages_for(part, old.chunk.text, relevant, old.text is None, old.chunk.chunk_id,
                                    previous=old.text or '')
             if not budget.fits(payload, expected_output=source_for(old.chunk.text)):
