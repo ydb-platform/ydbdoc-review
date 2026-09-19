@@ -300,7 +300,9 @@ def initial_description(result: RunResult, *, secrets=()) -> str:
     """Creation has full current costs and partial-file state before final delivery."""
     snapshot = result.snapshot
     pr = f'{snapshot.owner}/{snapshot.repo}/{snapshot.pr_number}'
-    pending = replace(result, mode='doc_verify')
+    pending = replace(result, mode='doc_verify', status='RED',
+                      message='Результат подготовлен; финализация и сохранение контекста ещё не завершены. '
+                              'Мержить пока нельзя. ' + result.message)
     body = render_reports(pending, current_pr=pr, secrets=secrets)[-1].body
     return body.replace(f'Результат: [PR]({_url(pr)}).',
                         'Переводной PR создаётся; итоговый отчёт будет обновлён после публикации.')
@@ -318,19 +320,29 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
     if source_pr is not None:
         _identity(source_pr)
 
-    def report(result: RunResult):
+    receipts = {}
+    artifact_receipt = {}
+    started = False
+
+    def progress(result):
+        nonlocal started
+        started = True
+        deliver(result, preliminary=True)
+
+    def deliver(result: RunResult, preliminary=False):
         if not authorized:
             raise PermissionError('GitHub report publication requires an authorized production run')
         failures = []
         artifact_url = artifact_error = None
-        if _needs_artifact(result):
+        if not preliminary and _needs_artifact(result):
             owner, repository, _ = current_pr.split('/')
             try:
                 artifact_url = github.upload_report_artifact(owner, repository,
                     render_artifact(result, secrets=secrets))
-            except Exception as exc:
+            except (Exception, KeyboardInterrupt) as exc:
                 artifact_error = _safe(str(exc), secrets)
                 failures.append(('artifact', artifact_error))
+            artifact_receipt.update(url=artifact_url, error=artifact_error)
         def rendered():
             effective = replace(result, status='RED') if failures else result
             return render_reports(effective, current_pr=current_pr, source_pr=source_pr,
@@ -340,19 +352,54 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
         for index, comment in enumerate(destinations):
             owner, repository, number = comment.pr.split('/')
             try:
-                github.post_issue_comment(owner, repository, int(number), rendered()[index].body)
-            except Exception as exc:
+                if preliminary:
+                    receipts[comment.pr] = github.create_report_comment(
+                        owner, repository, int(number), rendered()[index].body)
+                elif started:
+                    if comment.pr in receipts:
+                        github.update_report_comment(owner, repository, receipts[comment.pr],
+                                                     rendered()[index].body)
+                else:
+                    github.post_issue_comment(owner, repository, int(number), rendered()[index].body)
+            except (Exception, KeyboardInterrupt) as exc:
                 failures.append((f'comment {comment.pr}', _safe(str(exc), secrets)))
         if result.publication and result.publication.pr_number:
             owner, repository = result.publication.repository.split('/')
             try:
                 github.update_pull_body(owner, repository, result.publication.pr_number,
                                         rendered()[-1].body)
-            except Exception as exc:
+            except (Exception, KeyboardInterrupt) as exc:
                 failures.append(('description', _safe(str(exc), secrets)))
         if failures:
             raise ReportDeliveryError(failures)
-    return report
+
+    def reconcile_red(result):
+        if not authorized:
+            return [('report reconciliation', 'GitHub report publication requires an authorized production run')]
+        failures = []
+        comments = render_reports(replace(result, status='RED'), current_pr=current_pr,
+                                  source_pr=source_pr, secrets=secrets,
+                                  artifact_url=artifact_receipt.get('url'),
+                                  artifact_error=artifact_receipt.get('error'))
+        for comment in comments:
+            if comment.pr not in receipts:
+                continue
+            owner, repository, _ = comment.pr.split('/')
+            try:
+                github.update_report_comment(owner, repository, receipts[comment.pr], comment.body)
+            except (Exception, KeyboardInterrupt) as exc:
+                failures.append((f'comment reconciliation {comment.pr}', _safe(str(exc), secrets)))
+        if result.publication and result.publication.pr_number:
+            owner, repository = result.publication.repository.split('/')
+            try:
+                github.update_pull_body(owner, repository, result.publication.pr_number, comments[-1].body)
+            except (Exception, KeyboardInterrupt) as exc:
+                failures.append(('description reconciliation', _safe(str(exc), secrets)))
+        return failures
+
+    deliver.progress = progress
+    deliver.reconcile_red = reconcile_red
+    return deliver
 
 
 def report_hooks(adapter, github: GitHubClient, *, current_pr: str,

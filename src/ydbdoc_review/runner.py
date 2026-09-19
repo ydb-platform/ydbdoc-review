@@ -82,13 +82,14 @@ class RunResult:
 class RunHooks:
     """T12 saves progress/context; T14 renders the same finalized RunResult.
 
-    model_factory owns request/attempt recording callbacks. save runs before report;
+    model_factory owns request/attempt recording callbacks. Progress precedes save;
     failures are explicit in the returned result and never skip publication.
     cancelled is cooperative; KeyboardInterrupt also uses the same finalization.
     """
     file_progress: Callable[[FileResult], None] | None = None
     candidate_progress: Callable[[Candidate], None] | None = None
     save: Callable[[RunResult], None] | None = None
+    save_status: Callable[[RunResult], None] | None = None
     report: Callable[[RunResult], None] | None = None
     cancelled: Callable[[], bool] | None = None
     secrets: tuple[str, ...] = ()
@@ -99,7 +100,7 @@ class RunCancelled(Exception):
 
 
 def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = None) -> RunResult:
-    """Finalize metadata only; save before report, reconcile changed outcome once.
+    """Publish progress, save context once, then finalize independent reports.
 
     Every boundary can turn a published GREEN into RED. Reconcile draft before
     handing off that result and after each callback, including interruptions.
@@ -115,8 +116,10 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
     def failed(name, exc):
         nonlocal result
         error = redact_known(f'{name}: {type(exc).__name__}: {exc}', hooks.secrets)
+        explanation = ('Контекст не сохранён надёжно: doc_continue недоступен. Устраните ошибку хранилища '
+                       'и запустите doc_verify или новый doc_translate.' if name.startswith('storage') else '')
         result = replace(result, status='RED', errors=(*result.errors, error),
-                         message='; '.join(filter(None, (result.message, error))),
+                         message='; '.join(filter(None, (result.message, error, explanation))),
                          cancelled=result.cancelled or isinstance(exc, (RunCancelled, KeyboardInterrupt)))
 
     def reconcile():
@@ -139,24 +142,52 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
                 failed('draft', exc)
 
     reconcile()
-    saved_result = None
-    for name, callback in (('storage', hooks.save), ('report', hooks.report)):
-        if callback:
-            try:
-                if name == 'storage':
-                    saved_result = result
-                callback(result)
-            except (Exception, KeyboardInterrupt) as exc:
-                failed(name, exc)
-            reconcile()
-    # A late report/cancellation/draft failure must not leave a stored GREEN.
-    # One bounded reconciliation write, no second report or quality/model call.
-    if hooks.save and saved_result is not result:
+    # A reporter with progress support publishes a conservative, cost-bearing
+    # state before any potentially slow context persistence. Plain callbacks keep
+    # their single final invocation for backwards compatibility.
+    progress = (getattr(hooks.report, 'progress', None)
+                if hooks.save and (result.candidate or result.publication or result.attempts) else None)
+    if progress:
+        try:
+            progress(replace(result, status='RED', message='Финализация: проверки завершены или остановлены; '
+                             'сохранение контекста ещё не подтверждено. Мержить пока нельзя.'))
+        except (Exception, KeyboardInterrupt) as exc:
+            failed('report progress', exc)
+        reconcile()
+    saved_result = result
+    if hooks.save:
         try:
             hooks.save(result)
         except (Exception, KeyboardInterrupt) as exc:
-            failed('storage final outcome', exc)
+            failed('storage', exc)
+        reconcile()
+    if hooks.save_status and result is not saved_result:
+        try:
+            hooks.save_status(result)
+        except (Exception, KeyboardInterrupt) as exc:
+            failed('storage status', exc)
+        reconcile()
+    reported_result = result
+    if hooks.report:
+        try:
+            hooks.report(result)
+        except (Exception, KeyboardInterrupt) as exc:
+            failed('report', exc)
+        reconcile()
+    # Only small metadata may change after report delivery. Never replay save,
+    # model calls, document writes, or paid-attempt reconciliation.
+    if hooks.save_status and result is not reported_result:
+        try:
+            hooks.save_status(result)
+        except (Exception, KeyboardInterrupt) as exc:
+            failed('storage status', exc)
             reconcile()
+
+    if result is not reported_result and progress:
+        reconcile_report = getattr(hooks.report, 'reconcile_red', None)
+        if reconcile_report:
+            for channel, error in reconcile_report(result):
+                failed(channel, RuntimeError(error))
     return result
 
 

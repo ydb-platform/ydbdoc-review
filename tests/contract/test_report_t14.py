@@ -39,11 +39,20 @@ def capture(monkeypatch, *, fail_at=None, after=None):
             payload = {'ref': data['ref'], 'object': {'sha': data['sha']}} if path.endswith('/refs') else {'sha': 'a' * 40}
             r._content = json.dumps(payload).encode()
             return r
-        if req.method == 'POST' and urlsplit(req.url).path.endswith('/comments'):
-            sent.append((req.url, json.loads(req.body)['body']))
+        if (req.method == 'POST' and path.endswith('/comments')) or (req.method == 'PATCH' and '/issues/comments/' in path):
+            body = json.loads(req.body)['body']
+            if req.method == 'POST':
+                sent.append((req.url, body))
+                ident = len(sent)
+            else:
+                ident = int(path.rsplit('/', 1)[1])
+                assert 0 < ident <= len(sent)
+                if ident != fail_at:
+                    # Model the current remote comment, retaining its PR identity.
+                    sent[ident - 1] = (sent[ident - 1][0], body)
             r = requests.Response()
-            r.status_code = 503 if len(sent) == fail_at else 201
-            r._content = json.dumps({'html_url': 'https://github.com/up/docs/comment/3'}).encode()
+            r.status_code = 503 if ident == fail_at else 201
+            r._content = json.dumps({'id': ident, 'html_url': 'https://github.com/up/docs/comment/3'}).encode()
             if after:
                 after()
             return r

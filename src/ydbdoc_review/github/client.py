@@ -113,6 +113,24 @@ class GitHubClient:
         assert isinstance(data, dict)
         return str(data.get("html_url", ""))
 
+    def create_report_comment(self, owner: str, repo: str, pr_number: int, body: str) -> int:
+        self._check_report_body(body)
+        data = self._request('POST',
+            f'https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments',
+            json_body={'body': body})
+        comment_id = data.get('id') if isinstance(data, dict) else None
+        if type(comment_id) is not int or comment_id <= 0:
+            raise GitHubAPIError('Comment creation did not confirm its ID; update unavailable')
+        return comment_id
+
+    def update_report_comment(self, owner: str, repo: str, comment_id: int, body: str) -> None:
+        self._check_report_body(body)
+        if type(comment_id) is not int or comment_id <= 0:
+            raise ValueError('Confirmed positive comment ID required')
+        self._request('PATCH',
+            f'https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}',
+            json_body={'body': body})
+
     @staticmethod
     def _check_report_body(body: str) -> None:
         if len(body) > 12000:

@@ -1,6 +1,4 @@
 """Late failures must retain the published bytes and tell the truth about draft."""
-from dataclasses import replace
-
 import pytest
 
 from ydbdoc_review.model import ModelClient
@@ -53,8 +51,8 @@ def test_late_failure_keeps_checked_candidate_and_confirms_draft(rig, monkeypatc
     assert result.publication.draft and state['pulls'][-1][1]['draft']
     assert seen
     if boundary != 'cancel':
-        # Only final persistence reconciles a changed result; no model/report retry.
-        assert seen == [boundary] * (2 if boundary == 'save' else 1)
+        # Full persistence and reporting each run once, even on failure.
+        assert seen == [boundary]
     if boundary in {'close', 'save', 'cancel'}:
         assert state['reported'][0].status == 'RED'
 
@@ -99,9 +97,8 @@ def test_failed_draft_conversion_is_explicit_and_never_claimed(rig, monkeypatch,
     assert len(conversions) == 1
     assert len(state['reported']) == 1
     reported = state['reported'][0]
-    assert result.errors[-1].startswith('storage final outcome:')
-    assert reported.errors == result.errors[:-1]
-    assert reported == replace(result, errors=reported.errors, message=reported.message)
+    assert reported == result
+
 
 
 def test_publication_recovery_interrupt_is_reported_without_false_draft(rig, monkeypatch):

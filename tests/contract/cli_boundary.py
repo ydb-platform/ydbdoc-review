@@ -113,6 +113,13 @@ def main():
             )
         if path.endswith("/files"):
             return response(state["changes"])
+        if method == "PATCH" and "/issues/comments/" in path:
+            ident = int(path.rsplit("/", 1)[1])
+            if state.get("report_error"):
+                return response({"message": "report unavailable"}, 503)
+            state["comments"][ident - 1][1] = json.loads(request.body)["body"]
+            write(state)
+            return response({"id": ident})
         if path.endswith("/comments"):
             number = int(path.split("/issues/")[1].split("/")[0])
             if method == "GET":
@@ -122,7 +129,7 @@ def main():
             body = json.loads(request.body)["body"]
             state["comments"].append([number, body])
             write(state)
-            return response({"html_url": "https://github.com/up/docs/issues/1#comment"})
+            return response({"id": len(state["comments"]), "html_url": "https://github.com/up/docs/issues/1#comment"})
         if path == "/graphql":
             number = json.loads(request.body)["variables"]["id"].removeprefix("PR_")
             state["pulls"][number]["draft"] = True

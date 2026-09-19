@@ -119,7 +119,7 @@ def run_continue(*, repo: str | Path, github: GitHubClient, owner: str, reposito
         if hooks.save:
             hooks.save(value)
 
-    final_hooks = replace(hooks, save=save)
+    final_hooks = replace(hooks, save=save, save_status=adapter.save_status)
 
     def check_cancel():
         if hooks.cancelled and hooks.cancelled():

@@ -685,8 +685,20 @@ class RunStore:
         for attempt in result.attempts:
             self._attempts[self._id(attempt.request)] = attempt
             self._requests[self._id(attempt.request)] = attempt.request
-        for attempt in self._attempts.values():
-            self.record_attempt(attempt)
+        attempt_errors = []
+        for attempt in tuple(self._attempts.values()):
+            try:
+                self.record_attempt(attempt)
+            except (Exception, KeyboardInterrupt) as exc:
+                # Each paid call has its own ledger key. One broken context
+                # object must not prevent accounting for the remaining calls.
+                attempt_errors.append(exc)
+        if attempt_errors:
+            interruption = next((exc for exc in attempt_errors if isinstance(exc, KeyboardInterrupt)), None)
+            if interruption is not None:
+                raise interruption
+            raise StorageError('Failed to persist paid attempts: ' + '; '.join(
+                f'{type(exc).__name__}: {exc}' for exc in attempt_errors))
         for key, request in self._requests.items():
             self.store.put(self.run_id, f'request/{key}', encode(request))
         # Final candidate bytes, not initial FileResult text. Only selected/changed
@@ -721,6 +733,10 @@ class RunStore:
                 'initial': file_result_to_dict(file.initial) if file.initial else
                            known.get(file.path, {}).get('initial')}
         for file in result.files:
+            if file.path in known:
+                known[file.path]['initial'] = file_result_to_dict(file)
+        # Quality repairs carry the authoritative final chunk map (F07).
+        for file in getattr(result.quality, 'files', ()):
             if file.path in known:
                 known[file.path]['initial'] = file_result_to_dict(file)
         # Continue may select only one previously known file. Keep exact final
@@ -788,7 +804,7 @@ class RunStore:
     def hooks(self, *, report=None, cancelled=None, secrets=()):
         from ydbdoc_review.runner import RunHooks
         return RunHooks(file_progress=self.file_progress,
-                        candidate_progress=self.candidate_progress, save=self.save,
+                        candidate_progress=self.candidate_progress, save=self.save, save_status=self.save_status,
                         report=report, cancelled=cancelled, secrets=secrets)
 
 
