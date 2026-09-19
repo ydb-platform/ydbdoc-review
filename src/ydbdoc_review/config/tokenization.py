@@ -9,13 +9,14 @@ import requests
 from ydbdoc_review.document import CapacityError
 from ydbdoc_review.llm.tls import public_ca_bundle
 
-# Explicit versions documented for the native YC Tokenizer. Do not infer
-# support from a shared provider URL or silently substitute an alias/model.
-_VERIFIED_MODELS = frozenset({'yandexgpt-5-pro', 'yandexgpt-5.1', 'yandexgpt-5-lite'})
+# Exact model identities: native YC Tokenizer for YandexGPT; pinned official
+# local tokenizer for DeepSeek V4 Flash. No alias/model substitution.
+_VERIFIED_MODELS = frozenset({'yandexgpt-5-pro', 'yandexgpt-5.1', 'yandexgpt-5-lite',
+                              'deepseek-v4-flash'})
 
 
 class ProviderTokenCounter:
-    """Count using each configured YC model's own Tokenizer API.
+    """Count using each configured model's own tokenizer.
 
     The common budget must fit all configured primary/alternative endpoints.
     Construction is offline; requests are lazy and have no generation fallback.
@@ -46,7 +47,16 @@ class ProviderTokenCounter:
                 raise CapacityError('No verified tokenizer for configured provider/model; '
                                     'configure model-specific tokenization before generation')
 
+            if endpoint.model == 'deepseek-v4-flash' and endpoint.reasoning_effort not in (None, 'none', 'high'):
+                raise CapacityError('No verified DeepSeek V4 encoding for reasoning_effort')
+
     def _count(self, endpoint, method, payload):
+        if endpoint.model == 'deepseek-v4-flash':
+            from ydbdoc_review.config.deepseek_v4 import count_messages, count_output
+            if method == 'tokenize':
+                return count_output(payload['text'])
+            return count_messages([{'role': m['role'], 'content': m['text']}
+                                   for m in payload['messages']], endpoint.reasoning_effort)
         payload = dict(payload, modelUri=f'gpt://{endpoint.folder_id}/{endpoint.model}')
         key = (endpoint, method, hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).digest())
         if key in self._cache:
@@ -76,6 +86,9 @@ class ProviderTokenCounter:
         if any(set(m) != {'role', 'content'} or not isinstance(m['content'], str)
                for m in messages):
             raise CapacityError('Tokenizer supports text messages only')
+        if any(e.model == 'deepseek-v4-flash' for e in self.endpoints):
+            from ydbdoc_review.config.deepseek_v4 import render_messages
+            render_messages(messages, thinking=False)
         payload = {'messages': [{'role': m['role'], 'text': m['content']} for m in messages]}
         return max(self._count(e, 'tokenizeCompletion', payload) for e in self.endpoints)
 

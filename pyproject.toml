@@ -15,6 +15,7 @@ dependencies = [
     "requests>=2.32.0",
     "ydb[yc]>=3.0.0",
     "certifi>=2024.0.0",
+    "tokenizers==0.22.2",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "ydbdoc_review.prompts" = ["v1/translate_document.md"]
+"ydbdoc_review.config.deepseek_v4" = ["tokenizer.json", "tokenizer_config.json", "LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

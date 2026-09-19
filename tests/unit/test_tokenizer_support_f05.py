@@ -11,7 +11,7 @@ def endpoint(model):
 
 
 @pytest.mark.parametrize('models', [
-    ['deepseek-v32'], ['deepseek-v4-flash'], ['unknown'],
+    ['deepseek-v32'], ['deepseek-v4.1-flash'], ['unknown'],
     ['yandexgpt-5-pro', 'deepseek-v32'], ['deepseek-v32', 'yandexgpt-5-pro'],
 ])
 @pytest.mark.parametrize('method', ['messages', 'output', 'empty_output'])
