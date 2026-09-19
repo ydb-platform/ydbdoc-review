@@ -23,20 +23,19 @@ def default_runtime_data() -> dict:
             result['alternative'] = endpoint(alternative)
         return result
 
-    # No guessed reasoning control: deepseek-v32 deployment support is unresolved.
+    # No guessed reasoning control: DeepSeek V4 Flash reasoning-off support in YC is unresolved.
     # See docs/model-response-controls.md before changing model or output reserve.
-    translation = choice('YDBDOC_MODEL_TRANSLATE', 'deepseek-v32', 'yandexgpt-5-pro')
+    translation = choice('YDBDOC_MODEL_TRANSLATE', 'deepseek-v4-flash', 'yandexgpt-5-pro')
     critic = choice('YDBDOC_MODEL_CHECK', 'yandexgpt-5.1', 'yandexgpt-5-lite')
     return dict(models={'translation': translation, 'critic': critic, 'repair': translation},
                 context_tokens=32768, max_output_tokens=8000, timeout_s=240,
-                # Yandex AI Studio synchronous RUB tariffs, checked 2026-09-18:
+                # Yandex AI Studio synchronous RUB tariffs, checked 2026-09-19:
                 # https://aistudio.yandex.ru/ru/docs/ai-studio/pricing
-                # DeepSeek V3.2 cached-input rate: official YC cookbook pricing.md.
                 tariffs_rub_per_million=[
                     dict(provider='yandex_cloud', model=model, input=inp, output=out,
                          **({'cached_input': cached} if cached is not None else {}))
                     for model, inp, out, cached in (
-                        ('deepseek-v32', '500', '800', '130'),
+                        ('deepseek-v4-flash', '300', '500', '75'),
                         ('yandexgpt-5.1', '800', '800', None),
                         ('yandexgpt-5-pro', '1200', '1200', None),
                         ('yandexgpt-5-lite', '200', '200', None),

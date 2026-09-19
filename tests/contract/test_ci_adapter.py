@@ -24,7 +24,7 @@ def cloud_env(monkeypatch):
 
 def test_existing_workflow_defaults_and_model_overrides(cloud_env, monkeypatch):
     runtime = load_runtime()
-    assert runtime.choices['translation'].main.model == 'deepseek-v32'
+    assert runtime.choices['translation'].main.model == 'deepseek-v4-flash'
     assert runtime.choices['translation'].alternative.model == 'yandexgpt-5-pro'
     assert runtime.choices['critic'].main.model == 'yandexgpt-5.1'
     assert runtime.choices['critic'].alternative.model == 'yandexgpt-5-lite'
