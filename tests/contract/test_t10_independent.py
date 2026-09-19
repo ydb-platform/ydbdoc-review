@@ -449,12 +449,17 @@ def test_publisher_rejects_green_label_for_subsequent_unchecked_sha(rig):
     first = run()
     assert first.status == 'GREEN'
     unchecked = freeze(first.candidate, {ROOT+'en/a.md': b'# Changed after validation\n'})
+    assert unchecked.sha != first.checked_sha
+    assert unchecked.read(ROOT+'en/a.md') != first.candidate.read(ROOT+'en/a.md')
     publisher.branch = 'later'
     expected = publisher.preflight(first.snapshot)
     published = publisher.publish(unchecked, first.snapshot, expected_head=expected,
                                   status='GREEN', checked_sha=first.checked_sha)
     assert published.draft and published.pushed_sha == remote_sha('later') == unchecked.sha
-    assert s['pulls'][-1][1]['body'].startswith('RED\n')
+    body = s['pulls'][-1][1]['body']
+    assert body.startswith('RED — мержить нельзя')
+    assert first.checked_sha in body and unchecked.sha in body
+    assert f'{unchecked.sha} — этот SHA не проверен' in body
 
 
 def test_fork_with_explicit_matching_repository_publishes_to_source_branch(rig):

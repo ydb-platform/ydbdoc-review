@@ -52,21 +52,23 @@ def test_callbacks_observe_current_status_without_replay(rig, monkeypatch, bound
         monkeypatch.setattr(ModelClient, 'close', close)
     result = run(hooks=RunHooks(candidate_progress=candidates.append,
                                save=lambda r: callback('save', r),
+                               save_status=lambda r: callback('status', r),
                                report=lambda r: callback('report', r)))
     retained(result, state, remote_sha, candidates)
     assert result.publication.draft and state['pulls'][0][1]['draft']
     assert result.cancelled == (boundary != 'close')
-    assert [name for name, _ in seen] == (['save', 'report'] if boundary == 'close' else ['save', 'report', 'save'])
+    names = {'close': ['save', 'report'], 'save': ['save', 'status', 'report'],
+             'report': ['save', 'report', 'status']}
+    assert [name for name, _ in seen] == names[boundary]
     expected = {'close': ['RED', 'RED'], 'save': ['GREEN', 'RED', 'RED'], 'report': ['GREEN', 'GREEN', 'RED']}
     assert [r.status for _, r in seen] == expected[boundary]
     for _, snapshot in seen:
         assert snapshot.publication.draft == (snapshot.status == 'RED')
         assert snapshot.attempts == result.attempts
         assert snapshot.candidate is result.candidate
-    if boundary != 'save':
-        assert seen[-1][1] == result
-    else:
-        assert any('storage final outcome:' in e for e in result.errors)
+    assert seen[-1][1] == result
+    if boundary == 'save':
+        assert any('storage:' in e for e in result.errors)
     if boundary == 'report':
         assert not seen[1][1].errors  # immutable pre-failure observation
         assert any('report:' in e for e in result.errors)
@@ -103,13 +105,17 @@ def test_failed_draft_is_visible_to_next_callback_without_retry(rig, monkeypatch
         assert not result.publication.draft
         raise RuntimeError('report failed too')
 
-    result = run(hooks=RunHooks(candidate_progress=candidates.append, save=save, report=report))
+    result = run(hooks=RunHooks(candidate_progress=candidates.append, save=save, report=report,
+                               save_status=lambda r: seen.append(('status', r))))
     retained(result, state, remote_sha, candidates)
-    assert [name for name, _ in seen] == ['save', 'report', 'save']
+    assert [name for name, _ in seen] == ['save', 'status', 'report', 'status']
+    assert all(r.status == 'RED' and r.cancelled for _, r in seen[1:])
+    assert seen[-1][1] == result
     assert seen[0][1].status == 'GREEN' and not seen[0][1].errors
     assert len(conversions) == 1
-    assert len(result.errors) == 4
-    assert any('storage final outcome:' in e for e in result.errors)
+    assert len(result.errors) == 3
+    assert any('storage:' in e for e in result.errors)
+    assert any('draft:' in e for e in result.errors)
     assert any('report:' in e for e in result.errors)
     assert not result.publication.draft
     assert state['pulls'][0][1]['draft'] == (draft_failure == 'readback')
@@ -127,6 +133,7 @@ def test_verify_shared_hooks_keep_existing_pr_and_single_critic(system, boundary
             raise KeyboardInterrupt('verify callback interrupted')
 
     result = run(hooks=RunHooks(save=lambda r: callback('save', r),
+                               save_status=lambda r: callback('status', r),
                                report=lambda r: callback('report', r)))
     assert result.status == 'RED' and result.cancelled
     assert result.publication.pr_number == 1 and result.publication.draft and state['draft']
@@ -135,6 +142,8 @@ def test_verify_shared_hooks_keep_existing_pr_and_single_critic(system, boundary
     assert [op for op, _ in state['calls']] == ['critic']
     assert len(result.attempts) == 1 and result.cost_breakdown['total'] == Decimal('.25')
     assert not state['pulls']
-    assert [name for name, _ in seen] == ['save', 'report', 'save']
+    assert [name for name, _ in seen] == (['save', 'status', 'report'] if boundary == 'save'
+                                         else ['save', 'report', 'status'])
+    assert seen[-1][1] == result
     assert [r.status for _, r in seen] == (['GREEN', 'RED', 'RED'] if boundary == 'save'
                                          else ['GREEN', 'GREEN', 'RED'])
