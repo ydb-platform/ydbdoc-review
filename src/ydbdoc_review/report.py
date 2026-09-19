@@ -5,11 +5,10 @@ The caller owns GitHub credentials and RunStore lifetime (including create_store
 """
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 from collections import Counter
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from urllib.parse import quote
 
 from ydbdoc_review.diagnostics import redact_known
@@ -86,7 +85,7 @@ REPORT_BODY_LIMIT = 12000
 
 
 def _short(text, limit):
-    return text if len(text) <= limit else text[:limit] + '… [сокращено; см. артефакт]'
+    return text if len(text) <= limit else text[:limit] + '… [сокращено]'
 
 
 def _path_list(paths, clean):
@@ -117,50 +116,6 @@ def _bounded(parts, costs):
     return text
 
 
-def _needs_artifact(result):
-    return bool(result.issues or result.errors or result.unfinished_files or len(result.message) > 600
-                or (result.plan and len(result.plan.operations) > 5) or len(result.selected_files) > 5 or
-                (result.quality and result.quality.rounds))
-
-
-def render_artifact(result: RunResult, *, secrets=()) -> str:
-    """Explicit diagnostics only: no runtime tree, prompts or model transcripts.
-
-    Keep full path/line/quote records and build logs, with secrets redacted before
-    JSON encoding (also catches multiline secrets and credential-bearing URLs).
-    """
-    payload = dict(status=result.status, source_sha=result.snapshot.source_sha if result.snapshot else None,
-                   source_repository=result.snapshot.source_repo if result.snapshot else None,
-                   published_repository=result.publication.repository if result.publication else None,
-                   source_paths={f.path: (('ydb/docs/ru/' if f.target_lang == 'en' else 'ydb/docs/en/') + f.path.split('/', 3)[3])
-                                 for f in result.selected_files if f.path.startswith('ydb/docs/')},
-                   checked_sha=result.checked_sha,
-                   candidate_sha=result.candidate_sha, published_sha=result.result_sha,
-                   errors=list(result.errors), message=result.message,
-                   unfinished_files=list(result.unfinished_files),
-                   selected_files=[f.path for f in result.selected_files],
-                   operations=[asdict(op) for op in result.plan.operations] if result.plan else [],
-                   dependencies=list(result.plan.dependencies) if result.plan else [],
-                   issues=[asdict(i) for i in result.issues],
-                   costs={k: str(v) if v is not None else None for k, v in result.cost_breakdown.items()},
-                   rounds=[])
-    for r in result.quality.rounds if result.quality else ():
-        payload['rounds'].append(dict(number=r.number, candidate_sha=r.candidate_sha,
-            issues=[asdict(i) for i in r.issues],
-            build=dict(status=r.build.status, returncode=r.build.returncode, log=r.build.log)
-                  if r.build else None,
-            links=asdict(r.links) if r.links else None))
-    def redact(value):
-        if isinstance(value, str):
-            return _redact(value, secrets)
-        if isinstance(value, dict):
-            return {_redact(k, secrets): redact(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [redact(v) for v in value]
-        return value
-    return json.dumps(redact(payload), ensure_ascii=False, indent=2)
-
-
 class ReportDeliveryError(RuntimeError):
     """All channels were attempted. F11 may persist these small failure records."""
     def __init__(self, errors, *, cancelled=False):
@@ -170,8 +125,7 @@ class ReportDeliveryError(RuntimeError):
 
 
 def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None = None,
-                   secrets: tuple[str, ...] = (), artifact_url: str | None = None,
-                   artifact_error: str | None = None) -> tuple[Comment, ...]:
+                   secrets: tuple[str, ...] = ()) -> tuple[Comment, ...]:
     """Current PR is mandatory even when ACL/metadata preflight produced no snapshot.
 
     Continue's snapshot retains the original source PR. Explicit source_pr supports
@@ -223,13 +177,6 @@ def render_reports(result: RunResult, *, current_pr: str, source_pr: str | None 
         if last.links and last.links.unchecked_anchors:
             common.append(f'Якоря не проверены: {len(last.links.unchecked_anchors)}. '
                           'Сначала завершите сборку, затем повторите проверку ссылок.')
-    if artifact_url:
-        common.append(f'[Полная диагностика и технические логи]({artifact_url})')
-    elif artifact_error:
-        common.append('Артефакт не опубликован: ' + clean(artifact_error) +
-                      '. Повторите публикацию диагностики после устранения ошибки доступа или GitHub.')
-    elif _needs_artifact(result):
-        common.append('Полная диагностика: публикация артефакта ещё не подтверждена.')
     costs = _costs(result)
     brief = _bounded(common, costs)
     detail = [*(p for p in common if not p.startswith('Основные причины и действия:')), f'SHA последнего проверенного коммита: {result.checked_sha or "отсутствует"}.']
@@ -324,7 +271,6 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
         _identity(source_pr)
 
     receipts = {}
-    artifact_receipt = {}
     started = False
 
     def progress(result):
@@ -345,22 +291,9 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
             return
         failures = []
         interrupted = False
-        artifact_url = artifact_error = None
-        if not preliminary and _needs_artifact(result):
-            owner, repository, _ = current_pr.split('/')
-            try:
-                artifact_url = github.upload_report_artifact(owner, repository,
-                    render_artifact(result, secrets=secrets))
-            except (Exception, KeyboardInterrupt) as exc:
-                interrupted |= isinstance(exc, KeyboardInterrupt)
-                artifact_error = _safe(str(exc), secrets)
-                failures.append(('artifact', artifact_error))
-            artifact_receipt.update(url=artifact_url, error=artifact_error)
         def rendered():
-            effective = replace(result, status='RED', cancelled=result.cancelled or interrupted) if failures else result
-            return render_reports(effective, current_pr=current_pr, source_pr=source_pr,
-                                  secrets=secrets, artifact_url=artifact_url,
-                                  artifact_error=artifact_error)
+            return render_reports(result, current_pr=current_pr, source_pr=source_pr,
+                                  secrets=secrets)
         destinations = rendered()
         for index, comment in enumerate(destinations):
             owner, repository, number = comment.pr.split('/')
@@ -394,9 +327,7 @@ def create_reporter(github: GitHubClient, *, current_pr: str, source_pr: str | N
         failures = []
         interrupted = False
         comments = render_reports(replace(result, status='RED'), current_pr=current_pr,
-                                  source_pr=source_pr, secrets=secrets,
-                                  artifact_url=artifact_receipt.get('url'),
-                                  artifact_error=artifact_receipt.get('error'))
+                                  source_pr=source_pr, secrets=secrets)
         for comment in comments:
             if comment.pr not in receipts:
                 continue

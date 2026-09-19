@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import base64
 import re
-import uuid
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote
@@ -140,32 +138,6 @@ class GitHubClient:
         self._check_report_body(body)
         self._request('PATCH', f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}',
                       json_body={'body': body})
-
-    def upload_report_artifact(self, owner: str, repo: str, content: str) -> str:
-        """Isolated orphan commit/ref: never advance the checked document branch.
-
-        Git Data API supports large diagnostics without the Contents API's small
-        read limit. A random per-delivery ref retains the immutable artifact.
-        Return a link only after GitHub confirms that ref and its exact commit.
-        """
-        base = f'https://api.github.com/repos/{owner}/{repo}/git'
-        def sha(response):
-            value = response.get('sha', '') if isinstance(response, dict) else ''
-            if not re.fullmatch(r'[0-9a-f]{40}', value):
-                raise GitHubAPIError('Artifact upload did not confirm a Git object SHA')
-            return value
-        blob = sha(self._request('POST', base + '/blobs', json_body={
-            'content': base64.b64encode(content.encode('utf-8')).decode('ascii'), 'encoding': 'base64'}))
-        tree = sha(self._request('POST', base + '/trees', json_body={'tree': [
-            {'path': 'diagnostics.json', 'mode': '100644', 'type': 'blob', 'sha': blob}]}))
-        commit = sha(self._request('POST', base + '/commits', json_body={
-            'message': 'Documentation review diagnostics', 'tree': tree, 'parents': []}))
-        ref = 'refs/heads/ydbdoc-reports/' + uuid.uuid4().hex
-        receipt = self._request('POST', base + '/refs', json_body={'ref': ref, 'sha': commit})
-        if (not isinstance(receipt, dict) or receipt.get('ref') != ref or
-                receipt.get('object', {}).get('sha') != commit):
-            raise GitHubAPIError('Artifact upload did not confirm its retention ref')
-        return f'https://github.com/{owner}/{repo}/blob/{commit}/diagnostics.json'
 
     def find_open_pull_by_head(
         self, owner: str, repo: str, *, head_branch: str, base: str
