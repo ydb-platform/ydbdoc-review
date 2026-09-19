@@ -134,11 +134,6 @@ class GitHubClient:
         if len(body) > 12000:
             raise ValueError('Report exceeds concise GitHub body limit (12000)')
 
-    def update_pull_body(self, owner: str, repo: str, pr_number: int, body: str) -> None:
-        self._check_report_body(body)
-        self._request('PATCH', f'https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}',
-                      json_body={'body': body})
-
     def find_open_pull_by_head(
         self, owner: str, repo: str, *, head_branch: str, base: str
     ) -> tuple[str, int] | None:
