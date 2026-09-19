@@ -10,7 +10,7 @@ from ydbdoc_review.build import build_candidate
 from ydbdoc_review.document import DocumentIssue, FileResult, RequestBudget, protect, restore
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.model import Endpoint, ModelChoice, ModelClient
-from ydbdoc_review.quality import Issue
+from ydbdoc_review.quality import Issue, Location
 from ydbdoc_review.quality_loop import SelectedFile, repair_document, run_quality_loop
 
 # Up to three real CLI builds; each subprocess has its own 30s bound.
@@ -164,9 +164,12 @@ def test_mandatory_build_and_whole_tree_links(rig, gate):
 def test_long_repair_complete_source_current_coverage(rig):
     source = '\n\n'.join(f'Section {i} has exact facts and `code{i}`.' for i in range(60))
     current = '\n\n'.join(f'Section {i} has current wording and `code{i}`.' for i in range(60))
-    result = repair_document(SelectedFile(P, source, 'en', 'Keep facts.'), current, (),
+    findings = tuple(Issue(P, 'Incorrect fact', 'Restore source fact',
+                           source=Location(2*i+1, 2*i+1, f'Section {i} has exact facts and `code{i}`.'))
+                     for i in range(60))
+    result = repair_document(SelectedFile(P, source, 'en', 'Keep facts.'), current, findings,
                              replacements={}, client=rig.client, choice=rig.choice,
-                             budget=RequestBudget(2400, 650, lambda m: len(str(m))))
+                             budget=RequestBudget(4000, 650, lambda m: len(str(m))))
     assert result.complete, result.issues
     assert len(result.parts) > 1
     assert result.text == source
@@ -253,9 +256,11 @@ def test_real_loop_exact_allowed_url_succeeds(rig):
 
 def test_long_document_loop_trace_separates_rounds_and_chunk_calls(rig):
     source = '\n\n'.join(f'Section {i} has exact facts and `code{i}`.' for i in range(60))
-    finding = Issue(P, 'Review all wording', 'Keep facts and approved wording.')
-    _, result = rig.run(source=source, target=source, requested=(finding,),
-                        budget=RequestBudget(3000, 800, lambda m: len(str(m))))
+    findings = tuple(Issue(P, 'Incorrect fact', 'Restore source fact',
+                           source=Location(2*i+1, 2*i+1, f'Section {i} has exact facts and `code{i}`.'))
+                     for i in range(60))
+    _, result = rig.run(source=source, target=source, requested=findings,
+                        budget=RequestBudget(5000, 800, lambda m: len(str(m))))
     assert result.status == 'GREEN', result.issues
     assert len(result.rounds) == 2
     assert len(result.rounds[0].repairs) == 1

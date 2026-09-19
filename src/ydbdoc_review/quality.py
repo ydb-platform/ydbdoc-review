@@ -19,7 +19,7 @@ from itertools import pairwise
 from types import SimpleNamespace
 from typing import Literal
 
-from ydbdoc_review.document import CapacityError, RequestBudget, protect
+from ydbdoc_review.document import CapacityError, FileResult, RequestBudget, protect, restore
 from ydbdoc_review.model import ModelChoice, ModelClient, ModelError
 from ydbdoc_review.parsing.front_matter import encode_decoded_scalar
 from ydbdoc_review.parsing.inline_locations import LocatedText
@@ -101,6 +101,7 @@ class ReviewPart:
     source_end: int
     target_start: int
     target_end: int
+    chunk_indexes: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -443,9 +444,9 @@ Lines are global one-based inclusive; only CR, LF and CRLF delimit lines. All is
 def critic_messages(source: str, target: str, *, path: str, part: ReviewPart,
                     source_counts: StructureCounts, target_counts: StructureCounts,
                     glossary: Mapping[str, str] | None = None,
-                    target_lang: str = "en") -> list[dict[str, str]]:
+                    target_lang: str = "en", instruction: str = "") -> list[dict[str, str]]:
     payload = {
-        "path": path, "target_lang": target_lang,
+        "path": path, "target_lang": target_lang, "review_instruction": instruction,
         "source": source[part.source_start:part.source_end],
         "target": target[part.target_start:part.target_end],
         "source_start_line": _line_number(source, part.source_start),
@@ -526,7 +527,7 @@ def _review_units(text: str) -> list[_ReviewUnit]:
     return units
 
 
-def review_parts(source: str, target: str, *, fits) -> tuple[ReviewPart, ...]:
+def review_parts(source: str, target: str, *, fits, correspondence: FileResult | None = None) -> tuple[ReviewPart, ...]:
     """Align units first, then pack *paired* windows using the actual request.
 
     Shared text/identifiers anchor insertions/deletions. Between anchors, equal
@@ -534,6 +535,53 @@ def review_parts(source: str, target: str, *, fits) -> tuple[ReviewPart, ...]:
     critic sees the whole possible merger/omission. If such a group cannot fit,
     report incomplete instead of pretending independent slices correspond.
     """
+    if correspondence is not None and correspondence.chunks:
+        if correspondence.text != (target or None) and correspondence.text != target:
+            raise CapacityError("Saved correspondence differs from current target")
+        if correspondence.protected is None or correspondence.protected.source != source:
+            raise CapacityError("Saved correspondence differs from current source")
+        groups = []
+        for index, item in enumerate(correspondence.chunks):
+            if groups and item.chunk.source_start < max(correspondence.chunks[i].chunk.source_end for i in groups[-1]):
+                groups[-1].append(index)
+            else:
+                groups.append([index])
+        windows = []
+        pieces = []
+        cursor = 0
+        for indexes in groups:
+            slots = [correspondence.chunks[i] for i in indexes]
+            runs = []
+            for slot in slots:
+                if (runs and slot.status == 'complete' and slot.response is not None
+                        and runs[-1][-1].status == 'complete' and runs[-1][-1].response is not None):
+                    runs[-1].append(slot)
+                else:
+                    runs.append([slot])
+            rendered = []
+            for run in runs:
+                # Most parts already hold exact published text. Reassemble only
+                # overlapping scalar fragments whose YAML encoding is collective.
+                if len(run) > 1:
+                    try:
+                        rendered.append(restore(correspondence.protected,
+                                                ''.join(r.response for r in run),
+                                                expected=''.join(r.chunk.text for r in run)))
+                    except ValueError:
+                        rendered.append(''.join(r.text or '' for r in run))
+                else:
+                    rendered.append(run[0].text or '')
+            piece = ''.join(rendered)
+            end = cursor + len(piece)
+            windows.append(ReviewPart(min(s.chunk.source_start for s in slots),
+                                      max(s.chunk.source_end for s in slots), cursor, end, tuple(indexes)))
+            pieces.append(piece)
+            cursor = end
+        if ''.join(pieces) != target:
+            raise CapacityError("Saved correspondence cannot reconstruct published target")
+        if any(not fits(part) for part in windows):
+            raise CapacityError("Saved corresponding part exceeds request budget")
+        return tuple(windows)
     whole = ReviewPart(0, len(source), 0, len(target))
     if fits(whole):
         return (whole,)
@@ -655,7 +703,8 @@ def parse_critic_response(content: str, *, path: str, source: str, target: str,
 def check(source: str, target: str, *, path: str, candidate_sha: str, target_lang: str,
           client: ModelClient, choice: ModelChoice, budget: RequestBudget,
           glossary: Mapping[str, str] | None = None,
-          validated_url_replacements: Mapping[str, str] | None = None) -> CheckResult:
+          validated_url_replacements: Mapping[str, str] | None = None,
+          correspondence: FileResult | None = None, instruction: str = "") -> CheckResult:
     """One check round; all parts are attempted even after one critic failure.
 
     The caller owns source/target snapshot reads and the SHA binding. Callback /
@@ -683,14 +732,15 @@ def check(source: str, target: str, *, path: str, candidate_sha: str, target_lan
 
     def messages(part):
         return critic_messages(source, target, path=path, part=part, source_counts=sc,
-                               target_counts=tc, glossary=glossary, target_lang=target_lang)
+                               target_counts=tc, glossary=glossary, target_lang=target_lang, instruction=instruction)
 
     def incomplete(problem: str) -> None:
         issues.append(Issue(path, problem, "Complete the critic check before merging.", "critic_incomplete"))
 
     try:
         budget = budget.for_choice(choice)
-        parts = review_parts(source, target, fits=lambda p: budget.fits(messages(p)))
+        parts = review_parts(source, target, fits=lambda p: budget.fits(messages(p)),
+                             correspondence=correspondence)
     except CapacityError as exc:
         incomplete(str(exc))
         return CheckResult(path, candidate_sha, tuple(issues), False, (), (), sc, tc)

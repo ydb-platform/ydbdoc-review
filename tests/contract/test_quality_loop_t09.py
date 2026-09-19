@@ -9,6 +9,7 @@ from ydbdoc_review.build import BuildResult
 from ydbdoc_review.document import DocumentIssue, FileResult, RequestBudget
 from ydbdoc_review.links import Candidate
 from ydbdoc_review.model import Endpoint, ModelChoice, ModelClient
+from ydbdoc_review.quality import Issue, Location
 from ydbdoc_review.quality_loop import SelectedFile, repair_document, run_quality_loop
 
 PATH = 'ydb/docs/en/a.md'
@@ -185,9 +186,12 @@ def test_repair_long_document_complete_order_and_transport_fallback(setup):
             return requests.exceptions.Timeout('timeout')
         return data['source']
     handler[0] = respond
-    result = repair_document(SelectedFile(PATH, source, 'en'), source, (), replacements={},
+    findings = tuple(Issue(PATH, 'Meaning needs repair', 'Correct this sentence',
+                           source=Location(2*i + 1, 2*i + 1, f'Sentence number {i} is useful.'))
+                     for i in range(30))
+    result = repair_document(SelectedFile(PATH, source, 'en'), source, findings, replacements={},
                              client=client, choice=choice,
-                             budget=RequestBudget(1600, 350, lambda m: len(str(m))))
+                             budget=RequestBudget(3000, 350, lambda m: len(str(m))))
     assert result.complete and result.text == source
     assert len(result.parts) > 1
     assert result.parts[0].attempt_end - result.parts[0].attempt_start == 2
@@ -219,7 +223,8 @@ def test_repair_callback_failure_is_terminal_red(setup):
 ])
 def test_front_matter_repair_or_indivisible_incomplete(setup, source, target):
     _, _, _, _, _, client, choice, _ = setup
-    result = repair_document(SelectedFile(PATH, source, 'en'), target, (), replacements={},
+    result = repair_document(SelectedFile(PATH, source, 'en'), target,
+                             (Issue(PATH, 'Damaged target', 'Restore protected structure'),), replacements={},
                              client=client, choice=choice,
                              budget=BUDGET if source.startswith('---') else
                              RequestBudget(1600, 350, lambda m: len(str(m))))

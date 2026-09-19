@@ -13,6 +13,7 @@ from ydbdoc_review.build import build_candidate
 from ydbdoc_review.document import RequestBudget
 from ydbdoc_review.links import Candidate, check_links, references
 from ydbdoc_review.model import Endpoint, ModelChoice, ModelClient
+from ydbdoc_review.quality import Issue
 from ydbdoc_review.quality_loop import SelectedFile, repair_document, run_quality_loop
 
 pytestmark = pytest.mark.timeout(120)
@@ -83,7 +84,8 @@ def rig(git_repo, monkeypatch):
 
 
 def repair(rig, source, mapping):
-    result = repair_document(SelectedFile(P, source, 'en'), source, (),
+    result = repair_document(SelectedFile(P, source, 'en'), source,
+                             (Issue(P, 'Check requested repair', 'Preserve approved prose and protected bytes'),),
                              replacements=mapping, client=rig.client,
                              choice=rig.choice, budget=BUDGET)
     assert result.complete, result.issues

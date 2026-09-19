@@ -136,7 +136,8 @@ def test_repair_http_payload_excludes_next_line_finding(wire, monkeypatch, newli
             return self
 
         def fits(self, messages, **kwargs):
-            return False  # Force the supplied windows instead of the whole document.
+            # Reject the whole document while accepting actual per-part requests.
+            return len(json.loads(messages[-1]['content'])['current_target']) <= end1
 
     findings = tuple(Issue(PATH, f'line {line}', 'fix', target=Location(line, line, quote))
                      for line, quote in enumerate(('aaa', 'bbb', 'ccc'), 1))
