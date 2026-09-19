@@ -162,6 +162,13 @@ def test_adapter_authorization_no_http_by_default(monkeypatch):
 def wired(system, db, monkeypatch, **capture_options):
     state, _, _, _, _, _, publisher, _ = system
     store, _, _ = db
+    from datetime import datetime
+    from ydbdoc_review import model
+    class ModelClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return store.clock().astimezone(tz)
+    monkeypatch.setattr(model, 'datetime', ModelClock)
     adapter = RunStore(store, mode='doc_verify' if publisher.pr_number else 'doc_translate', source_pr='up/docs/1')
     sent = capture(monkeypatch, **capture_options)
     def factory():
@@ -277,8 +284,9 @@ def test_bounded_finalization_persistent_storage_failure():
         saves.append(result)
         raise OSError('storage unavailable')
     result = finalize(RunResult(status='GREEN'), RunHooks(save=save, report=reports.append))
-    assert len(saves) == 2 and len(reports) == 1
-    assert result.status == 'RED' and 'storage final outcome' in result.errors[-1]
+    assert len(saves) == 1 and len(reports) == 1
+    assert result.status == 'RED' and result.errors[-1].startswith('storage:')
+    assert reports == [result] and 'doc_continue недоступен' in reports[0].message
 
 
 @pytest.mark.parametrize('mode', ['doc_verify', 'doc_continue'])
@@ -297,7 +305,7 @@ def test_full_existing_pr_report_failure_stores_red(system, db, monkeypatch, mod
         context = db[0].context(adapter.run_id)
         assert result.cost_breakdown['total'] == Decimal('.25')
     assert sent and result.status == 'RED' and result.publication.draft
-    assert any('report:' in e for e in result.errors)
+    assert any(e.startswith(('report:', 'report progress:')) for e in result.errors)
     assert context['result']['status'] == 'RED'
     assert context['result']['errors'] == list(result.errors)
     assert context['cost_breakdown'] == result.cost_breakdown

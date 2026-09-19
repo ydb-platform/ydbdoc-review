@@ -119,7 +119,7 @@ def finalize(result: RunResult, hooks: RunHooks, publisher: Publisher | None = N
         explanation = ('Контекст не сохранён надёжно: doc_continue недоступен. Устраните ошибку хранилища '
                        'и запустите doc_verify или новый doc_translate.' if name.startswith('storage') else '')
         result = replace(result, status='RED', errors=(*result.errors, error),
-                         message='; '.join(filter(None, (result.message, error, explanation))),
+                         message='; '.join(filter(None, (explanation, result.message, error))),
                          cancelled=result.cancelled or isinstance(exc, (RunCancelled, KeyboardInterrupt)))
 
     def reconcile():

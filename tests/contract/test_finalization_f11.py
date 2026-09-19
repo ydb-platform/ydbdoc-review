@@ -88,12 +88,13 @@ def test_first_or_second_report_failure_never_replays_context(delivery, channel)
     assert all('GREEN' not in body and 'Итого: 2 ₽' in body for body in state['comments'].values())
 
 
-def test_storage_failure_reports_continue_unavailability_without_retry(delivery):
+@pytest.mark.parametrize('diagnostic', ['storage offline', 'RPC diagnostics: ' + 'x'*1000])
+def test_storage_failure_reports_continue_unavailability_without_retry(delivery, diagnostic):
     reporter, state, _ = delivery
     calls, statuses = [], []
     def fail(result):
         calls.append(result)
-        raise RuntimeError('storage offline')
+        raise RuntimeError(diagnostic)
     result = finalize(ready(), RunHooks(save=fail, save_status=statuses.append, report=reporter))
     assert len(calls) == 1
     assert len(statuses) == 1
@@ -132,6 +133,8 @@ def test_late_metadata_failure_cannot_leave_published_green(delivery):
     result = finalize(ready(), RunHooks(save=save, save_status=status, report=reporter))
     assert result.status == 'RED'
     assert any('storage status' in error for error in result.errors)
+    assert 'doc_continue недоступен' in state['comments'][10]
+    assert 'doc_verify' in state['comments'][10]
     assert all('GREEN' not in body for body in state['comments'].values())
 
 
