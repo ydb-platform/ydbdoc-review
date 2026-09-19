@@ -144,15 +144,10 @@ class Publisher:
             publication = Publication(pr_repository, self.branch, base,
                                       candidate.sha, self.pr_number, draft=False)
             if self.pr_number is None:
-                from ydbdoc_review.report import initial_description
-                from ydbdoc_review.runner import RunResult
-                creation_result = report_result or RunResult(snapshot=snapshot, candidate=candidate,
-                    status=status, checked_sha=checked_sha)
-                description = initial_description(creation_result, secrets=(self.token,))
                 created = self.github.create_pull(
                     owner, repo, title=f'Documentation translation #{snapshot.pr_number}',
                     head=self.branch, base=base,
-                    body=description, draft=not green)
+                    body='', draft=not green)
                 if not created:
                     raise RuntimeError('GitHub did not confirm PR creation')
                 url, number, _ = created
