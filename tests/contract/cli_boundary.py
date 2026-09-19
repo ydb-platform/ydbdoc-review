@@ -74,14 +74,22 @@ def main():
         method = request.method
         state["http"].append([method, path])
         write(state)
-        if "model.invalid" in request.url:
-            role = path.split("/internal/")[1].split("/")[0]
+        if urlsplit(request.url).hostname == "llm.api.cloud.yandex.net":
+            payload = json.loads(request.body)
+            # The YC network tokenizer is an external boundary. Flash must never
+            # arrive here: its pinned local tokenizer remains real below.
+            assert "deepseek" not in payload["modelUri"]
+            state.setdefault("yc_tokenizers", []).append(payload["modelUri"])
+            write(state)
+            return response({"tokens": [{}] * 10})
+        if "model.invalid" in request.url or urlsplit(request.url).hostname == "ai.api.cloud.yandex.net":
             payload = json.loads(request.body)
             # Pending request and transcript exist BEFORE every paid HTTP attempt.
             row = sql.connection.execute(
                 "SELECT * FROM runs WHERE entry_id <> 'summary' ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
-            assert row is not None and row["operation"] == role and row["status"] == "pending"
+            assert row is not None and row["status"] == "pending"
+            role = row["operation"]
             assert sql.connection.execute("SELECT COUNT(*) FROM run_objects").fetchone()[0] > 0
             state["model"].append([role, payload])
             write(state)
@@ -220,7 +228,26 @@ def main():
     def fixture_runtime(path=None):
         return original_load_runtime(path, token_counter=FixtureTokenizer())
 
-    runtime_config.load_runtime = fixture_runtime
+    if os.environ.get("T15_REAL_V4") != "1":
+        runtime_config.load_runtime = fixture_runtime
+    else:
+        # Observe the production counter without replacing its result. This
+        # hook also works on pre-migration code, where unsupported Flash must
+        # fail in production validation rather than in a test-only import.
+        from ydbdoc_review.config.tokenization import ProviderTokenCounter
+
+        original_count = ProviderTokenCounter._count
+
+        def observe_count(counter, endpoint, method, payload):
+            result = original_count(counter, endpoint, method, payload)
+            if endpoint.model == "deepseek-v4-flash":
+                state = read()
+                name = "count_output" if method == "tokenize" else "count_messages"
+                state.setdefault("local_v4_counts", []).append([name, result])
+                write(state)
+            return result
+
+        ProviderTokenCounter._count = observe_count
     from ydbdoc_review.model import ModelClient
 
     original_init = ModelClient.__init__
