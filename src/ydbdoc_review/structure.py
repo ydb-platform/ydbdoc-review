@@ -96,11 +96,19 @@ _CODE_SPAN = re.compile(r"(?P<ticks>`{1,})(?P<body>[^\r\n]*?)(?P=ticks)")
 _TEMPLATE = re.compile(r"\{\{.*?\}\}|\$\{[^}\r\n]*\}", re.S)
 _YFM_TAG = re.compile(r"\{%\s*(?P<name>[A-Za-z][A-Za-z0-9_-]*)(?:\s+[^%]*?)?\s*%\}")
 _URL = re.compile(r"(?<![\w])(?:https?://|ftp://|mailto:|www\.)[^\s<>\]\}]+", re.I)
-_PATH = re.compile(r"(?<![\w])(?:\.\.?/|/)[^\s<>\[\]{}(),]+")
+_PATH = re.compile(
+    r"(?<![\w])(?:\.\.?/|/)[^\s<>\[\]{}(),]+"
+    r"|(?<![\w./])(?:[A-Za-z0-9_-]+/)+[A-Za-z0-9_.-]+(?:#[A-Za-z0-9_.-]+)?"
+)
 _HTML = re.compile(r"</?[A-Za-z][^>\r\n]*>|<!--.*?-->", re.S)
 _ANCHOR = re.compile(r"\{#[^}\r\n]+\}")
-_MARKUP = re.compile(r"\*\*|~~|(?<!\w)_[^\r\n_]+_(?!\w)|(?<!\w)\*[^\r\n*]+\*(?!\w)")
+_MARKUP = re.compile(
+    r"(?P<marker>\*\*|~~|__|(?<!\w)\*|(?<!\w)_)"
+    r"(?P<markup_body>[^\r\n]+?)"
+    r"(?P=marker)(?!\w)"
+)
 _UNKNOWN_YFM = re.compile(r"\{%\s*(?P<name>[A-Za-z][A-Za-z0-9_-]*)\b[^%]*%\}")
+_NESTED_FENCE = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})(?P<info>[^\r\n]*)$")
 
 _KNOWN_YFM = {
     "else",
@@ -173,7 +181,12 @@ def _iter_lines(raw: str) -> list[tuple[int, int, str]]:
     return lines
 
 
-def _scan_inline(text: str, base: int) -> tuple[list[TextField], tuple[str, ...]]:
+def _scan_inline(
+    text: str,
+    base: int,
+    *,
+    technical_code: bool = False,
+) -> tuple[list[TextField], tuple[str, ...]]:
     fields: list[TextField] = []
     signature: list[str] = []
     if text.count("[") != text.count("]"):
@@ -202,10 +215,23 @@ def _scan_inline(text: str, base: int) -> tuple[list[TextField], tuple[str, ...]
         if match.group("label") is not None:
             kind = "image_alt" if match.group("image") else "link_label"
             label_start, label_end = match.span("label")
-            _append_field(fields, kind, base + label_start, base + label_end)
             signature.append("image" if match.group("image") else "link")
+            label_fields, label_signature = _scan_inline(
+                match.group("label"),
+                base + label_start,
+                technical_code=True,
+            )
+            if label_fields:
+                fields.extend(label_fields)
+            else:
+                _append_field(fields, kind, base + label_start, base + label_end)
+            signature.extend(f"link-label:{item}" for item in label_signature)
         elif match.group("ticks") is not None:
-            signature.append(f"code:{len(match.group('ticks'))}")
+            marker = match.group("ticks")
+            if technical_code:
+                signature.append(f"code:{len(marker)}:{match.group('body')}")
+            else:
+                signature.append(f"code:{len(marker)}")
         elif match.group("name") is not None:
             name = match.group("name").lower()
             if name not in _KNOWN_YFM:
@@ -222,6 +248,17 @@ def _scan_inline(text: str, base: int) -> tuple[list[TextField], tuple[str, ...]
             signature.append("html")
         elif match.group(0).startswith("{#"):
             signature.append("anchor")
+        elif match.group("marker") is not None:
+            marker = match.group("marker")
+            body_start, _body_end = match.span("markup_body")
+            signature.append(f"markup:{marker}")
+            inner, inner_signature = _scan_inline(
+                match.group("markup_body"),
+                base + body_start,
+                technical_code=technical_code,
+            )
+            fields.extend(inner)
+            signature.extend(inner_signature)
         else:
             signature.append("markup")
         cursor = match.end()
@@ -257,7 +294,10 @@ def _scan_table(raw: str, base: int) -> tuple[list[TextField], tuple[str, ...]]:
 def _scan_lines(raw: str, base: int, *, list_mode: bool = False) -> tuple[list[TextField], tuple[str, ...]]:
     fields: list[TextField] = []
     signature: list[str] = []
-    for cursor, _line_end, body in _iter_lines(raw):
+    lines = _iter_lines(raw)
+    index = 0
+    while index < len(lines):
+        cursor, _line_end, body = lines[index]
         prefix_end = 0
         if list_mode:
             marker = _LIST_MARKER.match(body)
@@ -270,9 +310,33 @@ def _scan_lines(raw: str, base: int, *, list_mode: bool = False) -> tuple[list[T
                 prefix_end = quote.end()
                 signature.append("quote")
         content = body[prefix_end:]
+
+        nested = _NESTED_FENCE.match(content)
+        if nested:
+            fence = nested.group("fence")
+            closing = index + 1
+            while closing < len(lines):
+                close_body = lines[closing][2]
+                if re.fullmatch(rf"[ \t]*{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", close_body):
+                    break
+                closing += 1
+            if closing < len(lines):
+                code_end = lines[closing][1]
+            else:
+                code_end = len(raw)
+            code_start = cursor
+            code_text = raw[code_start:code_end]
+            language = (nested.group("info").strip().split() or [""])[0].lower()
+            signature.append(
+                f"nested-fence:{fence[0]}:{len(fence)}:{language}:{code_text}"
+            )
+            index = closing + 1 if closing < len(lines) else len(lines)
+            continue
+
         inner, inner_signature = _scan_inline(content, base + cursor + prefix_end)
         fields.extend(inner)
         signature.extend(inner_signature)
+        index += 1
     return fields, tuple(signature)
 
 
@@ -287,16 +351,28 @@ def _node_for_token(source: str, offsets: list[int], token: object, token_type: 
     signature: list[str] = [kind]
     if kind == "heading":
         heading = re.match(r"^[ \t]*#{1,6}[ \t]+", raw)
-        prefix_end = heading.end() if heading else 0
-        anchor = re.search(r"\s+\{#[^}\r\n]+\}\s*(?:\r?\n|\r)?$", raw)
-        body_end = anchor.start() if anchor else len(raw.rstrip("\r\n"))
-        inner, inner_signature = _scan_inline(raw[prefix_end:body_end], start + prefix_end)
-        fields.extend(inner)
-        heading_match = re.match(r"^[ \t]*(#+)", raw)
-        level = len(heading_match.group(1)) if heading_match else 0
-        signature.extend((f"level:{level}", *inner_signature))
-        if anchor:
-            signature.append("anchor")
+        setext_lines = _iter_lines(raw)
+        setext = (
+            len(setext_lines) >= 2
+            and bool(re.fullmatch(r"[ \t]*(=+|-+)[ \t]*", setext_lines[1][2]))
+        )
+        if setext:
+            body_start, _body_end, body = setext_lines[0]
+            underline = setext_lines[1][2].strip()
+            inner, inner_signature = _scan_inline(body, start + body_start)
+            fields.extend(inner)
+            signature.extend((f"setext:{underline}", *inner_signature))
+        else:
+            prefix_end = heading.end() if heading else 0
+            anchor = re.search(r"\s+\{#[^}\r\n]+\}\s*(?:\r?\n|\r)?$", raw)
+            body_end = anchor.start() if anchor else len(raw.rstrip("\r\n"))
+            inner, inner_signature = _scan_inline(raw[prefix_end:body_end], start + prefix_end)
+            fields.extend(inner)
+            heading_match = re.match(r"^[ \t]*(#+)", raw)
+            level = len(heading_match.group(1)) if heading_match else 0
+            signature.extend((f"level:{level}", *inner_signature))
+            if anchor:
+                signature.append("anchor")
     elif kind == "table":
         fields, table_signature = _scan_table(raw, start)
         signature.extend(table_signature[1:])
@@ -350,6 +426,16 @@ def _nodes_from_tokens(source: str) -> tuple[tuple[DocumentNode, ...], tuple[str
 
 
 def plan_document(source: str, *, path: str) -> DocumentPlan:
+    if path.lower().endswith((".yaml", ".yml")):
+        node = DocumentNode(
+            "yaml",
+            0,
+            len(source),
+            signature=("yaml", source),
+            line_start=1,
+            line_end=source.count("\n") + 1,
+        )
+        return DocumentPlan(path=path, source=source, nodes=(node,))
     try:
         nodes, diagnostics = _nodes_from_tokens(source)
     except Exception as exc:  # parser failures are local, source-preserving diagnostics
@@ -365,7 +451,7 @@ def _mismatch(plan: DocumentPlan, reason: str) -> AssemblyResult:
 
 def assemble_document(plan: DocumentPlan, candidate: str) -> AssemblyResult:
     if candidate == plan.source:
-        return AssemblyResult(plan.source, plan.diagnostics, bool(plan.diagnostics))
+        return AssemblyResult(plan.source, plan.diagnostics)
     if plan.diagnostics:
         return _mismatch(plan, "source plan contains an unknown or unreadable node")
     candidate_plan = plan_document(candidate, path=plan.path)

@@ -188,11 +188,75 @@ def test_unsafe_link_field_retains_source_and_reports_diagnostic() -> None:
 
 def test_unknown_construct_is_retained_with_a_local_diagnostic() -> None:
     source = "{% custom-directive value %}\nText.\n"
-    candidate = "{% custom-directive changed %}\nTranslated.\n"
+    candidate = source
 
     plan = plan_document(source, path="docs/example.md")
     result = assemble_document(plan, candidate)
 
     assert result.text == source
-    assert result.red is True
+    assert result.red is False
     assert any("unknown" in diagnostic.lower() for diagnostic in result.diagnostics)
+
+
+def test_nested_fenced_code_inside_list_is_source_owned_and_red_on_change() -> None:
+    source = "- Перед кодом\n  ```sql\n  SELECT 1\n  ```\n- После кода\n"
+    candidate = "- Before code\n  ```sql\n  DROP 1\n  ```\n- After code\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+
+
+def test_inline_code_inside_link_label_is_source_owned() -> None:
+    source = "См. [используйте `SELECT`](guide.md) для чтения.\n"
+    candidate = "See [use `DROP`](other.md) for reading.\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+
+
+def test_yaml_configuration_path_is_opaque_and_red_on_changed_href() -> None:
+    source = "title: Документация\nhref: docs/source.md\nitems:\n  - source.md\n"
+    candidate = "title: Documentation\nhref: docs/other.md\nitems:\n  - other.md\n"
+
+    result = assemble_document(plan_document(source, path="docs/toc.yaml"), candidate)
+
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+
+
+def test_emphasis_markers_are_source_syntax_but_inner_text_is_editable() -> None:
+    source = "Это *важно* и **критично**.\n"
+    candidate = "This is *important* and **critical**.\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.red is False
+    assert result.text == candidate
+
+
+def test_setext_underline_is_structural_and_heading_level_cannot_change() -> None:
+    source = "Заголовок\n=======\n\nТекст.\n"
+    candidate = "Heading\n--------\n\nText.\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+
+
+def test_bare_relative_path_in_prose_is_source_owned() -> None:
+    source = "Откройте файл docs/source.md для примера.\n"
+    candidate = "Open file docs/translated.md for an example.\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.red is False
+    assert result.text == "Open file docs/source.md for an example.\n"
