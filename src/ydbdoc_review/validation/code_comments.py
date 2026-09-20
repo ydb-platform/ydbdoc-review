@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 
 from pygments.lexers import get_lexer_by_name
-from pygments.token import Comment
+from pygments.token import Comment, Token
 from pygments.util import ClassNotFound
 
 
@@ -64,21 +64,96 @@ def _approved_comment_tokens(
     except ClassNotFound:
         return [], False
 
+    if not _syntax_is_safe(code, language):
+        return [], False
+
     raw: list[tuple[int, int, str]] = []
     for start, kind, value in lexer.get_tokens_unprocessed(code):
+        if kind in Token.Error:
+            return [], False
         if kind not in Comment or kind in Comment.Preproc or kind in Comment.Hashbang:
             continue
         end = start + len(value)
-        if kind in Comment.Multiline and raw and raw[-1][1] == start:
-            previous_start, _previous_end, previous_value = raw[-1]
-            raw[-1] = (previous_start, end, previous_value + value)
-        else:
-            raw.append((start, end, value))
+        raw.append((start, end, value))
 
     for _start, _end, value in raw:
         if value.startswith("/*") and not value.endswith("*/"):
             return raw, False
     return raw, True
+
+
+def _syntax_is_safe(code: str, language: str) -> bool:
+    """Reject malformed strings/comments before extracting editable spans.
+
+    Pygments is intentionally permissive for recovery.  Structural assembly is
+    not: a recovered token stream must never make an incomplete source block
+    editable.  This small scanner only tracks delimiters and quoted literals;
+    it does not try to parse the language grammar.
+    """
+
+    line_marker = "//" if language in {"cpp", "java", "javascript"} else "#"
+    block_comment = language in {"cpp", "java", "javascript"}
+    quote: str | None = None
+    block = False
+    escaped = False
+    index = 0
+    while index < len(code):
+        if block:
+            if code.startswith("*/", index):
+                block = False
+                index += 2
+            else:
+                index += 1
+            continue
+        if quote is not None:
+            if escaped:
+                escaped = False
+                index += 1
+                continue
+            if language == "yaml" and quote == "'" and code.startswith("''", index):
+                index += 2
+                continue
+            if code[index] == "\\" and not (
+                language == "yaml" and quote == "'"
+            ):
+                escaped = True
+                index += 1
+                continue
+            if len(quote) == 3 and code.startswith(quote, index):
+                quote = None
+                index += 3
+                continue
+            if len(quote) == 1 and code[index] == quote:
+                quote = None
+                index += 1
+                continue
+            if code[index] in "\r\n" and len(quote) == 1:
+                return False
+            index += 1
+            continue
+
+        if block_comment and code.startswith("*/", index):
+            return False
+        if block_comment and code.startswith("/*", index):
+            block = True
+            index += 2
+            continue
+        if code.startswith(line_marker, index):
+            newline = code.find("\n", index)
+            index = len(code) if newline < 0 else newline + 1
+            continue
+        if code[index] in "'\"" or (
+            language == "javascript" and code[index] == "`"
+        ):
+            if language == "python" and code.startswith(code[index] * 3, index):
+                quote = code[index] * 3
+                index += 3
+            else:
+                quote = code[index]
+                index += 1
+            continue
+        index += 1
+    return not block and quote is None and not escaped
 
 
 def scan_approved_comments(code: str, info: str) -> ApprovedCommentScan:
@@ -160,6 +235,8 @@ def approved_code_skeleton(code: str, info: str) -> str | None:
             pieces.append(value)
         elif str(kind).startswith("Token.Text"):
             pieces.append(re.sub(r"[^\r\n]", " ", value))
+        elif kind in Token.Operator or kind in Token.Punctuation:
+            pieces.append(f"<TOKEN:{kind}:{value}>")
         else:
             pieces.append(f"<TOKEN:{kind}>")
     return "".join(pieces)

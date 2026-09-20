@@ -5,6 +5,13 @@ from __future__ import annotations
 import pytest
 
 from ydbdoc_review.structure import assemble_document, plan_document
+from ydbdoc_review.validation.code_comments import (
+    CommentSpan,
+    approved_code_skeleton,
+    approved_comment_spans,
+    replace_comments,
+    scan_approved_comments,
+)
 
 
 @pytest.mark.parametrize(
@@ -85,4 +92,86 @@ def test_malformed_block_comment_retains_source_code() -> None:
     result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
 
     assert result.text == source
+    assert result.red is True
+
+
+@pytest.mark.parametrize(
+    ("language", "body"),
+    (
+        ("cpp", '// Русский\n/* unclosed\nint value = 1\n'),
+        ("java", '// Русский\n/* unclosed\nint value = 1\n'),
+        ("javascript", '// Русский\n/* unclosed\nconst value = 1\n'),
+        ("cpp", '// Русский\n*/\nint value = 1\n'),
+        ("java", '// Русский\n*/\nint value = 1\n'),
+        ("javascript", '// Русский\n*/\nconst value = 1\n'),
+        ("python", 'value = "unterminated\n# Русский\n'),
+        ("yaml", 'value: "unterminated\n# Русский\n'),
+        ("javascript", 'const value = "unterminated\n// Русский\n'),
+    ),
+)
+def test_malformed_supported_code_is_unsafe_and_restored(
+    language: str, body: str
+) -> None:
+    source = f"```{language}\n{body}```\n"
+    translated_body = body.replace("Русский", "English").replace("1", "2")
+    candidate = f"```{language}\n{translated_body}```\n"
+
+    scan = scan_approved_comments(body, language)
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert scan.supported is True
+    assert scan.safe is False
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+
+
+@pytest.mark.parametrize("operator", (">", "+"))
+def test_operator_spelling_change_is_unsafe_even_with_same_token_kind(operator: str) -> None:
+    source = "```python\n# Русский\nvalue = 1\n```\n"
+    candidate = f"```python\n# English\nvalue {operator} 1\n```\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+    assert approved_code_skeleton("value = 1\n", "python") != approved_code_skeleton(
+        f"value {operator} 1\n", "python"
+    )
+
+
+def test_approved_spans_are_comment_bodies_and_adjacent_comments_stay_distinct() -> None:
+    code = "// first\n// second\n/* third */ /* fourth */\n"
+
+    assert approved_comment_spans(code, "cpp") == [
+        CommentSpan(3, 8),
+        CommentSpan(12, 18),
+        CommentSpan(22, 27),
+        CommentSpan(34, 40),
+    ]
+
+
+def test_multiline_span_excludes_comment_delimiters_and_formatting() -> None:
+    code = "/*\n * first\n * second\n */\n"
+
+    spans = approved_comment_spans(code, "cpp")
+
+    assert [code[span.start : span.end] for span in spans] == ["first", "second"]
+
+
+def test_comment_replacement_cannot_change_delimiters() -> None:
+    code = "// first\n/* second */\n"
+    spans = approved_comment_spans(code, "cpp")
+
+    assert [code[span.start : span.end] for span in spans] == ["first", "second"]
+    with pytest.raises(ValueError, match="boundaries"):
+        replace_comments(code, "cpp", {(spans[0].start, spans[0].end): "*/"})
+
+    fenced = f"```cpp\n{code}```\n"
+    delimiter_changed = "```cpp\n// first\n// second\n```\n"
+    result = assemble_document(
+        plan_document(fenced, path="docs/example.md"), delimiter_changed
+    )
+    assert result.text == fenced
     assert result.red is True
