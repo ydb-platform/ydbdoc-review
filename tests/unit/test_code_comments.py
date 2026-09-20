@@ -126,6 +126,48 @@ def test_malformed_supported_code_is_unsafe_and_restored(
     assert result.diagnostics
 
 
+@pytest.mark.parametrize(
+    "body",
+    (
+        '# Русский\necho foo#bar"\n',
+        'echo foo#bar"\n# Русский\n',
+    ),
+)
+def test_malformed_bash_with_midword_hash_is_unsafe_and_restored(body: str) -> None:
+    source = f"```bash\n{body}```\n"
+    candidate = f"```bash\n{body.replace('Русский', 'English')}```\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.text == source
+    assert result.red is True
+    assert result.diagnostics
+
+
+@pytest.mark.parametrize(
+    ("language", "body"),
+    (
+        ("bash", 'echo "one\ntwo"\n# Русский\n'),
+        ("javascript", 'const text = `one\ntwo`;\n// Русский\n'),
+        ("yaml", "key: don't\n# Русский\n"),
+        ("yaml", 'literal: |\n  quote " stays\n# Русский\n'),
+        ("cpp", "int value = 1'000;\n// Русский\n"),
+        ("javascript", 'const pattern = /"/;\n// Русский\n'),
+        ("bash", "echo 'C:\\tmp'\n# Русский\n"),
+    ),
+)
+def test_valid_quoted_or_literal_code_remains_editable(
+    language: str, body: str
+) -> None:
+    source = f"```{language}\n{body}```\n"
+    candidate = f"```{language}\n{body.replace('Русский', 'English')}```\n"
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.red is False
+    assert result.text == candidate
+
+
 @pytest.mark.parametrize("operator", (">", "+"))
 def test_operator_spelling_change_is_unsafe_even_with_same_token_kind(operator: str) -> None:
     source = "```python\n# Русский\nvalue = 1\n```\n"

@@ -7,7 +7,9 @@ scanner below, which fails closed for unsupported or malformed syntax.
 
 from __future__ import annotations
 
+import io
 import re
+import tokenize
 from dataclasses import dataclass
 
 from pygments.lexers import get_lexer_by_name
@@ -64,13 +66,12 @@ def _approved_comment_tokens(
     except ClassNotFound:
         return [], False
 
-    if not _syntax_is_safe(code, language):
+    tokens = list(lexer.get_tokens_unprocessed(code))
+    if not _syntax_is_safe(code, language, tokens):
         return [], False
 
     raw: list[tuple[int, int, str]] = []
-    for start, kind, value in lexer.get_tokens_unprocessed(code):
-        if kind in Token.Error:
-            return [], False
+    for start, kind, value in tokens:
         if kind not in Comment or kind in Comment.Preproc or kind in Comment.Hashbang:
             continue
         end = start + len(value)
@@ -82,78 +83,96 @@ def _approved_comment_tokens(
     return raw, True
 
 
-def _syntax_is_safe(code: str, language: str) -> bool:
-    """Reject malformed strings/comments before extracting editable spans.
+def _yaml_strings_are_balanced(
+    tokens: list[tuple[int, Token, str]],
+) -> bool:
+    """Track YAML quoted scalar delimiters without treating block scalars as strings."""
 
-    Pygments is intentionally permissive for recovery.  Structural assembly is
+    quote: str | None = None
+    for _start, kind, value in tokens:
+        if kind not in Token.Literal.String:
+            continue
+        index = 0
+        while index < len(value):
+            char = value[index]
+            if quote is None:
+                if char in "'\"":
+                    quote = char
+                index += 1
+                continue
+            if quote == "'" and value.startswith("''", index):
+                index += 2
+                continue
+            if char == "\\" and quote == '"':
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+    return quote is None
+
+
+def _syntax_is_safe(
+    code: str,
+    language: str,
+    tokens: list[tuple[int, Token, str]],
+) -> bool:
+    """Reject malformed delimiters while trusting the lexer for token context.
+
+    Pygments is intentionally permissive for recovery. Structural assembly is
     not: a recovered token stream must never make an incomplete source block
-    editable.  This small scanner only tracks delimiters and quoted literals;
-    it does not try to parse the language grammar.
+    editable. The checks here are deliberately lexical, not language parsing.
     """
 
-    line_marker = "//" if language in {"cpp", "java", "javascript"} else "#"
-    block_comment = language in {"cpp", "java", "javascript"}
-    quote: str | None = None
-    block = False
-    escaped = False
-    index = 0
-    while index < len(code):
-        if block:
-            if code.startswith("*/", index):
-                block = False
-                index += 2
-            else:
-                index += 1
-            continue
-        if quote is not None:
-            if escaped:
-                escaped = False
-                index += 1
-                continue
-            if language == "yaml" and quote == "'" and code.startswith("''", index):
-                index += 2
-                continue
-            if code[index] == "\\" and not (
-                language == "yaml" and quote == "'"
-            ):
-                escaped = True
-                index += 1
-                continue
-            if len(quote) == 3 and code.startswith(quote, index):
-                quote = None
-                index += 3
-                continue
-            if len(quote) == 1 and code[index] == quote:
-                quote = None
-                index += 1
-                continue
-            if code[index] in "\r\n" and len(quote) == 1:
-                return False
-            index += 1
-            continue
+    if any(kind in Token.Error for _start, kind, _value in tokens):
+        return False
 
-        if block_comment and code.startswith("*/", index):
+    if language == "python":
+        try:
+            list(tokenize.generate_tokens(io.StringIO(code).readline))
+        except tokenize.TokenError as exc:
+            if "string" in str(exc).lower():
+                return False
+
+    if language == "yaml" and not _yaml_strings_are_balanced(tokens):
+        return False
+
+    if language == "javascript":
+        template_open = False
+        for _start, kind, value in tokens:
+            if kind in Token.Literal.String.Backtick and value == "`":
+                template_open = not template_open
+        if template_open:
             return False
-        if block_comment and code.startswith("/*", index):
-            block = True
-            index += 2
-            continue
-        if code.startswith(line_marker, index):
-            newline = code.find("\n", index)
-            index = len(code) if newline < 0 else newline + 1
-            continue
-        if code[index] in "'\"" or (
-            language == "javascript" and code[index] == "`"
-        ):
-            if language == "python" and code.startswith(code[index] * 3, index):
-                quote = code[index] * 3
-                index += 3
+
+    if language == "bash":
+        for _start, kind, value in tokens:
+            if kind in Token.Literal.String.Single:
+                quote = "'"
+            elif kind in Token.Literal.String.Double:
+                quote = '"'
             else:
-                quote = code[index]
-                index += 1
-            continue
-        index += 1
-    return not block and quote is None and not escaped
+                continue
+            if len(value) < 2 or not value.startswith(quote) or not value.endswith(quote):
+                return False
+
+    protected: list[tuple[int, int]] = []
+    for start, kind, value in tokens:
+        if kind in Comment or kind in Token.Literal.String:
+            protected.append((start, start + len(value)))
+        if kind in Comment.Multiline and (
+            not value.startswith("/*") or not value.endswith("*/")
+        ):
+            return False
+
+    if language in {"cpp", "java", "javascript"}:
+        for marker in ("/*", "*/"):
+            index = code.find(marker)
+            while index >= 0:
+                if not any(start <= index and index + 2 <= end for start, end in protected):
+                    return False
+                index = code.find(marker, index + 1)
+    return True
 
 
 def scan_approved_comments(code: str, info: str) -> ApprovedCommentScan:
