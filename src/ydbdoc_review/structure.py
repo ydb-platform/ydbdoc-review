@@ -13,6 +13,10 @@ import re
 from dataclasses import dataclass
 
 from ydbdoc_review.parsing.markdown_parser import create_parser
+from ydbdoc_review.validation.code_comments import (
+    approved_code_skeleton,
+    scan_approved_comments,
+)
 
 
 @dataclass(frozen=True)
@@ -179,6 +183,22 @@ def _iter_lines(raw: str) -> list[tuple[int, int, str]]:
         lines.append((cursor, cursor + len(full), full.rstrip("\r\n")))
         cursor += len(full)
     return lines
+
+
+def _fenced_code_body(raw: str, fence: re.Match[str]) -> tuple[str, int, int, str] | None:
+    """Return ``(language, body_start, body_end, body)`` for a closed fence."""
+
+    lines = _iter_lines(raw)
+    if len(lines) < 2:
+        return None
+    opening = fence.group(1)
+    closing = lines[-1][2]
+    if not re.fullmatch(rf"[ \t]*{re.escape(opening[0])}{{{len(opening)},}}[ \t]*", closing):
+        return None
+    language = (fence.group(2).strip().split() or [""])[0].lower()
+    body_start = lines[0][1]
+    body_end = lines[-1][0]
+    return language, body_start, body_end, raw[body_start:body_end]
 
 
 def _scan_inline(
@@ -390,6 +410,26 @@ def _node_for_token(source: str, offsets: list[int], token: object, token_type: 
         if fence:
             language = (fence.group(2).strip().split() or [""])[0].lower()
             signature.append(f"fence:{fence.group(1)[0]}:{len(fence.group(1))}:{language}")
+            fenced = _fenced_code_body(raw, fence)
+            if fenced is not None:
+                language, body_start, _body_end, body = fenced
+                scan = scan_approved_comments(body, language)
+                if scan.supported and not scan.safe:
+                    signature.append(f"unsafe-code:{body}")
+                elif scan.supported and scan.spans:
+                    skeleton = approved_code_skeleton(body, language)
+                    if skeleton is None:
+                        signature.append(f"unsafe-code:{body}")
+                    else:
+                        for span in reversed(scan.spans):
+                            fields.append(
+                                TextField(
+                                    "code_comment",
+                                    start + body_start + span.start,
+                                    start + body_start + span.end,
+                                )
+                            )
+                        signature.append(f"comment-skeleton:{skeleton}")
         else:
             signature.append("indented")
     elif kind == "include":
