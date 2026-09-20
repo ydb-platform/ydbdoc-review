@@ -1,1 +1,173 @@
-IiIiSW5jaWRlbnQtc2NhbGUgcmVwb3J0cyBhdCByZXF1ZXN0cycgcmVhbCBwcmVwYXJlZCBIVFRQIGJvdW5kYXJ5LCBubyBuZXR3b3JrLiIiIgojIHJ1ZmY6IG5vcWE6IEY4MTEgLS0gcHl0ZXN0IGZpeHR1cmVzCmltcG9ydCBqc29uCmltcG9ydCBzdWJwcm9jZXNzCmZyb20gZGF0YWNsYXNzZXMgaW1wb3J0IHJlcGxhY2UKZnJvbSB1cmxsaWIucGFyc2UgaW1wb3J0IHVybHNwbGl0CgppbXBvcnQgcHl0ZXN0CmltcG9ydCByZXF1ZXN0cwoKZnJvbSB0ZXN0cy5jb250cmFjdC50ZXN0X3JlcG9ydF90MTQgaW1wb3J0IGxvY2F0ZWQgICMgbm9xYTogRjQwMQpmcm9tIHRlc3RzLmNvbnRyYWN0LnRlc3RfdHJhbnNsYXRlX3QxMCBpbXBvcnQgc3lzdGVtIGFzIHRyYW5zbGF0ZV9zeXN0ZW0gICMgbm9xYTogRjQwMQpmcm9tIHlkYmRvY19yZXZpZXcuYnVpbGQgaW1wb3J0IEJ1aWxkUmVzdWx0CmZyb20geWRiZG9jX3Jldmlldy5naXRodWIuY2xpZW50IGltcG9ydCBHaXRIdWJDbGllbnQKZnJvbSB5ZGJkb2NfcmV2aWV3LmxpbmtzIGltcG9ydCBDYW5kaWRhdGUsIExpbmtSZXN1bHQsIFVuY2hlY2tlZEFuY2hvcgpmcm9tIHlkYmRvY19yZXZpZXcucXVhbGl0eSBpbXBvcnQgSXNzdWUsIExvY2F0aW9uCmZyb20geWRiZG9jX3Jldmlldy5xdWFsaXR5X2xvb3AgaW1wb3J0IExvb3BSZXN1bHQsIFJvdW5kVHJhY2UKZnJvbSB5ZGJkb2NfcmV2aWV3LnJlcG9ydCBpbXBvcnQgKAogICAgUmVwb3J0RGVsaXZlcnlFcnJvciwKICAgIGNyZWF0ZV9yZXBvcnRlciwKICAgIHJlbmRlcl9yZXBvcnRzLAopCgoKQHB5dGVzdC5maXh0dXJlCmRlZiBib3VuZGFyeShtb25rZXlwYXRjaCk6CiAgICBjYWxscyA9IFtdCiAgICBzdGF0ZSA9IHsnZmFpbCc6IE5vbmV9CiAgICBkZWYgc2VuZChzZXNzaW9uLCByZXF1ZXN0LCAqKmt3YXJncyk6CiAgICAgICAgYXNzZXJ0IHJlcXVlc3QudXJsLnN0YXJ0c3dpdGgoJ2h0dHBzOi8vYXBpLmdpdGh1Yi5jb20vJykKICAgICAgICBwYXRoID0gdXJsc3BsaXQocmVxdWVzdC51cmwpLnBhdGgKICAgICAgICBkYXRhID0ganNvbi5sb2FkcyhyZXF1ZXN0LmJvZHkpCiAgICAgICAgY2FsbHMuYXBwZW5kKChyZXF1ZXN0Lm1ldGhvZCwgcGF0aCwgZGF0YSkpCiAgICAgICAgcmVzcG9uc2UgPSByZXF1ZXN0cy5SZXNwb25zZSgpCiAgICAgICAgcmVzcG9uc2Uuc3RhdHVzX2NvZGUgPSAyMDEKICAgICAgICBpZiAnYm9keScgaW4gZGF0YToKICAgICAgICAgICAgYXNzZXJ0IGxlbihkYXRhWydib2R5J10pIDwgMTIwMDEKICAgICAgICBpZiBzdGF0ZVsnZmFpbCddIGFuZCBzdGF0ZVsnZmFpbCddIGluIHBhdGg6CiAgICAgICAgICAgIHJlc3BvbnNlLnN0YXR1c19jb2RlID0gNDIyCiAgICAgICAgICAgIHBheWxvYWQgPSB7J21lc3NhZ2UnOiAndXBsb2FkIHJlamVjdGVkIHRva2VuPU5FVkVSX1BSSU5UJ30KICAgICAgICBlbHNlOgogICAgICAgICAgICBwYXlsb2FkID0geydzaGEnOiAnYScgKiA0MCwgJ2h0bWxfdXJsJzogJ2h0dHBzOi8vZ2l0aHViLmNvbS91cC9kb2NzL2NvbW1lbnQvMSd9CiAgICAgICAgcmVzcG9uc2UuX2NvbnRlbnQgPSBqc29uLmR1bXBzKHBheWxvYWQpLmVuY29kZSgpCiAgICAgICAgcmV0dXJuIHJlc3BvbnNlCiAgICBtb25rZXlwYXRjaC5zZXRhdHRyKHJlcXVlc3RzLlNlc3Npb24sICdzZW5kJywgc2VuZCkKICAgIHJldHVybiBzdGF0ZSwgY2FsbHMKCgpkZWYgbGFyZ2UobG9jYXRlZCk6CiAgICByZXR1cm4gcmVwbGFjZShsb2NhdGVkLCBpc3N1ZXM9dHVwbGUoCiAgICAgICAgSXNzdWUoZid5ZGIvZG9jcy9lbi9wYWdlLXtpICUgMTE0OH0ubWQnLCAnQW5jaG9yIHVuY2hlY2tlZCBiZWNhdXNlIGJ1aWxkIGZhaWxlZCcsCiAgICAgICAgICAgICAgJ0NvbXBsZXRlIHRoZSBidWlsZCwgdGhlbiBjaGVjayBhbmNob3JzJywgJ3VuY2hlY2tlZF9hbmNob3InLCB0YXJnZXQ9TG9jYXRpb24oMywgMywgJ3F1b3RlJykpCiAgICAgICAgZm9yIGkgaW4gcmFuZ2UoODg5NCkpKQoKCmRlZiB0ZXN0X2luY2lkZW50Xzg4OTRfc21hbGxfYm9kaWVzX2tlZXBfZWFjaF9jb21tZW50X2JvdW5kZWQobG9jYXRlZCwgYm91bmRhcnkpOgogICAgXywgY2FsbHMgPSBib3VuZGFyeQogICAgcmVzdWx0ID0gbGFyZ2UobG9jYXRlZCkKICAgIGJlZm9yZSA9IHJlc3VsdC5jYW5kaWRhdGVfc2hhCiAgICBjcmVhdGVfcmVwb3J0ZXIoR2l0SHViQ2xpZW50KCdkdW1teScpLCBjdXJyZW50X3ByPSd1cC9kb2NzLzEnLCBhdXRob3JpemVkPVRydWUpKHJlc3VsdCkKICAgIGJvZGllcyA9IFtkYXRhWydib2R5J10gZm9yIF8sIF8sIGRhdGEgaW4gY2FsbHMgaWYgJ2JvZHknIGluIGRhdGFdCiAgICBhc3NlcnQgbGVuKGJvZGllcykgPT0gMgogICAgZm9yIGJvZHkgaW4gYm9kaWVzOgogICAgICAgIGFzc2VydCBsZW4oYm9keSkgPCA2MDAwCiAgICAgICAgYXNzZXJ0ICc4ODk0JyBpbiBib2R5IGFuZCAnMTE0OCcgaW4gYm9keQogICAgICAgIGFzc2VydCAn0JjRgtC+0LPQvjogMy40MjM0NTY3OTAg4oK9JyBpbiBib2R5CiAgICAgICAgYXNzZXJ0ICdBbmNob3IgdW5jaGVja2VkJyBpbiBib2R5CiAgICBhc3NlcnQgcmVzdWx0LmNhbmRpZGF0ZV9zaGEgPT0gYmVmb3JlCiAgICBhc3NlcnQgbm90IGFueShtZXRob2QgaW4geydQVVQnLCAnREVMRVRFJ30gZm9yIG1ldGhvZCwgXywgXyBpbiBjYWxscykKCgpAcHl0ZXN0Lm1hcmsucGFyYW1ldHJpemUoJ2ZhaWx1cmUnLCBbJy9pc3N1ZXMvMS9jb21tZW50cycsICcvaXNzdWVzLzIvY29tbWVudHMnXSkKZGVmIHRlc3RfZmFpbHVyZV9kb2VzX25vdF9za2lwX290aGVyX2NoYW5uZWxzX29yX2Nvc3RzKGxvY2F0ZWQsIGJvdW5kYXJ5LCBmYWlsdXJlKToKICAgIHN0YXRlLCBjYWxscyA9IGJvdW5kYXJ5CiAgICBzdGF0ZVsnZmFpbCddID0gZmFpbHVyZQogICAgcmVzdWx0ID0gcmVwbGFjZShsb2NhdGVkLCBzdGF0dXM9J0dSRUVOJykKICAgIHdpdGggcHl0ZXN0LnJhaXNlcyhSZXBvcnREZWxpdmVyeUVycm9yKSBhcyBlcnJvcjoKICAgICAgICBjcmVhdGVfcmVwb3J0ZXIoR2l0SHViQ2xpZW50KCdkdW1teScpLCBjdXJyZW50X3ByPSd1cC9kb2NzLzEnLCBhdXRob3JpemVkPVRydWUpKHJlc3VsdCkKICAgIGFzc2VydCAnTkVWRVJfUFJJTlQnIG5vdCBpbiBzdHIoZXJyb3IudmFsdWUpCiAgICBib2RpZXMgPSBbKHBhdGgsIGRhdGFbJ2JvZHknXSkgZm9yIF8sIHBhdGgsIGRhdGEgaW4gY2FsbHMgaWYgJ2JvZHknIGluIGRhdGFdCiAgICBhc3NlcnQgbGVuKGJvZGllcykgPT0gMgogICAgYXNzZXJ0ICcvaXNzdWVzLzEvY29tbWVudHMnIGluIGJvZGllc1swXVswXQogICAgYXNzZXJ0ICcvaXNzdWVzLzIvY29tbWVudHMnIGluIGJvZGllc1sxXVswXQogICAgYXNzZXJ0ICcvaXNzdWVzLzIvY29tbWVudHMnIGluIGJvZGllc1sxXVswXQogICAgYXNzZXJ0IGFsbCgn0JjRgtC+0LPQvjogMy40MjM0NTY3OTAg4oK9JyBpbiBib2R5IGZvciBfLCBib2R5IGluIGJvZGllcykKICAgIGFzc2VydCAnR1JFRU4nIG5vdCBpbiBib2RpZXNbLTFdWzFdCgoKZGVmIHRlc3RfaW5pdGlhbF9wYXJ0aWFsX2Nvc3RfYW5kX3BlbmRpbmdfY2hlY2sobG9jYXRlZCk6CiAgICByZXN1bHQgPSByZXBsYWNlKGxvY2F0ZWQsIHB1YmxpY2F0aW9uPU5vbmUsIGNoZWNrZWRfc2hhPU5vbmUsIHN0YXR1cz0nR1JFRU4nLAogICAgICAgICAgICAgICAgICAgICB1bmZpbmlzaGVkX2ZpbGVzPSgneWRiL2RvY3MvZW4vYS5tZCcsKSkKICAgIGNvbW1lbnRzID0gcmVuZGVyX3JlcG9ydHMocmVzdWx0LCBjdXJyZW50X3ByPSd1cC9kb2NzLzEnKQogICAgYXNzZXJ0IGxlbihjb21tZW50cykgPT0gMQogICAgYm9keSA9IGNvbW1lbnRzWzBdLmJvZHkKICAgIGFzc2VydCAnR1JFRU4nIG5vdCBpbiBib2R5CiAgICBhc3NlcnQgJ9Cd0LXQt9Cw0LLQtdGA0YjRkdC90L3Ri9C1INGE0LDQudC70YsnIGluIGJvZHkKICAgIGFzc2VydCAn0JjRgtC+0LPQvjogMy40MjM0NTY3OTAg4oK9JyBpbiBib2R5CiAgICBhc3NlcnQgJ9Cf0LXRgNC10LLQvtC00L3QvtC5IFBSINC90LUg0YHQvtC30LTQsNC9JyBpbiBib2R5CgoKZGVmIHRlc3RfbG9uZ19lcnJvcnNfcGF0aHNfYXJlX2JvdW5kZWRfd2l0aG91dF9sb3NpbmdfY29zdF9vcl9zaGEobG9jYXRlZCk6CiAgICByZXN1bHQgPSByZXBsYWNlKGxvY2F0ZWQsIGVycm9ycz0oJ3gnICogMTAwMDAwLCksIGlzc3Vlcz0oSXNzdWUoJ3onICogMTAwMDAwLCAncCcgKiAxMDAwMDAsICdmJyAqIDEwMDAwMCksKSkKICAgIGJvZGllcyA9IHJlbmRlcl9yZXBvcnRzKHJlc3VsdCwgY3VycmVudF9wcj0ndXAvZG9jcy8xJykKICAgIGFzc2VydCBhbGwobGVuKGMuYm9keSkgPD0gMTIwMDAgZm9yIGMgaW4gYm9kaWVzKQogICAgYXNzZXJ0IGxvY2F0ZWQuY2hlY2tlZF9zaGEgaW4gYm9kaWVzWy0xXS5ib2R5CiAgICBhc3NlcnQgYWxsKCfQmNGC0L7Qs9C+OiAzLjQyMzQ1Njc5MCDigr0nIGluIGMuYm9keSBmb3IgYyBpbiBib2RpZXMpCgoKZGVmIHRlc3RfYnVpbGRfZmFpbHVyZV9yZXBvcnRfa2VlcHNfY29tbWVudF9jb250cmFjdChsb2NhdGVkKToKICAgIHNoYSA9IGxvY2F0ZWQuY2FuZGlkYXRlX3NoYQogICAgIyBGMDggc2VwYXJhdGVzIGRlcGVuZGVudCBhbmNob3IgZGlhZ25vc3RpY3MgZnJvbSByb290IGJ1aWxkIGlzc3Vlcy4KICAgIGxpbmtzID0gTGlua1Jlc3VsdChzaGEsICgpLCBGYWxzZSwgKFVuY2hlY2tlZEFuY2hvcigneWRiL2RvY3MvZW4vYS5tZCcsICdvdGhlci5tZCNtaXNzaW5nJywgJ3lkYi9kb2NzL2VuL290aGVyLm1kJywgJ3lkYi9kb2NzL2VuL2EubWQnLCBMb2NhdGlvbigzLCAzLCAncXVvdGUnKSksKSkKICAgIGJ1aWxkID0gQnVpbGRSZXN1bHQoc2hhLCAnZmFpbHVyZScsICdzdGFydFxucHJpdmF0ZS12YWx1ZVxuJyArICd0ZWNobmljYWwgZGV0YWlsc1xuJyAqIDEwMDAsIDEpCiAgICB0cmFjZSA9IFJvdW5kVHJhY2UoMSwgc2hhLCAoKSwgYnVpbGQsIGxpbmtzLCBsb2NhdGVkLmlzc3VlcykKICAgIHJlc3VsdCA9IHJlcGxhY2UobG9jYXRlZCwgcXVhbGl0eT1Mb29wUmVzdWx0KGxvY2F0ZWQuY2FuZGlkYXRlLCAnUkVEJywgc2hhLCBsb2NhdGVkLmlzc3VlcywgKCksICh0cmFjZSwpKSkKICAgIGNvbW1lbnRzID0gcmVuZGVyX3JlcG9ydHMocmVzdWx0LCBjdXJyZW50X3ByPSd1cC9kb2NzLzEnLCBzZWNyZXRzPSgncHJpdmF0ZS12YWx1ZScsKSkKICAgIGFzc2VydCBsZW4oY29tbWVudHMpID09IDIKICAgIGFzc2VydCBhbGwoJ9Cv0LrQvtGA0Y8g0L3QtSDQv9GA0L7QstC10YDQtdC90Ys6IDEnIGluIGNvbW1lbnQuYm9keSBmb3IgY29tbWVudCBpbiBjb21tZW50cykKICAgIGFzc2VydCBhbGwoJ3ByaXZhdGUtdmFsdWUnIG5vdCBpbiBjb21tZW50LmJvZHkgZm9yIGNvbW1lbnQgaW4gY29tbWVudHMpCgoKZGVmIHRlc3RfcGFydGlhbF9yZXN1bHRfY29tbWVudF9jb250YWluc19jdXJyZW50X2Nvc3QodHJhbnNsYXRlX3N5c3RlbSk6CiAgICBzdGF0ZSwgcnVuLCAqXyA9IHRyYW5zbGF0ZV9zeXN0ZW0KICAgIHN0YXRlWydoYW5kbGVyJ10gPSBsYW1iZGEgb3AsIGRhdGE6ICcjIFBhcnRpYWwnIGlmIG9wID09ICd0cmFuc2xhdGlvbicgZWxzZSAneyJ2ZXJkaWN0IjogImNvcnJlY3QifScKICAgIHJlc3VsdCA9IHJ1bigpCiAgICBjb21tZW50cyA9IHJlbmRlcl9yZXBvcnRzKHJlc3VsdCwgY3VycmVudF9wcj0ndXAvZG9jcy8xJykKICAgIHRyYW5zbGF0aW9uX2NvbW1lbnRzID0gW2NvbW1lbnQgZm9yIGNvbW1lbnQgaW4gY29tbWVudHMgaWYgY29tbWVudC5wciA9PSAndXAvZG9jcy8yJ10KICAgIGFzc2VydCBsZW4odHJhbnNsYXRpb25fY29tbWVudHMpID09IDEKICAgIGJvZHkgPSB0cmFuc2xhdGlvbl9jb21tZW50c1swXS5ib2R5CiAgICBhc3NlcnQgJ1JFRCDigJQg0LzQtdGA0LbQuNGC0Ywg0L3QtdC70YzQt9GPJyBpbiBib2R5CiAgICBhc3NlcnQgJ9Ce0LHRgNCw0LHQvtGC0LDQvdC90YvQtSDRhNCw0LnQu9GLJyBpbiBib2R5IG9yICfQndC10LfQsNCy0LXRgNGI0ZHQvdC90YvQtSDRhNCw0LnQu9GLJyBpbiBib2R5CiAgICBhc3NlcnQgJ9Cf0LXRgNC10LLQvtC0OicgaW4gYm9keQogICAgYXNzZXJ0IGYi0JjRgtC+0LPQvjoge3Jlc3VsdC5jb3N0X2JyZWFrZG93blsndG90YWwnXTpmfSDigr0iIGluIGJvZHkKICAgIGFzc2VydCAnU0hBJyBpbiBib2R5CgoKZGVmIHRlc3Rfc3RhbGVfZ3JlZW5fbGFiZWxfY2Fubm90X2hpZGVfZXJyb3JzX29yX3BhcnRpYWxfZmlsZXMobG9jYXRlZCk6CiAgICBmb3IgcmVzdWx0IGluIChyZXBsYWNlKGxvY2F0ZWQsIHN0YXR1cz0nR1JFRU4nKSwKICAgICAgICAgICAgICAgICAgIHJlcGxhY2UobG9jYXRlZCwgc3RhdHVzPSdHUkVFTicsIGlzc3Vlcz0oKSwgdW5maW5pc2hlZF9maWxlcz0oJ2EubWQnLCkpKToKICAgICAgICBhc3NlcnQgYWxsKCdHUkVFTicgbm90IGluIGMuYm9keSBmb3IgYyBpbiByZW5kZXJfcmVwb3J0cyhyZXN1bHQsIGN1cnJlbnRfcHI9J3VwL2RvY3MvMScpKQoKCkBweXRlc3QubWFyay5wYXJhbWV0cml6ZSgncGF0aCcsIFsnLi4vLi4vb3V0c2lkZS5tZCcsICcvYWJzb2x1dGUubWQnLCByJ2JhZFxwYXRoLm1kJ10pCmRlZiB0ZXN0X21hbGZvcm1lZF9pc3N1ZV9wYXRoX3ByZXNlcnZlc19hbGxfZGVsaXZlcnlfY2hhbm5lbHMobG9jYXRlZCwgYm91bmRhcnksIHBhdGgpOgogICAgXywgY2FsbHMgPSBib3VuZGFyeQogICAgcmVzdWx0ID0gcmVwbGFjZShsb2NhdGVkLCBpc3N1ZXM9KHJlcGxhY2UobG9jYXRlZC5pc3N1ZXNbMF0sIHBhdGg9cGF0aCksKSkKICAgIGNyZWF0ZV9yZXBvcnRlcihHaXRIdWJDbGllbnQoJ2R1bW15JyksIGN1cnJlbnRfcHI9J3VwL2RvY3MvMScsIGF1dGhvcml6ZWQ9VHJ1ZSkocmVzdWx0KQogICAgYm9kaWVzID0gW2RhdGFbJ2JvZHknXSBmb3IgXywgXywgZGF0YSBpbiBjYWxscyBpZiAnYm9keScgaW4gZGF0YV0KICAgIGFzc2VydCBsZW4oYm9kaWVzKSA9PSAyCiAgICBhc3NlcnQgYWxsKCdSRUQg4oCUINC80LXRgNC20LjRgtGMINC90LXQu9GM0LfRjycgaW4gYm9keSBhbmQgJ9CY0YLQvtCz0L46IDMuNDIzNDU2NzkwIOKCvScgaW4gYm9keSBmb3IgYm9keSBpbiBib2RpZXMpCiAgICBhc3NlcnQgJ9Ci0LXQutGB0YIg0YTQsNC50LvQsCDQvdC10LTQvtGB0YLRg9C/0LXQvTsg0YHRgtGA0L7QutC4INC/0LXRgNC10LLQvtC00LAg0L3QtSDRg9GB0YLQsNC90L7QstC70LXQvdGLJyBpbiBib2RpZXNbLTFdCiAgICBhc3NlcnQgJy9ibG9iLycgbm90IGluIGJvZGllc1stMV0KCgpAcHl0ZXN0Lm1hcmsucGFyYW1ldHJpemUoJ3NvdXJjZScsIFtGYWxzZSwgVHJ1ZV0pCkBweXRlc3QubWFyay5wYXJhbWV0cml6ZSgnZXJyb3InLCBbVmFsdWVFcnJvcignaW52YWxpZCBwYXRoJyksIE9TRXJyb3IoJ3VucmVhZGFibGUgc25hcHNob3QnKSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBSdW50aW1lRXJyb3IoJ2dpdCBvYmplY3QgdW5hdmFpbGFibGUnKSwgc3VicHJvY2Vzcy5UaW1lb3V0RXhwaXJlZCgnZ2l0JywgNjApXSkKZGVmIHRlc3RfdW5yZWFkYWJsZV9sb2NhdGlvbl9wcmVzZXJ2ZXNfY2hhbm5lbHNfY29zdF9hbmRfaG9uZXN0X2Nvb3JkaW5hdGVzKAogICAgICAgIGxvY2F0ZWQsIGJvdW5kYXJ5LCBtb25rZXlwYXRjaCwgc291cmNlLCBlcnJvcik6CiAgICBfLCBjYWxscyA9IGJvdW5kYXJ5CiAgICByZXN1bHQgPSByZXBsYWNlKGxvY2F0ZWQsIHBsYW49Tm9uZSkgaWYgc291cmNlIGVsc2UgbG9jYXRlZAogICAgZGVmIGZhaWwoKmFyZ3MsICoqa3dhcmdzKToKICAgICAgICByYWlzZSBlcnJvcgogICAgaWYgc291cmNlOgogICAgICAgIG1vbmtleXBhdGNoLnNldGF0dHIoQ2FuZGlkYXRlLCAnb3BlbicsIGZhaWwpCiAgICBlbHNlOgogICAgICAgIG1vbmtleXBhdGNoLnNldGF0dHIoQ2FuZGlkYXRlLCAncmVhZCcsIGZhaWwpCiAgICBjcmVhdGVfcmVwb3J0ZXIoR2l0SHViQ2xpZW50KCdkdW1teScpLCBjdXJyZW50X3ByPSd1cC9kb2NzLzEnLCBhdXRob3JpemVkPVRydWUpKHJlc3VsdCkKICAgIGJvZGllcyA9IFtkYXRhWydib2R5J10gZm9yIF8sIF8sIGRhdGEgaW4gY2FsbHMgaWYgJ2JvZHknIGluIGRhdGFdCiAgICBhc3NlcnQgbGVuKGJvZGllcykgPT0gMgogICAgYXNzZXJ0IGFsbCgn0JjRgtC+0LPQvjogMy40MjM0NTY3OTAg4oK9JyBpbiBib2R5IGZvciBib2R5IGluIGJvZGllcykKICAgIGFzc2VydCAoJ9CY0YHRhdC+0LTQvdC40Log0L3QtdC00L7RgdGC0YPQv9C10L0nIGlmIHNvdXJjZSBlbHNlICfQotC10LrRgdGCINGE0LDQudC70LAg0L3QtdC00L7RgdGC0YPQv9C10L0nKSBpbiBib2RpZXNbLTFdCiAgICBhc3NlcnQgKCcvcnUvYS5tZCMnIGlmIHNvdXJjZSBlbHNlICcvZW4vYS5tZCMnKSBub3QgaW4gYm9kaWVzWy0xXQo=
+"""Incident-scale reports at requests' real prepared HTTP boundary, no network."""
+# ruff: noqa: F811 -- pytest fixtures
+import json
+import subprocess
+from dataclasses import replace
+from urllib.parse import urlsplit
+
+import pytest
+import requests
+
+from tests.contract.test_report_t14 import located  # noqa: F401
+from tests.contract.test_translate_t10 import system as translate_system  # noqa: F401
+from ydbdoc_review.build import BuildResult
+from ydbdoc_review.github.client import GitHubClient
+from ydbdoc_review.links import Candidate, LinkResult, UncheckedAnchor
+from ydbdoc_review.quality import Issue, Location
+from ydbdoc_review.quality_loop import LoopResult, RoundTrace
+from ydbdoc_review.report import (
+    ReportDeliveryError,
+    create_reporter,
+    render_reports,
+)
+
+
+@pytest.fixture
+def boundary(monkeypatch):
+    calls = []
+    state = {'fail': None}
+    def send(session, request, **kwargs):
+        assert request.url.startswith('https://api.github.com/')
+        path = urlsplit(request.url).path
+        data = json.loads(request.body)
+        calls.append((request.method, path, data))
+        response = requests.Response()
+        response.status_code = 201
+        if 'body' in data:
+            assert len(data['body']) < 12001
+        if state['fail'] and state['fail'] in path:
+            response.status_code = 422
+            payload = {'message': 'upload rejected token=NEVER_PRINT'}
+        else:
+            payload = {'sha': 'a' * 40, 'html_url': 'https://github.com/up/docs/comment/1'}
+        response._content = json.dumps(payload).encode()
+        return response
+    monkeypatch.setattr(requests.Session, 'send', send)
+    return state, calls
+
+
+def large(located):
+    return replace(located, issues=tuple(
+        Issue(f'ydb/docs/en/page-{i % 1148}.md', 'Anchor unchecked because build failed',
+              'Complete the build, then check anchors', 'unchecked_anchor', target=Location(3, 3, 'quote'))
+        for i in range(8894)))
+
+
+def test_incident_8894_small_bodies_keep_each_comment_bounded(located, boundary):
+    _, calls = boundary
+    result = large(located)
+    before = result.candidate_sha
+    create_reporter(GitHubClient('dummy'), current_pr='up/docs/1', authorized=True)(result)
+    bodies = [data['body'] for _, _, data in calls if 'body' in data]
+    assert len(bodies) == 2
+    for body in bodies:
+        assert len(body) < 6000
+        assert '8894' in body and '1148' in body
+        assert 'Итого: 3.423456790 ₽' in body
+        assert 'Anchor unchecked' in body
+    assert result.candidate_sha == before
+    assert not any(method in {'PUT', 'DELETE'} for method, _, _ in calls)
+
+
+@pytest.mark.parametrize('failure', ['/issues/1/comments', '/issues/2/comments'])
+def test_failure_does_not_skip_other_channels_or_costs(located, boundary, failure):
+    state, calls = boundary
+    state['fail'] = failure
+    result = replace(located, status='GREEN')
+    with pytest.raises(ReportDeliveryError) as error:
+        create_reporter(GitHubClient('dummy'), current_pr='up/docs/1', authorized=True)(result)
+    assert 'NEVER_PRINT' not in str(error.value)
+    bodies = [(path, data['body']) for _, path, data in calls if 'body' in data]
+    assert len(bodies) == 2
+    assert '/issues/1/comments' in bodies[0][0]
+    assert '/issues/2/comments' in bodies[1][0]
+    assert '/issues/2/comments' in bodies[1][0]
+    assert all('Итого: 3.423456790 ₽' in body for _, body in bodies)
+    assert 'GREEN' not in bodies[-1][1]
+
+
+def test_initial_partial_cost_and_pending_check(located):
+    result = replace(located, publication=None, checked_sha=None, status='GREEN',
+                     unfinished_files=('ydb/docs/en/a.md',))
+    comments = render_reports(result, current_pr='up/docs/1')
+    assert len(comments) == 1
+    body = comments[0].body
+    assert 'GREEN' not in body
+    assert 'Незавершённые файлы' in body
+    assert 'Итого: 3.423456790 ₽' in body
+    assert 'Переводной PR не создан' in body
+
+
+def test_long_errors_paths_are_bounded_without_losing_cost_or_sha(located):
+    result = replace(located, errors=('x' * 100000,), issues=(Issue('z' * 100000, 'p' * 100000, 'f' * 100000),))
+    bodies = render_reports(result, current_pr='up/docs/1')
+    assert all(len(c.body) <= 12000 for c in bodies)
+    assert located.checked_sha in bodies[-1].body
+    assert all('Итого: 3.423456790 ₽' in c.body for c in bodies)
+
+
+def test_build_failure_report_keeps_comment_contract(located):
+    sha = located.candidate_sha
+    # F08 separates dependent anchor diagnostics from root build issues.
+    links = LinkResult(sha, (), False, (UncheckedAnchor('ydb/docs/en/a.md', 'other.md#missing', 'ydb/docs/en/other.md', 'ydb/docs/en/a.md', Location(3, 3, 'quote')),))
+    build = BuildResult(sha, 'failure', 'start\nprivate-value\n' + 'technical details\n' * 1000, 1)
+    trace = RoundTrace(1, sha, (), build, links, located.issues)
+    result = replace(located, quality=LoopResult(located.candidate, 'RED', sha, located.issues, (), (trace,)))
+    comments = render_reports(result, current_pr='up/docs/1', secrets=('private-value',))
+    assert len(comments) == 2
+    assert all('Якоря не проверены: 1' in comment.body for comment in comments)
+    assert all('private-value' not in comment.body for comment in comments)
+
+
+def test_partial_result_comment_contains_current_cost(translate_system):
+    state, run, *_ = translate_system
+    state['handler'] = lambda op, data: '# Partial' if op == 'translation' else '{"verdict": "correct"}'
+    result = run()
+    comments = render_reports(result, current_pr='up/docs/1')
+    translation_comments = [comment for comment in comments if comment.pr == 'up/docs/2']
+    assert len(translation_comments) == 1
+    body = translation_comments[0].body
+    assert 'RED — мержить нельзя' in body
+    assert 'Обработанные файлы' in body or 'Незавершённые файлы' in body
+    assert 'Перевод:' in body
+    assert f"Итого: {result.cost_breakdown['total']:f} ₽" in body
+    assert 'SHA' in body
+
+
+def test_stale_green_label_cannot_hide_errors_or_partial_files(located):
+    for result in (replace(located, status='GREEN'),
+                   replace(located, status='GREEN', issues=(), unfinished_files=('a.md',))):
+        assert all('GREEN' not in c.body for c in render_reports(result, current_pr='up/docs/1'))
+
+
+@pytest.mark.parametrize('path', ['../../outside.md', '/absolute.md', r'bad\path.md'])
+def test_malformed_issue_path_preserves_all_delivery_channels(located, boundary, path):
+    _, calls = boundary
+    result = replace(located, issues=(replace(located.issues[0], path=path),))
+    create_reporter(GitHubClient('dummy'), current_pr='up/docs/1', authorized=True)(result)
+    bodies = [data['body'] for _, _, data in calls if 'body' in data]
+    assert len(bodies) == 2
+    assert all('RED — мержить нельзя' in body and 'Итого: 3.423456790 ₽' in body for body in bodies)
+    assert 'Текст файла недоступен; строки перевода не установлены' in bodies[-1]
+    assert '/blob/' not in bodies[-1]
+
+
+@pytest.mark.parametrize('source', [False, True])
+@pytest.mark.parametrize('error', [ValueError('invalid path'), OSError('unreadable snapshot'),
+                                   RuntimeError('git object unavailable'), subprocess.TimeoutExpired('git', 60)])
+def test_unreadable_location_preserves_channels_cost_and_honest_coordinates(
+        located, boundary, monkeypatch, source, error):
+    _, calls = boundary
+    result = replace(located, plan=None) if source else located
+    def fail(*args, **kwargs):
+        raise error
+    if source:
+        monkeypatch.setattr(Candidate, 'open', fail)
+    else:
+        monkeypatch.setattr(Candidate, 'read', fail)
+    create_reporter(GitHubClient('dummy'), current_pr='up/docs/1', authorized=True)(result)
+    bodies = [data['body'] for _, _, data in calls if 'body' in data]
+    assert len(bodies) == 2
+    assert all('Итого: 3.423456790 ₽' in body for body in bodies)
+    assert ('Исходник недоступен' if source else 'Текст файла недоступен') in bodies[-1]
+    assert ('/ru/a.md#' if source else '/en/a.md#') not in bodies[-1]
