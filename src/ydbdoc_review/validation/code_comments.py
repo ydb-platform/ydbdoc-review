@@ -124,7 +124,13 @@ def _syntax_is_safe(
     editable. The checks here are deliberately lexical, not language parsing.
     """
 
-    if any(kind in Token.Error for _start, kind, _value in tokens):
+    # Pygments' YAML lexer emits the carriage-return half of CRLF as an
+    # ``Error`` token.  It is only line-ending whitespace, unlike every other
+    # error token, which must keep the conservative unsafe result.
+    if any(
+        kind in Token.Error and value != "\r"
+        for _start, kind, value in tokens
+    ):
         return False
 
     if language == "python":

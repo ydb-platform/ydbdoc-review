@@ -57,6 +57,39 @@ def test_yaml_configuration_and_literals_remain_immutable() -> None:
     assert result.red is False
 
 
+@pytest.mark.parametrize(
+    ("language", "source_comment", "translated_comment"),
+    (
+        ("python", "# RU", "# EN"),
+        ("bash", "# RU", "# EN"),
+        ("yaml", "# RU", "# EN"),
+        ("cpp", "// RU", "// EN"),
+        ("java", "/* RU */", "/* EN */"),
+        ("javascript", "// RU", "// EN"),
+    ),
+)
+def test_crlf_comment_only_code_is_editable(
+    language: str, source_comment: str, translated_comment: str
+) -> None:
+    source = f"```{language}\r\n{source_comment}\r\n```\r\n"
+    candidate = source.replace(source_comment, translated_comment)
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.red is False
+    assert result.text == candidate
+
+
+def test_yaml_crlf_comment_translation_keeps_configuration_immutable() -> None:
+    source = "```yaml\r\n# RU\r\nx: 1\r\n```\r\n"
+    candidate = source.replace("# RU", "# EN")
+
+    result = assemble_document(plan_document(source, path="docs/example.md"), candidate)
+
+    assert result.red is False
+    assert result.text == candidate
+
+
 def test_comment_like_text_inside_literals_is_immutable() -> None:
     source = '```python\nvalue = "# Не комментарий"\nprint(value)\n```\n'
     candidate = '```python\nvalue = "# Not a comment"\nprint(value)\n```\n'
